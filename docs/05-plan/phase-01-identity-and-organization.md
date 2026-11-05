@@ -1,0 +1,191 @@
+# Phase 01 — Identity and organization
+
+Goal: people can log in safely, belong to organizations and teams with the right roles, and see a navigation and Home shell built from those roles.
+
+## Index
+- [Before you start](#before-you-start) — prototype screens, requirements, ADRs, docs
+- [Outcome](#outcome) — what works after this phase
+- [Scope](#scope) — what this phase builds
+- [Out of scope](#out-of-scope) — what waits
+- [Requirements covered](#requirements-covered) — FR and NFR ids
+- [Design notes](#design-notes) — modules, tables, routes, roles model
+- [Tasks](#tasks) — P01.T1 to P01.T7
+- [Definition of done](#definition-of-done) — phase checklist
+- [Hand-off notes](#hand-off-notes) — notes for P02
+
+## Before you start
+1. **Prototype.** Open https://claude.ai/artifact/FmbJosB3s5mDi75cLqMFQ2 (Artifact tool, `action: "read"`, `path: "project/Main.dc.html"`). Use the "view as" switch to compare Lead, Tester, Developer, Manager, Admin and "Lead + Admin" (this switch is prototype-only). Study the header, nav and Home top. Fallback docs: [Global layout](../04-prototype/prototype-guide.md#global-layout), [Home: header block and focus chips](../04-prototype/screens/home-work.md#header-block-and-focus-chips), [Admin home](../04-prototype/screens/home-admin.md), [Admin: people and roles](../04-prototype/screens/admin.md#people-and-roles), [Admin: teams](../04-prototype/screens/admin.md#teams).
+2. **Requirements:** [FR-ID-01, FR-ID-02, FR-ID-03, FR-ID-04, FR-ID-05, FR-ID-06, FR-ID-07, FR-ID-08](../01-requirements/functional-requirements.md#id--identity-and-access) (FR-ID-05 tokens is built in P09), [FR-ORG-01, FR-ORG-02, FR-ORG-03, FR-ORG-04, FR-ORG-05, FR-ORG-09](../01-requirements/functional-requirements.md#org--organization-teams-and-roles), [permission matrix](../00-product/personas-and-roles.md#permission-matrix), [multi-role behaviour](../00-product/personas-and-roles.md#multi-role-behaviour), [NFR-SEC](../01-requirements/non-functional-requirements.md#sec--security) NFR-SEC-03, NFR-SEC-04, NFR-SEC-05, NFR-SEC-08, NFR-SEC-14.
+3. **ADRs:** [0012 authentication](../03-adr/0012-authentication.md), [0013 authorization](../03-adr/0013-authorization.md), [0005 multi-tenancy](../03-adr/0005-multi-tenancy.md), [0010 sessions in Valkey](../03-adr/0010-cache-sessions-locks.md), [0027 secrets and encryption](../03-adr/0027-secrets-and-encryption.md).
+4. **Architecture docs:** [Identity module](../02-architecture/modules.md#identity-idn_), [Organization module](../02-architecture/modules.md#organization-org_), [tables: Identity](../02-architecture/data-model.md#identity-global), [tables: Organization](../02-architecture/data-model.md#organization), [authorization model](../02-architecture/security.md#authorization-model), [tenant isolation](../02-architecture/security.md#tenant-isolation), [layout and navigation](../02-architecture/frontend.md#layout-and-navigation).
+5. **Previous phase:** check the [P00 Definition of done](phase-00-foundation.md#definition-of-done).
+
+## Outcome
+Sara, the admin of Acme Foods, invites Omar. Omar sets a password and logs in. He sees Home, Tickets, My reports and Team in the menu. Lena is lead of the Shop team and also an admin: her Home has focus chips "All · My work · My team · Admin", and the Admin menu item. Sara must turn on two-step login before she can open admin pages. A wrong password shows one neutral message, and five fast wrong tries slow the attacker down.
+
+## Scope
+- Users, credentials (Argon2id), login, logout, sessions in Valkey, throttling, password reset, profile (name, time zone, theme).
+- Organizations, org picker after login, memberships with org roles (Admin, Manager), teams with one lead, team members with team role and job.
+- Invitations by email (single use, 72 h).
+- TOTP two-step login, required for admins on admin pages.
+- Role resolution, base voters, deny by default.
+- App shell: menu from roles, header, avatar menu, Home shell with focus chips and empty sections.
+- `app:demo:seed` with neutral data (Acme Foods, Shop team, Lena, Omar, Mia, Raj, Sara).
+
+## Out of scope
+- Personal access tokens (P09), SSO (P10), the full admin pages (P11), Home content (P07), Team page content (P02/P03).
+- The Activity log UI, filters, export and retention (P11). This phase writes audit events through `Audit\Api\AuditLog` into the minimal `aud_event` table from P00.T7.
+
+## Requirements covered
+FR-ID-01, FR-ID-02, FR-ID-03, FR-ID-06, FR-ID-07, FR-ID-08, FR-ORG-01, FR-ORG-02, FR-ORG-03, FR-ORG-04, FR-ORG-05, FR-ORG-09 (default triager), FR-HOME-08 (chips shell only), NFR-SEC-03, NFR-SEC-04, NFR-SEC-05, NFR-SEC-08, NFR-SEC-14.
+
+## Design notes
+- **Identity tables** are global (no `organization_id`): `idn_user`, `idn_credential`, `idn_mfa_secret`, `idn_login_attempt`. A user can belong to many orgs.
+- **Organization tables** are tenant tables with RLS: `org_organization`, `org_membership` (`org_roles text[]`), `org_team` (`lead_user_id`), `org_team_member` (`team_role`, `job`), `org_invitation`, `org_settings` (`triager_id` default = first admin).
+- **Roles model:** org roles Admin and Manager are additive and company-wide; team roles Lead, Member, Viewer are per team; jobs (tester, developer, other) are not permissions ([role model](../00-product/personas-and-roles.md#role-model)).
+- **Authorization:** `ActorContext` (user id, org id, org roles, team roles map) is built once per request from `MembershipQueries::rolesOf` and cached for the request only. Voters deny by default.
+- **Routes:** `/login`, `/logout`, `/password/forgot`, `/password/reset/{token}`, `/invite/{token}`, `/org/choose`, `/me/profile`, `/me/security`, `/` (Home shell).
+- **Sessions:** Valkey (`valkey-state`), cookie `Secure`, `HttpOnly`, `SameSite=Lax`; ID rotates at login and on role change; idle timeout and absolute lifetime per [ADR-0012](../03-adr/0012-authentication.md): idle 8 h, absolute 30 days, admin pages ask for MFA again after 1 h.
+- **Security:** CSRF on every form; login throttling with RateLimiter keyed by account and by IP; neutral error text; TOTP secret encrypted with libsodium (key id) ([ADR-0027](../03-adr/0027-secrets-and-encryption.md)).
+
+## Tasks
+
+### P01.T1 — Users and password login 🏁
+**Why:** nothing else works without a safe login ([FR-ID-01](../01-requirements/functional-requirements.md#id--identity-and-access)).
+**Steps:**
+1. Identity domain: `User`, `Email` (lower-case, citext), `PasswordHash`; repository; Doctrine XML mapping.
+2. Migration for `idn_user`, `idn_credential`, `idn_login_attempt`.
+3. Symfony Security: form login, Argon2id hasher, user provider, logout (POST with CSRF).
+4. Login throttling (5 tries per 15 min per account and per IP) and the neutral error "Email or password is wrong".
+5. Sessions in `valkey-state`; ID rotation at login; logged-in users opening `/login` go to Home.
+6. Login page with the prototype look (centered card, logo, two fields, filled button "Log in").
+**Files:** `src/Identity/**`, `config/packages/security.yaml`, `migrations/`.
+**Acceptance criteria:**
+- [ ] Correct login lands on `/`; wrong password and unknown email show the same message and take similar time.
+- [ ] The 6th wrong try within 15 minutes is blocked with "Too many tries. Wait 15 minutes."
+- [ ] Session cookie has `Secure`, `HttpOnly`, `SameSite=Lax`; the session id changes after login.
+- [ ] Passwords shorter than the ADR minimum are refused.
+**Tests:** functional login/logout/throttle tests; unit tests for `Email`; a test that the hash algorithm is Argon2id.
+**Prototype check:** the header after login matches the Main board header (logo, menu position, avatar initials).
+**Size:** M
+
+### P01.T2 — Password reset, profile and session control
+**Why:** people forget passwords and need to set their time zone (quiet hours use it) ([FR-ID-06](../01-requirements/functional-requirements.md#id--identity-and-access), FR-ID-07, FR-ID-08).
+**Steps:**
+1. "Forgot password": email with a single-use link valid 1 hour; the response never says whether the email exists.
+2. Reset form; all other sessions end after a reset.
+3. `/me/profile`: display name, time zone (IANA list), theme (system / light / dark, stored and applied with `data-theme`).
+4. `/me/security`: change password, "Log out of all devices".
+5. Session limits per [ADR-0012](../03-adr/0012-authentication.md): idle timeout 8 hours, absolute lifetime 30 days; admin pages ask for MFA again after 1 hour (step-up, FR-ID-06).
+**Files:** `src/Identity/UI/Controller/*`, templates, mailer templates (plain text and HTML, no secrets in URLs except the token).
+**Acceptance criteria:**
+- [ ] A reset link works once and expires after 1 hour.
+- [ ] "Log out of all devices" ends sessions on another browser.
+- [ ] The theme choice survives logout and login.
+**Tests:** functional tests for reset (used, expired, unknown email), profile save, logout all.
+**Prototype check:** avatar menu items (Security, Theme, Log out) as in [Global layout](../04-prototype/prototype-guide.md#global-layout).
+**Size:** M
+
+### P01.T3 — Organizations, teams, memberships and seed data 🏁
+**Why:** every ticket lives inside one org and one team ([FR-ORG-01, FR-ORG-02, FR-ORG-03](../01-requirements/functional-requirements.md#org--organization-teams-and-roles)).
+**Steps:**
+1. Organization domain: `Organization`, `Membership` (org roles), `Team` (exactly one lead), `TeamMember` (team role, job), `OrgSettings` (jsonb with version; defaults from [data model](../02-architecture/data-model.md#organization)).
+2. Migrations with RLS on every table (use the P00 helper; the catalog test must pass).
+3. Org picker `/org/choose` after login when the user has more than one org; the list comes from the `SECURITY DEFINER` resolver function for "orgs of this user" (P00.T4), because no tenant is set yet; the chosen org goes into the session and `TenantContext`.
+4. Commands (application layer): CreateOrganization, CreateTeam, SetTeamRole, SetOrgRoles (the last admin cannot remove their own Admin role).
+5. Events: `MemberJoined`, `OrgRolesChanged`, `TeamCreated`, `TeamRoleChanged` (written to the outbox; the audit consumer comes in P11).
+6. `app:demo:seed`: Acme Foods; team Shop (Lena lead + developer, Omar member developer, Mia member tester); Raj with Manager; Sara with Admin; Lena also Admin. A second org "Beta Bakery" with one user for isolation tests. Passwords from env, never in the repo.
+**Files:** `src/Organization/**`, `src/Web/UI/Controller/OrgChooseController.php`, `src/SharedKernel/Infrastructure/Console/DemoSeedCommand.php`.
+**Acceptance criteria:**
+- [ ] A team cannot be saved without a lead; changing the lead records `TeamRoleChanged`.
+- [ ] A user in two orgs picks one; switching orgs changes all data shown.
+- [ ] Removing the last admin's Admin role fails with "An organization needs at least one admin."
+- [ ] The default triager is the first admin.
+**Tests:** domain unit tests (lead rule, last admin rule); tenant isolation tests for every `org_` table; functional test of the org picker.
+**Prototype check:** role combinations in [Examples of role combinations](../00-product/personas-and-roles.md#examples-of-role-combinations) can all be seeded.
+**Size:** L
+
+### P01.T4 — Role resolution and base voters 🏁
+**Why:** every later action asks a voter; this task builds the shared pieces ([ADR-0013](../03-adr/0013-authorization.md), NFR-SEC-04).
+**Steps:**
+1. `Organization\Api\MembershipQueries::rolesOf(UserId, OrganizationId): Roles` and `teamsOf`.
+2. `ActorContext` value object built once per request (request-scoped service, reset in worker mode).
+3. Base voter class: abstain only for unknown subjects; for known subjects return deny unless a rule grants.
+4. `OrganizationVoter` (`ORG_VIEW`, `ORG_ADMIN`), `TeamVoter` (`TEAM_VIEW`, `TEAM_LEAD`), `AdminAreaVoter` (Admin role + TOTP confirmed from P01.T6; denies any actor that authenticated with a personal access token).
+6. **Hackathon exception (until 22 Nov 2026):** P01.T6 (TOTP) is not in the hackathon slice, but P08.T3 (Admin › AI) is. With the env flag `APP_HACKATHON_SKIP_ADMIN_MFA=1`, `AdminAreaVoter` skips only the TOTP part. The kernel refuses to boot when this flag is set and `APP_ENV=prod`. The exception is recorded in [ADR-0012](../03-adr/0012-authentication.md) ("Hackathon exception (2026-11-06)"). Remove the flag when P01.T6 is done.
+5. A table-driven voter test helper that reads rows from the [permission matrix](../00-product/personas-and-roles.md#permission-matrix) so later phases add rows, not new test code.
+**Files:** `src/Organization/Api/*`, `src/Organization/UI/Voter/*`, `src/SharedKernel/Security/*`, `tests/Integration/Voter/*`.
+**Acceptance criteria:**
+- [ ] A Member of team A gets `TEAM_VIEW` for A and is denied `TEAM_LEAD` for A and everything for team B (unless they are a member there).
+- [ ] An admin with no team role can view all teams and is denied `TEAM_LEAD`.
+- [ ] Role changes take effect on the next request (no stale cache).
+- [ ] Booting with `APP_HACKATHON_SKIP_ADMIN_MFA=1` and `APP_ENV=prod` fails with a clear error; in dev it lets an admin without TOTP open admin pages.
+**Tests:** voter matrix tests (table-driven); a test that the ActorContext is rebuilt per request in worker mode.
+**Prototype check:** none (backend task).
+**Size:** M
+
+### P01.T5 — App shell, menu by roles and Home shell 🏁
+**Why:** one Home for all roles, no mode switch ([FR-ORG-05](../01-requirements/functional-requirements.md#org--organization-teams-and-roles), [ux principle 7](../00-product/ux-principles.md#7-one-home-for-all-roles)).
+**Steps:**
+1. Menu built from roles: Home (everyone); Tickets (team role or Manager); My reports (team role); Team (team role; "Teams ▾" when several); Admin (Admin role). See [layout and navigation](../02-architecture/frontend.md#layout-and-navigation).
+2. Header: "Report a problem" tonal button for people with a team role (target route added in P03/P06), bell placeholder, avatar menu.
+3. Home shell (`src/Web`): headline "Hi, Lena" placeholder, focus chips All / My work / My team / All teams (Manager) / Admin (Admin); sections render empty states. Chip choice saved per user and applied on next visit; chips only hide sections (Stimulus `focus-chips`).
+4. Pure Manager and pure Admin homes: placeholders matching [Manager home](../04-prototype/screens/home-manager.md) and [Admin home](../04-prototype/screens/home-admin.md) layouts (content in P07).
+**Files:** `src/Web/UI/Controller/HomeController.php`, `src/Web/UI/templates/home/*`, `assets/controllers/focus-chips_controller.js`, nav component.
+**Acceptance criteria:**
+- [ ] Each seeded person sees exactly the menu items of the table above.
+- [ ] Lena (Lead + Admin) sees chips All, My work, My team, Admin and the Admin menu item.
+- [ ] A pure admin sees Home and Admin only.
+- [ ] The chosen chip is remembered across sessions.
+**Tests:** functional tests per seeded person for the menu; Playwright: chips hide and show sections and keep the choice.
+**Prototype check:** [Header block and focus chips](../04-prototype/screens/home-work.md#header-block-and-focus-chips): chip labels, order, the pressed style; nav item order.
+**Size:** M
+
+### P01.T6 — Two-step login (TOTP)
+**Why:** admins hold the keys to everything ([FR-ID-03](../01-requirements/functional-requirements.md#id--identity-and-access), NFR-SEC-05).
+**Steps:**
+1. TOTP setup in `/me/security`: QR code (rendered server-side, no third-party service), confirm with a code, 10 recovery codes shown once (stored hashed).
+2. Login step two when TOTP is on; throttle code tries.
+3. Admin pages require a confirmed TOTP; an admin without it is sent to setup with a plain message.
+4. Disable TOTP needs the password and a code.
+5. `Identity\Application\RecentAuth`: a "Confirm it's you" page (password + TOTP code) whose success is remembered in the session for 10 minutes. Later phases use it for sensitive actions: admin credential changes (P08.T3), token creation (P09.T1), Jira and SSO setup (P10), role changes, retention and export (P11).
+**Files:** `src/Identity/**` (`idn_mfa_secret` encrypted with sodium + key id).
+**Acceptance criteria:**
+- [ ] An admin without TOTP opening `/admin/people` lands on the setup page.
+- [ ] A used recovery code cannot be used again.
+- [ ] The secret is not readable in the database dump (encrypted).
+- [ ] A route protected by `RecentAuth` asks again after 10 minutes.
+**Tests:** functional tests for setup, login with code, recovery code, admin gate, `RecentAuth` expiry; unit test for encryption round trip with key rotation.
+**Prototype check:** none (the prototype has no login screens; follow [ux-principles.md](../00-product/ux-principles.md)).
+**Size:** M
+
+### P01.T7 — Invitations
+**Why:** admins add people without sharing passwords ([FR-ID-02](../01-requirements/functional-requirements.md#id--identity-and-access)).
+**Steps:**
+1. `InviteMember` command: email, org roles, optional team and team role; token stored as a hash; expires after 72 hours. The accept page finds the invite through the invite resolver function (P00.T4), not with `BYPASSRLS`.
+2. Email (Mailpit locally) with the link `/invite/{token}`.
+3. Accept page: new user sets name and password; an existing user (same email) logs in and gets the membership.
+4. Expired or used link: "This invite is no longer valid. Ask your admin for a new one."
+5. Pending invites query for the admin card and the People page (shown as "Invited · not joined yet" in P11).
+**Files:** `src/Organization/**` (`org_invitation`), `src/Identity/UI/Controller/InviteController.php`.
+**Acceptance criteria:**
+- [ ] Accepting creates the membership with the chosen roles in one transaction.
+- [ ] A second use of the same link fails with the message above.
+- [ ] Only admins can invite (voter test).
+**Tests:** functional tests (new user, existing user, expired, used), voter test.
+**Prototype check:** invite field and button text in [Admin: people and roles](../04-prototype/screens/admin.md#people-and-roles) (the button needs a valid email).
+**Size:** M
+
+## Definition of done
+- [ ] All tasks ticked; seeded people log in and see the right menus.
+- [ ] Voter matrix tests and tenant isolation tests cover every new table and action.
+- [ ] Admin pages are gated by role and TOTP.
+- [ ] No passwords, codes or tokens in logs (marker test extended).
+- [ ] Global [Definition of done](README.md#definition-of-done-for-every-task) met for every task.
+
+## Hand-off notes
+- Personal access tokens (FR-ID-05) are built in P09, together with the token page.
+- SSO (FR-ID-04) is built in P10.
+- Role and settings events are written to `aud_event` through `Audit\Api\AuditLog`; P11 adds the Activity log UI.
+- Hackathon: `APP_HACKATHON_SKIP_ADMIN_MFA=1` is allowed only in dev and demo environments (ADR-0012 exception); after 22 Nov 2026 do P01.T6 and delete the flag and its code path.
+- (add dated notes here)

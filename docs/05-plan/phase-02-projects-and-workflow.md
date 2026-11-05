@@ -1,0 +1,197 @@
+# Phase 02 — Projects and workflow
+
+Goal: projects with ticket keys, the five groups and their steps, the step policy and rules, the verb (transition) engine, and the "whose turn" read model, all tested before tickets exist.
+
+## Index
+- [Before you start](#before-you-start) — prototype screens, requirements, ADRs, docs
+- [Outcome](#outcome) — what works after this phase
+- [Scope](#scope) — what this phase builds
+- [Out of scope](#out-of-scope) — what waits
+- [Requirements covered](#requirements-covered) — FR and NFR ids
+- [Design notes](#design-notes) — modules, tables, pure functions, events
+- [Tasks](#tasks) — P02.T1 to P02.T8
+- [Definition of done](#definition-of-done) — phase checklist
+- [Hand-off notes](#hand-off-notes) — notes for P03
+
+## Before you start
+1. **Prototype.** Open https://claude.ai/artifact/FmbJosB3s5mDi75cLqMFQ2 (Artifact tool, `action: "read"`, `path: "project/Main.dc.html"`). Look at the Team page ("How work moves here"), a ticket page's status pill, "Now:" and "Next:" lines and the "YOUR NEXT STEP" box for each role; read the `turnOf`, `verbFor`, `nowText`, `nextText` helpers in the script. Fallback docs: [Team: projects](../04-prototype/screens/team.md#projects), [Team: how work moves here](../04-prototype/screens/team.md#how-work-moves-here), [Ticket page: turn rules](../04-prototype/screens/ticket-page.md#turn-rules), [Now and Next texts](../04-prototype/screens/ticket-page.md#now-and-next-texts), [Your next step box](../04-prototype/screens/ticket-page.md#your-next-step-box), [Every move](../04-prototype/screens/ticket-page.md#every-move), [Admin: statuses](../04-prototype/screens/admin.md#statuses).
+2. **Requirements:** [FR-WF-01, FR-WF-02, FR-WF-03, FR-WF-04, FR-WF-05, FR-WF-06, FR-WF-07, FR-WF-08, FR-WF-09, FR-WF-10, FR-WF-11, FR-WF-12, FR-WF-13, FR-WF-14, FR-WF-15, FR-WF-16](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns) (FR-WF-14 reviewer and tester choice, FR-WF-15 needs-input target, FR-WF-16 move side effects), [FR-ORG-06, FR-ORG-07](../01-requirements/functional-requirements.md#org--organization-teams-and-roles), [NFR-PERF](../01-requirements/non-functional-requirements.md#perf--performance) NFR-PERF-01, NFR-PERF-06.
+3. **ADRs:** [0014 five groups](../03-adr/0014-status-model-five-groups.md), [0015 turn read model](../03-adr/0015-turn-read-model.md), [0006 identifiers](../03-adr/0006-identifiers.md), [0002 modular monolith](../03-adr/0002-modular-monolith.md).
+4. **Architecture docs:** [workflow engine](../02-architecture/workflow-engine.md) — read all of it, especially [five groups and core steps](../02-architecture/workflow-engine.md#five-groups-and-core-steps), [policy](../02-architecture/workflow-engine.md#company-steps-team-steps-and-the-step-policy), [rules](../02-architecture/workflow-engine.md#rules-guards), [transition catalogue](../02-architecture/workflow-engine.md#transition-catalogue), [whose turn](../02-architecture/workflow-engine.md#whose-turn), [Now and Next](../02-architecture/workflow-engine.md#now-and-next-sentences), [needs-you kinds and score](../02-architecture/workflow-engine.md#needs-you-kinds-and-score); [Workflow module](../02-architecture/modules.md#workflow-wf_), [Insight module](../02-architecture/modules.md#insight-ins_); tables [Workflow](../02-architecture/data-model.md#workflow), [ins_ticket_turn](../02-architecture/data-model.md#ins_ticket_turn-the-most-important-table-for-speed).
+5. **Previous phase:** check the [P01 Definition of done](phase-01-identity-and-organization.md#definition-of-done).
+
+## Outcome
+Lena creates project SHOP. The next ticket will be SHOP-1, and two tickets created at the same moment never share a number. Every org has the eight core steps in the five groups. Lena adds a team step "Design check" under Checking because the policy is "extend". Given any ticket state and any person, the engine says which verbs they may use, why others are hidden ("Team rule: nobody approves their own code. Lena reviews it."), whose turn it is, and the "Now:" and "Next:" sentences. The Team page shows "How work moves here".
+
+## Scope
+- Projects and per-project key counters (Ticketing owns `tkt_project`).
+- Steps (core, company, team), groups, step policy, rule sets.
+- Guards, transition catalogue as data, the transition engine (`TransitionPolicy`).
+- Turn rules, reviewer/tester choice, needs-input target, needs-you kind and base score (pure functions).
+- `ins_ticket_turn` table and `TurnProjector` (Insight), ready to be called by Ticketing in P03.
+- Now/Next sentence builder and per-person verb text ("Test it", "Review Omar's code").
+- Team page: projects list and "How work moves here".
+
+## Out of scope
+- Tickets themselves (P03). This phase tests with `TicketState` fixtures.
+- Admin "Statuses" page UI (P11). This phase gives the commands and a minimal lead UI on the Team page.
+- Jira status mapping (P10).
+
+## Requirements covered
+FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF-03, FR-WF-04, FR-WF-05, FR-WF-06, FR-WF-07 (engine), FR-WF-08, FR-WF-09, FR-WF-10 (engine), FR-WF-13, FR-WF-14, FR-WF-15, FR-WF-16, NFR-PERF-06.
+
+## Design notes
+- **Workflow is pure where it can be.** `TransitionPolicy::available(TicketState, ActorContext)` and `TurnRules::turnFor(TicketState, TeamFacts)` are pure functions over value objects. They have no database access. This makes them fast and easy to test.
+- **`TicketState`** (Workflow Api DTO): step id, core code, group, assignee, pending assignee, reviewer, tester, previous step, reporter, waiting-on user/label, open question (asked user), check needed + checker, priority, release flag, team id.
+- **`TeamFacts`**: lead id, developers, testers with their open-review and in-testing counts (for reviewer and tester choice).
+- **Tables:** `tkt_project` (`next_number`), `wf_step` (`grp`, `core_code`, `origin`, `position`, `archived_at`), `wf_rule_set`, `ins_ticket_turn` (all with RLS).
+- **Events:** `StepAdded`, `StepRemoved`, `RulesChanged`, `ProjectCreated`.
+- **Group colours** come from the fixed tokens ([five group colours](../00-product/ux-principles.md#the-five-group-colors)); never per team.
+- **Performance:** steps and rule sets per team are cached in `valkey-cache` with tags `org:{id}:workflow`, cleared on `StepAdded/StepRemoved/RulesChanged`.
+
+## Tasks
+
+### P02.T1 — Projects and ticket keys 🏁
+**Why:** humans talk about "SHOP-41", not UUIDs ([FR-ORG-06](../01-requirements/functional-requirements.md#org--organization-teams-and-roles), [ADR-0006](../03-adr/0006-identifiers.md)).
+**Steps:**
+1. `Ticketing\Domain\Project`, `ProjectKey` (2–10 capital letters/digits, starts with a letter, unique per org).
+2. Migration `tkt_project` with RLS and `UNIQUE (organization_id, key)`.
+3. `NextTicketNumber` service: `UPDATE tkt_project SET next_number = next_number + 1 … RETURNING` inside the caller's transaction.
+4. Command CreateProject (lead of the owning team or admin; voter `PROJECT_CREATE`).
+5. Seed SHOP for the Shop team in `app:demo:seed`.
+**Files:** `src/Ticketing/Domain/Project*.php`, `src/Ticketing/Application/CreateProject/*`, migration.
+**Acceptance criteria:**
+- [ ] 50 parallel number requests on one project give 50 distinct numbers with no gaps.
+- [ ] Key "shop", "1SHOP" and "SHOPPINGCART1" are rejected with a plain message.
+- [ ] Org B cannot see or use org A's project (isolation test).
+**Tests:** unit tests for `ProjectKey`; integration concurrency test (parallel connections); isolation and voter tests.
+**Prototype check:** project key style in [Team: projects](../04-prototype/screens/team.md#projects) (key in mono font, name, count).
+**Size:** S
+
+### P02.T2 — Five groups and core steps 🏁
+**Why:** every team maps to the same five groups, so managers can compare ([FR-WF-01, FR-WF-02](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns)).
+**Steps:**
+1. `Workflow\Domain\Group` enum (`todo`, `doing`, `check`, `wait`, `done`) with label and list order (Waiting, Checking, Doing, To do, Done).
+2. `Step` entity; `CoreStep` codes (`backlog`, `todo`, `progress`, `review`, `test`, `input`, `hold`, `done`).
+3. Migration `wf_step`, `wf_rule_set` with RLS. On `OrganizationCreated` (or in the seed for existing orgs) insert the eight core steps and the default rule set (all three rules on).
+4. `StepQueries::stepsFor(TeamId)` ordered by group then position; `groupOf(StepId)`.
+5. Hint texts per group for lists: "Someone must answer first", "Being checked", "Being built", "Not started".
+**Files:** `src/Workflow/**`, migrations.
+**Acceptance criteria:**
+- [ ] A new org has exactly eight core steps in the right groups and cannot remove them.
+- [ ] `stepsFor` returns steps in the list order above.
+**Tests:** unit tests for Group order and labels; integration test of seeding; isolation test.
+**Prototype check:** step names and group labels in [Team: how work moves here](../04-prototype/screens/team.md#how-work-moves-here).
+**Size:** S
+
+### P02.T3 — Company steps, team steps, policy and rules
+**Why:** teams differ, but the company decides how much ([FR-WF-03, FR-WF-04, FR-WF-05, FR-WF-06](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns)).
+**Steps:**
+1. Commands AddStep / RemoveStep (company: admin; team: lead when policy is `extend` or `team`), ChangeStepPolicy (admin), SetRule (admin; lead per team under `team`).
+2. Validation: name required, group not `done`; removal only when no open ticket is in the step (query through a `Ticketing\Api` count method added now, returning 0 until P03).
+3. Policy `locked`: team steps are hidden from new moves; tickets already there keep them.
+4. `RuleSet` resolution: team rule set under `team` policy, else the org rule set.
+5. Events `StepAdded`, `StepRemoved`, `RulesChanged`; cache invalidation by tag.
+**Files:** `src/Workflow/Application/*`, `src/Workflow/UI/Voter/WorkflowVoter.php`.
+**Acceptance criteria:**
+- [ ] Under `locked`, a lead's AddStep is denied; under `extend` it is allowed for their own team only.
+- [ ] Under `extend`, a lead cannot change rules; under `team`, they can for their team only.
+- [ ] A step inside Done cannot be created.
+**Tests:** unit tests for policy decisions; voter matrix rows; integration tests for rule resolution.
+**Prototype check:** policy texts and rule labels in [Admin: statuses](../04-prototype/screens/admin.md#statuses) and [Team: how work moves here](../04-prototype/screens/team.md#how-work-moves-here).
+**Size:** M
+
+### P02.T4 — Transition engine, guards and the hackathon verbs 🏁
+**Why:** buttons are verbs, and the engine decides which ones a person sees ([FR-WF-07](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns), [ADR-0014](../03-adr/0014-status-model-five-groups.md)).
+**Steps:**
+1. `Transition` catalogue as data (verb name, from, to, who may), structured exactly as in the [transition catalogue](../02-architecture/workflow-engine.md#transition-catalogue). In this task fill the rows for: Plan it, Give it to…, Start work, Send to code review, Approve code, Ask for changes, Pass it, Needs changes.
+2. Guards: `TesterMovesDone`, `NoSelfReview`, `ReviewBeforeTest`, `QuestionOpenPause` (no moves while a question is open). Each returns `null` or the plain note.
+3. `TransitionPolicy::available(TicketState, ActorContext)` → ordered list of `TransitionView` (label, primary flag) + one rule note; `check(...)` → `Decision`.
+4. Managers, viewers and admins without a team role get no verbs and the note "Managers can read and comment. Only the team moves tickets."
+**Files:** `src/Workflow/Domain/{Transition,Guard,TransitionPolicy}*.php`, `src/Workflow/Api/TransitionPolicy.php`.
+**Acceptance criteria:**
+- [ ] For each of the eight rows, a test shows who sees the verb and who does not.
+- [ ] With `no_self_review` on, Lena (lead and assignee) sees no "Approve code" and the note names the other reviewer.
+- [ ] With a question open, `available()` returns no verbs and the note "Paused until Mia answers the question below."
+- [ ] Managers, viewers and admins without a team role get no verbs and the note above.
+**Tests:** table-driven unit tests (one row per catalogue row × role).
+**Prototype check:** button labels, order (first one filled) and rule notes in [Your next step box](../04-prototype/screens/ticket-page.md#your-next-step-box) for these eight verbs.
+**Size:** M
+
+### P02.T5 — Full verb catalogue, move side effects and Move to another step
+**Why:** the rest of the catalogue and its side effects make every move predictable ([FR-WF-07](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns), [FR-WF-10](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns), [FR-WF-16](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns)).
+**Steps:**
+1. Fill the remaining catalogue rows: Send to testing (only when `review_before_test` is off), Input given · go on, Go on, Reopen, Put on hold, Move on to <next core step>.
+2. Move side effects as data on the decision (FR-WF-16): Backlog + assign → To do; "Input given · go on" → previous step else To do; "Go on" → previous step else In progress; "Move on to …" mapping by group (To do → In progress, Doing → Code review, Checking → Testing, Waiting → previous step).
+3. "Move to another step…" list grouped by the five groups, current step marked (lead only); In progress → Testing is refused while `review_before_test` is on, with the note "Team rule: code review comes before testing."
+4. Property test: no `available()` result ever contains a verb that `check()` denies.
+**Files:** `src/Workflow/Domain/Transition*.php`, `src/Workflow/Domain/MoveSideEffects.php`.
+**Acceptance criteria:**
+- [ ] For each remaining catalogue row, a test shows who sees the verb and who does not.
+- [ ] Each side effect in FR-WF-16 has a unit test with the expected target step.
+- [ ] The property test runs 1,000 random states without a failure.
+**Tests:** table-driven unit tests; property test.
+**Prototype check:** [Every move](../04-prototype/screens/ticket-page.md#every-move) and the "Move to another step…" list in [Your next step box](../04-prototype/screens/ticket-page.md#your-next-step-box).
+**Size:** M
+
+### P02.T6 — Turn rules and the turn read model 🏁
+**Why:** "whose turn" must be instant on Home and in lists ([FR-WF-08, FR-WF-14, FR-WF-15](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns), [ADR-0015](../03-adr/0015-turn-read-model.md)).
+**Steps:**
+1. `TurnRules::turnFor(TicketState, TeamFacts)` with the exact order from [whose turn](../02-architecture/workflow-engine.md#whose-turn): open question → asked person; check needed and no assignee → checker; Done → nobody; Backlog/On hold → lead; Code review → reviewer; Testing or any Checking step → tester; Needs input → waiting-on user or label (Customer, Product owner, Technical owner); else assignee or lead.
+2. Reviewer choice (lead; if the lead is the author, the other developer with the fewest open reviews) and tester choice (the team tester with the fewest tickets in Testing) as pure functions (FR-WF-14). Fallbacks: no tester in the team → the Testing turn goes to the lead; the lead is the author and there is no other developer → the lead reviews and the override is written to the ticket activity ("Lena reviews her own code: no other developer in the team").
+3. Needs-you `kind` (`answer`, `check`, `review`, `test`, `assign`, `input`, `decide`, `build`) and `base_score` = kind base + priority weight + release points ([needs-you kinds and score](../02-architecture/workflow-engine.md#needs-you-kinds-and-score)). The time part is computed in SQL at read time.
+4. Migration `ins_ticket_turn` with the four indexes from the data model; RLS.
+5. `Insight\Api\TurnProjector::project(TicketState, TeamFacts, ?OpenQuestion)`: upsert (or delete when Done), sets `waiting_since` only when the turn person changes.
+**Files:** `src/Workflow/Domain/TurnRules.php`, `src/Insight/**`.
+**Acceptance criteria:**
+- [ ] Every turn rule has a unit test with the expected person or label.
+- [ ] A label waiter ("Customer") has `turn_user_id` NULL and `turn_label` set.
+- [ ] Reprojecting with the same turn keeps `waiting_since`; a new turn person resets it.
+- [ ] A Done ticket has no row.
+**Tests:** unit tests (rules, reviewer/tester choice and both fallbacks, score); integration tests for the projector and indexes (EXPLAIN uses the Home index). Tickets do not exist yet: test with a synthetic `TicketState` and a `ticket_id` without a foreign key; P03.T1 adds the foreign key from `ins_ticket_turn.ticket_id` to `tkt_ticket`.
+**Performance notes:** one upsert per change; no reads of other tickets except the small `TeamFacts` counts (cached per request).
+**Prototype check:** none (backend task; P03 shows the result on the ticket page).
+**Size:** M
+
+### P02.T7 — Now and Next sentences 🏁
+**Why:** "Now: Lena reviews the code. Next: Mia tests it." replaces status jargon ([FR-WF-09](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns)).
+**Steps:**
+1. `NowNext::now(TicketState, Turn, names)` and `::next(...)` exactly as in [Now and Next sentences](../02-architecture/workflow-engine.md#now-and-next-sentences): "Omar builds it", "Lena reviews the code", "Mia tests it", "Waiting for input from Ben", "Lena decides if it goes on", "Lena plans it", "Lena picks a developer", "Lena takes a quick look at the new ticket", "Mia answers Lena's question", "Done. Nobody needs to act."
+2. `VerbFor::person(...)`: the short task for Home and lists ("Test it", "Review Omar's code", "Answer Mia's question", "Check the new ticket", "Plan it", "Pick a developer", "Start building", "Build it", "Give input", "Decide: go on or stop").
+3. First names only; the viewer becomes "you" where the prototype does ("Turn: you").
+**Files:** `src/Workflow/Domain/NowNext.php`, `src/Workflow/Domain/VerbFor.php`.
+**Acceptance criteria:**
+- [ ] Each sentence in [Now and Next texts](../04-prototype/screens/ticket-page.md#now-and-next-texts) is produced by a test case with the same words.
+- [ ] No sentence contains a raw step code.
+**Tests:** table-driven unit tests; `lint:copy` passes on the strings.
+**Prototype check:** Now/Next lines for each step on the ticket page header.
+**Size:** S
+
+### P02.T8 — Team page: projects and "How work moves here"
+**Why:** a team sees its own way of working, in plain words ([FR-ORG-07](../01-requirements/functional-requirements.md#org--organization-teams-and-roles)).
+**Steps:**
+1. Route `GET /teams/{slug}` (`team_show`), voter `TEAM_VIEW`.
+2. Projects section: key, name, open ticket count (0 until P03), link "See tickets", "Remove" and "Add project" for the lead only.
+3. "How work moves here": the policy sentence, the five groups with their steps (team steps highlighted), "Add team step" (name + group chips, not Done) when allowed, rule list (editable switches only under `team` policy, else "· set by the admin").
+4. Non-leads see "Only the team lead can change projects and steps."
+5. People section shell (workload bars are filled in P03.T9).
+**Files:** `src/Organization/UI/Controller/TeamController.php`, templates, Live Component for adding a step.
+**Acceptance criteria:**
+- [ ] Lena can add "Design check" under Checking; Omar cannot see the add form.
+- [ ] Under `locked`, nobody sees "Add team step" and the policy sentence says so.
+**Tests:** functional tests per role; Playwright add/remove team step.
+**Prototype check:** [Team page](../04-prototype/screens/team.md): section order, policy sentences, step chips per group, rule list wording.
+**Size:** M
+
+## Definition of done
+- [ ] All tasks ticked; engine, turn rules and Now/Next have full table-driven tests.
+- [ ] Every new table has RLS, isolation tests and appears in the catalog test.
+- [ ] Voter matrix rows added for project and workflow actions.
+- [ ] Team page matches the prototype for lead and member.
+- [ ] Global [Definition of done](README.md#definition-of-done-for-every-task) met for every task.
+
+## Hand-off notes
+- P03 must call `TransitionPolicy::check` before every move and `TurnProjector::project` in the same transaction.
+- P03.T1 adds the foreign key `ins_ticket_turn.ticket_id → tkt_ticket.id` (P02.T6 tests ran without it).
+- The step-removal check uses a Ticketing count that returns 0 until P03 implements it.
+- (add dated notes here)

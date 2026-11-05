@@ -1,0 +1,363 @@
+# Modules
+
+The catalogue of pinround's modules: what each one owns, what it offers to others, which events it sends, and the rules that keep the boundaries clean.
+
+## Index
+
+- [Why modules](#why-modules) — the problem modules solve, as a short story.
+- [Directory layout and namespaces](#directory-layout-and-namespaces) — folders inside a module, with an example.
+- [How modules talk](#how-modules-talk) — calls through `Api`, events through the outbox, and nothing else.
+- [Module catalogue](#module-catalogue) — every module: purpose, owned tables, Api, commands, events, dependencies.
+- [Event catalogue](#event-catalogue) — every domain event: producer, consumers, payload, delivery.
+- [Deptrac rules](#deptrac-rules) — the layer and module rules the build checks.
+- [Rules for adding a module](#rules-for-adding-a-module) — the checklist before you create a new one.
+
+## Why modules
+
+Six months from now, Omar adds a "mute" option to pings. In a classic monolith he would touch the ticket entity, the Home query, and the email code, and break the manager page by accident. In pinround he changes only the Notification module. Home learns about mutes through a small `NotificationQueries` interface. Tickets do not know mutes exist.
+
+That is the goal: **a change in one area stays in one area.** We get it without the cost of microservices, which a team of three cannot run ([ADR-0002](../03-adr/0002-modular-monolith.md)).
+
+## Directory layout and namespaces
+
+Every module has the same five folders:
+
+```text
+src/
+  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result
+  Ticketing/
+    Api/                        # PUBLIC: interfaces + DTOs other modules may use
+      TicketQueries.php
+      TicketCommands.php
+      Dto/TicketSummary.php
+      Event/TicketCreated.php   # public event classes
+    Domain/                     # entities, value objects, domain services, repository interfaces
+      Ticket.php
+      TicketKey.php
+      CheckReason.php
+      TicketRepository.php
+    Application/                # use cases (command handlers, query handlers), Api implementations
+      CreateTicket/CreateTicketHandler.php
+      ConfirmCheck/ConfirmCheckHandler.php
+      TicketQueriesService.php
+    Infrastructure/             # Doctrine mappings + repositories, Messenger handlers, external clients
+      Doctrine/DoctrineTicketRepository.php
+      Doctrine/Mapping/Ticket.orm.xml
+    UI/                         # controllers, forms, Twig components, voters, templates for this module
+      Controller/TicketController.php
+      Voter/TicketVoter.php
+      templates/
+```
+
+Namespaces follow the folders: `App\Ticketing\Domain\Ticket`, `App\Ticketing\Api\TicketQueries`, and so on.
+
+- **Domain** depends on nothing except `SharedKernel`. Doctrine mapping is XML in Infrastructure, so entities stay plain PHP.
+- **Application** depends on Domain, on SharedKernel, and on the `Api` of other modules.
+- **Infrastructure** implements Domain interfaces.
+- **UI** calls Application through command and query classes. It never calls repositories.
+- **Api** holds only interfaces, read-only DTOs and event classes. There is no logic in it.
+
+## How modules talk
+
+1. **Synchronous query or command through `Api`.**
+   - Example: Ticketing asks Workflow, "may Lena move this ticket from In progress to Code review?" through `Workflow\Api\TransitionPolicy`.
+   - The call runs inside the caller's transaction.
+2. **Domain events through the outbox.**
+   - Example: Ticketing records `TicketMoved`. The event row is written to the outbox in the same transaction. Notification, Audit, Integration and Insight react later ([ADR-0009](../03-adr/0009-async-messaging-and-outbox.md)).
+3. **Read model updates that must be instant** run synchronously, in the same transaction.
+   - Example: the `ins_ticket_turn` row ([ADR-0015](../03-adr/0015-turn-read-model.md)).
+   - The producing module calls `Insight\Api\TurnProjector` directly, so Home is correct right after the click.
+4. **Never:**
+   - a join across another module's tables (one named exception: Insight's query service may join `ins_ticket_turn` with Ticketing's read-only view `tkt_ticket_list_v`, [ADR-0015](../03-adr/0015-turn-read-model.md));
+   - a Doctrine relation to another module's entity (store the id as a value object instead);
+   - using another module's repository or `Domain` class.
+
+## Module catalogue
+
+Table prefixes keep ownership visible in SQL. The tables and columns are in [data-model.md](data-model.md).
+
+### SharedKernel
+
+- **Purpose:** the small set of types every module shares.
+- **Contains:**
+  - `Uuid`-based ids (`OrganizationId`, `UserId`, `TicketId` …, all UUIDv7, [ADR-0006](../03-adr/0006-identifiers.md));
+  - `Clock` (an interface, so tests can freeze time);
+  - `TenantContext` (the current `OrganizationId`, plus setting `app.org_id` on the connection, [ADR-0005](../03-adr/0005-multi-tenancy.md));
+  - the `DomainEvent` base (event id, occurred at, organization id, actor id);
+  - `Result`/`Problem` types for expected failures.
+- **Owns tables:** none.
+- **Rule:** keep it tiny. A type joins SharedKernel only when three or more modules need it.
+
+### Identity (`idn_`)
+
+- **Story:** Sara invites Omar. Omar sets a password and turns on two-factor login. Later the company switches to Microsoft login, and Omar's account is linked, not duplicated.
+- **Owns:** `idn_user`, `idn_credential`, `idn_mfa_secret`, `idn_sso_identity`, `idn_api_token`, `idn_login_attempt`. Sessions live in Valkey.
+- **Api:**
+  - `UserQueries::byId(UserId): ?UserView`
+  - `UserQueries::byIds(list<UserId>): array<string, UserView>`
+  - `UserQueries::byEmail(string): ?UserView`
+  - `TokenAuthenticator::authenticate(string $bearer): ?TokenPrincipal` (scopes included)
+  - `ApiTokens::issue(UserId, OrganizationId, string $name, list<Scope>, \DateTimeImmutable $expires): IssuedToken` (the plain token is returned once)
+- **Commands:** RegisterFromInvite, ChangePassword, EnableTotp, DisableTotp, LinkSsoIdentity, IssueApiToken, RevokeApiToken.
+- **Events:** `UserRegistered`, `UserLoggedIn`, `LoginFailed`, `MfaEnabled`, `ApiTokenIssued`, `ApiTokenRevoked`.
+- **Depends on:** SharedKernel only.
+- **ADRs:** [0012](../03-adr/0012-authentication.md), [0027](../03-adr/0027-secrets-and-encryption.md).
+
+### Organization (`org_`)
+
+- **Story:** Sara creates the team "Shop" with Lena as lead. She gives Raj the Manager role. Omar is a member of Shop and a viewer in "Mobile".
+- **Owns:** `org_organization`, `org_membership` (org roles: admin, manager), `org_team`, `org_team_member` (team role: lead, member, viewer; job: tester, developer, other), `org_invitation`, `org_settings` (ping limits, quiet hours, lead-check switch, triager, step policy, AI policy, retention).
+- **Api:**
+  - `MembershipQueries::rolesOf(UserId, OrganizationId): Roles`
+  - `MembershipQueries::teamsOf(UserId): list<TeamRole>`
+  - `TeamQueries::team(TeamId): TeamView`
+  - `TeamQueries::leadOf(TeamId): UserId`
+  - `TeamQueries::testersOf(TeamId): list<UserId>`
+  - `TeamQueries::members(TeamId): list<MemberView>`
+  - `OrgSettings::get(OrganizationId): SettingsView`
+- **Commands:** CreateOrganization, InviteMember, AcceptInvitation, SetOrgRoles, CreateTeam, SetTeamRole, ChangeSettings.
+- **Events:** `MemberJoined`, `OrgRolesChanged`, `TeamCreated`, `TeamRoleChanged`, `SettingsChanged`.
+- **Depends on:** Identity Api.
+- **ADRs:** [0013](../03-adr/0013-authorization.md).
+
+### Workflow (`wf_`)
+
+- **Story:** Lena adds a team step "Design check" under Checking. Raj still sees the team in the same five groups as every other team.
+- **Owns:** `wf_step` (core, company or team steps, each with its group), `wf_rule_set` (the three rules per org or team), `wf_transition` (the verb catalogue as data).
+- **Api:**
+  - `StepQueries::stepsFor(TeamId): list<StepView>` (ordered by group, then position)
+  - `StepQueries::groupOf(StepId): Group`
+  - `TransitionPolicy::available(TicketState, ActorContext): list<TransitionView>`
+  - `TransitionPolicy::check(TicketState, TransitionName, ActorContext): Decision` (allowed, or a rule note)
+  - `TurnRules::turnFor(TicketState, TeamFacts): Turn` (a pure function)
+- **Commands:** AddStep, RemoveStep, ChangeStepPolicy, SetRule.
+- **Events:** `StepAdded`, `StepRemoved`, `RulesChanged`.
+- **Depends on:** Organization Api.
+- **Note:** Workflow does not store tickets. Ticketing owns the ticket's current step and asks Workflow before every move.
+- **More:** [workflow-engine.md](workflow-engine.md), [ADR-0014](../03-adr/0014-status-model-five-groups.md).
+
+### Ticketing (`tkt_`)
+
+- **Story:** Mia's report becomes `SHOP-412` at once, with the flag "maybe the same as an older ticket". Lena confirms it. Omar moves it through the steps.
+- **Owns:** `tkt_project` (with the key counter), `tkt_ticket`, `tkt_ticket_event` (partitioned history), `tkt_duplicate_link`, `tkt_summary` (current + history).
+- **Api:**
+  - `TicketQueries::byKey(OrganizationId, string $key): ?TicketView`
+  - `TicketQueries::list(ListFilter, ?Cursor): Page<TicketRow>`
+  - `TicketQueries::reportedBy(UserId): list<TicketRow>`
+  - `TicketQueries::duplicateCandidates(OrganizationId, string $text, ?TicketId $exclude): list<TicketRow>` (top 3)
+  - `TicketCommands::create(CreateTicket): TicketId`
+  - `TicketCommands::move(TicketId, TransitionName, UserId): void`
+  - `TicketCommands::assign(TicketId, UserId, UserId $actor): void`
+  - `TicketCommands::confirmCheck(TicketId, UserId): void`
+  - `TicketCommands::closeAsDuplicate(TicketId, TicketId $of, UserId): void`
+- **Commands (more):** SetVisibility, SetSummary, UseExplanationAsSummary, MoveToTeam, PutOnHold.
+- **Events:** `TicketCreated`, `TicketMoved`, `TicketAssigned`, `TicketChecked`, `TicketClosedAsDuplicate`, `TicketVisibilityChanged`, `SummaryChanged`.
+- **Depends on:** Workflow Api, Organization Api, Media Api (report screenshot ids), Insight Api (`TurnProjector`, synchronous).
+- **ADRs:** [0016](../03-adr/0016-direct-ticket-creation-with-check-flags.md), [0022](../03-adr/0022-search-and-duplicates.md).
+
+### Conversation (`cnv_`)
+
+- **Story:** Lena asks Mia, "Which contract was it?" The ticket pauses. Mia answers from "My reports", and the ticket goes back to its step.
+- **Owns:** `cnv_message` (comment or question, with `to_user_id` and `resolved_at`), `cnv_reply` (one level deep).
+- **Api:**
+  - `ThreadQueries::forTicket(TicketId, UserId $viewer): list<MessageView>`
+  - `ThreadQueries::openQuestion(TicketId): ?QuestionView`
+  - `ThreadQueries::openQuestionsTo(UserId): list<QuestionView>`
+- **Commands:** PostComment, AskQuestion, Reply, Answer (a reply that resolves the question), Resolve.
+- **Events:** `CommentPosted`, `QuestionAsked`, `QuestionAnswered`, `CommentResolved`, `ReplyPosted`.
+- **Depends on:** Ticketing Api (visibility check, ticket exists).
+- **How pausing works:** a question does not change the ticket's step. Insight sees `QuestionAsked` and makes the asked person the turn owner. The page shows "Waiting · question to Mia" ([workflow-engine.md](workflow-engine.md#questions-pause-and-resume)).
+
+### Review (`rvw_`)
+
+- **Story:** Omar's private draft round has three screenshots. He shares it as round 2 when he sends the ticket to review. Mia marks each pin.
+- **Owns:** `rvw_round` (kind: report, checklist, review, draft; owner; `shared_at`), `rvw_screenshot` (media id, position, verdict, note), `rvw_pin` (number, x/y in percent, note, verdict, source human/ai, state kept/dismissed), `rvw_check_item` (the Round 1 checklist, made from report pins).
+- **Api:**
+  - `RoundQueries::forTicket(TicketId, UserId $viewer): list<RoundView>` (private drafts filtered out)
+  - `RoundQueries::roundNotes(TicketId, UserId $owner): RoundNotes` (for MCP `get_round_notes`)
+  - `RoundCommands::addScreenshot(RoundId, MediaId, UserId): ScreenshotId`
+  - `RoundCommands::setVerdict(ScreenshotId|PinId, Verdict, UserId): void`
+  - `RoundCommands::shareDraft(RoundId, UserId): int $roundNumber`
+- **Commands (more):** StartDraftRound, AddPin, EditPinNote, RemovePin, MarkChecklistItem, DeleteDraft, KeepOrDismissAiPin.
+- **Events:** `RoundStarted`, `RoundShared`, `PinVerdictSet`, `ChecklistItemChanged`, `DraftDeleted`.
+- **Depends on:** Ticketing Api, Media Api.
+- **ADRs:** [0017](../03-adr/0017-private-draft-rounds.md), [0011](../03-adr/0011-screenshot-storage-and-processing.md).
+
+### Media (`med_`)
+
+- **Story:** Mia's 4 MB screenshot goes straight from her browser to the bucket. A worker checks it, strips hidden data, makes a small WebP, and marks it ready.
+- **Owns:** `med_object` (storage key, sha256, mime, bytes, size, status, variants), `med_upload_intent` (presigned slot: max bytes, allowed types, expiry).
+- **Api:**
+  - `Uploads::begin(OrganizationId, UserId, UploadPurpose, int $bytes, string $mime): UploadIntent` (with a presigned PUT URL)
+  - `Uploads::complete(UploadIntentId): MediaId`
+  - `MediaQueries::status(MediaId): MediaStatus`
+  - `SignedUrls::forVariant(MediaId, Variant, UserId): SignedUrl` (the caller must check access first)
+- **Events:** `MediaReady`, `MediaRejected`.
+- **Depends on:** SharedKernel only. Media is generic and does not know about tickets.
+- **More:** [media-pipeline.md](media-pipeline.md).
+
+### Notification (`ntf_`)
+
+- **Story:** Omar pings Lena twice in an hour. The second ping is blocked by the limit. When Lena approves the code, the ping clears by itself.
+- **Owns:** `ntf_ping`, `ntf_notification` (partitioned), `ntf_mute`, `ntf_delivery` (email digest state).
+- **Api:**
+  - `PingCommands::ping(TicketId, UserId $from, UserId $to, string $body): PingResult` (sent, or rate limited until …)
+  - `NotificationQueries::bell(UserId): BellView` (grouped by person and ticket)
+  - `NotificationQueries::isMuted(UserId, TicketId): bool`
+- **Commands (more):** MarkPingDone, Mute, Unmute.
+- **Events:** `PingSent`, `PingCleared`.
+- **Consumes:** `TicketMoved`, `TicketAssigned`, `QuestionAsked`, `QuestionAnswered`, `RoundShared`, `TicketChecked`, `TicketCreated`. Acting on a ticket auto-clears your pings on it.
+- **Depends on:** Organization Api (settings), Ticketing Api (visibility).
+- **More:** [realtime-and-notifications.md](realtime-and-notifications.md), [ADR-0024](../03-adr/0024-notifications-and-pings.md).
+
+### Insight (`ins_`)
+
+- **Story:** Lena opens Home. pinround does not scan 200k tickets. It reads her 30 rows from `ins_ticket_turn` and sorts them by score.
+- **Owns:** `ins_ticket_turn` (turn user, turn label, kind, base score, waiting since, group, checker), `ins_team_counts` (open tickets per team and group, for managers), `ins_release_progress`.
+- **Api:**
+  - `TurnProjector::project(TicketState, TeamFacts, ?OpenQuestion): void` (called synchronously by Ticketing and Conversation)
+  - `HomeQueries::needsYou(UserId, OrganizationId): NeedsList` (top 5 + grouped rest)
+  - `HomeQueries::whoseTurn(ProjectFilter): list<TurnGroup>`
+  - `HomeQueries::workload(TeamId): list<Load>`
+  - `HomeQueries::myReports(UserId): ReportTracking`
+  - `HomeQueries::teamsAtAGlance(OrganizationId): list<TeamBar>`
+- **Consumes:** all ticket, conversation and round events (for counts and history). The turn row itself is updated synchronously.
+- **Depends on:** Workflow Api (group of a step), Ticketing Api (row details for display).
+- **ADRs:** [0015](../03-adr/0015-turn-read-model.md).
+
+### Assist (`ast_`)
+
+- **Story:** Mia asks "Explain it to me". The answer is private to her. She shares it, and Lena makes it the main summary. The old summary stays in history.
+- **Owns:** `ast_explanation` (private or shared), `ast_suggestion` (intake suggestions as JSON), `ast_embedding` (pgvector, optional), `ast_usage` (tokens and model per call, no content), `ast_local_package` (prompt packages issued for laptop AI, short-lived).
+- **Api:**
+  - `AiPolicy::for(UserId, OrganizationId): PolicyView` (on, who, what is sent, where it runs)
+  - `Summaries::request(TicketId, UserId): JobId`
+  - `Explanations::ask(TicketId, UserId, string $prompt): JobId`
+  - `IntakeAssist::suggest(DraftReport): JobId`
+  - `LocalAi::package(TicketId, Purpose, UserId): PromptPackage`
+  - `LocalAi::accept(PackageId, string $output, string $model, UserId): void`
+- **Events:** `SummaryGenerated`, `ExplanationShared`, `SuggestionReady`.
+- **Depends on:** Ticketing Api, Review Api, Organization Api (policy settings).
+- **More:** [ai-architecture.md](ai-architecture.md), ADRs [0018](../03-adr/0018-ai-provider-abstraction.md), [0019](../03-adr/0019-browser-local-ai.md), [0020](../03-adr/0020-ai-safety-and-prompt-injection.md).
+
+### Integration (`int_`)
+
+- **Story:** The Shop team links its Jira project. Old issues come in once. After that, a move in pinround moves the Jira issue, and a Jira webhook updates pinround.
+- **Owns:** `int_jira_connection` (encrypted credentials), `int_project_link`, `int_status_mapping` (Jira status → step), `int_external_ref` (entity, id, system, external id, version), `int_sync_log`.
+- **Api:** `ExternalRefs::find(string $system, string $externalId): ?EntityRef`
+- **Commands:** Connect, LinkProject, MapStatus, ImportProject, HandleWebhook.
+- **Consumes:** `TicketMoved`, `TicketCreated`, `CommentPosted` (outbound sync, when enabled).
+- **Depends on:** Ticketing Api, Workflow Api.
+- **More:** [integrations.md](integrations.md), [ADR-0025](../03-adr/0025-jira-integration.md).
+
+### Audit (`aud_`)
+
+- **Story:** Sara wants to know who turned off the lead check last week. The activity log shows the person, the time and the old and new value.
+- **Owns:** `aud_event` (append-only, partitioned by month), `aud_export`.
+- **Api:** `AuditLog::record(AuditEntry)` (for actions that have no domain event, for example an MCP call or an export download).
+- **Consumes:** admin, settings, role, token, login, AI-policy, export and ticket-move events.
+- **Depends on:** SharedKernel only.
+- **ADRs:** [0026](../03-adr/0026-audit-log.md).
+
+### AgentApi (`api_`)
+
+- **Story:** Claude Code calls `get_round_notes` with Omar's token. It gets exactly what Omar may see, and nothing from another team.
+- **Owns:** `api_idempotency_key` (safe retries for POST).
+- **Offers:**
+  - REST under `/api/v1` (browser capture plugin, CLI);
+  - MCP tools at `/mcp`: `list_my_tickets`, `get_ticket`, `get_round_notes`, `add_screenshot`, `set_verdict`, `add_comment`, `move_ticket`.
+- **Rule:** thin adapters only. Each tool calls another module's Api, after the same Voter check the web UI uses. Token scopes are checked first.
+- **Depends on:** Identity, Ticketing, Review, Conversation, Media Api.
+- **ADRs:** [0021](../03-adr/0021-mcp-server.md).
+
+### Web (UI shell)
+
+- **Purpose:** the layout, the navigation (built from the user's roles), Home composition with focus chips, and the design-system Twig components.
+- **Rule:** no business logic. Web only puts the other modules' UI pieces together.
+- **Depends on:** Api of Insight, Organization, Notification and Ticketing (read only).
+- **More:** [frontend.md](frontend.md).
+
+## Event catalogue
+
+All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `occurredAt`, `organizationId` and `actorId`. "Outbox" means the event is stored in the same transaction and delivered at least once to async handlers.
+
+| Event | Producer | Consumers | Payload (besides the base) | Delivery |
+|---|---|---|---|---|
+| TicketCreated | Ticketing | Insight, Notification, Audit, Assist, Integration | ticketId, projectId, teamId?, reporterId, assigneeId?, checkReasons[] | outbox |
+| TicketMoved | Ticketing | Insight, Notification, Audit, Integration | ticketId, fromStep, toStep, transition | outbox (turn row synchronous) |
+| TicketAssigned | Ticketing | Insight, Notification, Audit | ticketId, assigneeId, previousId? | outbox |
+| TicketChecked | Ticketing | Insight, Notification, Audit | ticketId, checkerId | outbox |
+| TicketClosedAsDuplicate | Ticketing | Insight, Notification, Audit | ticketId, duplicateOfId | outbox |
+| TicketVisibilityChanged | Ticketing | Insight, Notification, Audit | ticketId, visibility | outbox |
+| SummaryChanged | Ticketing | Audit | ticketId, source, authorId | outbox |
+| CommentPosted | Conversation | Notification, Integration | ticketId, messageId | outbox |
+| QuestionAsked | Conversation | Insight, Notification | ticketId, messageId, toUserId | outbox (turn row synchronous) |
+| QuestionAnswered | Conversation | Insight, Notification | ticketId, messageId | outbox (turn row synchronous) |
+| ReplyPosted | Conversation | Notification | ticketId, messageId, replyId | outbox |
+| CommentResolved | Conversation | — (UI only) | ticketId, messageId | outbox |
+| RoundStarted | Review | Audit | ticketId, roundId, kind | outbox |
+| RoundShared | Review | Notification, Insight, Audit | ticketId, roundId, number | outbox |
+| PinVerdictSet | Review | Insight, Notification | ticketId, roundId, pinId, verdict | outbox |
+| ChecklistItemChanged | Review | Insight | ticketId, itemId, state | outbox |
+| MediaReady / MediaRejected | Media | Review, Ticketing | mediaId, reason? | outbox |
+| PingSent / PingCleared | Notification | Insight (bell counts), Audit | pingId, ticketId, from, to | outbox |
+| SummaryGenerated | Assist | Ticketing (stores the summary), Notification | ticketId, model, source | outbox |
+| ExplanationShared | Assist | Notification | ticketId, explanationId | outbox |
+| SuggestionReady | Assist | Web (Mercure push to the requester) | requestId, userId | outbox |
+| MemberJoined, OrgRolesChanged, TeamCreated, TeamRoleChanged, SettingsChanged | Organization | Audit, Insight | ids + old/new values | outbox |
+| StepAdded, StepRemoved, RulesChanged | Workflow | Audit, Insight | ids + old/new values | outbox |
+| UserLoggedIn, LoginFailed, MfaEnabled, ApiTokenIssued, ApiTokenRevoked | Identity | Audit | userId, ipHash, tokenId? | outbox |
+
+Rules:
+
+- **An event is a fact in the past tense.** It never asks someone to do something.
+- **Consumers must be idempotent.** Store the handled `eventId`, or upsert by natural key.
+- **Event classes are public** (they live in `Api/Event`). Changing a payload means adding fields only. To remove a field, create a new event version.
+
+## Deptrac rules
+
+Deptrac runs in CI ([ADR-0028](../03-adr/0028-testing-and-quality-gates.md)). Two rule sets:
+
+**Layers inside a module**
+
+| From | May depend on |
+|---|---|
+| Domain | SharedKernel |
+| Application | Domain, SharedKernel, other modules' Api |
+| Infrastructure | Domain, Application, SharedKernel, vendor |
+| UI | Application, Api (own + others), SharedKernel, vendor (Symfony) |
+| Api | SharedKernel only (interfaces, DTOs, events) |
+
+**Between modules:** only `Api` is visible from outside. The allowed module edges are the "Depends on" lines in the catalogue above. Anything else fails the build. A sketch of the config (verify the exact Deptrac syntax at implementation):
+
+```yaml
+deptrac:
+  paths: ['./src']
+  layers:
+    - name: Ticketing_Api
+      collectors: [{ type: directory, value: 'src/Ticketing/Api/.*' }]
+    - name: Ticketing_Internal
+      collectors: [{ type: directory, value: 'src/Ticketing/(Domain|Application|Infrastructure|UI)/.*' }]
+    # … one Api layer + one Internal layer per module, plus SharedKernel
+  ruleset:
+    Ticketing_Internal: [Ticketing_Api, Workflow_Api, Organization_Api, Media_Api, Insight_Api, SharedKernel]
+    Ticketing_Api: [SharedKernel]
+```
+
+## Rules for adding a module
+
+Add a module only if **all** of these are true:
+
+1. It owns data that no current module owns, and it has its own words (a new part of the glossary).
+2. Its rules change for different reasons than its neighbours' rules.
+3. You can name its Api in five methods or fewer at the start.
+
+Then:
+
+- write an ADR or update [ADR-0002](../03-adr/0002-modular-monolith.md);
+- pick a table prefix;
+- add both Deptrac layers;
+- add it to this catalogue and to the event catalogue;
+- add tenant-isolation tests for its tables ([ADR-0005](../03-adr/0005-multi-tenancy.md)).
+
+If you are unsure, put the feature inside the closest module first. Moving code out later is cheaper than merging two modules back together.
