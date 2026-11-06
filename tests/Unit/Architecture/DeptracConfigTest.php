@@ -94,6 +94,69 @@ final class DeptracConfigTest extends TestCase
     }
 
     #[Test]
+    public function uiDomainApiAndEventLayersNeverMayUseAnEventLayer(): void
+    {
+        foreach ($this->config()['ruleset'] as $from => $allowed) {
+            foreach (['_UI', '_Domain', '_Api', '_Event'] as $suffix) {
+                if (!str_ends_with($from, $suffix)) {
+                    continue;
+                }
+                $events = array_filter($allowed, static fn (string $name): bool => str_ends_with($name, '_Event'));
+                self::assertSame([], array_values($events), $from.' must not use an Event layer');
+            }
+        }
+    }
+
+    #[Test]
+    public function applicationInfrastructureAndUiMayCallExactlyTheApisInTheDependsOnLines(): void
+    {
+        $dependsOn = $this->dependsOnLines();
+        self::assertSame($this->moduleFolders(), array_keys($dependsOn));
+
+        foreach ($dependsOn as $module => $expected) {
+            foreach (['Application', 'Infrastructure', 'UI'] as $part) {
+                $otherApis = array_filter(
+                    $this->config()['ruleset'][$module.'_'.$part],
+                    static fn (string $name): bool => str_ends_with($name, '_Api') && $module.'_Api' !== $name,
+                );
+                self::assertEqualsCanonicalizing(
+                    array_map(static fn (string $dependency): string => $dependency.'_Api', $expected),
+                    array_values($otherApis),
+                    \sprintf('%s_%s Api edges differ from the "Depends on" line of %s in modules.md', $module, $part, $module),
+                );
+            }
+        }
+    }
+
+    #[Test]
+    public function ownLayersAndSharedKernelAreAllowedWhereTheDocSays(): void
+    {
+        $ruleset = $this->config()['ruleset'];
+
+        self::assertSame(['Vendor'], $ruleset['SharedKernel']);
+        self::assertEqualsCanonicalizing(['Vendor', 'SharedKernel'], $ruleset['Kernel']);
+
+        foreach ($this->moduleFolders() as $module) {
+            foreach (['Api', 'Event', 'Domain'] as $part) {
+                self::assertSame(['SharedKernel'], $ruleset[$module.'_'.$part]);
+            }
+            self::assertContains($module.'_Domain', $ruleset[$module.'_Application']);
+            self::assertContains($module.'_Api', $ruleset[$module.'_Application']);
+            self::assertContains('SharedKernel', $ruleset[$module.'_Application']);
+            foreach (['Domain', 'Application', 'Api', 'Event'] as $part) {
+                if ('Event' !== $part) {
+                    self::assertContains($module.'_'.$part, $ruleset[$module.'_Infrastructure']);
+                }
+            }
+            self::assertContains('Vendor', $ruleset[$module.'_Infrastructure']);
+            self::assertEqualsCanonicalizing(
+                [$module.'_Application', $module.'_Api', 'SharedKernel', 'Vendor'],
+                array_values(array_filter($ruleset[$module.'_UI'], static fn (string $name): bool => !str_ends_with($name, '_Api') || $module.'_Api' === $name)),
+            );
+        }
+    }
+
+    #[Test]
     public function analysisIsLimitedToSrc(): void
     {
         self::assertSame(['./src'], $this->config()['paths']);
@@ -113,6 +176,30 @@ final class DeptracConfigTest extends TestCase
         sort($folders);
 
         return $folders;
+    }
+
+    /**
+     * @return array<string, list<string>> module => modules named in its "Depends on" line of modules.md
+     */
+    private function dependsOnLines(): array
+    {
+        $modules = $this->moduleFolders();
+        $lines = file(\dirname(__DIR__, 3).'/docs/02-architecture/modules.md', \FILE_IGNORE_NEW_LINES);
+        self::assertIsArray($lines);
+
+        $current = null;
+        $result = [];
+        foreach ($lines as $line) {
+            if (1 === preg_match('/^### (\w+)/', $line, $heading)) {
+                $current = $heading[1];
+            } elseif (null !== $current && \in_array($current, $modules, true) && str_starts_with($line, '- **Depends on:**')) {
+                $text = (string) preg_replace('/\([^)]*\)/', '', substr($line, \strlen('- **Depends on:**')));
+                $result[$current] = array_values(array_filter($modules, static fn (string $module): bool => $module !== $current && 1 === preg_match('/\b'.$module.'\b/', $text)));
+            }
+        }
+        ksort($result);
+
+        return $result;
     }
 
     /**
