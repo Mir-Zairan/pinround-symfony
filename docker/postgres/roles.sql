@@ -1,7 +1,6 @@
 -- Database roles of ADR-0005, run by the Postgres admin account on each database
--- (dev: pinround and pinround_test; CI: pinround_test; prod: at install, again after the first
--- migration, and after upgrades that change this file). Safe to re-run: it creates what is
--- missing and re-asserts the rest.
+-- before migrating (dev: pinround and pinround_test; CI: pinround_test; prod: at install and after
+-- upgrades that change this file). Safe to re-run: it creates what is missing and re-asserts the rest.
 --
 --   psql -v ON_ERROR_STOP=1 -d <database> \
 --        -v app_password=... -v migrator_password=... \
@@ -87,28 +86,15 @@ SELECT format('GRANT CONNECT ON DATABASE %I TO pinround_app, pinround_migrator, 
 \gexec
 GRANT USAGE ON SCHEMA public TO pinround_app, pinround_retention, pinround_readonly;
 
--- Tables the migrator creates from now on. No TRUNCATE, REFERENCES or TRIGGER for anyone.
+-- No table or sequence rights here. The migration that creates a table grants pinround_app and
+-- pinround_readonly exactly what they need, on the parent only for a partitioned table: a default
+-- privilege would reach every child partition (whose direct query skips the parent's policy), and a
+-- blanket grant on re-run would undo a migration's narrower grant. The revokes clear what earlier
+-- versions of this script granted, so old databases end in the same state as new ones.
 ALTER DEFAULT PRIVILEGES FOR ROLE pinround_migrator IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pinround_app;
+    REVOKE ALL ON TABLES FROM pinround_app, pinround_readonly;
 ALTER DEFAULT PRIVILEGES FOR ROLE pinround_migrator IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO pinround_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE pinround_migrator IN SCHEMA public
-    GRANT SELECT ON TABLES TO pinround_readonly;
-
--- Tables that already exist. Child partitions are skipped: rights live on the parent only,
--- so nobody can read a partition directly and skip its policy (data-model.md).
-SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON %1$I.%2$I TO pinround_app; GRANT SELECT ON %1$I.%2$I TO pinround_readonly', n.nspname, c.relname)
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = 'public'
-  AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-  AND NOT c.relispartition
-  AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
-\gexec
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pinround_app;
-
--- Migration bookkeeping is the migrator's alone; the app never reads it. A new database gets this
--- table, with the default rights above, from its first migration, so the script runs again after it.
-SELECT 'REVOKE ALL ON public.doctrine_migration_versions FROM pinround_app'
+    REVOKE ALL ON SEQUENCES FROM pinround_app, pinround_readonly;
+SELECT 'REVOKE ALL ON public.doctrine_migration_versions FROM pinround_app, pinround_readonly'
 WHERE to_regclass('public.doctrine_migration_versions') IS NOT NULL
 \gexec

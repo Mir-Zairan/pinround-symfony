@@ -16,10 +16,12 @@ DB_APP_PASSWORD ?= change-me-dev-only-app-db
 DB_MIGRATOR_PASSWORD ?= change-me-dev-only-migrator-db
 DB_RETENTION_PASSWORD ?= change-me-dev-only-retention-db
 DB_READONLY_PASSWORD ?= change-me-dev-only-readonly-db
-PSQL := $(COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(DB_ADMIN_USER)
+PSQL := $(COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U '$(DB_ADMIN_USER)'
+# Quoted so the shell keeps a password with spaces or shell characters as one argument.
+# Make still expands $ first (write $$), and a password with a single quote is not supported.
 ROLES_SQL := -f /pinround/postgres/roles.sql \
-	-v app_password=$(DB_APP_PASSWORD) -v migrator_password=$(DB_MIGRATOR_PASSWORD) \
-	-v retention_password=$(DB_RETENTION_PASSWORD) -v readonly_password=$(DB_READONLY_PASSWORD)
+	-v app_password='$(DB_APP_PASSWORD)' -v migrator_password='$(DB_MIGRATOR_PASSWORD)' \
+	-v retention_password='$(DB_RETENTION_PASSWORD)' -v readonly_password='$(DB_READONLY_PASSWORD)'
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -28,8 +30,6 @@ up: ## Build the image, start the stack, apply the database roles and migrate
 	$(COMPOSE) build
 	$(COMPOSE) up -d --wait
 	$(MAKE) --no-print-directory db-roles migrate migrate-test
-	@# Again: a new database's first migration creates doctrine_migration_versions, which roles.sql locks.
-	$(MAKE) --no-print-directory db-roles
 
 down: ## Stop the stack
 	$(COMPOSE) down
