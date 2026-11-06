@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\SharedKernel\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\Bundle\DoctrineBundle\Attribute\AsMiddleware;
 use Doctrine\DBAL\Driver;
 use Doctrine\DBAL\Driver\Connection as DriverConnection;
@@ -23,19 +24,25 @@ use Symfony\Contracts\Service\ResetInterface;
  * point every unit of work (request, message, command) passes. reset() clears the mark between worker
  * requests, also when a connection was closed in the middle of a transaction.
  *
+ * When a transaction begins for another organization than the last one (or for none), it clears the entity
+ * manager, so find() never returns the last organization's object from the identity map without asking the
+ * database. That matters for a long-lived entity manager, such as a console loop over organizations.
+ *
  * Priority below TenantMiddleware's 0 makes this the outer wrapper: the mark is set only after BEGIN and
  * set_config have both succeeded.
  */
 #[AsMiddleware(connections: ['default'], priority: -10)]
-final readonly class TenantFilterMiddleware implements Middleware, ResetInterface
+final class TenantFilterMiddleware implements Middleware, ResetInterface
 {
+    private ?OrganizationId $organizationOfLastTransaction = null;
+
     /**
      * @param \Closure(): EntityManagerInterface $entityManager a closure, because the entity manager is built on this connection
      */
     public function __construct(
-        private TenantContext $tenantContext,
+        private readonly TenantContext $tenantContext,
         #[AutowireServiceClosure('doctrine.orm.default_entity_manager')]
-        private \Closure $entityManager,
+        private readonly \Closure $entityManager,
     ) {
     }
 
@@ -94,7 +101,15 @@ final readonly class TenantFilterMiddleware implements Middleware, ResetInterfac
      */
     public function markTenantOfNewTransaction(): void
     {
-        $this->tenantFilter(($this->entityManager)())?->markTenantSet(null !== $this->tenantContext->get());
+        $organizationId = $this->tenantContext->get();
+        $entityManager = ($this->entityManager)();
+        if ($this->isOrganizationChange($organizationId) && $this->isBuilt($entityManager)) {
+            // Cost: entities of the last organization become detached, and their unflushed changes are dropped.
+            $entityManager->clear();
+        }
+        $this->organizationOfLastTransaction = $organizationId;
+
+        $this->tenantFilter($entityManager)?->markTenantSet(null !== $organizationId);
     }
 
     /**
@@ -104,16 +119,32 @@ final readonly class TenantFilterMiddleware implements Middleware, ResetInterfac
     {
         $entityManager = ($this->entityManager)();
         // An entity manager that is not built yet has no filter; building it here would cost every request.
-        if (new \ReflectionClass($entityManager)->isUninitializedLazyObject($entityManager)) {
-            return;
+        if ($this->isBuilt($entityManager)) {
+            $this->tenantFilter($entityManager)?->markTenantSet(false);
         }
-
-        $this->tenantFilter($entityManager)?->markTenantSet(false);
     }
 
+    /**
+     * The kernel reset clears the entity manager too, so the next request starts with no last organization.
+     */
     public function reset(): void
     {
         $this->clearTenantMark();
+        $this->organizationOfLastTransaction = null;
+    }
+
+    private function isOrganizationChange(?OrganizationId $organizationId): bool
+    {
+        if (null === $this->organizationOfLastTransaction) {
+            return false;
+        }
+
+        return null === $organizationId || !$organizationId->equals($this->organizationOfLastTransaction);
+    }
+
+    private function isBuilt(EntityManagerInterface $entityManager): bool
+    {
+        return !new \ReflectionClass($entityManager)->isUninitializedLazyObject($entityManager);
     }
 
     /**

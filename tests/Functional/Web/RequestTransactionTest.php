@@ -78,7 +78,7 @@ final class RequestTransactionTest extends WebTestCase
     }
 
     #[Test]
-    public function theTransactionBeginsAtPriority7BelowTheSecurityFirewallsPriority8(): void
+    public function theTransactionBeginsAtKernelRequestPriority7(): void
     {
         $dispatcher = self::getContainer()->get('event_dispatcher');
         $subscriber = self::getContainer()->get(RequestTransaction::class);

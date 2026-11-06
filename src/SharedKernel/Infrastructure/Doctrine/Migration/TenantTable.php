@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\SharedKernel\Infrastructure\Doctrine\Migration;
 
+use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
+
 /**
  * The row-level security every tenant table gets (ADR-0005). Table rights are not part of it: the
  * migration that creates the table grants pinround_app and pinround_readonly what they need.
@@ -13,7 +15,7 @@ final class TenantTable
     // Up to 63 characters: PostgreSQL silently truncates longer names, which could hit another table.
     private const string PLAIN_IDENTIFIER = '/^[a-z_][a-z0-9_]{0,62}\z/';
 
-    private const string SAME_TENANT = "organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid";
+    private const string SAME_TENANT = 'organization_id = '.TenantSetting::CURRENT_ORG_SQL;
 
     /**
      * @return list<string> statements for a migration's addSql(), in order

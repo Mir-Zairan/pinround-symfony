@@ -24,9 +24,6 @@ final class TenantFilter extends SQLFilter
     // cached once, because compiling a TenantOwned query without the mark throws and caches nothing.
     private const string IS_TENANT_SET_PARAMETER = 'is_tenant_set';
 
-    // Reads the setting RLS reads instead of a literal id, so the SQL is the same for every organization.
-    private const string ORGANIZATION_OF_TRANSACTION = "NULLIF(current_setting('app.org_id', true), '')::uuid";
-
     private bool $isTenantSet = false;
 
     public function markTenantSet(bool $isTenantSet): void
@@ -48,6 +45,8 @@ final class TenantFilter extends SQLFilter
             throw new TenantNotSet();
         }
 
-        return $targetTableAlias.'.organization_id = '.self::ORGANIZATION_OF_TRANSACTION;
+        // Reads the setting RLS reads instead of a literal id, so the SQL is the same for every organization. The
+        // same holds for a result cache key, so the result cache must store nothing (see doctrine.yaml).
+        return $targetTableAlias.'.organization_id = '.TenantSetting::CURRENT_ORG_SQL;
     }
 }

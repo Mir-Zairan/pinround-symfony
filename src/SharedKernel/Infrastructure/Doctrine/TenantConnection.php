@@ -15,7 +15,7 @@ use Doctrine\DBAL\ParameterType;
 final class TenantConnection extends AbstractConnectionMiddleware
 {
     // Third argument true = transaction-local. Never false, and never a plain SET (ADR-0005).
-    private const string SET_TENANT_FOR_TRANSACTION = "SELECT set_config('app.org_id', ?, true)";
+    private const string SET_TENANT_FOR_TRANSACTION = "SELECT set_config('".TenantSetting::NAME."', ?, true)";
 
     public function __construct(Connection $wrappedConnection, private readonly TenantContext $tenantContext)
     {

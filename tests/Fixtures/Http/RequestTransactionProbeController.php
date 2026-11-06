@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Fixtures\Http;
 
+use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -89,7 +90,7 @@ final readonly class RequestTransactionProbeController
      */
     private function insertProbeRow(string $organizationId, string $label): void
     {
-        $this->connection->executeQuery("SELECT set_config('app.org_id', ?, true)", [$organizationId]);
+        $this->connection->executeQuery("SELECT set_config('".TenantSetting::NAME."', ?, true)", [$organizationId]);
         $this->connection->executeStatement(
             'INSERT INTO zz_tenant_probe (organization_id, label) VALUES (?, ?)',
             [$organizationId, $label],

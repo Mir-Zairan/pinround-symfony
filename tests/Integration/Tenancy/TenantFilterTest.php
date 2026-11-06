@@ -16,6 +16,8 @@ use Doctrine\ORM\Query;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
+use Symfony\Component\Cache\Adapter\NullAdapter;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * Proves TenantFilter and TenantFilterMiddleware on the kernel's entity manager (ADR-0005), with the test-only
@@ -104,21 +106,88 @@ final class TenantFilterTest extends KernelTestCase
     }
 
     #[Test]
-    public function findDoesNotReturnTheOtherOrganizationsRowAfterTheOrganizationChangesWithRowLevelSecurityOff(): void
+    public function findDoesNotReturnTheIdentityMapsObjectOfTheLastOrganizationWhenTheOrganizationChanges(): void
     {
-        $this->tenantContext->set(new OrganizationId(self::ORG_A));
-        $rowOfOrgA = $this->entityManager->wrapInTransaction(
-            fn (): ?TenantProbe => $this->entityManager->getRepository(TenantProbe::class)->findOneBy(['label' => 'a-first']),
-        );
-        self::assertInstanceOf(TenantProbe::class, $rowOfOrgA);
-        $this->entityManager->clear();
+        $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
         $this->tenantContext->set(new OrganizationId(self::ORG_B));
 
-        $found = $this->withRowLevelSecurityOff(fn (): mixed => $this->entityManager->wrapInTransaction(
+        $found = $this->entityManager->wrapInTransaction(
             fn (): ?TenantProbe => $this->entityManager->find(TenantProbe::class, $rowOfOrgA->id()),
-        ));
+        );
 
         self::assertNull($found);
+    }
+
+    #[Test]
+    public function aTransactionForTheSameOrganizationKeepsTheIdentityMap(): void
+    {
+        $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
+        $this->tenantContext->set(new OrganizationId(self::ORG_A));
+
+        $found = $this->entityManager->wrapInTransaction(
+            fn (): ?TenantProbe => $this->entityManager->find(TenantProbe::class, $rowOfOrgA->id()),
+        );
+
+        self::assertSame($rowOfOrgA, $found);
+    }
+
+    #[Test]
+    public function findInATransactionWithoutAnOrganizationAfterOrgAThrowsInsteadOfReturningTheCachedObject(): void
+    {
+        $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
+
+        $this->expectException(TenantNotSet::class);
+        $this->entityManager->wrapInTransaction(
+            fn (): ?TenantProbe => $this->entityManager->find(TenantProbe::class, $rowOfOrgA->id()),
+        );
+    }
+
+    #[Test]
+    public function theFirstOrmQueryInATransactionBegunBeforeTheEntityManagerWasBuiltSeesOnlyTheTransactionsOrganization(): void
+    {
+        self::ensureKernelShutdown();
+        $container = self::getContainer();
+        $connection = $container->get('doctrine.dbal.default_connection');
+        $entityManager = $container->get('doctrine.orm.default_entity_manager');
+        $container->get(TenantContext::class)->set(new OrganizationId(self::ORG_A));
+        self::assertTrue(new \ReflectionClass($entityManager)->isUninitializedLazyObject($entityManager));
+
+        $labels = $this->withRowLevelSecurityOff(static function () use ($connection, $entityManager): array {
+            $connection->beginTransaction();
+            try {
+                return $entityManager->createQuery(self::LABELS_DQL)->getSingleColumnResult();
+            } finally {
+                $connection->rollBack();
+            }
+        });
+
+        self::assertSame(['a-first', 'a-second'], $labels);
+    }
+
+    #[Test]
+    public function theResultCacheStoresNothingInEveryEnvironment(): void
+    {
+        $doctrineConfig = Yaml::parseFile(
+            self::getContainer()->getParameter('kernel.project_dir').'/config/packages/doctrine.yaml',
+            Yaml::PARSE_CONSTANT,
+        );
+
+        self::assertSame([
+            'doctrine.orm.result_cache_driver' => ['type' => 'service', 'id' => NullAdapter::class],
+            'when@prod.doctrine.orm.query_cache_driver' => ['type' => 'pool', 'pool' => 'doctrine.system_cache_pool'],
+        ], self::cacheSettings($doctrineConfig));
+        self::assertInstanceOf(NullAdapter::class, $this->entityManager->getConfiguration()->getResultCache());
+    }
+
+    #[Test]
+    public function aTenantOwnedQueryWithTheResultCacheOnStillAsksTheDatabaseForEachOrganization(): void
+    {
+        $cachedLabels = fn (): mixed => $this->labelsQuery()->enableResultCache(3600, 'tenant-probe-labels')->getSingleColumnResult();
+
+        $this->tenantContext->set(new OrganizationId(self::ORG_A));
+        self::assertSame(['a-first', 'a-second'], $this->entityManager->wrapInTransaction($cachedLabels));
+        $this->tenantContext->set(new OrganizationId(self::ORG_B));
+        self::assertSame(['b-only'], $this->entityManager->wrapInTransaction($cachedLabels));
     }
 
     #[Test]
@@ -241,6 +310,27 @@ final class TenantFilterTest extends KernelTestCase
         $filter->addFilterConstraint($this->entityManager->getClassMetadata(TenantProbe::class), 't0_');
     }
 
+    /**
+     * @return array<string, mixed> every key that configures a query or result cache, by dotted path
+     */
+    private static function cacheSettings(mixed $config, string $path = ''): array
+    {
+        if (!\is_array($config)) {
+            return [];
+        }
+
+        $settings = [];
+        foreach ($config as $key => $value) {
+            $keyPath = ltrim($path.'.'.$key, '.');
+            if (str_contains((string) $key, 'cache_driver') || str_contains((string) $key, 'result_cache')) {
+                $settings[$keyPath] = $value;
+            }
+            $settings += self::cacheSettings($value, $keyPath);
+        }
+
+        return $settings;
+    }
+
     private static function probeTable(): TenantProbeTable
     {
         return new TenantProbeTable(self::getContainer()->get('doctrine.dbal.migrator_connection'));
@@ -308,6 +398,18 @@ final class TenantFilterTest extends KernelTestCase
         return $this->entityManager->createQuery(self::LABELS_DQL);
     }
 
+    private function findOneAs(string $organizationId, string $label): TenantProbe
+    {
+        $this->tenantContext->set(new OrganizationId($organizationId));
+        $row = $this->entityManager->wrapInTransaction(
+            fn (): ?TenantProbe => $this->entityManager->getRepository(TenantProbe::class)->findOneBy(['label' => $label]),
+        );
+        $this->tenantContext->clear();
+        self::assertInstanceOf(TenantProbe::class, $row);
+
+        return $row;
+    }
+
     /**
      * Closing the connection drops the transaction without a COMMIT or ROLLBACK, so the filter keeps org A.
      */
@@ -315,7 +417,13 @@ final class TenantFilterTest extends KernelTestCase
     {
         $this->tenantContext->set(new OrganizationId(self::ORG_A));
         $this->connection->beginTransaction();
-        self::assertSame(['a-first', 'a-second'], $this->visibleLabels());
+        try {
+            $labels = $this->visibleLabels();
+        } catch (\Throwable $setupFailure) {
+            // The callers expect TenantNotSet, so a failure here must not pass as that.
+            self::fail('Setting up org A in the filter failed with '.$setupFailure::class);
+        }
+        self::assertSame(['a-first', 'a-second'], $labels);
         $this->connection->close();
         $this->tenantContext->clear();
     }
