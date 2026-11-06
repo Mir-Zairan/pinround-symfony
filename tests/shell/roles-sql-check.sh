@@ -39,10 +39,19 @@ expect_refusal() {
     fi
 }
 
+variables="app_password migrator_password retention_password readonly_password"
+
 expect_refusal "no passwords"
-expect_refusal "app_password missing" \
-    -v migrator_password=check-only -v retention_password=check-only -v readonly_password=check-only
-expect_refusal "app_password empty" \
-    -v app_password= -v migrator_password=check-only -v retention_password=check-only -v readonly_password=check-only
+
+for target in $variables; do
+    set --
+    for variable in $variables; do
+        if [ "$variable" != "$target" ]; then
+            set -- "$@" -v "$variable=check-only"
+        fi
+    done
+    expect_refusal "$target missing" "$@"
+    expect_refusal "$target empty" "$@" -v "$target="
+done
 
 echo "roles-sql-check: ok"

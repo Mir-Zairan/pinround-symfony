@@ -41,6 +41,8 @@ logs: ## Follow the logs
 	$(COMPOSE) logs -f
 
 test: migrate-test ## Run the PHPUnit tests in the app container
+	@# A re-run test, not a required step: DatabaseRolesTest then proves roles.sql never widens a migration's grants.
+	@$(PSQL) -q -d pinround_test $(ROLES_SQL)
 	$(COMPOSE) exec app bin/phpunit
 
 qa: ## Run every quality gate in the app container

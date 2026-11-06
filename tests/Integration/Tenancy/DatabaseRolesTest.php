@@ -118,6 +118,29 @@ final class DatabaseRolesTest extends KernelTestCase
         }
     }
 
+    /** Vacuous until the first partitioned table; then it guards every migration that adds one. */
+    #[Test]
+    public function noChildPartitionInTheSchemaHasDirectGrants(): void
+    {
+        self::assertSame([], $this->connection()->fetchFirstColumn(
+            "SELECT c.relname || ' ' || acl.grantee::regrole::text || ' ' || acl.privilege_type
+             FROM pg_class c, aclexplode(c.relacl) acl
+             WHERE c.relnamespace = 'public'::regnamespace AND c.relispartition AND acl.grantee <> c.relowner",
+        ));
+    }
+
+    #[Test]
+    public function theAppAndReadonlyRolesHoldNoTruncateReferencesOrTriggerInTheSchema(): void
+    {
+        self::assertSame([], $this->connection()->fetchFirstColumn(
+            "SELECT c.relname || ' ' || acl.grantee::regrole::text || ' ' || acl.privilege_type
+             FROM pg_class c, aclexplode(c.relacl) acl
+             WHERE c.relnamespace = 'public'::regnamespace
+               AND acl.grantee IN ('pinround_app'::regrole, 'pinround_readonly'::regrole)
+               AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER')",
+        ));
+    }
+
     #[Test]
     public function nobodyButTheMigratorHasRightsOnTheMigrationsTable(): void
     {

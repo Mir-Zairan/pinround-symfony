@@ -302,7 +302,13 @@ CREATE POLICY tenant_isolation ON tkt_ticket
 
 The roles live in `docker/postgres/roles.sql`. The Postgres admin account runs it on each database before migrating (`make db-roles` in `make up`, a step in CI, the operator in production), with the four passwords as psql variables. It is safe to re-run. It creates missing roles and re-asserts their attributes. It makes `pinround_migrator` the owner of the database and of every table, view and sequence in `public`. It revokes all rights of `PUBLIC` on the database and on schema `public`, so only the four roles get `CONNECT` and nobody but the owner gets `CREATE` or `TEMPORARY`. It grants schema `USAGE` to `pinround_app`, `pinround_readonly` and `pinround_retention`. It grants **no table or sequence rights**, sets no default privileges, and removes any that an older version of the script left, including all rights of `pinround_app` and `pinround_readonly` on `doctrine_migration_versions`.
 
-**Table rights live in the migration that creates the table.** That migration grants `pinround_app` and `pinround_readonly` exactly what they need, for example `SELECT, INSERT` only for an append-only table. It never grants `TRUNCATE`, `REFERENCES` or `TRIGGER`, and never grants on a child partition (only the parent). A plain sequence (not an identity column, which needs no grant) gets `USAGE` in the same migration. Re-running `roles.sql` never widens these grants. `DatabaseRolesTest` checks that no default privilege exists, that a new table and a new partition start with no rights, and that only the migrator touches the migrations table. `pinround_retention` gets its table rights from the retention job's migration (P11).
+**Table rights live in the migration that creates the table.** That migration grants `pinround_app` and `pinround_readonly` exactly what they need, for example `SELECT, INSERT` only for an append-only table. It never grants `TRUNCATE`, `REFERENCES` or `TRIGGER`, and never grants on a child partition (only the parent). A plain sequence (not an identity column, which needs no grant) gets `USAGE` in the same migration. Re-running `roles.sql` never widens these grants. `make test` and CI run it once more on the migrated test database before PHPUnit, to test this. `DatabaseRolesTest` checks five things on that database:
+
+- No default privilege grants anything to `pinround_app` or `pinround_readonly`.
+- A plain table and a child partition the migrator creates start with no rights, and a partitioned parent has only what was granted on it.
+- No child partition in `public` has a grantee other than its owner.
+- Neither role holds `TRUNCATE`, `REFERENCES` or `TRIGGER` on anything in `public`.
+- Only the owner has rights on `doctrine_migration_versions`. `pinround_retention` gets its table rights from the retention job's migration (P11).
 
 **Lookups before the tenant is known (the only RLS exceptions)**
 
