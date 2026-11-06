@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Tenancy;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\Migrations\Provider\OrmSchemaProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -76,18 +77,30 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     #[Test]
-    public function theAppRoleWritesRowsButCannotTruncate(): void
+    public function newTablesGiveTheAppRowRightsWithoutTruncateAndTheReadonlyRoleSelect(): void
+    {
+        self::assertEqualsCanonicalizing(
+            [
+                'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE', 'pinround_app DELETE',
+                'pinround_readonly SELECT',
+            ],
+            $this->defaultPrivilegesOfTheMigrator('r'),
+        );
+        self::assertEqualsCanonicalizing(
+            ['pinround_app USAGE', 'pinround_app SELECT'],
+            $this->defaultPrivilegesOfTheMigrator('S'),
+        );
+    }
+
+    #[Test]
+    public function theAppRoleCannotTouchTheMigrationsTable(): void
     {
         $connection = $this->connection();
-        $table = "'public.doctrine_migration_versions'";
 
-        // A privilege list is true when any one is held, so the granted rights are checked one by one.
-        foreach (['SELECT', 'INSERT', 'UPDATE', 'DELETE'] as $privilege) {
-            self::assertTrue($connection->fetchOne("SELECT has_table_privilege('pinround_app', {$table}, '{$privilege}')"), $privilege);
-        }
-        self::assertFalse($connection->fetchOne("SELECT has_table_privilege('pinround_app', {$table}, 'TRUNCATE')"));
-        self::assertFalse($connection->fetchOne("SELECT has_table_privilege('pinround_app', {$table}, 'REFERENCES')"));
-        self::assertFalse($connection->fetchOne("SELECT has_table_privilege('pinround_app', {$table}, 'TRIGGER')"));
+        self::assertFalse($connection->fetchOne("SELECT has_table_privilege('pinround_app', 'public.doctrine_migration_versions', 'INSERT')"));
+        self::assertFalse($connection->fetchOne(
+            "SELECT has_table_privilege('pinround_app', 'public.doctrine_migration_versions', 'SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')",
+        ));
     }
 
     #[Test]
@@ -116,8 +129,34 @@ final class DatabaseRolesTest extends KernelTestCase
         ));
     }
 
+    #[Test]
+    public function theMigrationsUseTheMigratorConnectionAndTheOrmSchema(): void
+    {
+        $migrations = self::getContainer()->get('doctrine.migrations.dependency_factory');
+
+        self::assertSame('pinround_migrator', $migrations->getConnection()->fetchOne('SELECT current_user'));
+        self::assertInstanceOf(OrmSchemaProvider::class, $migrations->getSchemaProvider());
+    }
+
     private function connection(): Connection
     {
         return self::getContainer()->get('doctrine.dbal.default_connection');
+    }
+
+    /**
+     * @param 'r'|'S' $objectType pg_default_acl's type: tables or sequences
+     *
+     * @return list<mixed> "grantee PRIVILEGE" pairs for objects pinround_migrator creates in public
+     */
+    private function defaultPrivilegesOfTheMigrator(string $objectType): array
+    {
+        return $this->connection()->fetchFirstColumn(
+            "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type
+             FROM pg_default_acl d, aclexplode(d.defaclacl) acl
+             WHERE d.defaclrole = 'pinround_migrator'::regrole
+               AND d.defaclnamespace = 'public'::regnamespace
+               AND d.defaclobjtype = ?",
+            [$objectType],
+        );
     }
 }

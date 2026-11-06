@@ -13,7 +13,7 @@ doctrine:
             Doctrine\DBAL\Platforms\PostgreSQLPlatform: identity
         auto_mapping: false
 
-# Migrations run as pinround_migrator (ADR-0005); the app keeps "default" (pinround_app).
+# Migrations run as pinround_migrator (ADR-0005; wired in doctrine_migrations.yaml); the app and the ORM keep "default" (pinround_app).
 # Prod has no "migrator" connection: its migrate container gets a DATABASE_URL for pinround_migrator.
 when@dev:
     doctrine:
@@ -24,8 +24,6 @@ when@dev:
                     url: '%env(resolve:MIGRATOR_DATABASE_URL)%'
                     driver: pdo_pgsql
                     server_version: '18'
-    doctrine_migrations:
-        connection: migrator
 
 when@test:
     doctrine:
@@ -40,8 +38,6 @@ when@test:
                     driver: pdo_pgsql
                     server_version: '18'
                     dbname_suffix: '_test%env(default::TEST_TOKEN)%'
-    doctrine_migrations:
-        connection: migrator
 
 when@prod:
     doctrine:

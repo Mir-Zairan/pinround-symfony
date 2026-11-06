@@ -16,7 +16,7 @@ You need Docker with Compose v2, and `make`. You do not need PHP on your machine
 3. Mail the app sends shows up in Mailpit at http://localhost:8025.
 4. The MinIO console is at http://localhost:9001.
 
-On Linux, `make` passes your user and group id to the build. If you run plain `docker compose up` instead, set `APP_UID` and `APP_GID` in `.env.local` (run `id -u` and `id -g`).
+On Linux, `make` passes your user and group id to the build. If you run plain `docker compose up` instead, set `APP_UID` and `APP_GID` in `.env.local` (run `id -u` and `id -g`). Then run `make db-roles`, `make migrate` and `make migrate-test`, and `make db-roles` once more: the app connects as the `pinround_app` database role, which only exists after `make db-roles`, and the second run locks the migrations table that the first migration creates. `make up` does all of this for you.
 
 If a port is taken, put a new one in `.env.local`, for example `HTTP_PORT=8081`. The other settings are `HTTPS_PORT`, `MAILPIT_UI_PORT`, `MINIO_API_PORT` and `MINIO_CONSOLE_PORT`.
 

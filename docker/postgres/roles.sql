@@ -1,6 +1,7 @@
--- Database roles of ADR-0005, run by the Postgres admin account once per database
--- (dev: pinround and pinround_test; CI: pinround_test; prod: at install and after upgrades
--- that change this file). Safe to re-run: it creates what is missing and re-asserts the rest.
+-- Database roles of ADR-0005, run by the Postgres admin account on each database
+-- (dev: pinround and pinround_test; CI: pinround_test; prod: at install, again after the first
+-- migration, and after upgrades that change this file). Safe to re-run: it creates what is
+-- missing and re-asserts the rest.
 --
 --   psql -v ON_ERROR_STOP=1 -d <database> \
 --        -v app_password=... -v migrator_password=... \
@@ -105,3 +106,9 @@ WHERE n.nspname = 'public'
   AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
 \gexec
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pinround_app;
+
+-- Migration bookkeeping is the migrator's alone; the app never reads it. A new database gets this
+-- table, with the default rights above, from its first migration, so the script runs again after it.
+SELECT 'REVOKE ALL ON public.doctrine_migration_versions FROM pinround_app'
+WHERE to_regclass('public.doctrine_migration_versions') IS NOT NULL
+\gexec

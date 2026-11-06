@@ -51,7 +51,7 @@ jobs:
     # URLs point at the compose host name "postgres". The URLs name "pinround";
     # config/packages/doctrine.yaml appends "_test" in the test env, so the service
     # must create "pinround_test". The service user "pinround" is the admin account:
-    # it only runs docker/postgres/roles.sql. Migrations run as pinround_migrator,
+    # it only runs docker/postgres/roles.sql, before and after the migrations. Migrations run as pinround_migrator,
     # the tests as pinround_app. The passwords are CI-only placeholders; the retention
     # and readonly ones appear only on the psql step, never in the job env.
     services:
@@ -104,6 +104,17 @@ jobs:
         env:
           APP_ENV: test
         run: bin/console doctrine:migrations:migrate --no-interaction
+      # The first migration creates doctrine_migration_versions, which roles.sql takes away from pinround_app.
+      - name: Apply the database roles again
+        env:
+          PGPASSWORD: pinround
+        run: >-
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pinround -d pinround_test
+          -v app_password=change-me-ci-only-app-db
+          -v migrator_password=change-me-ci-only-migrator-db
+          -v retention_password=change-me-ci-only-retention-db
+          -v readonly_password=change-me-ci-only-readonly-db
+          -f docker/postgres/roles.sql
       - run: composer test:integration
       - run: composer test:functional
 

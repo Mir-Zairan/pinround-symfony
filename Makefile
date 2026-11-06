@@ -28,6 +28,8 @@ up: ## Build the image, start the stack, apply the database roles and migrate
 	$(COMPOSE) build
 	$(COMPOSE) up -d --wait
 	$(MAKE) --no-print-directory db-roles migrate migrate-test
+	@# Again: a new database's first migration creates doctrine_migration_versions, which roles.sql locks.
+	$(MAKE) --no-print-directory db-roles
 
 down: ## Stop the stack
 	$(COMPOSE) down
