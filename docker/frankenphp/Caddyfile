@@ -1,0 +1,39 @@
+{
+	# Keeps the internal CA out of the container trust store; browsers and curl -k still accept localhost.
+	skip_install_trust
+
+	# Exposes /metrics on the admin endpoint (localhost:2019), used by the container healthcheck.
+	metrics
+
+	frankenphp
+}
+
+{$SERVER_NAME:localhost} {
+	root * /app/public
+
+	# Compressed SSE streams cost memory per subscriber and enable BREACH-style attacks.
+	@compressible not path /.well-known/mercure
+	encode @compressible zstd br gzip
+
+	mercure {
+		issuer {$MERCURE_TRUSTED_ISSUERS:https://localhost} {
+			publisher {
+				jwt {env.MERCURE_PUBLISHER_JWT_KEY} {env.MERCURE_PUBLISHER_JWT_ALG}
+			}
+			subscriber {
+				jwt {env.MERCURE_SUBSCRIBER_JWT_KEY} {env.MERCURE_SUBSCRIBER_JWT_ALG}
+			}
+		}
+	}
+
+	php_server {
+		root /app/public
+		worker {
+			file /app/public/index.php
+			num {$FRANKENPHP_WORKER_COUNT:2}
+			env FRANKENPHP_WORKER 1
+			# FrankenPHP 1.13 has no max_requests directive; the Symfony Runtime restarts the worker after this many requests.
+			env FRANKENPHP_LOOP_MAX 500
+		}
+	}
+}
