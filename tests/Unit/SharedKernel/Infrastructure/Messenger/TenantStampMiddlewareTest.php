@@ -334,11 +334,11 @@ final class TenantStampMiddlewareTest extends TestCase
             }
         };
 
-        return new StackMiddleware(new class($recordHandling) implements MiddlewareInterface {
+        return new StackMiddleware(new readonly class($recordHandling) implements MiddlewareInterface {
             /**
              * @param \Closure(): void $recordHandling
              */
-            public function __construct(private readonly \Closure $recordHandling)
+            public function __construct(private \Closure $recordHandling)
             {
             }
 

@@ -86,11 +86,11 @@ final class RejectMessageForAnotherTenantMiddlewareTest extends TestCase
             ++$this->nextMiddlewareCallCount;
         };
 
-        return new StackMiddleware(new class($countCall) implements MiddlewareInterface {
+        return new StackMiddleware(new readonly class($countCall) implements MiddlewareInterface {
             /**
              * @param \Closure(): void $countCall
              */
-            public function __construct(private readonly \Closure $countCall)
+            public function __construct(private \Closure $countCall)
             {
             }
 
