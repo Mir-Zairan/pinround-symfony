@@ -24,7 +24,6 @@ RUN groupadd --gid ${APP_GID} app \
     && mkdir -p /data/caddy /config/caddy /app/var \
     && chown -R app:app /data /config /app
 
-ENV FRANKENPHP_WORKER=1
 ENV COMPOSER_ALLOW_SUPERUSER=0
 
 ENTRYPOINT ["docker-entrypoint"]
@@ -51,7 +50,13 @@ COPY --chown=app:app composer.json composer.lock symfony.lock ./
 RUN composer install --no-dev --no-scripts --no-autoloader --no-interaction --prefer-dist
 
 COPY --chown=app:app . .
+# Cache warm-up needs these variables to exist; the throwaway values are scoped to that one
+# command, so nothing is baked into the image. Real values come from the runtime environment.
 RUN composer dump-autoload --no-dev --classmap-authoritative \
     && composer dump-env prod \
-    && composer run-script --no-dev post-install-cmd \
+    && DATABASE_URL="postgresql://build:build@localhost:5432/build?serverVersion=18" \
+       MAILER_DSN="null://null" \
+       MESSENGER_TRANSPORT_DSN="in-memory://" \
+       DEFAULT_URI="http://localhost" \
+       composer run-script --no-dev post-install-cmd \
     && chmod +x bin/console

@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Web;
 
 use App\Web\Infrastructure\Debug\WorkerRequestCountSubscriber;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\DependencyInjection\Attribute\When;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\KernelEvents;
 
@@ -23,12 +24,11 @@ final class WorkerRequestCountTest extends WebTestCase
         self::assertSame('2', $client->getResponse()->headers->get('X-Worker-Request-Count'));
     }
 
-    public function testSubscriberIsNotRegisteredInProd(): void
+    public function testSubscriberIsRegisteredInTheTestEnvironment(): void
     {
-        // The prod container has no test service locator, so read the public dispatcher from the kernel.
-        $kernel = self::bootKernel(['environment' => 'prod', 'debug' => false]);
+        static::createClient();
 
-        $dispatcher = $kernel->getContainer()->get('event_dispatcher');
+        $dispatcher = self::getContainer()->get(EventDispatcherInterface::class);
         \assert($dispatcher instanceof EventDispatcherInterface);
 
         $listenerClasses = array_map(
@@ -36,6 +36,16 @@ final class WorkerRequestCountTest extends WebTestCase
             $dispatcher->getListeners(KernelEvents::RESPONSE),
         );
 
-        self::assertNotContains(WorkerRequestCountSubscriber::class, $listenerClasses);
+        self::assertContains(WorkerRequestCountSubscriber::class, $listenerClasses);
+    }
+
+    public function testSubscriberIsOnlyEnabledForDevAndTest(): void
+    {
+        $attributes = (new \ReflectionClass(WorkerRequestCountSubscriber::class))->getAttributes(When::class);
+
+        $environments = array_map(static fn (\ReflectionAttribute $attribute): string => $attribute->newInstance()->env, $attributes);
+        sort($environments);
+
+        self::assertSame(['dev', 'test'], $environments);
     }
 }

@@ -15,6 +15,10 @@
 	@compressible not path /.well-known/mercure
 	encode @compressible zstd br gzip
 
+	# AssetMapper file names carry a content hash, so they never change.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
 	mercure {
 		issuer {$MERCURE_TRUSTED_ISSUERS:https://localhost} {
 			publisher {
@@ -32,6 +36,8 @@
 			file /app/public/index.php
 			num {$FRANKENPHP_WORKER_COUNT:2}
 			env FRANKENPHP_WORKER 1
+			# Dev sets this to `watch` so code edits on the bind mount restart the workers; empty in prod.
+			{$FRANKENPHP_WORKER_CONFIG:}
 			# FrankenPHP 1.13 has no max_requests directive; the Symfony Runtime restarts the worker after this many requests.
 			env FRANKENPHP_LOOP_MAX 500
 		}

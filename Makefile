@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
 .PHONY: help up down sh logs test qa migrate seed
 
-# .env.local is git-ignored and overrides .env (for example HTTP_PORT); later files win.
-ENV_FILES := --env-file .env $(if $(wildcard .env.local),--env-file .env.local)
+# .env.dev holds the dev Mercure keys; .env.local is git-ignored and overrides both (for example HTTP_PORT); later files win.
+ENV_FILES := --env-file .env --env-file .env.dev $(if $(wildcard .env.local),--env-file .env.local)
 COMPOSE := docker compose $(ENV_FILES)
 
 help: ## List the targets
