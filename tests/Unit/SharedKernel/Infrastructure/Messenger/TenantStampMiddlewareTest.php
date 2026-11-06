@@ -11,10 +11,13 @@ use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\PDO\Exception as PdoDriverException;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\ErrorHandler\BufferingLogger;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;
@@ -28,8 +31,9 @@ final class TenantStampMiddlewareTest extends TestCase
     private RecordingTenantSwitchGuard $switchGuard;
     private TenantContext $tenantContext;
     private TenantStampMiddleware $middleware;
+    private BufferingLogger $logger;
 
-    private bool $isTransactionOpen = false;
+    private int $transactionNestingLevel = 0;
     private ?\Throwable $rollBackFailure = null;
     private int $rollBackCount = 0;
     private int $connectionCloseCount = 0;
@@ -42,19 +46,20 @@ final class TenantStampMiddlewareTest extends TestCase
     {
         $this->switchGuard = new RecordingTenantSwitchGuard();
         $this->tenantContext = new TenantContext($this->switchGuard);
+        $this->logger = new BufferingLogger();
 
         $connection = self::createStub(Connection::class);
-        $connection->method('isTransactionActive')->willReturnCallback(fn (): bool => $this->isTransactionOpen);
+        $connection->method('isTransactionActive')->willReturnCallback(fn (): bool => $this->transactionNestingLevel > 0);
         $connection->method('rollBack')->willReturnCallback(function (): void {
             ++$this->rollBackCount;
             if (null !== $this->rollBackFailure) {
                 throw $this->rollBackFailure;
             }
-            $this->isTransactionOpen = false;
+            --$this->transactionNestingLevel;
         });
         $connection->method('close')->willReturnCallback(function (): void {
             ++$this->connectionCloseCount;
-            $this->isTransactionOpen = false;
+            $this->transactionNestingLevel = 0;
         });
 
         $entityManager = self::createStub(EntityManagerInterface::class);
@@ -67,6 +72,7 @@ final class TenantStampMiddlewareTest extends TestCase
             $this->switchGuard,
             static fn (): Connection => $connection,
             static fn (): EntityManagerInterface => $entityManager,
+            $this->logger,
         );
     }
 
@@ -126,6 +132,7 @@ final class TenantStampMiddlewareTest extends TestCase
             $this->switchGuard,
             static fn (): Connection => self::createStub(Connection::class),
             static fn (): EntityManagerInterface => $unbuiltEntityManager,
+            $this->logger,
         );
 
         $middleware->handle($this->envelopeFor(self::ORG_A), $this->stackWithHandler());
@@ -151,7 +158,7 @@ final class TenantStampMiddlewareTest extends TestCase
     public function withNoOrganizationSetAStampedMessagePassesOnWithoutAnOrganizationWhileTheGuardRefuses(): void
     {
         $this->switchGuard->isRefusing = true;
-        $this->isTransactionOpen = true;
+        $this->transactionNestingLevel = 1;
         $envelope = $this->envelopeFor(self::ORG_A);
 
         $handledEnvelope = $this->middleware->handle($envelope, $this->stackWithHandler());
@@ -163,21 +170,35 @@ final class TenantStampMiddlewareTest extends TestCase
         self::assertSame(1, $this->switchGuard->switchCount);
         self::assertSame(0, $this->entityManagerClearCount);
         self::assertSame(0, $this->rollBackCount);
-        self::assertTrue($this->isTransactionOpen);
+        self::assertSame(1, $this->transactionNestingLevel);
     }
 
     #[Test]
     public function aTransactionTheMessageLeftOpenIsRolledBackAndTheSuccessBecomesAFailure(): void
     {
         $thrown = $this->handleCatching($this->envelopeFor(self::ORG_A), function (): void {
-            $this->isTransactionOpen = true;
+            $this->transactionNestingLevel = 1;
         });
 
         self::assertInstanceOf(\LogicException::class, $thrown);
         self::assertStringContainsString('left a database transaction open', $thrown->getMessage());
         self::assertSame(1, $this->rollBackCount);
-        self::assertFalse($this->isTransactionOpen);
+        self::assertSame(0, $this->transactionNestingLevel);
         self::assertNull($this->tenantContext->get());
+    }
+
+    #[Test]
+    public function everyLevelOfATransactionTheMessageLeftOpenIsRolledBack(): void
+    {
+        $thrown = $this->handleCatching($this->envelopeFor(self::ORG_A), function (): void {
+            $this->transactionNestingLevel = 2;
+        });
+
+        self::assertInstanceOf(\LogicException::class, $thrown);
+        self::assertSame(2, $this->rollBackCount);
+        self::assertSame(0, $this->transactionNestingLevel);
+        self::assertSame(0, $this->connectionCloseCount);
+        self::assertSame([], $this->logger->cleanLogs());
     }
 
     #[Test]
@@ -186,7 +207,7 @@ final class TenantStampMiddlewareTest extends TestCase
         $handlerFailure = new \RuntimeException('The handler failed.');
 
         $thrown = $this->handleCatching($this->envelopeFor(self::ORG_A), function () use ($handlerFailure): never {
-            $this->isTransactionOpen = true;
+            $this->transactionNestingLevel = 1;
 
             throw $handlerFailure;
         });
@@ -197,18 +218,26 @@ final class TenantStampMiddlewareTest extends TestCase
     }
 
     #[Test]
-    public function whenRollingBackTheLeftOpenTransactionFailsTheConnectionIsClosed(): void
+    public function whenRollingBackTheLeftOpenTransactionFailsItLogsWithoutTheMessageTextAndClosesTheConnection(): void
     {
-        $this->rollBackFailure = new \RuntimeException('The rollback failed.');
+        $this->rollBackFailure = new DriverException(
+            new PdoDriverException('SQLSTATE[08006]: connection lost while writing secret-row-value', '08006', 7),
+            null,
+        );
 
         $thrown = $this->handleCatching($this->envelopeFor(self::ORG_A), function (): void {
-            $this->isTransactionOpen = true;
+            $this->transactionNestingLevel = 1;
         });
 
         self::assertInstanceOf(\LogicException::class, $thrown);
         self::assertSame(1, $this->connectionCloseCount);
-        self::assertFalse($this->isTransactionOpen);
+        self::assertSame(0, $this->transactionNestingLevel);
         self::assertNull($this->tenantContext->get());
+        self::assertSame([[
+            'warning',
+            'Rolling back the transaction a message left open failed; closing the connection instead.',
+            ['exception_class' => DriverException::class, 'sqlstate' => '08006', 'code' => 7],
+        ]], $this->logger->cleanLogs());
     }
 
     #[Test]

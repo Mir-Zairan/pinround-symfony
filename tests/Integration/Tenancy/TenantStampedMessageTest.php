@@ -9,8 +9,10 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
+use App\Tests\Fixtures\Messenger\InsertTenantProbeLabel;
 use App\Tests\Fixtures\Messenger\InsertTenantProbeLabelLeavingTransactionOpen;
 use App\Tests\Fixtures\Messenger\ListTenantProbeLabels;
+use App\Tests\Fixtures\Messenger\QueueTenantProbeInsertAfterCurrentMessage;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -18,6 +20,9 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
+use Symfony\Component\Messenger\Stamp\ReceivedStamp;
+use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
+use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 
 /**
  * Proves TenantStampMiddleware on the real default bus: the handler's doctrine_transaction runs under the stamp's
@@ -159,6 +164,72 @@ final class TenantStampedMessageTest extends KernelTestCase
         $this->dispatchListing(self::ORG_B);
     }
 
+    #[Test]
+    public function aHandlerCannotDispatchAMessageForAnotherOrganizationToRunAfterItself(): void
+    {
+        try {
+            $this->bus->dispatch(
+                new QueueTenantProbeInsertAfterCurrentMessage(self::ORG_B, 'b-smuggled'),
+                [new TenantStamp(new OrganizationId(self::ORG_A))],
+            );
+            self::fail('The handler dispatched a message for another organization.');
+        } catch (HandlerFailedException $failure) {
+            self::assertInstanceOf(MessageForAnotherTenantRefused::class, $failure->getPrevious());
+        }
+
+        $this->assertNothingLeftOfTheMessage();
+        self::assertSame(['labels' => ['b-only'], 'orgSetting' => self::ORG_B], $this->dispatchListing(self::ORG_B));
+    }
+
+    #[Test]
+    public function aHandlerCanDispatchAMessageForItsOwnOrganizationToRunAfterItself(): void
+    {
+        $this->bus->dispatch(
+            new QueueTenantProbeInsertAfterCurrentMessage(self::ORG_A, 'a-later'),
+            [new TenantStamp(new OrganizationId(self::ORG_A))],
+        );
+
+        $this->assertNothingLeftOfTheMessage();
+        self::assertSame(['labels' => ['a-first', 'a-later', 'a-second'], 'orgSetting' => self::ORG_A], $this->dispatchListing(self::ORG_A));
+    }
+
+    #[Test]
+    public function withAnOrganizationSetAMessageForAnotherOneIsNotQueued(): void
+    {
+        $this->tenantContext->set(new OrganizationId(self::ORG_A));
+
+        try {
+            $this->bus->dispatch(new InsertTenantProbeLabel(self::ORG_B, 'b-queued'), [
+                new TenantStamp(new OrganizationId(self::ORG_B)),
+                new TransportNamesStamp(['test_queue']),
+            ]);
+            self::fail('The message for another organization was queued.');
+        } catch (MessageForAnotherTenantRefused) {
+        }
+
+        self::assertSame([], $this->testQueue()->getSent());
+        self::assertSame(self::ORG_A, $this->tenantContext->get()?->toString());
+    }
+
+    #[Test]
+    public function aQueuedMessageRunsUnderItsOrganizationWhenReceived(): void
+    {
+        $this->bus->dispatch(new InsertTenantProbeLabel(self::ORG_A, 'a-queued'), [
+            new TenantStamp(new OrganizationId(self::ORG_A)),
+            new TransportNamesStamp(['test_queue']),
+        ]);
+        $this->assertNothingLeftOfTheMessage();
+        self::assertSame(['labels' => ['a-first', 'a-second'], 'orgSetting' => self::ORG_A], $this->dispatchListing(self::ORG_A));
+
+        $received = iterator_to_array($this->testQueue()->get(), false);
+        self::assertCount(1, $received);
+        // What the worker does with a received message; the in-memory transport serialized it on the way.
+        $this->bus->dispatch($received[0]->with(new ReceivedStamp('test_queue')));
+
+        $this->assertNothingLeftOfTheMessage();
+        self::assertSame(['labels' => ['a-first', 'a-queued', 'a-second'], 'orgSetting' => self::ORG_A], $this->dispatchListing(self::ORG_A));
+    }
+
     private static function probeTable(): TenantProbeTable
     {
         return new TenantProbeTable(self::getContainer()->get('doctrine.dbal.migrator_connection'));
@@ -175,6 +246,14 @@ final class TenantStampedMessageTest extends KernelTestCase
         self::assertIsArray($listing);
 
         return $listing;
+    }
+
+    private function testQueue(): InMemoryTransport
+    {
+        $transport = self::getContainer()->get('messenger.transport.test_queue');
+        self::assertInstanceOf(InMemoryTransport::class, $transport);
+
+        return $transport;
     }
 
     private function assertNothingLeftOfTheMessage(): void

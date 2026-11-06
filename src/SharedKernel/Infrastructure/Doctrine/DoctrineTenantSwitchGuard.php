@@ -41,8 +41,7 @@ final readonly class DoctrineTenantSwitchGuard implements TenantSwitchGuard
     private function entityManagerHoldsEntities(): bool
     {
         $entityManager = ($this->entityManager)();
-        // An entity manager that is not built yet holds nothing, and reading it must not build it.
-        if (new \ReflectionClass($entityManager)->isUninitializedLazyObject($entityManager)) {
+        if (!LazyObjectState::isBuilt($entityManager)) {
             return false;
         }
 

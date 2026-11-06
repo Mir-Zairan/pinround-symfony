@@ -8,28 +8,19 @@ use App\SharedKernel\Application\MessageForAnotherTenantRefused;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchGuard;
 use App\SharedKernel\Application\TenantSwitchRefused;
+use App\SharedKernel\Infrastructure\Doctrine\LazyObjectState;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\AutowireServiceClosure;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;
 
 /**
- * Runs a message under the organization of its TenantStamp (ADR-0005). It sits directly before doctrine_transaction
- * on every bus (messenger.yaml), so TenantContext holds the organization when that transaction begins and
- * TenantMiddleware sets it for row-level security.
- *
- * - No stamp: passes the message on unchanged, under whatever organization is set (in a worker, none).
- * - Stamp, no organization set, no open transaction and no loaded entity: sets the stamp's organization, passes the
- *   message on, and afterwards (also when it throws) clears the entity manager and then TenantContext, so nothing
- *   loaded for that organization stays for the next message. A transaction the message leaves open is rolled back;
- *   on success that throws a \LogicException, because nothing in it was saved.
- * - Stamp, no organization set, but a transaction open or an entity loaded (a request without a tenant queuing a
- *   message for a new organization): passes on without setting it. A worker sets it when the message is received;
- *   handled here and now it runs without a tenant, so row-level security returns no rows and TenantFilter throws.
- * - Stamp with the same organization set (a dispatch inside a request or a handler): passes on and keeps it.
- * - Stamp with another organization set: MessageForAnotherTenantRefused before anything runs; never switches.
+ * Runs a message under the organization of its TenantStamp; the five cases are in data-model.md › Row-level security.
+ * It must sit directly before doctrine_transaction, so the organization is set before that transaction begins.
  */
 final readonly class TenantStampMiddleware implements MiddlewareInterface
 {
@@ -44,11 +35,13 @@ final readonly class TenantStampMiddleware implements MiddlewareInterface
         private \Closure $connection,
         #[AutowireServiceClosure('doctrine.orm.default_entity_manager')]
         private \Closure $entityManager,
+        private LoggerInterface $logger,
     ) {
     }
 
     /**
      * @throws MessageForAnotherTenantRefused when another organization is set
+     * @throws \LogicException                when the message succeeded but left a transaction open, now rolled back
      */
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
@@ -67,10 +60,7 @@ final readonly class TenantStampMiddleware implements MiddlewareInterface
             return $stack->next()->handle($envelope, $stack);
         }
 
-        // TenantContext does not ask the guard for its first organization; this middleware must, because it moves
-        // back to none afterwards and that move needs no transaction and no entities from before the message.
-        // When it refuses, the message goes on without an organization: queued it gets one in the worker, handled
-        // now it fails closed.
+        // Clearing the organization afterwards needs what the guard checks, and TenantContext skips it on a first set.
         try {
             $this->switchGuard->prepareSwitch();
         } catch (TenantSwitchRefused) {
@@ -102,8 +92,7 @@ final readonly class TenantStampMiddleware implements MiddlewareInterface
         $wasTransactionLeftOpen = $this->rollBackOpenTransaction();
 
         $entityManager = ($this->entityManager)();
-        // An entity manager that is not built yet holds nothing, and clearing it must not build it.
-        if (!new \ReflectionClass($entityManager)->isUninitializedLazyObject($entityManager)) {
+        if (LazyObjectState::isBuilt($entityManager)) {
             $entityManager->clear();
         }
 
@@ -126,9 +115,14 @@ final readonly class TenantStampMiddleware implements MiddlewareInterface
             while ($connection->isTransactionActive()) {
                 $connection->rollBack();
             }
-        } catch (\Throwable) {
-            // Closing ends the transaction on the server and resets DBAL's nesting level; the failure itself
-            // changes nothing for the caller, who gets the message's own outcome.
+        } catch (\Throwable $rollBackFailure) {
+            // Class and code only: a database message can quote row values.
+            $this->logger->warning('Rolling back the transaction a message left open failed; closing the connection instead.', [
+                'exception_class' => $rollBackFailure::class,
+                'sqlstate' => $rollBackFailure instanceof DriverException ? $rollBackFailure->getSQLState() : null,
+                'code' => $rollBackFailure->getCode(),
+            ]);
+            // Closing ends the transaction on the server and resets DBAL's nesting level.
             $connection->close();
         }
 

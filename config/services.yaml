@@ -37,7 +37,7 @@ when@test:
             autowire: true
             autoconfigure: true
 
-        # Test-only message handlers, used by TenantStampMiddlewareTest through the real bus.
+        # Test-only message handlers, used by TenantStampedMessageTest through the real bus.
         App\Tests\Fixtures\Messenger\:
             resource: '../tests/Fixtures/Messenger/*Handler.php'
             autowire: true

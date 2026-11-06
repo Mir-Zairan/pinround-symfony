@@ -2,14 +2,34 @@ framework:
     messenger:
         default_bus: messenger.bus.default
         buses:
-            # Every bus lists the tenant stamp middleware directly before doctrine_transaction, so TenantContext is
-            # filled before BEGIN (ADR-0005). MessengerBusMiddlewareTest fails for a bus that does not.
+            # The framework's default middleware is listed by hand, because RejectMessageForAnotherTenantMiddleware must
+            # run before dispatch_after_current_bus, and custom middleware otherwise only goes after it. Every bus lists
+            # it there, and TenantStampMiddleware directly before doctrine_transaction, so TenantContext is filled before
+            # BEGIN (ADR-0005). MessengerBusMiddlewareTest fails for a bus that does not, and pins the full list.
             messenger.bus.default:
+                default_middleware: false
                 middleware:
+                    - add_default_stamps_middleware
+                    - add_bus_name_stamp_middleware
+                    - reject_redelivered_message_middleware
+                    - App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware
+                    - dispatch_after_current_bus
+                    - decode_failed_message_middleware
+                    - failed_message_processing_middleware
                     - App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware
                     - doctrine_transaction
+                    - send_message
+                    - handle_message
 
         transports:
             async: '%env(MESSENGER_TRANSPORT_DSN)%'
 
         routing: {}
+
+when@test:
+    framework:
+        messenger:
+            transports:
+                # Test-only, reached with a TransportNamesStamp. serialize=true sends each message through the
+                # transport serializer, as a real queue does.
+                test_queue: 'in-memory://?serialize=true'

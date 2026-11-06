@@ -103,8 +103,8 @@ final readonly class TenantFilterMiddleware implements Middleware, ResetInterfac
     public function clearTenantMark(): void
     {
         $entityManager = ($this->entityManager)();
-        // An entity manager that is not built yet has no filter; building it here would cost every request.
-        if ($this->isBuilt($entityManager)) {
+        // An entity manager that is not built yet has no filter.
+        if (LazyObjectState::isBuilt($entityManager)) {
             $this->tenantFilter($entityManager)?->markTenantSet(false);
         }
     }
@@ -112,11 +112,6 @@ final readonly class TenantFilterMiddleware implements Middleware, ResetInterfac
     public function reset(): void
     {
         $this->clearTenantMark();
-    }
-
-    private function isBuilt(EntityManagerInterface $entityManager): bool
-    {
-        return !new \ReflectionClass($entityManager)->isUninitializedLazyObject($entityManager);
     }
 
     /**
