@@ -95,3 +95,16 @@ Repo rules (CLAUDE.md, ADR-0028, testing-strategy.md):
 - Fixtures use Zenstruck Foundry with neutral data only (Acme Foods, SHOP, Lena, Omar, Mia, Raj,
   Sara). Real company data or anything copied from the prototype is `"I"`, class `data-integrity`.
 - Tests read in product words (round, pin, verdict, step, turn) so the tester can follow them.
+- Suites by folder (`phpunit.dist.xml`): `tests/Unit` (no DB, CI job `unit`), `tests/Integration`
+  and `tests/Functional` (CI job `integration`, real PostgreSQL and Valkey). A test in the wrong
+  folder runs in the wrong job — `"I"`. PHPUnit fails on deprecations, notices and warnings, so a
+  test that only passes by triggering one is wrong.
+- **A rule a config enforces** (Deptrac layers, compose services, scheduler transports, CI jobs)
+  gets a test that fails when the rule is removed: one forbidden case, one allowed case, and
+  exact-list asserts (`assertEqualsCanonicalizing`), never `assertContains` alone. A change to
+  `deptrac.yaml` or the modules catalogue keeps `DeptracConfigTest`, `ModuleSkeletonTest` and the
+  fixtures in `tests/Fixtures/Deptrac` (run by `ModuleBoundaryViolationTest`) in step.
+- Assert the exact status code the plan names (`assertResponseStatusCodeSame(200)`), not any
+  success. A test that proves something is absent (not registered in prod) also proves the same
+  lookup finds it where it should be, and never trusts a cached container. A check on a pinned
+  value matches its exact shape (a 40-hex SHA), not just the key name.

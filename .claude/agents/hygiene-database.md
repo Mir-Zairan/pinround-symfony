@@ -96,7 +96,11 @@ Repo rules (data-model.md, ADR-0004, ADR-0005, ADR-0006, performance-and-scale.m
   search and duplicate queries filtered by `organization_id` and the ticket visibility predicate and
   able to use the GIN/HNSW index under RLS; counts in a separate query.
 - Retention deletes in chunks of 5,000 rows; open tickets and their history are never deleted.
-
+- A migration's `down()` never drops what `up()` created with `IF NOT EXISTS` (an extension it may
+  not own); it throws an irreversible-migration exception instead.
+- Integration tests use the database named in `DATABASE_URL` with `_test` appended in the test env
+  (`config/packages/doctrine.yaml`); CI creates `pinround_test` as a service. A new database,
+  schema or role a test needs must exist in both compose and the CI `integration` job.
 <!-- hygiene-machine-checked:start — managed by /hygiene-learn; do not hand-edit -->
 Machine-checked in this repo — the deterministic gate already catches these; do NOT
 spend review effort flagging instances of exactly these classes:

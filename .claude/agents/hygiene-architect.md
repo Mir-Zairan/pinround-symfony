@@ -69,26 +69,51 @@ to public APIs or serialized / cached / queued shapes, and naming at the design 
 (`reference/naming.md`): services named by capability, DTOs and value objects by what they carry,
 interfaces by role, modules by their single subject, vocabulary from the glossary.
 
-Repo rules (ADR-0002, modules.md, CLAUDE.md):
+Repo rules (ADR-0002, ADR-0032, modules.md "Deptrac rules", CLAUDE.md):
 - Modules: SharedKernel, Identity, Organization, Workflow, Ticketing, Conversation, Review, Media,
   Notification, Insight, Assist, Integration, Audit, AgentApi, Web. Layout
-  `src/<Module>/{Api,Domain,Application,Infrastructure,UI}`, namespace `App\<Module>\…`.
-- **Modules talk only through `src/<Module>/Api` or domain events** (outbox). Deptrac fails the
-  build otherwise, but flag it here too, with the right route.
-- Domain depends only on SharedKernel (Doctrine mapping is XML in Infrastructure, entities stay plain
-  PHP). Application depends on Domain, SharedKernel and other modules' `Api`. Infrastructure
-  implements Domain interfaces. UI calls Application through command and query classes and never
-  calls repositories. `Api` holds only interfaces, read-only DTOs and event classes — no logic.
+  `src/<Module>/{Api,Domain,Application,Infrastructure,UI}` plus a `README.md` per module (purpose,
+  owns, Api, depends on), namespace `App\<Module>\…`. `App\Kernel` is its own layer.
+- **Modules talk only through `src/<Module>/Api` or domain events** (outbox). `composer deptrac`
+  (run in `composer qa` and CI with `--fail-on-uncovered`) fails the build otherwise, but flag it here
+  too, with the right route. A class outside every layer also fails the build.
+- **Which module may call which Api** is set by the "Depends on" line of each module in the
+  `modules.md` catalogue (ADR-0032 superseded the ADR-0002 dependency diagram; do not cite that
+  diagram). A call to the Api of a module not on the caller's line is `"I"`, class `design`: either
+  route it through an event or change the catalogue line and `deptrac.yaml` together. Ticketing and
+  Insight calling each other's Api is the one accepted cycle.
+- **Events** live in `App\<Module>\Api\Event\` (their own Deptrac layer `<Module>_Event`). Any
+  module's Application and Infrastructure may use any module's events; UI may not. Event classes
+  depend on SharedKernel only. An event placed elsewhere in `Api`, or UI using an event, is `"I"`.
+- Layer edges (modules.md table): Api, Event and Domain → SharedKernel only. Application → own
+  Domain and Api, SharedKernel, the Api of modules on its "Depends on" line, any Event.
+  Infrastructure → the same plus own Application and vendor code. UI → own Application and Api,
+  SharedKernel, vendor code, the Api of modules on its line. SharedKernel → vendor only.
+- **Only Infrastructure and UI may use vendor code** (Symfony, Doctrine, any `composer` package).
+  A Doctrine attribute, Symfony class or library type in Domain, Application, Api or Event is `"I"`,
+  class `design` (Doctrine mapping is XML in Infrastructure; entities stay plain PHP).
+- Infrastructure implements Domain interfaces. UI calls Application through command and query
+  classes and never calls repositories. `Api` holds only interfaces, read-only DTOs and event
+  classes — no logic.
+- Adding a module needs an ADR (or an ADR-0002 update), a table prefix, its six Deptrac layers, a
+  catalogue entry and its README; `DeptracConfigTest` and `ModuleSkeletonTest` check folders and
+  layers. The catalogue lines and `deptrac.yaml` are kept in step by hand — a diff that changes one
+  and not the other is `"I"`, class `docs`.
 - **Never:** a join across another module's tables (only exception: Insight joining
   `ins_ticket_turn` with Ticketing's view `tkt_ticket_list_v`); a Doctrine relation to another
   module's entity (store the id value object); using another module's repository or Domain class.
 - Read models that must be instant are updated synchronously in the same transaction
   (`Insight\Api\TurnProjector`); everything else reacts to outbox events.
-- Events are past-tense facts; changing an event or Messenger message shape breaks queued messages
-  in the outbox — `"I"`, class `api-contract`, unless old payloads still deserialize.
+- Events are past-tense facts; consumers are idempotent. Event classes are public, so a payload
+  change adds fields only; removing or renaming a field needs a new event version. Changing an event
+  or Messenger message shape otherwise breaks queued messages in the outbox — `"I"`, class
+  `api-contract`.
 - AI prompt templates are versioned files in `src/Assist/Infrastructure/Prompt/` with output schemas
   `{feature}.v{n}.schema.json` beside them; editing a released version in place is `"I"`.
 - UI is server-rendered (ADR-0007): Twig, Turbo, Stimulus, Twig and Live Components; no SPA layer.
 - A change that alters an architecture decision needs a new ADR; an accepted ADR's decision is
-  never edited, only superseded.
+  never edited, only superseded (the old ADR gets a "Superseded in part by" line, and the ADR
+  README index lists the new one). When code changes behaviour that a doc, ADR, README status line
+  or phase hand-off note describes, that text changes in the same commit; a doc that names a check
+  states exactly what the script enforces (`"I"`, class `docs`).
 - Worker mode (ADR-0008): services that hold state implement `ResetInterface`.

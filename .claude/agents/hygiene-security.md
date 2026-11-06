@@ -107,6 +107,13 @@ Repo rules (security.md, ADR-0005, ADR-0011, ADR-0013, ADR-0020, ADR-0021, ADR-0
 - **SSO** identities are keyed by `(provider_config_id, iss, sub)` and never matched to an existing
   account by email; linking needs password + MFA.
 - **Secrets:** never in the repo; Symfony secrets or env vars. Jira tokens, OIDC client secrets,
-  webhook secrets and MFA secrets use field encryption (libsodium secretbox with key id).
+  webhook secrets and MFA secrets use field encryption (libsodium secretbox with key id). `.env`
+  holds empty values only; dev placeholders go in `.env.dev` (`change-me…` values the prod image
+  refuses). Every secret file in `.gitignore` is also in `.dockerignore`, because the image is built
+  from the working folder.
+- **CI** (`.github/workflows/ci.yml`, testing-strategy.md): `permissions: contents: read`,
+  `persist-credentials: false` on checkout, no secrets in the workflow, every action pinned to a
+  commit SHA. A new job or step that widens permissions, uses a secret or an unpinned action is
+  `"I"`, class `secrets`.
 - Security headers: CSP with nonce, HSTS (prod), `nosniff`, `Referrer-Policy: same-origin`,
   `Permissions-Policy`, `frame-ancestors 'none'`.

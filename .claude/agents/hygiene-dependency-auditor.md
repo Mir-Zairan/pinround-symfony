@@ -1,6 +1,6 @@
 ---
 name: hygiene-dependency-auditor
-description: Dependency lens for pinround — each new Composer package or importmap entry is needed, reputable, maintained, audited and fits the PHP 8.4 / Symfony 8.1 stack. Dispatch when composer.json, composer.lock or importmap.php change.
+description: Dependency lens for pinround — each new Composer package or importmap entry is needed, reputable, maintained, audited and fits the PHP 8.4 / Symfony 8.1 stack; actions and images are pinned. Dispatch when composer.json, composer.lock, importmap.php, the Dockerfile, compose.yaml images or .github actions change.
 tools: Read, Grep, Glob
 maxTurns: 15
 effort: low
@@ -79,4 +79,12 @@ Repo rules (ADR-0003, ADR-0007, ADR-0028, NFR-SEC-11):
 - Frontend packages come through AssetMapper and `importmap.php`; adding an npm build tool or bundler
   goes against ADR-0007 — `"I"`, class `dependency`.
 - No runtime calls to third-party hosts (fonts and assets are self-hosted).
-- Dev tools (PHPStan, Deptrac, PHP-CS-Fixer, Rector, PHPUnit) belong in `require-dev`.
+- Dev tools (PHPStan, Deptrac, PHP-CS-Fixer, Rector, PHPUnit, Foundry, BrowserKit) belong in
+  `require-dev`. `composer.json` says PHP `>=8.4`, but the Docker image and CI run PHP 8.5, so a
+  package must install on both.
+- A bundle or recipe file needed only in dev or test (config under `config/packages/`) is scoped
+  with `when@dev` / `when@test`, so the prod image (built `--no-dev`) never loads a missing package.
+- Every GitHub Action is pinned to a full commit SHA with the version in a comment; base images
+  are pinned by `@sha256` digest and source builds by commit SHA, never by a tag that can move.
+  A new or changed unpinned one is `"I"`, class `dependency` (some existing images are still
+  tag-pinned; do not report lines the diff did not touch).

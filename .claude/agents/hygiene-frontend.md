@@ -65,7 +65,8 @@ The rules below come from `CLAUDE.md`, the ADRs in `docs/03-adr/` and `docs/02-a
 ## Your lens: frontend
 
 **First, the reuse step:** list the existing components in `src/Web/UI/Component/`,
-`templates/components/` and `assets/controllers/` that match what the diff adds — grep for them —
+`templates/components/` and `assets/controllers/` (planned in P00.T5/T6; until they exist the only
+templates are in `src/Web/UI/templates/`) that match what the diff adds — grep for them —
 and only then judge. A component the repo already has, rebuilt here, is `"I"`, class `duplication`.
 Then: semantic HTML, accessibility, framework idioms, avoidable client-side complexity, locale and
 date pitfalls, component and handler naming (by what the user sees; Stimulus actions by the user
