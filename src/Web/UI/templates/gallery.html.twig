@@ -1,0 +1,32 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Component gallery - pinround{% endblock %}
+
+{% block main %}
+    <h1>Component gallery</h1>
+    <p>Add <code>?theme=light</code> or <code>?theme=dark</code> to the address to pick a theme.</p>
+
+    <section class="gallery-section" aria-labelledby="gallery-button">
+        <h2 id="gallery-button">Button</h2>
+        {% for buttonSize in ['md', 'sm'] %}
+            <div class="gallery-theme">
+                <h3>Size {{ buttonSize }}</h3>
+                <div class="gallery-row">
+                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text'] %}
+                        <twig:Button variant="{{ buttonVariant }}" size="{{ buttonSize }}">{{ buttonVariant|capitalize }}</twig:Button>
+                    {% endfor %}
+                </div>
+                <div class="gallery-row">
+                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text'] %}
+                        <twig:Button variant="{{ buttonVariant }}" size="{{ buttonSize }}" disabled>Save</twig:Button>
+                    {% endfor %}
+                </div>
+                <div class="gallery-row">
+                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text'] %}
+                        <twig:Button variant="{{ buttonVariant }}" size="{{ buttonSize }}" href="{{ path('web_home') }}">Start</twig:Button>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endfor %}
+    </section>
+{% endblock %}

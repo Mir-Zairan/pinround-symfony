@@ -64,8 +64,8 @@ final class HomePageShellTest extends WebTestCase
         $page = $this->openHome();
 
         $stylesheets = $page->filter('link[rel="stylesheet"]')->each(static fn (Crawler $link): string => (string) $link->attr('href'));
-        self::assertCount(4, $stylesheets);
-        foreach (['tokens', 'fonts', 'base', 'shell'] as $position => $name) {
+        self::assertCount(5, $stylesheets);
+        foreach (['tokens', 'fonts', 'base', 'shell', 'components'] as $position => $name) {
             self::assertMatchesRegularExpression('#^/assets/styles/'.$name.'-[0-9A-Za-z_-]+\.css$#', $stylesheets[$position]);
         }
 

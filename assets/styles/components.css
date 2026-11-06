@@ -1,0 +1,77 @@
+.btn-filled {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.btn-filled:hover {
+  filter: brightness(1.1);
+}
+
+.btn-filled:disabled,
+.btn-filled[aria-disabled="true"] {
+  opacity: .38;
+  cursor: default;
+  filter: none;
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--on-surface);
+  border-color: var(--outline-var);
+}
+
+.btn-outline:hover {
+  background: var(--s-high);
+}
+
+.btn-outline:disabled,
+.btn-outline[aria-disabled="true"] {
+  opacity: .4;
+  cursor: default;
+}
+
+.btn-text {
+  background: transparent;
+  color: var(--primary);
+  padding: 0 12px;
+}
+
+.btn-text:hover {
+  background: var(--s-high);
+}
+
+.btn-text:disabled,
+.btn-text[aria-disabled="true"] {
+  opacity: .38;
+  cursor: default;
+}
+
+.btn-tonal[aria-disabled="true"] {
+  opacity: .38;
+  cursor: default;
+  filter: none;
+}
+
+.gallery-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.gallery-theme {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid var(--outline-var);
+  background: var(--surface);
+  color: var(--on-surface);
+}
+
+.gallery-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}

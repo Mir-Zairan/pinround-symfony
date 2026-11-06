@@ -202,6 +202,21 @@
             "src/Schedule.php"
         ]
     },
+    "symfony/stimulus-bundle": {
+        "version": "3.7",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "3.3",
+            "ref": "7ce779ee74ea8d8aae6afed73e8438af5a392b30"
+        },
+        "files": [
+            "assets/controllers.json",
+            "assets/controllers/csrf_protection_controller.js",
+            "assets/controllers/hello_controller.js",
+            "assets/stimulus_bootstrap.js"
+        ]
+    },
     "symfony/twig-bundle": {
         "version": "8.1",
         "recipe": {
@@ -213,6 +228,18 @@
         "files": [
             "config/packages/twig.yaml",
             "templates/base.html.twig"
+        ]
+    },
+    "symfony/ux-twig-component": {
+        "version": "3.7",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "2.13",
+            "ref": "f367ae2a1faf01c503de2171f1ec22567febeead"
+        },
+        "files": [
+            "config/packages/twig_component.yaml"
         ]
     },
     "zenstruck/foundry": {

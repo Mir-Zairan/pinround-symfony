@@ -24,7 +24,9 @@
         "symfony/redis-messenger": "8.1.*",
         "symfony/runtime": "8.1.*",
         "symfony/scheduler": "8.1.*",
+        "symfony/stimulus-bundle": "^3.7",
         "symfony/twig-bundle": "8.1.*",
+        "symfony/ux-twig-component": "^3.7",
         "symfony/yaml": "8.1.*"
     },
     "require-dev": {
