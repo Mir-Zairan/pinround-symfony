@@ -12,7 +12,9 @@ use Doctrine\DBAL\Connection;
  * The tenancy rules of ADR-0005 read from the PostgreSQL catalog. Each check returns one line per
  * offending object, so an empty list means the rule holds. A tenant table is a table with an
  * `organization_id` column, plus every partition or inheritance child below it, in any schema but the
- * system ones; tables and functions an extension owns are left out.
+ * system ones. Objects an extension owns are checked too: the migrator owns the extensions, so it could
+ * hide an object with ALTER EXTENSION ... ADD, and none of the installed extensions brings tables or
+ * SECURITY DEFINER functions.
  */
 final readonly class TenancyCatalog
 {
@@ -27,7 +29,6 @@ final readonly class TenancyCatalog
             SELECT c.oid FROM pg_class c
             WHERE c.relnamespace IN '.self::USER_SCHEMAS."
               AND c.relkind IN ('r', 'p')
-              AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
               AND EXISTS (
                   SELECT 1 FROM pg_attribute a
                   WHERE a.attrelid = c.oid AND a.attname = 'organization_id' AND a.attnum > 0 AND NOT a.attisdropped
@@ -135,7 +136,7 @@ final readonly class TenancyCatalog
      * Only the resolver functions may run with their owner's rights, and pinround_resolver owns nothing else.
      * Their search_path, inputs, outputs and EXECUTE rights are ResolverFunctionTest's job.
      *
-     * @return list<string> SECURITY DEFINER functions (extension functions left out) that are not exactly
+     * @return list<string> SECURITY DEFINER functions that are not exactly
      *                      ResolverFunctions::NAMES in public, one each, owned by pinround_resolver, and functions
      *                      that pinround_resolver owns but NAMES does not list; in any schema but the system ones
      */
@@ -147,8 +148,7 @@ final readonly class TenancyCatalog
             "SELECT p.oid::regprocedure::text AS signature, p.proname AS name, p.prosecdef AS is_security_definer,
                     p.pronamespace = 'public'::regnamespace AS is_in_public, p.proowner = 'pinround_resolver'::regrole AS is_resolver_owned
              FROM pg_proc p
-             WHERE (p.prosecdef AND p.pronamespace IN ".self::USER_SCHEMAS." OR p.proowner = 'pinround_resolver'::regrole)
-               AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+             WHERE p.prosecdef AND p.pronamespace IN ".self::USER_SCHEMAS." OR p.proowner = 'pinround_resolver'::regrole
              ORDER BY 1",
         ) as $function) {
             $isListed = true === $function['is_in_public'] && \in_array($function['name'], ResolverFunctions::NAMES, true);

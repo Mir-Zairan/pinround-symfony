@@ -205,6 +205,29 @@ final class CatalogTest extends KernelTestCase
     }
 
     #[Test]
+    public function aTenantTableOrSecurityDefinerFunctionAddedToAnExtensionIsStillReported(): void
+    {
+        self::assertSame(
+            [
+                ['zz_catalog_in_extension: ROW LEVEL SECURITY off, FORCE ROW LEVEL SECURITY off, no tenant_isolation policy as TenantTable::enableRls writes it'],
+                ['zz_catalog_definer_in_extension() is SECURITY DEFINER but not in ResolverFunctions::NAMES'],
+            ],
+            $this->inRolledBackFixture(
+                [
+                    'CREATE TABLE zz_catalog_in_extension (organization_id uuid NOT NULL)',
+                    'ALTER EXTENSION citext ADD TABLE zz_catalog_in_extension',
+                    'CREATE FUNCTION zz_catalog_definer_in_extension() RETURNS int LANGUAGE sql SECURITY DEFINER AS $fixture$ SELECT 1 $fixture$',
+                    'ALTER EXTENSION citext ADD FUNCTION zz_catalog_definer_in_extension()',
+                ],
+                static fn (TenancyCatalog $catalog): array => [
+                    $catalog->tenantTablesWithoutIsolation(),
+                    $catalog->securityDefinerFunctionsOutsideTheResolvers(),
+                ],
+            ),
+        );
+    }
+
+    #[Test]
     public function aListedResolverThatIsMissingIsReported(): void
     {
         self::assertSame(
