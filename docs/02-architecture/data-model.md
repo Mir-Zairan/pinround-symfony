@@ -12,7 +12,7 @@ The PostgreSQL tables, keys, indexes, partitions, row-level security, read model
 - [Diagram 4 — notifications, AI, integration, audit](#diagram-4--notifications-ai-integration-audit) — the supporting modules.
 - [Table specifications](#table-specifications) — columns, constraints and indexes per table.
 - [Read models](#read-models) — `ins_ticket_turn` and the other Insight tables.
-- [Row-level security](#row-level-security) — the policy every tenant table gets, how the tenant is set, roles, and the few lookups that run before the tenant is known.
+- [Row-level security](#row-level-security) — the policy every tenant table gets (`TenantTable::enableRls`), how the tenant is set (`TenantContext`, `TenantMiddleware`), roles, and the few lookups that run before the tenant is known.
 - [Ticket visibility predicate](#ticket-visibility-predicate) — the one canonical rule for who may see a restricted ticket.
 - [Index catalogue](#index-catalogue) — the single list of indexes on hot tables.
 - [Query patterns](#query-patterns) — the grouped list, Home, duplicates, ticket history, with SQL.
@@ -272,7 +272,7 @@ Home and "Whose turn?" read this table joined with `tkt_ticket_list_v`, a read-o
 
 ## Row-level security
 
-Every tenant table gets the same policy. The app's database role has no `BYPASSRLS`, and `FORCE ROW LEVEL SECURITY` makes the table owner obey the policy too.
+Every tenant table gets the same policy. The app's database role has no `BYPASSRLS`, and `FORCE ROW LEVEL SECURITY` makes the table owner obey the policy too. The migration that creates the table passes the statements of `App\SharedKernel\Infrastructure\Doctrine\Migration\TenantTable::enableRls('<table>')` to `addSql()` (it accepts only a plain lowercase name of up to 63 characters and quotes it). These are the statements; the table rights are separate grants in the same migration (see below).
 
 ```sql
 ALTER TABLE tkt_ticket ENABLE ROW LEVEL SECURITY;
@@ -284,9 +284,11 @@ CREATE POLICY tenant_isolation ON tkt_ticket
 
 **How the tenant is set**
 
-- `TenantContext` runs `SELECT set_config('app.org_id', $1, true)` as the first statement of every transaction. The third argument `true` makes it transaction-local, like `SET LOCAL`, and unlike `SET LOCAL` it accepts a bound parameter (no string building, no SQL injection). The setting ends with the transaction, which is safe with PgBouncer in transaction mode and with FrankenPHP worker mode.
+- `App\SharedKernel\Application\TenantContext` holds the current `OrganizationId` (a lowercase canonical UUIDv7) for the request or message. The DBAL driver middleware `App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware`, registered on every connection, runs `SELECT set_config('app.org_id', ?, true)` with the id bound, right after each outermost `BEGIN`, when `TenantContext` holds an organization. The third argument `true` makes it transaction-local, like `SET LOCAL`, and unlike `SET LOCAL` it accepts a bound parameter (no string building, no SQL injection). The setting ends with the transaction, which is safe with PgBouncer in transaction mode and with FrankenPHP worker mode.
+- **Contract:** set the tenant before the transaction begins. Changing it inside a transaction has no effect until the next one, and nested transactions (savepoints) do not set it again. A statement outside a transaction (autocommit) never has a tenant, so it sees no tenant rows. `TenantContext` is reset by the kernel between requests, so no tenant survives into the next one.
 - **Why `NULLIF`:** on a pooled connection that has already run a transaction-local setting, `current_setting('app.org_id', true)` returns an empty string `''` (not NULL) once that transaction is over. `''::uuid` would raise an error. `NULLIF(…, '')` turns it into NULL, `organization_id = NULL` is never true, so **no rows** match. This fails closed.
-- `TenantContext` also throws in PHP before any query when no tenant is set, so the database check is the second line of defence.
+- Code that needs a tenant reads it with `TenantContext::require()`, which throws `TenantNotSet` when none is set, so the database check is the second line of defence. The middleware itself never throws: without a tenant it sets nothing, and the policy returns no rows.
+- `tests/Integration/Tenancy/TenantIsolationTest` proves this on a test-only table `zz_tenant_probe`, which exists only in the test database (a test fixture creates it through the migrator connection; no migration does).
 - **Messenger workers:** every handler runs inside the `doctrine_transaction` middleware, and a pinround middleware reads the `organization_id` from the message envelope and calls `set_config` at the start of that transaction. A message without an org (system jobs) runs with no tenant and can only touch global tables or call the resolver functions below.
 - **Worker mode:** after an exception the EntityManager is closed; the kernel reset resets it before the next request or message. A test throws inside a request and checks the next request works and carries no tenant ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)).
 - A static check bans `SET app.org_id` without `LOCAL` and any `set_config('app.org_id', …, false)`.
