@@ -251,6 +251,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T2): Application, Domain, Api and Event layers may not use vendor code; only Infrastructure and UI may. Put framework glue in Infrastructure.
 - 2026-11-06 (P00.T2): the CI integration job creates `pinround_test` but runs no migrations. P00.T3 must add a migrate step for the test database.
 - 2026-11-06 (P00.T2): ADR-0028 describes one "unit+integration" job and a nightly e2e. The real workflow has separate `unit` and `integration` jobs, and `e2e` is a stub that runs on pull requests only until P00.T9.
-- 2026-11-06 (P00.T2): PHPUnit 13 fails an empty suite, so `test:unit` and `test:integration` pass `--do-not-fail-on-empty-test-suite`. `composer test` does not.
+- 2026-11-06 (P00.T2): PHPUnit 13 fails an empty suite. Keep it that way: the unit and integration suites have tests, so a suite that finds none (a renamed folder) turns CI red.
+- 2026-11-06 (P00.T2): `symfony/property-info` is dev-only (it comes with Foundry), so `config/packages/property_info.yaml` sets it only for dev and test. Move it to `require` before prod code needs it.
 - 2026-11-06 (P00.T2): PHP-CS-Fixer prints a "minimum PHP 8.4" warning on PHP 8.5 but runs correctly.
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)

@@ -78,8 +78,8 @@
             "assets:install %PUBLIC_DIR%": "symfony-cmd"
         },
         "test": "phpunit",
-        "test:unit": "phpunit --testsuite unit --do-not-fail-on-empty-test-suite",
-        "test:integration": "phpunit --testsuite integration --do-not-fail-on-empty-test-suite",
+        "test:unit": "phpunit --testsuite unit",
+        "test:integration": "phpunit --testsuite integration",
         "test:functional": "phpunit --testsuite functional",
         "cs": "php-cs-fixer fix --dry-run --diff --show-progress=none",
         "cs:fix": "php-cs-fixer fix",
