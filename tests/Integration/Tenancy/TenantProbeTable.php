@@ -30,7 +30,8 @@ final readonly class TenantProbeTable
                 'CREATE TABLE zz_tenant_probe (
                     id uuid PRIMARY KEY DEFAULT uuidv7(),
                     organization_id uuid NOT NULL,
-                    label text NOT NULL
+                    label text NOT NULL,
+                    note text
                 )',
             );
             $migrator->executeStatement('CREATE INDEX zz_tenant_probe_organization_id_label_idx ON zz_tenant_probe (organization_id, label)');

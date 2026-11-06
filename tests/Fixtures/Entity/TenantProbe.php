@@ -25,6 +25,9 @@ final class TenantProbe implements TenantOwned
     #[ORM\Column(type: Types::TEXT)]
     private string $label;
 
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    private ?string $note = null;
+
     public function __construct(string $id, string $organizationId, string $label)
     {
         $this->id = $id;
@@ -50,5 +53,15 @@ final class TenantProbe implements TenantOwned
     public function relabel(string $label): void
     {
         $this->label = $label;
+    }
+
+    public function note(): ?string
+    {
+        return $this->note;
+    }
+
+    public function annotate(string $note): void
+    {
+        $this->note = $note;
     }
 }

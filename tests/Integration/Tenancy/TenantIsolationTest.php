@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Tenancy;
 
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
 use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
@@ -113,17 +114,23 @@ final class TenantIsolationTest extends KernelTestCase
     }
 
     #[Test]
-    public function aNestedTransactionKeepsTheOrgIdOfTheOuterOne(): void
+    public function theOrgCannotChangeInsideATransactionAndANestedOneKeepsTheOuterOrgId(): void
     {
         $this->tenantContext->set(new OrganizationId(self::ORG_A));
 
         $settingInSavepoint = $this->connection->transactional(function (Connection $connection): mixed {
-            $this->tenantContext->set(new OrganizationId(self::ORG_B));
+            try {
+                $this->tenantContext->set(new OrganizationId(self::ORG_B));
+                self::fail('The switch inside the transaction was not refused.');
+            } catch (TenantSwitchRefused) {
+            }
 
             return $connection->transactional($this->currentOrgSetting(...));
         });
 
         self::assertSame(self::ORG_A, $settingInSavepoint);
+        self::assertSame(self::ORG_A, $this->tenantContext->get()?->toString());
+        $this->tenantContext->set(new OrganizationId(self::ORG_B));
         self::assertSame(self::ORG_B, $this->connection->transactional($this->currentOrgSetting(...)));
     }
 

@@ -12,8 +12,8 @@ use Symfony\Contracts\Service\ResetInterface;
  * each database transaction. The kernel resets it between requests, so worker mode never carries a
  * tenant over (ADR-0008).
  *
- * Moving from one organization to another one or to none first runs the TenantSwitchGuard; the first set() and
- * setting the same organization again do not.
+ * Moving from one organization to another one or to none first asks the TenantSwitchGuard, which refuses it while
+ * state of the current one is open. The first set() and setting the same organization again do not ask.
  */
 final class TenantContext implements ResetInterface
 {

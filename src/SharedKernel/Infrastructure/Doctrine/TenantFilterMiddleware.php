@@ -21,7 +21,7 @@ use Symfony\Contracts\Service\ResetInterface;
  * marks the tenant set when TenantContext holds one, at COMMIT and ROLLBACK it clears the mark. It follows the
  * transaction boundary because that is where RLS takes the organization too; a SQLFilter cannot take services.
  * reset() clears the mark between worker requests, also when a connection was closed in the middle of a
- * transaction. Clearing the entity manager when the organization changes is EntityManagerTenantSwitchGuard's job.
+ * transaction. DoctrineTenantSwitchGuard keeps the organization from changing while a transaction is open.
  *
  * Priority below TenantMiddleware's 0 makes this the outer wrapper: the mark is set only after BEGIN and
  * set_config have both succeeded.
