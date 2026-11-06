@@ -1,0 +1,148 @@
+/* Colour tokens are copied from docs/04-prototype/prototype-guide.md#design-tokens; DesignTokensTest keeps them in step. */
+:root {
+  color-scheme: light;
+  --primary: #006b5f;
+  --on-primary: #ffffff;
+  --primary-container: #9ef2e3;
+  --on-primary-container: #005047;
+  --secondary-container: #cce8e2;
+  --on-secondary-container: #334b47;
+  --surface: #f4fbf8;
+  --s-lowest: #ffffff;
+  --s-low: #eff5f2;
+  --s-c: #e9efec;
+  --s-high: #e3eae7;
+  --s-highest: #dde4e1;
+  --on-surface: #161d1b;
+  --on-surface-var: #3f4946;
+  --outline: #6f7976;
+  --outline-var: #bec9c5;
+  --inverse-surface: #2b3230;
+  --inverse-on-surface: #ecf2ef;
+  --error: #ba1a1a;
+  --on-error: #ffffff;
+  --error-container: #ffdad6;
+  --on-error-container: #93000a;
+  --passed: #006c51;
+  --passed-container: #83f8cd;
+  --on-passed-container: #002116;
+  --waiting: #735c00;
+  --waiting-container: #ffe088;
+  --on-waiting-container: #241a00;
+  --ping: #0062a0;
+  --ping-container: #d0e4ff;
+  --on-ping-container: #001d34;
+  --ai: #4f51be;
+  --ai-container: #e1e0ff;
+  --on-ai-container: #06006c;
+  --scrim: rgba(0,0,0,.32);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --primary: #82d5c7;
+    --on-primary: #003731;
+    --primary-container: #005047;
+    --on-primary-container: #9ef2e3;
+    --secondary-container: #334b47;
+    --on-secondary-container: #cce8e2;
+    --surface: #0e1513;
+    --s-lowest: #090f0e;
+    --s-low: #161d1b;
+    --s-c: #1a211f;
+    --s-high: #252b2a;
+    --s-highest: #303634;
+    --on-surface: #dde4e1;
+    --on-surface-var: #bec9c5;
+    --outline: #899390;
+    --outline-var: #3f4946;
+    --inverse-surface: #dde4e1;
+    --inverse-on-surface: #2b3230;
+    --error: #ffb4ab;
+    --on-error: #690005;
+    --error-container: #93000a;
+    --on-error-container: #ffdad6;
+    --passed: #66dbb2;
+    --passed-container: #00513c;
+    --on-passed-container: #83f8cd;
+    --waiting: #ebc23e;
+    --waiting-container: #574500;
+    --on-waiting-container: #ffe088;
+    --ping: #9bcbff;
+    --ping-container: #004a7a;
+    --on-ping-container: #d0e4ff;
+    --ai: #c0c1ff;
+    --ai-container: #3637a4;
+    --on-ai-container: #e1e0ff;
+    --scrim: rgba(0,0,0,.6);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --primary: #82d5c7;
+  --on-primary: #003731;
+  --primary-container: #005047;
+  --on-primary-container: #9ef2e3;
+  --secondary-container: #334b47;
+  --on-secondary-container: #cce8e2;
+  --surface: #0e1513;
+  --s-lowest: #090f0e;
+  --s-low: #161d1b;
+  --s-c: #1a211f;
+  --s-high: #252b2a;
+  --s-highest: #303634;
+  --on-surface: #dde4e1;
+  --on-surface-var: #bec9c5;
+  --outline: #899390;
+  --outline-var: #3f4946;
+  --inverse-surface: #dde4e1;
+  --inverse-on-surface: #2b3230;
+  --error: #ffb4ab;
+  --on-error: #690005;
+  --error-container: #93000a;
+  --on-error-container: #ffdad6;
+  --passed: #66dbb2;
+  --passed-container: #00513c;
+  --on-passed-container: #83f8cd;
+  --waiting: #ebc23e;
+  --waiting-container: #574500;
+  --on-waiting-container: #ffe088;
+  --ping: #9bcbff;
+  --ping-container: #004a7a;
+  --on-ping-container: #d0e4ff;
+  --ai: #c0c1ff;
+  --ai-container: #3637a4;
+  --on-ai-container: #e1e0ff;
+  --scrim: rgba(0,0,0,.6);
+}
+
+:root {
+  --group-todo: #6f7976;
+  --group-doing: #006b5f;
+  --group-check: #2f6fd6;
+  --group-wait: #c98a00;
+  --group-done: #006c51;
+
+  --radius-tag: 6px;
+  --radius-chip: 10px;
+  --radius-input: 12px;
+  --radius-card: 16px;
+  --radius-button: 20px;
+  --radius-dialog: 24px;
+
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-28: 28px;
+  --space-32: 32px;
+
+  --font-text: 'Atkinson Hyperlegible Next', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
+}

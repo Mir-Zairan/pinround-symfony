@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down sh logs test qa db-roles migrate migrate-test seed check-compose
+.PHONY: help up down sh logs test qa e2e e2e-update db-roles migrate migrate-test seed check-compose
 
 # .env.dev holds the dev Mercure keys; .env.local is git-ignored and overrides both (for example HTTP_PORT); later files win.
 ENV_FILES := --env-file .env --env-file .env.dev $(if $(wildcard .env.local),--env-file .env.local)
@@ -48,6 +48,16 @@ test: migrate-test ## Run the PHPUnit tests in the app container
 
 qa: ## Run every quality gate in the app container
 	$(COMPOSE) exec app composer qa
+
+e2e: ## Run the Playwright shell tests against the running stack (E2E_BASE_URL, default https://localhost)
+	npm ci --prefix tests/e2e
+	npm exec --prefix tests/e2e -- playwright install chromium
+	npm exec --prefix tests/e2e -- playwright test --config tests/e2e/playwright.config.ts
+
+e2e-update: ## Refresh the Playwright screenshot baselines
+	npm ci --prefix tests/e2e
+	npm exec --prefix tests/e2e -- playwright install chromium
+	npm exec --prefix tests/e2e -- playwright test --config tests/e2e/playwright.config.ts --update-snapshots
 
 db-roles: ## Create pinround_test if missing and apply docker/postgres/roles.sql to both databases
 	$(PSQL) -d pinround -tAc "SELECT 1 FROM pg_database WHERE datname = 'pinround_test'" | grep -q 1 \

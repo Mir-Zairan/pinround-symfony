@@ -10,3 +10,9 @@ config/secrets/prod/prod.decrypt.private.php
 public/bundles/
 phpunit.xml
 .phpunit.cache/
+.php-cs-fixer.php
+.php-cs-fixer.cache
+public/assets/
+tests/e2e/node_modules/
+tests/e2e/test-results/
+tests/e2e/playwright-report/

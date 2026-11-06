@@ -200,7 +200,8 @@ Notes:
 - `http://localhost:11434` is added to `connect-src` **only** when the org's AI policy allows laptop AI.
 - `{bucket-host}` is the bucket's **own** hostname (for example `acme-pinround.s3.eu-central-1.amazonaws.com` or the CDN host for this bucket), never a shared storage host like `*.amazonaws.com`, which would allow images from any bucket.
 - No inline event handlers. Stimulus controllers only.
-- AssetMapper with import maps. Each script tag gets the nonce. Verify the nonce integration for AssetMapper and Live Components at implementation time.
+- One nonce per request comes from `App\Web\Infrastructure\Security\CspNonce::current()` (128 random bits, base64). Templates print it with `csp_nonce()`; the security-headers subscriber (P00.T8) reads the same service. The kernel resets it between requests, so worker mode never reuses one.
+- AssetMapper with import maps: `{{ importmap('app', {nonce: csp_nonce()}) }}` puts the nonce on every `<script>` it prints (the importmap JSON and the entry module; the polyfill is off). Its `<link rel="modulepreload">` tags carry no nonce and need none: they load same-origin files that `'self'` allows. Verify the nonce integration for Live Components when they arrive.
 
 ## Outbound requests (SSRF)
 
