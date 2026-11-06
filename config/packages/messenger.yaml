@@ -110,6 +110,7 @@ when@test:
         outbox_relay.target_transports:
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey
+            App\Tests\Fixtures\Messaging\OutageProbeRecorded: valkey_with_outage
 
     framework:
         messenger:
@@ -133,7 +134,11 @@ when@test:
                 unreachable_valkey:
                     dsn: 'redis://127.0.0.1:1'
                     options: { stream: unreachable, lazy: true }
+                # Test-only: down until a test calls bringBack() (ValkeyWithOutageTransport), so a message lands in
+                # failed the real way and a retry from failed then reaches it.
+                valkey_with_outage: 'valkey-outage://'
 
             routing:
                 App\Tests\Fixtures\Messaging\OutboxProbeRecorded: outbox
                 App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: outbox
+                App\Tests\Fixtures\Messaging\OutageProbeRecorded: outbox

@@ -6,11 +6,13 @@ namespace App\Tests\Integration\Messaging;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
+use App\Tests\Fixtures\Messaging\OutageProbeRecorded;
 use App\Tests\Fixtures\Messaging\OutboxProbeRecorded;
 use App\Tests\Fixtures\Messaging\OutboxProbeRecordedHandler;
 use App\Tests\Fixtures\Messaging\SaveProbeNote;
 use App\Tests\Fixtures\Messaging\SaveProbeNoteHandler;
 use App\Tests\Fixtures\Messaging\UnreachableProbeRecorded;
+use App\Tests\Fixtures\Messaging\ValkeyWithOutageTransport;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -97,35 +99,49 @@ final class OutboxRelayTest extends KernelTestCase
         self::assertSame(0, $this->probeHandler()->callCount());
     }
 
+    #[Test]
+    public function aRelayedEventIsHandledOnceByTheWorkerOfItsTransport(): void
+    {
+        $this->recordProbeEvent();
+        self::runTheWorkerUntilIdle('outbox');
+        self::assertSame(0, $this->probeHandler()->callCount());
+
+        self::runTheWorkerUntilIdle('async_notify');
+        self::runTheWorkerUntilIdle('async_notify');
+
+        self::assertSame(1, $this->probeHandler()->callCount());
+        self::assertSame([], $this->failedEnvelopes());
+    }
+
     /**
-     * The operator's way back after Valkey was down: the event waits in failed as the outbox worker left it, and
-     * messenger:failed:retry relays it to its target as if it came from the outbox, without handling it.
+     * The operator's way back after Valkey was down: the event lands in failed through the outbox worker's own retries,
+     * and once Valkey is back messenger:failed:retry relays it to its target as if it came from the outbox, without
+     * handling it.
      */
     #[Test]
     public function anEventRetriedFromFailedOnceValkeyIsBackIsRelayedToItsTransportAndNotHandled(): void
     {
-        $this->failedTransport()->send(new Envelope(new OutboxProbeRecorded(self::PROBE_ID), [
-            new TenantStamp(new OrganizationId(self::ORG_A)),
-            new BusNameStamp('event.bus'),
-            new RedeliveryStamp(0),
-            new SentToFailureTransportStamp('outbox'),
-            ErrorDetailsStamp::create(new TransportException('Valkey is unreachable.')),
-        ]));
+        $this->eventBus->dispatch(new OutageProbeRecorded(self::PROBE_ID), [new TenantStamp(new OrganizationId(self::ORG_A))]);
+        self::runTheWorkerUntilIdle('outbox');
         $failed = $this->failedEnvelopes();
         self::assertCount(1, $failed);
+        self::assertSame([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0], self::retryCounts($failed[0]));
+        self::assertSame([], $this->valkeyWithOutage()->getSent());
         $failedMessageId = $failed[0]->last(TransportMessageIdStamp::class)?->getId();
         self::assertIsInt($failedMessageId);
 
+        $this->valkeyWithOutage()->bringBack();
         $retry = new CommandTester(new Application(self::$kernel ?? self::bootKernel())->find('messenger:failed:retry'));
         $retry->execute(['id' => [(string) $failedMessageId], '--force' => true], ['interactive' => false]);
 
         $retry->assertCommandIsSuccessful();
-        $relayed = $this->asyncNotify()->getSent();
+        $relayed = $this->valkeyWithOutage()->getSent();
         self::assertCount(1, $relayed);
-        self::assertEquals(new OutboxProbeRecorded(self::PROBE_ID), $relayed[0]->getMessage());
+        self::assertEquals(new OutageProbeRecorded(self::PROBE_ID), $relayed[0]->getMessage());
         self::assertSame(self::ORG_A, $relayed[0]->last(TenantStamp::class)?->organizationId()->toString());
         self::assertSame([], $relayed[0]->all(SentToFailureTransportStamp::class));
         self::assertSame([], $relayed[0]->all(ErrorDetailsStamp::class));
+        self::assertSame([], $relayed[0]->all(RedeliveryStamp::class));
         self::assertSame([], $this->failedEnvelopes());
         self::assertSame(0, $this->outboxRowCount());
         self::assertSame(0, $this->probeHandler()->callCount());
@@ -215,6 +231,14 @@ final class OutboxRelayTest extends KernelTestCase
     {
         $transport = self::getContainer()->get('messenger.transport.async_notify');
         self::assertInstanceOf(InMemoryTransport::class, $transport);
+
+        return $transport;
+    }
+
+    private function valkeyWithOutage(): ValkeyWithOutageTransport
+    {
+        $transport = self::getContainer()->get('messenger.transport.valkey_with_outage');
+        self::assertInstanceOf(ValkeyWithOutageTransport::class, $transport);
 
         return $transport;
     }

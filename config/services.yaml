@@ -54,3 +54,5 @@ when@test:
         App\Tests\Fixtures\Messaging\CapturedLogRecords:
             autoconfigure: true
             public: true
+        App\Tests\Fixtures\Messaging\ValkeyWithOutageTransportFactory:
+            autoconfigure: true

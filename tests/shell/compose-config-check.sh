@@ -2,7 +2,8 @@
 # Fails when compose.yaml is invalid, a service is missing, a long-running service has no healthcheck,
 # a built or credential-holding service can pull its image, the workers do not consume every Messenger transport
 # but `failed` exactly once with `outbox` alone in worker-outbox, a messenger:consume service does not wait for
-# postgres (and the workers for valkey-state), or docker/minio/Dockerfile lacks pinned commits and digests.
+# a healthy postgres (and the workers for a healthy valkey-state), or docker/minio/Dockerfile lacks pinned commits
+# and digests.
 # Only POSIX tools are used, so CI needs nothing beyond docker compose.
 set -eu
 
@@ -87,28 +88,30 @@ if [ "$outbox_worker_transports" != "outbox" ]; then
     exit 1
 fi
 
-# Whether a service's depends_on lists the given service.
-depends_on() {
+# Whether a service's depends_on lists the given service with condition: service_healthy, so it starts only once
+# that service answers; service_started would let a worker begin consuming before PostgreSQL or Valkey is ready.
+depends_on_healthy() {
     printf '%s\n' "$config" | awk -v svc="$1" -v dep="$2" '
         /^[a-z]/ { in_services = ($0 == "services:") }
-        in_services && /^  [a-z0-9-]+:$/ { current = substr($1, 1, length($1) - 1); in_depends = 0 }
-        in_services && current == svc && /^    [a-z_]+:/ { in_depends = ($1 == "depends_on:") }
-        in_services && current == svc && in_depends && $0 == "      " dep ":" { found = 1 }
-        END { exit !found }
+        in_services && /^  [a-z0-9-]+:$/ { current = substr($1, 1, length($1) - 1); in_depends = 0; in_dep = 0 }
+        in_services && current == svc && /^    [a-z_]+:/ { in_depends = ($1 == "depends_on:"); in_dep = 0 }
+        in_services && current == svc && in_depends && /^      [a-z0-9-]+:$/ { in_dep = ($0 == "      " dep ":") }
+        in_services && current == svc && in_dep && $0 == "        condition: service_healthy" { healthy = 1 }
+        END { exit !healthy }
     '
 }
 
 # The outbox and failed transports are PostgreSQL tables, and a scheduled job records its events in the outbox.
 for consumer in worker-outbox worker worker-heavy scheduler; do
-    if ! depends_on "$consumer" postgres; then
-        echo "compose-config-check: service '$consumer' must depend on postgres" >&2
+    if ! depends_on_healthy "$consumer" postgres; then
+        echo "compose-config-check: service '$consumer' must depend on postgres with condition: service_healthy" >&2
         exit 1
     fi
 done
 
 for worker in worker-outbox worker worker-heavy; do
-    if ! depends_on "$worker" valkey-state; then
-        echo "compose-config-check: service '$worker' must depend on valkey-state" >&2
+    if ! depends_on_healthy "$worker" valkey-state; then
+        echo "compose-config-check: service '$worker' must depend on valkey-state with condition: service_healthy" >&2
         exit 1
     fi
 done

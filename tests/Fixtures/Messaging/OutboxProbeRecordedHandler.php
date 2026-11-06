@@ -7,14 +7,21 @@ namespace App\Tests\Fixtures\Messaging;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 /**
- * Counts the times the probe event is handled, so a test proves the relay moves it without handling it.
+ * Counts the times either probe event is handled, so a test proves the relay moves it without handling it, and a
+ * worker on its target transport handles it.
  */
-#[AsMessageHandler(bus: 'event.bus')]
 final class OutboxProbeRecordedHandler
 {
     private int $callCount = 0;
 
-    public function __invoke(OutboxProbeRecorded $event): void
+    #[AsMessageHandler(bus: 'event.bus')]
+    public function countOutboxProbe(OutboxProbeRecorded $event): void
+    {
+        ++$this->callCount;
+    }
+
+    #[AsMessageHandler(bus: 'event.bus')]
+    public function countOutageProbe(OutageProbeRecorded $event): void
     {
         ++$this->callCount;
     }
