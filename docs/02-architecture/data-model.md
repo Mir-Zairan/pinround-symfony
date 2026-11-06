@@ -296,7 +296,7 @@ CREATE POLICY tenant_isolation ON tkt_ticket
 - `tests/Integration/Tenancy/TenantIsolationTest` proves this on a test-only table `zz_tenant_probe`, which exists only in the test database while that test class runs (its fixture drops and recreates it through the migrator connection, then drops it; no migration creates it).
 - **Messenger workers:** every handler runs inside the `doctrine_transaction` middleware. A pinround Messenger middleware placed before it only fills `TenantContext` from the message's `TenantStamp` (and clears it afterwards); when `doctrine_transaction` opens the transaction, `TenantMiddleware` runs `set_config` as for any other transaction. A message without an org (system jobs) runs with no tenant and can only touch global tables or call the resolver functions below.
 - **Worker mode:** after an exception the EntityManager is closed; the kernel reset resets it before the next request or message. A test throws inside a request and checks the next request works and carries no tenant ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)).
-- A static check bans `SET app.org_id` without `LOCAL` and any `set_config('app.org_id', …, false)`.
+- `bin/check-tenant-setting` (run by `composer lint`, so in CI) bans `SET`, `SET LOCAL`, `SET SESSION` and `RESET` of `app.org_id`, any `set_config('app.org_id', …, false)`, and any `set_config` for `app.org_id` outside `TenantConnection`, `TenantMiddleware` and the few test files that assert or simulate them. Reading it with `current_setting('app.org_id', true)` is fine. `TenantSettingCheckTest` proves it on fixtures.
 
 **Database roles** ([ADR-0005](../03-adr/0005-multi-tenancy.md)) — the same five names everywhere:
 
