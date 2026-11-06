@@ -125,7 +125,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 5. Worker reset: after a request or message ends (including after an exception), `TenantContext` is cleared and a closed `EntityManager` is reset (`ManagerRegistry::resetManager()`), so the next request starts clean.
 **Files:** `tests/Integration/Tenancy/CatalogTest.php`, `src/SharedKernel/Infrastructure/Messenger/{TenantStamp,TenantStampMiddleware,RejectMessageForAnotherTenantMiddleware}.php`, `src/SharedKernel/Application/MessageForAnotherTenantRefused.php`, `src/SharedKernel/Infrastructure/Doctrine/Migration/ResolverFunctions.php`, `migrations/Version20261106140000.php`, `bin/check-tenant-setting`.
 **Acceptance criteria:**
-- [x] The catalog test fails when a new tenant table or partition forgets RLS (proved with a temporary table in the test).
+- [x] The catalog test fails when a new tenant table or partition forgets RLS (proved with throwaway tables and partitions built in a rolled-back transaction; PostgreSQL temporary tables are not scanned).
 - [x] Each resolver function returns ids only and nothing for an unknown input; calling it as `pinround_readonly` is denied.
 - [x] After a request ends, the next request on the same worker has no tenant (worker reset test).
 - [x] After a handler throws and closes the EntityManager, the next message is handled normally (EntityManager reset test).
