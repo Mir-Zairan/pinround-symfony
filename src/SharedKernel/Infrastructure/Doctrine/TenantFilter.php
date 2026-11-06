@@ -5,32 +5,34 @@ declare(strict_types=1);
 namespace App\SharedKernel\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantNotSet;
-use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TenantOwned;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Query\Filter\SQLFilter;
 
 /**
- * Adds `<alias>.organization_id = '<org id>'` to every ORM query on a TenantOwned entity, on top of row-level
- * security (ADR-0005). The organization is the one of the current transaction, the same one RLS uses:
- * TenantFilterMiddleware sets it at each outermost BEGIN and removes it at COMMIT and ROLLBACK. With no
- * organization, which includes any query outside a transaction, a query on a TenantOwned entity throws
- * TenantNotSet. Other entities are not touched.
+ * Restricts every ORM query on a TenantOwned entity to the organization of the current transaction, on top of
+ * row-level security (ADR-0005), so it still holds for a role that bypasses RLS. TenantFilterMiddleware marks
+ * at each outermost BEGIN whether that transaction has an organization, and clears the mark at COMMIT and
+ * ROLLBACK. Without the mark, which includes any query outside a transaction, a query on a TenantOwned entity
+ * throws TenantNotSet. Other entities are not touched.
  */
 final class TenantFilter extends SQLFilter
 {
     public const string NAME = 'tenant';
 
-    // The id goes in as a filter parameter, because Doctrine keys its DQL query cache and the persisters'
-    // cached SQL on the filter parameters: SQL built for one organization is never reused for another.
-    private const string ORGANIZATION_ID_PARAMETER = 'organization_id';
+    // Doctrine keys its query cache on the filter parameters, so the only one is this yes/no mark: each query is
+    // cached once, because compiling a TenantOwned query without the mark throws and caches nothing.
+    private const string IS_TENANT_SET_PARAMETER = 'is_tenant_set';
 
-    private ?OrganizationId $organizationId = null;
+    // Reads the setting RLS reads instead of a literal id, so the SQL is the same for every organization.
+    private const string ORGANIZATION_OF_TRANSACTION = "NULLIF(current_setting('app.org_id', true), '')::uuid";
 
-    public function useOrganization(?OrganizationId $organizationId): void
+    private bool $isTenantSet = false;
+
+    public function markTenantSet(bool $isTenantSet): void
     {
-        $this->organizationId = $organizationId;
-        $this->setParameter(self::ORGANIZATION_ID_PARAMETER, $organizationId?->toString() ?? '');
+        $this->isTenantSet = $isTenantSet;
+        $this->setParameter(self::IS_TENANT_SET_PARAMETER, $isTenantSet);
     }
 
     /**
@@ -42,10 +44,10 @@ final class TenantFilter extends SQLFilter
             return '';
         }
 
-        if (null === $this->organizationId) {
+        if (!$this->isTenantSet) {
             throw new TenantNotSet();
         }
 
-        return $targetTableAlias.'.organization_id = '.$this->getParameter(self::ORGANIZATION_ID_PARAMETER);
+        return $targetTableAlias.'.organization_id = '.self::ORGANIZATION_OF_TRANSACTION;
     }
 }

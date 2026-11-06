@@ -67,18 +67,19 @@ final class TenantFilterTest extends KernelTestCase
     }
 
     #[Test]
-    public function theSqlCarriesTheOrganizationOfTheTransaction(): void
+    public function theSqlReadsTheOrganizationOfTheTransactionInsteadOfALiteralId(): void
     {
         $this->tenantContext->set(new OrganizationId(self::ORG_A));
 
         $sql = $this->entityManager->wrapInTransaction(fn (): mixed => $this->labelsQuery()->getSQL());
 
         self::assertIsString($sql);
-        self::assertStringContainsString(".organization_id = '".self::ORG_A."'", $sql);
+        self::assertStringContainsString(".organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid", $sql);
+        self::assertStringNotContainsString(self::ORG_A, $sql);
     }
 
     #[Test]
-    public function theQueryCacheNeverServesOneOrganizationTheSqlOfAnother(): void
+    public function allOrganizationsShareOneQueryCacheEntryAndEachSeesOnlyItsOwnRows(): void
     {
         $queryCache = new ArrayAdapter();
         $this->entityManager->getConfiguration()->setQueryCache($queryCache);
@@ -86,7 +87,66 @@ final class TenantFilterTest extends KernelTestCase
         self::assertSame(['a-first', 'a-second'], $this->labelsAs(self::ORG_A));
         self::assertSame(['b-only'], $this->labelsAs(self::ORG_B));
         self::assertSame(['a-first', 'a-second'], $this->labelsAs(self::ORG_A));
-        self::assertCount(2, $queryCache->getValues());
+        self::assertCount(1, $queryCache->getValues());
+    }
+
+    #[Test]
+    public function aRepositoryFindByReturnsOnlyTheRowsOfTheTransactionsOrganizationWithRowLevelSecurityOff(): void
+    {
+        $this->tenantContext->set(new OrganizationId(self::ORG_A));
+
+        $labels = $this->withRowLevelSecurityOff(fn (): mixed => $this->entityManager->wrapInTransaction(fn (): array => array_map(
+            static fn (TenantProbe $probe): string => $probe->label(),
+            $this->entityManager->getRepository(TenantProbe::class)->findBy([], ['label' => 'ASC']),
+        )));
+
+        self::assertSame(['a-first', 'a-second'], $labels);
+    }
+
+    #[Test]
+    public function findDoesNotReturnTheOtherOrganizationsRowAfterTheOrganizationChangesWithRowLevelSecurityOff(): void
+    {
+        $this->tenantContext->set(new OrganizationId(self::ORG_A));
+        $rowOfOrgA = $this->entityManager->wrapInTransaction(
+            fn (): ?TenantProbe => $this->entityManager->getRepository(TenantProbe::class)->findOneBy(['label' => 'a-first']),
+        );
+        self::assertInstanceOf(TenantProbe::class, $rowOfOrgA);
+        $this->entityManager->clear();
+        $this->tenantContext->set(new OrganizationId(self::ORG_B));
+
+        $found = $this->withRowLevelSecurityOff(fn (): mixed => $this->entityManager->wrapInTransaction(
+            fn (): ?TenantProbe => $this->entityManager->find(TenantProbe::class, $rowOfOrgA->id()),
+        ));
+
+        self::assertNull($found);
+    }
+
+    #[Test]
+    public function withRowLevelSecurityOffTheFilterStillRestrictsToTheTransactionsOrganization(): void
+    {
+        [$labelsFiltered, $labelsUnfiltered] = $this->withRowLevelSecurityOff(function (): array {
+            $labelsFiltered = $this->labelsAs(self::ORG_A);
+            $this->entityManager->getFilters()->disable(TenantFilter::NAME);
+
+            return [$labelsFiltered, $this->labelsAs(self::ORG_A)];
+        });
+
+        self::assertSame(['a-first', 'a-second'], $labelsFiltered);
+        self::assertSame(['a-first', 'a-second', 'b-only'], $labelsUnfiltered);
+    }
+
+    #[Test]
+    public function aWorkerResetDoesNotBuildAnEntityManagerThatWasNeverUsed(): void
+    {
+        self::ensureKernelShutdown();
+        $container = self::getContainer();
+        $container->get('doctrine.dbal.default_connection');
+        $entityManager = $container->get('doctrine.orm.default_entity_manager');
+        self::assertTrue(new \ReflectionClass($entityManager)->isUninitializedLazyObject($entityManager));
+
+        $container->get('services_resetter')->reset();
+
+        self::assertTrue(new \ReflectionClass($entityManager)->isUninitializedLazyObject($entityManager));
     }
 
     #[Test]
@@ -184,6 +244,26 @@ final class TenantFilterTest extends KernelTestCase
     private static function probeTable(): TenantProbeTable
     {
         return new TenantProbeTable(self::getContainer()->get('doctrine.dbal.migrator_connection'));
+    }
+
+    /**
+     * Stands in for a role that bypasses row-level security, so only the filter can keep the organizations apart.
+     *
+     * @template T
+     *
+     * @param \Closure(): T $work
+     *
+     * @return T
+     */
+    private function withRowLevelSecurityOff(\Closure $work): mixed
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $migrator->executeStatement('ALTER TABLE zz_tenant_probe DISABLE ROW LEVEL SECURITY');
+        try {
+            return $work();
+        } finally {
+            $migrator->executeStatement('ALTER TABLE zz_tenant_probe ENABLE ROW LEVEL SECURITY');
+        }
     }
 
     private function insertLabelsAs(string $organizationId, string ...$labels): void

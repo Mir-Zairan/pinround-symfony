@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\SharedKernel\Infrastructure\Http;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
 use Symfony\Component\HttpKernel\Event\FinishRequestEvent;
@@ -20,6 +22,8 @@ use Symfony\Contracts\Service\ResetInterface;
  * it opened that is still open when the request finishes, terminates or the worker resets (ADR-0008).
  *
  * A streamed response body runs after the commit, outside any transaction, so it sees no tenant rows (fails closed).
+ * Whatever fills TenantContext must do it on kernel.request at a priority above 7 (the firewall runs at 8), so the
+ * firewall must not be lazy: a lazy firewall would set the tenant after BEGIN.
  */
 final class RequestTransaction implements EventSubscriberInterface, ResetInterface
 {
@@ -33,7 +37,7 @@ final class RequestTransaction implements EventSubscriberInterface, ResetInterfa
     /** The DBAL nesting level of the transaction this subscriber opened; 0 when it has none open. */
     private int $openNestingLevel = 0;
 
-    public function __construct(private readonly Connection $connection)
+    public function __construct(private readonly Connection $connection, private readonly LoggerInterface $logger)
     {
     }
 
@@ -109,7 +113,13 @@ final class RequestTransaction implements EventSubscriberInterface, ResetInterfa
             while ($this->connection->getTransactionNestingLevel() >= $openNestingLevel) {
                 $this->connection->rollBack();
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $rollBackFailure) {
+            // Class and code only: a database message can quote row values.
+            $this->logger->warning('Rolling back the request transaction failed; closing the connection instead.', [
+                'exception_class' => $rollBackFailure::class,
+                'sqlstate' => $rollBackFailure instanceof DriverException ? $rollBackFailure->getSQLState() : null,
+                'code' => $rollBackFailure->getCode(),
+            ]);
             // Closing the connection ends the transaction on the server, so nothing it wrote is committed.
             $this->connection->close();
         }

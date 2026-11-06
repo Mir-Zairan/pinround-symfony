@@ -9,17 +9,24 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Tests\Integration\Tenancy\TenantProbeTable;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver;
+use Doctrine\DBAL\Driver\AbstractException;
 use Doctrine\DBAL\Driver\Connection as DriverConnection;
 use Doctrine\DBAL\Driver\Middleware\AbstractConnectionMiddleware;
 use Doctrine\DBAL\Driver\Middleware\AbstractDriverMiddleware;
 use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
+use Doctrine\DBAL\Exception\DriverException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Config\FileLocator;
+use Symfony\Component\ErrorHandler\BufferingLogger;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\HttpKernel\KernelEvents;
+use Symfony\Component\Routing\Loader\YamlFileLoader;
 
 /**
  * Proves the one-transaction-per-request rule of RequestTransaction through the test-only endpoints in
@@ -28,6 +35,15 @@ use Symfony\Component\HttpKernel\KernelEvents;
 final class RequestTransactionTest extends WebTestCase
 {
     private const string ORG_A = '0197a3c0-0000-7000-8000-00000000000a';
+    private const array TEST_ROUTE_NAMES = [
+        'test_request_transaction_report',
+        'test_request_transaction_insert',
+        'test_request_transaction_insert_then_throw',
+        'test_request_transaction_insert_then_fail_commit',
+        'test_request_transaction_leave_nested_open',
+        'test_request_transaction_failing_sub_request',
+        'test_request_transaction_lose_connection',
+    ];
 
     private KernelBrowser $client;
 
@@ -62,7 +78,7 @@ final class RequestTransactionTest extends WebTestCase
     }
 
     #[Test]
-    public function theTransactionBeginsAfterTheSecurityFirewallFillsTheTenant(): void
+    public function theTransactionBeginsAtPriority7BelowTheSecurityFirewallsPriority8(): void
     {
         $dispatcher = self::getContainer()->get('event_dispatcher');
         $subscriber = self::getContainer()->get(RequestTransaction::class);
@@ -70,6 +86,24 @@ final class RequestTransactionTest extends WebTestCase
         $priority = $dispatcher->getListenerPriority(KernelEvents::REQUEST, [$subscriber, 'beginTransaction']);
 
         self::assertSame(7, $priority);
+    }
+
+    #[Test]
+    public function theTestOnlyRoutesExistInTheTestKernelAndNowhereElse(): void
+    {
+        $router = self::getContainer()->get('router');
+        $testRouteNames = array_values(array_filter(
+            array_keys($router->getRouteCollection()->all()),
+            static fn (string $name): bool => str_starts_with($name, 'test_'),
+        ));
+        self::assertEqualsCanonicalizing(self::TEST_ROUTE_NAMES, $testRouteNames);
+
+        foreach (['dev', 'prod'] as $environment) {
+            $loader = new YamlFileLoader(new FileLocator(self::$kernel?->getProjectDir().'/config/routes'), $environment);
+            self::assertSame([], $loader->load('test_fixtures.yaml')->all(), $environment);
+        }
+        $testLoader = new YamlFileLoader(new FileLocator(self::$kernel?->getProjectDir().'/config/routes'), 'test');
+        self::assertEqualsCanonicalizing(self::TEST_ROUTE_NAMES, array_keys($testLoader->load('test_fixtures.yaml')->all()));
     }
 
     #[Test]
@@ -168,30 +202,71 @@ final class RequestTransactionTest extends WebTestCase
         $requestTransaction->reset();
     }
 
-    #[Test]
-    public function aRollbackThatFailsClosesTheConnectionInsteadOfThrowing(): void
+    /**
+     * @return iterable<string, array{\Closure(): \Throwable, array<string, mixed>}>
+     */
+    public static function rollBackFailures(): iterable
     {
-        $rollBackFails = new class(new PgSQLDriver()) extends AbstractDriverMiddleware {
+        yield 'a driver error' => [
+            static fn (): \Throwable => new class('ROLLBACK failed on purpose, row value 42', '25P01', 7) extends AbstractException {},
+            ['exception_class' => DriverException::class, 'sqlstate' => '25P01', 'code' => 7],
+        ];
+        yield 'any other error' => [
+            static fn (): \Throwable => new \RuntimeException('ROLLBACK failed on purpose, row value 42'),
+            ['exception_class' => \RuntimeException::class, 'sqlstate' => null, 'code' => 0],
+        ];
+    }
+
+    /**
+     * @param \Closure(): \Throwable $rollBackFailure
+     * @param array<string, mixed>   $expectedContext
+     */
+    #[Test]
+    #[DataProvider('rollBackFailures')]
+    public function aRollbackThatFailsIsLoggedWithoutItsMessageAndClosesTheConnection(\Closure $rollBackFailure, array $expectedContext): void
+    {
+        $rollBackFails = new class(new PgSQLDriver(), $rollBackFailure) extends AbstractDriverMiddleware {
+            /**
+             * @param \Closure(): \Throwable $rollBackFailure
+             */
+            public function __construct(Driver $driver, private readonly \Closure $rollBackFailure)
+            {
+                parent::__construct($driver);
+            }
+
             public function connect(
                 #[\SensitiveParameter]
                 array $params,
             ): DriverConnection {
-                return new class(parent::connect($params)) extends AbstractConnectionMiddleware {
+                return new class(parent::connect($params), $this->rollBackFailure) extends AbstractConnectionMiddleware {
+                    /**
+                     * @param \Closure(): \Throwable $rollBackFailure
+                     */
+                    public function __construct(DriverConnection $connection, private readonly \Closure $rollBackFailure)
+                    {
+                        parent::__construct($connection);
+                    }
+
                     public function rollBack(): void
                     {
-                        throw new \RuntimeException('ROLLBACK failed on purpose');
+                        throw ($this->rollBackFailure)();
                     }
                 };
             }
         };
         $connection = new Connection($this->connection()->getParams(), $rollBackFails);
-        $requestTransaction = new RequestTransaction($connection);
+        $logger = new BufferingLogger();
+        $requestTransaction = new RequestTransaction($connection, $logger);
         $requestTransaction->beginTransaction($this->mainRequestEvent());
 
         $requestTransaction->reset();
 
         self::assertFalse($connection->isTransactionActive());
         self::assertFalse($connection->isConnected());
+        self::assertSame(
+            [['warning', 'Rolling back the request transaction failed; closing the connection instead.', $expectedContext]],
+            $logger->cleanLogs(),
+        );
     }
 
     private static function probeTable(): TenantProbeTable
