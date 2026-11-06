@@ -300,6 +300,8 @@ CREATE POLICY tenant_isolation ON tkt_ticket
 | `pinround_retention` | yes | **yes — the only one** | the nightly retention purge job only |
 | `pinround_readonly` | yes | no | support queries and reporting, with the same tenant setting |
 
+The roles live in `docker/postgres/roles.sql`. The Postgres admin account runs it once per database (`make db-roles` locally, a step in CI, the operator in production) with the four passwords as psql variables. It is safe to re-run: it creates missing roles, re-asserts their attributes, makes `pinround_migrator` the database owner and owner of every table, view and sequence in `public`, revokes all rights of `PUBLIC` on the database and on schema `public` (so only the four roles get `CONNECT`, and nobody but the owner gets `CREATE` or `TEMPORARY`), and grants `pinround_app` `SELECT, INSERT, UPDATE, DELETE` (no `TRUNCATE`, no DDL) and `pinround_readonly` `SELECT` on existing tables (child partitions skipped) and, through default privileges, on tables the migrator creates later; `pinround_app` also gets `USAGE, SELECT` on sequences. `pinround_retention` gets only `CONNECT` and schema `USAGE` until the retention job (P11) adds its rights. `DatabaseRolesTest` checks the result.
+
 **Lookups before the tenant is known (the only RLS exceptions)**
 
 Some lookups must find a row before the app knows which organization the request belongs to. They do not get `BYPASSRLS`. Each one is a `SECURITY DEFINER` SQL function owned by a role without login (`pinround_resolver`), with `SET search_path = pg_catalog, public` fixed in the function definition. It takes one exact key, and **returns ids only** (never names, text or secrets). `pinround_app` gets `EXECUTE` on these functions and nothing else from the owner role.

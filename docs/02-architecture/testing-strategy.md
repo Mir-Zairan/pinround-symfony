@@ -97,11 +97,11 @@ GitHub Actions workflow `CI` (`.github/workflows/ci.yml`) runs on every push and
 |---|---|---|---|
 | `static` | `composer validate --strict`, `composer cs`, `composer rector`, `composer phpstan`, `composer deptrac`, `composer lint` (container, YAML, Twig), `composer audit`: the same commands as `composer qa` minus the tests | 5 min | ≤ 3 min |
 | `unit` | `composer test:unit` | 3 min | ≤ 1 min |
-| `integration` | Service containers `postgres:18.6` and `valkey/valkey:8.1.4` (same tags as `compose.yaml`) with health checks, the database `pinround_test` (the test env appends `_test` to the database name in `DATABASE_URL`); `composer test:integration`, then `composer test:functional` | 8 min | ≤ 6 min |
+| `integration` | Service containers `postgres:18.6` and `valkey/valkey:8.1.4` (same tags as `compose.yaml`) with health checks, the database `pinround_test` (the test env appends `_test` to the database name in `DATABASE_URL` and `MIGRATOR_DATABASE_URL`); the service's admin user `pinround` runs `docker/postgres/roles.sql`, `bin/console doctrine:migrations:migrate` runs in the test env as `pinround_migrator`, then `composer test:integration` and `composer test:functional` run as `pinround_app` (`DatabaseRolesTest` checks the roles) | 8 min | ≤ 6 min |
 | `build` | `docker build --target prod` with the GitHub Actions layer cache (no push), then `sh tests/shell/compose-config-check.sh` | 6 min | ≤ 5 min |
 | `e2e` | Stub: prints that the Playwright journeys arrive in P00.T9. It runs on pull requests only; on a push it is skipped, which counts as passing for branch protection | 2 min | ≤ 8 min once real (Docker stack, Playwright key journeys + axe) |
 
-Not in CI yet: migrations and isolation suites (no migrations exist), image scan and SBOM (planned for the main branch).
+Not in CI yet: the migration test and the tenant isolation suite (no tenant tables exist; the migrations themselves already run in `integration`), image scan and SBOM (planned for the main branch).
 
 Total target under 15 minutes. A failed job blocks the merge.
 
