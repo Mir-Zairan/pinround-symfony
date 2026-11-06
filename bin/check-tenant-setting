@@ -7,7 +7,8 @@ declare(strict_types=1);
  * CI check for the tenant setting (ADR-0005). Prints `file:line: text` for every violation and exits 1.
  *
  * The tenant setting is named either literally (app.org_id, optionally quoted, quotes optionally backslash-escaped)
- * or through a PHP constant concatenated into the string (TenantSetting::NAME, self::NAME). Bans, case-insensitive
+ * or through a PHP constant concatenated into the string (TenantSetting::NAME, self::NAME), the quotes around the
+ * concatenation optionally backslash-escaped too. Bans, case-insensitive
  * and with any whitespace:
  * - `SET`, `SET LOCAL`, `SET SESSION` and `RESET` of the setting;
  * - any set_config for the setting whose third argument is anything but the bare word true, in every file;
@@ -38,8 +39,8 @@ const ALLOWED_SET_CONFIG_FILES = [
 ];
 
 const QUOTE = '\\\\?[\'"]';
-const NAME_CONSTANT = '[\'"]+\s*\.\s*[\w\\\\]+::NAME\b';
-const TENANT_NAME = '(?:'.QUOTE.'app\.org_id'.QUOTE.'|'.NAME_CONSTANT.'(?:\s*\.\s*[\'"]+)?)';
+const NAME_CONSTANT = '(?:'.QUOTE.')+\s*\.\s*[\w\\\\]+::NAME\b';
+const TENANT_NAME = '(?:'.QUOTE.'app\.org_id'.QUOTE.'|'.NAME_CONSTANT.'(?:\s*\.\s*(?:'.QUOTE.')+)?)';
 const SET_STATEMENT = '/\b(?:SET|RESET)\s+(?:(?:LOCAL|SESSION)\s+)?(?:(?:'.QUOTE.')?app\.org_id\b|'.NAME_CONSTANT.')/i';
 const SET_CONFIG_CALL = '/set_config\s*\(\s*'.TENANT_NAME.'/i';
 // The second argument may hold one level of parentheses but never closes the call, so a mention such as

@@ -21,6 +21,7 @@ final class TenantSettingCheckTest extends TestCase
     private const string FIXTURES = 'tests/Fixtures/TenantSetting/';
     private const string TENANT_CONNECTION = 'src/SharedKernel/Infrastructure/Doctrine/TenantConnection.php';
     private const string TRANSACTION_LOCAL_ARGUMENTS = '?, true)';
+    private const string STATEMENT_DECLARATION = 'SET_TENANT_FOR_TRANSACTION = ';
 
     private ?string $temporaryRoot = null;
 
@@ -34,6 +35,10 @@ final class TenantSettingCheckTest extends TestCase
             [
                 self::FIXTURES.'Bad/escaped_quotes.php:5',
                 self::FIXTURES.'Bad/escaped_quotes.php:6',
+                self::FIXTURES.'Bad/escaped_quotes_around_constant.php:5',
+                self::FIXTURES.'Bad/escaped_quotes_around_constant.php:6',
+                self::FIXTURES.'Bad/escaped_quotes_around_constant.php:7',
+                self::FIXTURES.'Bad/escaped_quotes_around_constant.php:8',
                 self::FIXTURES.'Bad/in_php.php:5',
                 self::FIXTURES.'Bad/in_shell.sh:2',
                 self::FIXTURES.'Bad/in_yaml.yaml:2',
@@ -121,6 +126,39 @@ final class TenantSettingCheckTest extends TestCase
         foreach (['false', 'FALSE', "'false'", "'off'", "'no'", "'f'", "'0'", '0', '$isLocal'] as $thirdArgument) {
             yield 'third argument '.$thirdArgument => [$thirdArgument];
         }
+    }
+
+    /**
+     * @param list<string> $expectedLocations
+     */
+    #[Test]
+    #[DataProvider('escapedQuoteStatements')]
+    public function theMiddlewareStatementWrittenWithEscapedQuotesIsJudgedByItsThirdArgument(string $thirdArgument, array $expectedLocations): void
+    {
+        $source = self::tenantConnectionSource();
+        $rewritten = preg_replace(
+            '/('.self::STATEMENT_DECLARATION.').+;$/m',
+            '${1}\'SELECT set_config(\\\\\'\'.TenantSetting::NAME.\'\\\\\', ?, '.$thirdArgument.')\';',
+            $source,
+            -1,
+            $replacements,
+        );
+        self::assertSame(1, $replacements, 'TenantConnection no longer declares the statement this test rewrites');
+        self::assertIsString($rewritten);
+
+        $process = self::runCheckIn($this->temporaryRepositoryWith([self::TENANT_CONNECTION => $rewritten]), self::TENANT_CONNECTION);
+
+        self::assertSame([] === $expectedLocations ? 0 : 1, $process->getExitCode(), self::outputOf($process));
+        self::assertSame($expectedLocations, self::reportedLocations($process));
+    }
+
+    /**
+     * @return iterable<string, array{string, list<string>}>
+     */
+    public static function escapedQuoteStatements(): iterable
+    {
+        yield 'transaction-local' => ['true', []];
+        yield 'not transaction-local' => ['false', [self::TENANT_CONNECTION.':'.self::lineOf(self::tenantConnectionSource(), self::STATEMENT_DECLARATION)]];
     }
 
     #[Test]
