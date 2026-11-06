@@ -188,7 +188,7 @@ sequenceDiagram
 Rules shown in this flow:
 
 1. **Authentication** comes first. Every route except login, invite accept, health and webhooks needs a session or a token ([ADR-0012](../03-adr/0012-authentication.md)).
-2. **The tenant is set before any query.** `TenantContext` runs `SELECT set_config('app.org_id', $1, true)` (transaction-local) at the start of the transaction. RLS then rejects rows from other organizations, even if a query forgets its filter ([ADR-0005](../03-adr/0005-multi-tenancy.md)).
+2. **The tenant is set before any query.** The firewall fills `TenantContext`; the DBAL middleware `TenantMiddleware` reads it and runs `SELECT set_config('app.org_id', $1, true)` (transaction-local) at the start of the transaction. RLS then rejects rows from other organizations, even if a query forgets its filter ([ADR-0005](../03-adr/0005-multi-tenancy.md)).
 3. **Every action asks a Voter**, and the voter denies by default ([ADR-0013](../03-adr/0013-authorization.md)).
 4. **Domain objects enforce the rules.** Controllers stay thin.
 5. **One transaction covers** the state change, the read model update ([ADR-0015](../03-adr/0015-turn-read-model.md)) and the outbox row. Either all of them happen, or none.

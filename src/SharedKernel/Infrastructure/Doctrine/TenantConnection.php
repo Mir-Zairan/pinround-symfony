@@ -24,8 +24,8 @@ final class TenantConnection extends AbstractConnectionMiddleware
 
     /**
      * DBAL calls this only for the outermost transaction; nested levels become savepoints without it.
-     * When setting the tenant fails, the transaction is rolled back so the connection is not left in an
-     * aborted one, and the original failure is rethrown.
+     * A failure to set the tenant is thrown as is; CloseOnFailedBeginConnection then closes the connection,
+     * which ends the open transaction on the server.
      */
     public function beginTransaction(): void
     {
@@ -36,24 +36,8 @@ final class TenantConnection extends AbstractConnectionMiddleware
             return;
         }
 
-        try {
-            $statement = $this->prepare(self::SET_TENANT_FOR_TRANSACTION);
-            $statement->bindValue(1, $organizationId->toString(), ParameterType::STRING);
-            $statement->execute();
-        } catch (\Throwable $setTenantFailure) {
-            $this->rollBackQuietly();
-
-            throw $setTenantFailure;
-        }
-    }
-
-    // A failing rollback is dropped: the set_config failure is the cause the caller must see, PHP cannot
-    // attach a second cause to an exception that already exists, and a broken connection fails again on next use.
-    private function rollBackQuietly(): void
-    {
-        try {
-            $this->rollBack();
-        } catch (\Throwable) {
-        }
+        $statement = $this->prepare(self::SET_TENANT_FOR_TRANSACTION);
+        $statement->bindValue(1, $organizationId->toString(), ParameterType::STRING);
+        $statement->execute();
     }
 }

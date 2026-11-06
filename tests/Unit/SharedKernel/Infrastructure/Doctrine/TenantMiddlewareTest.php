@@ -24,8 +24,6 @@ final class TenantMiddlewareTest extends TestCase
 
     private ?\Throwable $setTenantFailure = null;
 
-    private ?\Throwable $rollBackFailure = null;
-
     #[Test]
     public function afterBeginItSetsTheOrgIdAsABoundTransactionLocalParameter(): void
     {
@@ -69,47 +67,26 @@ final class TenantMiddlewareTest extends TestCase
     }
 
     #[Test]
-    public function whenSettingTheTenantFailsItRollsBackAndRethrowsTheFailure(): void
+    public function whenSettingTheTenantFailsTheFailureReachesTheCallerUnchanged(): void
     {
         $this->setTenantFailure = new \RuntimeException('set_config failed');
-
-        $thrown = $this->beginWithOrgA();
-
-        self::assertSame($this->setTenantFailure, $thrown);
-        self::assertSame(
-            ['begin', "prepare SELECT set_config('app.org_id', ?, true)", 'bind 1 '.self::ORG_A.' STRING', 'execute', 'rollback'],
-            $this->driverCalls,
-        );
-    }
-
-    #[Test]
-    public function whenTheRollbackAlsoFailsTheSetTenantFailureIsStillThrown(): void
-    {
-        $this->setTenantFailure = new \RuntimeException('set_config failed');
-        $this->rollBackFailure = new \RuntimeException('rollback failed');
-
-        $thrown = $this->beginWithOrgA();
-
-        self::assertSame($this->setTenantFailure, $thrown);
-        self::assertSame(
-            ['begin', "prepare SELECT set_config('app.org_id', ?, true)", 'bind 1 '.self::ORG_A.' STRING', 'execute', 'rollback'],
-            $this->driverCalls,
-        );
-    }
-
-    private function beginWithOrgA(): ?\Throwable
-    {
         $tenantContext = new TenantContext();
         $tenantContext->set(new OrganizationId(self::ORG_A));
         $connection = $this->connectThroughTheMiddleware($tenantContext);
 
+        $thrown = null;
         try {
             $connection->beginTransaction();
-        } catch (\Throwable $thrown) {
-            return $thrown;
+        } catch (\RuntimeException $exception) {
+            $thrown = $exception;
         }
 
-        return null;
+        self::assertSame($this->setTenantFailure, $thrown);
+        // Ending the transaction is CloseOnFailedBeginConnection's job (it closes the connection), not a rollback here.
+        self::assertSame(
+            ['begin', "prepare SELECT set_config('app.org_id', ?, true)", 'bind 1 '.self::ORG_A.' STRING', 'execute'],
+            $this->driverCalls,
+        );
     }
 
     private function connectThroughTheMiddleware(TenantContext $tenantContext): DriverConnection
@@ -130,9 +107,6 @@ final class TenantMiddlewareTest extends TestCase
         });
         $driverConnection->method('rollBack')->willReturnCallback(function (): void {
             $this->driverCalls[] = 'rollback';
-            if (null !== $this->rollBackFailure) {
-                throw $this->rollBackFailure;
-            }
         });
         $driverConnection->method('prepare')->willReturnCallback(function (string $sql) use ($statement): Statement {
             $this->driverCalls[] = 'prepare '.$sql;

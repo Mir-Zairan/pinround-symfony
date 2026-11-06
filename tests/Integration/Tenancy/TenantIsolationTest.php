@@ -6,7 +6,10 @@ namespace App\Tests\Integration\Tenancy;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
+use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\DBAL\Exception\DriverException;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -23,13 +26,24 @@ final class TenantIsolationTest extends KernelTestCase
     private Connection $connection;
     private TenantContext $tenantContext;
 
+    public static function setUpBeforeClass(): void
+    {
+        self::probeTable()->recreate();
+        self::ensureKernelShutdown();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::probeTable()->drop();
+        self::ensureKernelShutdown();
+        parent::tearDownAfterClass();
+    }
+
     protected function setUp(): void
     {
-        $container = self::getContainer();
-        $probe = new TenantProbeTable($container->get('doctrine.dbal.migrator_connection'));
-        $probe->createIfMissing();
-        $probe->removeAllRows();
+        self::probeTable()->removeAllRows();
 
+        $container = self::getContainer();
         $this->connection = $container->get('doctrine.dbal.default_connection');
         $this->tenantContext = $container->get(TenantContext::class);
 
@@ -51,7 +65,7 @@ final class TenantIsolationTest extends KernelTestCase
         // A new backend, so current_setting() is NULL here (the '' case is covered on a reused backend below).
         $this->connection->close();
 
-        self::assertSame([], $this->visibleLabels());
+        self::assertSame([], $this->visibleLabels($this->connection));
         self::assertSame([], $this->connection->transactional($this->visibleLabels(...)));
     }
 
@@ -95,7 +109,7 @@ final class TenantIsolationTest extends KernelTestCase
         $this->tenantContext->set(new OrganizationId(self::ORG_A));
 
         self::assertSame(self::ORG_A, $this->connection->transactional($this->currentOrgSetting(...)));
-        self::assertSame('', $this->currentOrgSetting());
+        self::assertSame('', $this->currentOrgSetting($this->connection));
     }
 
     #[Test]
@@ -111,6 +125,33 @@ final class TenantIsolationTest extends KernelTestCase
 
         self::assertSame(self::ORG_A, $settingInSavepoint);
         self::assertSame(self::ORG_B, $this->connection->transactional($this->currentOrgSetting(...)));
+    }
+
+    #[Test]
+    public function aFailedTenantSetupLeavesTheConnectionReadyForTheNextTransaction(): void
+    {
+        $setTenantFailsOnce = new SetTenantFailsOnceMiddleware();
+        // The failing middleware sits inside TenantMiddleware, so TenantMiddleware's set_config passes through it.
+        $driver = new TenantMiddleware($this->tenantContext)->wrap($setTenantFailsOnce->wrap(new PgSQLDriver()));
+        $connection = new CloseOnFailedBeginConnection($this->connection->getParams(), $driver);
+        $this->tenantContext->set(new OrganizationId(self::ORG_A));
+
+        $thrown = null;
+        try {
+            $connection->transactional($this->visibleLabels(...));
+        } catch (\RuntimeException $exception) {
+            $thrown = $exception;
+        }
+
+        self::assertSame($setTenantFailsOnce->failure, $thrown);
+        self::assertFalse($connection->isTransactionActive());
+        self::assertSame(['a-first', 'a-second'], $connection->transactional($this->visibleLabels(...)));
+        $connection->close();
+    }
+
+    private static function probeTable(): TenantProbeTable
+    {
+        return new TenantProbeTable(self::getContainer()->get('doctrine.dbal.migrator_connection'));
     }
 
     private function insertLabelsAs(string $organizationId, string ...$labels): void
@@ -130,14 +171,14 @@ final class TenantIsolationTest extends KernelTestCase
     /**
      * @return list<mixed>
      */
-    private function visibleLabels(): array
+    private function visibleLabels(Connection $connection): array
     {
-        return $this->connection->fetchFirstColumn('SELECT label FROM zz_tenant_probe ORDER BY label');
+        return $connection->fetchFirstColumn('SELECT label FROM zz_tenant_probe ORDER BY label');
     }
 
-    private function currentOrgSetting(): mixed
+    private function currentOrgSetting(Connection $connection): mixed
     {
-        return $this->connection->fetchOne("SELECT current_setting('app.org_id', true)");
+        return $connection->fetchOne("SELECT current_setting('app.org_id', true)");
     }
 
     /**

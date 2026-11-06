@@ -9,7 +9,7 @@ use Doctrine\DBAL\Connection;
 
 /**
  * The test-only tenant table `zz_tenant_probe`. It lives only in the test database and never in a migration.
- * It is created and emptied through the migrator connection, which owns it.
+ * It is created, emptied and dropped through the migrator connection, which owns it.
  */
 final readonly class TenantProbeTable
 {
@@ -19,13 +19,13 @@ final readonly class TenantProbeTable
     {
     }
 
-    public function createIfMissing(): void
+    /**
+     * Drops any earlier copy first, so the policy always matches the current TenantTable::enableRls output.
+     */
+    public function recreate(): void
     {
-        if (null !== $this->migrator->fetchOne("SELECT to_regclass('public.zz_tenant_probe')")) {
-            return;
-        }
-
         $this->migrator->transactional(static function (Connection $migrator): void {
+            $migrator->executeStatement('DROP TABLE IF EXISTS zz_tenant_probe');
             $migrator->executeStatement(
                 'CREATE TABLE zz_tenant_probe (
                     id uuid PRIMARY KEY DEFAULT uuidv7(),
@@ -48,5 +48,10 @@ final readonly class TenantProbeTable
     public function removeAllRows(): void
     {
         $this->migrator->executeStatement('TRUNCATE zz_tenant_probe');
+    }
+
+    public function drop(): void
+    {
+        $this->migrator->executeStatement('DROP TABLE IF EXISTS zz_tenant_probe');
     }
 }

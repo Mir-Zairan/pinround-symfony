@@ -4,6 +4,13 @@ doctrine:
 
         driver: pdo_pgsql
         server_version: '18'
+        # Every connection repeats these two (anchors below). See docs/02-architecture/performance-and-scale.md#connection-pooling.
+        # Bound values go out in one unnamed-statement round trip instead of PREPARE, EXECUTE and DEALLOCATE,
+        # and no named statement outlives a transaction under PgBouncer transaction pooling.
+        options: &pgsql_options
+            !php/const Pdo\Pgsql::ATTR_DISABLE_PREPARES: true
+        # Closes the connection when a transaction cannot begin, so DBAL never counts a transaction the database does not have.
+        wrapper_class: &connection_class App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection
 
         profiling_collect_backtrace: '%kernel.debug%'
     orm:
@@ -24,6 +31,8 @@ when@dev:
                     url: '%env(resolve:MIGRATOR_DATABASE_URL)%'
                     driver: pdo_pgsql
                     server_version: '18'
+                    options: *pgsql_options
+                    wrapper_class: *connection_class
 
 when@test:
     doctrine:
@@ -37,6 +46,8 @@ when@test:
                     url: '%env(resolve:MIGRATOR_DATABASE_URL)%'
                     driver: pdo_pgsql
                     server_version: '18'
+                    options: *pgsql_options
+                    wrapper_class: *connection_class
                     dbname_suffix: '_test%env(default::TEST_TOKEN)%'
 
 when@prod:

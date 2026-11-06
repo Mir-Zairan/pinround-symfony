@@ -203,7 +203,7 @@ FrankenPHP worker mode ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)) boots 
 - PgBouncer in **transaction** pooling mode in front of PostgreSQL when we run more than ~100 app connections.
 - Tenant context uses `SELECT set_config('app.org_id', $1, true)` inside each transaction (transaction-local like `SET LOCAL`, but with a bound parameter). It ends with the transaction, so a pooled connection never carries one org's context into another org's request. Plain `SET` and `set_config(…, false)` are forbidden (a static check looks for them). The RLS policy uses `NULLIF(current_setting('app.org_id', true), '')::uuid`, because a pooled connection reads an old transaction-local setting back as `''`.
 - Every request that reads tenant data runs inside a transaction (a request-level read transaction for GET pages; Doctrine's `wrapInTransaction` for writes).
-- Server-side prepared statements across transactions are not safe with older PgBouncer versions. Check the PgBouncer version's prepared-statement support at implementation time, or disable emulated/server-side prepares accordingly.
+- Server-side prepared statements are off on every DBAL connection: `config/packages/doctrine.yaml` sets `Pdo\Pgsql::ATTR_DISABLE_PREPARES` to `true`. Bound values still travel separately from the SQL, but in one unnamed-statement round trip (libpq `PQexecParams`) instead of `PREPARE`, `EXECUTE` and `DEALLOCATE`, so `set_config` costs one round trip per transaction and no named statement outlives a transaction under PgBouncer transaction pooling. `DatabaseConnectionSetupTest` checks that a bound query leaves no row in `pg_prepared_statements`.
 
 ## Images, CDN and HTTP caching
 
