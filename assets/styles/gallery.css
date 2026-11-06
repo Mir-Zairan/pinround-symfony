@@ -28,6 +28,12 @@
   display: inline-block;
 }
 
+/* The demo trigger sits at the left edge, so the list opens rightwards instead of off-screen. */
+.gallery-row .menu__list {
+  right: auto;
+  left: 0;
+}
+
 .gallery-menu-trigger {
   font-size: 18px;
   line-height: 1;

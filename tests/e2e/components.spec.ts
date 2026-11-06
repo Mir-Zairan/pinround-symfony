@@ -50,15 +50,52 @@ test.describe('dialog', () => {
     await expect(dialog).toBeVisible();
   });
 
-  test('removing the dialog controller while it is open leaves the page usable', async ({ page }) => {
+  test('a press that starts on the backdrop and ends inside the dialog keeps it open', async ({ page }) => {
+    await openGallery(page);
+    await page.getByRole('button', { name: 'Open dialog' }).click();
+    const dialog = page.getByRole('dialog');
+    const box = (await dialog.getByRole('heading', { name: 'Share this round?' }).boundingBox())!;
+
+    await page.mouse.move(5, 5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 4, box.y + box.height / 2);
+    await page.mouse.up();
+
+    await expect(dialog).toBeVisible();
+  });
+
+  test('removing the dialog controller while it is open closes the dialog and leaves the page usable', async ({ page }) => {
     await openGallery(page);
     await page.getByRole('button', { name: 'Open dialog' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
 
-    await page.evaluate(() => document.querySelector('[data-controller="dialog"]')!.remove());
+    // Only the controller goes; the <dialog> stays in the page, so the browser cannot drop it from the top layer itself.
+    await page.evaluate(() => document.querySelector('[data-controller="dialog"]')!.removeAttribute('data-controller'));
 
+    await expect(page.getByRole('dialog')).toBeHidden();
     await page.getByRole('button', { name: 'More actions' }).click();
     await expect(page.getByRole('button', { name: 'More actions' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('connecting resets a dialog that is open without being modal and a menu that is open', async ({ page }) => {
+    await openGallery(page);
+
+    await page.evaluate(() => {
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = `
+        <div id="restored-dialog" data-controller="dialog">
+          <dialog id="restored-dialog-box" open data-dialog-target="dialog"><p>Restored</p></dialog>
+        </div>
+        <div id="restored-menu" data-controller="menu">
+          <button id="restored-menu-trigger" type="button" aria-expanded="true" data-menu-target="trigger">Restored menu</button>
+          <div id="restored-menu-list" role="menu" data-menu-target="list"><button type="button" role="menuitem" data-menu-target="item">One</button></div>
+        </div>`;
+      document.querySelector('main')!.append(wrapper);
+    });
+
+    await expect(page.locator('#restored-dialog-box')).not.toHaveAttribute('open', '');
+    await expect(page.locator('#restored-menu-trigger')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#restored-menu-list')).toBeHidden();
   });
 
   test('opening moves focus inside the dialog and Tab never leaves it', async ({ page }) => {
@@ -270,6 +307,17 @@ test.describe('menu', () => {
     await expect(trigger(page)).not.toBeFocused();
   });
 
+  test('moving focus out of the open menu from script closes it', async ({ page }) => {
+    await openGallery(page);
+    await trigger(page).click();
+    await expect(trigger(page)).toHaveAttribute('aria-expanded', 'true');
+
+    await page.getByRole('button', { name: 'Open dialog' }).focus();
+
+    await expect(trigger(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(items(page).first()).toBeHidden();
+  });
+
   test('choosing an item closes the menu and focus returns to the trigger', async ({ page }) => {
     await openGallery(page);
     await trigger(page).click();
@@ -295,15 +343,23 @@ test.describe('narrow viewport', () => {
   const hasNoHorizontalScroll = (page: Page) =>
     page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
-  test('the open dialog and the open menu do not scroll horizontally at 360px', async ({ page }) => {
+  // A modal dialog sits in the top layer and never widens the page, so its own box has to be checked.
+  const lieWithinViewport = async (locator: Locator) => {
+    const box = (await locator.boundingBox())!;
+    return box.x >= 0 && box.x + box.width <= 360;
+  };
+
+  test('the open dialog and the open menu stay within 360px', async ({ page }) => {
     await openGallery(page);
     await page.getByRole('button', { name: 'Open dialog' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     expect(await hasNoHorizontalScroll(page)).toBe(true);
+    expect(await lieWithinViewport(page.getByRole('dialog'))).toBe(true);
     await page.keyboard.press('Escape');
 
     await page.getByRole('button', { name: 'More actions' }).click();
     await expect(page.getByRole('menuitem').first()).toBeVisible();
     expect(await hasNoHorizontalScroll(page)).toBe(true);
+    expect(await lieWithinViewport(page.getByRole('menu'))).toBe(true);
   });
 });

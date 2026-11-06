@@ -6,9 +6,13 @@ export default class extends Controller {
   static targets = ['dialog'];
 
   opener = null;
+  dialogElement = null;
   pressStartedOnBackdrop = false;
+  pressEndedOnBackdrop = false;
 
   connect() {
+    // Kept for disconnect(): once the controller element loses data-controller, Stimulus no longer finds targets.
+    this.dialogElement = this.dialogTarget;
     // A dialog restored open from a page snapshot is not modal, so the page behind it would stay usable.
     if (this.dialogTarget.open && !this.dialogTarget.matches(':modal')) {
       this.dialogTarget.close();
@@ -31,21 +35,28 @@ export default class extends Controller {
 
   rememberPress(event) {
     this.pressStartedOnBackdrop = event.target === this.dialogTarget;
+    this.pressEndedOnBackdrop = false;
+  }
+
+  rememberRelease(event) {
+    this.pressEndedOnBackdrop = event.target === this.dialogTarget;
   }
 
   // The dialog box has no padding of its own, so an event whose target is the <dialog> itself hit the backdrop.
-  // Both the press and the click must: a drag that starts inside the box and ends outside must not close it.
+  // Press and release must both be there: a drag between the box and the backdrop, in either direction, still
+  // fires a click on the <dialog> (the common ancestor) and must not close it.
   closeOnBackdrop(event) {
-    const startedOnBackdrop = this.pressStartedOnBackdrop;
+    const pressedAndReleasedOnBackdrop = this.pressStartedOnBackdrop && this.pressEndedOnBackdrop;
     this.pressStartedOnBackdrop = false;
-    if (startedOnBackdrop && event.target === this.dialogTarget) {
+    this.pressEndedOnBackdrop = false;
+    if (pressedAndReleasedOnBackdrop && event.target === this.dialogTarget) {
       this.close();
     }
   }
 
   disconnect() {
-    if (this.hasDialogTarget && this.dialogTarget.open) {
-      this.dialogTarget.close();
+    if (this.dialogElement?.open) {
+      this.dialogElement.close();
     }
   }
 
