@@ -176,15 +176,15 @@ Rules:
 
 ## Async work
 
-Runs in Messenger workers (see [ADR-0009](../03-adr/0009-async-messaging-and-outbox.md)):
+Runs in Messenger workers (see [ADR-0009](../03-adr/0009-async-messaging-and-outbox.md) and [ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md), which supersedes it for transports, workers and the relay):
 
-| Work | Transport | Typical time |
-|---|---|---|
-| Image verify, re-encode, thumbnails | `media` (Valkey) | 200–800 ms per image |
-| AI summaries, suggestions, embeddings | `ai` (Valkey), low concurrency per org | 1–20 s |
-| Notifications fan-out, Mercure publish, emails | `notify` (Valkey) | < 100 ms |
-| Jira sync | `integration` (Valkey), rate-limited | varies |
-| Domain events to other modules | outbox (PostgreSQL, same transaction) → relay | < 1 s |
+| Work | Transport | Consumed by | Typical time |
+|---|---|---|---|
+| Image verify, re-encode, thumbnails | `async_media` (Valkey) | `worker-heavy` | 200–800 ms per image |
+| AI summaries, suggestions, embeddings | `async_ai` (Valkey), low concurrency per org | `worker-heavy` | 1–20 s |
+| Notifications fan-out, Mercure publish, emails | `async_notify` (Valkey) | `worker` | < 100 ms |
+| Jira sync | `async_integration` (Valkey), rate-limited | `worker` | varies |
+| Domain events to other modules | `outbox` (PostgreSQL, same transaction) → relay | `worker-outbox` | < 1 s |
 
 Queues are separate, so a slow AI provider never delays notifications. Alerts fire when the oldest message in a queue is older than its limit (see [operations.md](operations.md)).
 
