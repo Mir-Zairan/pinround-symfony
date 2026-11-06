@@ -162,7 +162,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 **Files:** `src/Web/UI/Component/*.php`, `src/Web/UI/templates/components/*.html.twig`, `assets/controllers/{dialog,menu}_controller.js`, `assets/styles/components.css`, `assets/styles/gallery.css`, `config/routes/component_gallery.yaml`, `tests/e2e/components.spec.ts`.
 **Acceptance criteria:**
 - [x] Each component renders as in the prototype ([Component classes](../04-prototype/prototype-guide.md#component-classes)). Sizes and radii are measured in `tests/e2e/gallery.spec.ts`; light and dark baselines are `tests/e2e/screenshots/gallery-*-linux.png`.
-- [x] `AvatarStack` with 7 people shows 4 avatars and "+3" (`tests/Integration/Web/NewComponentsTest.php`).
+- [x] `AvatarStack` with 7 people shows 4 avatars and "+3" (`tests/Integration/Web/AvatarCardEmptyStateToastComponentsTest.php`).
 - [x] `StatusPill` for each of the five groups uses the fixed group colours ([five group colours](../00-product/ux-principles.md#the-five-group-colors)) (`tests/Integration/Web/DesignComponentsTest.php`).
 - [x] Keyboard: dialogs trap focus and give it back; menus close on Escape (`tests/e2e/components.spec.ts`).
 - [x] `/_gallery` returns 404 in prod (`ComponentGalleryRouteTest`).
@@ -286,7 +286,8 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-07 (P00.T6): `assets/vendor` is git-ignored and restored by the composer auto-script `importmap:install`. The Docker entrypoint now also runs it when `assets/vendor` is missing.
 - 2026-11-07 (P00.T6): the gallery shows one theme at a time via `?theme=` because `data-theme` only works on `:root`.
 - 2026-11-07 (P00.T6): the PHP class for Switch is `SwitchControl` (PHP reserves `switch`); it is registered as `<twig:Switch>`.
-- 2026-11-07 (P00.T6): status pills have no coloured dot and use the tag shape, because the prototype has no pill CSS.
+- 2026-11-07 (P00.T6): status pills follow the ticket-page and UX docs: 30 px high, pill radius, with a decorative dot in the `--group-*` colour (the prototype has no pill CSS class).
+- 2026-11-07 (P00.T6): tags, AI chips and pills use 12 px text instead of the prototype's 11 px, because ux-principles.md says text is never below 12 px (the requirement wins).
 - 2026-11-07 (P00.T6): the prototype's dialog CSS was not found, so the dialog is styled from `docs/04-prototype/screens/dialogs-and-popovers.md`.
 - 2026-11-07 (P00.T6): Dialog has an extra X close button beyond the Cancel button the docs describe.
 - 2026-11-07 (P00.T6): the e2e suite needs the stack running (`make e2e`).

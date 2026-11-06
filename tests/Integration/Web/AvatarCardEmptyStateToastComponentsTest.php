@@ -12,14 +12,22 @@ use App\Web\UI\Component\Toast;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
-use Symfony\UX\TwigComponent\Test\InteractsWithTwigComponents;
-use Twig\Error\RuntimeError;
 
-final class NewComponentsTest extends KernelTestCase
+final class AvatarCardEmptyStateToastComponentsTest extends KernelTestCase
 {
-    use InteractsWithTwigComponents;
+    use RendersTwigComponents;
 
-    private const array PEOPLE = ['Lena', 'Omar', 'Mia', 'Raj', 'Sara', 'Noor', 'Tom'];
+    private const array PEOPLE = ['Lena', 'Omar', 'Mia', 'Raj', 'Sara', 'Noor', 'Lena Noor'];
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function cardElements(): iterable
+    {
+        yield 'div' => ['div'];
+        yield 'section' => ['section'];
+        yield 'article' => ['article'];
+    }
 
     /**
      * @return iterable<string, array{string, string}>
@@ -27,11 +35,11 @@ final class NewComponentsTest extends KernelTestCase
     public static function initials(): iterable
     {
         yield 'one word' => ['Lena', 'L'];
-        yield 'two words' => ['Omar Haddad', 'OH'];
+        yield 'two words' => ['Omar Raj', 'OR'];
         yield 'three words use the first two' => ['Mia Anne Lee', 'MA'];
         yield 'lowercase' => ['lena ross', 'LR'];
         yield 'multibyte' => ['Élodie Ünal', 'ÉÜ'];
-        yield 'extra spaces' => ['  Omar   Haddad ', 'OH'];
+        yield 'extra spaces' => ['  Omar   Raj ', 'OR'];
     }
 
     #[Test]
@@ -41,6 +49,15 @@ final class NewComponentsTest extends KernelTestCase
         $html = (string) $this->renderTwigComponent(Avatar::class, ['name' => $name]);
 
         self::assertMatchesRegularExpression('#^\s*<span class="av" role="img" aria-label="'.preg_quote($name, '#').'">'.$expected.'</span>\s*$#u', $html);
+    }
+
+    #[Test]
+    public function aMediumAvatarHasNoSizeClass(): void
+    {
+        $html = (string) $this->renderTwigComponent(Avatar::class, ['name' => 'Lena', 'size' => 'md']);
+
+        self::assertStringContainsString('class="av"', $html);
+        self::assertStringNotContainsString('av-lg', $html);
     }
 
     #[Test]
@@ -72,7 +89,7 @@ final class NewComponentsTest extends KernelTestCase
         self::assertSame(4, substr_count($html, 'class="av"'));
         self::assertSame(1, substr_count($html, 'av-more'));
         self::assertStringContainsString('>+3</span>', $html);
-        self::assertStringContainsString('aria-label="3 more: Sara, Noor, Tom"', $html);
+        self::assertStringContainsString('aria-label="3 more: Sara, Noor, Lena Noor"', $html);
         self::assertStringNotContainsString('aria-label="Sara"', $html);
     }
 
@@ -121,11 +138,12 @@ final class NewComponentsTest extends KernelTestCase
     }
 
     #[Test]
-    public function aCardCanBeASection(): void
+    #[DataProvider('cardElements')]
+    public function aCardCanBeAnyAllowedElement(string $tag): void
     {
-        $html = (string) $this->renderTwigComponent(Card::class, ['tag' => 'section'], content: 'Inside');
+        $html = (string) $this->renderTwigComponent(Card::class, ['tag' => $tag], content: 'Inside');
 
-        self::assertMatchesRegularExpression('#^\s*<section class="card">Inside</section>\s*$#', $html);
+        self::assertMatchesRegularExpression('#^\s*<'.$tag.' class="card">Inside</'.$tag.'>\s*$#', $html);
     }
 
     #[Test]
@@ -167,29 +185,5 @@ final class NewComponentsTest extends KernelTestCase
         self::assertStringNotContainsString('aria-live', $html);
         self::assertStringNotContainsString('role=', $html);
         self::assertStringContainsString('class="toast"', (string) $this->renderTwigComponent(Toast::class, [], content: 'x'));
-    }
-
-    /**
-     * @param array<string, mixed> $variables
-     */
-    private function renderTemplate(string $source, array $variables = []): string
-    {
-        return self::getContainer()->get('twig')->createTemplate($source)->render($variables);
-    }
-
-    /**
-     * @param class-string             $component
-     * @param array<string, mixed>     $props
-     * @param class-string<\Throwable> $cause
-     */
-    private function assertFailsAtMount(string $component, array $props, string $messagePart, string $cause = \InvalidArgumentException::class): void
-    {
-        try {
-            $this->renderTwigComponent($component, $props, content: 'x');
-            self::fail('The component must not render.');
-        } catch (RuntimeError $error) {
-            self::assertInstanceOf($cause, $error->getPrevious());
-            self::assertStringContainsString($messagePart, $error->getMessage());
-        }
     }
 }

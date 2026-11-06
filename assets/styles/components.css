@@ -112,12 +112,11 @@
 }
 
 .tag,
-.aichip,
-.pill {
+.aichip {
   display: inline-block;
   padding: 1px 8px;
   border-radius: var(--radius-tag);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .03em;
 }
@@ -132,27 +131,54 @@
   color: var(--on-ai-container);
 }
 
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+
+.pill__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pill-dot);
+  /* The group colours are the same in both themes; the ring keeps the dark greens visible on dark pills. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent);
+}
+
 .pill-todo {
+  --pill-dot: var(--group-todo);
   background: var(--s-highest);
   color: var(--on-surface);
 }
 
 .pill-doing {
+  --pill-dot: var(--group-doing);
   background: var(--secondary-container);
   color: var(--on-secondary-container);
 }
 
 .pill-checking {
+  --pill-dot: var(--group-check);
   background: var(--ping-container);
   color: var(--on-ping-container);
 }
 
 .pill-waiting {
+  --pill-dot: var(--group-wait);
   background: var(--waiting-container);
   color: var(--on-waiting-container);
 }
 
 .pill-done {
+  --pill-dot: var(--group-done);
   background: var(--passed-container);
   color: var(--on-passed-container);
 }

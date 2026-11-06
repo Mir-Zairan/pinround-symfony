@@ -14,12 +14,10 @@ use App\Web\UI\Component\Tag;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
-use Symfony\UX\TwigComponent\Test\InteractsWithTwigComponents;
-use Twig\Error\RuntimeError;
 
 final class DesignComponentsTest extends KernelTestCase
 {
-    use InteractsWithTwigComponents;
+    use RendersTwigComponents;
 
     private const array OPTIONS = ['list' => 'List', 'turn' => 'Whose turn?', '3' => 'Three'];
 
@@ -43,6 +41,18 @@ final class DesignComponentsTest extends KernelTestCase
         yield 'checking' => ['pill-checking', '--ping-container', '--on-ping-container'];
         yield 'waiting' => ['pill-waiting', '--waiting-container', '--on-waiting-container'];
         yield 'done' => ['pill-done', '--passed-container', '--on-passed-container'];
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function dotTokens(): iterable
+    {
+        yield 'todo' => ['pill-todo', '--group-todo'];
+        yield 'doing' => ['pill-doing', '--group-doing'];
+        yield 'checking' => ['pill-checking', '--group-check'];
+        yield 'waiting' => ['pill-waiting', '--group-wait'];
+        yield 'done' => ['pill-done', '--group-done'];
     }
 
     #[Test]
@@ -77,8 +87,8 @@ final class DesignComponentsTest extends KernelTestCase
         self::assertStringContainsString('role="group" aria-label="View"', $html);
         self::assertSame(3, substr_count($html, 'class="seg"'));
         self::assertSame(1, substr_count($html, 'aria-pressed="true"'));
-        self::assertStringContainsString('<button type="button" class="seg" aria-pressed="true">Whose turn?</button>', $html);
-        self::assertStringContainsString('<button type="button" class="seg" aria-pressed="false">List</button>', $html);
+        self::assertStringContainsString('<button type="button" class="seg" value="turn" aria-pressed="true">Whose turn?</button>', $html);
+        self::assertStringContainsString('<button type="button" class="seg" value="list" aria-pressed="false">List</button>', $html);
     }
 
     #[Test]
@@ -86,7 +96,7 @@ final class DesignComponentsTest extends KernelTestCase
     {
         $html = (string) $this->renderTwigComponent(SegmentedControl::class, ['label' => 'View', 'options' => self::OPTIONS, 'selected' => '3']);
 
-        self::assertStringContainsString('aria-pressed="true">Three<', $html);
+        self::assertStringContainsString('value="3" aria-pressed="true">Three<', $html);
         self::assertSame(1, substr_count($html, 'aria-pressed="true"'));
     }
 
@@ -131,7 +141,20 @@ final class DesignComponentsTest extends KernelTestCase
     {
         $html = (string) $this->renderTwigComponent(StatusPill::class, ['group' => $group], content: 'Code review');
 
-        self::assertStringContainsString('<span class="'.$classes.'">Code review</span>', $html);
+        self::assertStringContainsString('<span class="'.$classes.'"><span class="pill__dot" aria-hidden="true"></span>Code review</span>', $html);
+    }
+
+    #[Test]
+    #[DataProvider('dotTokens')]
+    public function theStylesheetColoursEachPillDotWithItsGroupToken(string $selector, string $dotToken): void
+    {
+        $css = file_get_contents(__DIR__.'/../../../assets/styles/components.css');
+        self::assertIsString($css);
+
+        self::assertSame(1, preg_match('/^\.'.preg_quote($selector, '/').' \{(.*?)^\}/ms', $css, $rule), $selector.' rule not found');
+        self::assertSame(1, preg_match('/^\s*--pill-dot:\s*var\(([^)]+)\);$/m', $rule[1], $dotMatch));
+        self::assertSame($dotToken, $dotMatch[1]);
+        self::assertMatchesRegularExpression('/^\.pill__dot \{[^}]*background:\s*var\(--pill-dot\);/ms', $css, 'the dot must use --pill-dot');
     }
 
     #[Test]
@@ -199,29 +222,5 @@ final class DesignComponentsTest extends KernelTestCase
         $html = $this->renderTemplate('<twig:Switch label="Quiet hours" checked />', []);
 
         self::assertStringContainsString('role="switch" aria-checked="true" aria-label="Quiet hours"', $html);
-    }
-
-    /**
-     * @param array<string, mixed> $variables
-     */
-    private function renderTemplate(string $source, array $variables): string
-    {
-        return self::getContainer()->get('twig')->createTemplate($source)->render($variables);
-    }
-
-    /**
-     * @param class-string             $component
-     * @param array<string, mixed>     $props
-     * @param class-string<\Throwable> $cause
-     */
-    private function assertFailsAtMount(string $component, array $props, string $messagePart, string $cause = \InvalidArgumentException::class): void
-    {
-        try {
-            $this->renderTwigComponent($component, $props, content: 'x');
-            self::fail('The component must not render.');
-        } catch (RuntimeError $error) {
-            self::assertInstanceOf($cause, $error->getPrevious());
-            self::assertStringContainsString($messagePart, $error->getMessage());
-        }
     }
 }

@@ -88,6 +88,7 @@ final class ComponentGalleryTest extends WebTestCase
     {
         $client = self::createClient();
         $gallery = $client->request('GET', '/_gallery');
+        self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $gallery->filter('link[rel="stylesheet"][href*="styles/gallery-"]'));
 
         $home = $client->request('GET', '/');

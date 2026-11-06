@@ -81,13 +81,35 @@ test.describe('component sizes match the prototype classes', () => {
     expect(segment.radius).toBeGreaterThanOrEqual(16);
   });
 
-  test('a tag is 11px bold with a 6px radius', async ({ page }) => {
-    const tag = await measure(page, '.tag');
-    const weight = await page.locator('.tag').first().evaluate((element) => getComputedStyle(element).fontWeight);
+  // 12px, not the prototype's 11px: ux-principles.md says text is never below 12px.
+  for (const selector of ['.tag', '.aichip']) {
+    test(`${selector} is 12px bold with a 6px radius`, async ({ page }) => {
+      const label = await measure(page, selector);
+      const weight = await page.locator(selector).first().evaluate((element) => getComputedStyle(element).fontWeight);
 
-    expect(tag.fontSize).toBe(11);
-    expect(Number(weight)).toBeGreaterThanOrEqual(700);
-    expect(tag.radius).toBe(6);
+      expect(label.fontSize).toBe(12);
+      expect(Number(weight)).toBeGreaterThanOrEqual(700);
+      expect(label.radius).toBe(6);
+    });
+  }
+
+  test('a status pill is a 30px pill with a 12px label and a decorative dot', async ({ page }) => {
+    const pill = await measure(page, '.pill');
+    const dot = await measure(page, '.pill__dot');
+
+    expect(pill.height).toBe(30);
+    expect(pill.fontSize).toBe(12);
+    expect(pill.radius).toBeGreaterThanOrEqual(15);
+    expect([dot.width, dot.height]).toEqual([8, 8]);
+  });
+
+  test('each status pill dot has its own group colour', async ({ page }) => {
+    const colours = await page
+      .locator('.pill__dot')
+      .evaluateAll((dots) => dots.map((dot) => getComputedStyle(dot).backgroundColor));
+
+    expect(colours).toHaveLength(5);
+    expect(new Set(colours).size).toBe(5);
   });
 
   test('a card has a 16px radius', async ({ page }) => {
