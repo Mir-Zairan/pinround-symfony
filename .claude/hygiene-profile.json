@@ -410,13 +410,37 @@
         "message": "Use keyset pagination (WHERE (sort_key, id) < (:last_key, :last_id) ... LIMIT n), not OFFSET or setFirstResult().",
         "source": [],
         "enabled": true
+      },
+      {
+        "id": "lp-20261106-d0e1",
+        "class": "migration-safety",
+        "lens": "hygiene-database",
+        "origin": "learned",
+        "ext": [
+          "php"
+        ],
+        "paths": [
+          "migrations/"
+        ],
+        "pattern": "DROP[[:space:]]+EXTENSION",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Don't drop extensions in down(): up() uses CREATE EXTENSION IF NOT EXISTS and may not own them. Throw IrreversibleMigration ($this->throwIrreversibleMigrationException('...')) instead.",
+        "source": [
+          "20261106-0020"
+        ],
+        "enabled": true
       }
     ]
   },
   "learned": {
     "_comment": "Flywheel knobs for /hygiene-learn.",
     "threshold": 2,
-    "skipClasses": [],
+    "skipClasses": [
+      "design",
+      "logic-error"
+    ],
     "rejectThreshold": 2
   },
   "relations": {

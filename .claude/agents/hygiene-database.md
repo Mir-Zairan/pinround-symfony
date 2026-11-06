@@ -96,3 +96,10 @@ Repo rules (data-model.md, ADR-0004, ADR-0005, ADR-0006, performance-and-scale.m
   search and duplicate queries filtered by `organization_id` and the ticket visibility predicate and
   able to use the GIN/HNSW index under RLS; counts in a separate query.
 - Retention deletes in chunks of 5,000 rows; open tickets and their history are never deleted.
+
+<!-- hygiene-machine-checked:start — managed by /hygiene-learn; do not hand-edit -->
+Machine-checked in this repo — the deterministic gate already catches these; do NOT
+spend review effort flagging instances of exactly these classes:
+- performance: OFFSET or setFirstResult() paging in src/
+- migration-safety: DROP EXTENSION in a migration's down()
+<!-- hygiene-machine-checked:end -->
