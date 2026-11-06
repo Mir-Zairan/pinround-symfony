@@ -152,11 +152,13 @@ The colours are Material 3 tones generated from **one seed, #2A6F65**. They are 
 | `--on-surface` / `--on-surface-var` | #161d1b / #3f4946 | #dde4e1 / #bec9c5 |
 | `--outline` / `--outline-var` | #6f7976 / #bec9c5 | #899390 / #3f4946 |
 | `--error` / `--error-container` / `--on-error-container` | #ba1a1a / #ffdad6 / #93000a | #ffb4ab / #93000a / #ffdad6 |
+| `--on-error` | #ffffff | #690005 |
 | `--passed` / `--passed-container` / `--on-passed-container` | #006c51 / #83f8cd / #002116 | #66dbb2 / #00513c / #83f8cd |
 | `--waiting` / `--waiting-container` / `--on-waiting-container` | #735c00 / #ffe088 / #241a00 | #ebc23e / #574500 / #ffe088 |
 | `--ping` / `--ping-container` / `--on-ping-container` | #0062a0 / #d0e4ff / #001d34 | #9bcbff / #004a7a / #d0e4ff |
 | `--ai` / `--ai-container` / `--on-ai-container` | #4f51be / #e1e0ff / #06006c | #c0c1ff / #3637a4 / #e1e0ff |
 
+- **`--on-error` goes beyond the prototype.** It gives text enough contrast on the dark-mode `--error` colour. The badge uses it.
 - **Group colours:** fixed tokens `--group-todo` … `--group-done` (see [workflow-engine.md](workflow-engine.md#five-groups-and-core-steps)).
 - **Fonts:** Atkinson Hyperlegible Next (text) and Atkinson Hyperlegible Mono (keys, code). Both are self-hosted as WOFF2 with `font-display: swap`; there are no font CDNs. Base size 15 px, line height 1.5.
 - **Shape and space:**

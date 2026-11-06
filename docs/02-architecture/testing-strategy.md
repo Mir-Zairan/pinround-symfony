@@ -52,7 +52,7 @@ With three people and many sessions with Claude Code, tests are how we keep each
 - **PHPUnit** (current major) for unit, integration and functional tests.
 - **Zenstruck Foundry** for factories and stories (neutral fixtures).
 - **Symfony test client** (`WebTestCase`) and the Live Component test helpers for UI behaviour.
-- **Playwright** for e2e journeys (run against the Docker stack). Chosen over Panther for better tooling and traces. A local shell spec exists since P00.T5 (`make e2e`, project in `tests/e2e`, baselines in `tests/e2e/screenshots`, one per platform and recorded on Linux, so another OS records its own with `make e2e-update`; the same target refreshes them); CI wiring and more journeys arrive in P00.T9.
+- **Playwright** for e2e journeys (run against the Docker stack). Chosen over Panther for better tooling and traces. A local shell spec exists since P00.T5 (`make e2e`, which runs on the host and needs Node 22.12 or newer; project in `tests/e2e`, baselines in `tests/e2e/screenshots`, one per platform and recorded on Linux, so another OS records its own with `make e2e-update`; the same target refreshes them); CI wiring and more journeys arrive in P00.T9.
 - **PHPStan** at max level with strict rules and the Symfony and Doctrine extensions.
 - **Deptrac** for module boundaries ([ADR-0002](../03-adr/0002-modular-monolith.md)).
 - **PHP-CS-Fixer** and **Rector** for style and safe upgrades.

@@ -9,7 +9,7 @@ Problems are shown on screenshots with numbered pins. Work moves in *rounds*: th
 
 ## Run it locally
 
-You need Docker with Compose v2, and `make`. You do not need PHP on your machine.
+You need Docker with Compose v2, and `make`. You do not need PHP on your machine. Only `make e2e` (the browser tests) also needs Node 22.12 or newer on your machine.
 
 1. Run `make up`. The first run builds MinIO from source and takes about 5-6 minutes. Later runs start in seconds.
 2. Open https://localhost and accept the local certificate that Caddy makes.

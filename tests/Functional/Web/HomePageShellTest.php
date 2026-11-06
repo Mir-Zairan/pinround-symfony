@@ -122,7 +122,7 @@ final class HomePageShellTest extends WebTestCase
 
     private function renderHomeWithTheme(string $theme): Crawler
     {
-        $this->client()->request('GET', '/');
+        $this->client(); // boots the kernel so the container exists; no request is needed
         $twig = static::getContainer()->get('twig');
 
         return new Crawler($twig->render('@Web/home.html.twig', ['theme' => $theme]));
