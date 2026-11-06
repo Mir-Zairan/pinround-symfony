@@ -15,14 +15,17 @@ use App\Tests\Fixtures\Messenger\ListTenantProbeLabels;
 use App\Tests\Fixtures\Messenger\QueueTenantProbeInsertAfterCurrentMessage;
 use App\Tests\Fixtures\Messenger\SaveTenantProbe;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Exception\EntityManagerClosed;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\ErrorDetailsStamp;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
@@ -258,19 +261,32 @@ final class TenantStampedMessageTest extends KernelTestCase
     #[Test]
     public function theWorkerHandlesTheNextMessageNormallyAfterOneClosedTheEntityManager(): void
     {
-        $this->queueStamped(new SaveTenantProbe(self::PROBE_ID, self::ORG_A, 'a-saved'), self::ORG_A);
-        $this->queueStamped(new SaveTenantProbe(self::PROBE_ID, self::ORG_A, 'a-same-id'), self::ORG_A);
-        $this->queueStamped(new SaveTenantProbe(self::OTHER_PROBE_ID, self::ORG_B, 'b-saved'), self::ORG_B);
+        $this->queueMessageThatClosesTheEntityManagerThenOneForOrganizationB();
 
-        $worker = new CommandTester(new Application(self::$kernel ?? throw new \LogicException('No kernel.'))->find('messenger:consume'));
-        // The worker's service reset after each message also empties the in-memory transport, so all three are
-        // fetched at once; a real queue keeps its messages.
-        $worker->execute(['receivers' => ['test_queue'], '--limit' => '3', '--fetch-size' => '3', '--time-limit' => '30']);
+        $this->consumeTestQueue(isResettingServices: true);
 
-        $worker->assertCommandIsSuccessful();
         $this->assertNothingLeftOfTheMessage();
         self::assertSame(['labels' => ['b-only', 'b-saved'], 'orgSetting' => self::ORG_B], $this->dispatchListing(self::ORG_B));
-        self::assertSame(['labels' => ['a-first', 'a-saved', 'a-second'], 'orgSetting' => self::ORG_A], $this->dispatchListing(self::ORG_A));
+        self::assertSame(['labels' => ['a-first', 'a-second'], 'orgSetting' => self::ORG_A], $this->dispatchListing(self::ORG_A));
+    }
+
+    #[Test]
+    public function withoutTheWorkerResetTheNextMessageFailsOnTheClosedEntityManager(): void
+    {
+        $this->queueMessageThatClosesTheEntityManagerThenOneForOrganizationB();
+
+        $this->consumeTestQueue(isResettingServices: false);
+
+        $failureClassByLabel = [];
+        foreach ($this->testQueue()->getSent() as $sent) {
+            $message = $sent->getMessage();
+            $errorDetails = $sent->last(ErrorDetailsStamp::class);
+            if ($message instanceof SaveTenantProbe && $errorDetails instanceof ErrorDetailsStamp) {
+                $failureClassByLabel[$message->label] = $errorDetails->getExceptionClass();
+            }
+        }
+        self::assertSame(['a-without-stamp' => DriverException::class, 'b-saved' => EntityManagerClosed::class], $failureClassByLabel);
+        self::assertSame(['labels' => ['b-only'], 'orgSetting' => self::ORG_B], $this->dispatchListing(self::ORG_B));
     }
 
     private static function probeTable(): TenantProbeTable
@@ -296,9 +312,32 @@ final class TenantStampedMessageTest extends KernelTestCase
         $this->bus->dispatch(new SaveTenantProbe($probeId, $organizationId, $label), [new TenantStamp(new OrganizationId($organizationId))]);
     }
 
-    private function queueStamped(object $message, string $organizationId): void
+    /**
+     * The first message has no TenantStamp, so TenantStampMiddleware leaves it alone: row-level security refuses its
+     * row at the flush, which closes the entity manager, and only the worker's own reset can open it again.
+     */
+    private function queueMessageThatClosesTheEntityManagerThenOneForOrganizationB(): void
     {
-        $this->bus->dispatch($message, [new TenantStamp(new OrganizationId($organizationId)), new TransportNamesStamp(['test_queue'])]);
+        $this->bus->dispatch(new SaveTenantProbe(self::PROBE_ID, self::ORG_A, 'a-without-stamp'), [new TransportNamesStamp(['test_queue'])]);
+        $this->bus->dispatch(new SaveTenantProbe(self::OTHER_PROBE_ID, self::ORG_B, 'b-saved'), [
+            new TenantStamp(new OrganizationId(self::ORG_B)),
+            new TransportNamesStamp(['test_queue']),
+        ]);
+    }
+
+    private function consumeTestQueue(bool $isResettingServices): void
+    {
+        $worker = new CommandTester(new Application(self::$kernel ?? throw new \LogicException('No kernel.'))->find('messenger:consume'));
+        // The worker's service reset after each message also empties the in-memory transport, so both are fetched
+        // at once; a real queue keeps its messages.
+        $options = ['receivers' => ['test_queue'], '--limit' => '2', '--fetch-size' => '2', '--time-limit' => '30'];
+        if (!$isResettingServices) {
+            $options['--no-reset'] = null;
+        }
+
+        $worker->execute($options);
+
+        $worker->assertCommandIsSuccessful();
     }
 
     private function testQueue(): InMemoryTransport
