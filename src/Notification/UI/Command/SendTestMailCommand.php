@@ -27,7 +27,7 @@ final class SendTestMailCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $this->mailer->send(
-            (new Email())
+            new Email()
                 ->from('pinround@acme-foods.example')
                 ->to(self::RECIPIENT)
                 ->subject('Pinround test mail')

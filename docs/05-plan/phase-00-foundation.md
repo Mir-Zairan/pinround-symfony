@@ -48,7 +48,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - **Tenancy flow:** firewall → `TenantContext` resolves the org → Doctrine middleware starts each transaction with `SELECT set_config('app.org_id', $1, true)` (a bound parameter; `true` = local to the transaction) → RLS policy `USING (organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid)` with the same `WITH CHECK` → the Doctrine SQL filter adds the same condition. `NULLIF` matters: on a pooled connection that ran an earlier transaction, `current_setting(..., true)` returns `''` (not NULL), and `''::uuid` would raise an error. No org set means zero rows (fails closed). Plain `SET app.org_id …` without `LOCAL` is banned.
 - **Lookups before the org is known** (personal access token by hash, org picker after login, invite token, webhook `connectionId`, Mercure and laptop-package resolution) never use `BYPASSRLS`. They call `SECURITY DEFINER` resolver functions that return ids only (for example `pinround_resolve_token(hash) → (user_id, organization_id)`). These functions are the only RLS exceptions; the list lives in [data-model.md](../02-architecture/data-model.md) and each has its own test.
 - **Worker mode:** no static state; stateful services implement `ResetInterface` ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)).
-- **Composer scripts:** `test`, `test:unit`, `test:integration`, `phpstan`, `deptrac`, `cs`, `cs:fix`, `rector`, `audit`, `lint:docs`, `lint:copy`, `qa` (all).
+- **Composer scripts:** `test`, `test:unit`, `test:integration`, `test:functional`, `phpstan`, `deptrac`, `cs`, `cs:fix`, `rector`, `lint`, `qa` (all). There is no `audit` script: `composer audit` is a built-in command and `qa` calls `@composer audit`. `lint:docs` and `lint:copy` come in P00.T9.
 - **Security:** CSP with nonces and no inline scripts, HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, frame-ancestors none.
 - **Performance:** OPcache with preloading, FrankenPHP worker count from env, AssetMapper with long cache headers.
 
@@ -85,10 +85,10 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 6. GitHub Actions workflow with the stages from [CI pipeline](../02-architecture/testing-strategy.md#ci-pipeline): static, unit, integration (PostgreSQL 18 + Valkey services), build. E2E stage stub (filled in P00.T9).
 **Files:** `src/*/`, `deptrac.yaml`, `phpstan.dist.neon`, `.php-cs-fixer.dist.php`, `rector.php`, `phpunit.dist.xml`, `.github/workflows/ci.yml`, `composer.json` scripts.
 **Acceptance criteria:**
-- [ ] `composer qa` runs every gate locally and passes.
-- [ ] A test branch that imports `App\Ticketing\Domain\Ticket` from `App\Review\Application` fails `composer deptrac` (keep this as a documented fixture test, not a real import).
+- [x] `composer qa` runs every gate locally and passes.
+- [x] A test branch that imports `App\Ticketing\Domain\Ticket` from `App\Review\Application` fails `composer deptrac` (keep this as a documented fixture test, not a real import).
 - [ ] CI runs on push and pull request and blocks merge when a stage fails.
-- [ ] Total CI time is under 15 minutes.
+- [x] Total CI time is under 15 minutes.
 **Tests:** CI itself; a unit test that the Deptrac config lists every module folder.
 **Prototype check:** none.
 **Size:** M
@@ -246,4 +246,14 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T9, P12): the prod env must provide `APP_SECRET` as a plain environment variable (not a Symfony secret; the entrypoint guard reads only the environment), `DATABASE_URL`, `MAILER_DSN`, `MESSENGER_TRANSPORT_DSN`, `DEFAULT_URI`, `REDIS_CACHE_DSN` and the Mercure keys (prod refuses `change-me` keys). `config.md` and P12 `compose.prod.yaml` must list them.
 - 2026-11-06 (P00.T1): MinIO and `mc` are built from pinned source ([ADR-0031](../03-adr/0031-minio-built-from-pinned-source.md)) because upstream stopped publishing images. `pgvector` is not in the stock postgres image and was skipped.
 - 2026-11-06 (P00.T1): the disk on a dev machine can fill up. The MinIO source build needs about 2-3 GB.
+- 2026-11-06 (P00.T2): [ADR-0032](../03-adr/0032-module-call-edges-follow-modules-catalogue.md) replaces ADR-0002's allowed-dependency diagram. Module calls follow the "Depends on" lines in modules.md. `DeptracConfigTest` fails if `deptrac.yaml` and those lines differ, so change both together.
+- 2026-11-06 (P00.T2): events live in `<Module>\Api\Event`, their own Deptrac layer. Any module's Application and Infrastructure may use them; UI may not.
+- 2026-11-06 (P00.T2): Application, Domain, Api and Event layers may not use vendor code; only Infrastructure and UI may. Put framework glue in Infrastructure.
+- 2026-11-06 (P00.T2): the CI integration job creates `pinround_test` but runs no migrations. P00.T3 must add a migrate step for the test database.
+- 2026-11-06 (P00.T2): ADR-0028 describes one "unit+integration" job and a nightly e2e. The real workflow has separate `unit` and `integration` jobs, and `e2e` is a stub that runs on pull requests only until P00.T9.
+- 2026-11-06 (P00.T2): PHPUnit 13 fails an empty suite. Keep it that way: the unit and integration suites have tests, so a suite that finds none (a renamed folder) turns CI red.
+- 2026-11-06 (P00.T2): `symfony/property-info` is dev-only (it comes with Foundry), so `config/packages/property_info.yaml` sets it only for dev and test. Move it to `require` before prod code needs it.
+- 2026-11-06 (P00.T2): PHP-CS-Fixer prints a "minimum PHP 8.4" warning on PHP 8.5 but runs correctly.
+- 2026-11-06 (P00.T2): CI ran green on PR #1: push run 3m01s, pull request run 2m29s (slowest job `build`, about 2.5 min).
+- 2026-11-06 (P00.T2): merge blocking is not on. GitHub refuses branch protection on this private personal repo ("Upgrade to GitHub Pro or make this repository public", HTTP 403). The "blocks merge" criterion stays open until the repo gets Pro or a team plan; then require `static`, `unit`, `integration` and `build` on `main`.
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
-use App\Web\Infrastructure\Debug\WorkerRequestCountSubscriber;
+use App\Web\Infrastructure\Debug\WorkerRequestCountListener;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DependencyInjection\Attribute\When;
 
@@ -22,9 +22,9 @@ final class WorkerRequestCountTest extends WebTestCase
         self::assertSame('2', $client->getResponse()->headers->get('X-Worker-Request-Count'));
     }
 
-    public function testSubscriberIsOnlyEnabledForDevAndTest(): void
+    public function testListenerIsOnlyEnabledForDevAndTest(): void
     {
-        $attributes = (new \ReflectionClass(WorkerRequestCountSubscriber::class))->getAttributes(When::class);
+        $attributes = new \ReflectionClass(WorkerRequestCountListener::class)->getAttributes(When::class);
 
         $environments = array_map(static fn (\ReflectionAttribute $attribute): string => $attribute->newInstance()->env, $attributes);
         sort($environments);

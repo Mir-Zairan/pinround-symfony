@@ -20,6 +20,8 @@ On Linux, `make` passes your user and group id to the build. If you run plain `d
 
 If a port is taken, put a new one in `.env.local`, for example `HTTP_PORT=8081`. The other settings are `HTTPS_PORT`, `MAILPIT_UI_PORT`, `MINIO_API_PORT` and `MINIO_CONSOLE_PORT`.
 
+Run `make qa` (or `composer qa` inside the app container) to run every quality gate. CI lives in `.github/workflows/ci.yml`.
+
 Run `make help` to see every command.
 
 ## Why it exists

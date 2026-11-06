@@ -1,0 +1,4 @@
+# Deptrac merges `paths` from imported files and resolves each path against the importing file's folder,
+# so ./src from the real config lands on this fixture's src/ and no override is needed.
+imports:
+  - ../../../../deptrac.yaml

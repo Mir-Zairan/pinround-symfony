@@ -1,0 +1,379 @@
+# Module boundaries (ADR-0002, ADR-0032). Rules are documented in docs/02-architecture/modules.md#deptrac-rules.
+# Layers are collected by namespace, not by directory, so tests can point Deptrac at a fixture outside src/.
+deptrac:
+  paths:
+    - ./src
+
+  ignore_uncovered_internal_classes: true
+
+  layers:
+    - name: SharedKernel
+      collectors:
+        - { type: classNameRegex, value: '#^App\\SharedKernel\\#' }
+    - name: Kernel
+      collectors:
+        - { type: classNameRegex, value: '#^App\\Kernel$#' }
+    - name: Vendor
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#.#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\#' }
+            - { type: php_internal, value: '.' }
+    - name: Identity_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Identity\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Identity\\Api\\Event\\#' }
+    - name: Identity_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Identity\\Api\\Event\\#' }]
+    - name: Identity_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Identity\\Domain\\#' }]
+    - name: Identity_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Identity\\Application\\#' }]
+    - name: Identity_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Identity\\Infrastructure\\#' }]
+    - name: Identity_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Identity\\UI\\#' }]
+
+    - name: Organization_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Organization\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Organization\\Api\\Event\\#' }
+    - name: Organization_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Organization\\Api\\Event\\#' }]
+    - name: Organization_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Organization\\Domain\\#' }]
+    - name: Organization_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Organization\\Application\\#' }]
+    - name: Organization_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Organization\\Infrastructure\\#' }]
+    - name: Organization_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Organization\\UI\\#' }]
+
+    - name: Workflow_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Workflow\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Workflow\\Api\\Event\\#' }
+    - name: Workflow_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Workflow\\Api\\Event\\#' }]
+    - name: Workflow_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Workflow\\Domain\\#' }]
+    - name: Workflow_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Workflow\\Application\\#' }]
+    - name: Workflow_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Workflow\\Infrastructure\\#' }]
+    - name: Workflow_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Workflow\\UI\\#' }]
+
+    - name: Ticketing_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Ticketing\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Ticketing\\Api\\Event\\#' }
+    - name: Ticketing_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Ticketing\\Api\\Event\\#' }]
+    - name: Ticketing_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Ticketing\\Domain\\#' }]
+    - name: Ticketing_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Ticketing\\Application\\#' }]
+    - name: Ticketing_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Ticketing\\Infrastructure\\#' }]
+    - name: Ticketing_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Ticketing\\UI\\#' }]
+
+    - name: Conversation_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Conversation\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Conversation\\Api\\Event\\#' }
+    - name: Conversation_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Conversation\\Api\\Event\\#' }]
+    - name: Conversation_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Conversation\\Domain\\#' }]
+    - name: Conversation_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Conversation\\Application\\#' }]
+    - name: Conversation_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Conversation\\Infrastructure\\#' }]
+    - name: Conversation_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Conversation\\UI\\#' }]
+
+    - name: Review_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Review\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Review\\Api\\Event\\#' }
+    - name: Review_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Review\\Api\\Event\\#' }]
+    - name: Review_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Review\\Domain\\#' }]
+    - name: Review_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Review\\Application\\#' }]
+    - name: Review_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Review\\Infrastructure\\#' }]
+    - name: Review_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Review\\UI\\#' }]
+
+    - name: Media_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Media\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Media\\Api\\Event\\#' }
+    - name: Media_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Media\\Api\\Event\\#' }]
+    - name: Media_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Media\\Domain\\#' }]
+    - name: Media_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Media\\Application\\#' }]
+    - name: Media_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Media\\Infrastructure\\#' }]
+    - name: Media_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Media\\UI\\#' }]
+
+    - name: Notification_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Notification\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Notification\\Api\\Event\\#' }
+    - name: Notification_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Notification\\Api\\Event\\#' }]
+    - name: Notification_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Notification\\Domain\\#' }]
+    - name: Notification_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Notification\\Application\\#' }]
+    - name: Notification_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Notification\\Infrastructure\\#' }]
+    - name: Notification_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Notification\\UI\\#' }]
+
+    - name: Insight_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Insight\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Insight\\Api\\Event\\#' }
+    - name: Insight_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Insight\\Api\\Event\\#' }]
+    - name: Insight_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Insight\\Domain\\#' }]
+    - name: Insight_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Insight\\Application\\#' }]
+    - name: Insight_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Insight\\Infrastructure\\#' }]
+    - name: Insight_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Insight\\UI\\#' }]
+
+    - name: Assist_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Assist\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Assist\\Api\\Event\\#' }
+    - name: Assist_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Assist\\Api\\Event\\#' }]
+    - name: Assist_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Assist\\Domain\\#' }]
+    - name: Assist_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Assist\\Application\\#' }]
+    - name: Assist_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Assist\\Infrastructure\\#' }]
+    - name: Assist_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Assist\\UI\\#' }]
+
+    - name: Integration_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Integration\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Integration\\Api\\Event\\#' }
+    - name: Integration_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Integration\\Api\\Event\\#' }]
+    - name: Integration_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Integration\\Domain\\#' }]
+    - name: Integration_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Integration\\Application\\#' }]
+    - name: Integration_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Integration\\Infrastructure\\#' }]
+    - name: Integration_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Integration\\UI\\#' }]
+
+    - name: Audit_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Audit\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Audit\\Api\\Event\\#' }
+    - name: Audit_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Audit\\Api\\Event\\#' }]
+    - name: Audit_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Audit\\Domain\\#' }]
+    - name: Audit_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Audit\\Application\\#' }]
+    - name: Audit_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Audit\\Infrastructure\\#' }]
+    - name: Audit_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Audit\\UI\\#' }]
+
+    - name: AgentApi_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\AgentApi\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\AgentApi\\Api\\Event\\#' }
+    - name: AgentApi_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\AgentApi\\Api\\Event\\#' }]
+    - name: AgentApi_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\AgentApi\\Domain\\#' }]
+    - name: AgentApi_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\AgentApi\\Application\\#' }]
+    - name: AgentApi_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\AgentApi\\Infrastructure\\#' }]
+    - name: AgentApi_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\AgentApi\\UI\\#' }]
+
+    - name: Web_Api
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Web\\Api\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Web\\Api\\Event\\#' }
+    - name: Web_Event
+      collectors: [{ type: classNameRegex, value: '#^App\\Web\\Api\\Event\\#' }]
+    - name: Web_Domain
+      collectors: [{ type: classNameRegex, value: '#^App\\Web\\Domain\\#' }]
+    - name: Web_Application
+      collectors: [{ type: classNameRegex, value: '#^App\\Web\\Application\\#' }]
+    - name: Web_Infrastructure
+      collectors: [{ type: classNameRegex, value: '#^App\\Web\\Infrastructure\\#' }]
+    - name: Web_UI
+      collectors: [{ type: classNameRegex, value: '#^App\\Web\\UI\\#' }]
+
+  # Per module M: Api, Event and Domain see SharedKernel only. Application, Infrastructure and UI may also
+  # call the Api of the modules in M's "Depends on" line (modules.md). Application and Infrastructure may
+  # listen to the events (M_Event) of every module. Only Infrastructure and UI see Vendor.
+  ruleset:
+    SharedKernel: [Vendor]
+    Kernel: [Vendor, SharedKernel]
+
+    Identity_Api: [SharedKernel]
+    Identity_Event: [SharedKernel]
+    Identity_Domain: [SharedKernel]
+    Identity_Application: [Identity_Domain, Identity_Api, SharedKernel, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Identity_Infrastructure: [Identity_Domain, Identity_Application, Identity_Api, SharedKernel, Vendor, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Identity_UI: [Identity_Application, Identity_Api, SharedKernel, Vendor]
+
+    Organization_Api: [SharedKernel]
+    Organization_Event: [SharedKernel]
+    Organization_Domain: [SharedKernel]
+    Organization_Application: [Organization_Domain, Organization_Api, SharedKernel, Identity_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Organization_Infrastructure: [Organization_Domain, Organization_Application, Organization_Api, SharedKernel, Vendor, Identity_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Organization_UI: [Organization_Application, Organization_Api, SharedKernel, Vendor, Identity_Api]
+
+    Workflow_Api: [SharedKernel]
+    Workflow_Event: [SharedKernel]
+    Workflow_Domain: [SharedKernel]
+    Workflow_Application: [Workflow_Domain, Workflow_Api, SharedKernel, Organization_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Workflow_Infrastructure: [Workflow_Domain, Workflow_Application, Workflow_Api, SharedKernel, Vendor, Organization_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Workflow_UI: [Workflow_Application, Workflow_Api, SharedKernel, Vendor, Organization_Api]
+
+    Ticketing_Api: [SharedKernel]
+    Ticketing_Event: [SharedKernel]
+    Ticketing_Domain: [SharedKernel]
+    Ticketing_Application: [Ticketing_Domain, Ticketing_Api, SharedKernel, Workflow_Api, Organization_Api, Media_Api, Insight_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Ticketing_Infrastructure: [Ticketing_Domain, Ticketing_Application, Ticketing_Api, SharedKernel, Vendor, Workflow_Api, Organization_Api, Media_Api, Insight_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Ticketing_UI: [Ticketing_Application, Ticketing_Api, SharedKernel, Vendor, Workflow_Api, Organization_Api, Media_Api, Insight_Api]
+
+    Conversation_Api: [SharedKernel]
+    Conversation_Event: [SharedKernel]
+    Conversation_Domain: [SharedKernel]
+    Conversation_Application: [Conversation_Domain, Conversation_Api, SharedKernel, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Conversation_Infrastructure: [Conversation_Domain, Conversation_Application, Conversation_Api, SharedKernel, Vendor, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Conversation_UI: [Conversation_Application, Conversation_Api, SharedKernel, Vendor, Ticketing_Api]
+
+    Review_Api: [SharedKernel]
+    Review_Event: [SharedKernel]
+    Review_Domain: [SharedKernel]
+    Review_Application: [Review_Domain, Review_Api, SharedKernel, Ticketing_Api, Media_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Review_Infrastructure: [Review_Domain, Review_Application, Review_Api, SharedKernel, Vendor, Ticketing_Api, Media_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Review_UI: [Review_Application, Review_Api, SharedKernel, Vendor, Ticketing_Api, Media_Api]
+
+    Media_Api: [SharedKernel]
+    Media_Event: [SharedKernel]
+    Media_Domain: [SharedKernel]
+    Media_Application: [Media_Domain, Media_Api, SharedKernel, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Media_Infrastructure: [Media_Domain, Media_Application, Media_Api, SharedKernel, Vendor, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Media_UI: [Media_Application, Media_Api, SharedKernel, Vendor]
+
+    Notification_Api: [SharedKernel]
+    Notification_Event: [SharedKernel]
+    Notification_Domain: [SharedKernel]
+    Notification_Application: [Notification_Domain, Notification_Api, SharedKernel, Organization_Api, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Notification_Infrastructure: [Notification_Domain, Notification_Application, Notification_Api, SharedKernel, Vendor, Organization_Api, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Notification_UI: [Notification_Application, Notification_Api, SharedKernel, Vendor, Organization_Api, Ticketing_Api]
+
+    Insight_Api: [SharedKernel]
+    Insight_Event: [SharedKernel]
+    Insight_Domain: [SharedKernel]
+    Insight_Application: [Insight_Domain, Insight_Api, SharedKernel, Workflow_Api, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Insight_Infrastructure: [Insight_Domain, Insight_Application, Insight_Api, SharedKernel, Vendor, Workflow_Api, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Insight_UI: [Insight_Application, Insight_Api, SharedKernel, Vendor, Workflow_Api, Ticketing_Api]
+
+    Assist_Api: [SharedKernel]
+    Assist_Event: [SharedKernel]
+    Assist_Domain: [SharedKernel]
+    Assist_Application: [Assist_Domain, Assist_Api, SharedKernel, Ticketing_Api, Review_Api, Organization_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Assist_Infrastructure: [Assist_Domain, Assist_Application, Assist_Api, SharedKernel, Vendor, Ticketing_Api, Review_Api, Organization_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Assist_UI: [Assist_Application, Assist_Api, SharedKernel, Vendor, Ticketing_Api, Review_Api, Organization_Api]
+
+    Integration_Api: [SharedKernel]
+    Integration_Event: [SharedKernel]
+    Integration_Domain: [SharedKernel]
+    Integration_Application: [Integration_Domain, Integration_Api, SharedKernel, Ticketing_Api, Workflow_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Integration_Infrastructure: [Integration_Domain, Integration_Application, Integration_Api, SharedKernel, Vendor, Ticketing_Api, Workflow_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Integration_UI: [Integration_Application, Integration_Api, SharedKernel, Vendor, Ticketing_Api, Workflow_Api]
+
+    Audit_Api: [SharedKernel]
+    Audit_Event: [SharedKernel]
+    Audit_Domain: [SharedKernel]
+    Audit_Application: [Audit_Domain, Audit_Api, SharedKernel, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Audit_Infrastructure: [Audit_Domain, Audit_Application, Audit_Api, SharedKernel, Vendor, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Audit_UI: [Audit_Application, Audit_Api, SharedKernel, Vendor]
+
+    AgentApi_Api: [SharedKernel]
+    AgentApi_Event: [SharedKernel]
+    AgentApi_Domain: [SharedKernel]
+    AgentApi_Application: [AgentApi_Domain, AgentApi_Api, SharedKernel, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    AgentApi_Infrastructure: [AgentApi_Domain, AgentApi_Application, AgentApi_Api, SharedKernel, Vendor, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    AgentApi_UI: [AgentApi_Application, AgentApi_Api, SharedKernel, Vendor, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api]
+
+    Web_Api: [SharedKernel]
+    Web_Event: [SharedKernel]
+    Web_Domain: [SharedKernel]
+    Web_Application: [Web_Domain, Web_Api, SharedKernel, Insight_Api, Organization_Api, Notification_Api, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Web_Infrastructure: [Web_Domain, Web_Application, Web_Api, SharedKernel, Vendor, Insight_Api, Organization_Api, Notification_Api, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Web_UI: [Web_Application, Web_Api, SharedKernel, Vendor, Insight_Api, Organization_Api, Notification_Api, Ticketing_Api]

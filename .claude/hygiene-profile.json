@@ -1,5 +1,5 @@
 {
-  "_comment": "Calibrated 2026-11-06 on a docs-only repo: no composer.json, no CI workflow and no source code exist yet. Every command below is the one the docs promise for phase P00 (CLAUDE.md coding rules, ADR-0028, docs/02-architecture/testing-strategy.md CI pipeline, docs/05-plan/phase-00-foundation.md design notes) and runs inside the Docker 'app' service, because the host has no PHP or Composer. Re-run /hygiene-calibrate --force after P00.T2 (CI workflow) and P00.T9 (e2e + lints) land, so commands, CI order and browser login are read from the real files.",
+  "_comment": "Calibrated 2026-11-06 (--force) after P00.T2: composer.json scripts, .github/workflows/ci.yml, phpunit.dist.xml, deptrac.yaml, .php-cs-fixer.dist.php and the Makefile are read from the real files. The host has no PHP: every PHP command runs in the running Docker 'app' service with `docker compose exec -T app …` from the checkout root (exec uses the container's own environment, so the Makefile's --env-file flags are not needed for exec; `make up` starts the stack). Those commands fail while the stack is down or in a checkout whose compose project has no running 'app' service. CI runs the same composer scripts on the runner's PHP 8.5.",
   "schemaVersion": 2,
   "repo": "pinround-symfony",
   "language": "php",
@@ -7,13 +7,17 @@
     "symfony",
     "doctrine",
     "twig",
-    "symfony-ux (stimulus, turbo, twig/live components)",
     "symfony-messenger",
-    "frankenphp"
+    "symfony-scheduler",
+    "frankenphp",
+    "phpunit",
+    "zenstruck-foundry",
+    "deptrac"
   ],
   "packageManager": "composer",
   "guidelines": [
     "CLAUDE.md",
+    "README.md",
     "docs/README.md",
     "docs/05-plan/README.md",
     "docs/00-product/glossary.md",
@@ -25,27 +29,89 @@
     "docs/02-architecture/frontend.md",
     "docs/02-architecture/testing-strategy.md",
     "docs/02-architecture/ai-architecture.md",
-    "docs/03-adr/README.md"
+    "docs/03-adr/README.md",
+    "docs/03-adr/0002-modular-monolith.md",
+    "docs/03-adr/0028-testing-and-quality-gates.md",
+    "docs/03-adr/0032-module-call-edges-follow-modules-catalogue.md",
+    ".claude/rules/hygiene-learned-docker.md",
+    ".claude/rules/hygiene-learned-docs.md",
+    ".claude/rules/hygiene-learned-tests.md",
+    ".claude/rules/hygiene-learned-process.md"
   ],
   "guidelineHashes": {
     "CLAUDE.md": "57ea8f4de9209c7a554a5b6ef1dcab32bba83591",
-    "docs/05-plan/README.md": "5e4fcda995fef94ec7d55550f3a8c216ea96df19",
-    "docs/04-prototype/prototype-guide.md": "75921d6da5d5e939aa2984b7462721bf2b896413",
     "docs/README.md": "5925df43a8107d1ea0759a028539ab1d09fb8b97",
-    "docs/02-architecture/modules.md": "b0840ff06579e57ff7017912090061db8d4f688d",
+    "docs/05-plan/README.md": "5e4fcda995fef94ec7d55550f3a8c216ea96df19",
+    "docs/00-product/glossary.md": "873c8a7868ecac9f39678316edda6739f9ae93ab",
+    "docs/00-product/ux-principles.md": "9c31b8dc24140aaaf021ab8e2d0e604584ce6019",
+    "docs/02-architecture/modules.md": "ed8518a057ab45940fbed568e6b4b50f0a565783",
+    "docs/02-architecture/data-model.md": "88c348da77d0c375aedf20bb35eeb1a529215aa9",
+    "docs/02-architecture/security.md": "39e760fa21eb7243af7fb85beebf4e812bd639a3",
+    "docs/02-architecture/performance-and-scale.md": "3dd719be51facddbc9357810b2f19585de73d5ae",
+    "docs/02-architecture/frontend.md": "bf1c3bdeb012f49866a4cda8b2db727961d6707b",
+    "docs/02-architecture/testing-strategy.md": "39334e6b189b1e4e7cc792e1f09e8fa968945bdd",
     "docs/02-architecture/ai-architecture.md": "e512acae0aed2f65e880ba848169a1e64aa0e6a0",
-    "docs/03-adr/0002-modular-monolith.md": "6c9fa27c7e35af57df6ac83f62bb5fdd88dea27c",
+    "docs/03-adr/README.md": "930faa4867bc64a21d0a7e221ab66bb0dd83eb28",
+    "docs/04-prototype/prototype-guide.md": "75921d6da5d5e939aa2984b7462721bf2b896413",
+    "docs/03-adr/0002-modular-monolith.md": "0370329ca3c706c51fcd969a43c4f4a9312b10ef",
     "docs/03-adr/0005-multi-tenancy.md": "dfe32003b0a32e816463ff0420cad46f787f08b1",
     "docs/03-adr/0013-authorization.md": "928d7a5a201259183f9cc4f7380ce8452113b527",
     "docs/03-adr/0027-secrets-and-encryption.md": "cc74095ae161d06b797d74fff4d7b19019d12503",
     "docs/03-adr/0020-ai-safety-and-prompt-injection.md": "676752913ac430a903efd093b2ae6dfb01942e32",
     "docs/03-adr/0011-screenshot-storage-and-processing.md": "35b78e1d05f0cf02f367b675abfd59525a75a895",
-    "docs/02-architecture/performance-and-scale.md": "3dd719be51facddbc9357810b2f19585de73d5ae",
     "docs/03-adr/0008-frankenphp-runtime.md": "609ad7a0d5a900f674fc3871ffd8b014d463859c",
-    "docs/00-product/glossary.md": "873c8a7868ecac9f39678316edda6739f9ae93ab",
-    "docs/00-product/ux-principles.md": "9c31b8dc24140aaaf021ab8e2d0e604584ce6019",
-    "docs/03-adr/README.md": "fb7482d1945c765b8aabd4bfed6a1e0adcaec9ee",
-    "README.md": "94172ec2e07dedf806ffc23fe48a88bc7bd6c5e5"
+    "docs/00-product/vision.md": "c0cb59188afe8f89d82d2614b0ed298f54ab15a4",
+    "docs/02-architecture/architecture-overview.md": "32f5610a48ce5bb52d9dc6b4781886a64ca881a0",
+    "docs/02-architecture/trade-offs.md": "7fa05fa7d4483c293fd2dee1e53d46b4d4b5bb31",
+    "docs/00-product/personas-and-roles.md": "6642222e895be6d430301cf7be733e673b6152cd",
+    "docs/01-requirements/functional-requirements.md": "954a65e23eec62d76f3721aa8ef6893153f19db1",
+    "docs/01-requirements/non-functional-requirements.md": "855b63214f2fa84c2d4260947a9c7c31f9d9b97d",
+    "docs/01-requirements/constraints.md": "63a809dcbbc9ef72c902462718369f9e48da72e4",
+    "docs/02-architecture/workflow-engine.md": "9da1e5a86d81620e0946e9ef107b2601fe288adb",
+    "docs/02-architecture/realtime-and-notifications.md": "12a3e9138171c706b0188be6936ec422d1c68f6a",
+    "docs/02-architecture/media-pipeline.md": "8492ef207fd9d8e01ba6be06f401644ed50a3153",
+    "docs/02-architecture/integrations.md": "f8a292b03d6159f3a701ec08c6aabddab7f3f2cd",
+    "docs/02-architecture/operations.md": "30f3e7c364ce15509747e35d0f1f1ff1c9ef0fc8",
+    "docs/05-plan/phase-00-foundation.md": "48ead97c3f4b5e7510db17903a3774e9c06c9383",
+    "docs/05-plan/phase-01-identity-and-organization.md": "2e37e3f0e25f12a75c9c4f0dd720957c8ba4e14a",
+    "docs/05-plan/phase-02-projects-and-workflow.md": "0a50b65a169e82f598f0965077313a94c8bce07d",
+    "docs/05-plan/phase-03-tickets-core.md": "e51a1c2b6c1e9cf54d94b470a45a488d88e42245",
+    "docs/05-plan/phase-04-conversation-and-pings.md": "1e7c9e4f24ab4909219aa03cf3931e5c647ea1d9",
+    "docs/05-plan/phase-05-screenshots-pins-and-rounds.md": "a5bbb2ae84d1da58ef8f76ef2706995166a453ad",
+    "docs/05-plan/phase-06-intake-and-checks.md": "1f9b96ed758fec6359e459607fad813cf87a4cf4",
+    "docs/05-plan/phase-07-home-and-my-reports.md": "47fd3a0d1c5fbdf90e38b6b4f068e549591f9f8e",
+    "docs/05-plan/phase-08-ai-assist.md": "e83490c087306543fe50f46eede83fcd26198931",
+    "docs/05-plan/phase-09-mcp-and-claude-code.md": "c8ba0bf587a3a5e33d4466b34fb5af307c91ee10",
+    "docs/05-plan/phase-10-integrations.md": "42cb807bf673f065212be4ce338e18eefc5da410",
+    "docs/05-plan/phase-11-admin-and-governance.md": "340bbdd74473914e5df94d99df5f89eafeb8471b",
+    "docs/05-plan/phase-12-hardening-and-launch.md": "6352e67cecf2762a025e21103b529efb6fb47d2b",
+    "docs/03-adr/0003-php-and-symfony-versions.md": "0f926861cdff330d6d6cd27aa5ff8bbe9906aea8",
+    "docs/03-adr/0019-browser-local-ai.md": "0309fca283cd404a4b86bad537262236ca7f0829",
+    "docs/03-adr/0009-async-messaging-and-outbox.md": "d6e06be2bd97e703031e54874a6ea5a0c0a7d57e",
+    "docs/03-adr/0015-turn-read-model.md": "e41930f958cdc625bc00c46f25e1cfc56817c8c7",
+    "docs/03-adr/0006-identifiers.md": "959e5ad1cf945f47e1322871b1a60ab64a0fee5c",
+    "docs/03-adr/0012-authentication.md": "ba6974e563ea094814e4733932a8dc238f2723cf",
+    "docs/03-adr/0014-status-model-five-groups.md": "e4ca463a5ada0c436c8f70f5b879cafc91d7161e",
+    "docs/03-adr/0016-direct-ticket-creation-with-check-flags.md": "3c6853a7481628dba2aa48962df3db0fdbc9caec",
+    "docs/03-adr/0022-search-and-duplicates.md": "5ea68d1db8fb1b642e319152d31f008a60baaf35",
+    "docs/03-adr/0017-private-draft-rounds.md": "f69c41a82e127cd807cb7c9acad61b39782e2141",
+    "docs/03-adr/0024-notifications-and-pings.md": "c9cc884aab8825efa24324f9358c4a647af93165",
+    "docs/03-adr/0018-ai-provider-abstraction.md": "59127bef65934885498df9b9337b811c951300a2",
+    "docs/03-adr/0025-jira-integration.md": "37cef5a1a6b92e336fb0d6ee7bc0a8e87648b928",
+    "docs/03-adr/0026-audit-log.md": "5e97699d5c77e748ab8d000b6288defeb5b08ad8",
+    "docs/03-adr/0021-mcp-server.md": "62b24471dd270f93320703fd299e7a7bd9f31ffd",
+    "docs/03-adr/0028-testing-and-quality-gates.md": "8c8c048dac4980e7420818aa8a77415d177c7ebc",
+    "docs/03-adr/0032-module-call-edges-follow-modules-catalogue.md": "4181d3a1e15fe66a52cab85e29a55d34225af906",
+    "docs/03-adr/0030-deployment-model.md": "65058cefa813138647eeb4c30be6c99cafc8b6d3",
+    "docs/03-adr/0029-observability.md": "5796879825435c05bab24bad91bfc1da7f715b9c",
+    "docs/03-adr/0010-cache-sessions-locks.md": "c4afcb9be8575e0b8e3db272665469fd3e6f7772",
+    "docs/03-adr/0007-server-rendered-ui.md": "dc1aac9948e66a31061b19ce420331b268ef6e83",
+    "docs/03-adr/0023-realtime-mercure.md": "78a7f1883178b47fe31fe16231edfbda121b3c92",
+    "docs/03-adr/template.md": "5eb3d2003839c109c16388e06d60ee7c29191254",
+    "docs/03-adr/0001-record-architecture-decisions.md": "79ec178b0d395cd259742b991982e1d52a48a4d8",
+    "docs/03-adr/0004-postgresql.md": "5bf272a78f7353339b758633786ab95be9ccfdee",
+    "docs/03-adr/0031-minio-built-from-pinned-source.md": "8d08defeffdd5072168b4903014a87559e9360e9",
+    "README.md": "246d71bf53bd860d91854d7dd4d9794b7d92eed0"
   },
   "baseBranch": "main",
   "models": {
@@ -68,68 +134,86 @@
     "budgetLine": true
   },
   "checks": {
-    "_comment": "Planned commands (composer scripts listed in phase-00 design notes), run in the Docker 'app' service because the host has no PHP. They fail until P00.T1/T2 create composer.json and compose.yaml. `make qa` / `composer qa` runs them all.",
+    "_comment": "composer scripts from composer.json, run in the Docker 'app' service (host has no PHP). `composer qa` (or `make qa`) runs validate, cs, rector, phpstan, deptrac, lint, audit and test in one go. `ci` names the CI job in .github/workflows/ci.yml. build and compose run on the host (Docker), like the CI build job.",
+    "validate": {
+      "cmd": "docker compose exec -T app composer validate --strict",
+      "tier": "fast",
+      "needsDb": false,
+      "ci": "static"
+    },
     "format": {
       "cmd": "docker compose exec -T app composer cs",
-      "scopedCmd": null,
+      "scopedCmd": "docker compose exec -T app vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --dry-run --diff --show-progress=none --path-mode=intersection {files}",
       "fixCmd": "docker compose exec -T app composer cs:fix",
       "tier": "fast",
       "needsDb": false,
-      "ci": "1. Static"
-    },
-    "lint": {
-      "cmd": "docker compose exec -T app composer deptrac",
-      "tier": "fast",
-      "needsDb": false,
-      "ci": "1. Static"
-    },
-    "static": {
-      "cmd": "docker compose exec -T app composer phpstan",
-      "tier": "medium",
-      "needsDb": false,
-      "ci": "1. Static"
+      "ci": "static"
     },
     "rector": {
       "cmd": "docker compose exec -T app composer rector",
       "tier": "medium",
       "needsDb": false,
-      "ci": "1. Static"
+      "ci": "static"
     },
-    "docs": {
-      "cmd": "docker compose exec -T app composer lint:docs",
+    "static": {
+      "cmd": "docker compose exec -T app composer phpstan",
+      "tier": "medium",
+      "needsDb": false,
+      "ci": "static"
+    },
+    "deptrac": {
+      "cmd": "docker compose exec -T app composer deptrac",
       "tier": "fast",
       "needsDb": false,
-      "ci": "1. Static"
+      "ci": "static"
     },
-    "copy": {
-      "cmd": "docker compose exec -T app composer lint:copy",
+    "lint": {
+      "cmd": "docker compose exec -T app composer lint",
       "tier": "fast",
       "needsDb": false,
-      "ci": "1. Static"
+      "ci": "static"
     },
     "audit": {
       "cmd": "docker compose exec -T app composer audit",
       "tier": "fast",
       "needsDb": false,
-      "ci": "1. Static"
+      "ci": "static"
     },
     "unit": {
       "cmd": "docker compose exec -T app composer test:unit",
       "tier": "medium",
       "needsDb": false,
-      "ci": "2. Unit"
+      "ci": "unit"
     },
     "integration": {
       "cmd": "docker compose exec -T app composer test:integration",
       "tier": "slow",
       "needsDb": true,
-      "ci": "3. Integration + functional"
+      "ci": "integration"
+    },
+    "functional": {
+      "cmd": "docker compose exec -T app composer test:functional",
+      "tier": "slow",
+      "needsDb": true,
+      "ci": "integration"
+    },
+    "build": {
+      "cmd": "docker build --target prod --build-arg APP_UID=1000 --build-arg APP_GID=1000 .",
+      "tier": "slow",
+      "needsDb": false,
+      "ci": "build"
+    },
+    "compose": {
+      "cmd": "sh tests/shell/compose-config-check.sh",
+      "tier": "fast",
+      "needsDb": false,
+      "ci": "build"
     },
     "e2e": {
       "cmd": null,
       "tier": "slow",
       "needsDb": true,
-      "ci": "4. E2E (Playwright + axe under tests/e2e/, added in P00.T9; command not documented yet)"
+      "ci": "e2e (stub on pull requests until the Playwright journeys arrive in P00.T9)"
     },
     "frontend": {
       "cmd": null,
@@ -141,18 +225,20 @@
     }
   },
   "ciGate": [
+    "validate",
     "format",
-    "lint",
-    "static",
     "rector",
-    "docs",
-    "copy",
+    "static",
+    "deptrac",
+    "lint",
     "audit",
     "unit",
     "integration",
-    "e2e"
+    "functional",
+    "build",
+    "compose"
   ],
-  "_ciGate_comment": "No CI workflow exists yet. Order taken from docs/02-architecture/testing-strategy.md 'CI pipeline' (1 Static, 2 Unit, 3 Integration + functional, 4 E2E, 5 Build on main only).",
+  "_ciGate_comment": "In CI order from .github/workflows/ci.yml: static job (validate, cs, rector, phpstan, deptrac, lint, audit), unit, integration (test:integration then test:functional, with postgres:18.6 and valkey 8.1.4 services), build (docker build --target prod, compose-config-check.sh). The jobs run in parallel on every push and on pull requests to main. e2e is a stub that runs nothing yet, so it is left out.",
   "reviewAgents": [
     {
       "name": "hygiene-senior-engineer",
@@ -160,7 +246,7 @@
     },
     {
       "name": "hygiene-security",
-      "when": "always (code changed); weight on voters, tenancy, templates, uploads, AI, MCP, tokens, logging"
+      "when": "always (code changed); weight on voters, tenancy, templates, uploads, AI, MCP, tokens, logging, .env files and the CI workflow"
     },
     {
       "name": "hygiene-performance",
@@ -176,11 +262,11 @@
     },
     {
       "name": "hygiene-architect",
-      "when": "new classes or dirs under src/, controllers, repositories, events, Api changes, cross-module edits"
+      "when": "new classes or dirs under src/, controllers, repositories, events, Api or Api/Event changes, cross-module edits, deptrac.yaml or the modules catalogue, ADRs"
     },
     {
       "name": "hygiene-database",
-      "when": "migrations/, Doctrine mappings, repositories, queries, read models, RLS, resolver functions"
+      "when": "migrations/, Doctrine mappings and config, repositories, queries, read models, RLS, resolver functions"
     },
     {
       "name": "hygiene-frontend",
@@ -188,11 +274,11 @@
     },
     {
       "name": "hygiene-dependency-auditor",
-      "when": "composer.json, composer.lock or importmap.php changed"
+      "when": "composer.json, composer.lock, importmap.php, Dockerfile, compose.yaml images or .github actions changed"
     }
   ],
   "review": {
-    "_comment": "Settings; overridable per person. prSizeGuide left at the default: no merged PRs to measure yet.",
+    "_comment": "Settings; overridable per person. prSizeGuide left at the default: no merged PRs to measure yet (gh lists none).",
     "smallDiffLines": 100,
     "frameOnReview": "auto",
     "gateOnReview": "auto",
@@ -202,19 +288,32 @@
     "maxFixRounds": 1
   },
   "fastGate": {
-    "_comment": "No PHP on the host, so no per-file `php -l` or formatter yet; add them once a host or container path is agreed. The patterns below come from the repo's written rules (origin calibrate) and the plugin's generic set (origin plugin); all were confirmed by the user on 2026-11-06.",
+    "_comment": "PHP and Twig run in the Docker 'app' service. No per-file `syntax`/`onEdit` for PHP: the on-edit hook passes the host's absolute path, which does not exist inside the container (it is mounted at /app), so `php -l` there would report a false error on every edit. The Stop gate passes paths relative to the checkout, so the scoped PHP-CS-Fixer run (about 0.4 s) and lint:twig (about 0.3 s) work; PHP-CS-Fixer also fails on a file it cannot parse. formatPaths match the finder in .php-cs-fixer.dist.php; --path-mode=intersection keeps its exclusions (config/reference.php). Both fail, not skip, while the stack is down.",
     "languages": [
       {
         "ext": [
           "php"
         ],
         "syntax": null,
-        "format": null,
+        "format": "docker compose exec -T app vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --dry-run --diff --show-progress=none --path-mode=intersection {files}",
+        "formatPaths": [
+          "bin/",
+          "config/",
+          "public/",
+          "src/",
+          "tests/"
+        ],
+        "onEdit": null
+      },
+      {
+        "ext": [
+          "twig"
+        ],
+        "syntax": null,
+        "format": "docker compose exec -T app php bin/console lint:twig {files}",
         "formatPaths": [
           "src/",
-          "tests/",
-          "migrations/",
-          "config/"
+          "templates/"
         ],
         "onEdit": null
       }
@@ -252,6 +351,27 @@
         "pattern": "(^[[:space:]]*\\$?|(const|let|var)[[:space:]]+)(data|result|tmp|info|obj)[[:space:]]*=([^=]|$)",
         "exclude": null,
         "message": "Name the variable by what it holds (openTickets, parsedRound), not data/result/tmp/info/obj.",
+        "enabled": true
+      },
+      {
+        "id": "lp-20261106-d0e1",
+        "class": "migration-safety",
+        "lens": "hygiene-database",
+        "origin": "learned",
+        "ext": [
+          "php"
+        ],
+        "paths": [
+          "migrations/"
+        ],
+        "pattern": "DROP[[:space:]]+EXTENSION",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Don't drop extensions in down(): up() uses CREATE EXTENSION IF NOT EXISTS and may not own them. Throw IrreversibleMigration ($this->throwIrreversibleMigrationException('...')) instead.",
+        "source": [
+          "20261106-0020"
+        ],
         "enabled": true
       },
       {
@@ -412,25 +532,29 @@
         "enabled": true
       },
       {
-        "id": "lp-20261106-d0e1",
-        "class": "migration-safety",
-        "lens": "hygiene-database",
-        "origin": "learned",
+        "id": "cal-final-class",
+        "class": "other-final-class",
+        "lens": "hygiene-senior-engineer",
+        "origin": "calibrate",
+        "confidence": "low",
+        "provenance": {
+          "file": "CLAUDE.md",
+          "line": 47,
+          "text": "PHP 8.4+, `declare(strict_types=1);`, final classes by default, readonly value objects, constructor injection only."
+        },
         "ext": [
           "php"
         ],
         "paths": [
-          "migrations/"
+          "src/"
         ],
-        "pattern": "DROP[[:space:]]+EXTENSION",
+        "pattern": "^(readonly[[:space:]]+)?class[[:space:]]+[A-Z]",
         "exclude": null,
         "astPattern": null,
         "astLang": null,
-        "message": "Don't drop extensions in down(): up() uses CREATE EXTENSION IF NOT EXISTS and may not own them. Throw IrreversibleMigration ($this->throwIrreversibleMigrationException('...')) instead.",
-        "source": [
-          "20261106-0020"
-        ],
-        "enabled": true
+        "message": "Classes are final by default (CLAUDE.md). Add `final`, or `abstract` for a base class; if it must be extended, add `// hygiene:allow` with the reason.",
+        "source": [],
+        "enabled": false
       }
     ]
   },
@@ -444,7 +568,7 @@
     "rejectThreshold": 2
   },
   "relations": {
-    "_comment": "Cross-file impact brief for the reasoning lenses. src/ is empty until P00.",
+    "_comment": "Cross-file impact brief for the reasoning lenses.",
     "enabled": true,
     "maxSymbols": 40,
     "maxRefsPerSymbol": 12,
@@ -455,7 +579,8 @@
         ],
         "sourcePaths": [
           "src/",
-          "migrations/"
+          "migrations/",
+          "tests/"
         ],
         "defPrefix": "(function|class|interface|trait|enum)[[:space:]]+",
         "astPattern": null,
@@ -464,23 +589,20 @@
     ]
   },
   "taskGate": {
-    "_comment": "Kept empty: the heavy gates need the Docker stack.",
+    "_comment": "Kept empty: every heavier check needs the Docker stack; the Stop gate's scoped checks cover the per-task boundary.",
     "extraChecks": []
   },
   "browser": {
-    "_comment": "Planned from phase-00: `make up` serves https://localhost (Caddy TLS, fixed port, no {port} flag yet), so a review in a worktree cannot start its own instance and refuses to reuse a busy address. Login arrives in P01 and the Playwright e2e setup in P00.T9; fill auth.storageState/loginCmd then. Nothing can drive a browser on this machine today (no Playwright package, no Chrome tools in the session).",
+    "_comment": "`make up` serves https://localhost (Caddy local TLS). The ports come from .env.local (HTTP_PORT, HTTPS_PORT) and the stack's other ports (MinIO, Mailpit) are fixed too, so a worktree cannot start a second stack beside the first: no {port} placeholder, and the stage refuses to reuse a busy address. There is no health route in the app; the home page (route web_home) answers when the stack is up. No login exists yet (P01), so no auth. Playwright resolves from node on this machine. Pages map only templates that exist today; the component gallery and assets/ arrive in P00.T5/T6.",
     "driver": "auto",
     "agentsPerPr": 1,
     "dependentScreens": 3,
     "skill": null,
     "startCmd": "make up",
-    "readyUrl": "https://localhost/health/ready",
+    "readyUrl": "https://localhost/",
     "pages": {
       "src/Web/UI/templates/**": "https://localhost/",
-      "templates/components/**": "https://localhost/_gallery",
-      "src/Web/UI/Component/**": "https://localhost/_gallery",
-      "assets/styles/**": "https://localhost/_gallery",
-      "assets/controllers/**": "https://localhost/_gallery"
+      "src/Web/UI/Controller/**": "https://localhost/"
     },
     "autoWhen": [
       "**/*.twig",
@@ -525,7 +647,7 @@
         360
       ],
       "data": {
-        "source": "app:demo:seed (stub in P00.T9, filled in P01) with Acme Foods / project SHOP",
+        "source": "app:demo:seed (empty until P01; `make seed`) with Acme Foods / project SHOP",
         "large": "an org near 200,000 tickets (data-model.md); a lead with many turns for Home"
       },
       "checks": [
@@ -536,15 +658,9 @@
     }
   },
   "ui": {
-    "_comment": "Planned locations from P00.T5/T6 and docs/02-architecture/frontend.md; they do not exist yet. Token names must match the prototype's CSS custom properties.",
-    "tokenFiles": [
-      "assets/styles/tokens.css"
-    ],
-    "componentDirs": [
-      "src/Web/UI/Component/",
-      "templates/components/",
-      "assets/controllers/"
-    ]
+    "_comment": "No design-system files exist yet: no assets/ dir, no CSS, no Twig components. frontend.md and P00.T5/T6 plan assets/styles/tokens.css (token names from the prototype's CSS custom properties) and components in src/Web/UI/Component/, templates/components/ and assets/controllers/. Fill these at the next calibration once they exist.",
+    "tokenFiles": [],
+    "componentDirs": []
   },
   "testing": {
     "_comment": "Settings for /hygiene-test. Overridable per person.",
@@ -574,9 +690,9 @@
     },
     {
       "name": "CI duration",
-      "value": "under 15 minutes total; alert past a 12-minute median",
-      "where": "docs/03-adr/0028-testing-and-quality-gates.md",
-      "howToCheck": "GitHub Actions run time"
+      "value": "under 15 minutes total; job timeouts static 5, unit 3, integration 8, build 6, e2e 2 minutes",
+      "where": "docs/03-adr/0028-testing-and-quality-gates.md; .github/workflows/ci.yml timeout-minutes",
+      "howToCheck": "GitHub Actions run time (3m01s on push for PR #1)"
     }
   ],
   "featureFlags": null,
@@ -687,14 +803,14 @@
     ]
   },
   "generatedAgentHashes": {
-    "hygiene-architect": "3613800489",
-    "hygiene-database": "3264598323",
-    "hygiene-dependency-auditor": "1465629070",
+    "hygiene-architect": "47292597",
+    "hygiene-database": "3134392123",
+    "hygiene-dependency-auditor": "3715399079",
     "hygiene-framing": "1765473501",
-    "hygiene-frontend": "2238131953",
+    "hygiene-frontend": "2740864799",
     "hygiene-performance": "1018974380",
-    "hygiene-security": "4201987398",
+    "hygiene-security": "1139616860",
     "hygiene-senior-engineer": "2892674783",
-    "hygiene-test-engineer": "2963785869"
+    "hygiene-test-engineer": "884157845"
   }
 }
