@@ -60,3 +60,11 @@ when@test:
             autowire: true
             autoconfigure: true
             public: true
+        # Used by AddTenantStampTest and WorkerStateBetweenMessagesTest.
+        App\Tests\Fixtures\Messaging\RecordHandlerSightingHandler:
+            autowire: true
+            autoconfigure: true
+            public: true
+        App\Tests\Fixtures\Messaging\DispatchSightingAfterCurrentMessageHandler:
+            autowire: true
+            autoconfigure: true

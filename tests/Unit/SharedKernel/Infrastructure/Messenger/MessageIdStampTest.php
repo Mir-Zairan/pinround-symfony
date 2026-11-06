@@ -8,6 +8,7 @@ use App\SharedKernel\Infrastructure\Messenger\MessageIdStamp;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Uid\UuidV7;
 
 final class MessageIdStampTest extends TestCase
 {
@@ -46,6 +47,9 @@ final class MessageIdStampTest extends TestCase
         yield 'version 4' => ['0197a3c0-0000-4000-8000-000000000301'];
         yield 'uppercase' => ['0197A3C0-0000-7000-8000-000000000301'];
         yield 'trailing newline' => ["0197a3c0-0000-7000-8000-000000000301\n"];
+        yield 'wrong variant' => ['0197a3c0-0000-7000-c000-000000000301'];
+        yield 'base58 of a valid UUIDv7' => [new UuidV7('0197a3c0-0000-7000-8000-000000000301')->toBase58()];
+        yield 'base32 of a valid UUIDv7' => [new UuidV7('0197a3c0-0000-7000-8000-000000000301')->toBase32()];
     }
 
     #[Test]

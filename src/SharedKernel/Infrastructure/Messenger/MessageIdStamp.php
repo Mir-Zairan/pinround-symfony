@@ -22,9 +22,8 @@ final readonly class MessageIdStamp implements StampInterface
      */
     public function __construct(string $messageId)
     {
-        $isCanonicalUuidV7 = Uuid::isValid($messageId) && Uuid::fromString($messageId) instanceof UuidV7
-            && Uuid::fromString($messageId)->toRfc4122() === $messageId;
-        if (!$isCanonicalUuidV7) {
+        $uuid = Uuid::isValid($messageId) ? Uuid::fromString($messageId) : null;
+        if (!$uuid instanceof UuidV7 || $uuid->toRfc4122() !== $messageId) {
             throw new \InvalidArgumentException('A message id must be a lowercase canonical UUIDv7.');
         }
 

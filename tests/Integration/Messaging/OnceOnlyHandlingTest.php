@@ -175,8 +175,18 @@ final class OnceOnlyHandlingTest extends KernelTestCase
             // lock_not_available: it waited on the open row's key until lock_timeout.
             self::assertSame('55P03', $lockFailure->getSQLState());
         } finally {
-            $appConnection->executeStatement('RESET lock_timeout');
-            $this->migrator->commit();
+            // The row lock is released first, whatever fails after it.
+            try {
+                try {
+                    $this->migrator->commit();
+                } finally {
+                    if ($this->migrator->isTransactionActive()) {
+                        $this->migrator->rollBack();
+                    }
+                }
+            } finally {
+                $appConnection->executeStatement('RESET lock_timeout');
+            }
         }
         self::assertSame(0, $this->effectCount());
 

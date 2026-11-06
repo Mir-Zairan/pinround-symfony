@@ -11,9 +11,11 @@ framework:
             # The framework's default middleware is listed by hand, because RejectMessageForAnotherTenantMiddleware must
             # run before dispatch_after_current_bus, and custom middleware otherwise only goes after it. Every bus lists
             # it there, and TenantStampMiddleware directly before doctrine_transaction, so TenantContext is filled before
-            # BEGIN (ADR-0005). MessageIdStampMiddleware comes directly after dispatch_after_current_bus, so a message
-            # held back there is handled under its own id. MessengerBusMiddlewareTest fails for a bus that does not, and
-            # pins the full list.
+            # BEGIN (ADR-0005). AddTenantStampMiddleware comes directly before RejectMessageForAnotherTenantMiddleware: a
+            # message held back by dispatch_after_current_bus is released after the organization is cleared, so it must
+            # be stamped before, and the check then sees the stamp the message is sent with. MessageIdStampMiddleware
+            # comes directly after dispatch_after_current_bus, so a message held back there is handled under its own
+            # id. MessengerBusMiddlewareTest fails for a bus that does not, and pins the full list.
             # The lists are written by hand: re-check them against FrameworkExtension's defaults after a Symfony
             # upgrade, and add deduplicate_middleware if framework.lock is enabled.
             command.bus:
@@ -22,6 +24,7 @@ framework:
                     - add_default_stamps_middleware
                     - add_bus_name_stamp_middleware
                     - reject_redelivered_message_middleware
+                    - App\SharedKernel\Infrastructure\Messenger\AddTenantStampMiddleware
                     - App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware
                     - dispatch_after_current_bus
                     - App\SharedKernel\Infrastructure\Messenger\MessageIdStampMiddleware
@@ -42,6 +45,7 @@ framework:
                     - add_default_stamps_middleware
                     - add_bus_name_stamp_middleware
                     - reject_redelivered_message_middleware
+                    - App\SharedKernel\Infrastructure\Messenger\AddTenantStampMiddleware
                     - App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware
                     - dispatch_after_current_bus
                     - App\SharedKernel\Infrastructure\Messenger\MessageIdStampMiddleware

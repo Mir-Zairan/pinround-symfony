@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Messaging;
 
+use App\SharedKernel\Infrastructure\Messenger\AddTenantStampMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\MessageIdStampMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\RelayOutboxMessageMiddleware;
@@ -24,7 +25,7 @@ use Symfony\Component\Messenger\Stamp\HandledStamp;
 final class MessengerBusMiddlewareTest extends KernelTestCase
 {
     #[Test]
-    public function everyBusRunsBothTenantMiddlewareInTheirPlace(): void
+    public function everyBusRunsTheTenantMiddlewareInTheirPlace(): void
     {
         $middlewareByBus = $this->middlewareByBus();
 
@@ -33,6 +34,8 @@ final class MessengerBusMiddlewareTest extends KernelTestCase
         foreach ($middlewareByBus as $busId => $middlewareIds) {
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, TenantStampMiddleware::class, $busId.'.middleware.doctrine_transaction');
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, RejectMessageForAnotherTenantMiddleware::class, 'messenger.middleware.dispatch_after_current_bus');
+            // A message dispatch_after_current_bus holds back is released after the organization is cleared.
+            self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, AddTenantStampMiddleware::class, RejectMessageForAnotherTenantMiddleware::class);
             // The relay must see the outbox's ReceivedStamp, which failed_message_processing_middleware puts back on
             // a message retried from failed, and must stop the message before any handler or tenant switch.
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, 'messenger.middleware.failed_message_processing_middleware', RelayOutboxMessageMiddleware::class);
@@ -53,6 +56,7 @@ final class MessengerBusMiddlewareTest extends KernelTestCase
                 'messenger.middleware.add_default_stamps_middleware',
                 $busId.'.middleware.add_bus_name_stamp_middleware',
                 'messenger.middleware.reject_redelivered_message_middleware',
+                AddTenantStampMiddleware::class,
                 RejectMessageForAnotherTenantMiddleware::class,
                 'messenger.middleware.dispatch_after_current_bus',
                 MessageIdStampMiddleware::class,
