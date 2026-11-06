@@ -5,7 +5,7 @@ Screenshot-first review and ticketing. Built with Symfony 8, Symfony AI and the 
 Most ticket tools tell you what *status* a ticket has. pinround tells you **what to do next**.
 Problems are shown on screenshots with numbered pins. Work moves in *rounds*: the developer fixes, the tester checks each pin, and everyone sees "Now: …" and "Next: …" in plain words.
 
-> Status: architecture and plan are ready. No application code yet. Start with [docs/README.md](docs/README.md).
+> Status: the P00 skeleton and Docker stack run locally (see "Run it locally"). Application features come phase by phase; see [phase 0](docs/05-plan/phase-00-foundation.md) and [docs/README.md](docs/README.md).
 
 ## Run it locally
 
@@ -15,6 +15,8 @@ You need Docker with Compose v2, and `make`. You do not need PHP on your machine
 2. Open https://localhost and accept the local certificate that Caddy makes.
 3. Mail the app sends shows up in Mailpit at http://localhost:8025.
 4. The MinIO console is at http://localhost:9001.
+
+On Linux, `make` passes your user and group id to the build. If you run plain `docker compose up` instead, set `APP_UID` and `APP_GID` in `.env.local` (run `id -u` and `id -g`).
 
 If a port is taken, put a new one in `.env.local`, for example `HTTP_PORT=8081`. The other settings are `HTTPS_PORT`, `MAILPIT_UI_PORT`, `MINIO_API_PORT` and `MINIO_CONSOLE_PORT`.
 

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Fails when compose.yaml is invalid, a service is missing, or a long-running service has no healthcheck.
+# Fails when compose.yaml is invalid, a service is missing, a long-running service has no healthcheck,
+# a built or credential-holding service can pull its image, or docker/minio/Dockerfile lacks pinned commits and digests.
 # Only POSIX tools are used, so CI needs nothing beyond docker compose.
 set -eu
 
@@ -50,8 +51,8 @@ done
 dockerfile=docker/minio/Dockerfile
 
 for arg in MINIO_COMMIT MC_COMMIT; do
-    if ! grep -q "^ARG $arg=" "$dockerfile"; then
-        echo "compose-config-check: $dockerfile has no pinned ARG $arg" >&2
+    if ! grep -Eq "^ARG $arg=[0-9a-f]{40}$" "$dockerfile"; then
+        echo "compose-config-check: $dockerfile has no 40-hex pinned ARG $arg" >&2
         exit 1
     fi
 done

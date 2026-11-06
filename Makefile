@@ -3,6 +3,10 @@
 
 # .env.dev holds the dev Mercure keys; .env.local is git-ignored and overrides both (for example HTTP_PORT); later files win.
 ENV_FILES := --env-file .env --env-file .env.dev $(if $(wildcard .env.local),--env-file .env.local)
+# The image user must match the host user, or the bind-mounted /app is not writable on Linux.
+export APP_UID ?= $(shell id -u)
+export APP_GID ?= $(shell id -g)
+
 COMPOSE := docker compose $(ENV_FILES)
 
 help: ## List the targets

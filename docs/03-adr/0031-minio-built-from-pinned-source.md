@@ -58,7 +58,7 @@ Chosen option: **build from pinned source**, because it keeps the ADR-0011 choic
 `make up` builds the image on a clean clone and `minio-init` creates the private bucket; the anonymous-read check returns 403.
 `tests/shell/compose-config-check.sh` fails unless:
 
-- `minio`, `minio-init`, `app`, `worker` and `scheduler` have a `pull_policy` that never pulls (`never` or `build`);
+- `minio`, `minio-init`, `app`, `worker` and `scheduler` have a `pull_policy` that never pulls (`never`);
 - `docker/minio/Dockerfile` has the `*_COMMIT` build args and base images pinned with `@sha256:`;
 - the compose file is valid, has every service, and each long-running service has a healthcheck.
 
