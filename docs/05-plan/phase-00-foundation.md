@@ -281,4 +281,5 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-07 (P00.T4): buses use `default_middleware: false`. If `framework.lock` is turned on, add `deduplicate_middleware` by hand, and re-check the list after a Symfony upgrade.
 - 2026-11-07 (P00.T4): a later phase fills a resolver body with `CREATE OR REPLACE FUNCTION` in a migration, using `SET ROLE pinround_resolver` and a temporary `CREATE` grant on the schema (see `Version20261106140000`). Keep the `p_` parameter names and the ids-only return columns.
 - 2026-11-07 (P00.T4): each tenant table a resolver reads opts in with `TenantTable::allowResolverRead(table, columns)`.
+- 2026-11-07 (P00.T9): tests/e2e exists with the shell spec; T9 adds the CI stage, axe on more pages, and the trace upload.
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)
