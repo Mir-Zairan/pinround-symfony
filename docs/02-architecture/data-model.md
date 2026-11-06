@@ -233,7 +233,8 @@ Ticket numbers come from `tkt_project.next_number`. The app runs `UPDATE … SET
 | int_external_ref | organization_id, entity, entity_id, system, external_id, external_version | `UNIQUE (organization_id, system, external_id)`; `(organization_id, entity, entity_id)` |
 | aud_event | id, organization_id, actor_id NULL, actor_kind (`user`/`token`/`system`), action, target_type, target_id, data `jsonb` (old/new values, never ticket text), ip_hash, at | Partitioned monthly; `(organization_id, at DESC)`; `(organization_id, target_type, target_id, at DESC)` |
 | api_idempotency_key | organization_id, key, token_id, response_hash, created_at | `PK (organization_id, key)`; purge after 24 h |
-| messenger_outbox | Symfony Messenger Doctrine transport table (queue `outbox`) | Managed by Messenger. Verify the table layout at implementation |
+| messenger_outbox | Symfony Messenger Doctrine transport table (queue `outbox`): id, body, headers, queue_name, created_at, available_at, delivered_at | Created by migration `Version20261107150000` in Messenger's own layout (`auto_setup` off); `pinround_app` has `SELECT`, `INSERT`, `UPDATE`, `DELETE`. Not a tenant table: no `organization_id`, no RLS; each message carries its organization in a `TenantStamp` |
+| messenger_failed | The `failed` transport (queue `failed`), same layout and grants as `messenger_outbox` | Its own table, so the outbox age alert reads only messages still to relay |
 
 ## Read models
 

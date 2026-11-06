@@ -54,7 +54,8 @@ services:
   worker:
     <<: *app-image
     restart: unless-stopped
-    command: php bin/console messenger:consume async --time-limit=3600 --memory-limit=256M -vv
+    # The outbox first: the worker reads its transports in this order. It relays outbox messages to the async_* ones.
+    command: php bin/console messenger:consume outbox async_notify async_integration async_media async_ai --time-limit=3600 --memory-limit=256M -vv
     volumes:
       - .:/app
     depends_on:
@@ -81,6 +82,9 @@ services:
       - .:/app
     depends_on:
       app:
+        condition: service_healthy
+      # An event a scheduled job records goes to the outbox table in PostgreSQL.
+      postgres:
         condition: service_healthy
       valkey-state:
         condition: service_healthy

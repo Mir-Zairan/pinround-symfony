@@ -1,14 +1,20 @@
+parameters:
+    # Where RelayOutboxMessageMiddleware moves a message it reads from the outbox: message class, parent class or
+    # interface => one of the async_* transports. A message with no entry goes to the failed transport, never lost.
+    outbox_relay.target_transports: {}
+
 framework:
     messenger:
-        default_bus: messenger.bus.default
+        default_bus: command.bus
+        failure_transport: failed
         buses:
             # The framework's default middleware is listed by hand, because RejectMessageForAnotherTenantMiddleware must
             # run before dispatch_after_current_bus, and custom middleware otherwise only goes after it. Every bus lists
             # it there, and TenantStampMiddleware directly before doctrine_transaction, so TenantContext is filled before
             # BEGIN (ADR-0005). MessengerBusMiddlewareTest fails for a bus that does not, and pins the full list.
-            messenger.bus.default:
-                # The list is written by hand: re-check it against FrameworkExtension's defaults after a Symfony
-                # upgrade, and add deduplicate_middleware if framework.lock is enabled.
+            # The lists are written by hand: re-check them against FrameworkExtension's defaults after a Symfony
+            # upgrade, and add deduplicate_middleware if framework.lock is enabled.
+            command.bus:
                 default_middleware: false
                 middleware:
                     - add_default_stamps_middleware
@@ -18,20 +24,108 @@ framework:
                     - dispatch_after_current_bus
                     - decode_failed_message_middleware
                     - failed_message_processing_middleware
+                    # On both buses: a message the outbox worker receives goes on the bus that sent it.
+                    - App\SharedKernel\Infrastructure\Messenger\RelayOutboxMessageMiddleware
                     - App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware
                     - doctrine_transaction
                     - send_message
                     - handle_message
+            # Domain events. Sent to the outbox, doctrine_transaction joins the dispatcher's open transaction (a
+            # savepoint), so the outbox row commits or rolls back with the change. Received from an async_* transport,
+            # it gives each event handler one transaction that begins under the event's organization.
+            event.bus:
+                default_middleware: false
+                middleware:
+                    - add_default_stamps_middleware
+                    - add_bus_name_stamp_middleware
+                    - reject_redelivered_message_middleware
+                    - App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware
+                    - dispatch_after_current_bus
+                    - decode_failed_message_middleware
+                    - failed_message_processing_middleware
+                    - App\SharedKernel\Infrastructure\Messenger\RelayOutboxMessageMiddleware
+                    - App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware
+                    - doctrine_transaction
+                    - send_message
+                    # An event nobody listens to yet is not an error.
+                    - handle_message: { index_1: true }
 
         transports:
-            async: '%env(MESSENGER_TRANSPORT_DSN)%'
+            # The app's own connection, so a message sent inside the app's transaction commits or rolls back with it.
+            # The tables come from a migration (the app role cannot create tables). No LISTEN/NOTIFY: LISTEN is
+            # session state, which PgBouncer transaction pooling does not keep; the worker polls every second.
+            outbox:
+                dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox&auto_setup=0'
+                options: { use_notify: false }
+                # A relay that fails to send has found Valkey unreachable (a missing route goes to failed at once),
+                # so it keeps trying for about five minutes (1 s doubling to 60 s) before the message waits in failed.
+                retry_strategy:
+                    max_retries: 10
+                    delay: 1000
+                    multiplier: 2
+                    max_delay: 60000
+                    jitter: 0
+            # Its own table, so the outbox age alert (ADR-0009) reads only messages still to relay.
+            failed:
+                dsn: 'doctrine://default?table_name=messenger_failed&queue_name=failed&auto_setup=0'
+                options: { use_notify: false }
+
+            # The state Valkey (noeviction). MESSENGER_TRANSPORT_DSN names no stream: a stream in its path would
+            # override each transport's own and put the four queues on one stream.
+            async_media:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options: { stream: async_media }
+                # ADR-0009: 3 retries, waiting 1 s, 10 s and 60 s.
+                retry_strategy: &async_retry
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 10
+                    max_delay: 60000
+                    jitter: 0
+            async_ai:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options: { stream: async_ai }
+                retry_strategy: *async_retry
+            async_notify:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options: { stream: async_notify }
+                retry_strategy: *async_retry
+            async_integration:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options: { stream: async_integration }
+                retry_strategy: *async_retry
 
         routing: {}
 
 when@test:
+    parameters:
+        outbox_relay.target_transports:
+            App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
+            App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey
+
     framework:
         messenger:
             transports:
+                # The same retry counts as above without the waits, so a test runs every retry at once.
+                # RetryStrategyConfigTest checks the waits above.
+                outbox:
+                    retry_strategy: { delay: 0, multiplier: 1 }
+                async_media:
+                    retry_strategy: &test_retry { delay: 0, multiplier: 1 }
+                async_ai:
+                    retry_strategy: *test_retry
+                async_notify:
+                    retry_strategy: *test_retry
+                async_integration:
+                    retry_strategy: *test_retry
                 # Test-only, reached with a TransportNamesStamp. serialize=true sends each message through the
                 # transport serializer, as a real queue does.
                 test_queue: 'in-memory://?serialize=true'
+                # Test-only: nothing listens on port 1, so every send fails as with Valkey down. lazy: connect on send.
+                unreachable_valkey:
+                    dsn: 'redis://127.0.0.1:1'
+                    options: { stream: unreachable, lazy: true }
+
+            routing:
+                App\Tests\Fixtures\Messaging\OutboxProbeRecorded: outbox
+                App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: outbox
