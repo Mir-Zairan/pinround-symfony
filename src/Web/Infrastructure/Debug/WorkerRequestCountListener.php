@@ -15,7 +15,7 @@ use Symfony\Component\HttpKernel\KernelEvents;
  */
 #[When('dev')]
 #[When('test')]
-final class WorkerRequestCountSubscriber
+final class WorkerRequestCountListener
 {
     // Deliberately not a ResetInterface: the count must span requests, it holds no request data.
     private int $requestCount = 0;
