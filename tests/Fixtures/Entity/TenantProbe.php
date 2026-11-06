@@ -11,7 +11,7 @@ use Doctrine\ORM\Mapping as ORM;
 /**
  * A row of the test-only table zz_tenant_probe (see TenantProbeTable), mapped for the test environment only.
  */
-#[ORM\Entity(readOnly: true)]
+#[ORM\Entity]
 #[ORM\Table(name: 'zz_tenant_probe')]
 final class TenantProbe implements TenantOwned
 {
@@ -45,5 +45,10 @@ final class TenantProbe implements TenantOwned
     public function label(): string
     {
         return $this->label;
+    }
+
+    public function relabel(string $label): void
+    {
+        $this->label = $label;
     }
 }

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\SharedKernel\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
-use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\Bundle\DoctrineBundle\Attribute\AsMiddleware;
 use Doctrine\DBAL\Driver;
 use Doctrine\DBAL\Driver\Connection as DriverConnection;
@@ -19,30 +18,24 @@ use Symfony\Contracts\Service\ResetInterface;
 /**
  * Tells TenantFilter whether the current transaction on the default connection has an organization, so the
  * filter throws TenantNotSet exactly when row-level security would see no tenant: at the outermost BEGIN it
- * marks the tenant set when TenantContext holds one, at COMMIT and ROLLBACK it clears the mark. A SQLFilter
- * cannot take services, and TenantContext tells no one when it changes, so the transaction boundary is the one
- * point every unit of work (request, message, command) passes. reset() clears the mark between worker
- * requests, also when a connection was closed in the middle of a transaction.
- *
- * When a transaction begins for another organization than the last one (or for none), it clears the entity
- * manager, so find() never returns the last organization's object from the identity map without asking the
- * database. That matters for a long-lived entity manager, such as a console loop over organizations.
+ * marks the tenant set when TenantContext holds one, at COMMIT and ROLLBACK it clears the mark. It follows the
+ * transaction boundary because that is where RLS takes the organization too; a SQLFilter cannot take services.
+ * reset() clears the mark between worker requests, also when a connection was closed in the middle of a
+ * transaction. Clearing the entity manager when the organization changes is EntityManagerTenantSwitchGuard's job.
  *
  * Priority below TenantMiddleware's 0 makes this the outer wrapper: the mark is set only after BEGIN and
  * set_config have both succeeded.
  */
 #[AsMiddleware(connections: ['default'], priority: -10)]
-final class TenantFilterMiddleware implements Middleware, ResetInterface
+final readonly class TenantFilterMiddleware implements Middleware, ResetInterface
 {
-    private ?OrganizationId $organizationOfLastTransaction = null;
-
     /**
      * @param \Closure(): EntityManagerInterface $entityManager a closure, because the entity manager is built on this connection
      */
     public function __construct(
-        private readonly TenantContext $tenantContext,
+        private TenantContext $tenantContext,
         #[AutowireServiceClosure('doctrine.orm.default_entity_manager')]
-        private readonly \Closure $entityManager,
+        private \Closure $entityManager,
     ) {
     }
 
@@ -101,15 +94,7 @@ final class TenantFilterMiddleware implements Middleware, ResetInterface
      */
     public function markTenantOfNewTransaction(): void
     {
-        $organizationId = $this->tenantContext->get();
-        $entityManager = ($this->entityManager)();
-        if ($this->isOrganizationChange($organizationId) && $this->isBuilt($entityManager)) {
-            // Cost: entities of the last organization become detached, and their unflushed changes are dropped.
-            $entityManager->clear();
-        }
-        $this->organizationOfLastTransaction = $organizationId;
-
-        $this->tenantFilter($entityManager)?->markTenantSet(null !== $organizationId);
+        $this->tenantFilter(($this->entityManager)())?->markTenantSet(null !== $this->tenantContext->get());
     }
 
     /**
@@ -124,22 +109,9 @@ final class TenantFilterMiddleware implements Middleware, ResetInterface
         }
     }
 
-    /**
-     * The kernel reset clears the entity manager too, so the next request starts with no last organization.
-     */
     public function reset(): void
     {
         $this->clearTenantMark();
-        $this->organizationOfLastTransaction = null;
-    }
-
-    private function isOrganizationChange(?OrganizationId $organizationId): bool
-    {
-        if (null === $this->organizationOfLastTransaction) {
-            return false;
-        }
-
-        return null === $organizationId || !$organizationId->equals($this->organizationOfLastTransaction);
     }
 
     private function isBuilt(EntityManagerInterface $entityManager): bool

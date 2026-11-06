@@ -7,6 +7,7 @@ namespace App\Tests\Unit\SharedKernel\Infrastructure\Doctrine;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
+use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
 use Doctrine\DBAL\Driver;
 use Doctrine\DBAL\Driver\Connection as DriverConnection;
 use Doctrine\DBAL\Driver\Result;
@@ -27,7 +28,7 @@ final class TenantMiddlewareTest extends TestCase
     #[Test]
     public function afterBeginItSetsTheOrgIdAsABoundTransactionLocalParameter(): void
     {
-        $tenantContext = new TenantContext();
+        $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $tenantContext->set(new OrganizationId(self::ORG_A));
 
         $this->connectThroughTheMiddleware($tenantContext)->beginTransaction();
@@ -46,7 +47,7 @@ final class TenantMiddlewareTest extends TestCase
     #[Test]
     public function withoutATenantItOnlyBegins(): void
     {
-        $this->connectThroughTheMiddleware(new TenantContext())->beginTransaction();
+        $this->connectThroughTheMiddleware(new TenantContext(new RecordingTenantSwitchGuard()))->beginTransaction();
 
         self::assertSame(['begin'], $this->driverCalls);
     }
@@ -54,7 +55,7 @@ final class TenantMiddlewareTest extends TestCase
     #[Test]
     public function itReadsTheTenantAtEachBeginNotWhenConnecting(): void
     {
-        $tenantContext = new TenantContext();
+        $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $connection = $this->connectThroughTheMiddleware($tenantContext);
 
         $tenantContext->set(new OrganizationId(self::ORG_A));
@@ -70,7 +71,7 @@ final class TenantMiddlewareTest extends TestCase
     public function whenSettingTheTenantFailsTheFailureReachesTheCallerUnchanged(): void
     {
         $this->setTenantFailure = new \RuntimeException('set_config failed');
-        $tenantContext = new TenantContext();
+        $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $tenantContext->set(new OrganizationId(self::ORG_A));
         $connection = $this->connectThroughTheMiddleware($tenantContext);
 

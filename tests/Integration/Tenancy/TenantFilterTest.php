@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Tenancy;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
+use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\Tests\Fixtures\Entity\TenantProbe;
@@ -27,6 +28,7 @@ final class TenantFilterTest extends KernelTestCase
 {
     private const string ORG_A = '0197a3c0-0000-7000-8000-00000000000a';
     private const string ORG_B = '0197a3c0-0000-7000-8000-00000000000b';
+    private const string NEW_ROW_ID = '0197a3c0-0000-7000-8000-0000000000ff';
     private const string LABELS_DQL = 'SELECT p.label FROM '.TenantProbe::class.' p ORDER BY p.label';
 
     private Connection $connection;
@@ -106,7 +108,17 @@ final class TenantFilterTest extends KernelTestCase
     }
 
     #[Test]
-    public function findDoesNotReturnTheIdentityMapsObjectOfTheLastOrganizationWhenTheOrganizationChanges(): void
+    public function findOutsideATransactionAfterSwitchingToOrgBThrowsInsteadOfReturningOrgAsObject(): void
+    {
+        $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
+        $this->tenantContext->set(new OrganizationId(self::ORG_B));
+
+        $this->expectException(TenantNotSet::class);
+        $this->entityManager->find(TenantProbe::class, $rowOfOrgA->id());
+    }
+
+    #[Test]
+    public function findInAnOrgBTransactionAfterSwitchingDoesNotReturnOrgAsRow(): void
     {
         $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
         $this->tenantContext->set(new OrganizationId(self::ORG_B));
@@ -119,7 +131,7 @@ final class TenantFilterTest extends KernelTestCase
     }
 
     #[Test]
-    public function aTransactionForTheSameOrganizationKeepsTheIdentityMap(): void
+    public function settingTheSameOrganizationAgainKeepsTheIdentityMap(): void
     {
         $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
         $this->tenantContext->set(new OrganizationId(self::ORG_A));
@@ -132,14 +144,75 @@ final class TenantFilterTest extends KernelTestCase
     }
 
     #[Test]
-    public function findInATransactionWithoutAnOrganizationAfterOrgAThrowsInsteadOfReturningTheCachedObject(): void
+    public function findInATransactionAfterClearingOrgAThrowsInsteadOfReturningTheLoadedObject(): void
     {
         $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
+        $this->tenantContext->clear();
 
         $this->expectException(TenantNotSet::class);
         $this->entityManager->wrapInTransaction(
             fn (): ?TenantProbe => $this->entityManager->find(TenantProbe::class, $rowOfOrgA->id()),
         );
+    }
+
+    #[Test]
+    public function switchingWithAnUnflushedInsertIsRefusedAndKeepsTheWorkOfOrgA(): void
+    {
+        $this->tenantContext->set(new OrganizationId(self::ORG_A));
+        $this->entityManager->persist(new TenantProbe(self::NEW_ROW_ID, self::ORG_A, 'a-unflushed'));
+
+        try {
+            $this->tenantContext->set(new OrganizationId(self::ORG_B));
+            self::fail('The switch was not refused.');
+        } catch (TenantSwitchRefused) {
+        }
+
+        self::assertSame(self::ORG_A, $this->tenantContext->get()?->toString());
+        $this->entityManager->flush();
+        self::assertSame(['a-first', 'a-second', 'a-unflushed'], $this->labelsAs(self::ORG_A));
+    }
+
+    #[Test]
+    public function switchingWithAnUnflushedRemoveIsRefused(): void
+    {
+        $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
+        $this->entityManager->remove($rowOfOrgA);
+
+        $this->expectException(TenantSwitchRefused::class);
+        $this->tenantContext->set(new OrganizationId(self::ORG_B));
+    }
+
+    #[Test]
+    public function clearingWithAnUnflushedChangeToALoadedEntityIsRefused(): void
+    {
+        $rowOfOrgA = $this->findOneAs(self::ORG_A, 'a-first');
+        $rowOfOrgA->relabel('a-renamed');
+
+        $this->expectException(TenantSwitchRefused::class);
+        $this->tenantContext->clear();
+    }
+
+    #[Test]
+    public function aFlushAfterSwitchingToOrgBSavesTheOrgBRow(): void
+    {
+        $this->findOneAs(self::ORG_A, 'a-first');
+        $this->tenantContext->set(new OrganizationId(self::ORG_B));
+
+        $this->entityManager->persist(new TenantProbe(self::NEW_ROW_ID, self::ORG_B, 'b-flushed'));
+        $this->entityManager->flush();
+
+        self::assertSame(['b-flushed', 'b-only'], $this->labelsAs(self::ORG_B));
+    }
+
+    #[Test]
+    public function theFirstSetOfARequestDoesNotDetachAManagedEntity(): void
+    {
+        $managedReference = $this->entityManager->getReference(TenantProbe::class, self::NEW_ROW_ID);
+        self::assertNotNull($managedReference);
+
+        $this->tenantContext->set(new OrganizationId(self::ORG_A));
+
+        self::assertTrue($this->entityManager->contains($managedReference));
     }
 
     #[Test]
@@ -398,13 +471,15 @@ final class TenantFilterTest extends KernelTestCase
         return $this->entityManager->createQuery(self::LABELS_DQL);
     }
 
+    /**
+     * Leaves $organizationId set, so the caller decides how the organization changes next.
+     */
     private function findOneAs(string $organizationId, string $label): TenantProbe
     {
         $this->tenantContext->set(new OrganizationId($organizationId));
         $row = $this->entityManager->wrapInTransaction(
             fn (): ?TenantProbe => $this->entityManager->getRepository(TenantProbe::class)->findOneBy(['label' => $label]),
         );
-        $this->tenantContext->clear();
         self::assertInstanceOf(TenantProbe::class, $row);
 
         return $row;
