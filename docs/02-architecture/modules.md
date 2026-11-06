@@ -9,7 +9,7 @@ The catalogue of pinround's modules: what each one owns, what it offers to other
 - [How modules talk](#how-modules-talk) — calls through `Api`, events through the outbox, and nothing else.
 - [Module catalogue](#module-catalogue) — every module: purpose, owned tables, Api, commands, events, dependencies.
 - [Event catalogue](#event-catalogue) — every domain event: producer, consumers, payload, delivery.
-- [Deptrac rules](#deptrac-rules) — the layer and module rules the build checks.
+- [Deptrac rules](#deptrac-rules) — the layers, the allowed edges and the tests behind `composer deptrac`.
 - [Rules for adding a module](#rules-for-adding-a-module) — the checklist before you create a new one.
 
 ## Why modules
@@ -316,33 +316,33 @@ Rules:
 
 ## Deptrac rules
 
-Deptrac runs in CI ([ADR-0028](../03-adr/0028-testing-and-quality-gates.md)). Two rule sets:
+`composer deptrac` runs in `composer qa` and in CI ([ADR-0028](../03-adr/0028-testing-and-quality-gates.md)). The one hand-written config is `deptrac.yaml`. It analyses `src` only and runs with `--fail-on-uncovered --report-uncovered`: a class that is outside every layer (and is not a PHP built-in) fails the run.
 
-**Layers inside a module**
+**Layers.** Layers are collected by namespace regex (for example `^App\\Ticketing\\Domain\\`), not by folder.
+
+- Per module M, five layers: `M_Api`, `M_Domain`, `M_Application`, `M_Infrastructure`, `M_UI`. The modules are Identity, Organization, Workflow, Ticketing, Conversation, Review, Media, Notification, Insight, Assist, Integration, Audit, AgentApi and Web.
+- `SharedKernel`: `App\SharedKernel\`.
+- `Vendor`: every class that is not `App\` and not a PHP built-in.
+- `Kernel`: `App\Kernel` only.
+
+**Rules.** D(M) is the set of modules in M's "Depends on" line in the catalogue above. Anything not listed fails the build.
 
 | From | May depend on |
 |---|---|
-| Domain | SharedKernel |
-| Application | Domain, SharedKernel, other modules' Api |
-| Infrastructure | Domain, Application, SharedKernel, vendor |
-| UI | Application, Api (own + others), SharedKernel, vendor (Symfony) |
-| Api | SharedKernel only (interfaces, DTOs, events) |
+| `M_Api` | `SharedKernel` |
+| `M_Domain` | `SharedKernel` |
+| `M_Application` | `M_Domain`, `M_Api`, `SharedKernel`, `D(M)_Api` |
+| `M_Infrastructure` | `M_Domain`, `M_Application`, `M_Api`, `SharedKernel`, `Vendor`, `D(M)_Api` |
+| `M_UI` | `M_Application`, `M_Api`, `SharedKernel`, `Vendor`, `D(M)_Api` |
+| `SharedKernel` | `Vendor` |
+| `Kernel` | `Vendor`, `SharedKernel` |
 
-**Between modules:** only `Api` is visible from outside. The allowed module edges are the "Depends on" lines in the catalogue above. Anything else fails the build. A sketch of the config (verify the exact Deptrac syntax at implementation):
+- Domain and Api never get `Vendor`; Application does not either.
+- Infrastructure may use `D(M)_Api` because Messenger handlers there react to other modules' Api events.
+- Only `Api` of another module is visible from outside: no module may touch another module's Domain, Application, Infrastructure or UI.
 
-```yaml
-deptrac:
-  paths: ['./src']
-  layers:
-    - name: Ticketing_Api
-      collectors: [{ type: directory, value: 'src/Ticketing/Api/.*' }]
-    - name: Ticketing_Internal
-      collectors: [{ type: directory, value: 'src/Ticketing/(Domain|Application|Infrastructure|UI)/.*' }]
-    # … one Api layer + one Internal layer per module, plus SharedKernel
-  ruleset:
-    Ticketing_Internal: [Ticketing_Api, Workflow_Api, Organization_Api, Media_Api, Insight_Api, SharedKernel]
-    Ticketing_Api: [SharedKernel]
-```
+**Tests.** `tests/Unit/Architecture/DeptracConfigTest.php` checks that every `src/` folder has its five layers, every module layer has a folder, and every layer in the ruleset exists. `tests/Integration/Architecture/ModuleBoundaryViolationTest.php` runs Deptrac on `tests/Fixtures/Deptrac/ReviewUsesTicketingDomain`, where Review's Application imports Ticketing's Domain, and asserts it fails with `Review_Application on Ticketing_Domain`. The fixture config imports the real `deptrac.yaml`; Deptrac merges the `paths` of imported files and resolves them against the importing file's folder, so `./src` points at the fixture.
+
 
 ## Rules for adding a module
 

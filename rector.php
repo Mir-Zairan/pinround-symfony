@@ -14,6 +14,7 @@ return RectorConfig::configure()
     ])
     ->withSkip([
         __DIR__.'/config/reference.php',
+        __DIR__.'/tests/Fixtures', // deliberate violations, see tests/Fixtures/Deptrac
     ])
     ->withPhpSets()
     ->withComposerBased(symfony: true, doctrine: true, phpunit: true)

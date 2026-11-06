@@ -26,6 +26,7 @@
         "symfony/yaml": "8.1.*"
     },
     "require-dev": {
+        "deptrac/deptrac": "^4.7",
         "friendsofphp/php-cs-fixer": "^3.95",
         "phpstan/phpstan": "^2",
         "phpstan/phpstan-doctrine": "^2",
@@ -86,6 +87,7 @@
             "@php bin/console cache:warmup --env=dev",
             "phpstan analyse --memory-limit=1G"
         ],
+        "deptrac": "deptrac analyse --no-interaction --no-progress --no-cache --fail-on-uncovered --report-uncovered",
         "lint": [
             "@php bin/console lint:container",
             "@php bin/console lint:yaml config",
@@ -96,6 +98,7 @@
             "@cs",
             "@rector",
             "@phpstan",
+            "@deptrac",
             "@lint",
             "@composer audit",
             "@test"
