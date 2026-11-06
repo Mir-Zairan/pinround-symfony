@@ -28,7 +28,7 @@ qa: ## Run every quality gate in the app container
 	$(COMPOSE) exec app composer qa
 
 migrate: ## Run the database migrations
-	$(COMPOSE) exec app bin/console doctrine:migrations:migrate --no-interaction
+	$(COMPOSE) exec app bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
 
 check-compose: ## Validate compose.yaml and the service list
 	sh tests/shell/compose-config-check.sh
