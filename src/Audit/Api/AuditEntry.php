@@ -109,8 +109,8 @@ final readonly class AuditEntry
             self::code($targetType, 'target type'),
             null === $targetId ? null : self::uuid($targetId, 'target id'),
             $data,
-            self::hash($ipHash, 'IP hash'),
-            self::hash($userAgentHash, 'user agent hash'),
+            self::requireNonEmptyHash($ipHash, 'IP hash'),
+            self::requireNonEmptyHash($userAgentHash, 'user agent hash'),
         );
     }
 
@@ -133,7 +133,7 @@ final readonly class AuditEntry
         return $lowercase;
     }
 
-    private static function hash(?string $value, string $field): ?string
+    private static function requireNonEmptyHash(?string $value, string $field): ?string
     {
         if ('' === $value) {
             throw new \InvalidArgumentException(\sprintf('An audit %s must not be empty; pass null when there is none.', $field));

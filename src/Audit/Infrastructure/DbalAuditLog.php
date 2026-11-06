@@ -10,7 +10,8 @@ use App\Audit\Api\AuditLog;
 use App\SharedKernel\Application\TenantContext;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
-use Symfony\Component\Uid\Uuid;
+use Psr\Clock\ClockInterface;
+use Symfony\Component\Uid\UuidV7;
 
 /**
  * AuditLog on the aud_event table. pinround_app may only insert and read it; the row-level security policy also
@@ -24,6 +25,7 @@ final readonly class DbalAuditLog implements AuditLog
     public function __construct(
         private Connection $connection,
         private TenantContext $tenantContext,
+        private ClockInterface $clock,
     ) {
     }
 
@@ -37,13 +39,14 @@ final readonly class DbalAuditLog implements AuditLog
             throw new \LogicException('An audit entry is recorded in the transaction of the change it describes; none is open.');
         }
 
-        $id = Uuid::v7();
+        $now = $this->clock->now();
+        // The id carries the same instant as at, so ordering by id and by at agree.
+        $id = new UuidV7(UuidV7::generate($now));
         $this->connection->executeStatement(
             self::INSERT,
             [
                 $id->toRfc4122(),
                 $entry->organizationId->toString(),
-                // The id's own time, so ordering by id and by at agree.
                 $id->getDateTime()->format('Y-m-d H:i:s.uP'),
                 $entry->actorKind->value,
                 $entry->actorUserId,
@@ -51,8 +54,8 @@ final readonly class DbalAuditLog implements AuditLog
                 $entry->action,
                 $entry->targetType,
                 $entry->targetId,
-                // An empty PHP array would encode as a JSON list; the column must hold an object.
-                [] === $entry->data ? '{}' : json_encode($entry->data, \JSON_THROW_ON_ERROR),
+                // The object cast keeps an empty or list-shaped array a JSON object; the column must hold one.
+                json_encode((object) $entry->data, \JSON_THROW_ON_ERROR),
                 $entry->ipHash,
                 $entry->userAgentHash,
             ],
