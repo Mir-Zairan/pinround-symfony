@@ -55,7 +55,7 @@ final class DbalAuditLogTest extends KernelTestCase
     }
 
     #[Test]
-    public function aRecordedEntryIsVisibleToItsOrganizationOnlyAndLandsInThisMonthsPartition(): void
+    public function aRecordedEntryIsVisibleToItsOrganizationOnlyAndLandsInTheClocksMonthPartition(): void
     {
         $this->tenantContext()->set(new OrganizationId(self::ORG_A));
         $this->connection()->transactional(fn () => $this->auditLog()->record(AuditEntry::byUser(
