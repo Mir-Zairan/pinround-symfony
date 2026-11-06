@@ -1,5 +1,14 @@
 framework:
     messenger:
+        default_bus: messenger.bus.default
+        buses:
+            # Every bus lists the tenant stamp middleware directly before doctrine_transaction, so TenantContext is
+            # filled before BEGIN (ADR-0005). MessengerBusMiddlewareTest fails for a bus that does not.
+            messenger.bus.default:
+                middleware:
+                    - App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware
+                    - doctrine_transaction
+
         transports:
             async: '%env(MESSENGER_TRANSPORT_DSN)%'
 

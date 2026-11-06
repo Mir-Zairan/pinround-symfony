@@ -36,3 +36,9 @@ when@test:
         App\Tests\Fixtures\Http\RequestTransactionProbeController:
             autowire: true
             autoconfigure: true
+
+        # Test-only message handlers, used by TenantStampMiddlewareTest through the real bus.
+        App\Tests\Fixtures\Messenger\:
+            resource: '../tests/Fixtures/Messenger/*Handler.php'
+            autowire: true
+            autoconfigure: true
