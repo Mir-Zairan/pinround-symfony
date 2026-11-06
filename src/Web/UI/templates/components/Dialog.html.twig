@@ -1,6 +1,6 @@
 <div {{ stimulus_controller('dialog') }}>
     {% block trigger %}{% endblock %}
-    <dialog id="{{ this.id }}" class="dialog" aria-labelledby="{{ this.id }}-title" {{ stimulus_target('dialog', 'dialog') }} {{ stimulus_action('dialog', 'closeOnBackdrop', 'click') }}>
+    <dialog id="{{ this.id }}" class="dialog" aria-labelledby="{{ this.id }}-title" {{ stimulus_target('dialog', 'dialog') }} data-action="pointerdown->dialog#rememberPress click->dialog#closeOnBackdrop">
         <div class="dialog__box">
             <div class="dialog__header">
                 <h2 id="{{ this.id }}-title" class="dialog__title">{{ this.title }}</h2>

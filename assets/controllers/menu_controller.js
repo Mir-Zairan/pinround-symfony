@@ -5,6 +5,10 @@ import { Controller } from '@hotwired/stimulus';
 export default class extends Controller {
   static targets = ['trigger', 'list', 'item'];
 
+  connect() {
+    this.close();
+  }
+
   get isOpen() {
     return this.triggerTarget.getAttribute('aria-expanded') === 'true';
   }
@@ -31,13 +35,24 @@ export default class extends Controller {
     this.triggerTarget.setAttribute('aria-expanded', 'false');
   }
 
-  openFromKey(event) {
-    if (event.key !== 'ArrowDown') {
-      return;
+  // Focus stays on the trigger after a mouse open, so the trigger needs Escape and Tab handling too.
+  triggerKey(event) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      this.open();
+      this.#focusItem(0);
+    } else if ((event.key === 'Escape' || event.key === 'Tab') && this.isOpen) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+      }
+      this.close();
     }
-    event.preventDefault();
-    this.open();
-    this.#focusItem(0);
+  }
+
+  closeOnFocusLeave(event) {
+    if (this.isOpen && event.relatedTarget && !this.element.contains(event.relatedTarget)) {
+      this.close();
+    }
   }
 
   navigate(event) {

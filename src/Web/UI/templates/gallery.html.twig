@@ -154,9 +154,9 @@
     <section class="gallery-section" aria-labelledby="gallery-menu">
         <h2 id="gallery-menu">Menu</h2>
         <div class="gallery-row">
-            <div class="menu" {{ stimulus_controller('menu') }}>
+            <div class="menu" {{ stimulus_controller('menu') }} data-action="focusout->menu#closeOnFocusLeave">
                 <button type="button" class="icon-btn gallery-menu-trigger" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="gallery-menu-list"
-                    {{ stimulus_target('menu', 'trigger') }} data-action="menu#toggle keydown->menu#openFromKey click@window->menu#closeOnOutsideClick">⋯</button>
+                    {{ stimulus_target('menu', 'trigger') }} data-action="menu#toggle keydown->menu#triggerKey click@window->menu#closeOnOutsideClick">⋯</button>
                 <div id="gallery-menu-list" class="menu__list" role="menu" aria-label="More actions" hidden
                     {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#navigate click->menu#closeOnSelect">
                     {% for menuLabel in ['Copy link', 'Give it to…', 'Archive'] %}

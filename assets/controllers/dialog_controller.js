@@ -6,6 +6,14 @@ export default class extends Controller {
   static targets = ['dialog'];
 
   opener = null;
+  pressStartedOnBackdrop = false;
+
+  connect() {
+    // A dialog restored open from a page snapshot is not modal, so the page behind it would stay usable.
+    if (this.dialogTarget.open && !this.dialogTarget.matches(':modal')) {
+      this.dialogTarget.close();
+    }
+  }
 
   open(event) {
     if (this.dialogTarget.open) {
@@ -21,9 +29,16 @@ export default class extends Controller {
     this.dialogTarget.close();
   }
 
-  // The dialog box has no padding of its own, so a click whose target is the <dialog> itself hit the backdrop.
+  rememberPress(event) {
+    this.pressStartedOnBackdrop = event.target === this.dialogTarget;
+  }
+
+  // The dialog box has no padding of its own, so an event whose target is the <dialog> itself hit the backdrop.
+  // Both the press and the click must: a drag that starts inside the box and ends outside must not close it.
   closeOnBackdrop(event) {
-    if (event.target === this.dialogTarget) {
+    const startedOnBackdrop = this.pressStartedOnBackdrop;
+    this.pressStartedOnBackdrop = false;
+    if (startedOnBackdrop && event.target === this.dialogTarget) {
       this.close();
     }
   }

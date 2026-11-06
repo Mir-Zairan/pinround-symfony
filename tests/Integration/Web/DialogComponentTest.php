@@ -46,7 +46,7 @@ final class DialogComponentTest extends KernelTestCase
 
         self::assertCount(1, $crawler->filter('[data-controller="dialog"]'));
         self::assertCount(1, $crawler->filter('[data-controller="dialog"] > dialog[data-dialog-target="dialog"]'));
-        self::assertStringContainsString('click->dialog#closeOnBackdrop', (string) $crawler->filter('dialog')->attr('data-action'));
+        self::assertSame('pointerdown->dialog#rememberPress click->dialog#closeOnBackdrop', $crawler->filter('dialog')->attr('data-action'));
     }
 
     #[Test]
