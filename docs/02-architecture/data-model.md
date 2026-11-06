@@ -12,7 +12,7 @@ The PostgreSQL tables, keys, indexes, partitions, row-level security, read model
 - [Diagram 4 — notifications, AI, integration, audit](#diagram-4--notifications-ai-integration-audit) — the supporting modules.
 - [Table specifications](#table-specifications) — columns, constraints and indexes per table.
 - [Read models](#read-models) — `ins_ticket_turn` and the other Insight tables.
-- [Row-level security](#row-level-security) — the policy every tenant table gets (`TenantTable::enableRls`), how the tenant is set (`TenantContext`, `TenantMiddleware`), roles, and the few lookups that run before the tenant is known.
+- [Row-level security](#row-level-security) — the policy every tenant table gets (`TenantTable::enableRls`), how the tenant is set (`TenantContext`, `TenantMiddleware`), roles, and the resolver functions (owned by `pinround_resolver`, reading through `TenantTable::allowResolverRead`) that run before the tenant is known.
 - [Ticket visibility predicate](#ticket-visibility-predicate) — the one canonical rule for who may see a restricted ticket.
 - [Index catalogue](#index-catalogue) — the single list of indexes on hot tables.
 - [Query patterns](#query-patterns) — the grouped list, Home, duplicates, ticket history, with SQL.
@@ -298,7 +298,7 @@ CREATE POLICY tenant_isolation ON tkt_ticket
 - **Worker mode:** after an exception the EntityManager is closed; the kernel reset resets it before the next request or message. A test throws inside a request and checks the next request works and carries no tenant ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)).
 - A static check bans `SET app.org_id` without `LOCAL` and any `set_config('app.org_id', …, false)`.
 
-**Database roles** ([ADR-0005](../03-adr/0005-multi-tenancy.md)) — the same four names everywhere:
+**Database roles** ([ADR-0005](../03-adr/0005-multi-tenancy.md)) — the same five names everywhere:
 
 | Role | Login | BYPASSRLS | Used by |
 |---|---|---|---|
@@ -306,8 +306,9 @@ CREATE POLICY tenant_isolation ON tkt_ticket
 | `pinround_migrator` | yes | no | migrations and partition creation (owns the tables; `FORCE RLS` still applies to its data access) |
 | `pinround_retention` | yes | **yes — the only one** | the nightly retention purge job only |
 | `pinround_readonly` | yes | no | support queries and reporting, with the same tenant setting |
+| `pinround_resolver` | **no** | no | nobody logs in as it; it owns the resolver functions only (see "Lookups before the tenant is known" below) |
 
-The roles live in `docker/postgres/roles.sql`. The Postgres admin account runs it on each database before migrating (`make db-roles` in `make up`, a step in CI, the operator in production), with the four passwords as psql variables. It is safe to re-run. It creates missing roles and re-asserts their attributes. It makes `pinround_migrator` the owner of the database and of every table, view and sequence in `public`. It revokes all rights of `PUBLIC` on the database and on schema `public`, so only the four roles get `CONNECT` and nobody but the owner gets `CREATE` or `TEMPORARY`. It grants schema `USAGE` to `pinround_app`, `pinround_readonly` and `pinround_retention`. It grants **no table or sequence rights**, sets no default privileges, and removes any that an older version of the script left, including all rights of `pinround_app` and `pinround_readonly` on `doctrine_migration_versions`.
+The roles live in `docker/postgres/roles.sql`. The Postgres admin account runs it on each database before migrating (`make db-roles` in `make up`, a step in CI, the operator in production), with the four login passwords as psql variables. It is safe to re-run. It creates missing roles and re-asserts their attributes. It makes `pinround_migrator` the only member of `pinround_resolver`, with `SET` but without `INHERIT`: the migrator can hand a function to that role, but never acts with its rights or policies. It removes any other member. It makes `pinround_migrator` the owner of the database and of every table, view and sequence in `public`. It revokes all rights of `PUBLIC` on the database and on schema `public`, so only the four login roles get `CONNECT` and nobody but the owner gets `CREATE` or `TEMPORARY`. It grants schema `USAGE` to `pinround_app`, `pinround_readonly`, `pinround_retention` and `pinround_resolver`, and revokes `CREATE` on the schema from `pinround_resolver`. It grants **no table or sequence rights**, sets no default privileges, and removes any that an older version of the script left, including all rights of `pinround_app` and `pinround_readonly` on `doctrine_migration_versions`.
 
 **Table rights live in the migration that creates the table.** That migration grants `pinround_app` and `pinround_readonly` exactly what they need, for example `SELECT, INSERT` only for an append-only table. It never grants `TRUNCATE`, `REFERENCES` or `TRIGGER`, and never grants on a child partition (only the parent). A plain sequence (not an identity column, which needs no grant) gets `USAGE` in the same migration. Re-running `roles.sql` never widens these grants. `make test` and CI run it once more on the migrated test database before PHPUnit, to test this. `DatabaseRolesTest` checks five things on that database:
 
@@ -319,18 +320,22 @@ The roles live in `docker/postgres/roles.sql`. The Postgres admin account runs i
 
 **Lookups before the tenant is known (the only RLS exceptions)**
 
-Some lookups must find a row before the app knows which organization the request belongs to. They do not get `BYPASSRLS`. Each one is a `SECURITY DEFINER` SQL function owned by a role without login (`pinround_resolver`), with `SET search_path = pg_catalog, public` fixed in the function definition. It takes one exact key, and **returns ids only** (never names, text or secrets). `pinround_app` gets `EXECUTE` on these functions and nothing else from the owner role.
+Some lookups must find a row before the app knows which organization the request belongs to. They do not get `BYPASSRLS`. Each one is a `SECURITY DEFINER` SQL function owned by a role without login (`pinround_resolver`), with `SET search_path = pg_catalog, public` fixed in the function definition. It takes one exact key, and **returns ids only** (`uuid` columns; never names, text, secrets, dates or status). The caller then sets the tenant and reads scopes, dates, status and org roles under the normal policy. `pinround_app` gets `EXECUTE` on these functions and nothing else from the owner role; `PUBLIC` and the other roles get no `EXECUTE`.
 
 | Function | Input | Returns | Used by |
 |---|---|---|---|
-| `resolve_api_token(token_hash bytea)` | hash of a presented PAT | `token_id, organization_id, user_id, scopes, expires_at, revoked_at` | API and MCP authentication |
-| `resolve_user_orgs(user_id uuid)` | the logged-in user | `organization_id` list (with org roles) | org picker after login, membership checks |
-| `resolve_invitation(token_hash bytea)` | hash of an invite token | `invitation_id, organization_id, expires_at, accepted_at` | accepting an invite |
+| `resolve_api_token(token_hash bytea)` | hash of a presented PAT | `token_id, organization_id, user_id` | API and MCP authentication |
+| `resolve_user_orgs(user_id uuid)` | the logged-in user | `organization_id`, one row per organization | org picker after login, membership checks |
+| `resolve_invitation(token_hash bytea)` | hash of an invite token | `invitation_id, organization_id` | accepting an invite |
 | `resolve_sso_provider(issuer text, domain text)` | issuer or email domain at login | `provider_config_id, organization_id` | company login start and callback |
-| `resolve_jira_connection(connection_id uuid)` | id from the webhook URL | `organization_id, status` | Jira webhook intake |
-| `resolve_laptop_package(package_id uuid)` | id of a laptop-AI package | `organization_id, user_id, expires_at, used_at` | laptop AI result intake |
+| `resolve_jira_connection(connection_id uuid)` | id from the webhook URL | `organization_id` | Jira webhook intake |
+| `resolve_laptop_package(package_id uuid)` | id of a laptop-AI package | `organization_id, user_id` | laptop AI result intake |
 
-Every resolver has a test: right key → ids; wrong key → no row; it can never return rows of another org for a guessed key; it returns no text columns. A CI catalog check lists all `SECURITY DEFINER` functions and fails if one is not in this table.
+- **Where they live:** migration `Version20261106140000` creates all six as stubs that return no row, with these signatures. The names are listed once in PHP, `App\SharedKernel\Infrastructure\Doctrine\Migration\ResolverFunctions::NAMES`, which the tests read. The phase that adds a function's table replaces its body with `CREATE OR REPLACE FUNCTION`, keeping the signature (and so the `EXECUTE` grants).
+- **How a resolver reads under `FORCE ROW LEVEL SECURITY`:** `pinround_resolver` has no `BYPASSRLS`, so the tenant policy applies to it too. The migration that creates a table a resolver reads adds the statements of `TenantTable::allowResolverRead('<table>', [<columns>])` after `enableRls`: an opt-in policy `resolver_read ... FOR SELECT TO pinround_resolver USING (true)` and `GRANT SELECT (<columns>)` to `pinround_resolver`. Grant only the columns a resolver returns or matches on, and on a partitioned table the parent only.
+- **Owner and migrator:** a new owner needs `CREATE` on the schema, so the migration grants it to `pinround_resolver` just for `ALTER FUNCTION ... OWNER TO pinround_resolver` and revokes it again; the role keeps no `CREATE`. `EXECUTE` is granted before the owner change, because the migrator does not inherit the owner's rights. To replace or drop a function later, a migration runs `SET ROLE pinround_resolver` first (and, for `CREATE OR REPLACE`, grants and revokes `CREATE` the same way), then `RESET ROLE`. Because the migrator has no `INHERIT`, the `resolver_read` policy never applies to it.
+
+`tests/Integration/Tenancy/ResolverFunctionTest` checks each function's owner, `SECURITY DEFINER`, fixed `search_path`, `uuid`-only output and `EXECUTE` rights, that an unknown key gives no row, and that `pinround_readonly` is refused. On a test-only table it proves a function owned by `pinround_resolver` finds another organization's row through `resolver_read`, cannot read an ungranted column, and that the migrator does not get the policy. When the tables arrive, every resolver gets a test: right key → ids; wrong key → no row; it can never return rows of another org for a guessed key. A CI catalog check lists all `SECURITY DEFINER` functions and fails if one is not in this table.
 
 **Partitioned tables:** grants are given on the **parent** table only. `roles.sql` revokes nothing on partitions and migrations never grant on a child partition, so `pinround_app` and `pinround_readonly` cannot query a partition directly and skip the parent's policy. RLS policies are created on the parent. `DatabaseRolesTest::noChildPartitionInTheSchemaHasDirectGrants` reads `pg_class.relispartition` and fails on any grant on a child partition to a role other than its owner.
 

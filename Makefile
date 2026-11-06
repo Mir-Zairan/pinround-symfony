@@ -10,7 +10,8 @@ export APP_GID ?= $(shell id -g)
 COMPOSE := docker compose $(ENV_FILES)
 
 # Dev-only database role passwords. The app and migrator ones must match the URLs in .env.dev and
-# .env.test. The retention and readonly ones live only here, so no web or worker env holds them.
+# .env.test, the readonly one the test-only URL in .env.test. The retention one lives only here,
+# and no web or worker env holds the readonly or retention one.
 DB_ADMIN_USER ?= pinround
 DB_APP_PASSWORD ?= change-me-dev-only-app-db
 DB_MIGRATOR_PASSWORD ?= change-me-dev-only-migrator-db

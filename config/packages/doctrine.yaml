@@ -62,6 +62,14 @@ when@test:
                     options: *pgsql_options
                     wrapper_class: *connection_class
                     dbname_suffix: '_test%env(default::TEST_TOKEN)%'
+                # Test-only: proves what pinround_readonly is refused (for example the resolver functions).
+                readonly:
+                    url: '%env(resolve:READONLY_DATABASE_URL)%'
+                    driver: pdo_pgsql
+                    server_version: '18'
+                    options: *pgsql_options
+                    wrapper_class: *connection_class
+                    dbname_suffix: '_test%env(default::TEST_TOKEN)%'
         orm:
             mappings:
                 # Test-only entities on test-only tables (for example zz_tenant_probe); never in a migration.
