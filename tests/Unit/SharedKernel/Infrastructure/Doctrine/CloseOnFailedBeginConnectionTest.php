@@ -45,6 +45,8 @@ final class CloseOnFailedBeginConnectionTest extends TestCase
         self::assertSame($this->savepointFailure, $this->failureOf($connection->beginTransaction(...)));
         self::assertTrue($connection->isTransactionActive());
         self::assertSame(1, $this->driverConnects);
+        // DBAL counts the savepoint that never started; pinned so a DBAL change that fixes it is noticed.
+        self::assertSame(2, $connection->getTransactionNestingLevel());
     }
 
     private function connection(): CloseOnFailedBeginConnection

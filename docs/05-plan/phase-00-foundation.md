@@ -104,11 +104,11 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 6. Test-only table `zz_tenant_probe` (created only in the test database) to prove the setup.
 **Files:** `src/SharedKernel/…`, `src/SharedKernel/Infrastructure/Doctrine/TenantMiddleware.php`, `config/packages/doctrine.yaml`, `migrations/`, `tests/Integration/Tenancy/`.
 **Acceptance criteria:**
-- [ ] With org A set, a query returns only org A rows; with no org set, it returns zero rows and no error.
-- [ ] On one pooled connection, a transaction without a tenant that follows a transaction with a tenant returns zero rows and no `invalid input syntax for type uuid` error (the `NULLIF` case).
-- [ ] With the Doctrine filter turned off, RLS still blocks org B rows.
-- [ ] Inserting a row with another org's id fails (`WITH CHECK`).
-- [ ] `pinround_migrator` and `pinround_app` both lack `BYPASSRLS` (catalog query test).
+- [x] With org A set, a query returns only org A rows; with no org set, it returns zero rows and no error.
+- [x] On one pooled connection, a transaction without a tenant that follows a transaction with a tenant returns zero rows and no `invalid input syntax for type uuid` error (the `NULLIF` case).
+- [x] With the Doctrine filter turned off, RLS still blocks org B rows.
+- [x] Inserting a row with another org's id fails (`WITH CHECK`).
+- [x] `pinround_migrator` and `pinround_app` both lack `BYPASSRLS` (catalog query test).
 **Tests:** integration suite `tests/Integration/Tenancy/*` (isolation, fail-closed, pooled-connection case, roles).
 **Security notes:** never log the org id together with ticket content; `pinround_retention` credentials are never in the web or worker env.
 **Performance notes:** `set_config` is one round trip per transaction and works with PgBouncer transaction mode ([connection pooling](../02-architecture/performance-and-scale.md#connection-pooling)).
@@ -256,4 +256,17 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T2): PHP-CS-Fixer prints a "minimum PHP 8.4" warning on PHP 8.5 but runs correctly.
 - 2026-11-06 (P00.T2): CI ran green on PR #1: push run 3m01s, pull request run 2m29s (slowest job `build`, about 2.5 min).
 - 2026-11-06 (P00.T2): merge blocking is not on. GitHub refuses branch protection on this private personal repo ("Upgrade to GitHub Pro or make this repository public", HTTP 403). The "blocks merge" criterion stays open until the repo gets Pro or a team plan; then require `static`, `unit`, `integration` and `build` on `main`.
+- 2026-11-06 (P00.T3): partition jobs must never grant on child partitions; each table migration grants on the parent only.
+- 2026-11-06 (P00.T3): `doctrine:migrations:diff` needs the `OrmSchemaProvider` service (`config/services.yaml`). In the test env it also sees the test-only `zz_tenant_probe` table.
+- 2026-11-06 (P00.T3): `OrganizationId` accepts UUIDv7 only (rejects nil and other versions).
+- 2026-11-06 (P00.T3): `TenantTable::enableRls` rejects names that are not identifiers or are longer than 63 characters, and does not grant.
+- 2026-11-06 (P00.T3): ADR-0005 line 103 ("raw SQL without app.org_id must fail") is met as "returns zero rows, no error" per the P00.T3 criterion. The loud failure comes from `TenantFilter` throwing `TenantNotSet`. ADR-0005 is not edited; a superseding ADR is needed if the database itself must throw.
+- 2026-11-06 (P00.T3): ADR-0005 line 130: the Messenger middleware only fills `TenantContext` from the `TenantStamp`. `TenantMiddleware` runs `set_config` at BEGIN (`doctrine_transaction`).
+- 2026-11-06 (P00.T3): the security firewall must be non-lazy (or whatever fills `TenantContext` must run between kernel.request priority 8 and 7), because `set_config` and the filter mark bind at BEGIN.
+- 2026-11-06 (P00.T3): no ORM result cache on tenant data (`NullAdapter` on purpose; the cache key cannot tell organizations apart).
+- 2026-11-06 (P00.T3): org switch rule: `TenantContext` refuses (`TenantSwitchRefused`) a switch to another org, or `clear()`, while a DB transaction is open or the EntityManager holds any entity. Loops over orgs must end the transaction, flush and clear first.
+- 2026-11-06 (P00.T3): server-side prepares are off app-wide (PgBouncer-safe).
+- 2026-11-06 (P00.T3): DBAL quirk: a failed nested savepoint leaves the nesting level one too high (not fixed; DBAL's own behaviour).
+- 2026-11-06 (P00.T3): `pinround_retention` has no test connection. The BYPASSRLS path is stood in by disabling RLS through the migrator in tests.
+- 2026-11-06 (P00.T3): CI has not yet run on GitHub for this branch (`psql` on the ubuntu-24.04 runner unverified).
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)

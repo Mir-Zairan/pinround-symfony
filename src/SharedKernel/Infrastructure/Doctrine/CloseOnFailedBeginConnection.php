@@ -14,6 +14,9 @@ use Doctrine\DBAL\Connection;
  * would then send SAVEPOINT without a transaction, until the worker restarts. When the outermost begin fails,
  * this closes the connection, which resets the count and drops the driver connection (the server ends its
  * transaction), and rethrows the failure. The next statement opens a new connection.
+ *
+ * Only the outermost begin is covered. A nested begin (savepoint) that fails keeps the connection and its outer
+ * transaction, but DBAL's nesting level stays one too high. That is DBAL's own behaviour and is not corrected here.
  */
 final class CloseOnFailedBeginConnection extends Connection
 {
