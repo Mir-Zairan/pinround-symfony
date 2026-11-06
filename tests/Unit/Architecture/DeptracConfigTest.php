@@ -140,15 +140,14 @@ final class DeptracConfigTest extends TestCase
             foreach (['Api', 'Event', 'Domain'] as $part) {
                 self::assertSame(['SharedKernel'], $ruleset[$module.'_'.$part]);
             }
-            self::assertContains($module.'_Domain', $ruleset[$module.'_Application']);
-            self::assertContains($module.'_Api', $ruleset[$module.'_Application']);
-            self::assertContains('SharedKernel', $ruleset[$module.'_Application']);
-            foreach (['Domain', 'Application', 'Api', 'Event'] as $part) {
-                if ('Event' !== $part) {
-                    self::assertContains($module.'_'.$part, $ruleset[$module.'_Infrastructure']);
-                }
-            }
-            self::assertContains('Vendor', $ruleset[$module.'_Infrastructure']);
+            self::assertEqualsCanonicalizing(
+                [$module.'_Domain', $module.'_Api', 'SharedKernel'],
+                $this->ownLayersOnly($module, $ruleset[$module.'_Application']),
+            );
+            self::assertEqualsCanonicalizing(
+                [$module.'_Domain', $module.'_Application', $module.'_Api', 'SharedKernel', 'Vendor'],
+                $this->ownLayersOnly($module, $ruleset[$module.'_Infrastructure']),
+            );
             self::assertEqualsCanonicalizing(
                 [$module.'_Application', $module.'_Api', 'SharedKernel', 'Vendor'],
                 array_values(array_filter($ruleset[$module.'_UI'], static fn (string $name): bool => !str_ends_with($name, '_Api') || $module.'_Api' === $name)),
@@ -179,6 +178,21 @@ final class DeptracConfigTest extends TestCase
     }
 
     /**
+     * Drops Event layers and other modules' Api layers; those edges are checked by their own tests.
+     *
+     * @param list<string> $allowed
+     *
+     * @return list<string>
+     */
+    private function ownLayersOnly(string $module, array $allowed): array
+    {
+        return array_values(array_filter(
+            $allowed,
+            static fn (string $name): bool => !str_ends_with($name, '_Event') && (!str_ends_with($name, '_Api') || $module.'_Api' === $name),
+        ));
+    }
+
+    /**
      * @return array<string, list<string>> module => modules named in its "Depends on" line of modules.md
      */
     private function dependsOnLines(): array
@@ -193,7 +207,8 @@ final class DeptracConfigTest extends TestCase
             if (1 === preg_match('/^### (\w+)/', $line, $heading)) {
                 $current = $heading[1];
             } elseif (null !== $current && \in_array($current, $modules, true) && str_starts_with($line, '- **Depends on:**')) {
-                $text = (string) preg_replace('/\([^)]*\)/', '', substr($line, \strlen('- **Depends on:**')));
+                $withoutNotes = (string) preg_replace('/\([^)]*\)/', '', substr($line, \strlen('- **Depends on:**')));
+                $text = explode('.', $withoutNotes)[0];
                 $result[$current] = array_values(array_filter($modules, static fn (string $module): bool => $module !== $current && 1 === preg_match('/\b'.$module.'\b/', $text)));
             }
         }
