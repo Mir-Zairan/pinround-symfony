@@ -73,9 +73,10 @@ See [ADR-0028](../03-adr/0028-testing-and-quality-gates.md).
 - **Log leak test:** run main journeys with a unique marker in ticket text; fail if the marker appears in logs.
 - **Migration test:** run all migrations up on an empty DB and check every new tenant table has `organization_id`, an RLS policy and an index starting with `organization_id`.
 - **Visibility suite:** for every path in the [ticket visibility predicate](data-model.md#ticket-visibility-predicate) list (list, search, duplicates, My reports, Home, Whose turn and workload counts, manager counts, Mercure publishes, emails, AI inputs, MCP tools, exports): a team-only ticket is visible to team members, admins, its reporter from outside the team and the triager of a no-team ticket, and to nobody else — also not as a number in a count.
+- **Tenancy tests (built in P00.T3):** `tests/Integration/Tenancy` covers the policy, the `NULLIF` pooled-connection case, the filter (`TenantNotSet`, one shared SQL text, RLS off and filter off cases), the org switch refusal and the no-result-cache rule; `tests/Functional/Web/RequestTransactionTest` covers commit, rollback and the safety nets. `pinround_retention` has no test connection, so the `BYPASSRLS` path is stood in by disabling RLS through the migrator.
 - **RLS details:** the policy fails closed when the setting is unset *and* when it reads back as `''` on a reused pooled connection; a static check bans `SET app.org_id` without `LOCAL` and `set_config(…, false)`; a Messenger handler sees only its message's org; after an exception in worker mode the next request works and carries no tenant.
 - **Resolver functions:** each `SECURITY DEFINER` resolver returns ids for the right key, nothing for a wrong key, never text columns; a catalog check fails on any `SECURITY DEFINER` function not in the approved list.
-- **Partition grants:** through `pg_inherits`, no child partition has direct grants for `pinround_app` or `pinround_readonly`.
+- **Partition grants:** `DatabaseRolesTest` reads `pg_class.relispartition` and fails if any child partition has a grant to a role other than its owner.
 - **Index use under RLS:** `EXPLAIN` of search, duplicate and embedding queries as `pinround_app` with the tenant set must use the GIN/HNSW index.
 - **SSRF:** the guarded HTTP client refuses `127.0.0.1`, `169.254.169.254`, `10.0.0.1`, an IPv6 loopback and a DNS name that resolves to them, and does not follow redirects.
 - **Tokens and admin:** a request with a personal access token gets 403 on every `ADMIN_*` action; creating a token without a fresh MFA check is refused.
@@ -97,11 +98,11 @@ GitHub Actions workflow `CI` (`.github/workflows/ci.yml`) runs on every push and
 |---|---|---|---|
 | `static` | `composer validate --strict`, `composer cs`, `composer rector`, `composer phpstan`, `composer deptrac`, `composer lint` (container, YAML, Twig), `composer audit`: the same commands as `composer qa` minus the tests | 5 min | ≤ 3 min |
 | `unit` | `composer test:unit` | 3 min | ≤ 1 min |
-| `integration` | Service containers `postgres:18.6` and `valkey/valkey:8.1.4` (same tags as `compose.yaml`) with health checks, the database `pinround_test` (the test env appends `_test` to the database name in `DATABASE_URL`); `composer test:integration`, then `composer test:functional` | 8 min | ≤ 6 min |
+| `integration` | Service containers `postgres:18.6` and `valkey/valkey:8.1.4` (same tags as `compose.yaml`) with health checks, the database `pinround_test` (the test env appends `_test` to the database name in `DATABASE_URL` and `MIGRATOR_DATABASE_URL`); the service's admin user `pinround` runs `docker/postgres/roles.sql`, `sh tests/shell/roles-sql-check.sh` proves the script refuses to run when any of its four passwords is missing or empty and changes nothing, `bin/console doctrine:migrations:migrate` runs in the test env as `pinround_migrator`, `roles.sql` runs once more as a re-run test (not a required step), then `composer test:integration` and `composer test:functional` run as `pinround_app` (`DatabaseRolesTest` checks the roles) | 8 min | ≤ 6 min |
 | `build` | `docker build --target prod` with the GitHub Actions layer cache (no push), then `sh tests/shell/compose-config-check.sh` | 6 min | ≤ 5 min |
 | `e2e` | Stub: prints that the Playwright journeys arrive in P00.T9. It runs on pull requests only; on a push it is skipped, which counts as passing for branch protection | 2 min | ≤ 8 min once real (Docker stack, Playwright key journeys + axe) |
 
-Not in CI yet: migrations and isolation suites (no migrations exist), image scan and SBOM (planned for the main branch).
+Not in CI yet: the catalog migration test (every tenant table has an RLS policy; no tenant tables exist yet), image scan and SBOM (planned for the main branch). The tenant isolation tests in `tests/Integration/Tenancy` and `tests/Functional/Web` already run in `integration` (roles.sql, migrations, then the suites). The `integration` job has not yet run on GitHub for the tenancy branch; `psql` on the runner is unverified.
 
 Total target under 15 minutes. A failed job blocks the merge.
 

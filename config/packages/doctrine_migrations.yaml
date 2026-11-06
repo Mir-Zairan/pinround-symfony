@@ -4,3 +4,14 @@ doctrine_migrations:
         # as migrations classes should NOT be autoloaded
         'DoctrineMigrations': '%kernel.project_dir%/migrations'
     enable_profiler: false
+
+# Dev and test migrate as pinround_migrator through the "migrator" connection (config/packages/doctrine.yaml).
+# With a connection instead of an entity manager the bundle has no schema provider, so diff gets the
+# default entity manager's one. Prod keeps the bundle default: the migrate container's DATABASE_URL is the migrator.
+when@dev: &migrate_as_migrator
+    doctrine_migrations:
+        connection: migrator
+        services:
+            Doctrine\Migrations\Provider\SchemaProvider: Doctrine\Migrations\Provider\OrmSchemaProvider
+
+when@test: *migrate_as_migrator

@@ -1,0 +1,36 @@
+# Test-only endpoints whose controllers live under tests/Fixtures; there is no route here in dev or prod.
+when@test:
+    test_request_transaction_report:
+        path: /_test/request-transaction
+        controller: App\Tests\Fixtures\Http\RequestTransactionProbeController::reportTransaction
+        methods: [GET]
+
+    test_request_transaction_insert:
+        path: /_test/request-transaction/{organizationId}/{label}
+        controller: App\Tests\Fixtures\Http\RequestTransactionProbeController::insertLabel
+        methods: [POST]
+
+    test_request_transaction_insert_then_throw:
+        path: /_test/request-transaction/{organizationId}/{label}/throw
+        controller: App\Tests\Fixtures\Http\RequestTransactionProbeController::insertLabelThenThrow
+        methods: [POST]
+
+    test_request_transaction_insert_then_fail_commit:
+        path: /_test/request-transaction/{organizationId}/{label}/fail-commit
+        controller: App\Tests\Fixtures\Http\RequestTransactionProbeController::insertLabelThenFailTheCommit
+        methods: [POST]
+
+    test_request_transaction_leave_nested_open:
+        path: /_test/request-transaction/{organizationId}/{label}/leave-nested-open
+        controller: App\Tests\Fixtures\Http\RequestTransactionProbeController::leaveANestedTransactionOpen
+        methods: [POST]
+
+    test_request_transaction_failing_sub_request:
+        path: /_test/request-transaction/{organizationId}/{label}/failing-sub-request
+        controller: App\Tests\Fixtures\Http\RequestTransactionProbeController::insertLabelAroundAFailingSubRequest
+        methods: [POST]
+
+    test_request_transaction_lose_connection:
+        path: /_test/request-transaction/{organizationId}/{label}/lose-connection
+        controller: App\Tests\Fixtures\Http\RequestTransactionProbeController::insertLabelThenLoseTheConnection
+        methods: [POST]

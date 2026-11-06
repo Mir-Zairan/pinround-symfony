@@ -1,0 +1,190 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Integration\Tenancy;
+
+use Doctrine\DBAL\Connection;
+use Doctrine\Migrations\Provider\OrmSchemaProvider;
+use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+
+/**
+ * Proves docker/postgres/roles.sql ran and the migrations ran as pinround_migrator (ADR-0005).
+ * It reads the catalog through the normal kernel connection, which must be pinround_app.
+ */
+final class DatabaseRolesTest extends KernelTestCase
+{
+    private const array ROLES = ['pinround_app', 'pinround_migrator', 'pinround_retention', 'pinround_readonly'];
+
+    #[Test]
+    public function theKernelConnectsAsTheAppRole(): void
+    {
+        self::assertSame('pinround_app', $this->connection()->fetchOne('SELECT current_user'));
+    }
+
+    #[Test]
+    public function exactlyTheFourPinroundRolesExistAndCanLogIn(): void
+    {
+        $loginRoles = $this->connection()->fetchFirstColumn(
+            "SELECT rolname FROM pg_roles WHERE rolname LIKE 'pinround\\_%' AND rolcanlogin",
+        );
+
+        self::assertEqualsCanonicalizing(self::ROLES, $loginRoles);
+    }
+
+    #[Test]
+    public function onlyTheRetentionRoleBypassesRowLevelSecurity(): void
+    {
+        $bypassingRoles = $this->connection()->fetchFirstColumn(
+            "SELECT rolname FROM pg_roles WHERE rolname LIKE 'pinround\\_%' AND rolbypassrls",
+        );
+
+        self::assertSame(['pinround_retention'], $bypassingRoles);
+    }
+
+    #[Test]
+    public function noPinroundRoleIsSuperuserOrCreatesRolesOrDatabasesOrReplicates(): void
+    {
+        $privilegedRoles = $this->connection()->fetchFirstColumn(
+            "SELECT rolname FROM pg_roles WHERE rolname LIKE 'pinround\\_%'
+             AND (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication)",
+        );
+
+        self::assertSame([], $privilegedRoles);
+    }
+
+    #[Test]
+    public function theAppRoleCannotCreateObjectsButTheMigratorCan(): void
+    {
+        $connection = $this->connection();
+
+        self::assertFalse($connection->fetchOne("SELECT has_schema_privilege('pinround_app', 'public', 'CREATE')"));
+        self::assertFalse($connection->fetchOne("SELECT has_database_privilege('pinround_app', current_database(), 'CREATE')"));
+        self::assertFalse($connection->fetchOne("SELECT has_database_privilege('pinround_app', current_database(), 'TEMPORARY')"));
+        self::assertTrue($connection->fetchOne("SELECT has_schema_privilege('pinround_migrator', 'public', 'CREATE')"));
+    }
+
+    #[Test]
+    public function publicGetsNothingAndOnlyThePinroundRolesConnect(): void
+    {
+        $connection = $this->connection();
+
+        self::assertSame([], $connection->fetchFirstColumn(
+            'SELECT acl.privilege_type FROM pg_database d, aclexplode(d.datacl) acl
+             WHERE d.datname = current_database() AND acl.grantee = 0',
+        ));
+        self::assertSame([], $connection->fetchFirstColumn(
+            "SELECT acl.privilege_type FROM pg_namespace n, aclexplode(n.nspacl) acl
+             WHERE n.nspname = 'public' AND acl.grantee = 0",
+        ));
+        // The owner (pinround_migrator) is listed too: an explicit ACL spells out the owner's own rights.
+        self::assertEqualsCanonicalizing(self::ROLES, $connection->fetchFirstColumn(
+            "SELECT acl.grantee::regrole::text FROM pg_database d, aclexplode(d.datacl) acl
+             WHERE d.datname = current_database() AND acl.privilege_type = 'CONNECT'",
+        ));
+    }
+
+    #[Test]
+    public function noDefaultPrivilegeGivesTheAppOrReadonlyRoleRights(): void
+    {
+        self::assertSame([], $this->connection()->fetchFirstColumn(
+            "SELECT d.defaclobjtype::text || ' ' || acl.grantee::regrole::text || ' ' || acl.privilege_type
+             FROM pg_default_acl d, aclexplode(d.defaclacl) acl
+             WHERE acl.grantee IN ('pinround_app'::regrole, 'pinround_readonly'::regrole)",
+        ));
+    }
+
+    #[Test]
+    public function aNewTableHasOnlyTheRightsItsMigrationGrantsAndAPartitionNone(): void
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $migrator->beginTransaction();
+
+        try {
+            $migrator->executeStatement('CREATE TABLE roles_probe_plain (id int)');
+            $migrator->executeStatement('CREATE TABLE roles_probe_parent (id int, month int) PARTITION BY LIST (month)');
+            $migrator->executeStatement('CREATE TABLE roles_probe_child PARTITION OF roles_probe_parent FOR VALUES IN (1)');
+            $migrator->executeStatement('GRANT SELECT, INSERT ON roles_probe_parent TO pinround_app');
+
+            self::assertSame([], $this->grantsToOthersThanTheOwner($migrator, 'roles_probe_plain'));
+            self::assertEqualsCanonicalizing(
+                ['pinround_app INSERT', 'pinround_app SELECT'],
+                $this->grantsToOthersThanTheOwner($migrator, 'roles_probe_parent'),
+            );
+            self::assertSame([], $this->grantsToOthersThanTheOwner($migrator, 'roles_probe_child'));
+        } finally {
+            $migrator->rollBack();
+        }
+    }
+
+    /** Vacuous until the first partitioned table; then it guards every migration that adds one. */
+    #[Test]
+    public function noChildPartitionInTheSchemaHasDirectGrants(): void
+    {
+        self::assertSame([], $this->connection()->fetchFirstColumn(
+            "SELECT c.relname || ' ' || acl.grantee::regrole::text || ' ' || acl.privilege_type
+             FROM pg_class c, aclexplode(c.relacl) acl
+             WHERE c.relnamespace = 'public'::regnamespace AND c.relispartition AND acl.grantee <> c.relowner",
+        ));
+    }
+
+    #[Test]
+    public function theAppAndReadonlyRolesHoldNoTruncateReferencesOrTriggerInTheSchema(): void
+    {
+        self::assertSame([], $this->connection()->fetchFirstColumn(
+            "SELECT c.relname || ' ' || acl.grantee::regrole::text || ' ' || acl.privilege_type
+             FROM pg_class c, aclexplode(c.relacl) acl
+             WHERE c.relnamespace = 'public'::regnamespace
+               AND acl.grantee IN ('pinround_app'::regrole, 'pinround_readonly'::regrole)
+               AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER')",
+        ));
+    }
+
+    #[Test]
+    public function nobodyButTheMigratorHasRightsOnTheMigrationsTable(): void
+    {
+        $connection = $this->connection();
+
+        self::assertFalse($connection->fetchOne("SELECT has_table_privilege('pinround_app', 'public.doctrine_migration_versions', 'INSERT')"));
+        self::assertSame([], $this->grantsToOthersThanTheOwner($connection, 'doctrine_migration_versions'));
+    }
+
+    #[Test]
+    public function theMigrationsRanAsTheMigrator(): void
+    {
+        // roles.sql re-owns tables but cannot re-own extensions, so only a migration run as the migrator makes it their owner.
+        self::assertEqualsCanonicalizing(
+            ['citext', 'pg_trgm', 'pgcrypto'],
+            $this->connection()->fetchFirstColumn("SELECT extname FROM pg_extension WHERE extowner = 'pinround_migrator'::regrole"),
+            'A test database migrated before the roles existed keeps the old owner: drop pinround_test, then run make db-roles migrate-test.',
+        );
+    }
+
+    #[Test]
+    public function theMigrationsUseTheMigratorConnectionAndTheOrmSchema(): void
+    {
+        $migrations = self::getContainer()->get('doctrine.migrations.dependency_factory');
+
+        self::assertSame('pinround_migrator', $migrations->getConnection()->fetchOne('SELECT current_user'));
+        self::assertInstanceOf(OrmSchemaProvider::class, $migrations->getSchemaProvider());
+    }
+
+    private function connection(): Connection
+    {
+        return self::getContainer()->get('doctrine.dbal.default_connection');
+    }
+
+    /**
+     * @return list<mixed> "grantee PRIVILEGE" pairs on a table in public, the owner's own rights left out
+     */
+    private function grantsToOthersThanTheOwner(Connection $connection, string $table): array
+    {
+        return $connection->fetchFirstColumn(
+            "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type
+             FROM pg_class c, aclexplode(c.relacl) acl
+             WHERE c.oid = to_regclass('public.' || quote_ident(?)) AND acl.grantee <> c.relowner",
+            [$table],
+        );
+    }
+}

@@ -80,9 +80,9 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 
 - **Purpose:** the small set of types every module shares.
 - **Contains:**
-  - `Uuid`-based ids (`OrganizationId`, `UserId`, `TicketId` …, all UUIDv7, [ADR-0006](../03-adr/0006-identifiers.md));
+  - id value objects (`OrganizationId`, `UserId`, `TicketId` …, all UUIDv7, [ADR-0006](../03-adr/0006-identifiers.md));
   - `Clock` (an interface, so tests can freeze time);
-  - `TenantContext` (the current `OrganizationId`, plus setting `app.org_id` on the connection, [ADR-0005](../03-adr/0005-multi-tenancy.md));
+  - `TenantContext` (the current `OrganizationId`; callers only fill it). The DBAL driver middleware `TenantMiddleware` in `Infrastructure/Doctrine` reads it and runs `set_config('app.org_id', …, true)` at the start of each transaction. `TenantFilter` scopes ORM queries on `TenantOwned` entities and throws `TenantNotSet` without a tenant; `RequestTransaction` wraps each main web request in one transaction; `TenantContext` refuses (`TenantSwitchRefused`) an org switch or `clear()` while a transaction is open or the EntityManager holds an entity ([ADR-0005](../03-adr/0005-multi-tenancy.md), [row-level security](data-model.md#row-level-security));
   - the `DomainEvent` base (event id, occurred at, organization id, actor id);
   - `Result`/`Problem` types for expected failures.
 - **Owns tables:** none.

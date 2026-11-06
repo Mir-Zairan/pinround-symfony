@@ -48,9 +48,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     # Images match compose.yaml. Real environment variables beat .env.test, whose
-    # DATABASE_URL points at the compose host name "postgres". The URL names "pinround";
+    # URLs point at the compose host name "postgres". The URLs name "pinround";
     # config/packages/doctrine.yaml appends "_test" in the test env, so the service
-    # must create "pinround_test".
+    # must create "pinround_test". The service user "pinround" is the admin account:
+    # it only runs docker/postgres/roles.sql and its check. Migrations run as pinround_migrator,
+    # the tests as pinround_app. The passwords are CI-only placeholders; the retention
+    # and readonly ones appear only on the psql step, never in the job env.
     services:
       postgres:
         image: postgres:18.6
@@ -75,7 +78,8 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://pinround:pinround@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
+      DATABASE_URL: postgresql://pinround_app:change-me-ci-only-app-db@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
+      MIGRATOR_DATABASE_URL: postgresql://pinround_migrator:change-me-ci-only-migrator-db@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
       REDIS_CACHE_DSN: redis://127.0.0.1:6379
       MESSENGER_TRANSPORT_DSN: in-memory://
       MAILER_DSN: null://null
@@ -85,6 +89,37 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/php-setup
+      # psql comes with the runner image's preinstalled PostgreSQL client.
+      - name: Apply the database roles
+        env:
+          PGPASSWORD: pinround
+        run: >-
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pinround -d pinround_test
+          -v app_password='change-me-ci-only-app-db'
+          -v migrator_password='change-me-ci-only-migrator-db'
+          -v retention_password='change-me-ci-only-retention-db'
+          -v readonly_password='change-me-ci-only-readonly-db'
+          -f docker/postgres/roles.sql
+      - name: Check roles.sql refuses to run without its passwords
+        env:
+          PGPASSWORD: pinround
+          ROLES_PSQL: psql -h 127.0.0.1 -U pinround -d pinround_test
+        run: sh tests/shell/roles-sql-check.sh
+      - name: Migrate the test database as pinround_migrator
+        env:
+          APP_ENV: test
+        run: bin/console doctrine:migrations:migrate --no-interaction
+      # A re-run test, not a required step: DatabaseRolesTest then proves roles.sql never widens a migration's grants.
+      - name: Re-run the database roles on the migrated database
+        env:
+          PGPASSWORD: pinround
+        run: >-
+          psql -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -U pinround -d pinround_test
+          -v app_password='change-me-ci-only-app-db'
+          -v migrator_password='change-me-ci-only-migrator-db'
+          -v retention_password='change-me-ci-only-retention-db'
+          -v readonly_password='change-me-ci-only-readonly-db'
+          -f docker/postgres/roles.sql
       - run: composer test:integration
       - run: composer test:functional
 

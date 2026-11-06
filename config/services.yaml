@@ -19,5 +19,20 @@ services:
     App\:
         resource: '../src/'
 
+    # doctrine:migrations:diff compares the database with this entity manager's mapping
+    # (wired in config/packages/doctrine_migrations.yaml for dev and test).
+    Doctrine\Migrations\Provider\OrmSchemaProvider:
+        arguments: ['@doctrine.orm.default_entity_manager']
+
+    # The ORM result cache (doctrine.yaml says why it must not store anything).
+    Symfony\Component\Cache\Adapter\NullAdapter: ~
+
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
+
+when@test:
+    services:
+        # Test-only controller behind config/routes/test_fixtures.yaml.
+        App\Tests\Fixtures\Http\RequestTransactionProbeController:
+            autowire: true
+            autoconfigure: true

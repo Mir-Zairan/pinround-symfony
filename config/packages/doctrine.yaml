@@ -4,6 +4,14 @@ doctrine:
 
         driver: pdo_pgsql
         server_version: '18'
+        # Every connection repeats these two (anchors below). See docs/02-architecture/performance-and-scale.md#connection-pooling.
+        # Bound values go out in one unnamed-statement round trip instead of PREPARE, EXECUTE and DEALLOCATE,
+        # and no named statement outlives a transaction under PgBouncer transaction pooling.
+        options: &pgsql_options
+            !php/const Pdo\Pgsql::ATTR_DISABLE_PREPARES: true
+        # Closes the connection when the outermost transaction cannot begin, so DBAL never counts a transaction the database does not have.
+        # A failed nested savepoint is not covered: DBAL's nesting level stays one too high (DBAL's own behaviour).
+        wrapper_class: &connection_class App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection
 
         profiling_collect_backtrace: '%kernel.debug%'
     orm:
@@ -12,12 +20,55 @@ doctrine:
         identity_generation_preferences:
             Doctrine\DBAL\Platforms\PostgreSQLPlatform: identity
         auto_mapping: false
+        # A result cache that never stores anything, in every environment: TenantFilter's SQL holds no organization
+        # id, so a result cache key would not tell organizations apart and could serve one organization's rows to
+        # another without asking the database. Left unset, DoctrineBundle would add an in-memory one. Replace it
+        # only with a cache whose keys include the organization.
+        result_cache_driver:
+            type: service
+            id: Symfony\Component\Cache\Adapter\NullAdapter
+        filters:
+            # ORM-level tenant scope on top of row-level security; see TenantFilter and TenantFilterMiddleware.
+            tenant:
+                class: App\SharedKernel\Infrastructure\Doctrine\TenantFilter
+                enabled: true
+
+# Migrations run as pinround_migrator (ADR-0005; wired in doctrine_migrations.yaml); the app and the ORM keep "default" (pinround_app).
+# Prod has no "migrator" connection: its migrate container gets a DATABASE_URL for pinround_migrator.
+when@dev:
+    doctrine:
+        dbal:
+            default_connection: default
+            connections:
+                migrator:
+                    url: '%env(resolve:MIGRATOR_DATABASE_URL)%'
+                    driver: pdo_pgsql
+                    server_version: '18'
+                    options: *pgsql_options
+                    wrapper_class: *connection_class
 
 when@test:
     doctrine:
         dbal:
-            # "TEST_TOKEN" is typically set by ParaTest
-            dbname_suffix: '_test%env(default::TEST_TOKEN)%'
+            default_connection: default
+            connections:
+                default:
+                    # "TEST_TOKEN" is typically set by ParaTest
+                    dbname_suffix: '_test%env(default::TEST_TOKEN)%'
+                migrator:
+                    url: '%env(resolve:MIGRATOR_DATABASE_URL)%'
+                    driver: pdo_pgsql
+                    server_version: '18'
+                    options: *pgsql_options
+                    wrapper_class: *connection_class
+                    dbname_suffix: '_test%env(default::TEST_TOKEN)%'
+        orm:
+            mappings:
+                # Test-only entities on test-only tables (for example zz_tenant_probe); never in a migration.
+                TestFixtures:
+                    type: attribute
+                    dir: '%kernel.project_dir%/tests/Fixtures/Entity'
+                    prefix: 'App\Tests\Fixtures\Entity'
 
 when@prod:
     doctrine:
@@ -25,14 +76,9 @@ when@prod:
             query_cache_driver:
                 type: pool
                 pool: doctrine.system_cache_pool
-            result_cache_driver:
-                type: pool
-                pool: doctrine.result_cache_pool
 
     framework:
         cache:
             pools:
-                doctrine.result_cache_pool:
-                    adapter: cache.app
                 doctrine.system_cache_pool:
                     adapter: cache.system

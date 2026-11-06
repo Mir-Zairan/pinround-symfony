@@ -12,7 +12,7 @@ The PostgreSQL tables, keys, indexes, partitions, row-level security, read model
 - [Diagram 4 — notifications, AI, integration, audit](#diagram-4--notifications-ai-integration-audit) — the supporting modules.
 - [Table specifications](#table-specifications) — columns, constraints and indexes per table.
 - [Read models](#read-models) — `ins_ticket_turn` and the other Insight tables.
-- [Row-level security](#row-level-security) — the policy every tenant table gets, how the tenant is set, roles, and the few lookups that run before the tenant is known.
+- [Row-level security](#row-level-security) — the policy every tenant table gets (`TenantTable::enableRls`), how the tenant is set (`TenantContext`, `TenantMiddleware`), roles, and the few lookups that run before the tenant is known.
 - [Ticket visibility predicate](#ticket-visibility-predicate) — the one canonical rule for who may see a restricted ticket.
 - [Index catalogue](#index-catalogue) — the single list of indexes on hot tables.
 - [Query patterns](#query-patterns) — the grouped list, Home, duplicates, ticket history, with SQL.
@@ -272,7 +272,7 @@ Home and "Whose turn?" read this table joined with `tkt_ticket_list_v`, a read-o
 
 ## Row-level security
 
-Every tenant table gets the same policy. The app's database role has no `BYPASSRLS`, and `FORCE ROW LEVEL SECURITY` makes the table owner obey the policy too.
+Every tenant table gets the same policy. The app's database role has no `BYPASSRLS`, and `FORCE ROW LEVEL SECURITY` makes the table owner obey the policy too. The migration that creates the table passes the statements of `App\SharedKernel\Infrastructure\Doctrine\Migration\TenantTable::enableRls('<table>')` to `addSql()` (it accepts only a plain lowercase name of up to 63 characters and quotes it). These are the statements; the table rights are separate grants in the same migration (see below).
 
 ```sql
 ALTER TABLE tkt_ticket ENABLE ROW LEVEL SECURITY;
@@ -284,10 +284,17 @@ CREATE POLICY tenant_isolation ON tkt_ticket
 
 **How the tenant is set**
 
-- `TenantContext` runs `SELECT set_config('app.org_id', $1, true)` as the first statement of every transaction. The third argument `true` makes it transaction-local, like `SET LOCAL`, and unlike `SET LOCAL` it accepts a bound parameter (no string building, no SQL injection). The setting ends with the transaction, which is safe with PgBouncer in transaction mode and with FrankenPHP worker mode.
+- `App\SharedKernel\Application\TenantContext` holds the current `OrganizationId` (a lowercase canonical UUIDv7) for the request or message. The DBAL driver middleware `App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware`, registered on every connection, runs `SELECT set_config('app.org_id', ?, true)` with the id bound, right after each outermost `BEGIN`, when `TenantContext` holds an organization. The third argument `true` makes it transaction-local, like `SET LOCAL`, and unlike `SET LOCAL` it accepts a bound parameter (no string building, no SQL injection). The setting ends with the transaction, which is safe with PgBouncer in transaction mode and with FrankenPHP worker mode.
+- **Contract:** set the tenant before the transaction begins. On the default connection, a switch to another organization while a transaction is open is refused (`TenantSwitchRefused`). Only setting the first tenant while a transaction is open, or a change seen by another connection such as `migrator`, waits for the next transaction. Nested transactions (savepoints) never set it again. If `BEGIN` or `set_config` fails, every connection's DBAL class `App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection` (doctrine.yaml `wrapper_class`) closes the connection and rethrows the failure, when the failing `BEGIN` is the outermost one. Closing ends the half-begun transaction on the server and resets DBAL's transaction count, so the next transaction starts on a fresh connection instead of sending `SAVEPOINT` outside a transaction. A failed nested savepoint is not covered: the connection and its outer transaction stay, but DBAL's nesting level stays one too high (DBAL's own behaviour, not fixed; a unit test pins it). A statement outside a transaction (autocommit) never has a tenant, so it sees no tenant rows. `TenantContext` is reset by the kernel between requests, so no tenant survives into the next one.
 - **Why `NULLIF`:** on a pooled connection that has already run a transaction-local setting, `current_setting('app.org_id', true)` returns an empty string `''` (not NULL) once that transaction is over. `''::uuid` would raise an error. `NULLIF(…, '')` turns it into NULL, `organization_id = NULL` is never true, so **no rows** match. This fails closed.
-- `TenantContext` also throws in PHP before any query when no tenant is set, so the database check is the second line of defence.
-- **Messenger workers:** every handler runs inside the `doctrine_transaction` middleware, and a pinround middleware reads the `organization_id` from the message envelope and calls `set_config` at the start of that transaction. A message without an org (system jobs) runs with no tenant and can only touch global tables or call the resolver functions below.
+- **Two layers, two behaviours when no tenant is set.** The database layer fails closed silently: raw SQL without a tenant returns zero rows with no error (the P00.T3 isolation criterion). The application layer is loud: `TenantFilter`, the Doctrine SQL filter for `TenantOwned` entities, throws `TenantNotSet` for an ORM query when the current transaction has no tenant (also outside any transaction), so a missing tenant fails in tests instead of returning nothing.
+- **`TenantFilter`:** adds `organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid` (the `TenantSetting::CURRENT_ORG_SQL` constant) to every `TenantOwned` query. The SQL text is the same for every organization, so Doctrine's query cache entry is shared. Its only filter parameter is the `is_tenant_set` marker, which `TenantFilterMiddleware` sets at each outermost `BEGIN` (true when the transaction has an organization) and clears at `COMMIT` and `ROLLBACK`.
+- **One transaction per web request:** `RequestTransaction` begins a transaction on every main request at `kernel.request` priority 7, just below the firewall's 8, so `TenantContext` is already filled. It commits on the response, rolls back on an exception, and has a safety net on `kernel.finish_request` and `kernel.terminate`. A streamed body runs after the commit, so it sees zero tenant rows.
+- **No ORM result cache:** the result cache is a `NullAdapter` in every environment, on purpose. The filter SQL holds no organization id, so a result cache key could not tell organizations apart. Never add a result cache for tenant data without a tenant-aware key.
+- **Switching organization:** `TenantContext` refuses (`TenantSwitchRefused`) a switch to another organization, or `clear()`, while a database transaction is open or the EntityManager holds any entity. A loop over organizations must end the transaction, flush and clear first.
+- **No server-side prepares:** `Pdo\Pgsql::ATTR_DISABLE_PREPARES` is on for every connection (PgBouncer-safe, one round trip per bound query).
+- `tests/Integration/Tenancy/TenantIsolationTest` proves this on a test-only table `zz_tenant_probe`, which exists only in the test database while that test class runs (its fixture drops and recreates it through the migrator connection, then drops it; no migration creates it).
+- **Messenger workers:** every handler runs inside the `doctrine_transaction` middleware. A pinround Messenger middleware placed before it only fills `TenantContext` from the message's `TenantStamp` (and clears it afterwards); when `doctrine_transaction` opens the transaction, `TenantMiddleware` runs `set_config` as for any other transaction. A message without an org (system jobs) runs with no tenant and can only touch global tables or call the resolver functions below.
 - **Worker mode:** after an exception the EntityManager is closed; the kernel reset resets it before the next request or message. A test throws inside a request and checks the next request works and carries no tenant ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)).
 - A static check bans `SET app.org_id` without `LOCAL` and any `set_config('app.org_id', …, false)`.
 
@@ -299,6 +306,16 @@ CREATE POLICY tenant_isolation ON tkt_ticket
 | `pinround_migrator` | yes | no | migrations and partition creation (owns the tables; `FORCE RLS` still applies to its data access) |
 | `pinround_retention` | yes | **yes — the only one** | the nightly retention purge job only |
 | `pinround_readonly` | yes | no | support queries and reporting, with the same tenant setting |
+
+The roles live in `docker/postgres/roles.sql`. The Postgres admin account runs it on each database before migrating (`make db-roles` in `make up`, a step in CI, the operator in production), with the four passwords as psql variables. It is safe to re-run. It creates missing roles and re-asserts their attributes. It makes `pinround_migrator` the owner of the database and of every table, view and sequence in `public`. It revokes all rights of `PUBLIC` on the database and on schema `public`, so only the four roles get `CONNECT` and nobody but the owner gets `CREATE` or `TEMPORARY`. It grants schema `USAGE` to `pinround_app`, `pinround_readonly` and `pinround_retention`. It grants **no table or sequence rights**, sets no default privileges, and removes any that an older version of the script left, including all rights of `pinround_app` and `pinround_readonly` on `doctrine_migration_versions`.
+
+**Table rights live in the migration that creates the table.** That migration grants `pinround_app` and `pinround_readonly` exactly what they need, for example `SELECT, INSERT` only for an append-only table. It never grants `TRUNCATE`, `REFERENCES` or `TRIGGER`, and never grants on a child partition (only the parent). A plain sequence (not an identity column, which needs no grant) gets `USAGE` in the same migration. Re-running `roles.sql` never widens these grants. `make test` and CI run it once more on the migrated test database before PHPUnit, to test this. `DatabaseRolesTest` checks five things on that database:
+
+- No default privilege grants anything to `pinround_app` or `pinround_readonly`.
+- A plain table and a child partition the migrator creates start with no rights, and a partitioned parent has only what was granted on it.
+- No child partition in `public` has a grantee other than its owner.
+- Neither role holds `TRUNCATE`, `REFERENCES` or `TRIGGER` on anything in `public`.
+- Only the owner has rights on `doctrine_migration_versions`. `pinround_retention` gets its table rights from the retention job's migration (P11).
 
 **Lookups before the tenant is known (the only RLS exceptions)**
 
@@ -315,9 +332,9 @@ Some lookups must find a row before the app knows which organization the request
 
 Every resolver has a test: right key → ids; wrong key → no row; it can never return rows of another org for a guessed key; it returns no text columns. A CI catalog check lists all `SECURITY DEFINER` functions and fails if one is not in this table.
 
-**Partitioned tables:** grants are given on the **parent** table only; all rights on child partitions are revoked from `pinround_app` and `pinround_readonly`, so nobody can query a partition directly and skip the parent's policy. RLS policies are created on the parent. The catalog test checks every partition (through `pg_inherits`) for "no direct grants".
+**Partitioned tables:** grants are given on the **parent** table only. `roles.sql` revokes nothing on partitions and migrations never grant on a child partition, so `pinround_app` and `pinround_readonly` cannot query a partition directly and skip the parent's policy. RLS policies are created on the parent. `DatabaseRolesTest::noChildPartitionInTheSchemaHasDirectGrants` reads `pg_class.relispartition` and fails on any grant on a child partition to a role other than its owner.
 
-- The Doctrine SQL filter adds `organization_id = :org` as well. Both checks must agree; a CI test turns the filter off and expects RLS to still block ([testing-strategy.md](testing-strategy.md)).
+- `TenantFilter` adds the same `organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid` condition to ORM queries. Both checks must agree; a CI test turns the filter off and expects RLS to still block ([testing-strategy.md](testing-strategy.md)).
 - A CI check lists tenant tables without RLS and fails if any is found.
 
 ## Ticket visibility predicate
