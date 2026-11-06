@@ -14,7 +14,7 @@ final class HomePageTest extends WebTestCase
 
         $client->request('GET', '/');
 
-        self::assertResponseIsSuccessful();
+        self::assertResponseStatusCodeSame(200);
         self::assertSelectorTextSame('title', 'pinround');
     }
 }
