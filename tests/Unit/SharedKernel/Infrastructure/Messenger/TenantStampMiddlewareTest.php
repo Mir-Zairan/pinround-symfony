@@ -14,6 +14,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDO\Exception as PdoDriverException;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\Persistence\ManagerRegistry;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -38,6 +39,9 @@ final class TenantStampMiddlewareTest extends TestCase
     private int $rollBackCount = 0;
     private int $connectionCloseCount = 0;
     private int $entityManagerClearCount = 0;
+    private bool $isEntityManagerOpen = true;
+    private int $entityManagerResetCount = 0;
+    private ManagerRegistry $managerRegistry;
 
     private int $handlerCallCount = 0;
     private ?string $organizationSeenByHandler = null;
@@ -66,12 +70,23 @@ final class TenantStampMiddlewareTest extends TestCase
         $entityManager->method('clear')->willReturnCallback(function (): void {
             ++$this->entityManagerClearCount;
         });
+        $entityManager->method('isOpen')->willReturnCallback(fn (): bool => $this->isEntityManagerOpen);
+
+        $managerRegistry = self::createStub(ManagerRegistry::class);
+        $managerRegistry->method('resetManager')->willReturnCallback(function () use ($entityManager): EntityManagerInterface {
+            ++$this->entityManagerResetCount;
+            $this->isEntityManagerOpen = true;
+
+            return $entityManager;
+        });
+        $this->managerRegistry = $managerRegistry;
 
         $this->middleware = new TenantStampMiddleware(
             $this->tenantContext,
             $this->switchGuard,
             static fn (): Connection => $connection,
             static fn (): EntityManagerInterface => $entityManager,
+            $this->managerRegistry,
             $this->logger,
         );
     }
@@ -115,6 +130,7 @@ final class TenantStampMiddlewareTest extends TestCase
         self::assertSame(self::ORG_A, $this->organizationSeenByHandler);
         self::assertNull($this->tenantContext->get());
         self::assertSame(1, $this->entityManagerClearCount);
+        self::assertSame(0, $this->entityManagerResetCount);
         self::assertSame(0, $this->rollBackCount);
         // Once before setting the organization, once when TenantContext clears it.
         self::assertSame(2, $this->switchGuard->switchCount);
@@ -132,12 +148,32 @@ final class TenantStampMiddlewareTest extends TestCase
             $this->switchGuard,
             static fn (): Connection => self::createStub(Connection::class),
             static fn (): EntityManagerInterface => $unbuiltEntityManager,
+            $this->managerRegistry,
             $this->logger,
         );
 
         $middleware->handle($this->envelopeFor(self::ORG_A), $this->stackWithHandler());
 
         self::assertSame(self::ORG_A, $this->organizationSeenByHandler);
+        self::assertNull($this->tenantContext->get());
+        self::assertSame(0, $this->entityManagerResetCount);
+    }
+
+    #[Test]
+    public function aStampedMessageThatClosedTheEntityManagerLeavesItResetInsteadOfCleared(): void
+    {
+        $flushFailure = new \RuntimeException('The flush failed.');
+
+        $thrown = $this->handleCatching($this->envelopeFor(self::ORG_A), function () use ($flushFailure): never {
+            $this->isEntityManagerOpen = false;
+
+            throw $flushFailure;
+        });
+
+        self::assertSame($flushFailure, $thrown);
+        self::assertSame(1, $this->entityManagerResetCount);
+        self::assertSame(0, $this->entityManagerClearCount);
+        self::assertTrue($this->isEntityManagerOpen);
         self::assertNull($this->tenantContext->get());
     }
 

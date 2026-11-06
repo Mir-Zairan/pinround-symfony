@@ -34,3 +34,18 @@ when@test:
         path: /_test/request-transaction/{organizationId}/{label}/lose-connection
         controller: App\Tests\Fixtures\Http\RequestTransactionProbeController::insertLabelThenLoseTheConnection
         methods: [POST]
+
+    test_worker_reset_report:
+        path: /_test/worker-reset
+        controller: App\Tests\Fixtures\Http\WorkerResetProbeController::reportWorkerState
+        methods: [GET]
+
+    test_worker_reset_enter:
+        path: /_test/worker-reset/{organizationId}
+        controller: App\Tests\Fixtures\Http\WorkerResetProbeController::enterOrganization
+        methods: [POST]
+
+    test_worker_reset_enter_then_fail:
+        path: /_test/worker-reset/{organizationId}/fail
+        controller: App\Tests\Fixtures\Http\WorkerResetProbeController::enterOrganizationThenFail
+        methods: [POST]

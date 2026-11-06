@@ -127,8 +127,8 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 **Acceptance criteria:**
 - [ ] The catalog test fails when a new tenant table or partition forgets RLS (proved with a temporary table in the test).
 - [ ] Each resolver function returns ids only and nothing for an unknown input; calling it as `pinround_readonly` is denied.
-- [ ] After a request ends, the next request on the same worker has no tenant (worker reset test).
-- [ ] After a handler throws and closes the EntityManager, the next message is handled normally (EntityManager reset test).
+- [x] After a request ends, the next request on the same worker has no tenant (worker reset test).
+- [x] After a handler throws and closes the EntityManager, the next message is handled normally (EntityManager reset test).
 **Tests:** integration tests above; a fixture test for the static check.
 **Prototype check:** none (backend task).
 **Size:** M
@@ -270,4 +270,5 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T3): `pinround_retention` has no test connection. The BYPASSRLS path is stood in by disabling RLS through the migrator in tests.
 - 2026-11-06 (P00.T3): CI has not yet run on GitHub for this branch (`psql` on the ubuntu-24.04 runner unverified).
 - 2026-11-06 (P00.T3): step 3 says the filter adds `organization_id = :org`. As built, the filter reads the transaction's setting (`NULLIF(current_setting('app.org_id', true), '')::uuid`, the `TenantSetting` constant) instead of binding `:org`, so all organizations share one query-cache entry. Its only parameter is the `is_tenant_set` flag.
+- 2026-11-07 (P00.T4): worker reset needed no new listener. Web requests rely on `Kernel::handle()` running `services_resetter`; Messenger workers rely on `ResetServicesListener`, so no `messenger:consume` may run with `--no-reset` (P12 `compose.prod.yaml` too). The one gap was a sync dispatch with no worker in between: `TenantStampMiddleware` now resets a closed EntityManager after a stamped message it ran. Inside a web request a closed EntityManager stays closed until the request ends.
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)

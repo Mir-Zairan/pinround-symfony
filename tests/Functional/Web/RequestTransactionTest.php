@@ -43,6 +43,9 @@ final class RequestTransactionTest extends WebTestCase
         'test_request_transaction_leave_nested_open',
         'test_request_transaction_failing_sub_request',
         'test_request_transaction_lose_connection',
+        'test_worker_reset_report',
+        'test_worker_reset_enter',
+        'test_worker_reset_enter_then_fail',
     ];
 
     private KernelBrowser $client;

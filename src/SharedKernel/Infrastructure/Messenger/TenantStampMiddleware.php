@@ -12,6 +12,7 @@ use App\SharedKernel\Infrastructure\Doctrine\LazyObjectState;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\Persistence\ManagerRegistry;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\AutowireServiceClosure;
 use Symfony\Component\Messenger\Envelope;
@@ -35,6 +36,7 @@ final readonly class TenantStampMiddleware implements MiddlewareInterface
         private \Closure $connection,
         #[AutowireServiceClosure('doctrine.orm.default_entity_manager')]
         private \Closure $entityManager,
+        private ManagerRegistry $managerRegistry,
         private LoggerInterface $logger,
     ) {
     }
@@ -93,7 +95,13 @@ final readonly class TenantStampMiddleware implements MiddlewareInterface
 
         $entityManager = ($this->entityManager)();
         if (LazyObjectState::isBuilt($entityManager)) {
-            $entityManager->clear();
+            if ($entityManager->isOpen()) {
+                $entityManager->clear();
+            } else {
+                // A failed flush closes it for good. A worker resets services between messages, but a command that
+                // dispatches in a loop does not, so every later message would fail on the closed entity manager.
+                $this->managerRegistry->resetManager();
+            }
         }
 
         $this->tenantContext->clear();

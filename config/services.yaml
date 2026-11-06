@@ -32,8 +32,9 @@ services:
 
 when@test:
     services:
-        # Test-only controller behind config/routes/test_fixtures.yaml.
-        App\Tests\Fixtures\Http\RequestTransactionProbeController:
+        # Test-only controllers behind config/routes/test_fixtures.yaml.
+        App\Tests\Fixtures\Http\:
+            resource: '../tests/Fixtures/Http/*Controller.php'
             autowire: true
             autoconfigure: true
 

@@ -13,10 +13,14 @@ use App\Tests\Fixtures\Messenger\InsertTenantProbeLabel;
 use App\Tests\Fixtures\Messenger\InsertTenantProbeLabelLeavingTransactionOpen;
 use App\Tests\Fixtures\Messenger\ListTenantProbeLabels;
 use App\Tests\Fixtures\Messenger\QueueTenantProbeInsertAfterCurrentMessage;
+use App\Tests\Fixtures\Messenger\SaveTenantProbe;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
@@ -26,12 +30,15 @@ use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 
 /**
  * Proves TenantStampMiddleware on the real default bus: the handler's doctrine_transaction runs under the stamp's
- * organization (row-level security and TenantFilter), and nothing of it is left after the message (ADR-0005).
+ * organization (row-level security and TenantFilter), and nothing of it is left after the message (ADR-0005), not
+ * even a closed entity manager, on the bus alone or in the worker (ADR-0008).
  */
 final class TenantStampedMessageTest extends KernelTestCase
 {
     private const string ORG_A = '0197a3c0-0000-7000-8000-00000000000a';
     private const string ORG_B = '0197a3c0-0000-7000-8000-00000000000b';
+    private const string PROBE_ID = '0197a3c0-0000-7000-8000-000000000101';
+    private const string OTHER_PROBE_ID = '0197a3c0-0000-7000-8000-000000000102';
 
     private MessageBusInterface $bus;
     private Connection $connection;
@@ -230,6 +237,42 @@ final class TenantStampedMessageTest extends KernelTestCase
         self::assertSame(['labels' => ['a-first', 'a-queued', 'a-second'], 'orgSetting' => self::ORG_A], $this->dispatchListing(self::ORG_A));
     }
 
+    #[Test]
+    public function aMessageWhoseFlushClosedTheEntityManagerLeavesAnOpenOneForTheNextMessageOnTheBus(): void
+    {
+        $this->dispatchSave(self::PROBE_ID, self::ORG_A, 'a-saved');
+
+        try {
+            $this->dispatchSave(self::PROBE_ID, self::ORG_A, 'a-same-id');
+            self::fail('Saving a second probe with the same id did not fail.');
+        } catch (UniqueConstraintViolationException) {
+        }
+
+        $this->assertNothingLeftOfTheMessage();
+        self::assertTrue($this->entityManager->isOpen());
+        $this->dispatchSave(self::OTHER_PROBE_ID, self::ORG_B, 'b-saved');
+        self::assertSame(['labels' => ['b-only', 'b-saved'], 'orgSetting' => self::ORG_B], $this->dispatchListing(self::ORG_B));
+        self::assertSame(['labels' => ['a-first', 'a-saved', 'a-second'], 'orgSetting' => self::ORG_A], $this->dispatchListing(self::ORG_A));
+    }
+
+    #[Test]
+    public function theWorkerHandlesTheNextMessageNormallyAfterOneClosedTheEntityManager(): void
+    {
+        $this->queueStamped(new SaveTenantProbe(self::PROBE_ID, self::ORG_A, 'a-saved'), self::ORG_A);
+        $this->queueStamped(new SaveTenantProbe(self::PROBE_ID, self::ORG_A, 'a-same-id'), self::ORG_A);
+        $this->queueStamped(new SaveTenantProbe(self::OTHER_PROBE_ID, self::ORG_B, 'b-saved'), self::ORG_B);
+
+        $worker = new CommandTester(new Application(self::$kernel ?? throw new \LogicException('No kernel.'))->find('messenger:consume'));
+        // The worker's service reset after each message also empties the in-memory transport, so all three are
+        // fetched at once; a real queue keeps its messages.
+        $worker->execute(['receivers' => ['test_queue'], '--limit' => '3', '--fetch-size' => '3', '--time-limit' => '30']);
+
+        $worker->assertCommandIsSuccessful();
+        $this->assertNothingLeftOfTheMessage();
+        self::assertSame(['labels' => ['b-only', 'b-saved'], 'orgSetting' => self::ORG_B], $this->dispatchListing(self::ORG_B));
+        self::assertSame(['labels' => ['a-first', 'a-saved', 'a-second'], 'orgSetting' => self::ORG_A], $this->dispatchListing(self::ORG_A));
+    }
+
     private static function probeTable(): TenantProbeTable
     {
         return new TenantProbeTable(self::getContainer()->get('doctrine.dbal.migrator_connection'));
@@ -246,6 +289,16 @@ final class TenantStampedMessageTest extends KernelTestCase
         self::assertIsArray($listing);
 
         return $listing;
+    }
+
+    private function dispatchSave(string $probeId, string $organizationId, string $label): void
+    {
+        $this->bus->dispatch(new SaveTenantProbe($probeId, $organizationId, $label), [new TenantStamp(new OrganizationId($organizationId))]);
+    }
+
+    private function queueStamped(object $message, string $organizationId): void
+    {
+        $this->bus->dispatch($message, [new TenantStamp(new OrganizationId($organizationId)), new TransportNamesStamp(['test_queue'])]);
     }
 
     private function testQueue(): InMemoryTransport
