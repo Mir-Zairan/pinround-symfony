@@ -11,9 +11,10 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * Reads the migrated schema's catalog as pinround_app and fails on any tenancy rule of ADR-0005 it breaks
- * (see TenancyCatalog). Each rule is also proved to fire: the migrator creates a throwaway object that
- * breaks it, inside a transaction that is rolled back, and the rule must name exactly that object. These are
- * real tables in public, not CREATE TEMPORARY TABLE, which would land in pg_temp where no check looks.
+ * (see TenancyCatalog). Each rule is also proved to fire. For tables, policies, functions and privileges the
+ * migrator creates a throwaway object that breaks the rule, inside a transaction that is rolled back, and the
+ * rule must name exactly that object. These are real tables, not CREATE TEMPORARY TABLE, which would land in
+ * pg_temp where no check looks. The two role rules are proved on roles that exist.
  */
 final class CatalogTest extends KernelTestCase
 {
@@ -26,10 +27,46 @@ final class CatalogTest extends KernelTestCase
 
         self::assertSame([], $catalog->tenantTablesWithoutIsolation());
         self::assertSame([], $catalog->foreignPoliciesOnTenantTables());
-        self::assertSame([], $catalog->rolesBypassingRowLevelSecurity());
+        self::assertSame([], $catalog->rolesBypassingRowLevelSecurityOtherThan('pinround_retention'));
         self::assertSame([], $catalog->securityDefinerFunctionsOutsideTheResolvers());
         self::assertSame([], $catalog->resolverRightsBeyondItsColumnReads());
-        self::assertSame([], $catalog->rolesTheAppRoleIsMemberOf());
+        self::assertSame([], $catalog->rolesGrantedTo('pinround_app'));
+    }
+
+    /** The test roles cannot create roles or grant membership, so the role rules are proved on roles that exist. */
+    #[Test]
+    public function theRoleRulesReportTheRolesThatReallyBypassOrAreGranted(): void
+    {
+        $catalog = TenancyCatalog::read($this->connection(), $this->migrator());
+
+        self::assertSame(['pinround_retention'], $catalog->rolesBypassingRowLevelSecurityOtherThan('pinround_migrator'));
+        self::assertSame(['pinround_resolver'], $catalog->rolesGrantedTo('pinround_migrator'));
+    }
+
+    #[Test]
+    public function aTenantTableAndASecurityDefinerFunctionInAnotherSchemaAreReported(): void
+    {
+        self::assertSame(
+            [
+                ['zz_other.zz_catalog_no_rls_elsewhere: ROW LEVEL SECURITY off, FORCE ROW LEVEL SECURITY off, no tenant_isolation policy as TenantTable::enableRls writes it'],
+                [
+                    'zz_other.resolve_api_token(bytea) is SECURITY DEFINER but not in ResolverFunctions::NAMES',
+                    'zz_other.zz_catalog_definer_elsewhere() is SECURITY DEFINER but not in ResolverFunctions::NAMES',
+                ],
+            ],
+            $this->inRolledBackFixture(
+                [
+                    'CREATE SCHEMA zz_other',
+                    'CREATE TABLE zz_other.zz_catalog_no_rls_elsewhere (organization_id uuid NOT NULL)',
+                    'CREATE FUNCTION zz_other.zz_catalog_definer_elsewhere() RETURNS int LANGUAGE sql SECURITY DEFINER AS $fixture$ SELECT 1 $fixture$',
+                    'CREATE FUNCTION zz_other.resolve_api_token(p_token_hash bytea) RETURNS int LANGUAGE sql SECURITY DEFINER AS $fixture$ SELECT 1 $fixture$',
+                ],
+                static fn (TenancyCatalog $catalog): array => [
+                    $catalog->tenantTablesWithoutIsolation(),
+                    $catalog->securityDefinerFunctionsOutsideTheResolvers(),
+                ],
+            ),
+        );
     }
 
     #[Test]
@@ -47,6 +84,9 @@ final class CatalogTest extends KernelTestCase
                     ...TenantTable::allowResolverRead('zz_catalog_allowed_parent', ['organization_id']),
                     'CREATE TABLE zz_catalog_allowed_child PARTITION OF zz_catalog_allowed_parent FOR VALUES IN (1)',
                     ...TenantTable::enableRls('zz_catalog_allowed_child'),
+                    // A session's own temporary objects are not schema objects other sessions could reach.
+                    'CREATE TEMPORARY TABLE zz_catalog_session_scratch (organization_id uuid NOT NULL)',
+                    'CREATE FUNCTION pg_temp.zz_catalog_session_definer() RETURNS int LANGUAGE sql SECURITY DEFINER AS $fixture$ SELECT 1 $fixture$',
                 ],
                 static fn (TenancyCatalog $catalog): array => [
                     $catalog->tenantTablesWithoutIsolation(),

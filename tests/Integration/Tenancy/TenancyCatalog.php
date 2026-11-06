@@ -10,28 +10,34 @@ use Doctrine\DBAL\Connection;
 
 /**
  * The tenancy rules of ADR-0005 read from the PostgreSQL catalog. Each check returns one line per
- * offending object, so an empty list means the rule holds. A tenant table is a table in schema public
- * with an `organization_id` column, plus every partition or inheritance child below it, in any schema.
+ * offending object, so an empty list means the rule holds. A tenant table is a table with an
+ * `organization_id` column, plus every partition or inheritance child below it, in any schema but the
+ * system ones; tables and functions an extension owns are left out.
  */
 final readonly class TenancyCatalog
 {
     private const string REFERENCE_TABLE = 'zz_tenancy_catalog_reference';
 
-    private const string TENANT_TABLES = <<<'SQL'
-        WITH RECURSIVE tenant_table AS (
+    /** Every schema but PostgreSQL's own and the per-session temporary ones; any other the migrator could create. */
+    private const string USER_SCHEMAS = "(SELECT n.oid FROM pg_namespace n
+        WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+          AND n.nspname NOT LIKE 'pg\\_temp\\_%' AND n.nspname NOT LIKE 'pg\\_toast\\_temp\\_%')";
+
+    private const string TENANT_TABLES = 'WITH RECURSIVE tenant_table AS (
             SELECT c.oid FROM pg_class c
-            WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p')
+            WHERE c.relnamespace IN '.self::USER_SCHEMAS."
+              AND c.relkind IN ('r', 'p')
+              AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
               AND EXISTS (
                   SELECT 1 FROM pg_attribute a
                   WHERE a.attrelid = c.oid AND a.attname = 'organization_id' AND a.attnum > 0 AND NOT a.attisdropped
               )
             UNION
             SELECT i.inhrelid FROM pg_inherits i JOIN tenant_table t ON i.inhparent = t.oid
-        )
-        SQL;
+        )";
 
     /**
-     * @param array<string, array<string, mixed>> $policiesTenantTableWrites policy name => shape, see policiesTenantTableWrites()
+     * @param array<string, array<string, mixed>> $policiesTenantTableWrites policy name => shape, see read()
      */
     private function __construct(private Connection $connection, private array $policiesTenantTableWrites)
     {
@@ -115,12 +121,13 @@ final readonly class TenancyCatalog
      * Superusers are left out: they bypass row-level security whatever rolbypassrls says, and the only one
      * is the bootstrap admin account that runs roles.sql.
      *
-     * @return list<string> roles other than pinround_retention that bypass row-level security
+     * @return list<string> roles other than $allowedRole that bypass row-level security
      */
-    public function rolesBypassingRowLevelSecurity(): array
+    public function rolesBypassingRowLevelSecurityOtherThan(string $allowedRole): array
     {
         return self::strings($this->connection->fetchFirstColumn(
-            "SELECT rolname FROM pg_roles WHERE rolbypassrls AND NOT rolsuper AND rolname <> 'pinround_retention' ORDER BY 1",
+            'SELECT rolname FROM pg_roles WHERE rolbypassrls AND NOT rolsuper AND rolname <> ? ORDER BY 1',
+            [$allowedRole],
         ));
     }
 
@@ -128,9 +135,9 @@ final readonly class TenancyCatalog
      * Only the resolver functions may run with their owner's rights, and pinround_resolver owns nothing else.
      * Their search_path, inputs, outputs and EXECUTE rights are ResolverFunctionTest's job.
      *
-     * @return list<string> SECURITY DEFINER functions in public (extension functions left out) that are not exactly
-     *                      ResolverFunctions::NAMES owned by pinround_resolver, and functions anywhere that
-     *                      pinround_resolver owns but NAMES does not list
+     * @return list<string> SECURITY DEFINER functions (extension functions left out) that are not exactly
+     *                      ResolverFunctions::NAMES in public, one each, owned by pinround_resolver, and functions
+     *                      that pinround_resolver owns but NAMES does not list; in any schema but the system ones
      */
     public function securityDefinerFunctionsOutsideTheResolvers(): array
     {
@@ -140,16 +147,16 @@ final readonly class TenancyCatalog
             "SELECT p.oid::regprocedure::text AS signature, p.proname AS name, p.prosecdef AS is_security_definer,
                     p.pronamespace = 'public'::regnamespace AS is_in_public, p.proowner = 'pinround_resolver'::regrole AS is_resolver_owned
              FROM pg_proc p
-             WHERE (p.prosecdef AND p.pronamespace = 'public'::regnamespace OR p.proowner = 'pinround_resolver'::regrole)
+             WHERE (p.prosecdef AND p.pronamespace IN ".self::USER_SCHEMAS." OR p.proowner = 'pinround_resolver'::regrole)
                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
              ORDER BY 1",
         ) as $function) {
-            $isListed = \in_array($function['name'], ResolverFunctions::NAMES, true);
-            $isPublicSecurityDefiner = true === $function['is_security_definer'] && true === $function['is_in_public'];
-            if ($isPublicSecurityDefiner && $isListed) {
+            $isListed = true === $function['is_in_public'] && \in_array($function['name'], ResolverFunctions::NAMES, true);
+            $isSecurityDefiner = true === $function['is_security_definer'];
+            if ($isSecurityDefiner && $isListed) {
                 ++$securityDefinerCounts[self::text($function['name'])];
             }
-            if ($isPublicSecurityDefiner && !$isListed) {
+            if ($isSecurityDefiner && !$isListed) {
                 $violations[] = self::text($function['signature']).' is SECURITY DEFINER but not in ResolverFunctions::NAMES';
             }
             if (true === $function['is_resolver_owned'] && !$isListed) {
@@ -193,12 +200,13 @@ final readonly class TenancyCatalog
     }
 
     /**
-     * @return list<string> roles pinround_app is a member of; any would lend it that role's rights or policies
+     * @return list<string> roles $member is a member of; for pinround_app any would lend it that role's rights or policies
      */
-    public function rolesTheAppRoleIsMemberOf(): array
+    public function rolesGrantedTo(string $member): array
     {
         return self::strings($this->connection->fetchFirstColumn(
-            "SELECT m.roleid::regrole::text FROM pg_auth_members m WHERE m.member = 'pinround_app'::regrole ORDER BY 1",
+            'SELECT m.roleid::regrole::text FROM pg_auth_members m WHERE m.member = ?::regrole ORDER BY 1',
+            [$member],
         ));
     }
 
