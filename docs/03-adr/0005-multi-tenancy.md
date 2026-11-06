@@ -61,7 +61,7 @@ sequenceDiagram
   B->>K: GET /t/SHOP-42 (session cookie)
   K->>T: user + current organization (from membership, checked)
   T->>M: org id for this unit of work
-  M->>P: BEGIN; SELECT set_config('app.org_id', $1, true)
+  M->>P: BEGIN, then SELECT set_config('app.org_id', $1, true)
   M->>P: SELECT … FROM tkt_ticket WHERE organization_id = $1 AND …
   P-->>M: rows (RLS also filters by app.org_id)
   M->>P: COMMIT (setting ends with the transaction)

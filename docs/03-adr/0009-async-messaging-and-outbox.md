@@ -68,7 +68,7 @@ sequenceDiagram
   participant Q as Valkey queues
   participant W as Workers
   U->>H: POST "Pass it"
-  H->>DB: BEGIN; update tkt_ticket; update ins_ticket_turn; insert tkt_ticket_event; insert outbox(TicketMoved); COMMIT
+  H->>DB: BEGIN, update tkt_ticket + ins_ticket_turn, insert tkt_ticket_event + outbox(TicketMoved), COMMIT
   H-->>U: 303 + Turbo Stream (fast)
   R->>DB: read outbox rows
   R->>Q: route to async / heavy

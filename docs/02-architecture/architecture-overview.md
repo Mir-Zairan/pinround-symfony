@@ -169,7 +169,7 @@ sequenceDiagram
   participant H as Mercure hub
   B->>F: POST /t/SHOP-412/check (CSRF token)
   F->>T: user known, active org from session
-  T->>DB: BEGIN; SELECT set_config('app.org_id', $1, true)
+  T->>DB: BEGIN, then SELECT set_config('app.org_id', $1, true)
   F->>C: authenticated request
   C->>S: ConfirmCheck(ticketId, userId)
   S->>V: isGranted(CHECK, ticket)

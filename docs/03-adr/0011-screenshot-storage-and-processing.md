@@ -63,7 +63,7 @@ sequenceDiagram
   B->>A: POST /media/{id}/complete
   A->>W: ProcessMedia (heavy queue)
   W->>S: GET original (stream)
-  W->>W: check magic bytes, size, pixel limits; decode and re-encode with libvips (strip metadata)
+  W->>W: check magic bytes, size, pixel limits, then decode and re-encode with libvips (strip metadata)
   W->>S: PUT final + WebP thumb (1600px, 480px) to {org}/{sha256}/…
   W->>S: DELETE incoming original
   W->>A: mark ready (or rejected with reason)
