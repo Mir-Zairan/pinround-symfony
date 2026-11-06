@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Tenancy;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Schema\ComparatorConfig;
 use Doctrine\Migrations\Provider\OrmSchemaProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -16,6 +17,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 final class DatabaseRolesTest extends KernelTestCase
 {
     private const array ROLES = ['pinround_app', 'pinround_migrator', 'pinround_retention', 'pinround_readonly'];
+    private const array MESSENGER_TABLES = ['messenger_outbox', 'messenger_failed'];
 
     #[Test]
     public function theKernelConnectsAsTheAppRole(): void
@@ -180,6 +182,41 @@ final class DatabaseRolesTest extends KernelTestCase
 
         self::assertFalse($connection->fetchOne("SELECT has_table_privilege('pinround_app', 'public.doctrine_migration_versions', 'INSERT')"));
         self::assertSame([], $this->grantsToOthersThanTheOwner($connection, 'doctrine_migration_versions'));
+    }
+
+    /** The worker inserts, locks, marks and deletes rows; support reports never read envelopes (Version20261107150000). */
+    #[Test]
+    public function theAppRoleAloneMayReadAndWriteTheMessengerTables(): void
+    {
+        $connection = $this->connection();
+
+        foreach (self::MESSENGER_TABLES as $table) {
+            self::assertEqualsCanonicalizing(
+                ['pinround_app DELETE', 'pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
+                $this->grantsToOthersThanTheOwner($connection, $table),
+                $table,
+            );
+            self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
+        }
+    }
+
+    /** What doctrine:migrations:diff compares, limited to the Messenger tables: the migration built them as Messenger would. */
+    #[Test]
+    public function theMigratedMessengerTablesMatchTheSchemaMessengerExpects(): void
+    {
+        $migrations = self::getContainer()->get('doctrine.migrations.dependency_factory');
+        $migratorConnection = $migrations->getConnection();
+        $schemaManager = $migratorConnection->createSchemaManager();
+        $expectedSchema = $migrations->getSchemaProvider()->createSchema();
+        $migratedSchema = $schemaManager->introspectSchema();
+        $comparator = $schemaManager->createComparator(new ComparatorConfig()->withReportModifiedIndexes(false));
+
+        foreach (self::MESSENGER_TABLES as $table) {
+            self::assertTrue($expectedSchema->hasTable($table), $table.' is not in the schema Doctrine expects.');
+            $tableDiff = $comparator->compareTables($migratedSchema->getTable($table), $expectedSchema->getTable($table));
+
+            self::assertSame([], $migratorConnection->getDatabasePlatform()->getAlterTableSQL($tableDiff), $table);
+        }
     }
 
     #[Test]

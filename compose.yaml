@@ -12,6 +12,25 @@ x-app-image: &app-image
 
 # This file is dev-only. The placeholders below keep a plain `docker compose up` working
 # without the Makefile's --env-file flags; the prod image refuses change-me keys.
+# The messenger:consume services: the app image's HEALTHCHECK probes Caddy, which they do not run.
+x-consumer-healthcheck: &consumer-healthcheck
+  # [c] keeps the probe's own command line from matching the pattern.
+  test: ["CMD-SHELL", "grep -qa 'messenger:[c]onsume' /proc/[0-9]*/cmdline"]
+  interval: 10s
+  timeout: 3s
+  retries: 3
+  start_period: 30s
+
+x-consumer-dependencies: &consumer-dependencies
+  # app healthy means vendor/ is installed on the shared bind mount.
+  app:
+    condition: service_healthy
+  # The outbox and failed transports are tables in PostgreSQL; a scheduled job's events go to the outbox too.
+  postgres:
+    condition: service_healthy
+  valkey-state:
+    condition: service_healthy
+
 x-minio-credentials: &minio-credentials
   MINIO_ROOT_USER: ${MINIO_ROOT_USER:-pinround-dev}
   MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-me-dev-only-minio}
@@ -51,28 +70,37 @@ services:
       # The first start on a clean clone runs composer install before Caddy starts.
       start_period: 120s
 
+  # Three workers (ADR-0033), so a slow AI or media job never holds up the relay or a notification.
+  # tests/shell/compose-config-check.sh fails unless together they consume every transport but `failed`, once.
+  worker-outbox:
+    <<: *app-image
+    restart: unless-stopped
+    # Only the relay, polling every 0.5 s: no LISTEN/NOTIFY through PgBouncer, and events must leave within 1 s.
+    command: php bin/console messenger:consume outbox --sleep=0.5 --time-limit=3600 --memory-limit=128M -vv
+    volumes:
+      - .:/app
+    depends_on: *consumer-dependencies
+    healthcheck: *consumer-healthcheck
+
   worker:
     <<: *app-image
     restart: unless-stopped
-    # The outbox first: the worker reads its transports in this order. It relays outbox messages to the async_* ones.
-    command: php bin/console messenger:consume outbox async_notify async_integration async_media async_ai --time-limit=3600 --memory-limit=256M -vv
+    # Short jobs; read in this order, so notifications go before Jira sync.
+    command: php bin/console messenger:consume async_notify async_integration --time-limit=3600 --memory-limit=256M -vv
     volumes:
       - .:/app
-    depends_on:
-      # app healthy means vendor/ is installed on the shared bind mount.
-      app:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      valkey-state:
-        condition: service_healthy
-    healthcheck:
-      # [c] keeps the probe's own command line from matching the pattern.
-      test: ["CMD-SHELL", "grep -qa 'messenger:[c]onsume' /proc/[0-9]*/cmdline"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 30s
+    depends_on: *consumer-dependencies
+    healthcheck: *consumer-healthcheck
+
+  worker-heavy:
+    <<: *app-image
+    restart: unless-stopped
+    # Slow jobs; screenshots before AI, as a user waits for the thumbnail.
+    command: php bin/console messenger:consume async_media async_ai --time-limit=3600 --memory-limit=256M -vv
+    volumes:
+      - .:/app
+    depends_on: *consumer-dependencies
+    healthcheck: *consumer-healthcheck
 
   scheduler:
     <<: *app-image
@@ -80,20 +108,8 @@ services:
     command: php bin/console messenger:consume scheduler_default --time-limit=3600 --memory-limit=128M -vv
     volumes:
       - .:/app
-    depends_on:
-      app:
-        condition: service_healthy
-      # An event a scheduled job records goes to the outbox table in PostgreSQL.
-      postgres:
-        condition: service_healthy
-      valkey-state:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "grep -qa 'messenger:[c]onsume' /proc/[0-9]*/cmdline"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 30s
+    depends_on: *consumer-dependencies
+    healthcheck: *consumer-healthcheck
 
   postgres:
     image: postgres:18.6

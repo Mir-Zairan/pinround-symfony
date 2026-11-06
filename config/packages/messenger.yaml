@@ -53,7 +53,8 @@ framework:
         transports:
             # The app's own connection, so a message sent inside the app's transaction commits or rolls back with it.
             # The tables come from a migration (the app role cannot create tables). No LISTEN/NOTIFY: LISTEN is
-            # session state, which PgBouncer transaction pooling does not keep; the worker polls every second.
+            # session state, which PgBouncer transaction pooling does not keep; worker-outbox polls every 0.5 s
+            # (compose.yaml, ADR-0033).
             outbox:
                 dsn: 'doctrine://default?table_name=messenger_outbox&queue_name=outbox&auto_setup=0'
                 options: { use_notify: false }
@@ -70,10 +71,10 @@ framework:
                 dsn: 'doctrine://default?table_name=messenger_failed&queue_name=failed&auto_setup=0'
                 options: { use_notify: false }
 
-            # The state Valkey (noeviction). MESSENGER_TRANSPORT_DSN names no stream: a stream in its path would
-            # override each transport's own and put the four queues on one stream.
+            # The state Valkey (noeviction), one stream per transport. dsn_without_stream fails when
+            # MESSENGER_TRANSPORT_DSN names a stream, which would override these and put the four queues on one.
             async_media:
-                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                dsn: '%env(dsn_without_stream:MESSENGER_TRANSPORT_DSN)%'
                 options: { stream: async_media }
                 # ADR-0009: 3 retries, waiting 1 s, 10 s and 60 s.
                 retry_strategy: &async_retry
@@ -82,18 +83,25 @@ framework:
                     multiplier: 10
                     max_delay: 60000
                     jitter: 0
+            # AI providers and Jira rate-limit us, so ADR-0033 gives them 5 retries waiting 30 s, 90 s, 270 s,
+            # 810 s and 900 s (capped at 15 min), each spread by up to 10 % so retries do not arrive together.
             async_ai:
-                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                dsn: '%env(dsn_without_stream:MESSENGER_TRANSPORT_DSN)%'
                 options: { stream: async_ai }
-                retry_strategy: *async_retry
+                retry_strategy: &provider_retry
+                    max_retries: 5
+                    delay: 30000
+                    multiplier: 3
+                    max_delay: 900000
+                    jitter: 0.1
             async_notify:
-                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                dsn: '%env(dsn_without_stream:MESSENGER_TRANSPORT_DSN)%'
                 options: { stream: async_notify }
                 retry_strategy: *async_retry
             async_integration:
-                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                dsn: '%env(dsn_without_stream:MESSENGER_TRANSPORT_DSN)%'
                 options: { stream: async_integration }
-                retry_strategy: *async_retry
+                retry_strategy: *provider_retry
 
         routing: {}
 

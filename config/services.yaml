@@ -48,6 +48,9 @@ when@test:
         App\Tests\Fixtures\Messaging\SaveProbeNoteHandler:
             autoconfigure: true
             public: true
+        App\Tests\Fixtures\Messaging\OutboxProbeRecordedHandler:
+            autoconfigure: true
+            public: true
         App\Tests\Fixtures\Messaging\CapturedLogRecords:
             autoconfigure: true
             public: true

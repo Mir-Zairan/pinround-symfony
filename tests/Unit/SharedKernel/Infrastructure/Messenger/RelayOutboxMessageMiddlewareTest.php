@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Integration\Messaging;
+namespace App\Tests\Unit\SharedKernel\Infrastructure\Messenger;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Messenger\RelayOutboxMessageMiddleware;

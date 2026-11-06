@@ -40,7 +40,9 @@ Docker Compose for local and small self-hosted installs:
 | Service | Image / tech | Role |
 |---|---|---|
 | `app` | FrankenPHP + pinround | Web, API, MCP endpoint, built-in Mercure hub ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)) |
-| `worker` | same image, `messenger:consume` | Async jobs: media, ai, notify, integration, outbox relay ([ADR-0009](../03-adr/0009-async-messaging-and-outbox.md)) |
+| `worker-outbox` | same image, `messenger:consume outbox --sleep=0.5` | Outbox relay only: moves domain events to their Valkey transport ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md)) |
+| `worker` | same image, `messenger:consume async_notify async_integration` | Short async jobs: notifications, Mercure, email, Jira sync ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md)) |
+| `worker-heavy` | same image, `messenger:consume async_media async_ai` | Slow async jobs: screenshot processing, AI ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md)) |
 | `scheduler` | same image, Symfony Scheduler | Scheduled jobs (see below) |
 | `postgres` | PostgreSQL 18 with `pg_trgm`, `pgvector` (optional) | Primary data ([ADR-0004](../03-adr/0004-postgresql.md)) |
 | `valkey` | Valkey 8 | Cache, sessions, locks, rate limits, job queues ([ADR-0010](../03-adr/0010-cache-sessions-locks.md)) |
@@ -48,7 +50,7 @@ Docker Compose for local and small self-hosted installs:
 | `mailpit` | Mailpit (local only) | Catch outgoing email |
 | `ollama` | optional | Server-side AI for orgs that want one shared box |
 
-SaaS swaps `postgres`, `valkey` and `minio` for managed services (managed PostgreSQL with PITR, managed Valkey/Redis, S3 or R2) and runs `app`, `worker` and `scheduler` on a container platform (Kubernetes optional).
+SaaS swaps `postgres`, `valkey` and `minio` for managed services (managed PostgreSQL with PITR, managed Valkey/Redis, S3 or R2) and runs `app`, `worker-outbox`, `worker`, `worker-heavy` and `scheduler` on a container platform (Kubernetes optional).
 
 Containers run as a non-root user, with a read-only root file system where possible, and health checks.
 
@@ -56,7 +58,7 @@ Containers run as a non-root user, with a read-only root file system where possi
 
 - Twelve-factor style: everything through environment variables, documented in `.env` (defaults, no secrets) and `docs/operations/config.md` (created in phase 0).
 - Secrets: Symfony secrets vault per environment, or the platform's secret store injected as env vars. Never in the repo ([ADR-0027](../03-adr/0027-secrets-and-encryption.md)).
-- Database roles: `app`, `worker` and `scheduler` get a `DATABASE_URL` for `pinround_app`. The `migrate` container gets its own `DATABASE_URL` for `pinround_migrator`; prod has no second connection. Dev and test add `MIGRATOR_DATABASE_URL` (in `.env.dev` and `.env.test`), which the `migrator` Doctrine connection uses for migrations. Test alone adds `READONLY_DATABASE_URL` (in `.env.test` and on the CI test steps) for a `readonly` connection that tests use to prove what `pinround_readonly` is refused. The `pinround_retention` credentials go only to the retention job and the `pinround_readonly` ones only to support tooling and that test connection, never into the web or worker env. The admin account runs `docker/postgres/roles.sql` at install, before the first migration, and again after an upgrade that changes it. The script grants no table rights. Each table's migration grants `pinround_app` and `pinround_readonly` their rights explicitly, and child partitions are never granted ([data-model.md › Row-level security](data-model.md#row-level-security)).
+- Database roles: `app`, `worker-outbox`, `worker`, `worker-heavy` and `scheduler` get a `DATABASE_URL` for `pinround_app`. The `migrate` container gets its own `DATABASE_URL` for `pinround_migrator`; prod has no second connection. Dev and test add `MIGRATOR_DATABASE_URL` (in `.env.dev` and `.env.test`), which the `migrator` Doctrine connection uses for migrations. Test alone adds `READONLY_DATABASE_URL` (in `.env.test` and on the CI test steps) for a `readonly` connection that tests use to prove what `pinround_readonly` is refused. The `pinround_retention` credentials go only to the retention job and the `pinround_readonly` ones only to support tooling and that test connection, never into the web or worker env. The admin account runs `docker/postgres/roles.sql` at install, before the first migration, and again after an upgrade that changes it. The script grants no table rights. Each table's migration grants `pinround_app` and `pinround_readonly` their rights explicitly, and child partitions are never granted ([data-model.md › Row-level security](data-model.md#row-level-security)).
 - Database connection: every Doctrine connection turns server-side prepares off (`Pdo\Pgsql::ATTR_DISABLE_PREPARES`), so PgBouncer transaction pooling is safe and a bound query is one round trip. Every main web request runs in one transaction and the tenant setting lasts only for it, so streamed response bodies, which run after the commit, see no tenant rows. Never add an ORM result cache for tenant data without a tenant-aware key ([data-model.md › Row-level security](data-model.md#row-level-security)).
 - Feature flags: a small org-level flag table for risky features (laptop AI, vision pins, Jira comment copy), so we can turn them off per org without a deploy.
 

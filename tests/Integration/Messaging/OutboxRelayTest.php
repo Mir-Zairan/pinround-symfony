@@ -7,12 +7,15 @@ namespace App\Tests\Integration\Messaging;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\Tests\Fixtures\Messaging\OutboxProbeRecorded;
+use App\Tests\Fixtures\Messaging\OutboxProbeRecordedHandler;
 use App\Tests\Fixtures\Messaging\SaveProbeNote;
 use App\Tests\Fixtures\Messaging\SaveProbeNoteHandler;
 use App\Tests\Fixtures\Messaging\UnreachableProbeRecorded;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\TransportException;
 use Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException;
@@ -21,15 +24,18 @@ use Symfony\Component\Messenger\Stamp\BusNameStamp;
 use Symfony\Component\Messenger\Stamp\ErrorDetailsStamp;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 use Symfony\Component\Messenger\Stamp\RedeliveryStamp;
+use Symfony\Component\Messenger\Stamp\SentToFailureTransportStamp;
 use Symfony\Component\Messenger\Stamp\TransportMessageIdStamp;
 use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 use Symfony\Component\Messenger\Transport\Receiver\ListableReceiverInterface;
+use Symfony\Component\Messenger\Transport\Sender\SenderInterface;
 
 /**
  * The outbox of ADR-0009 on the real event bus, PostgreSQL tables and worker loop: an event is saved with the
- * transaction that records it, and the relay moves it to its async_* transport once, or keeps it until it lands in
- * failed. In the test env async_notify is in-memory (messenger.yaml, when@test routes the probe events).
+ * transaction that records it, and the relay moves it to its async_* transport once without handling it, or keeps it
+ * until it lands in failed, from where a retry relays it. In the test env async_notify is in-memory and stands in for
+ * a reachable Valkey (messenger.yaml, when@test routes the probe events).
  */
 final class OutboxRelayTest extends KernelTestCase
 {
@@ -88,6 +94,41 @@ final class OutboxRelayTest extends KernelTestCase
         self::assertCount(1, $relayed[0]->all(TransportMessageIdStamp::class));
         self::assertSame([], $relayed[0]->all(ReceivedStamp::class));
         self::assertSame([], $this->failedEnvelopes());
+        self::assertSame(0, $this->probeHandler()->callCount());
+    }
+
+    /**
+     * The operator's way back after Valkey was down: the event waits in failed as the outbox worker left it, and
+     * messenger:failed:retry relays it to its target as if it came from the outbox, without handling it.
+     */
+    #[Test]
+    public function anEventRetriedFromFailedOnceValkeyIsBackIsRelayedToItsTransportAndNotHandled(): void
+    {
+        $this->failedTransport()->send(new Envelope(new OutboxProbeRecorded(self::PROBE_ID), [
+            new TenantStamp(new OrganizationId(self::ORG_A)),
+            new BusNameStamp('event.bus'),
+            new RedeliveryStamp(0),
+            new SentToFailureTransportStamp('outbox'),
+            ErrorDetailsStamp::create(new TransportException('Valkey is unreachable.')),
+        ]));
+        $failed = $this->failedEnvelopes();
+        self::assertCount(1, $failed);
+        $failedMessageId = $failed[0]->last(TransportMessageIdStamp::class)?->getId();
+        self::assertIsInt($failedMessageId);
+
+        $retry = new CommandTester(new Application(self::$kernel ?? self::bootKernel())->find('messenger:failed:retry'));
+        $retry->execute(['id' => [(string) $failedMessageId], '--force' => true], ['interactive' => false]);
+
+        $retry->assertCommandIsSuccessful();
+        $relayed = $this->asyncNotify()->getSent();
+        self::assertCount(1, $relayed);
+        self::assertEquals(new OutboxProbeRecorded(self::PROBE_ID), $relayed[0]->getMessage());
+        self::assertSame(self::ORG_A, $relayed[0]->last(TenantStamp::class)?->organizationId()->toString());
+        self::assertSame([], $relayed[0]->all(SentToFailureTransportStamp::class));
+        self::assertSame([], $relayed[0]->all(ErrorDetailsStamp::class));
+        self::assertSame([], $this->failedEnvelopes());
+        self::assertSame(0, $this->outboxRowCount());
+        self::assertSame(0, $this->probeHandler()->callCount());
     }
 
     #[Test]
@@ -151,10 +192,23 @@ final class OutboxRelayTest extends KernelTestCase
      */
     private function failedEnvelopes(): array
     {
+        return iterator_to_array($this->failedTransport()->all(), false);
+    }
+
+    private function failedTransport(): ListableReceiverInterface&SenderInterface
+    {
         $failed = self::getContainer()->get('messenger.transport.failed');
         self::assertInstanceOf(ListableReceiverInterface::class, $failed);
 
-        return iterator_to_array($failed->all(), false);
+        return $failed;
+    }
+
+    private function probeHandler(): OutboxProbeRecordedHandler
+    {
+        $handler = self::getContainer()->get(OutboxProbeRecordedHandler::class);
+        self::assertInstanceOf(OutboxProbeRecordedHandler::class, $handler);
+
+        return $handler;
     }
 
     private function asyncNotify(): InMemoryTransport
