@@ -16,9 +16,9 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 final class DatabaseConnectionSetupTest extends KernelTestCase
 {
     #[Test]
-    public function theTestEnvironmentHasTheAppAndTheMigratorConnection(): void
+    public function theTestEnvironmentHasTheAppTheMigratorAndTheReadonlyConnection(): void
     {
-        self::assertEqualsCanonicalizing(['default', 'migrator'], array_keys($this->doctrine()->getConnectionNames()));
+        self::assertEqualsCanonicalizing(['default', 'migrator', 'readonly'], array_keys($this->doctrine()->getConnectionNames()));
     }
 
     #[Test]

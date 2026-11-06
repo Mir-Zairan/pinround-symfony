@@ -55,4 +55,45 @@ final class TenantTableTest extends TestCase
 
         TenantTable::enableRls($table);
     }
+
+    #[Test]
+    public function itLetsTheResolverReadEveryOrganizationsRowsButOnlyTheGivenColumns(): void
+    {
+        self::assertSame(
+            [
+                'CREATE POLICY resolver_read ON "idn_api_token" FOR SELECT TO pinround_resolver USING (true)',
+                'GRANT SELECT ("id", "organization_id", "token_hash") ON "idn_api_token" TO pinround_resolver',
+            ],
+            TenantTable::allowResolverRead('idn_api_token', ['id', 'organization_id', 'token_hash']),
+        );
+    }
+
+    #[Test]
+    #[DataProvider('notAPlainLowercaseIdentifier')]
+    public function theResolverReadRejectsATableNameThatIsNotAPlainLowercaseIdentifier(string $table): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('table name');
+
+        TenantTable::allowResolverRead($table, ['organization_id']);
+    }
+
+    #[Test]
+    #[DataProvider('notAPlainLowercaseIdentifier')]
+    public function theResolverReadRejectsAColumnNameThatIsNotAPlainLowercaseIdentifier(string $column): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('column name');
+
+        TenantTable::allowResolverRead('idn_api_token', ['organization_id', $column]);
+    }
+
+    #[Test]
+    public function theResolverReadRejectsAnEmptyColumnList(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('at least one column');
+
+        TenantTable::allowResolverRead('idn_api_token', []);
+    }
 }

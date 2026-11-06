@@ -34,6 +34,38 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     #[Test]
+    public function theResolverIsTheOnlyPinroundRoleWithoutLogin(): void
+    {
+        self::assertSame(['pinround_resolver'], $this->connection()->fetchFirstColumn(
+            "SELECT rolname FROM pg_roles WHERE rolname LIKE 'pinround\\_%' AND NOT rolcanlogin",
+        ));
+    }
+
+    #[Test]
+    public function onlyTheMigratorIsAMemberOfAnyRoleAndItCanSetButNotInheritTheResolver(): void
+    {
+        self::assertSame(
+            ['pinround_migrator in pinround_resolver inherit=false set=true admin=false'],
+            $this->connection()->fetchFirstColumn(
+                "SELECT m.member::regrole::text || ' in ' || m.roleid::regrole::text
+                        || ' inherit=' || m.inherit_option || ' set=' || m.set_option || ' admin=' || m.admin_option
+                 FROM pg_auth_members m
+                 WHERE m.member::regrole::text LIKE 'pinround\\_%' OR m.roleid = 'pinround_resolver'::regrole",
+            ),
+        );
+    }
+
+    #[Test]
+    public function theResolverHasSchemaUsageButNoCreateAndNoConnect(): void
+    {
+        $connection = $this->connection();
+
+        self::assertTrue($connection->fetchOne("SELECT has_schema_privilege('pinround_resolver', 'public', 'USAGE')"));
+        self::assertFalse($connection->fetchOne("SELECT has_schema_privilege('pinround_resolver', 'public', 'CREATE')"));
+        self::assertFalse($connection->fetchOne("SELECT has_database_privilege('pinround_resolver', current_database(), 'CONNECT')"));
+    }
+
+    #[Test]
     public function onlyTheRetentionRoleBypassesRowLevelSecurity(): void
     {
         $bypassingRoles = $this->connection()->fetchFirstColumn(

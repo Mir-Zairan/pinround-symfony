@@ -92,7 +92,8 @@
         "lint": [
             "@php bin/console lint:container",
             "@php bin/console lint:yaml config",
-            "@php bin/console lint:twig src"
+            "@php bin/console lint:twig src",
+            "@php bin/check-tenant-setting"
         ],
         "qa": [
             "@composer validate --strict",

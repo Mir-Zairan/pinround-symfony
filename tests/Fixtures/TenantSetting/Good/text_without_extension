@@ -1,0 +1,2 @@
+Plain text without a shebang is not a script, so the check does not read it.
+SET app.org_id = 1

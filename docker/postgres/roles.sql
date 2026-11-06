@@ -34,7 +34,7 @@ WHERE '' IN (:'app_password', :'migrator_password', :'retention_password', :'rea
 
 -- Roles are cluster-wide: the second database's run finds them and only re-asserts them.
 SELECT format('CREATE ROLE %I', role_name)
-FROM unnest(ARRAY['pinround_app', 'pinround_migrator', 'pinround_retention', 'pinround_readonly']) AS role_name
+FROM unnest(ARRAY['pinround_app', 'pinround_migrator', 'pinround_retention', 'pinround_readonly', 'pinround_resolver']) AS role_name
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name)
 \gexec
 
@@ -43,6 +43,20 @@ ALTER ROLE pinround_migrator WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NORE
 -- The only BYPASSRLS role: the nightly retention purge. Its table rights come with that job (P11).
 ALTER ROLE pinround_retention WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD :'retention_password';
 ALTER ROLE pinround_readonly WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD :'readonly_password';
+-- Owns the SECURITY DEFINER lookups that run before the tenant is known, and nothing else.
+-- Its table rights are column grants plus the resolver_read policy (TenantTable::allowResolverRead).
+ALTER ROLE pinround_resolver WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD NULL;
+
+-- The migrator may hand functions to pinround_resolver (SET) but never acts with its rights or
+-- policies (no INHERIT). Re-granting updates the options; any other member is removed.
+SET client_min_messages = warning;
+GRANT pinround_resolver TO pinround_migrator WITH INHERIT FALSE, SET TRUE, ADMIN FALSE;
+RESET client_min_messages;
+SELECT format('REVOKE pinround_resolver FROM %I CASCADE', m.member::regrole)
+FROM pg_auth_members m
+WHERE m.roleid = 'pinround_resolver'::regrole
+  AND m.member <> 'pinround_migrator'::regrole
+\gexec
 
 -- The database owner owns schema public through pg_database_owner (PostgreSQL 15+) and has
 -- CREATE on the database, which trusted extensions such as pg_trgm need.
@@ -84,7 +98,9 @@ REVOKE ALL ON SCHEMA public FROM PUBLIC;
 
 SELECT format('GRANT CONNECT ON DATABASE %I TO pinround_app, pinround_migrator, pinround_retention, pinround_readonly', current_database())
 \gexec
-GRANT USAGE ON SCHEMA public TO pinround_app, pinround_retention, pinround_readonly;
+GRANT USAGE ON SCHEMA public TO pinround_app, pinround_retention, pinround_readonly, pinround_resolver;
+-- The resolver migration grants CREATE only for its ALTER FUNCTION ... OWNER and revokes it again.
+REVOKE CREATE ON SCHEMA public FROM pinround_resolver;
 
 -- No table or sequence rights here. The migration that creates a table grants pinround_app and
 -- pinround_readonly exactly what they need, on the parent only for a partitioned table: a default
