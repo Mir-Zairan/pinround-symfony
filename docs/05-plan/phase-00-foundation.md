@@ -88,7 +88,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - [x] `composer qa` runs every gate locally and passes.
 - [x] A test branch that imports `App\Ticketing\Domain\Ticket` from `App\Review\Application` fails `composer deptrac` (keep this as a documented fixture test, not a real import).
 - [ ] CI runs on push and pull request and blocks merge when a stage fails.
-- [ ] Total CI time is under 15 minutes.
+- [x] Total CI time is under 15 minutes.
 **Tests:** CI itself; a unit test that the Deptrac config lists every module folder.
 **Prototype check:** none.
 **Size:** M
@@ -254,4 +254,6 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T2): PHPUnit 13 fails an empty suite. Keep it that way: the unit and integration suites have tests, so a suite that finds none (a renamed folder) turns CI red.
 - 2026-11-06 (P00.T2): `symfony/property-info` is dev-only (it comes with Foundry), so `config/packages/property_info.yaml` sets it only for dev and test. Move it to `require` before prod code needs it.
 - 2026-11-06 (P00.T2): PHP-CS-Fixer prints a "minimum PHP 8.4" warning on PHP 8.5 but runs correctly.
+- 2026-11-06 (P00.T2): CI ran green on PR #1: push run 3m01s, pull request run 2m29s (slowest job `build`, about 2.5 min).
+- 2026-11-06 (P00.T2): merge blocking is not on. GitHub refuses branch protection on this private personal repo ("Upgrade to GitHub Pro or make this repository public", HTTP 403). The "blocks merge" criterion stays open until the repo gets Pro or a team plan; then require `static`, `unit`, `integration` and `build` on `main`.
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)
