@@ -104,7 +104,7 @@ final class ResolverFunctionTest extends KernelTestCase
         );
 
         self::assertSame(
-            ['owner' => 'pinround_resolver', 'is_security_definer' => true, 'config' => '{"search_path=pg_catalog, public"}', 'returns_set' => true, 'kind' => 'f'],
+            ['owner' => 'pinround_resolver', 'is_security_definer' => true, 'config' => '{"search_path=pg_catalog, public, pg_temp"}', 'returns_set' => true, 'kind' => 'f'],
             $function,
         );
         self::assertSame(
@@ -117,6 +117,18 @@ final class ResolverFunctionTest extends KernelTestCase
                 [$name],
             ),
         );
+        // A same-named column would win over an unprefixed input in the body (see the probe test below).
+        $inputNames = $this->connection()->fetchFirstColumn(
+            "SELECT a.name
+             FROM pg_proc p, unnest(p.proallargtypes, p.proargmodes, p.proargnames) AS a(type, mode, name)
+             WHERE p.pronamespace = 'public'::regnamespace AND p.proname = ? AND a.mode = 'i'",
+            [$name],
+        );
+        self::assertNotSame([], $inputNames);
+        foreach ($inputNames as $inputName) {
+            self::assertIsString($inputName);
+            self::assertStringStartsWith('p_', $inputName);
+        }
     }
 
     #[Test]
@@ -204,12 +216,33 @@ final class ResolverFunctionTest extends KernelTestCase
     }
 
     #[Test]
+    public function aPrefixedInputMatchesOnlyItsKeyWhileAnInputNamedLikeTheColumnMatchesEveryRow(): void
+    {
+        $this->insertProbeRows();
+        $connection = $this->connection();
+
+        self::assertSame([], $connection->fetchFirstColumn("SELECT organization_id FROM zz_resolve_probe('unknown-key')"));
+        self::assertSame([self::ORG_A], $connection->fetchFirstColumn("SELECT organization_id FROM zz_resolve_probe('a-key')"));
+        self::assertEqualsCanonicalizing(
+            [self::ORG_A, self::ORG_B],
+            $connection->fetchFirstColumn("SELECT organization_id FROM zz_resolve_probe_unprefixed('unknown-key')"),
+        );
+    }
+
+    #[Test]
     public function theMigratorDoesNotInheritTheResolverReadPolicy(): void
     {
         $this->insertProbeRows();
+        $migrator = $this->migrator();
+        $this->tenantContext()->set(new OrganizationId(self::ORG_A));
 
+        self::assertSame(['a-key'], $migrator->transactional(
+            static fn (Connection $migrator): array => $migrator->fetchFirstColumn('SELECT lookup_key FROM zz_resolver_probe'),
+        ));
+
+        $this->tenantContext()->clear();
         // The table owner obeys FORCE ROW LEVEL SECURITY; with no tenant only resolver_read could show it a row.
-        self::assertSame([], $this->migrator()->fetchFirstColumn('SELECT lookup_key FROM zz_resolver_probe'));
+        self::assertSame([], $migrator->fetchFirstColumn('SELECT lookup_key FROM zz_resolver_probe'));
     }
 
     private static function probeTable(): ResolverProbeTable

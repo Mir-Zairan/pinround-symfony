@@ -12,16 +12,18 @@ final class Version20261106140000 extends AbstractMigration
     /**
      * Stubs that return no row until the phase that adds each table replaces the body with
      * CREATE OR REPLACE, keeping the signature. They return ids only (data-model.md).
+     * Inputs carry a p_ prefix: in a LANGUAGE sql body a same-named column wins over the parameter, so
+     * `token_hash = token_hash` would match every row; CREATE OR REPLACE cannot rename them later.
      *
      * @var array<string, array{arguments: string, argumentTypes: string, returns: list<string>}>
      */
     private const array RESOLVERS = [
-        'resolve_api_token' => ['arguments' => 'token_hash bytea', 'argumentTypes' => 'bytea', 'returns' => ['token_id', 'organization_id', 'user_id']],
-        'resolve_user_orgs' => ['arguments' => 'user_id uuid', 'argumentTypes' => 'uuid', 'returns' => ['organization_id']],
-        'resolve_invitation' => ['arguments' => 'token_hash bytea', 'argumentTypes' => 'bytea', 'returns' => ['invitation_id', 'organization_id']],
-        'resolve_sso_provider' => ['arguments' => 'issuer text, domain text', 'argumentTypes' => 'text, text', 'returns' => ['provider_config_id', 'organization_id']],
-        'resolve_jira_connection' => ['arguments' => 'connection_id uuid', 'argumentTypes' => 'uuid', 'returns' => ['organization_id']],
-        'resolve_laptop_package' => ['arguments' => 'package_id uuid', 'argumentTypes' => 'uuid', 'returns' => ['organization_id', 'user_id']],
+        'resolve_api_token' => ['arguments' => 'p_token_hash bytea', 'argumentTypes' => 'bytea', 'returns' => ['token_id', 'organization_id', 'user_id']],
+        'resolve_user_orgs' => ['arguments' => 'p_user_id uuid', 'argumentTypes' => 'uuid', 'returns' => ['organization_id']],
+        'resolve_invitation' => ['arguments' => 'p_token_hash bytea', 'argumentTypes' => 'bytea', 'returns' => ['invitation_id', 'organization_id']],
+        'resolve_sso_provider' => ['arguments' => 'p_issuer text, p_domain text', 'argumentTypes' => 'text, text', 'returns' => ['provider_config_id', 'organization_id']],
+        'resolve_jira_connection' => ['arguments' => 'p_connection_id uuid', 'argumentTypes' => 'uuid', 'returns' => ['organization_id']],
+        'resolve_laptop_package' => ['arguments' => 'p_package_id uuid', 'argumentTypes' => 'uuid', 'returns' => ['organization_id', 'user_id']],
     ];
 
     public function getDescription(): string
@@ -36,10 +38,10 @@ final class Version20261106140000 extends AbstractMigration
             $noRow = 'SELECT '.implode(', ', array_fill(0, \count($resolver['returns']), 'NULL::uuid')).' WHERE false';
             $function = \sprintf('public.%s(%s)', $name, $resolver['argumentTypes']);
 
-            // pg_temp is not listed, so it is searched first for tables; no pinround role has TEMPORARY (roles.sql).
+            // pg_temp last, so a temporary table never shadows one a resolver reads (PostgreSQL's SECURITY DEFINER advice).
             $this->addSql(\sprintf(
                 'CREATE FUNCTION public.%s(%s) RETURNS TABLE (%s) LANGUAGE sql STABLE SECURITY DEFINER'
-                .' SET search_path = pg_catalog, public AS $resolver$ %s $resolver$',
+                .' SET search_path = pg_catalog, public, pg_temp AS $resolver$ %s $resolver$',
                 $name,
                 $resolver['arguments'],
                 implode(', ', $columns),

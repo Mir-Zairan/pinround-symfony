@@ -9,21 +9,26 @@ use Doctrine\DBAL\Connection;
 
 /**
  * The test-only tenant table `zz_resolver_probe` with TenantTable::allowResolverRead on three of its
- * four columns, and two SECURITY DEFINER functions owned by pinround_resolver that read it: one reads
- * granted columns, one the ungranted `secret_note`. Never in a migration; created and dropped through
- * the migrator connection.
+ * four columns, and SECURITY DEFINER functions owned by pinround_resolver that read it: one reads granted
+ * columns, one the ungranted `secret_note`, one names its input like the column it matches. Never in a
+ * migration; created and dropped through the migrator connection.
  */
 final readonly class ResolverProbeTable
 {
     public const array RESOLVER_COLUMNS = ['id', 'organization_id', 'lookup_key'];
 
+    /** Function name => its input, then the rest of its definition. */
     private const array FUNCTIONS = [
-        'zz_resolve_probe' => 'RETURNS TABLE (id uuid, organization_id uuid) LANGUAGE sql STABLE SECURITY DEFINER'
-            .' SET search_path = pg_catalog, public'
-            .' AS $probe$ SELECT p.id, p.organization_id FROM zz_resolver_probe p WHERE p.lookup_key = probe_key $probe$',
-        'zz_resolve_probe_note' => 'RETURNS TABLE (secret_note text) LANGUAGE sql STABLE SECURITY DEFINER'
-            .' SET search_path = pg_catalog, public'
-            .' AS $probe$ SELECT p.secret_note FROM zz_resolver_probe p WHERE p.lookup_key = probe_key $probe$',
+        'zz_resolve_probe' => '(p_lookup_key text) RETURNS TABLE (id uuid, organization_id uuid) LANGUAGE sql STABLE SECURITY DEFINER'
+            .' SET search_path = pg_catalog, public, pg_temp'
+            .' AS $probe$ SELECT id, organization_id FROM zz_resolver_probe WHERE lookup_key = p_lookup_key $probe$',
+        'zz_resolve_probe_note' => '(p_lookup_key text) RETURNS TABLE (secret_note text) LANGUAGE sql STABLE SECURITY DEFINER'
+            .' SET search_path = pg_catalog, public, pg_temp'
+            .' AS $probe$ SELECT secret_note FROM zz_resolver_probe WHERE lookup_key = p_lookup_key $probe$',
+        // The mistake the p_ prefix prevents: the column wins over the same-named parameter, so this matches every row.
+        'zz_resolve_probe_unprefixed' => '(lookup_key text) RETURNS TABLE (id uuid, organization_id uuid) LANGUAGE sql STABLE SECURITY DEFINER'
+            .' SET search_path = pg_catalog, public, pg_temp'
+            .' AS $probe$ SELECT id, organization_id FROM zz_resolver_probe WHERE lookup_key = lookup_key $probe$',
     ];
 
     public function __construct(private Connection $migrator)
@@ -52,7 +57,7 @@ final readonly class ResolverProbeTable
             $migrator->executeStatement('GRANT SELECT, INSERT ON zz_resolver_probe TO pinround_app');
 
             foreach (self::FUNCTIONS as $name => $definition) {
-                $migrator->executeStatement(\sprintf('CREATE FUNCTION %s(probe_key text) %s', $name, $definition));
+                $migrator->executeStatement(\sprintf('CREATE FUNCTION %s%s', $name, $definition));
                 $migrator->executeStatement(\sprintf('REVOKE EXECUTE ON FUNCTION %s(text) FROM PUBLIC', $name));
                 $migrator->executeStatement(\sprintf('GRANT EXECUTE ON FUNCTION %s(text) TO pinround_app', $name));
             }
