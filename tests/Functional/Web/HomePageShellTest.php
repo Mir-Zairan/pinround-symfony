@@ -20,6 +20,7 @@ final class HomePageShellTest extends WebTestCase
         self::assertCount(1, $page->filter('main'));
         self::assertCount(1, $page->filter('h1'));
         self::assertSame('Home', $page->filter('h1')->text());
+        self::assertSelectorTextSame('title', 'pinround');
         self::assertSame('en', $page->filter('html')->attr('lang'));
         self::assertNull($page->filter('html')->attr('data-theme'));
         self::assertSame('light dark', $page->filter('meta[name="color-scheme"]')->attr('content'));
@@ -76,7 +77,7 @@ final class HomePageShellTest extends WebTestCase
     }
 
     #[Test]
-    public function everyScriptSharesOneNonceAndNothingIsInline(): void
+    public function everyScriptSharesOneNonceAndThereAreNoInlineStylesOrHandlers(): void
     {
         $page = $this->openHome();
 
@@ -104,7 +105,28 @@ final class HomePageShellTest extends WebTestCase
         self::assertStringNotContainsString('es-module-shims', (string) $this->client()->getResponse()->getContent());
     }
 
+    #[Test]
+    public function aThemeOfLightOrDarkIsPrintedOnTheHtmlElement(): void
+    {
+        self::assertSame('dark', $this->renderHomeWithTheme('dark')->filter('html')->attr('data-theme'));
+        self::assertSame('light', $this->renderHomeWithTheme('light')->filter('html')->attr('data-theme'));
+    }
+
+    #[Test]
+    public function anUnknownThemeIsNotPrinted(): void
+    {
+        self::assertNull($this->renderHomeWithTheme('purple')->filter('html')->attr('data-theme'));
+    }
+
     private ?KernelBrowser $browser = null;
+
+    private function renderHomeWithTheme(string $theme): Crawler
+    {
+        $this->client()->request('GET', '/');
+        $twig = static::getContainer()->get('twig');
+
+        return new Crawler($twig->render('@Web/home.html.twig', ['theme' => $theme]));
+    }
 
     private function client(): KernelBrowser
     {

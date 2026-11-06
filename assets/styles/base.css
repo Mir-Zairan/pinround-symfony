@@ -5,7 +5,7 @@
 }
 
 html {
-  /* Tallest sticky header: two wrapped rows at 360px or 200% zoom (8 + 40 + 8 + 40 + 8 + 1 = 105px), rounded up. */
+  /* Tallest sticky header: two wrapped rows at 360px or 200% zoom (8 + 40 + 8 + 40 + 8 + 1 = 105px). The extra ~10px is headroom, so a focused item does not sit flush against the sticky header (WCAG 2.4.11). */
   --header-height-max: 116px;
   scroll-padding-top: var(--header-height-max);
 }

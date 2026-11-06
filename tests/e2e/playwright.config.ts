@@ -3,8 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.ts',
-  // Baselines sit beside the spec, one file per screenshot, with no platform suffix.
-  snapshotPathTemplate: '{testDir}/screenshots/{arg}{ext}',
+  // Baselines sit beside the spec, one file per screenshot and platform, because font rendering differs per OS.
+  snapshotPathTemplate: '{testDir}/screenshots/{arg}-{platform}{ext}',
   reporter: [['list']],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'https://localhost',

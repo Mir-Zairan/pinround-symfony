@@ -34,6 +34,12 @@
   color: inherit;
 }
 
+.site-header__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .site-header__spacer {
   flex: 1;
 }
