@@ -1,0 +1,5 @@
+<div{{ attributes.defaults({class: 'seg-group'}) }} role="group" aria-label="{{ this.label }}">
+{%- for value, optionLabel in this.options -%}
+<button type="button" class="seg" aria-pressed="{{ (value ~ '') == this.selected ? 'true' : 'false' }}">{{ optionLabel }}</button>
+{%- endfor -%}
+</div>

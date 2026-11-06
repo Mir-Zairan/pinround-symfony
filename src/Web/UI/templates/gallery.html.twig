@@ -33,4 +33,63 @@
             </div>
         {% endfor %}
     </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-chip">
+        <h2 id="gallery-chip">Chip</h2>
+        <div class="gallery-row">
+            <twig:Chip>Acme Foods</twig:Chip>
+            <twig:Chip pressed>Project SHOP</twig:Chip>
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-segmented-control">
+        <h2 id="gallery-segmented-control">Segmented control</h2>
+        {% set viewOptions = {list: 'List', turn: 'Whose turn?'} %}
+        {% set teamOptions = {lena: 'Lena', omar: 'Omar', mia: 'Mia'} %}
+        <div class="gallery-row">
+            <twig:SegmentedControl label="View" :options="viewOptions" selected="list" />
+            <twig:SegmentedControl label="View, turn selected" :options="viewOptions" selected="turn" />
+        </div>
+        <div class="gallery-row">
+            {% for teamMember in teamOptions|keys %}
+                <twig:SegmentedControl label="Team member {{ teamMember }}" :options="teamOptions" selected="{{ teamMember }}" />
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-tag">
+        <h2 id="gallery-tag">Tag</h2>
+        <div class="gallery-row">
+            <twig:Tag>PRIVATE</twig:Tag>
+            <twig:Tag>EXAMPLE</twig:Tag>
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-ai-chip">
+        <h2 id="gallery-ai-chip">AI chip</h2>
+        <div class="gallery-row">
+            <twig:AiChip>AI SUMMARY</twig:AiChip>
+            <twig:AiChip>AI ORDER</twig:AiChip>
+            <twig:AiChip>AI SUGGESTED</twig:AiChip>
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-status-pill">
+        <h2 id="gallery-status-pill">Status pill</h2>
+        <div class="gallery-row">
+            <twig:StatusPill group="todo">Backlog</twig:StatusPill>
+            <twig:StatusPill group="doing">Coding</twig:StatusPill>
+            <twig:StatusPill group="checking">Code review</twig:StatusPill>
+            <twig:StatusPill group="waiting">Waiting · question to Mia</twig:StatusPill>
+            <twig:StatusPill group="done">Released</twig:StatusPill>
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-switch">
+        <h2 id="gallery-switch">Switch</h2>
+        <div class="gallery-row">
+            <twig:Switch label="AI help" />
+            <twig:Switch label="Quiet hours" checked />
+        </div>
+    </section>
 {% endblock %}
