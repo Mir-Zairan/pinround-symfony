@@ -1,5 +1,5 @@
 {%- set isLink = this.href is not null -%}
 {%- set tag = isLink ? 'a' : 'button' -%}
 <{{ tag }}{{ attributes.defaults({class: this.classes}) }}
-{%- if isLink %}{% if this.disabled %} aria-disabled="true"{% else %} href="{{ this.href }}"{% endif %}
+{%- if isLink %}{% if this.disabled %} role="link" aria-disabled="true"{% else %} href="{{ this.href }}"{% endif %}
 {%- else %} type="{{ this.type }}"{% if this.disabled %} disabled{% endif %}{% endif %}>{% block content %}{% endblock %}</{{ tag }}>

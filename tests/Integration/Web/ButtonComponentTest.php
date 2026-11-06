@@ -89,7 +89,7 @@ final class ButtonComponentTest extends KernelTestCase
     {
         $html = (string) $this->renderTwigComponent(Button::class, ['href' => '/x', 'disabled' => true], content: 'Save');
 
-        self::assertStringContainsString('aria-disabled="true"', $html);
+        self::assertStringContainsString('<a class="btn btn-filled" role="link" aria-disabled="true">Save</a>', $html);
         self::assertStringNotContainsString('href', $html);
         self::assertStringNotContainsString('tabindex', $html);
     }

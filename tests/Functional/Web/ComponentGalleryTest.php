@@ -26,6 +26,18 @@ final class ComponentGalleryTest extends WebTestCase
     }
 
     #[Test]
+    public function theGalleryLinksItsOwnStylesheetAndHomeDoesNot(): void
+    {
+        $client = self::createClient();
+        $gallery = $client->request('GET', '/_gallery');
+        self::assertCount(1, $gallery->filter('link[rel="stylesheet"][href*="styles/gallery-"]'));
+
+        $home = $client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $home->filter('link[href*="gallery"]'));
+    }
+
+    #[Test]
     public function aThemeQueryPicksTheTheme(): void
     {
         $client = self::createClient();
