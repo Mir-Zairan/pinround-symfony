@@ -19,6 +19,11 @@ doctrine:
         identity_generation_preferences:
             Doctrine\DBAL\Platforms\PostgreSQLPlatform: identity
         auto_mapping: false
+        filters:
+            # ORM-level tenant scope on top of row-level security; see TenantFilter and TenantFilterMiddleware.
+            tenant:
+                class: App\SharedKernel\Infrastructure\Doctrine\TenantFilter
+                enabled: true
 
 # Migrations run as pinround_migrator (ADR-0005; wired in doctrine_migrations.yaml); the app and the ORM keep "default" (pinround_app).
 # Prod has no "migrator" connection: its migrate container gets a DATABASE_URL for pinround_migrator.
@@ -49,6 +54,13 @@ when@test:
                     options: *pgsql_options
                     wrapper_class: *connection_class
                     dbname_suffix: '_test%env(default::TEST_TOKEN)%'
+        orm:
+            mappings:
+                # Test-only entities on test-only tables (for example zz_tenant_probe); never in a migration.
+                TestFixtures:
+                    type: attribute
+                    dir: '%kernel.project_dir%/tests/Fixtures/Entity'
+                    prefix: 'App\Tests\Fixtures\Entity'
 
 when@prod:
     doctrine:
