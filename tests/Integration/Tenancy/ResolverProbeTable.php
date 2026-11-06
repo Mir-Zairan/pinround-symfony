@@ -69,6 +69,10 @@ final readonly class ResolverProbeTable
         });
     }
 
+    /**
+     * Safe when nothing exists. CatalogTest calls it too: a run cut short inside ResolverFunctionTest leaves
+     * these committed, and the catalog would report the probe functions as SECURITY DEFINER outside the resolvers.
+     */
     public function drop(): void
     {
         $this->migrator->transactional($this->dropIn(...));

@@ -18,8 +18,44 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class CatalogTest extends KernelTestCase
 {
+    /**
+     * A run cut short inside ResolverFunctionTest leaves its probe committed, and every check here reads the
+     * real catalog, so each test starts without it whatever ran or broke before.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->dropResolverProbeLeftovers();
+    }
+
     #[Test]
     public function theMigratedSchemaBreaksNoTenancyRule(): void
+    {
+        $this->assertTheMigratedSchemaBreaksNoTenancyRule();
+    }
+
+    #[Test]
+    public function resolverProbeLeftoversOfARunCutShortAreDroppedBeforeTheMainCheck(): void
+    {
+        $this->resolverProbeTable()->recreate();
+        self::assertSame(
+            [
+                'zz_resolve_probe_note(text) is SECURITY DEFINER but not in ResolverFunctions::NAMES',
+                'zz_resolve_probe_note(text) is owned by pinround_resolver but not in ResolverFunctions::NAMES',
+                'zz_resolve_probe(text) is SECURITY DEFINER but not in ResolverFunctions::NAMES',
+                'zz_resolve_probe(text) is owned by pinround_resolver but not in ResolverFunctions::NAMES',
+                'zz_resolve_probe_unprefixed(text) is SECURITY DEFINER but not in ResolverFunctions::NAMES',
+                'zz_resolve_probe_unprefixed(text) is owned by pinround_resolver but not in ResolverFunctions::NAMES',
+            ],
+            TenancyCatalog::read($this->connection(), $this->migrator())->securityDefinerFunctionsOutsideTheResolvers(),
+        );
+
+        $this->dropResolverProbeLeftovers();
+
+        $this->assertTheMigratedSchemaBreaksNoTenancyRule();
+    }
+
+    private function assertTheMigratedSchemaBreaksNoTenancyRule(): void
     {
         $connection = $this->connection();
         self::assertSame('pinround_app', $connection->fetchOne('SELECT current_user'));
@@ -293,6 +329,16 @@ final class CatalogTest extends KernelTestCase
         } finally {
             $migrator->rollBack();
         }
+    }
+
+    private function dropResolverProbeLeftovers(): void
+    {
+        $this->resolverProbeTable()->drop();
+    }
+
+    private function resolverProbeTable(): ResolverProbeTable
+    {
+        return new ResolverProbeTable($this->migrator());
     }
 
     private function connection(): Connection
