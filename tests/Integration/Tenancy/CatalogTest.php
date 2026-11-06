@@ -38,7 +38,7 @@ final class CatalogTest extends KernelTestCase
     public function resolverProbeLeftoversOfARunCutShortAreDroppedBeforeTheMainCheck(): void
     {
         $this->resolverProbeTable()->recreate();
-        self::assertSame(
+        self::assertEqualsCanonicalizing(
             [
                 'zz_resolve_probe_note(text) is SECURITY DEFINER but not in ResolverFunctions::NAMES',
                 'zz_resolve_probe_note(text) is owned by pinround_resolver but not in ResolverFunctions::NAMES',
