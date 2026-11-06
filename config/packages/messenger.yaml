@@ -11,7 +11,9 @@ framework:
             # The framework's default middleware is listed by hand, because RejectMessageForAnotherTenantMiddleware must
             # run before dispatch_after_current_bus, and custom middleware otherwise only goes after it. Every bus lists
             # it there, and TenantStampMiddleware directly before doctrine_transaction, so TenantContext is filled before
-            # BEGIN (ADR-0005). MessengerBusMiddlewareTest fails for a bus that does not, and pins the full list.
+            # BEGIN (ADR-0005). MessageIdStampMiddleware comes directly after dispatch_after_current_bus, so a message
+            # held back there is handled under its own id. MessengerBusMiddlewareTest fails for a bus that does not, and
+            # pins the full list.
             # The lists are written by hand: re-check them against FrameworkExtension's defaults after a Symfony
             # upgrade, and add deduplicate_middleware if framework.lock is enabled.
             command.bus:
@@ -22,6 +24,7 @@ framework:
                     - reject_redelivered_message_middleware
                     - App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware
                     - dispatch_after_current_bus
+                    - App\SharedKernel\Infrastructure\Messenger\MessageIdStampMiddleware
                     - decode_failed_message_middleware
                     - failed_message_processing_middleware
                     # On both buses: a message the outbox worker receives goes on the bus that sent it.
@@ -41,6 +44,7 @@ framework:
                     - reject_redelivered_message_middleware
                     - App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware
                     - dispatch_after_current_bus
+                    - App\SharedKernel\Infrastructure\Messenger\MessageIdStampMiddleware
                     - decode_failed_message_middleware
                     - failed_message_processing_middleware
                     - App\SharedKernel\Infrastructure\Messenger\RelayOutboxMessageMiddleware
@@ -129,7 +133,9 @@ when@test:
                     retry_strategy: *test_retry
                 # Test-only, reached with a TransportNamesStamp. serialize=true sends each message through the
                 # transport serializer, as a real queue does.
-                test_queue: 'in-memory://?serialize=true'
+                test_queue:
+                    dsn: 'in-memory://?serialize=true'
+                    retry_strategy: *test_retry
                 # Test-only: nothing listens on port 1, so every send fails as with Valkey down. lazy: connect on send.
                 unreachable_valkey:
                     dsn: 'redis://127.0.0.1:1'

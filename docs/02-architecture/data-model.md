@@ -235,6 +235,7 @@ Ticket numbers come from `tkt_project.next_number`. The app runs `UPDATE … SET
 | api_idempotency_key | organization_id, key, token_id, response_hash, created_at | `PK (organization_id, key)`; purge after 24 h |
 | messenger_outbox | Symfony Messenger Doctrine transport table (queue `outbox`): id, body, headers, queue_name, created_at, available_at, delivered_at | Created by migration `Version20261107150000` in Messenger's own layout (`auto_setup` off); `pinround_app` has `SELECT`, `INSERT`, `UPDATE`, `DELETE`. Not a tenant table: no `organization_id`, no RLS; each message carries its organization in a `TenantStamp` |
 | messenger_failed | The `failed` transport (queue `failed`), same layout and grants as `messenger_outbox` | Its own table, so the outbox age alert reads only messages still to relay |
+| processed_message | message_id `uuid` (the `MessageIdStamp` id, kept through the outbox, the relay, retries and `failed`), handler `text` (the stable name an async handler passes to `OnceOnlyHandling::runOnce`), processed_at `timestamptz` default `now()` | `PRIMARY KEY (message_id, handler)`. Created by migration `Version20261107160000`; `pinround_app` has `SELECT`, `INSERT` only, `pinround_readonly` nothing. `ProcessedMessageLedger` inserts the row with `ON CONFLICT DO NOTHING` in the transaction of the handler's effect and skips the effect when no row was inserted (ADR-0009). Not a tenant table: message ids are UUIDv7 unique across organizations and a row holds no tenant data. No cleanup job yet |
 
 ## Read models
 

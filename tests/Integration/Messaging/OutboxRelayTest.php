@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Messaging;
 
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Infrastructure\Messenger\MessageIdStamp;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\Tests\Fixtures\Messaging\OutageProbeRecorded;
 use App\Tests\Fixtures\Messaging\OutboxProbeRecorded;
@@ -82,6 +83,8 @@ final class OutboxRelayTest extends KernelTestCase
         $this->recordProbeEvent();
         $this->connection->commit();
         self::assertSame(1, $this->outboxRowCount());
+        $outboxMessageId = $this->outboxEnvelopes()[0]->last(MessageIdStamp::class)?->messageId();
+        self::assertIsString($outboxMessageId);
 
         self::runTheWorkerUntilIdle('outbox');
         self::runTheWorkerUntilIdle('outbox');
@@ -92,6 +95,8 @@ final class OutboxRelayTest extends KernelTestCase
         self::assertEquals(new OutboxProbeRecorded(self::PROBE_ID), $relayed[0]->getMessage());
         self::assertSame(self::ORG_A, $relayed[0]->last(TenantStamp::class)?->organizationId()->toString());
         self::assertSame('event.bus', $relayed[0]->last(BusNameStamp::class)?->getBusName());
+        // The dedupe key of OnceOnlyHandling: the same id after the relay, unlike the transport's own ids.
+        self::assertSame($outboxMessageId, $relayed[0]->last(MessageIdStamp::class)?->messageId());
         // Only async_notify's own id: the outbox row id and the outbox's ReceivedStamp stay behind.
         self::assertCount(1, $relayed[0]->all(TransportMessageIdStamp::class));
         self::assertSame([], $relayed[0]->all(ReceivedStamp::class));
@@ -129,6 +134,8 @@ final class OutboxRelayTest extends KernelTestCase
         self::assertSame([], $this->valkeyWithOutage()->getSent());
         $failedMessageId = $failed[0]->last(TransportMessageIdStamp::class)?->getId();
         self::assertIsInt($failedMessageId);
+        $messageId = $failed[0]->last(MessageIdStamp::class)?->messageId();
+        self::assertIsString($messageId);
 
         $this->valkeyWithOutage()->bringBack();
         $retry = new CommandTester(new Application(self::$kernel ?? self::bootKernel())->find('messenger:failed:retry'));
@@ -138,6 +145,7 @@ final class OutboxRelayTest extends KernelTestCase
         $relayed = $this->valkeyWithOutage()->getSent();
         self::assertCount(1, $relayed);
         self::assertEquals(new OutageProbeRecorded(self::PROBE_ID), $relayed[0]->getMessage());
+        self::assertSame($messageId, $relayed[0]->last(MessageIdStamp::class)?->messageId());
         self::assertSame(self::ORG_A, $relayed[0]->last(TenantStamp::class)?->organizationId()->toString());
         self::assertSame([], $relayed[0]->all(SentToFailureTransportStamp::class));
         self::assertSame([], $relayed[0]->all(ErrorDetailsStamp::class));
@@ -201,6 +209,17 @@ final class OutboxRelayTest extends KernelTestCase
         self::assertIsInt($count);
 
         return $count;
+    }
+
+    /**
+     * @return list<Envelope>
+     */
+    private function outboxEnvelopes(): array
+    {
+        $outbox = self::getContainer()->get('messenger.transport.outbox');
+        self::assertInstanceOf(ListableReceiverInterface::class, $outbox);
+
+        return iterator_to_array($outbox->all(), false);
     }
 
     /**

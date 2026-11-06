@@ -200,6 +200,19 @@ final class DatabaseRolesTest extends KernelTestCase
         }
     }
 
+    /** Append-only for the app, so a recorded message cannot be forgotten and handled again (Version20261107160000). */
+    #[Test]
+    public function theAppRoleMayOnlyReadAndAddProcessedMessages(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'processed_message'),
+        );
+        self::assertSame('pinround_migrator', $connection->fetchOne("SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass('public.processed_message')"));
+    }
+
     /** What doctrine:migrations:diff compares, limited to the Messenger tables: the migration built them as Messenger would. */
     #[Test]
     public function theMigratedMessengerTablesMatchTheSchemaMessengerExpects(): void

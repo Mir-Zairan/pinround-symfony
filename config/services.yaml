@@ -56,3 +56,7 @@ when@test:
             public: true
         App\Tests\Fixtures\Messaging\ValkeyWithOutageTransportFactory:
             autoconfigure: true
+        App\Tests\Fixtures\Messaging\RecordProbeEffectHandler:
+            autowire: true
+            autoconfigure: true
+            public: true

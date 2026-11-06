@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Messaging;
 
+use App\SharedKernel\Infrastructure\Messenger\MessageIdStampMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\RelayOutboxMessageMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware;
@@ -36,6 +37,8 @@ final class MessengerBusMiddlewareTest extends KernelTestCase
             // a message retried from failed, and must stop the message before any handler or tenant switch.
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, 'messenger.middleware.failed_message_processing_middleware', RelayOutboxMessageMiddleware::class);
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, RelayOutboxMessageMiddleware::class, TenantStampMiddleware::class);
+            // A message dispatch_after_current_bus holds back must be handled under its own id, not the one before it.
+            self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, 'messenger.middleware.dispatch_after_current_bus', MessageIdStampMiddleware::class);
         }
     }
 
@@ -52,6 +55,7 @@ final class MessengerBusMiddlewareTest extends KernelTestCase
                 'messenger.middleware.reject_redelivered_message_middleware',
                 RejectMessageForAnotherTenantMiddleware::class,
                 'messenger.middleware.dispatch_after_current_bus',
+                MessageIdStampMiddleware::class,
                 'messenger.middleware.decode_failed_message_middleware',
                 'messenger.middleware.failed_message_processing_middleware',
                 RelayOutboxMessageMiddleware::class,
