@@ -1,0 +1,676 @@
+{
+  "_comment": "Calibrated 2026-11-06 on a docs-only repo: no composer.json, no CI workflow and no source code exist yet. Every command below is the one the docs promise for phase P00 (CLAUDE.md coding rules, ADR-0028, docs/02-architecture/testing-strategy.md CI pipeline, docs/05-plan/phase-00-foundation.md design notes) and runs inside the Docker 'app' service, because the host has no PHP or Composer. Re-run /hygiene-calibrate --force after P00.T2 (CI workflow) and P00.T9 (e2e + lints) land, so commands, CI order and browser login are read from the real files.",
+  "schemaVersion": 2,
+  "repo": "pinround-symfony",
+  "language": "php",
+  "frameworks": [
+    "symfony",
+    "doctrine",
+    "twig",
+    "symfony-ux (stimulus, turbo, twig/live components)",
+    "symfony-messenger",
+    "frankenphp"
+  ],
+  "packageManager": "composer",
+  "guidelines": [
+    "CLAUDE.md",
+    "docs/README.md",
+    "docs/05-plan/README.md",
+    "docs/00-product/glossary.md",
+    "docs/00-product/ux-principles.md",
+    "docs/02-architecture/modules.md",
+    "docs/02-architecture/data-model.md",
+    "docs/02-architecture/security.md",
+    "docs/02-architecture/performance-and-scale.md",
+    "docs/02-architecture/frontend.md",
+    "docs/02-architecture/testing-strategy.md",
+    "docs/02-architecture/ai-architecture.md",
+    "docs/03-adr/README.md"
+  ],
+  "guidelineHashes": {
+    "CLAUDE.md": "57ea8f4de9209c7a554a5b6ef1dcab32bba83591",
+    "docs/05-plan/README.md": "5e4fcda995fef94ec7d55550f3a8c216ea96df19",
+    "docs/04-prototype/prototype-guide.md": "75921d6da5d5e939aa2984b7462721bf2b896413",
+    "docs/README.md": "5925df43a8107d1ea0759a028539ab1d09fb8b97",
+    "docs/02-architecture/modules.md": "b0840ff06579e57ff7017912090061db8d4f688d",
+    "docs/02-architecture/ai-architecture.md": "e512acae0aed2f65e880ba848169a1e64aa0e6a0",
+    "docs/03-adr/0002-modular-monolith.md": "6c9fa27c7e35af57df6ac83f62bb5fdd88dea27c",
+    "docs/03-adr/0005-multi-tenancy.md": "dfe32003b0a32e816463ff0420cad46f787f08b1",
+    "docs/03-adr/0013-authorization.md": "928d7a5a201259183f9cc4f7380ce8452113b527",
+    "docs/03-adr/0027-secrets-and-encryption.md": "cc74095ae161d06b797d74fff4d7b19019d12503",
+    "docs/03-adr/0020-ai-safety-and-prompt-injection.md": "676752913ac430a903efd093b2ae6dfb01942e32",
+    "docs/03-adr/0011-screenshot-storage-and-processing.md": "35b78e1d05f0cf02f367b675abfd59525a75a895",
+    "docs/02-architecture/performance-and-scale.md": "3dd719be51facddbc9357810b2f19585de73d5ae",
+    "docs/03-adr/0008-frankenphp-runtime.md": "609ad7a0d5a900f674fc3871ffd8b014d463859c",
+    "docs/00-product/glossary.md": "873c8a7868ecac9f39678316edda6739f9ae93ab",
+    "docs/00-product/ux-principles.md": "9c31b8dc24140aaaf021ab8e2d0e604584ce6019",
+    "docs/03-adr/README.md": "fb7482d1945c765b8aabd4bfed6a1e0adcaec9ee",
+    "README.md": "94172ec2e07dedf806ffc23fe48a88bc7bd6c5e5"
+  },
+  "baseBranch": "main",
+  "models": {
+    "_comment": "Which model each role runs on. Settings, not calibration; a personal hygiene.json in the active Claude config directory overrides per person. Values: sonnet, opus, haiku, fable, a full model id, or inherit.",
+    "explorer": "sonnet",
+    "judge": "opus",
+    "reviewer": "inherit",
+    "buildReviewer": "opus",
+    "checklist": "haiku",
+    "implementer": "sonnet",
+    "sensitiveImplementer": "inherit"
+  },
+  "depth": "standard",
+  "_depth_comment": "quick | standard | thorough — how wide the option and approach panels are. Setting; overridable per person.",
+  "output": {
+    "_comment": "How the plugin talks to you (reference/voice.md). Settings; overridable per person.",
+    "didYouKnow": true,
+    "maxReportChars": 2400,
+    "enforceLength": true,
+    "budgetLine": true
+  },
+  "checks": {
+    "_comment": "Planned commands (composer scripts listed in phase-00 design notes), run in the Docker 'app' service because the host has no PHP. They fail until P00.T1/T2 create composer.json and compose.yaml. `make qa` / `composer qa` runs them all.",
+    "format": {
+      "cmd": "docker compose exec -T app composer cs",
+      "scopedCmd": null,
+      "fixCmd": "docker compose exec -T app composer cs:fix",
+      "tier": "fast",
+      "needsDb": false,
+      "ci": "1. Static"
+    },
+    "lint": {
+      "cmd": "docker compose exec -T app composer deptrac",
+      "tier": "fast",
+      "needsDb": false,
+      "ci": "1. Static"
+    },
+    "static": {
+      "cmd": "docker compose exec -T app composer phpstan",
+      "tier": "medium",
+      "needsDb": false,
+      "ci": "1. Static"
+    },
+    "rector": {
+      "cmd": "docker compose exec -T app composer rector",
+      "tier": "medium",
+      "needsDb": false,
+      "ci": "1. Static"
+    },
+    "docs": {
+      "cmd": "docker compose exec -T app composer lint:docs",
+      "tier": "fast",
+      "needsDb": false,
+      "ci": "1. Static"
+    },
+    "copy": {
+      "cmd": "docker compose exec -T app composer lint:copy",
+      "tier": "fast",
+      "needsDb": false,
+      "ci": "1. Static"
+    },
+    "audit": {
+      "cmd": "docker compose exec -T app composer audit",
+      "tier": "fast",
+      "needsDb": false,
+      "ci": "1. Static"
+    },
+    "unit": {
+      "cmd": "docker compose exec -T app composer test:unit",
+      "tier": "medium",
+      "needsDb": false,
+      "ci": "2. Unit"
+    },
+    "integration": {
+      "cmd": "docker compose exec -T app composer test:integration",
+      "tier": "slow",
+      "needsDb": true,
+      "ci": "3. Integration + functional"
+    },
+    "e2e": {
+      "cmd": null,
+      "tier": "slow",
+      "needsDb": true,
+      "ci": "4. E2E (Playwright + axe under tests/e2e/, added in P00.T9; command not documented yet)"
+    },
+    "frontend": {
+      "cmd": null,
+      "cwd": null,
+      "tier": "medium",
+      "needsDb": false,
+      "when": null,
+      "ci": null
+    }
+  },
+  "ciGate": [
+    "format",
+    "lint",
+    "static",
+    "rector",
+    "docs",
+    "copy",
+    "audit",
+    "unit",
+    "integration",
+    "e2e"
+  ],
+  "_ciGate_comment": "No CI workflow exists yet. Order taken from docs/02-architecture/testing-strategy.md 'CI pipeline' (1 Static, 2 Unit, 3 Integration + functional, 4 E2E, 5 Build on main only).",
+  "reviewAgents": [
+    {
+      "name": "hygiene-senior-engineer",
+      "when": "always (code changed)"
+    },
+    {
+      "name": "hygiene-security",
+      "when": "always (code changed); weight on voters, tenancy, templates, uploads, AI, MCP, tokens, logging"
+    },
+    {
+      "name": "hygiene-performance",
+      "when": "always (code changed)"
+    },
+    {
+      "name": "hygiene-test-engineer",
+      "when": "always (code changed)"
+    },
+    {
+      "name": "hygiene-framing",
+      "when": "reviewing a change not written in this session (review.frameOnReview)"
+    },
+    {
+      "name": "hygiene-architect",
+      "when": "new classes or dirs under src/, controllers, repositories, events, Api changes, cross-module edits"
+    },
+    {
+      "name": "hygiene-database",
+      "when": "migrations/, Doctrine mappings, repositories, queries, read models, RLS, resolver functions"
+    },
+    {
+      "name": "hygiene-frontend",
+      "when": "Twig templates, Twig/Live components, assets/ (CSS, Stimulus controllers), importmap.php"
+    },
+    {
+      "name": "hygiene-dependency-auditor",
+      "when": "composer.json, composer.lock or importmap.php changed"
+    }
+  ],
+  "review": {
+    "_comment": "Settings; overridable per person. prSizeGuide left at the default: no merged PRs to measure yet.",
+    "smallDiffLines": 100,
+    "frameOnReview": "auto",
+    "gateOnReview": "auto",
+    "batchTasks": 3,
+    "prSizeGuide": 1500,
+    "prePushCheck": "offer",
+    "maxFixRounds": 1
+  },
+  "fastGate": {
+    "_comment": "No PHP on the host, so no per-file `php -l` or formatter yet; add them once a host or container path is agreed. The patterns below come from the repo's written rules (origin calibrate) and the plugin's generic set (origin plugin); all were confirmed by the user on 2026-11-06.",
+    "languages": [
+      {
+        "ext": [
+          "php"
+        ],
+        "syntax": null,
+        "format": null,
+        "formatPaths": [
+          "src/",
+          "tests/",
+          "migrations/",
+          "config/"
+        ],
+        "onEdit": null
+      }
+    ],
+    "patterns": [
+      {
+        "id": "gp-prose-comment-in-body",
+        "class": "comments",
+        "origin": "plugin",
+        "ext": [
+          "php",
+          "js",
+          "mjs",
+          "sql",
+          "sh"
+        ],
+        "paths": [],
+        "check": "prose-comments",
+        "message": "Three or more comment lines inside a function body narrate the code. Keep the one line that says why (a constraint, a workaround); the story of the change belongs in the commit message.",
+        "enabled": true
+      },
+      {
+        "id": "gp-vague-variable",
+        "class": "naming",
+        "origin": "plugin",
+        "ext": [
+          "php",
+          "js",
+          "mjs"
+        ],
+        "paths": [
+          "src/",
+          "assets/"
+        ],
+        "pattern": "(^[[:space:]]*\\$?|(const|let|var)[[:space:]]+)(data|result|tmp|info|obj)[[:space:]]*=([^=]|$)",
+        "exclude": null,
+        "message": "Name the variable by what it holds (openTickets, parsedRound), not data/result/tmp/info/obj.",
+        "enabled": true
+      },
+      {
+        "id": "cal-set-org-id",
+        "class": "authz",
+        "lens": "hygiene-security",
+        "origin": "calibrate",
+        "confidence": "high",
+        "provenance": {
+          "file": "docs/02-architecture/performance-and-scale.md",
+          "line": 204,
+          "text": "Plain `SET` and `set_config(…, false)` are forbidden (a static check looks for them)."
+        },
+        "ext": [
+          "php",
+          "sql"
+        ],
+        "paths": [
+          "src/",
+          "migrations/",
+          "config/"
+        ],
+        "pattern": "[Ss][Ee][Tt][[:space:]]+([Ll][Oo][Cc][Aa][Ll][[:space:]]+)?app\\.org_id|set_config\\([[:space:]]*'app\\.org_id'.*,[[:space:]]*false[[:space:]]*\\)",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Never set the tenant with SET / SET LOCAL / set_config(..., false); only the Doctrine TenantMiddleware sets it with SELECT set_config('app.org_id', :id, true) as a bound parameter.",
+        "source": [],
+        "enabled": true
+      },
+      {
+        "id": "cal-twig-raw",
+        "class": "injection",
+        "lens": "hygiene-security",
+        "origin": "calibrate",
+        "confidence": "high",
+        "provenance": {
+          "file": "docs/02-architecture/frontend.md",
+          "line": 214,
+          "text": "Twig auto-escaping is always on. User text is never rendered with `|raw`."
+        },
+        "ext": [
+          "twig"
+        ],
+        "paths": [],
+        "pattern": "\\|[[:space:]]*raw([^A-Za-z0-9_]|$)",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Do not use |raw. Let Twig escape, and render the Markdown subset through the server-side HTML Sanitizer (sanitize_html).",
+        "source": [],
+        "enabled": true
+      },
+      {
+        "id": "cal-inline-handler",
+        "class": "injection",
+        "lens": "hygiene-frontend",
+        "origin": "calibrate",
+        "confidence": "high",
+        "provenance": {
+          "file": "docs/05-plan/phase-00-foundation.md",
+          "line": 144,
+          "text": "CSP nonce helper for any `<script>` tag; no inline handlers."
+        },
+        "ext": [
+          "twig",
+          "html"
+        ],
+        "paths": [],
+        "pattern": "[[:space:]]on(click|dblclick|change|submit|input|load|error|keydown|keyup|keypress|focus|blur|mouse[a-z]+)[[:space:]]*=",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "No inline event handlers (the CSP blocks them). Use a Stimulus controller with data-action=\"click->name#method\".",
+        "source": [],
+        "enabled": true
+      },
+      {
+        "id": "cal-static-state",
+        "class": "concurrency",
+        "lens": "hygiene-senior-engineer",
+        "origin": "calibrate",
+        "confidence": "high",
+        "provenance": {
+          "file": "CLAUDE.md",
+          "line": 44,
+          "text": "Worker mode is on (FrankenPHP). No static state, and services that hold state implement reset (ADR-0008)."
+        },
+        "ext": [
+          "php"
+        ],
+        "paths": [
+          "src/"
+        ],
+        "pattern": "(private|protected|public)[[:space:]]+static[[:space:]]+[?A-Za-z_\\\\|]*[[:space:]]*\\$|^[[:space:]]*static[[:space:]]+\\$",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "No static properties or static variables in worker mode: they leak between requests. Keep state in a service property and implement ResetInterface.",
+        "source": [],
+        "enabled": true
+      },
+      {
+        "id": "cal-copy-oops",
+        "class": "other-copy",
+        "lens": "hygiene-frontend",
+        "origin": "calibrate",
+        "confidence": "high",
+        "provenance": {
+          "file": "docs/00-product/ux-principles.md",
+          "line": 208,
+          "text": "No exclamation marks except in rare good news. No \"Oops\"."
+        },
+        "ext": [
+          "twig",
+          "yaml",
+          "yml",
+          "xlf",
+          "php"
+        ],
+        "paths": [
+          "src/",
+          "templates/",
+          "translations/"
+        ],
+        "pattern": "[Oo]ops",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "No \"Oops\" in product copy. Say what happened and what to do next, in one plain sentence.",
+        "source": [],
+        "enabled": true
+      },
+      {
+        "id": "cal-offset-paging",
+        "class": "performance",
+        "lens": "hygiene-database",
+        "origin": "calibrate",
+        "confidence": "low",
+        "provenance": {
+          "file": "docs/02-architecture/performance-and-scale.md",
+          "line": 166,
+          "text": "No `OFFSET` beyond the first page."
+        },
+        "ext": [
+          "php",
+          "sql"
+        ],
+        "paths": [
+          "src/"
+        ],
+        "pattern": "[Oo][Ff][Ff][Ss][Ee][Tt][[:space:]]+[:?0-9$]|setFirstResult\\(",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Use keyset pagination (WHERE (sort_key, id) < (:last_key, :last_id) ... LIMIT n), not OFFSET or setFirstResult().",
+        "source": [],
+        "enabled": true
+      }
+    ]
+  },
+  "learned": {
+    "_comment": "Flywheel knobs for /hygiene-learn.",
+    "threshold": 2,
+    "skipClasses": [],
+    "rejectThreshold": 2
+  },
+  "relations": {
+    "_comment": "Cross-file impact brief for the reasoning lenses. src/ is empty until P00.",
+    "enabled": true,
+    "maxSymbols": 40,
+    "maxRefsPerSymbol": 12,
+    "languages": [
+      {
+        "ext": [
+          "php"
+        ],
+        "sourcePaths": [
+          "src/",
+          "migrations/"
+        ],
+        "defPrefix": "(function|class|interface|trait|enum)[[:space:]]+",
+        "astPattern": null,
+        "astLang": null
+      }
+    ]
+  },
+  "taskGate": {
+    "_comment": "Kept empty: the heavy gates need the Docker stack.",
+    "extraChecks": []
+  },
+  "browser": {
+    "_comment": "Planned from phase-00: `make up` serves https://localhost (Caddy TLS, fixed port, no {port} flag yet), so a review in a worktree cannot start its own instance and refuses to reuse a busy address. Login arrives in P01 and the Playwright e2e setup in P00.T9; fill auth.storageState/loginCmd then. Nothing can drive a browser on this machine today (no Playwright package, no Chrome tools in the session).",
+    "driver": "auto",
+    "agentsPerPr": 1,
+    "dependentScreens": 3,
+    "skill": null,
+    "startCmd": "make up",
+    "readyUrl": "https://localhost/health/ready",
+    "pages": {
+      "src/Web/UI/templates/**": "https://localhost/",
+      "templates/components/**": "https://localhost/_gallery",
+      "src/Web/UI/Component/**": "https://localhost/_gallery",
+      "assets/styles/**": "https://localhost/_gallery",
+      "assets/controllers/**": "https://localhost/_gallery"
+    },
+    "autoWhen": [
+      "**/*.twig",
+      "assets/**",
+      "src/**/UI/Component/**"
+    ],
+    "auth": null,
+    "setup": null,
+    "matrix": {
+      "roles": [
+        {
+          "name": "viewer",
+          "account": "viewer"
+        },
+        {
+          "name": "member",
+          "account": "omar"
+        },
+        {
+          "name": "lead",
+          "account": "lena"
+        },
+        {
+          "name": "manager",
+          "account": "raj"
+        },
+        {
+          "name": "admin",
+          "account": "sara"
+        }
+      ],
+      "locales": [
+        "en"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "widths": [
+        1366,
+        390,
+        360
+      ],
+      "data": {
+        "source": "app:demo:seed (stub in P00.T9, filled in P01) with Acme Foods / project SHOP",
+        "large": "an org near 200,000 tickets (data-model.md); a lead with many turns for Home"
+      },
+      "checks": [
+        "console",
+        "unsaved-close",
+        "edited-url"
+      ]
+    }
+  },
+  "ui": {
+    "_comment": "Planned locations from P00.T5/T6 and docs/02-architecture/frontend.md; they do not exist yet. Token names must match the prototype's CSS custom properties.",
+    "tokenFiles": [
+      "assets/styles/tokens.css"
+    ],
+    "componentDirs": [
+      "src/Web/UI/Component/",
+      "templates/components/",
+      "assets/controllers/"
+    ]
+  },
+  "testing": {
+    "_comment": "Settings for /hygiene-test. Overridable per person.",
+    "postComments": "ask",
+    "isolate": "worktree"
+  },
+  "commit": {
+    "_comment": "strip: CLAUDE.md says never add Co-Authored-By or other attribution lines.",
+    "attribution": "strip"
+  },
+  "prText": {
+    "_comment": "No section is banned from PR descriptions in the guidelines.",
+    "forbiddenSections": []
+  },
+  "limits": [
+    {
+      "name": "screenshot upload size and type",
+      "value": "PNG/JPEG/WebP only, at most 15 MB",
+      "where": "docs/01-requirements/non-functional-requirements.md NFR-SEC-06",
+      "howToCheck": "upload tests with oversize, polyglot and SVG files"
+    },
+    {
+      "name": "screenshot pixel count",
+      "value": "40 MP, checked from the header before decoding",
+      "where": "docs/02-architecture/security.md (uploads)",
+      "howToCheck": "a decompression-bomb image is refused before the decoder runs"
+    },
+    {
+      "name": "CI duration",
+      "value": "under 15 minutes total; alert past a 12-minute median",
+      "where": "docs/03-adr/0028-testing-and-quality-gates.md",
+      "howToCheck": "GitHub Actions run time"
+    }
+  ],
+  "featureFlags": null,
+  "build": {
+    "_comment": "subagent | inline. Setting; overridable per person.",
+    "implementer": "subagent"
+  },
+  "gates": {
+    "_comment": "Seconds any one gate check may take. Setting; overridable per person.",
+    "checkTimeoutSec": 20
+  },
+  "startup": {
+    "_comment": "Which reference digests every session carries. Setting; overridable per person.",
+    "digests": "auto"
+  },
+  "ledger": {
+    "_comment": "main | checkout. Setting; overridable per person.",
+    "location": "main"
+  },
+  "budget": {
+    "_comment": "Budget line and context ceiling. Settings; overridable per person.",
+    "dollars": true,
+    "prices": {},
+    "contextWarn": 250000,
+    "contextBlock": 400000,
+    "contextScope": "hygiene"
+  },
+  "upstream": {
+    "_comment": "ask | never. Setting; overridable per person.",
+    "offer": "ask"
+  },
+  "ticket": {
+    "_comment": "No tracker. Intent lives in the phase files: a task key like P05.T3 maps to docs/05-plan/phase-05-*.md, section '### P05.T3', with '**Acceptance criteria:**' checkboxes and the phase '## Definition of done'. Read the task's 'Hand-off notes' too.",
+    "source": "none",
+    "keyPattern": "P[0-9]{2}\\.T[0-9]+",
+    "urlTemplate": null,
+    "criteriaHeadings": [
+      "Acceptance criteria",
+      "Definition of done",
+      "Tests"
+    ],
+    "commentsMatter": false
+  },
+  "product": {
+    "_comment": "Planned, not yet runnable: P00 builds the stack, P01 adds login and the demo seed, P09 the MCP server. Accounts use the neutral example people from CLAUDE.md; passwords come from the seed command, never from this file.",
+    "interfaces": [
+      {
+        "kind": "web",
+        "note": "server-rendered Twig + Turbo/Stimulus at https://localhost"
+      },
+      {
+        "kind": "http",
+        "baseUrl": "https://localhost",
+        "note": "JSON API and the MCP server (P09), authenticated by personal access token"
+      }
+    ],
+    "environments": [
+      {
+        "name": "local",
+        "url": "https://localhost",
+        "howToStart": "make up"
+      }
+    ],
+    "accounts": [
+      {
+        "name": "viewer",
+        "roles": [
+          "team:viewer"
+        ],
+        "leastPrivileged": true,
+        "howToObtain": "not seeded yet; add a viewer to the demo seed in P01"
+      },
+      {
+        "name": "omar",
+        "roles": [
+          "team:member"
+        ],
+        "howToObtain": "bin/console app:demo:seed (P01)"
+      },
+      {
+        "name": "mia",
+        "roles": [
+          "team:member"
+        ],
+        "howToObtain": "bin/console app:demo:seed (P01); job tester"
+      },
+      {
+        "name": "lena",
+        "roles": [
+          "team:lead"
+        ],
+        "howToObtain": "bin/console app:demo:seed (P01)"
+      },
+      {
+        "name": "raj",
+        "roles": [
+          "org:manager"
+        ],
+        "howToObtain": "bin/console app:demo:seed (P01)"
+      },
+      {
+        "name": "sara",
+        "roles": [
+          "org:admin"
+        ],
+        "howToObtain": "bin/console app:demo:seed (P01)"
+      }
+    ]
+  },
+  "generatedAgentHashes": {
+    "hygiene-architect": "3613800489",
+    "hygiene-database": "3264598323",
+    "hygiene-dependency-auditor": "1465629070",
+    "hygiene-framing": "1765473501",
+    "hygiene-frontend": "2238131953",
+    "hygiene-performance": "1018974380",
+    "hygiene-security": "4201987398",
+    "hygiene-senior-engineer": "2892674783",
+    "hygiene-test-engineer": "2963785869"
+  }
+}
