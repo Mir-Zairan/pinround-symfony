@@ -209,7 +209,7 @@ Rules:
   - `connect-src 'self'` plus the Mercure hub, the storage host and `http://localhost:11434` (only when the org's AI runs on laptops);
   - `img-src 'self'` plus the storage host and `data:` (only for tiny placeholders);
   - `frame-ancestors 'none'`.
-  - There are no inline event handlers. The AssetMapper importmap script gets the nonce (verify the option at implementation).
+  - There are no inline event handlers. Every script tag gets the request's nonce from `csp_nonce()`: `<script nonce="{{ csp_nonce() }}">`, and for the import map `{{ importmap('app', {nonce: csp_nonce()}) }}`, which puts it on the importmap JSON and the entry module script.
 - **CSRF:** a token on every POST form and Live Component action (Symfony's CSRF protection, SameSite=Lax cookies).
 - **Escaping:** Twig auto-escaping is always on. User text is never rendered with `|raw`. Comments and descriptions support a small Markdown subset that is rendered and then sanitized with the HTML Sanitizer component on the server.
 - **External links** open with `rel="noopener noreferrer"`.
