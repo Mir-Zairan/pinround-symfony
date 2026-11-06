@@ -13,6 +13,7 @@ phpunit.xml
 .php-cs-fixer.php
 .php-cs-fixer.cache
 public/assets/
+assets/vendor/
 tests/e2e/node_modules/
 tests/e2e/test-results/
 tests/e2e/playwright-report/

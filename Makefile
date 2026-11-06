@@ -49,7 +49,7 @@ test: migrate-test ## Run the PHPUnit tests in the app container
 qa: ## Run every quality gate in the app container
 	$(COMPOSE) exec app composer qa
 
-e2e: ## Run the Playwright shell tests against the running stack (E2E_BASE_URL, default https://localhost)
+e2e: ## Run the Playwright tests (shell, components, gallery) against the running stack (E2E_BASE_URL, default https://localhost)
 	npm ci --prefix tests/e2e
 	npm exec --prefix tests/e2e -- playwright install chromium
 	npm exec --prefix tests/e2e -- playwright test --config tests/e2e/playwright.config.ts
