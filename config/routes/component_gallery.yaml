@@ -1,0 +1,13 @@
+# The component gallery is a design-review page: its controller has no #[Route] attribute,
+# so the route exists only where it is declared here, in dev and test, never in prod.
+when@dev:
+    web_component_gallery:
+        path: /_gallery
+        controller: App\Web\UI\Controller\ComponentGalleryController
+        methods: [GET]
+
+when@test:
+    web_component_gallery:
+        path: /_gallery
+        controller: App\Web\UI\Controller\ComponentGalleryController
+        methods: [GET]

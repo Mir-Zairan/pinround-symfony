@@ -1,0 +1,4 @@
+twig_component:
+    anonymous_template_directory: '@Web/components/'
+    defaults:
+        App\Web\UI\Component\: '@Web/components/'

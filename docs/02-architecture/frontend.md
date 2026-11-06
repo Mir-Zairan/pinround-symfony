@@ -67,7 +67,9 @@ The prototype's "view as" switch and "Big team" toggle are demo devices. They ar
 
 ## Design system: Twig components
 
-Each component lives in `src/Web/UI/Component/` with a template in `templates/components/`. The names follow the prototype's CSS classes, so a developer can compare them one to one.
+Each component lives in `src/Web/UI/Component/` with a template in `src/Web/UI/templates/components/` (Twig namespace `@Web`). The names follow the prototype's CSS classes, so a developer can compare them one to one. The PHP class for `Switch` is `SwitchControl`, because PHP reserves `switch`; it is registered as `<twig:Switch>`.
+
+The gallery at `/_gallery` shows every built component. It exists in dev and test only (route file `config/routes/component_gallery.yaml`) and returns 404 in prod. Add `?theme=light` or `?theme=dark` to show one theme.
 
 | Component | Prototype source | Notes |
 |---|---|---|
@@ -92,7 +94,7 @@ Each component lives in `src/Web/UI/Component/` with a template in `templates/co
 | `PinList` | pin notes under a screenshot | The text equivalent of the pins (accessibility) |
 | `Thread`, `Message`, `Reply`, `Composer` | ticket conversation | Comment / Question switch; answering a question resolves it |
 | `Dialog` | dialogs (ping, picker, share draft, local AI) | Native `<dialog>` with focus trap |
-| `Toast` | toast | One at a time, 3.6 s, `role="status"` |
+| `Toast` | toast | One at a time, 3.6 s, `role="status"`. The markup is built; the timer comes with the first real toast |
 | `Switch` | admin switches | `role="switch"`, `aria-checked` |
 | `EmptyState` | dashed boxes | One plain sentence + one action |
 

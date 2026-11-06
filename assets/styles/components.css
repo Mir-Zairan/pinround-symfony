@@ -1,0 +1,377 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 20px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: .01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-filled {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.btn-filled:hover:not(:disabled, [aria-disabled="true"]) {
+  filter: brightness(1.1);
+}
+
+.btn-tonal {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.btn-tonal:hover:not(:disabled, [aria-disabled="true"]) {
+  filter: brightness(.96);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--on-surface);
+  border-color: var(--outline-var);
+}
+
+.btn-outline:hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--s-high);
+}
+
+.btn-text {
+  background: transparent;
+  color: var(--primary);
+  padding: 0 12px;
+}
+
+.btn-text:hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--s-high);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: .38;
+  cursor: default;
+  filter: none;
+}
+
+.btn-sm {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.seg-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.seg {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--on-surface-var);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.seg[aria-pressed="true"] {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-chip);
+  border: 1px solid var(--outline-var);
+  background: transparent;
+  color: var(--on-surface);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.chip:hover {
+  background: var(--s-high);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--secondary-container);
+  border-color: transparent;
+  color: var(--on-secondary-container);
+}
+
+.tag,
+.aichip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-tag);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+
+.tag {
+  background: var(--s-highest);
+  color: var(--on-surface-var);
+}
+
+.aichip {
+  background: var(--ai-container);
+  color: var(--on-ai-container);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+
+.pill__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pill-dot);
+  /* The group colours are the same in both themes; the ring keeps the dark greens visible on dark pills. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent);
+}
+
+.pill-todo {
+  --pill-dot: var(--group-todo);
+  background: var(--s-highest);
+  color: var(--on-surface);
+}
+
+.pill-doing {
+  --pill-dot: var(--group-doing);
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.pill-checking {
+  --pill-dot: var(--group-check);
+  background: var(--ping-container);
+  color: var(--on-ping-container);
+}
+
+.pill-waiting {
+  --pill-dot: var(--group-wait);
+  background: var(--waiting-container);
+  color: var(--on-waiting-container);
+}
+
+.pill-done {
+  --pill-dot: var(--group-done);
+  background: var(--passed-container);
+  color: var(--on-passed-container);
+}
+
+.sw {
+  flex: none;
+  position: relative;
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  border-radius: 13px;
+  border: 2px solid var(--outline);
+  background: var(--s-highest);
+}
+
+.sw::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--outline);
+  transition: left 120ms;
+}
+
+.sw[aria-checked="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.sw[aria-checked="true"]::after {
+  left: 21px;
+  background: var(--on-primary);
+}
+
+.av {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.av-lg {
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+  font-size: 14px;
+}
+
+.stack {
+  display: flex;
+}
+
+.stack .av {
+  border: 2px solid var(--surface);
+  margin-left: -8px;
+}
+
+.stack .av:first-child {
+  margin-left: 0;
+}
+
+.card {
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: var(--s-lowest);
+  border: 1px solid var(--outline-var);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 28px;
+  border-radius: 16px;
+  border: 1px dashed var(--outline-var);
+  text-align: center;
+  color: var(--on-surface-var);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: calc(100vw - 32px);
+  padding: 14px 20px;
+  border-radius: 12px;
+  background: var(--inverse-surface);
+  color: var(--inverse-on-surface);
+  font-size: 14px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
+}
+
+.dialog {
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  background: var(--s-c);
+  color: var(--on-surface);
+  overflow: hidden;
+}
+
+.dialog::backdrop {
+  background: var(--scrim);
+}
+
+.dialog__box {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 32px);
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.dialog__body > :first-child {
+  margin-top: 0;
+}
+
+.dialog__body > :last-child {
+  margin-bottom: 0;
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.menu {
+  position: relative;
+  display: inline-block;
+}
+
+.menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--s-c);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
+}
+
+.menu__list[hidden] {
+  display: none;
+}
+
+.menu__item {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--on-surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu__item:hover {
+  background: var(--s-high);
+}
+
+.menu__item:focus-visible {
+  outline-offset: -2px;
+}
