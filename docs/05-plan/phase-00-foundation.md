@@ -65,11 +65,11 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 6. MinIO: create a private bucket `pinround` at start (init container or script), no public policy.
 **Files:** `compose.yaml`, `Dockerfile`, `Makefile`, `.env`, `config/packages/*`, `public/`, `docker/`.
 **Acceptance criteria:**
-- [ ] `make up` on a clean clone starts all services; `docker compose ps` shows them healthy.
-- [ ] https://localhost answers with the Symfony app over HTTP/2 (local TLS from Caddy).
-- [ ] Worker mode is on (verified by a request counter in a dev-only debug header that grows across requests).
-- [ ] Mail sent from the app appears in Mailpit.
-- [ ] The MinIO bucket refuses anonymous reads.
+- [x] `make up` on a clean clone starts all services; `docker compose ps` shows them healthy.
+- [x] https://localhost answers with the Symfony app over HTTP/2 (local TLS from Caddy).
+- [x] Worker mode is on (verified by a request counter in a dev-only debug header that grows across requests).
+- [x] Mail sent from the app appears in Mailpit.
+- [x] The MinIO bucket refuses anonymous reads.
 **Tests:** a smoke functional test `GET /` returns 200; a shell test in CI that runs `docker compose config`.
 **Prototype check:** none yet.
 **Size:** M
@@ -238,4 +238,12 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 ## Hand-off notes
 - Later phases that look something up before the org is known (P01 org picker and invites, P04 Mercure, P08 laptop packages, P09 tokens, P10 webhooks) must fill their resolver function from P00.T4, never use `BYPASSRLS`.
 - `aud_event` is the real audit table; P11 adds UI, export and retention on top of it.
+- 2026-11-06 (P00.T1): ADR-0008 says `max_requests` 500, but FrankenPHP 1.13.5 has no such directive. Workers restart through the Symfony Runtime's `FRANKENPHP_LOOP_MAX=500`.
+- 2026-11-06 (P00.T5): the prod image must run `asset-map:compile`. Caddy already sends `Cache-Control: public, max-age=31536000, immutable` for `/assets/*`.
+- 2026-11-06 (P00.T8): turn the Caddy admin API off in prod and point the image `HEALTHCHECK` at the app health route.
+- 2026-11-06 (P00.T3): the first migration installs trusted extensions, so `pinround_migrator` needs `CREATE` on the database (or a superuser bootstrap creates them). Test that migration as that role. Its `down()` is irreversible on purpose.
+- 2026-11-06 (P00.T7): `src/SharedKernel/Infrastructure/Scheduler/DefaultSchedule.php` is an empty placeholder so the scheduler service starts. Modules add jobs with `#[AsCronTask]` or `#[AsPeriodicTask]`.
+- 2026-11-06 (P00.T9, P12): the prod env must provide `DATABASE_URL`, `MAILER_DSN`, `MESSENGER_TRANSPORT_DSN`, `DEFAULT_URI`, `REDIS_CACHE_DSN` and the Mercure keys (prod refuses `change-me` keys). `config.md` and P12 `compose.prod.yaml` must list them.
+- 2026-11-06 (P00.T1): MinIO and `mc` are built from pinned source ([ADR-0031](../03-adr/0031-minio-built-from-pinned-source.md)) because upstream stopped publishing images. `pgvector` is not in the stock postgres image and was skipped.
+- 2026-11-06 (P00.T1): the disk on a dev machine can fill up. The MinIO source build needs about 2-3 GB.
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)

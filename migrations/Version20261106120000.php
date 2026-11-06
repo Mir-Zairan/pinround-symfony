@@ -24,8 +24,7 @@ final class Version20261106120000 extends AbstractMigration
 
     public function down(Schema $schema): void
     {
-        $this->addSql('DROP EXTENSION IF EXISTS pgcrypto');
-        $this->addSql('DROP EXTENSION IF EXISTS citext');
-        $this->addSql('DROP EXTENSION IF EXISTS pg_trgm');
+        // up() skips extensions that already exist, so down() cannot know which ones this migration created.
+        $this->throwIrreversibleMigrationException('The extensions may predate this migration; drop them by hand if needed.');
     }
 }

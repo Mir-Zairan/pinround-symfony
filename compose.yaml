@@ -7,7 +7,8 @@ x-app-image: &app-image
       APP_GID: ${APP_GID:-1000}
   image: pinround-app:dev
   # Local-only name: never pull it from a registry, where another owner could publish the same name.
-  pull_policy: build
+  # `never` still builds a missing image; `make up` builds, so `build` here would build twice.
+  pull_policy: never
 
 # This file is dev-only. The placeholders below keep a plain `docker compose up` working
 # without the Makefile's --env-file flags; the prod image refuses change-me keys.
@@ -133,7 +134,7 @@ services:
     build:
       context: docker/minio
     image: pinround-minio:dev
-    pull_policy: build
+    pull_policy: never
     restart: unless-stopped
     environment: *minio-credentials
     volumes:

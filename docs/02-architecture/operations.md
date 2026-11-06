@@ -44,7 +44,7 @@ Docker Compose for local and small self-hosted installs:
 | `scheduler` | same image, Symfony Scheduler | Scheduled jobs (see below) |
 | `postgres` | PostgreSQL 18 with `pg_trgm`, `pgvector` (optional) | Primary data ([ADR-0004](../03-adr/0004-postgresql.md)) |
 | `valkey` | Valkey 8 | Cache, sessions, locks, rate limits, job queues ([ADR-0010](../03-adr/0010-cache-sessions-locks.md)) |
-| `minio` | MinIO (self-host) | Object storage for screenshots ([ADR-0011](../03-adr/0011-screenshot-storage-and-processing.md)) |
+| `minio` | MinIO (self-host) | Object storage for screenshots ([ADR-0011](../03-adr/0011-screenshot-storage-and-processing.md)); built from pinned source in `docker/minio` ([ADR-0031](../03-adr/0031-minio-built-from-pinned-source.md)) |
 | `mailpit` | Mailpit (local only) | Catch outgoing email |
 | `ollama` | optional | Server-side AI for orgs that want one shared box |
 

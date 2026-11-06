@@ -7,6 +7,19 @@ Problems are shown on screenshots with numbered pins. Work moves in *rounds*: th
 
 > Status: architecture and plan are ready. No application code yet. Start with [docs/README.md](docs/README.md).
 
+## Run it locally
+
+You need Docker with Compose v2, and `make`. You do not need PHP on your machine.
+
+1. Run `make up`. The first run builds MinIO from source and takes about 5-6 minutes. Later runs start in seconds.
+2. Open https://localhost and accept the local certificate that Caddy makes.
+3. Mail the app sends shows up in Mailpit at http://localhost:8025.
+4. The MinIO console is at http://localhost:9001.
+
+If a port is taken, put a new one in `.env.local`, for example `HTTP_PORT=8081`. The other settings are `HTTPS_PORT`, `MAILPIT_UI_PORT`, `MINIO_API_PORT` and `MINIO_CONSOLE_PORT`.
+
+Run `make help` to see every command.
+
 ## Why it exists
 
 - A lead should not lose a morning finding out what waits on them. Home shows the top 5, with the reason for each.

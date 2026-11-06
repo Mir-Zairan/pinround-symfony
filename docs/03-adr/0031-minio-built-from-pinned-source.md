@@ -42,19 +42,25 @@ Chosen option: **build from pinned source**, because it keeps the ADR-0011 choic
 
 - `docker/minio/Dockerfile` builds `minio` and `mc` in a Go stage and copies them into a small Alpine stage that runs as a non-root user.
 - Each tool is pinned to a release tag **and** its commit SHA; the build fetches the commit, so a moved tag cannot change the result. Both base images are pinned by digest.
-- The image has a local-only name (`pinround-minio:dev`) and compose uses `pull_policy: build` and `never`, so it is never pulled from a registry.
+- The image has a local-only name (`pinround-minio:dev`) and compose uses `pull_policy: never` (a missing image is still built), so it is never pulled from a registry.
+- Self-host production gets MinIO from the image that CI builds from the same `docker/minio` Dockerfile, scans and signs ([ADR-0030](0030-deployment-model.md)); the pipeline lands in P12. Dev keeps the local build.
 - The pins (`MINIO_RELEASE`, `MINIO_COMMIT`, `MC_RELEASE`, `MC_COMMIT`) are changed by the maintainer who owns the Docker stack, in one pull request that also bumps the base-image digests when needed. They are checked at least once per quarter and right away for a security advisory.
 
 ### Consequences
 
 - Good: no registry trust for MinIO; the build is repeatable.
 - Bad: the first build compiles Go and takes about 5 minutes; we own the updates.
+- Good: production runs a scanned, signed image, not a build on the server.
 - Neutral: SaaS uses a managed S3 service and does not run this image.
 
 ## Confirmation
 
 `make up` builds the image on a clean clone and `minio-init` creates the private bucket; the anonymous-read check returns 403.
-`tests/shell/compose-config-check.sh` checks that the compose file stays valid.
+`tests/shell/compose-config-check.sh` fails unless:
+
+- `minio`, `minio-init`, `app`, `worker` and `scheduler` have a `pull_policy` that never pulls (`never` or `build`);
+- `docker/minio/Dockerfile` has the `*_COMMIT` build args and base images pinned with `@sha256:`;
+- the compose file is valid, has every service, and each long-running service has a healthcheck.
 
 ## Pros and cons of the options
 

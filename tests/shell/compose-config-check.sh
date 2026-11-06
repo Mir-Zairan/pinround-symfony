@@ -34,4 +34,32 @@ if [ -n "$without_healthcheck" ]; then
     exit 1
 fi
 
+# Images that hold credentials or are built here must never be pulled from a registry.
+for built in app worker scheduler minio minio-init; do
+    policy=$($compose config | awk -v svc="$built" '
+        /^[a-z]/ { in_services = ($0 == "services:") }
+        in_services && /^  [a-z0-9-]+:$/ { current = substr($1, 1, length($1) - 1) }
+        in_services && current == svc && /^    pull_policy:/ { print $2 }
+    ')
+    if [ "$policy" != "never" ]; then
+        echo "compose-config-check: service '$built' needs pull_policy: never (found '${policy:-none}')" >&2
+        exit 1
+    fi
+done
+
+dockerfile=docker/minio/Dockerfile
+
+for arg in MINIO_COMMIT MC_COMMIT; do
+    if ! grep -q "^ARG $arg=" "$dockerfile"; then
+        echo "compose-config-check: $dockerfile has no pinned ARG $arg" >&2
+        exit 1
+    fi
+done
+
+unpinned=$(grep '^FROM ' "$dockerfile" | grep -v '@sha256:' || true)
+if [ -n "$unpinned" ]; then
+    echo "compose-config-check: base image not pinned by digest in $dockerfile: $unpinned" >&2
+    exit 1
+fi
+
 echo "compose-config-check: ok"
