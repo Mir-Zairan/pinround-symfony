@@ -18,16 +18,16 @@ RUN chmod +x /usr/local/bin/docker-entrypoint
 
 # Run as a non-root user. Caddy must bind 80 and 443 inside the container; the file
 # capability on the binary allows that without root (the capability is in Docker's default set).
-# The host ids may already exist in the image (macOS gid 20 is dialout), so reuse such a group and allow shared ids.
+# The host ids may already exist in the image (macOS gid 20 is dialout), so the app group may share a gid; COPY --chown=app:app needs the names.
 # Root ids (0) would make the app run as root, so they fall back to 1000.
 RUN app_uid=${APP_UID}; app_gid=${APP_GID}; \
     if [ "$app_uid" = "0" ]; then app_uid=1000; fi; \
     if [ "$app_gid" = "0" ]; then app_gid=1000; fi; \
-    if ! getent group "$app_gid" > /dev/null; then groupadd --gid "$app_gid" app; fi \
-    && useradd --non-unique --uid "$app_uid" --gid "$app_gid" --create-home --shell /bin/bash app \
+    groupadd --non-unique --gid "$app_gid" app \
+    && useradd --non-unique --uid "$app_uid" --gid app --create-home --shell /bin/bash app \
     && setcap cap_net_bind_service=+ep /usr/local/bin/frankenphp \
     && mkdir -p /data/caddy /config/caddy /app/var \
-    && chown -R "app:$app_gid" /data /config /app
+    && chown -R app:app /data /config /app
 
 ENV COMPOSER_ALLOW_SUPERUSER=0
 
