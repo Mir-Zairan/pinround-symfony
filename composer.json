@@ -26,7 +26,15 @@
         "symfony/yaml": "8.1.*"
     },
     "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "phpstan/phpstan": "^2",
+        "phpstan/phpstan-doctrine": "^2",
+        "phpstan/phpstan-phpunit": "^2",
+        "phpstan/phpstan-strict-rules": "^2",
+        "phpstan/phpstan-symfony": "^2",
         "phpunit/phpunit": "^13.4",
+        "rector/rector": "^2",
+        "roave/security-advisories": "dev-latest",
         "symfony/browser-kit": "8.1.*",
         "symfony/css-selector": "8.1.*",
         "zenstruck/foundry": "^2.15"
@@ -71,7 +79,25 @@
         "test:unit": "phpunit --testsuite unit --do-not-fail-on-empty-test-suite",
         "test:integration": "phpunit --testsuite integration --do-not-fail-on-empty-test-suite",
         "test:functional": "phpunit --testsuite functional",
+        "cs": "php-cs-fixer fix --dry-run --diff --show-progress=none",
+        "cs:fix": "php-cs-fixer fix",
+        "rector": "rector process --dry-run --no-progress-bar",
+        "phpstan": [
+            "@php bin/console cache:warmup --env=dev",
+            "phpstan analyse --memory-limit=1G"
+        ],
+        "lint": [
+            "@php bin/console lint:container",
+            "@php bin/console lint:yaml config",
+            "@php bin/console lint:twig src"
+        ],
         "qa": [
+            "@composer validate --strict",
+            "@cs",
+            "@rector",
+            "@phpstan",
+            "@lint",
+            "@composer audit",
             "@test"
         ],
         "post-install-cmd": [

@@ -14,8 +14,8 @@ final class SendTestMailCommandTest extends KernelTestCase
 {
     public function testItSendsOneMailToTheNeutralAddress(): void
     {
-        self::bootKernel();
-        $command = (new Application(self::$kernel))->find('app:mail:send-test');
+        $kernel = self::bootKernel();
+        $command = new Application($kernel)->find('app:mail:send-test');
 
         $tester = new CommandTester($command);
         $exitCode = $tester->execute([]);
@@ -23,13 +23,14 @@ final class SendTestMailCommandTest extends KernelTestCase
         self::assertSame(0, $exitCode);
         self::assertEmailCount(1);
         $email = self::getMailerMessage();
+        self::assertNotNull($email);
         self::assertEmailAddressContains($email, 'to', SendTestMailCommand::RECIPIENT);
         self::assertEmailTextBodyContains($email, 'mail from the app');
     }
 
     public function testItIsNotRegisteredInProd(): void
     {
-        $attributes = (new \ReflectionClass(SendTestMailCommand::class))->getAttributes(When::class);
+        $attributes = new \ReflectionClass(SendTestMailCommand::class)->getAttributes(When::class);
 
         $environments = array_map(static fn (\ReflectionAttribute $attribute): string => $attribute->newInstance()->env, $attributes);
         sort($environments);

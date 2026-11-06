@@ -24,7 +24,7 @@ final class WorkerRequestCountTest extends WebTestCase
 
     public function testSubscriberIsOnlyEnabledForDevAndTest(): void
     {
-        $attributes = (new \ReflectionClass(WorkerRequestCountSubscriber::class))->getAttributes(When::class);
+        $attributes = new \ReflectionClass(WorkerRequestCountSubscriber::class)->getAttributes(When::class);
 
         $environments = array_map(static fn (\ReflectionAttribute $attribute): string => $attribute->newInstance()->env, $attributes);
         sort($environments);
