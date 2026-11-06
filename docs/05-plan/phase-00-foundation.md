@@ -159,13 +159,13 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 1. Create Twig components from [the component table](../02-architecture/frontend.md#design-system-twig-components): `Button` (filled, tonal, outline, text; md/sm), `Chip` (`aria-pressed`), `SegmentedControl`, `Tag`, `AiChip`, `StatusPill` (five group colours), `Avatar`, `AvatarStack` (max 4 + "+N"), `Card`, `EmptyState`, `Toast`, `Dialog` (native `<dialog>`), `Switch` (`role="switch"`).
 2. Stimulus controllers `dialog` and `menu` (Escape, click outside, focus return).
 3. A dev-only route `/_gallery` showing every component in every state, light and dark.
-**Files:** `src/Web/UI/Component/*.php`, `templates/components/*.html.twig`, `assets/controllers/{dialog,menu}_controller.js`.
+**Files:** `src/Web/UI/Component/*.php`, `src/Web/UI/templates/components/*.html.twig`, `assets/controllers/{dialog,menu}_controller.js`, `assets/styles/components.css`, `assets/styles/gallery.css`, `config/routes/component_gallery.yaml`, `tests/e2e/components.spec.ts`.
 **Acceptance criteria:**
-- [ ] Each component renders as in the prototype ([Component classes](../04-prototype/prototype-guide.md#component-classes)).
-- [ ] `AvatarStack` with 7 people shows 4 avatars and "+3".
-- [ ] `StatusPill` for each of the five groups uses the fixed group colours ([five group colours](../00-product/ux-principles.md#the-five-group-colors)).
-- [ ] Keyboard: dialogs trap focus and give it back; menus close on Escape.
-- [ ] `/_gallery` returns 404 in prod.
+- [x] Each component renders as in the prototype ([Component classes](../04-prototype/prototype-guide.md#component-classes)). Sizes and radii are measured in `tests/e2e/gallery.spec.ts`; light and dark baselines are `tests/e2e/screenshots/gallery-*-linux.png`.
+- [x] `AvatarStack` with 7 people shows 4 avatars and "+3" (`tests/Integration/Web/NewComponentsTest.php`).
+- [x] `StatusPill` for each of the five groups uses the fixed group colours ([five group colours](../00-product/ux-principles.md#the-five-group-colors)) (`tests/Integration/Web/DesignComponentsTest.php`).
+- [x] Keyboard: dialogs trap focus and give it back; menus close on Escape (`tests/e2e/components.spec.ts`).
+- [x] `/_gallery` returns 404 in prod (`ComponentGalleryRouteTest`).
 **Tests:** component unit tests (render with props → expected HTML attributes); Playwright for dialog and menu keyboard behaviour.
 **Prototype check:** buttons, chips, tags, pills, avatars in the Main board header and Home.
 **Size:** M
@@ -282,4 +282,12 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-07 (P00.T4): a later phase fills a resolver body with `CREATE OR REPLACE FUNCTION` in a migration, using `SET ROLE pinround_resolver` and a temporary `CREATE` grant on the schema (see `Version20261106140000`). Keep the `p_` parameter names and the ids-only return columns.
 - 2026-11-07 (P00.T4): each tenant table a resolver reads opts in with `TenantTable::allowResolverRead(table, columns)`.
 - 2026-11-07 (P00.T9): tests/e2e exists with the shell spec; T9 adds the CI stage, axe on more pages, and the trace upload.
+- 2026-11-07 (P00.T6): Toast is markup only. The 3.6 s one-at-a-time timer comes with the first real toast (user decision).
+- 2026-11-07 (P00.T6): `assets/vendor` is git-ignored and restored by the composer auto-script `importmap:install`. The Docker entrypoint now also runs it when `assets/vendor` is missing.
+- 2026-11-07 (P00.T6): the gallery shows one theme at a time via `?theme=` because `data-theme` only works on `:root`.
+- 2026-11-07 (P00.T6): the PHP class for Switch is `SwitchControl` (PHP reserves `switch`); it is registered as `<twig:Switch>`.
+- 2026-11-07 (P00.T6): status pills have no coloured dot and use the tag shape, because the prototype has no pill CSS.
+- 2026-11-07 (P00.T6): the prototype's dialog CSS was not found, so the dialog is styled from `docs/04-prototype/screens/dialogs-and-popovers.md`.
+- 2026-11-07 (P00.T6): Dialog has an extra X close button beyond the Cancel button the docs describe.
+- 2026-11-07 (P00.T6): the e2e suite needs the stack running (`make e2e`).
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)
