@@ -6,7 +6,7 @@ namespace App\Tests\Integration\Tenancy;
 
 use App\SharedKernel\Application\MessageForAnotherTenantRefused;
 use App\SharedKernel\Application\TenantContext;
-use App\SharedKernel\Application\TenantSwitchRefused;
+use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\Tests\Fixtures\Messenger\InsertTenantProbeLabelLeavingTransactionOpen;
@@ -108,14 +108,31 @@ final class TenantStampedMessageTest extends KernelTestCase
     }
 
     #[Test]
-    public function withNoOrganizationSetAStampedMessageIsRefusedInsideAnOpenTransaction(): void
+    public function withNoOrganizationSetInsideAnOpenTransactionAStampedMessageRunsWithoutATenantAndSeesNoRows(): void
+    {
+        $this->connection->beginTransaction();
+
+        $envelope = $this->bus->dispatch(
+            new ListTenantProbeLabels(isReadingWithSql: true),
+            [new TenantStamp(new OrganizationId(self::ORG_A))],
+        );
+
+        self::assertSame(['labels' => [], 'orgSetting' => ''], $envelope->last(HandledStamp::class)?->getResult());
+        self::assertNull($this->tenantContext->get());
+        self::assertSame(1, $this->connection->getTransactionNestingLevel());
+        $this->connection->rollBack();
+    }
+
+    #[Test]
+    public function withNoOrganizationSetInsideAnOpenTransactionAStampedMessageFailsLoudlyOnAnOrmQuery(): void
     {
         $this->connection->beginTransaction();
 
         try {
             $this->dispatchListing(self::ORG_A);
-            self::fail('The message ran inside a transaction that never got its organization.');
-        } catch (TenantSwitchRefused) {
+            self::fail('The ORM query ran without a tenant.');
+        } catch (HandlerFailedException $failure) {
+            self::assertInstanceOf(TenantNotSet::class, $failure->getPrevious());
         }
 
         self::assertNull($this->tenantContext->get());

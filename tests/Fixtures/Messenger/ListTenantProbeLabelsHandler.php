@@ -17,15 +17,19 @@ final readonly class ListTenantProbeLabelsHandler
     }
 
     /**
-     * Loads the rows as entities, so they sit in the entity manager when the handler returns.
+     * Through the ORM it loads the rows as entities, so they sit in the entity manager when the handler returns.
      *
-     * @return array{labels: list<string>, orgSetting: mixed}
+     * @return array{labels: list<mixed>, orgSetting: mixed}
      */
     public function __invoke(ListTenantProbeLabels $message): array
     {
-        $probes = $this->entityManager->getRepository(TenantProbe::class)->findBy([], ['label' => 'ASC']);
         $sighting = [
-            'labels' => array_map(static fn (TenantProbe $probe): string => $probe->label(), $probes),
+            'labels' => $message->isReadingWithSql
+                ? $this->connection->fetchFirstColumn('SELECT label FROM zz_tenant_probe ORDER BY label')
+                : array_map(
+                    static fn (TenantProbe $probe): string => $probe->label(),
+                    $this->entityManager->getRepository(TenantProbe::class)->findBy([], ['label' => 'ASC']),
+                ),
             'orgSetting' => $this->connection->fetchOne("SELECT current_setting('app.org_id', true)"),
         ];
 

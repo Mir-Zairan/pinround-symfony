@@ -21,11 +21,13 @@ use Symfony\Component\Messenger\Middleware\StackInterface;
  * TenantMiddleware sets it for row-level security.
  *
  * - No stamp: passes the message on unchanged, under whatever organization is set (in a worker, none).
- * - Stamp, no organization set: sets the stamp's organization, passes the message on, and afterwards (also when it
- *   throws) clears the entity manager and then TenantContext, so nothing loaded for that organization stays for the
- *   next message. Refused up front with TenantSwitchRefused while a transaction is open (it would never get the
- *   organization) or the entity manager holds entities (they would be cleared). A transaction the message leaves
- *   open is rolled back; on success that throws a \LogicException, because nothing in it was saved.
+ * - Stamp, no organization set, no open transaction and no loaded entity: sets the stamp's organization, passes the
+ *   message on, and afterwards (also when it throws) clears the entity manager and then TenantContext, so nothing
+ *   loaded for that organization stays for the next message. A transaction the message leaves open is rolled back;
+ *   on success that throws a \LogicException, because nothing in it was saved.
+ * - Stamp, no organization set, but a transaction open or an entity loaded (a request without a tenant queuing a
+ *   message for a new organization): passes on without setting it. A worker sets it when the message is received;
+ *   handled here and now it runs without a tenant, so row-level security returns no rows and TenantFilter throws.
  * - Stamp with the same organization set (a dispatch inside a request or a handler): passes on and keeps it.
  * - Stamp with another organization set: MessageForAnotherTenantRefused before anything runs; never switches.
  */
@@ -47,7 +49,6 @@ final readonly class TenantStampMiddleware implements MiddlewareInterface
 
     /**
      * @throws MessageForAnotherTenantRefused when another organization is set
-     * @throws TenantSwitchRefused            when no organization is set but a transaction is open or entities are loaded
      */
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
@@ -68,7 +69,14 @@ final readonly class TenantStampMiddleware implements MiddlewareInterface
 
         // TenantContext does not ask the guard for its first organization; this middleware must, because it moves
         // back to none afterwards and that move needs no transaction and no entities from before the message.
-        $this->switchGuard->prepareSwitch();
+        // When it refuses, the message goes on without an organization: queued it gets one in the worker, handled
+        // now it fails closed.
+        try {
+            $this->switchGuard->prepareSwitch();
+        } catch (TenantSwitchRefused) {
+            return $stack->next()->handle($envelope, $stack);
+        }
+
         $this->tenantContext->set($organizationId);
 
         try {

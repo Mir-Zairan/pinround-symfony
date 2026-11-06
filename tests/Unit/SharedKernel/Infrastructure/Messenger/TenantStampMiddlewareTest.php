@@ -6,7 +6,6 @@ namespace App\Tests\Unit\SharedKernel\Infrastructure\Messenger;
 
 use App\SharedKernel\Application\MessageForAnotherTenantRefused;
 use App\SharedKernel\Application\TenantContext;
-use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware;
@@ -149,16 +148,22 @@ final class TenantStampMiddlewareTest extends TestCase
     }
 
     #[Test]
-    public function withNoOrganizationSetAStampedMessageIsRefusedWhileTheGuardRefuses(): void
+    public function withNoOrganizationSetAStampedMessagePassesOnWithoutAnOrganizationWhileTheGuardRefuses(): void
     {
         $this->switchGuard->isRefusing = true;
+        $this->isTransactionOpen = true;
+        $envelope = $this->envelopeFor(self::ORG_A);
 
-        $thrown = $this->handleCatching($this->envelopeFor(self::ORG_A));
+        $handledEnvelope = $this->middleware->handle($envelope, $this->stackWithHandler());
 
-        self::assertInstanceOf(TenantSwitchRefused::class, $thrown);
-        self::assertSame(0, $this->handlerCallCount);
+        self::assertSame($envelope, $handledEnvelope);
+        self::assertSame(1, $this->handlerCallCount);
+        self::assertNull($this->organizationSeenByHandler);
         self::assertNull($this->tenantContext->get());
+        self::assertSame(1, $this->switchGuard->switchCount);
         self::assertSame(0, $this->entityManagerClearCount);
+        self::assertSame(0, $this->rollBackCount);
+        self::assertTrue($this->isTransactionOpen);
     }
 
     #[Test]
