@@ -1,0 +1,4 @@
+#!/usr/bin/env php
+<?php
+
+$sql = 'SET LOCAL app.org_id = 1';

@@ -1,0 +1,3 @@
+<?php
+
+$sql = 'RESET app.org_id';
