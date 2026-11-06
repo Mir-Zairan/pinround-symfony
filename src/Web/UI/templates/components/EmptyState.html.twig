@@ -1,0 +1,4 @@
+<div{{ attributes.defaults({class: 'empty-state'}) }}>
+    <p>{{ this.message }}</p>
+    {% if block('action')|trim is not empty %}<div class="empty-state__action">{% block action %}{% endblock %}</div>{% endif %}
+</div>

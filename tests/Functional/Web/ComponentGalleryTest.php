@@ -17,10 +17,11 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
         // 4 variants x 2 sizes x (normal, disabled, link)
-        self::assertCount(24, $crawler->filter('main .btn'));
-        self::assertCount(8, $crawler->filter('main a.btn[href]'));
+        // plus the one action button inside the empty-state example
+        self::assertCount(25, $crawler->filter('main .btn'));
+        self::assertCount(9, $crawler->filter('main a.btn[href]'));
         self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
         self::assertCount(2, $crawler->filter('main button.btn.btn-text:not([disabled])'));
     }
@@ -46,6 +47,26 @@ final class ComponentGalleryTest extends WebTestCase
         self::assertStringContainsString('Waiting · question to Mia', $crawler->filter('main .pill-waiting')->text());
         self::assertCount(1, $crawler->filter('main button.sw[role="switch"][aria-checked="true"]'));
         self::assertCount(1, $crawler->filter('main button.sw[role="switch"][aria-checked="false"]'));
+    }
+
+    #[Test]
+    public function theGalleryShowsAvatarsStacksCardEmptyStatesAndToast(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(4, $crawler->filter('#gallery-avatar ~ .gallery-row .av'));
+        self::assertCount(2, $crawler->filter('#gallery-avatar ~ .gallery-row .av-lg'));
+        // stacks of 1, 4 and 7: 1 + 4 + 4 avatars, one "+3" item
+        self::assertCount(3, $crawler->filter('main .stack'));
+        self::assertCount(9, $crawler->filter('main .stack .av:not(.av-more)'));
+        self::assertCount(1, $crawler->filter('main .stack .av-more'));
+        self::assertSame('+3', $crawler->filter('main .stack .av-more')->text());
+        self::assertCount(1, $crawler->filter('main section.card h3'));
+        self::assertCount(2, $crawler->filter('main .empty-state'));
+        self::assertCount(1, $crawler->filter('main .empty-state a.btn'));
+        self::assertCount(1, $crawler->filter('main .toast'));
     }
 
     #[Test]

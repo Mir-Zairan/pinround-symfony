@@ -92,4 +92,48 @@
             <twig:Switch label="Quiet hours" checked />
         </div>
     </section>
+
+    {% set galleryPeople = ['Lena', 'Omar Haddad', 'Mia', 'Raj', 'Sara', 'Noor', 'Tom'] %}
+
+    <section class="gallery-section" aria-labelledby="gallery-avatar">
+        <h2 id="gallery-avatar">Avatar</h2>
+        <div class="gallery-row">
+            <twig:Avatar name="Lena" />
+            <twig:Avatar name="Omar Haddad" />
+            <twig:Avatar name="Lena" size="lg" />
+            <twig:Avatar name="Omar Haddad" size="lg" />
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-avatar-stack">
+        <h2 id="gallery-avatar-stack">Avatar stack</h2>
+        <div class="gallery-row">
+            <twig:AvatarStack :names="galleryPeople|slice(0, 1)" />
+            <twig:AvatarStack :names="galleryPeople|slice(0, 4)" />
+            <twig:AvatarStack :names="galleryPeople" />
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-card">
+        <h2 id="gallery-card">Card</h2>
+        <twig:Card tag="section">
+            <h3 class="gallery-card-heading">Acme Foods</h3>
+            <p>Project SHOP has two rounds waiting for Lena.</p>
+        </twig:Card>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-empty-state">
+        <h2 id="gallery-empty-state">Empty state</h2>
+        <twig:EmptyState message="Nothing waits on you right now." />
+        <twig:EmptyState message="No rounds yet. Start the first one.">
+            <twig:block name="action"><twig:Button variant="tonal" href="{{ path('web_home') }}">Start a round</twig:Button></twig:block>
+        </twig:EmptyState>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-toast">
+        <h2 id="gallery-toast">Toast</h2>
+        <div class="gallery-toast">
+            <twig:Toast>Round saved.</twig:Toast>
+        </div>
+    </section>
 {% endblock %}

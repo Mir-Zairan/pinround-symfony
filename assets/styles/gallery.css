@@ -21,3 +21,13 @@
   align-items: center;
   gap: 12px;
 }
+
+.gallery-toast .toast {
+  position: static;
+  transform: none;
+  display: inline-block;
+}
+
+.gallery-card-heading {
+  margin: 0 0 8px;
+}

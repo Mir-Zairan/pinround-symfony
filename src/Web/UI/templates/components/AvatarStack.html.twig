@@ -1,0 +1,6 @@
+{% if this.names is not empty %}
+<div{{ attributes.defaults({class: 'stack'}) }}>
+    {% for name in this.shownNames %}<twig:Avatar name="{{ name }}" />{% endfor %}
+    {% if this.hiddenNames is not empty %}<span class="av av-more" role="img" aria-label="{{ this.hiddenNames|length }} more: {{ this.hiddenNames|join(', ') }}">+{{ this.hiddenNames|length }}</span>{% endif %}
+</div>
+{% endif %}
