@@ -2,6 +2,10 @@
 
 {% block title %}Component gallery - pinround{% endblock %}
 
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/gallery.css') }}">
+{% endblock %}
+
 {% block main %}
     <h1>Component gallery</h1>
     <p>Add <code>?theme=light</code> or <code>?theme=dark</code> to the address to pick a theme.</p>

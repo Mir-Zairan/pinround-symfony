@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="{{ asset('styles/base.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/shell.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/components.css') }}">
+    {% block stylesheets %}{% endblock %}
     {{ importmap('app', {nonce: csp_nonce()}) }}
 </head>
 <body>

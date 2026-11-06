@@ -4,48 +4,66 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Web;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
-use Symfony\Component\Routing\Exception\ResourceNotFoundException;
+use Symfony\Component\Config\FileLocator;
+use Symfony\Component\Routing\Loader\YamlFileLoader;
 use Symfony\Component\Routing\RouterInterface;
 
+/**
+ * The gallery is a design-review page: its route exists in dev and test and nowhere else. The route files
+ * are loaded per environment, so no prod kernel (and no prod cache) is booted.
+ */
 final class ComponentGalleryRouteTest extends KernelTestCase
 {
-    #[Test]
-    public function theGalleryRouteExistsInTestEnv(): void
+    /**
+     * @return iterable<string, array{string, list<string>}>
+     */
+    public static function routeNamesPerEnvironment(): iterable
     {
-        self::bootKernel(['environment' => 'test']);
+        yield 'prod' => ['prod', []];
+        yield 'dev' => ['dev', ['web_component_gallery']];
+        yield 'test' => ['test', ['web_component_gallery']];
+    }
 
+    /**
+     * @param list<string> $expectedRouteNames
+     */
+    #[Test]
+    #[DataProvider('routeNamesPerEnvironment')]
+    public function theGalleryRouteFileDeclaresTheRouteOnlyInDevAndTest(string $environment, array $expectedRouteNames): void
+    {
+        $loader = new YamlFileLoader(new FileLocator(self::getContainer()->getParameter('kernel.project_dir').'/config/routes'), $environment);
+
+        self::assertEqualsCanonicalizing($expectedRouteNames, array_keys($loader->load('component_gallery.yaml')->all()));
+    }
+
+    #[Test]
+    public function theTestKernelRoutesTheGallery(): void
+    {
         $match = $this->router()->match('/_gallery');
 
         self::assertSame('web_component_gallery', $match['_route']);
     }
 
     #[Test]
-    public function theGalleryRouteDoesNotExistInProd(): void
+    public function theAttributeImportOfAllControllersDoesNotPickTheGalleryUp(): void
     {
-        // A fresh prod kernel: the test container is never reused for this check.
-        self::bootKernel(['environment' => 'prod', 'debug' => false]);
+        $loader = self::getContainer()->get('routing.loader');
 
-        $router = $this->router();
+        $routes = $loader->load(self::getContainer()->getParameter('kernel.project_dir').'/config/routes.yaml', 'yaml');
 
-        self::assertNull($router->getRouteCollection()->get('web_component_gallery'));
-        self::assertNotNull($router->getRouteCollection()->get('web_home'));
-        $this->expectException(ResourceNotFoundException::class);
-        $router->match('/_gallery');
-    }
-
-    protected function tearDown(): void
-    {
-        parent::tearDown();
-        self::ensureKernelShutdown();
+        self::assertNotNull($routes->get('web_home'), 'the import must find the other controllers');
+        self::assertNull($routes->get('web_component_gallery'));
+        foreach ($routes->all() as $route) {
+            self::assertNotSame('/_gallery', $route->getPath());
+        }
     }
 
     private function router(): RouterInterface
     {
-        // The prod kernel has no test.service_container, so read the public router from the kernel.
-        $router = self::$kernel?->getContainer()->get('router');
-        self::assertInstanceOf(RouterInterface::class, $router);
+        $router = self::getContainer()->get('router');
 
         return $router;
     }

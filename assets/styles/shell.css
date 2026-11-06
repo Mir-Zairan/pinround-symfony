@@ -98,43 +98,6 @@
   color: var(--on-secondary-container);
 }
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 18px;
-  border-radius: 20px;
-  border: 1px solid transparent;
-  font-weight: 600;
-  font-size: 14px;
-  letter-spacing: .01em;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.btn-tonal {
-  background: var(--secondary-container);
-  color: var(--on-secondary-container);
-}
-
-.btn-tonal:hover {
-  filter: brightness(.96);
-}
-
-.btn-tonal:disabled {
-  opacity: .38;
-  cursor: default;
-  filter: none;
-}
-
-.btn-sm {
-  height: 32px;
-  padding: 0 12px;
-  font-size: 13px;
-}
-
 .icon-btn {
   width: 40px;
   height: 40px;

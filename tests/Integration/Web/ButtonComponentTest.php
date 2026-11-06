@@ -85,11 +85,13 @@ final class ButtonComponentTest extends KernelTestCase
     }
 
     #[Test]
-    public function aDisabledLinkIsMarkedAndRemovedFromTheTabOrder(): void
+    public function aDisabledLinkHasNoHrefAndIsMarkedDisabled(): void
     {
         $html = (string) $this->renderTwigComponent(Button::class, ['href' => '/x', 'disabled' => true], content: 'Save');
 
-        self::assertStringContainsString('aria-disabled="true" tabindex="-1"', $html);
+        self::assertStringContainsString('aria-disabled="true"', $html);
+        self::assertStringNotContainsString('href', $html);
+        self::assertStringNotContainsString('tabindex', $html);
     }
 
     #[Test]
@@ -112,16 +114,24 @@ final class ButtonComponentTest extends KernelTestCase
     #[Test]
     public function anUnknownVariantFailsAtMount(): void
     {
-        $this->expectException(RuntimeError::class);
-
-        $this->renderTwigComponent(Button::class, ['variant' => 'neon'], content: 'x');
+        try {
+            $this->renderTwigComponent(Button::class, ['variant' => 'neon'], content: 'x');
+            self::fail('An unknown variant must not render.');
+        } catch (RuntimeError $error) {
+            self::assertInstanceOf(\ValueError::class, $error->getPrevious());
+            self::assertStringContainsString('ButtonVariant', $error->getMessage());
+        }
     }
 
     #[Test]
     public function anUnknownSizeFailsAtMount(): void
     {
-        $this->expectException(RuntimeError::class);
-
-        $this->renderTwigComponent(Button::class, ['size' => 'xl'], content: 'x');
+        try {
+            $this->renderTwigComponent(Button::class, ['size' => 'xl'], content: 'x');
+            self::fail('An unknown size must not render.');
+        } catch (RuntimeError $error) {
+            self::assertInstanceOf(\ValueError::class, $error->getPrevious());
+            self::assertStringContainsString('ButtonSize', $error->getMessage());
+        }
     }
 }

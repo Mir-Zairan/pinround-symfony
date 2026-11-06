@@ -31,7 +31,18 @@ final class ComponentGalleryTest extends WebTestCase
         $client = self::createClient();
         $crawler = $client->request('GET', '/_gallery?theme=dark');
 
+        self::assertResponseStatusCodeSame(200);
         self::assertSame('dark', $crawler->filter('html')->attr('data-theme'));
+    }
+
+    #[Test]
+    public function aLightThemeQueryPicksTheLightTheme(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery?theme=light');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('light', $crawler->filter('html')->attr('data-theme'));
     }
 
     #[Test]
@@ -40,6 +51,7 @@ final class ComponentGalleryTest extends WebTestCase
         $client = self::createClient();
         $crawler = $client->request('GET', '/_gallery?theme=neon');
 
+        self::assertResponseStatusCodeSame(200);
         self::assertNull($crawler->filter('html')->attr('data-theme'));
     }
 }

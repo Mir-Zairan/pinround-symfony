@@ -15,8 +15,9 @@ if [ "${APP_ENV:-dev}" = "prod" ]; then
     done
 fi
 
-# A clean clone has no vendor/ on the bind mount; install once so `make up` works unaided.
-if [ "$1" = "frankenphp" ] && [ "${APP_ENV:-dev}" = "dev" ] && [ ! -f vendor/autoload_runtime.php ]; then
+# A clean clone has no vendor/ or assets/vendor/ (the vendored JS packages) on the bind mount; install once
+# so `make up` works unaided. The composer scripts run importmap:install.
+if [ "$1" = "frankenphp" ] && [ "${APP_ENV:-dev}" = "dev" ] && { [ ! -f vendor/autoload_runtime.php ] || [ ! -d assets/vendor ]; }; then
     composer install --no-interaction --prefer-dist
 fi
 
