@@ -64,3 +64,4 @@ Rules for Claude Code sessions in pinround-symfony. Read this fully before any t
 - Update docs you changed the truth of (and their Index).
 - Write anything the next session must know in **Hand-off notes**.
 - Commit with a clear message. Do not push unless the user asks.
+- Never add `Co-Authored-By` or any other attribution lines to commits or PRs.
