@@ -22,6 +22,10 @@ final class TenantMiddlewareTest extends TestCase
     /** @var list<string> */
     private array $driverCalls = [];
 
+    private ?\Throwable $setTenantFailure = null;
+
+    private ?\Throwable $rollBackFailure = null;
+
     #[Test]
     public function afterBeginItSetsTheOrgIdAsABoundTransactionLocalParameter(): void
     {
@@ -64,6 +68,50 @@ final class TenantMiddlewareTest extends TestCase
         );
     }
 
+    #[Test]
+    public function whenSettingTheTenantFailsItRollsBackAndRethrowsTheFailure(): void
+    {
+        $this->setTenantFailure = new \RuntimeException('set_config failed');
+
+        $thrown = $this->beginWithOrgA();
+
+        self::assertSame($this->setTenantFailure, $thrown);
+        self::assertSame(
+            ['begin', "prepare SELECT set_config('app.org_id', ?, true)", 'bind 1 '.self::ORG_A.' STRING', 'execute', 'rollback'],
+            $this->driverCalls,
+        );
+    }
+
+    #[Test]
+    public function whenTheRollbackAlsoFailsTheSetTenantFailureIsStillThrown(): void
+    {
+        $this->setTenantFailure = new \RuntimeException('set_config failed');
+        $this->rollBackFailure = new \RuntimeException('rollback failed');
+
+        $thrown = $this->beginWithOrgA();
+
+        self::assertSame($this->setTenantFailure, $thrown);
+        self::assertSame(
+            ['begin', "prepare SELECT set_config('app.org_id', ?, true)", 'bind 1 '.self::ORG_A.' STRING', 'execute', 'rollback'],
+            $this->driverCalls,
+        );
+    }
+
+    private function beginWithOrgA(): ?\Throwable
+    {
+        $tenantContext = new TenantContext();
+        $tenantContext->set(new OrganizationId(self::ORG_A));
+        $connection = $this->connectThroughTheMiddleware($tenantContext);
+
+        try {
+            $connection->beginTransaction();
+        } catch (\Throwable $thrown) {
+            return $thrown;
+        }
+
+        return null;
+    }
+
     private function connectThroughTheMiddleware(TenantContext $tenantContext): DriverConnection
     {
         $statement = self::createStub(Statement::class);
@@ -73,12 +121,18 @@ final class TenantMiddlewareTest extends TestCase
         $statement->method('execute')->willReturnCallback(function (): Result {
             $this->driverCalls[] = 'execute';
 
-            return self::createStub(Result::class);
+            return null === $this->setTenantFailure ? self::createStub(Result::class) : throw $this->setTenantFailure;
         });
 
         $driverConnection = self::createStub(DriverConnection::class);
         $driverConnection->method('beginTransaction')->willReturnCallback(function (): void {
             $this->driverCalls[] = 'begin';
+        });
+        $driverConnection->method('rollBack')->willReturnCallback(function (): void {
+            $this->driverCalls[] = 'rollback';
+            if (null !== $this->rollBackFailure) {
+                throw $this->rollBackFailure;
+            }
         });
         $driverConnection->method('prepare')->willReturnCallback(function (string $sql) use ($statement): Statement {
             $this->driverCalls[] = 'prepare '.$sql;

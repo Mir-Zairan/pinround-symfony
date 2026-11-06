@@ -18,6 +18,7 @@ use Doctrine\DBAL\Driver\Middleware;
  * - The tenant must be set before the transaction begins. Changing it inside a transaction has no effect
  *   until the next one; nested transactions (savepoints) do not run it again.
  * - Without a tenant nothing is set, and the tenant_isolation policy returns no rows (fails closed).
+ * - When setting the tenant fails, the transaction is rolled back and that failure is thrown from beginTransaction().
  * - Statements outside a transaction (autocommit) never get a tenant.
  */
 #[AsMiddleware]
