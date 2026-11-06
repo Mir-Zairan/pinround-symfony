@@ -38,6 +38,7 @@
         "roave/security-advisories": "dev-latest",
         "symfony/browser-kit": "8.1.*",
         "symfony/css-selector": "8.1.*",
+        "symfony/process": "8.1.*",
         "zenstruck/foundry": "^2.15"
     },
     "config": {

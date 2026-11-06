@@ -18,6 +18,8 @@ pinround is one Symfony application split into modules with hard, checked bounda
 
 Accepted · 2026-11-06 · Deciders: Zairan Mir (lead) with the team.
 
+Superseded in part by [ADR-0032](0032-module-call-edges-follow-modules-catalogue.md): the "Allowed dependencies" diagram under "Rules" is replaced by the "Depends on" lines in `modules.md`. Everything else here still stands.
+
 ## Context and problem statement
 
 Lena's team builds pinround: tickets, rounds with screenshots and pins, pings, AI help,

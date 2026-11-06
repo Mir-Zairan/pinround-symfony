@@ -6,7 +6,6 @@ namespace App\Tests\Integration\Architecture;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Process\Process;
 
 /**
  * Documented proof that the module rules bite: the fixture's Review Application class imports
@@ -14,21 +13,32 @@ use Symfony\Component\Process\Process;
  */
 final class ModuleBoundaryViolationTest extends TestCase
 {
-    private const string FIXTURE_CONFIG = 'tests/Fixtures/Deptrac/ReviewUsesTicketingDomain/deptrac.yaml';
-
     #[Test]
     public function reviewApplicationImportingTicketingDomainFailsDeptrac(): void
     {
-        $process = new Process(
-            [\PHP_BINARY, 'vendor/bin/deptrac', 'analyse', '--config-file='.self::FIXTURE_CONFIG, '--no-progress', '--no-cache', '--fail-on-uncovered', '--report-uncovered', '--formatter=console'],
-            \dirname(__DIR__, 3),
-        );
-        $process->run();
+        $process = DeptracRunner::run('ReviewUsesTicketingDomain');
 
-        self::assertNotSame(0, $process->getExitCode(), $process->getOutput().$process->getErrorOutput());
-        self::assertStringContainsString(
-            'Review_Application on Ticketing_Domain',
-            $process->getOutput().$process->getErrorOutput(),
-        );
+        self::assertNotSame(0, $process->getExitCode(), DeptracRunner::outputOf($process));
+        self::assertStringContainsString('Review_Application on Ticketing_Domain', DeptracRunner::outputOf($process));
+    }
+
+    #[Test]
+    public function aClassInNoLayerFailsDeptracAsUncovered(): void
+    {
+        $process = DeptracRunner::run('ReviewUsesUncoveredClass');
+
+        self::assertNotSame(0, $process->getExitCode(), DeptracRunner::outputOf($process));
+        self::assertStringContainsString('Review\Helpers\Formatter', DeptracRunner::outputOf($process));
+        self::assertStringContainsString('Uncovered: 1', DeptracRunner::outputOf($process));
+    }
+
+    #[Test]
+    public function allowedDependenciesPassDeptrac(): void
+    {
+        $process = DeptracRunner::run('AllowedDependencies');
+
+        self::assertSame(0, $process->getExitCode(), DeptracRunner::outputOf($process));
+        self::assertStringContainsString('Violations: 0', DeptracRunner::outputOf($process));
+        self::assertStringContainsString('Uncovered: 0', DeptracRunner::outputOf($process));
     }
 }

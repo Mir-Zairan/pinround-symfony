@@ -9,7 +9,7 @@ This folder holds every important architecture decision for pinround, why we mad
 - [Status lifecycle](#status-lifecycle) — Proposed, Accepted, Deprecated, Superseded.
 - [Naming and format](#naming-and-format) — file names, numbering, the template.
 - [How to change a decision](#how-to-change-a-decision) — superseding instead of editing.
-- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0031.
+- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0032.
 
 ## What an ADR is
 
@@ -100,3 +100,4 @@ All ADRs below are **Accepted** on **2026-11-06** (deciders: Zairan Mir, lead, w
 | [0029](0029-observability.md) | Observability | OpenTelemetry traces and metrics, JSON logs without content, health checks, SLO alerts. |
 | [0030](0030-deployment-model.md) | Deployment model | Docker images; Compose for small orgs, managed services for SaaS; expand/contract migrations; PITR. |
 | [0031](0031-minio-built-from-pinned-source.md) | Build MinIO from pinned source | MinIO stays the store; we build `minio` and `mc` from pinned tags and commits in `docker/minio`. |
+| [0032](0032-module-call-edges-follow-modules-catalogue.md) | Module call edges follow the modules catalogue | Api calls follow the "Depends on" lines in `modules.md`; any module may listen to any module's events. Supersedes only the ADR-0002 dependency diagram. |

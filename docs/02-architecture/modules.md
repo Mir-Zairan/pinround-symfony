@@ -316,33 +316,34 @@ Rules:
 
 ## Deptrac rules
 
-`composer deptrac` runs in `composer qa` and in CI ([ADR-0028](../03-adr/0028-testing-and-quality-gates.md)). The one hand-written config is `deptrac.yaml`. It analyses `src` only and runs with `--fail-on-uncovered --report-uncovered`: a class that is outside every layer (and is not a PHP built-in) fails the run.
+`composer deptrac` runs in `composer qa` and in CI ([ADR-0028](../03-adr/0028-testing-and-quality-gates.md)). The one hand-written config is `deptrac.yaml`. It analyses `src` only and runs with `--fail-on-uncovered --report-uncovered`: a class that is outside every layer (and is not a PHP built-in) fails the run. The call edges between modules are the "Depends on" lines in the catalogue above, as decided in [ADR-0032](../03-adr/0032-module-call-edges-follow-modules-catalogue.md).
 
 **Layers.** Layers are collected by namespace regex (for example `^App\\Ticketing\\Domain\\`), not by folder.
 
-- Per module M, five layers: `M_Api`, `M_Domain`, `M_Application`, `M_Infrastructure`, `M_UI`. The modules are Identity, Organization, Workflow, Ticketing, Conversation, Review, Media, Notification, Insight, Assist, Integration, Audit, AgentApi and Web.
+- Per module M, six layers: `M_Api` (`App\M\Api\`, except `Api\Event\`), `M_Event` (`App\M\Api\Event\`), `M_Domain`, `M_Application`, `M_Infrastructure`, `M_UI`. The modules are Identity, Organization, Workflow, Ticketing, Conversation, Review, Media, Notification, Insight, Assist, Integration, Audit, AgentApi and Web.
 - `SharedKernel`: `App\SharedKernel\`.
 - `Vendor`: every class that is not `App\` and not a PHP built-in.
 - `Kernel`: `App\Kernel` only.
 
-**Rules.** D(M) is the set of modules in M's "Depends on" line in the catalogue above. Anything not listed fails the build.
+**Rules.** D(M) is the set of modules in M's "Depends on" line in the catalogue above. E is the `Event` layer of every module, including M's own. Anything not listed fails the build.
 
 | From | May depend on |
 |---|---|
 | `M_Api` | `SharedKernel` |
+| `M_Event` | `SharedKernel` |
 | `M_Domain` | `SharedKernel` |
-| `M_Application` | `M_Domain`, `M_Api`, `SharedKernel`, `D(M)_Api` |
-| `M_Infrastructure` | `M_Domain`, `M_Application`, `M_Api`, `SharedKernel`, `Vendor`, `D(M)_Api` |
+| `M_Application` | `M_Domain`, `M_Api`, `SharedKernel`, `D(M)_Api`, E |
+| `M_Infrastructure` | `M_Domain`, `M_Application`, `M_Api`, `SharedKernel`, `Vendor`, `D(M)_Api`, E |
 | `M_UI` | `M_Application`, `M_Api`, `SharedKernel`, `Vendor`, `D(M)_Api` |
 | `SharedKernel` | `Vendor` |
 | `Kernel` | `Vendor`, `SharedKernel` |
 
-- Domain and Api never get `Vendor`; Application does not either.
-- Infrastructure may use `D(M)_Api` because Messenger handlers there react to other modules' Api events.
-- Only `Api` of another module is visible from outside: no module may touch another module's Domain, Application, Infrastructure or UI.
+- Calls into another module go through `D(M)_Api` only, and only for modules in M's "Depends on" line.
+- Any module's Application and Infrastructure may use any module's event classes (E), so a module can listen to events of modules it does not call. UI may not use events.
+- Only Infrastructure and UI get `Vendor`. Api, Event, Domain and Application do not.
+- No module may touch another module's Domain, Application, Infrastructure or UI.
 
-**Tests.** `tests/Unit/Architecture/DeptracConfigTest.php` checks that every `src/` folder has its five layers, every module layer has a folder, and every layer in the ruleset exists. `tests/Integration/Architecture/ModuleBoundaryViolationTest.php` runs Deptrac on `tests/Fixtures/Deptrac/ReviewUsesTicketingDomain`, where Review's Application imports Ticketing's Domain, and asserts it fails with `Review_Application on Ticketing_Domain`. The fixture config imports the real `deptrac.yaml`; Deptrac merges the `paths` of imported files and resolves them against the importing file's folder, so `./src` points at the fixture.
-
+**Tests.** `tests/Unit/Architecture/DeptracConfigTest.php` checks that every `src/` folder has its six layers, every module layer has a folder, every layer in the ruleset exists, only Infrastructure and UI get `Vendor`, and Application and Infrastructure get every Event layer. `tests/Integration/Architecture/ModuleBoundaryViolationTest.php` runs Deptrac with the arguments of the `deptrac` composer script on three fixtures in `tests/Fixtures/Deptrac`: `ReviewUsesTicketingDomain` must fail with `Review_Application on Ticketing_Domain`, `ReviewUsesUncoveredClass` must fail as uncovered, and `AllowedDependencies` (Review Application using Ticketing Api, Audit Infrastructure using a Ticketing event) must pass. Each fixture config imports the real `deptrac.yaml`; Deptrac merges the `paths` of imported files and resolves them against the importing file's folder, so `./src` points at the fixture.
 
 ## Rules for adding a module
 

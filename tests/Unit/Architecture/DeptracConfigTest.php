@@ -10,13 +10,13 @@ use Symfony\Component\Yaml\Yaml;
 
 final class DeptracConfigTest extends TestCase
 {
-    private const array PARTS = ['Api', 'Domain', 'Application', 'Infrastructure', 'UI'];
+    private const array PARTS = ['Api', 'Event', 'Domain', 'Application', 'Infrastructure', 'UI'];
 
     /** Layers that are not module parts. */
     private const array SPECIAL_LAYERS = ['SharedKernel', 'Kernel', 'Vendor'];
 
     #[Test]
-    public function everyModuleFolderHasAllFivePartLayers(): void
+    public function everyModuleFolderHasAllSixPartLayers(): void
     {
         $layers = $this->layerNames();
 
@@ -45,7 +45,7 @@ final class DeptracConfigTest extends TestCase
 
             [$module, $part] = explode('_', $layer, 2) + [1 => ''];
             self::assertContains($module, $modules, \sprintf('Layer %s has no folder src/%s', $layer, $module));
-            self::assertContains($part, self::PARTS, \sprintf('Layer %s is not one of the five parts', $layer));
+            self::assertContains($part, self::PARTS, \sprintf('Layer %s is not one of the six parts', $layer));
         }
     }
 
@@ -63,12 +63,33 @@ final class DeptracConfigTest extends TestCase
     }
 
     #[Test]
-    public function domainAndApiLayersNeverMayDependOnVendor(): void
+    public function onlyInfrastructureAndUiLayersMayDependOnVendor(): void
     {
         foreach ($this->config()['ruleset'] as $from => $allowed) {
-            if (str_ends_with($from, '_Domain') || str_ends_with($from, '_Api')) {
+            foreach (['_Domain', '_Api', '_Event', '_Application'] as $suffix) {
+                if (!str_ends_with($from, $suffix)) {
+                    continue;
+                }
                 self::assertNotContains('Vendor', $allowed, $from.' must not depend on Vendor');
             }
+        }
+    }
+
+    #[Test]
+    public function applicationAndInfrastructureLayersMayListenToEveryModulesEvents(): void
+    {
+        $eventLayers = array_values(array_filter($this->layerNames(), static fn (string $name): bool => str_ends_with($name, '_Event')));
+        self::assertCount(\count($this->moduleFolders()), $eventLayers);
+
+        foreach ($this->moduleFolders() as $module) {
+            foreach (['Application', 'Infrastructure'] as $part) {
+                self::assertEqualsCanonicalizing(
+                    $eventLayers,
+                    array_values(array_filter($this->config()['ruleset'][$module.'_'.$part], static fn (string $name): bool => str_ends_with($name, '_Event'))),
+                    \sprintf('%s_%s must be allowed to use every Event layer', $module, $part),
+                );
+            }
+            self::assertSame(['SharedKernel'], $this->config()['ruleset'][$module.'_Event']);
         }
     }
 
