@@ -10,7 +10,7 @@ What we test, with which tools, and what "done" means for any task.
 - [Tools](#tools) — PHPUnit, Foundry, Playwright, PHPStan, Deptrac, k6, axe and more.
 - [Special suites](#special-suites) — tenant isolation, voters, query counts, prompts, MCP contracts, log leaks.
 - [Fixtures and test data](#fixtures-and-test-data) — neutral data only.
-- [CI pipeline](#ci-pipeline) — stages and time budget.
+- [CI pipeline](#ci-pipeline) — the five CI jobs, what each runs and its timeout.
 - [Definition of done for any task](#definition-of-done-for-any-task) — the checklist.
 
 ## Why tests are part of every task
@@ -91,17 +91,19 @@ See [ADR-0028](../03-adr/0028-testing-and-quality-gates.md).
 
 ## CI pipeline
 
-GitHub Actions, on every push and pull request:
+GitHub Actions workflow `CI` (`.github/workflows/ci.yml`) runs on every push and on pull requests to `main`. The five jobs run in parallel. Their ids are the names branch protection requires, so do not rename them. PHP 8.5 comes from `shivammathur/setup-php` on the runner, with the extensions of the Docker image (pdo_pgsql, intl, zip, apcu, redis). Every action is pinned to a commit SHA, the workflow uses no secrets, and a newer run on the same ref cancels the older one.
 
-| Stage | Runs | Time budget |
-|---|---|---|
-| 1. Static | composer validate, CS check, PHPStan, Deptrac, composer audit, lint Twig/YAML/container | ≤ 3 min |
-| 2. Unit | PHPUnit unit suite | ≤ 1 min |
-| 3. Integration + functional | PostgreSQL 18 + Valkey services; migrations; isolation, voter, query-count suites | ≤ 6 min |
-| 4. E2E | Docker stack, Playwright key journeys + axe | ≤ 8 min |
-| 5. Build | Image build, scan, SBOM (main branch) | ≤ 5 min |
+| Job id | Runs | Timeout (job limit) | Target budget |
+|---|---|---|---|
+| `static` | `composer validate --strict`, `composer cs`, `composer rector`, `composer phpstan`, `composer deptrac`, `composer lint` (container, YAML, Twig), `composer audit`: the same commands as `composer qa` minus the tests | 5 min | ≤ 3 min |
+| `unit` | `composer test:unit` | 3 min | ≤ 1 min |
+| `integration` | Service containers `postgres:18.6` and `valkey/valkey:8.1.4` (same tags as `compose.yaml`) with health checks; `composer test:integration`, then `composer test:functional` | 8 min | ≤ 6 min |
+| `build` | `docker build --target prod` with the GitHub Actions layer cache (no push), then `sh tests/shell/compose-config-check.sh` | 6 min | ≤ 5 min |
+| `e2e` | Stub: prints that the Playwright journeys arrive in P00.T9. It runs on pull requests only; on a push it is skipped, which counts as passing for branch protection | 2 min | ≤ 8 min once real (Docker stack, Playwright key journeys + axe) |
 
-Total target under 15 minutes with stages run in parallel where possible. A failed stage blocks the merge.
+Not in CI yet: migrations and isolation suites (no migrations exist), image scan and SBOM (planned for the main branch).
+
+Total target under 15 minutes. A failed job blocks the merge.
 
 Key e2e journeys (grow phase by phase): log in and see Home; report a problem with a screenshot and pins; lead checks a new ticket; developer starts work, sends to review; reviewer approves; tester passes; ask a question and answer it from My reports; draft round shared on hand-off.
 

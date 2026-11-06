@@ -1,0 +1,146 @@
+name: CI
+
+# Job ids are required status checks in branch protection: do not rename them.
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPOSER_NO_INTERACTION: "1"
+
+jobs:
+  # Same commands as `composer qa`, minus the tests.
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.5"
+          extensions: pdo_pgsql, intl, zip, apcu, redis
+          coverage: none
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
+      - run: composer install --prefer-dist --no-progress --no-interaction
+      - run: composer validate --strict
+      - run: composer cs
+      - run: composer rector
+      - run: composer phpstan
+      - run: composer deptrac
+      - run: composer lint
+      - run: composer audit
+
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.5"
+          extensions: pdo_pgsql, intl, zip, apcu, redis
+          coverage: none
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
+      - run: composer install --prefer-dist --no-progress --no-interaction
+      - run: composer test:unit
+
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    # Images match compose.yaml. Real environment variables beat .env.test, whose
+    # DATABASE_URL points at the compose host name "postgres".
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: pinround
+          POSTGRES_PASSWORD: pinround
+          POSTGRES_DB: pinround
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pinround -d pinround"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      valkey:
+        image: valkey/valkey:8.1.4
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://pinround:pinround@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
+      REDIS_CACHE_DSN: redis://127.0.0.1:6379
+      MESSENGER_TRANSPORT_DSN: in-memory://
+      MAILER_DSN: null://null
+      DEFAULT_URI: http://localhost
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.5"
+          extensions: pdo_pgsql, intl, zip, apcu, redis
+          coverage: none
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
+      - run: composer install --prefer-dist --no-progress --no-interaction
+      - run: composer test:integration
+      - run: composer test:functional
+
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: prod
+          push: false
+          build-args: |
+            APP_UID=1000
+            APP_GID=1000
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: sh tests/shell/compose-config-check.sh
+
+  # Stub until the Playwright journeys arrive in P00.T9. It runs on pull requests only;
+  # on a push the job is skipped, which branch protection counts as passing.
+  e2e:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: echo "Playwright journeys arrive in P00.T9; nothing to run yet."
