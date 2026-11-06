@@ -269,4 +269,5 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T3): DBAL quirk: a failed nested savepoint leaves the nesting level one too high (not fixed; DBAL's own behaviour).
 - 2026-11-06 (P00.T3): `pinround_retention` has no test connection. The BYPASSRLS path is stood in by disabling RLS through the migrator in tests.
 - 2026-11-06 (P00.T3): CI has not yet run on GitHub for this branch (`psql` on the ubuntu-24.04 runner unverified).
+- 2026-11-06 (P00.T3): step 3 says the filter adds `organization_id = :org`. As built, the filter reads the transaction's setting (`NULLIF(current_setting('app.org_id', true), '')::uuid`, the `TenantSetting` constant) instead of binding `:org`, so all organizations share one query-cache entry. Its only parameter is the `is_tenant_set` flag.
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)
