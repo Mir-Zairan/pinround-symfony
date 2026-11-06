@@ -72,7 +72,7 @@ final class AssetPipelineTest extends KernelTestCase
     public function theEntrypointDoesNotImportStylesheets(): void
     {
         // A CSS import turns into a data: URL in the importmap, which the CSP forbids.
-        self::assertDoesNotMatchRegularExpression('/\bimport\b/', $this->stripComments($this->contentsOf('app.js')));
+        self::assertDoesNotMatchRegularExpression('/\bimport\b[^;]*\.css[\'"]/', $this->stripComments($this->contentsOf('app.js')));
     }
 
     private function assetMapper(): AssetMapperInterface

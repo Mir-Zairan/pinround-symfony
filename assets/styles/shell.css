@@ -34,6 +34,40 @@
   color: inherit;
 }
 
+.site-header__spacer {
+  flex: 1;
+}
+
+.logo__mark {
+  fill: var(--primary);
+}
+
+.logo__dot {
+  fill: var(--on-primary);
+}
+
+.logo__stem {
+  stroke: var(--on-primary);
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 40;
+  padding: 10px 16px;
+  border-radius: 20px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
 .nav {
   height: 40px;
   padding: 0 14px;

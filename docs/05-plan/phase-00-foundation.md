@@ -143,7 +143,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 4. `src/Web/UI/templates/base.html.twig`: header (logo "pinround", nav placeholder, "Report a problem" button placeholder, bell placeholder, avatar placeholder), one `<main>`, toast region (`role="status"`, `aria-live="polite"`), dialog root.
 5. Focus styles (`:focus-visible` 2 px outline), reduced motion, 360 px layout without horizontal scroll.
 6. CSP nonce helper for any `<script>` tag; no inline handlers.
-**Files:** `assets/styles/*.css`, `assets/fonts/`, `importmap.php`, `src/Web/UI/templates/base.html.twig`.
+**Files:** `assets/styles/*.css`, `assets/fonts/`, `importmap.php`, `src/Web/UI/templates/base.html.twig`, `src/Web/Infrastructure/Security/CspNonce.php`.
 **Acceptance criteria:**
 - [ ] Token names and values match the prototype in light and dark mode (diff check against the guide).
 - [ ] The page passes an axe check with zero serious issues.
@@ -241,8 +241,9 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - `aud_event` is the real audit table; P11 adds UI, export and retention on top of it.
 - 2026-11-06 (P00.T1): ADR-0008 says `max_requests` 500, but FrankenPHP 1.13.5 has no such directive. Workers restart through the Symfony Runtime's `FRANKENPHP_LOOP_MAX=500`.
 - 2026-11-06 (P00.T5): the prod image must run `asset-map:compile`. Caddy already sends `Cache-Control: public, max-age=31536000, immutable` for `/assets/*`.
-- 2026-11-07 (P00.T5): `--on-error` (light #ffffff, dark #690005) and the 12px bell badge differ from the prototype, for contrast on the dark `--error` and for minimum text size. `DesignTokensTest` lists `--on-error` as a named extra beyond the guide's table.
-- 2026-11-07 (P00.T5): `base.html.twig` links `tokens.css`, `fonts.css`, `base.css` and `shell.css` directly with `asset()` tags; `app.js` does not import CSS. A CSS import in JS becomes a `data:` URL in the importmap, so the CSP needs no `data:` or `'strict-dynamic'` for styles. `importmap_polyfill` is off so no CDN script loads.
+- 2026-11-07 (P00.T5): `--on-error` (light #ffffff, dark #690005) and the bell badge (12px text, 20px box with radius 10 instead of 18px) differ from the prototype, for contrast on the dark `--error` and for minimum text size. `DesignTokensTest` lists `--on-error` as a named extra beyond the guide's table.
+- 2026-11-07 (P00.T5): `base.html.twig` links `tokens.css`, `fonts.css`, `base.css` and `shell.css` directly with `asset()` tags; `app.js` does not import CSS. A CSS import in JS becomes a `data:` URL in the importmap, so the CSP needs no `data:` or `'strict-dynamic'` for styles. `importmap_polyfill` is off so no CDN script loads; `HomePageShellTest` fails if a remote script or link appears.
+- 2026-11-07 (P00.T5): the header button reads "Report a problem" (FR text, functional-requirements.md) where the prototype says "New report". The sticky header can wrap to two rows (about 105px), so `base.css` defines `--header-height-max` (116px) for `scroll-padding-top`.
 - 2026-11-06 (P00.T8): turn the Caddy admin API off in prod and point the image `HEALTHCHECK` at the app health route.
 - 2026-11-06 (P00.T3): the first migration installs trusted extensions, so `pinround_migrator` needs `CREATE` on the database (or a superuser bootstrap creates them). Test that migration as that role. Its `down()` is irreversible on purpose.
 - 2026-11-06 (P00.T7): `src/SharedKernel/Infrastructure/Scheduler/DefaultSchedule.php` is an empty placeholder so the scheduler service starts. Modules add jobs with `#[AsCronTask]` or `#[AsPeriodicTask]`.

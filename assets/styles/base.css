@@ -5,8 +5,9 @@
 }
 
 html {
-  /* Larger than the sticky header (64px, more when it wraps) so focus is never hidden under it. */
-  scroll-padding-top: 96px;
+  /* Tallest sticky header: two wrapped rows at 360px or 200% zoom (8 + 40 + 8 + 40 + 8 + 1 = 105px), rounded up. */
+  --header-height-max: 116px;
+  scroll-padding-top: var(--header-height-max);
 }
 
 body {

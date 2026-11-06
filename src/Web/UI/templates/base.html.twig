@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en"{% if theme is defined and theme in ['light', 'dark'] %} data-theme="{{ theme }}"{% endif %}>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>{% block title %}pinround{% endblock %}</title>
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="{{ asset('fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2') }}">
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="{{ asset('fonts/atkinson-hyperlegible-mono-latin-wght-normal.woff2') }}">
+    <link rel="stylesheet" href="{{ asset('styles/tokens.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/fonts.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/base.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/shell.css') }}">
+    {{ importmap('app', {nonce: csp_nonce()}) }}
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+    <div class="app">
+        <header class="site-header">
+            <div class="site-header__inner">
+                <a class="logo" href="{{ path('web_home') }}">
+                    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+                        <rect class="logo__mark" x="1" y="1" width="24" height="24" rx="7"/>
+                        <circle class="logo__dot" cx="13" cy="11.5" r="4.5"/>
+                        <path class="logo__stem" d="M13 16v5" stroke-width="2.2" stroke-linecap="round"/>
+                    </svg>
+                    pinround
+                </a>
+                <nav aria-label="Main">
+                    <a class="nav" href="{{ path('web_home') }}"{% if app.current_route == 'web_home' %} aria-current="page"{% endif %}>Home</a>
+                </nav>
+                <div class="site-header__spacer"></div>
+                {# TODO(P01): wire the report button, the bell and the avatar once users and pings exist. #}
+                <button type="button" class="btn btn-tonal btn-sm">Report a problem</button>
+                <button type="button" class="icon-btn" aria-label="Pings">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                    </svg>
+                </button>
+                <span class="site-header__avatar" aria-hidden="true"></span>
+            </div>
+        </header>
+        <main id="main" class="page">{% block main %}{% endblock %}</main>
+        <div class="toast-region" role="status" aria-live="polite"></div>
+        <div id="dialog-root"></div>
+    </div>
+</body>
+</html>
