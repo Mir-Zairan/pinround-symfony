@@ -6,6 +6,8 @@ x-app-image: &app-image
       APP_UID: ${APP_UID:-1000}
       APP_GID: ${APP_GID:-1000}
   image: pinround-app:dev
+  # Local-only name: never pull it from a registry, where another owner could publish the same name.
+  pull_policy: build
 
 # This file is dev-only. The placeholders below keep a plain `docker compose up` working
 # without the Makefile's --env-file flags; the prod image refuses change-me keys.
@@ -97,7 +99,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-pinround}
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -108,7 +109,8 @@ services:
   valkey-state:
     image: valkey/valkey:8.1.4
     restart: unless-stopped
-    command: ["valkey-server", "--maxmemory-policy", "noeviction", "--appendonly", "yes", "--appendfsync", "everysec"]
+    # The cap keeps small machines safe; noeviction makes writes fail at the cap instead of dropping sessions or jobs.
+    command: ["valkey-server", "--maxmemory-policy", "noeviction", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "256mb"]
     volumes:
       - valkey_state_data:/data
     healthcheck:
@@ -130,7 +132,8 @@ services:
   minio:
     build:
       context: docker/minio
-    image: pinround/minio:2025-10-15
+    image: pinround-minio:dev
+    pull_policy: build
     restart: unless-stopped
     environment: *minio-credentials
     volumes:
@@ -146,7 +149,9 @@ services:
       start_period: 10s
 
   minio-init:
-    image: pinround/minio:2025-10-15
+    image: pinround-minio:dev
+    # Built by the minio service above; it holds the root credentials, so it must never come from a registry.
+    pull_policy: never
     depends_on:
       minio:
         condition: service_healthy

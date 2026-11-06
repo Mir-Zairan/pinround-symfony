@@ -12,7 +12,7 @@ use Symfony\Component\DependencyInjection\Attribute\When;
 
 final class SendTestMailCommandTest extends KernelTestCase
 {
-    public function testItQueuesOneMailToTheNeutralAddress(): void
+    public function testItSendsOneMailToTheNeutralAddress(): void
     {
         self::bootKernel();
         $command = (new Application(self::$kernel))->find('app:mail:send-test');

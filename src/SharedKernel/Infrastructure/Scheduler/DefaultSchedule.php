@@ -9,7 +9,8 @@ use Symfony\Component\Scheduler\Schedule;
 use Symfony\Component\Scheduler\ScheduleProviderInterface;
 
 /**
- * Empty on purpose: the scheduler service needs a `default` schedule to start; P00.T7 adds the real recurring jobs.
+ * Empty on purpose: the scheduler service needs a `default` schedule to start.
+ * Modules add recurring jobs with #[AsCronTask] or #[AsPeriodicTask] on their own handlers, never by editing this class.
  */
 #[AsSchedule('default')]
 final class DefaultSchedule implements ScheduleProviderInterface

@@ -1,18 +1,37 @@
 #!/bin/sh
-# Fails when compose.yaml is invalid or one of the eight services is missing.
+# Fails when compose.yaml is invalid, a service is missing, or a long-running service has no healthcheck.
+# Only POSIX tools are used, so CI needs nothing beyond docker compose.
 set -eu
 
 cd "$(dirname "$0")/../.."
 
-docker compose --env-file .env --env-file .env.dev config --quiet
+compose="docker compose --env-file .env --env-file .env.dev"
 
-services=$(docker compose --env-file .env --env-file .env.dev config --services)
+$compose config --quiet
 
-for expected in app worker scheduler postgres valkey-state valkey-cache minio mailpit; do
+services=$($compose config --services)
+
+for expected in app worker scheduler postgres valkey-state valkey-cache minio minio-init mailpit; do
     if ! printf '%s\n' "$services" | grep -qx "$expected"; then
         echo "compose-config-check: service '$expected' is missing from compose.yaml" >&2
         exit 1
     fi
 done
+
+# In the normalised `config` output, services sit at two spaces and their keys at four.
+without_healthcheck=$($compose config | awk '
+    /^[a-z]/ { in_services = ($0 == "services:") }
+    in_services && /^  [a-z0-9-]+:$/ { if (name != "" && !has_check) print name; name = substr($1, 1, length($1) - 1); has_check = 0 }
+    in_services && /^    healthcheck:/ { has_check = 1 }
+    END { if (name != "" && !has_check) print name }
+')
+
+# minio-init is a one-shot that exits 0, so it has no healthcheck by design.
+without_healthcheck=$(printf '%s\n' "$without_healthcheck" | grep -vx 'minio-init' || true)
+
+if [ -n "$without_healthcheck" ]; then
+    echo "compose-config-check: no healthcheck for: $without_healthcheck" >&2
+    exit 1
+fi
 
 echo "compose-config-check: ok"

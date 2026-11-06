@@ -57,6 +57,7 @@ RUN composer dump-autoload --no-dev --classmap-authoritative \
     && DATABASE_URL="postgresql://build:build@localhost:5432/build?serverVersion=18" \
        MAILER_DSN="null://null" \
        MESSENGER_TRANSPORT_DSN="in-memory://" \
+       REDIS_CACHE_DSN="redis://localhost:6379" \
        DEFAULT_URI="http://localhost" \
        composer run-script --no-dev post-install-cmd \
     && chmod +x bin/console
