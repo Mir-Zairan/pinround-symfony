@@ -145,10 +145,10 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 6. CSP nonce helper for any `<script>` tag; no inline handlers.
 **Files:** `assets/styles/*.css`, `assets/fonts/`, `importmap.php`, `src/Web/UI/templates/base.html.twig`, `src/Web/Infrastructure/Security/CspNonce.php`.
 **Acceptance criteria:**
-- [ ] Token names and values match the prototype in light and dark mode (diff check against the guide).
-- [ ] The page passes an axe check with zero serious issues.
-- [ ] At 360 px width there is no horizontal scroll.
-- [ ] No request goes to a third-party host (fonts are local).
+- [x] Token names and values match the prototype in light and dark mode (diff check against the guide).
+- [x] The page passes an axe check with zero serious issues.
+- [x] At 360 px width there is no horizontal scroll.
+- [x] No request goes to a third-party host (fonts are local).
 **Tests:** Playwright screenshot of the shell in light and dark; axe check.
 **Prototype check:** Main board header and colours ([Global layout](../04-prototype/prototype-guide.md#global-layout)): logo, header height, primary colour, surface colours.
 **Size:** M
