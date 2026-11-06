@@ -28,6 +28,11 @@
   display: inline-block;
 }
 
+.gallery-menu-trigger {
+  font-size: 18px;
+  line-height: 1;
+}
+
 .gallery-card-heading {
   margin: 0 0 8px;
 }

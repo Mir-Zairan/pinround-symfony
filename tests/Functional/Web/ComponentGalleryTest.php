@@ -17,13 +17,13 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
         // 4 variants x 2 sizes x (normal, disabled, link)
-        // plus the one action button inside the empty-state example
-        self::assertCount(25, $crawler->filter('main .btn'));
+        // plus the one action button inside the empty-state example and the dialog's trigger, Cancel and Confirm
+        self::assertCount(28, $crawler->filter('main .btn'));
         self::assertCount(9, $crawler->filter('main a.btn[href]'));
         self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
-        self::assertCount(2, $crawler->filter('main button.btn.btn-text:not([disabled])'));
+        self::assertCount(3, $crawler->filter('main button.btn.btn-text:not([disabled])'));
     }
 
     #[Test]
@@ -67,6 +67,20 @@ final class ComponentGalleryTest extends WebTestCase
         self::assertCount(2, $crawler->filter('main .empty-state'));
         self::assertCount(1, $crawler->filter('main .empty-state a.btn'));
         self::assertCount(1, $crawler->filter('main .toast'));
+    }
+
+    #[Test]
+    public function theGalleryShowsADialogDemoAndAMenuDemo(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Open dialog', $crawler->filter('main [data-controller="dialog"] > button[data-action="dialog#open"]')->text());
+        self::assertSame(['Cancel', 'Confirm'], $crawler->filter('main dialog .dialog__actions .btn')->each(static fn ($button): string => $button->text()));
+        self::assertCount(1, $crawler->filter('main button[aria-haspopup="menu"][aria-expanded="false"][aria-controls="gallery-menu-list"]'));
+        self::assertCount(1, $crawler->filter('main #gallery-menu-list[role="menu"][hidden]'));
+        self::assertCount(3, $crawler->filter('main #gallery-menu-list [role="menuitem"]'));
     }
 
     #[Test]

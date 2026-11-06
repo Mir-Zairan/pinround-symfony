@@ -136,4 +136,34 @@
             <twig:Toast>Round saved.</twig:Toast>
         </div>
     </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-dialog">
+        <h2 id="gallery-dialog">Dialog</h2>
+        <div class="gallery-row">
+            <twig:Dialog id="gallery-dialog-demo" title="Share this round?">
+                <twig:block name="trigger"><twig:Button variant="tonal" data-action="dialog#open">Open dialog</twig:Button></twig:block>
+                <twig:block name="content"><p>Lena and Omar can see it once you share.</p></twig:block>
+                <twig:block name="actions">
+                    <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+                    <twig:Button variant="filled" data-action="dialog#close">Confirm</twig:Button>
+                </twig:block>
+            </twig:Dialog>
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-menu">
+        <h2 id="gallery-menu">Menu</h2>
+        <div class="gallery-row">
+            <div class="menu" {{ stimulus_controller('menu') }}>
+                <button type="button" class="icon-btn gallery-menu-trigger" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="gallery-menu-list"
+                    {{ stimulus_target('menu', 'trigger') }} data-action="menu#toggle keydown->menu#openFromKey click@window->menu#closeOnOutsideClick">⋯</button>
+                <div id="gallery-menu-list" class="menu__list" role="menu" aria-label="More actions" hidden
+                    {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#navigate click->menu#closeOnSelect">
+                    {% for menuLabel in ['Copy link', 'Give it to…', 'Archive'] %}
+                        <button type="button" class="menu__item" role="menuitem" tabindex="-1" {{ stimulus_target('menu', 'item') }}>{{ menuLabel }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </section>
 {% endblock %}
