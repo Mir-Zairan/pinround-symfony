@@ -69,7 +69,7 @@ Unchanged: Review, Conversation, Assist, Integration and Media.
 
 ## Confirmation
 
-`deptrac.yaml` has the layers `<Module>_Api`, `<Module>_Event`, `<Module>_Domain`, `<Module>_Application`, `<Module>_Infrastructure` and `<Module>_UI`, and `composer deptrac` fails on any other edge or on an uncovered class. `tests/Unit/Architecture/DeptracConfigTest.php` checks the config shape. `tests/Integration/Architecture/ModuleBoundaryViolationTest.php` runs Deptrac on fixtures: a forbidden edge, an uncovered class, and the allowed Api and event edges.
+`deptrac.yaml` has the layers `<Module>_Api`, `<Module>_Event`, `<Module>_Domain`, `<Module>_Application`, `<Module>_Infrastructure` and `<Module>_UI`, and `composer deptrac` fails on any other edge or on an uncovered class. `tests/Unit/Architecture/DeptracConfigTest.php` checks the config shape. `tests/Integration/Architecture/ModuleBoundaryViolationTest.php` runs Deptrac on four fixtures: a forbidden Domain edge, an uncovered class, an Api call to a module not on the caller's "Depends on" line, and the allowed Api and event edges.
 
 ## Pros and cons of the options
 
