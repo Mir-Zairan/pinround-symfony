@@ -254,8 +254,8 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 ### Audit (`aud_`)
 
 - **Story:** Sara wants to know who turned off the lead check last week. The activity log shows the person, the time and the old and new value.
-- **Owns:** `aud_event` (append-only, partitioned by month), `aud_export`.
-- **Api:** `AuditLog::record(AuditEntry)` (for actions that have no domain event, for example an MCP call or an export download).
+- **Owns:** `aud_event` (append-only, partitioned by month; P00.T7), `aud_export` (P11).
+- **Api:** `AuditLog::record(AuditEntry)` (for actions that have no domain event, for example an MCP call or an export download). `AuditEntry` is built with `byUser`, `byToken` or `bySystem` (`ActorKind`); `record` writes in the caller's transaction and throws `AuditEntryForAnotherTenantRefused` for an entry of another organization than `TenantContext`'s. Implemented by `Infrastructure\DbalAuditLog`.
 - **Consumes:** admin, settings, role, token, login, AI-policy, export and ticket-move events.
 - **Depends on:** SharedKernel only.
 - **ADRs:** [0026](../03-adr/0026-audit-log.md).

@@ -12,6 +12,10 @@ doctrine:
         # Closes the connection when the outermost transaction cannot begin, so DBAL never counts a transaction the database does not have.
         # A failed nested savepoint is not covered: DBAL's nesting level stays one too high (DBAL's own behaviour).
         wrapper_class: &connection_class App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection
+        # Tables no entity maps, built by hand-written migrations, that doctrine:migrations:diff would otherwise drop:
+        # processed_message, and aud_event with its monthly partitions aud_event_YYYYMM (data-model.md, Partitions and
+        # retention). The Messenger tables stay visible: Messenger adds them to the expected schema, so diff checks them.
+        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|aud_event(?:_\d{6})?)$)~'
 
         profiling_collect_backtrace: '%kernel.debug%'
     orm:
@@ -46,6 +50,7 @@ when@dev:
                     server_version: '18'
                     options: *pgsql_options
                     wrapper_class: *connection_class
+                    schema_filter: *schema_filter
 
 when@test:
     doctrine:
@@ -61,6 +66,7 @@ when@test:
                     server_version: '18'
                     options: *pgsql_options
                     wrapper_class: *connection_class
+                    schema_filter: *schema_filter
                     dbname_suffix: '_test%env(default::TEST_TOKEN)%'
                 # Test-only: proves what pinround_readonly is refused (for example the resolver functions).
                 readonly:

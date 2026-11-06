@@ -6,6 +6,8 @@ namespace App\Tests\Integration\Tenancy;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Schema\ComparatorConfig;
+use Doctrine\DBAL\Schema\Schema;
+use Doctrine\Migrations\Metadata\Storage\TableMetadataStorageConfiguration;
 use Doctrine\Migrations\Provider\OrmSchemaProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -216,6 +218,79 @@ final class DatabaseRolesTest extends KernelTestCase
             ['CREATE INDEX processed_message_processed_at_idx ON public.processed_message USING btree (processed_at)'],
             $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'processed_message' AND indexname <> 'processed_message_pkey'"),
         );
+    }
+
+    /**
+     * Append-only for the app; support reads it under row-level security. Grants on the parent only, so no role can
+     * read a partition directly and skip the parent's policy (ADR-0026, Version20261107170000).
+     */
+    #[Test]
+    public function theAuditParentAloneHasGrantsAndTheAppMayOnlyReadAndAdd(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_readonly SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'aud_event'),
+        );
+        /** @var list<string> $partitions */
+        $partitions = $connection->fetchFirstColumn("SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'public.aud_event'::regclass");
+        self::assertCount(14, $partitions);
+        foreach ($partitions as $partition) {
+            self::assertSame([], $this->grantsToOthersThanTheOwner($connection, $partition), $partition);
+        }
+    }
+
+    /** The tables no entity maps; the diff must neither drop them nor hide a table that is mapped. */
+    #[Test]
+    public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
+    {
+        $hidden = ['processed_message', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe'];
+
+        foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
+            $connection = self::getContainer()->get($connectionId);
+            self::assertInstanceOf(Connection::class, $connection);
+            $isKept = $connection->getConfiguration()->getSchemaAssetsFilter();
+
+            self::assertSame([], array_values(array_filter($hidden, static fn (string $table): bool => (bool) $isKept($table))), $connectionId);
+            self::assertSame($kept, array_values(array_filter($kept, static fn (string $table): bool => (bool) $isKept($table))), $connectionId);
+        }
+    }
+
+    /**
+     * What doctrine:migrations:diff runs (DiffGenerator: the filtered database against the filtered ORM schema, both
+     * ways), so a new hand-written table is either mapped or added to the schema_filter. The test-only zz_ entities have
+     * no migration and are left out, and so is the migrations' own table, which the bundle hides only while one of its
+     * commands runs.
+     */
+    #[Test]
+    public function doctrineMigrationsDiffFindsNoChanges(): void
+    {
+        $migrations = self::getContainer()->get('doctrine.migrations.dependency_factory');
+        $migratorConnection = $migrations->getConnection();
+        $schemaManager = $migratorConnection->createSchemaManager();
+        $isKept = $migratorConnection->getConfiguration()->getSchemaAssetsFilter();
+        $metadataStorage = $migrations->getConfiguration()->getMetadataStorageConfiguration();
+        self::assertInstanceOf(TableMetadataStorageConfiguration::class, $metadataStorage);
+        $migrationsTable = $metadataStorage->getTableName();
+        $withoutHiddenTables = static function (Schema $schema) use ($isKept, $migrationsTable): Schema {
+            foreach ($schema->getTables() as $table) {
+                $name = $table->getObjectName()->toString();
+                if (!(bool) $isKept($name) || str_starts_with($name, 'zz_') || $migrationsTable === $name) {
+                    $schema = $schema->edit()->dropTable($table->getObjectName())->create();
+                }
+            }
+
+            return $schema;
+        };
+        $migratedSchema = $withoutHiddenTables($schemaManager->introspectSchema());
+        $expectedSchema = $withoutHiddenTables($migrations->getSchemaProvider()->createSchema());
+        $comparator = $schemaManager->createComparator(new ComparatorConfig()->withReportModifiedIndexes(false));
+        $platform = $migratorConnection->getDatabasePlatform();
+
+        self::assertSame([], $platform->getAlterSchemaSQL($comparator->compareSchemas($migratedSchema, $expectedSchema)));
+        self::assertSame([], $platform->getAlterSchemaSQL($comparator->compareSchemas($expectedSchema, $migratedSchema)));
     }
 
     /** What doctrine:migrations:diff compares, limited to the Messenger tables: the migration built them as Messenger would. */
