@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down sh logs test qa migrate seed
+.PHONY: help up down sh logs test qa migrate seed check-compose
 
 # .env.dev holds the dev Mercure keys; .env.local is git-ignored and overrides both (for example HTTP_PORT); later files win.
 ENV_FILES := --env-file .env --env-file .env.dev $(if $(wildcard .env.local),--env-file .env.local)
@@ -29,6 +29,9 @@ qa: ## Run every quality gate in the app container
 
 migrate: ## Run the database migrations
 	$(COMPOSE) exec app bin/console doctrine:migrations:migrate --no-interaction
+
+check-compose: ## Validate compose.yaml and the service list
+	sh tests/shell/compose-config-check.sh
 
 seed: ## Load demo data (empty until P01)
 	@echo "Nothing to seed yet: demo data arrives in P01."
