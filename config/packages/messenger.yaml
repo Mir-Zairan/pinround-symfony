@@ -7,6 +7,8 @@ framework:
             # it there, and TenantStampMiddleware directly before doctrine_transaction, so TenantContext is filled before
             # BEGIN (ADR-0005). MessengerBusMiddlewareTest fails for a bus that does not, and pins the full list.
             messenger.bus.default:
+                # The list is written by hand: re-check it against FrameworkExtension's defaults after a Symfony
+                # upgrade, and add deduplicate_middleware if framework.lock is enabled.
                 default_middleware: false
                 middleware:
                     - add_default_stamps_middleware

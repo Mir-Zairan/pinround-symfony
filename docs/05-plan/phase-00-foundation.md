@@ -119,16 +119,17 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 **Why:** the tenancy rules must be checked by machines, and the few lookups that run before the org is known must not open a hole ([ADR-0005](../03-adr/0005-multi-tenancy.md), [ADR-0008](../03-adr/0008-frankenphp-runtime.md)).
 **Steps:**
 1. **Migration catalog test:** queries `pg_class`, `pg_policies` and `pg_inherits` and fails if any table with an `organization_id` column (including every partition) lacks RLS + FORCE + the policy, or if any role other than `pinround_retention` has `BYPASSRLS`.
-2. **Resolver functions:** create the `SECURITY DEFINER` functions for lookups before tenant context (token by hash, user's org list, invite by token hash, webhook connection by id, Mercure topic owner, laptop package owner) with `SET search_path` fixed, returning ids only, `EXECUTE` granted to `pinround_app` only. Stub bodies are fine where the table comes later; each later phase fills its function.
+2. **Resolver functions:** create the `SECURITY DEFINER` functions for lookups before tenant context (`resolve_api_token`, `resolve_user_orgs`, `resolve_invitation`, `resolve_sso_provider`, `resolve_jira_connection`, `resolve_laptop_package`) with `SET search_path` fixed, returning ids only, owned by `pinround_resolver`, `EXECUTE` granted to `pinround_app` only. Stub bodies are fine where the table comes later; each later phase fills its function.
 3. **Static check:** a PHPStan rule or CI grep that bans `SET app.org_id` and `SET LOCAL app.org_id` string building; only `set_config(..., true)` through the middleware is allowed.
-4. Messenger `doctrine_transaction` middleware on every bus, and a middleware that restores `TenantContext` from the message stamp before the handler and clears it after (the stamp itself is added in P00.T7).
+4. Messenger `doctrine_transaction` middleware on every bus. A stamped message runs under its organization (`TenantStampMiddleware`). A message for another organization than the one already set is refused with `MessageForAnotherTenantRefused`, also for async and delayed dispatch. Inside an open transaction with no tenant it passes through without a tenant and RLS returns no rows. Details: [data-model.md](../02-architecture/data-model.md#row-level-security).
 5. Worker reset: after a request or message ends (including after an exception), `TenantContext` is cleared and a closed `EntityManager` is reset (`ManagerRegistry::resetManager()`), so the next request starts clean.
-**Files:** `tests/Integration/Tenancy/CatalogTest.php`, `migrations/*_resolver_functions.php`, `phpstan-rules/` or `bin/check-set-local`, `src/SharedKernel/Infrastructure/Messenger/TenantMiddleware.php`.
+**Files:** `tests/Integration/Tenancy/CatalogTest.php`, `migrations/*_resolver_functions.php`, `phpstan-rules/` or `bin/check-set-local`, `src/SharedKernel/Infrastructure/Messenger/{TenantStamp,TenantStampMiddleware,RejectMessageForAnotherTenantMiddleware}.php`, `src/SharedKernel/Application/MessageForAnotherTenantRefused.php`, `src/SharedKernel/Infrastructure/Doctrine/Migration/ResolverFunctions.php`, `migrations/Version20261106140000.php`, `bin/check-tenant-setting`.
 **Acceptance criteria:**
-- [ ] The catalog test fails when a new tenant table or partition forgets RLS (proved with a temporary table in the test).
-- [ ] Each resolver function returns ids only and nothing for an unknown input; calling it as `pinround_readonly` is denied.
+- [x] The catalog test fails when a new tenant table or partition forgets RLS (proved with a temporary table in the test).
+- [x] Each resolver function returns ids only and nothing for an unknown input; calling it as `pinround_readonly` is denied.
 - [x] After a request ends, the next request on the same worker has no tenant (worker reset test).
 - [x] After a handler throws and closes the EntityManager, the next message is handled normally (EntityManager reset test).
+- [x] The static check fails on a fixture that sets `app.org_id` outside the tenant middleware (`tests/Integration/Architecture/TenantSettingCheckTest.php`).
 **Tests:** integration tests above; a fixture test for the static check.
 **Prototype check:** none (backend task).
 **Size:** M
@@ -271,4 +272,10 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T3): CI has not yet run on GitHub for this branch (`psql` on the ubuntu-24.04 runner unverified).
 - 2026-11-06 (P00.T3): step 3 says the filter adds `organization_id = :org`. As built, the filter reads the transaction's setting (`NULLIF(current_setting('app.org_id', true), '')::uuid`, the `TenantSetting` constant) instead of binding `:org`, so all organizations share one query-cache entry. Its only parameter is the `is_tenant_set` flag.
 - 2026-11-07 (P00.T4): worker reset needed no new listener. Web requests rely on `Kernel::handle()` running `services_resetter`; Messenger workers rely on `ResetServicesListener`, so no `messenger:consume` may run with `--no-reset` (P12 `compose.prod.yaml` too). The one gap was a sync dispatch with no worker in between: `TenantStampMiddleware` now resets a closed EntityManager after a stamped message it ran. Inside a web request a closed EntityManager stays closed until the request ends.
+- 2026-11-07 (P00.T4): the plan listed a Mercure topic-owner resolver. ADR-0005 and data-model.md list `resolve_sso_provider` and no Mercure resolver, so it is built per the ADR. If Mercure needs one, add it in its phase with a new ADR note.
+- 2026-11-07 (P00.T4): a job that creates partitions must run `TenantTable::enableRls` on every child partition, or `CatalogTest` fails.
+- 2026-11-07 (P00.T4): P00.T7 must add `command.bus` and `event.bus` to the hand-written middleware list in `config/packages/messenger.yaml` and to `tests/Integration/Messaging/MessengerBusMiddlewareTest.php`.
+- 2026-11-07 (P00.T4): buses use `default_middleware: false`. If `framework.lock` is turned on, add `deduplicate_middleware` by hand, and re-check the list after a Symfony upgrade.
+- 2026-11-07 (P00.T4): a later phase fills a resolver body with `CREATE OR REPLACE FUNCTION` in a migration, using `SET ROLE pinround_resolver` and a temporary `CREATE` grant on the schema (see `Version20261106140000`). Keep the `p_` parameter names and the ids-only return columns.
+- 2026-11-07 (P00.T4): each tenant table a resolver reads opts in with `TenantTable::allowResolverRead(table, columns)`.
 - (add dated notes here: shortcuts taken, differences from the plan, follow-ups for P01)
