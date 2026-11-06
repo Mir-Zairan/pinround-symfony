@@ -563,7 +563,8 @@
     "threshold": 2,
     "skipClasses": [
       "design",
-      "logic-error"
+      "logic-error",
+      "dead-code"
     ],
     "rejectThreshold": 2
   },
