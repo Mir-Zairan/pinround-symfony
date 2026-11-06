@@ -8,14 +8,14 @@ Four Valkey transports replace ADR-0009's `async` and `heavy`. Three workers con
 - [Context and problem statement](#context-and-problem-statement) — one worker, two named transports, no numbers.
 - [Decision drivers](#decision-drivers) — latency, isolation, small machines, PgBouncer, rate limits.
 - [Considered options](#considered-options) — ADR-0009 as written, one worker, three workers, five workers.
-- [Decision outcome](#decision-outcome) — transports, workers, relay, polling, retries, the DSN rule.
+- [Decision outcome](#decision-outcome) — transports, workers, relay, polling, retries, the DSN rule, the idempotency key.
 - [Confirmation](#confirmation) — the tests and the compose check.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — trade-offs.
 - [More information](#more-information) — links and revisit triggers.
 
 ## Status
 
-Accepted · Supersedes in part [ADR-0009](0009-async-messaging-and-outbox.md): only the `async` and `heavy` rows of its "Buses and transports" table, the relay's "route to async / heavy" step, and its retry line for AI and Jira. The rest of ADR-0009 stays as decided.
+Accepted · Supersedes in part [ADR-0009](0009-async-messaging-and-outbox.md): only the `async` and `heavy` rows of its "Buses and transports" table, the relay's "route to async / heavy" step, its retry line for AI and Jira, and the dedupe key of its idempotency rule ("uses the event id"), now the message id of the [Idempotency key](#idempotency-key) section. The rest of ADR-0009 stays as decided.
 
 - Date: 2026-11-07
 - Deciders: Zairan Mir (lead)
@@ -70,6 +70,14 @@ With the scheduler (128M) the consumers stop at 768 MB of PHP memory together, a
 
 **The DSN rule.** All four Valkey transports read `%env(dsn_without_stream:MESSENGER_TRANSPORT_DSN)%` and name their stream in `options.stream`. The Redis transport lets a stream in the DSN path (`redis://host:6379/messages`) or a `stream` query parameter override that option, which would put all four queues on one stream. `MESSENGER_TRANSPORT_DSN` therefore names no stream: no path after the host, and no `stream` query parameter. `DsnWithoutStreamEnvVarProcessor` throws on such a DSN when a transport is built: `worker` and `worker-heavy` fail at start, and every relay send fails until the event reaches `failed`.
 
+### Idempotency key
+
+At-least-once delivery (the relay, retries, `failed`) needs a key that every copy of a message shares. Messenger's `TransportMessageIdStamp` is not one: each transport adds its own, and the relay leaves the outbox's behind. ADR-0009's event id would cover only domain events, not commands sent to a queue. So:
+
+- `MessageIdStampMiddleware` (on both buses, directly after `dispatch_after_current_bus`) gives every message without a `MessageIdStamp` a new UUIDv7 (Symfony Uid, [ADR-0006](0006-identifiers.md)) before it is sent. The stamp travels through the outbox, the relay, retries and `failed`. While the message is handled, its id is the `MessageBeingHandled`, which the kernel resets between messages.
+- An async handler wraps its database effect in `OnceOnlyHandling::runOnce(<stable handler name>, <effect>)`. `ProcessedMessageLedger` inserts `(message id, handler name)` into `processed_message` with `ON CONFLICT DO NOTHING` in the effect's transaction (a savepoint inside the bus's transaction) and skips the effect when no row was inserted. A failed effect rolls the row back with it, so the retry runs it. A handler may still upsert by natural key instead.
+- `processed_message` is not a tenant table: the ids are unique across organizations and a row holds no tenant data. `pinround_app` may only `SELECT` and `INSERT`. A chunked retention job (P11) purges old rows by `processed_at`.
+
 ### Consequences
 
 - Good: a slow AI or media job never delays the relay or a notification.
@@ -80,11 +88,12 @@ With the scheduler (128M) the consumers stop at 768 MB of PHP memory together, a
 
 ## Confirmation
 
-- `tests/shell/compose-config-check.sh` (CI `build` job) fails unless `worker-outbox`, `worker` and `worker-heavy` together consume each key of `framework.messenger.transports` except `failed` exactly once, `worker-outbox` consumes only `outbox`, those three and `scheduler` depend on `postgres`, and the three workers depend on `valkey-state`.
+- `tests/shell/compose-config-check.sh` (CI `build` job) fails unless `worker-outbox`, `worker` and `worker-heavy` together consume each key of `framework.messenger.transports` except `failed` exactly once, `worker-outbox` consumes only `outbox`, those three and `scheduler` depend on `postgres` with `condition: service_healthy`, and the three workers depend on `valkey-state` with `condition: service_healthy`.
 - `tests/Unit/Architecture/RetryStrategyConfigTest` pins each transport's retry numbers and jitter above.
 - `tests/Unit/Architecture/AsyncTransportStreamsTest` sends each transport's options and the `.env.dev` DSN through the Redis transport's parser and expects four distinct streams. A DSN with a stream path merges them, and the guard refuses it.
 - `tests/Unit/SharedKernel/Infrastructure/Messenger/DsnWithoutStreamEnvVarProcessorTest` covers the DSN rule.
-- `tests/Unit/SharedKernel/Infrastructure/Messenger/RelayOutboxMessageMiddlewareTest` and `tests/Integration/Messaging/OutboxRelayTest` cover the relay, including a retry from `failed`.
+- `tests/Unit/SharedKernel/Infrastructure/Messenger/RelayOutboxMessageMiddlewareTest` and `tests/Integration/Messaging/OutboxRelayTest` cover the relay, including a retry from `failed`, and that the `MessageIdStamp` id is the same before and after it.
+- `tests/Integration/Messaging/OnceOnlyHandlingTest` delivers the same message twice on `command.bus` and a relayed event twice on `event.bus` and expects one effect each time. It also covers two messages, a failing effect, a caught failure and a concurrent delivery.
 
 ## Pros and cons of the options
 

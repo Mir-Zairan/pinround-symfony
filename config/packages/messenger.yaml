@@ -115,6 +115,8 @@ when@test:
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey
             App\Tests\Fixtures\Messaging\OutageProbeRecorded: valkey_with_outage
+            # Put in the outbox with a TransportNamesStamp by OnceOnlyHandlingTest, to be handled on event.bus.
+            App\Tests\Fixtures\Messaging\RecordProbeEffect: async_notify
 
     framework:
         messenger:

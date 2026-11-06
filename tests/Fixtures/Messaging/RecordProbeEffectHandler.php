@@ -10,7 +10,7 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 /**
  * Writes its effect, a row in the test-only table messaging_probe_effect, through OnceOnlyHandling, and counts how
- * often it was called, so a test tells a skipped effect from a handler that never ran.
+ * often it was called, so a test tells a skipped effect from a handler that never ran. Registered on both buses.
  */
 #[AsMessageHandler]
 final class RecordProbeEffectHandler
@@ -19,6 +19,7 @@ final class RecordProbeEffectHandler
 
     private int $callCount = 0;
     private bool $isNextEffectFailing = false;
+    private bool $isNextEffectFailureCaught = false;
 
     public function __construct(
         private readonly OnceOnlyHandling $onceOnlyHandling,
@@ -33,20 +34,35 @@ final class RecordProbeEffectHandler
     {
         ++$this->callCount;
 
-        $this->onceOnlyHandling->runOnce(self::HANDLER_NAME, function () use ($message): void {
-            $this->connection->executeStatement('INSERT INTO messaging_probe_effect (probe_id) VALUES (?)', [$message->probeId]);
+        try {
+            $this->onceOnlyHandling->runOnce(self::HANDLER_NAME, function () use ($message): void {
+                $this->connection->executeStatement('INSERT INTO messaging_probe_effect (probe_id) VALUES (?)', [$message->probeId]);
 
-            if ($this->isNextEffectFailing) {
-                $this->isNextEffectFailing = false;
+                if ($this->isNextEffectFailing) {
+                    $this->isNextEffectFailing = false;
 
-                throw new \RuntimeException('The probe effect failed after it was written.');
+                    throw new \RuntimeException('The probe effect failed after it was written.');
+                }
+            });
+        } catch (\RuntimeException $failure) {
+            if (!$this->isNextEffectFailureCaught) {
+                throw $failure;
             }
-        });
+
+            // The handler goes on, so the bus's transaction commits around the rolled-back effect.
+            $this->isNextEffectFailureCaught = false;
+        }
     }
 
     public function failNextEffectAfterWriting(): void
     {
         $this->isNextEffectFailing = true;
+    }
+
+    public function failNextEffectAfterWritingAndCatchTheFailure(): void
+    {
+        $this->isNextEffectFailing = true;
+        $this->isNextEffectFailureCaught = true;
     }
 
     public function callCount(): int

@@ -15,7 +15,7 @@ Side effects run asynchronously through Symfony Messenger; domain events are sav
 
 ## Status
 
-Accepted · 2026-11-06 · Deciders: Zairan Mir (lead). Superseded in part by [ADR-0033](0033-valkey-transports-workers-and-outbox-relay.md): the `async` and `heavy` transports, the relay route and the AI and Jira retries.
+Accepted · 2026-11-06 · Deciders: Zairan Mir (lead). Superseded in part by [ADR-0033](0033-valkey-transports-workers-and-outbox-relay.md): the `async` and `heavy` transports, the relay route, the AI and Jira retries, and the idempotency dedupe key (the `MessageIdStamp` id, not the event id).
 
 ## Context and problem statement
 

@@ -211,6 +211,11 @@ final class DatabaseRolesTest extends KernelTestCase
             $this->grantsToOthersThanTheOwner($connection, 'processed_message'),
         );
         self::assertSame('pinround_migrator', $connection->fetchOne("SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass('public.processed_message')"));
+        // The retention purge (P11) deletes by age.
+        self::assertSame(
+            ['CREATE INDEX processed_message_processed_at_idx ON public.processed_message USING btree (processed_at)'],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'processed_message' AND indexname <> 'processed_message_pkey'"),
+        );
     }
 
     /** What doctrine:migrations:diff compares, limited to the Messenger tables: the migration built them as Messenger would. */

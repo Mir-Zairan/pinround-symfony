@@ -22,6 +22,8 @@ final class Version20261107160000 extends AbstractMigration
             'CREATE TABLE processed_message (message_id UUID NOT NULL, handler TEXT NOT NULL,'
             .' processed_at TIMESTAMP(0) WITH TIME ZONE DEFAULT now() NOT NULL, PRIMARY KEY (message_id, handler))',
         );
+        // For the retention job (P11) that deletes old rows in chunks.
+        $this->addSql('CREATE INDEX processed_message_processed_at_idx ON processed_message (processed_at)');
         // Append-only for the app: a row that could be changed or deleted would let an effect run twice.
         // pinround_readonly gets nothing: the rows are not report data.
         $this->addSql('GRANT SELECT, INSERT ON processed_message TO pinround_app');
