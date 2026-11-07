@@ -1,7 +1,8 @@
 # Login throttling (ADR-0012), joined by ConsumeFirstLoginRateLimiter: every try, failed or not, takes a token from
-# both before the password check; a successful login gives the email and IP ones back. The counters live on the state
-# Valkey, which never evicts (ADR-0010), through ValkeyLimiterStorage, which fails the login when Valkey cannot be
-# reached. A lock on the same Valkey (lock.yaml) makes each read-add-write of a counter whole, so parallel tries all count.
+# both before the password check; a successful login clears the email and IP counter and gives its one IP token back
+# (FixedWindowTryRefund), so only wrong tries fill login_per_ip. The counters live on the state Valkey, which never
+# evicts (ADR-0010), through ValkeyLimiterStorage, which fails the login when Valkey cannot be reached. A lock on the
+# same Valkey (lock.yaml) makes each read-add-write of a counter whole, refunds included, so parallel tries all count.
 parameters:
     # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter).
     identity.login_per_email_and_ip_minutes: 15

@@ -31,6 +31,23 @@ final class LoginRateLimiterTest extends KernelTestCase
         self::assertFalse($limiter->consume(self::loginRequest(strtoupper($email), $ip))->isAccepted());
     }
 
+    #[Test]
+    public function theAppsLimiterGivesASuccessfulLoginsIpTryBack(): void
+    {
+        $limiter = self::getContainer()->get(ConsumeFirstLoginRateLimiter::class);
+        $ip = self::randomIp();
+        for ($try = 1; $try <= 49; ++$try) {
+            self::assertTrue($limiter->consume(self::loginRequest('person'.$try.'@acme-foods.example', $ip))->isAccepted());
+        }
+        $login = self::loginRequest('omar.'.bin2hex(random_bytes(4)).'@acme-foods.example', $ip);
+        self::assertTrue($limiter->consume($login)->isAccepted());
+
+        $limiter->reset($login);
+
+        self::assertTrue($limiter->consume(self::loginRequest('mia@acme-foods.example', $ip))->isAccepted(), 'the 50th wrong try');
+        self::assertFalse($limiter->consume(self::loginRequest('raj@acme-foods.example', $ip))->isAccepted(), 'the 51st wrong try');
+    }
+
     /**
      * Ten PHP processes, like ten app workers, send a wrong password for one email and IP at the same moment, through
      * the real firewall. Only five may get their password checked: a peekable limiter would check every try that starts

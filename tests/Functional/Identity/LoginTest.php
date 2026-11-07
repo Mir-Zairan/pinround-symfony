@@ -158,6 +158,47 @@ final class LoginTest extends WebTestCase
         self::assertIsNotLoggedIn($client);
     }
 
+    /**
+     * Like an office behind one NAT: only wrong tries count toward the IP's 50 per hour.
+     */
+    #[Test]
+    public function sixtySuccessfulLoginsFromOneIpWithinAnHourAreAllAccepted(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Lena Berg');
+
+        for ($login = 1; $login <= 60; ++$login) {
+            $this->submitLogin($client, $user->email()->toString(), self::PASSWORD);
+            self::assertResponseRedirects('/', 302, 'login '.$login);
+            $client->getCookieJar()->clear();
+        }
+    }
+
+    #[Test]
+    public function theFiftyFirstWrongTryFromOneIpIsRefusedAlsoAfterSuccessfulLogins(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Omar Haddad');
+        for ($login = 1; $login <= 5; ++$login) {
+            $this->submitLogin($client, $user->email()->toString(), self::PASSWORD);
+            self::assertResponseRedirects('/', 302);
+            $client->getCookieJar()->clear();
+        }
+        for ($try = 1; $try <= 50; ++$try) {
+            $this->submitLogin($client, 'nobody'.$try.'.'.bin2hex(random_bytes(4)).'@acme-foods.example', self::PASSWORD);
+            self::assertResponseRedirects('/login', 302);
+            $page = $client->followRedirect();
+            self::assertSame(LoginController::WRONG_CREDENTIALS, $page->filter('[role="alert"]')->text());
+        }
+
+        $this->submitLogin($client, 'nobody51.'.bin2hex(random_bytes(4)).'@acme-foods.example', self::PASSWORD);
+
+        self::assertResponseRedirects('/login', 302);
+        $page = $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Too many tries. Wait 60 minutes.', $page->filter('[role="alert"]')->text());
+    }
+
     #[Test]
     public function aStringThatIsNoEmailGetsTheSameMessage(): void
     {
