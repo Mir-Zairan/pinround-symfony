@@ -184,7 +184,7 @@ Details: [media-pipeline.md](media-pipeline.md).
 
 ## Browser hardening and CSP
 
-Headers on every HTML response:
+Headers on every response the app answers:
 
 ```http
 Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{random}'; style-src 'self' 'nonce-{random}'; img-src 'self' https://{bucket-host} data:; connect-src 'self' https://{mercure-host} http://localhost:11434; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
@@ -197,7 +197,11 @@ Cross-Origin-Opener-Policy: same-origin
 
 Notes:
 
-- `http://localhost:11434` is added to `connect-src` **only** when the org's AI policy allows laptop AI.
+- `App\Web\Infrastructure\Security\SecurityHeadersSubscriber` sends these headers on every main-request response the app answers (HTML, JSON, redirects and error pages), and replaces any value a controller set. `Strict-Transport-Security` is sent only when the kernel environment is `prod`. Files Caddy serves straight from `public/` (in prod the compiled `/assets/*`) and the Mercure hub's own responses get none of them.
+- `{bucket-host}` comes from `OBJECT_STORAGE_PUBLIC_URL` and `{mercure-host}` from `MERCURE_PUBLIC_URL`. The subscriber keeps only the origin (scheme, host, port) of each, so `http://localhost:9000` in dev is allowed. An empty value adds no source. A value that is not an `http` or `https` URL whose host is only letters, digits, dots and hyphens (optional port; a path or query may follow but holds no space, `;` or `,`) throws, so a bad setting fails loudly instead of widening the policy. `.env` leaves both empty; `.env.dev` and `.env.test` set the local hub and MinIO.
+- With `kernel.debug` on (dev, test), Symfony's `ErrorListener` drops the CSP from error pages so its exception page can run; the other headers stay. Prod has debug off and keeps it.
+- `Referrer-Policy` is `strict-origin-when-cross-origin` as above. The P00.T8 plan step said `same-origin`; this doc wins.
+- `http://localhost:11434` is added to `connect-src` **only** when the org's AI policy allows laptop AI. TODO(P08): the subscriber does not add it yet, because orgs and the AI policy do not exist.
 - `{bucket-host}` is the bucket's **own** hostname (for example `acme-pinround.s3.eu-central-1.amazonaws.com` or the CDN host for this bucket), never a shared storage host like `*.amazonaws.com`, which would allow images from any bucket.
 - No inline event handlers. Stimulus controllers only.
 - One nonce per request comes from `App\Web\Infrastructure\Security\CspNonce::current()` (128 random bits, base64). Templates print it with `csp_nonce()`; the security-headers subscriber (P00.T8) reads the same service. The kernel resets it between requests, so worker mode never reuses one.
