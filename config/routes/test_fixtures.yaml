@@ -54,3 +54,13 @@ when@test:
         path: /_test/log-leak/{organizationId}
         controller: App\Tests\Fixtures\Http\LogLeakProbeController::logTheSummaryThenFail
         methods: [POST]
+
+    test_tracing_respond:
+        path: /_test/tracing
+        controller: App\Tests\Fixtures\Http\TracingProbeController::respondAndLog
+        methods: [GET, POST]
+
+    test_tracing_fail:
+        path: /_test/tracing/fail
+        controller: App\Tests\Fixtures\Http\TracingProbeController::fail
+        methods: [GET]
