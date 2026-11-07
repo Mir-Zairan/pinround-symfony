@@ -10,15 +10,17 @@ use Symfony\Component\DependencyInjection\Exception\RuntimeException;
 /**
  * `%env(dsn_without_stream:NAME)%` resolves to the DSN unchanged, or fails when a Redis or Valkey DSN names a stream in
  * its path or its query. The Redis transport lets that stream win over each transport's own `stream` option, so one
- * shared DSN with a stream would put all four async_* queues on one stream (ADR-0033). The error never shows the
- * DSN, which can hold a password.
+ * shared DSN with a stream would put all four async_* queues on one stream (ADR-0033). It also fails on a comma that
+ * does not begin another host, which the transport would refuse only when a worker starts: a comma in a password must
+ * be written as %2C (RedisDsnHosts). The error never shows the DSN, which can hold a password.
  */
 final readonly class DsnWithoutStreamEnvVarProcessor implements EnvVarProcessorInterface
 {
     public const string PREFIX = 'dsn_without_stream';
 
     /**
-     * @throws RuntimeException when the variable is not a string or names a stream
+     * @throws RuntimeException when the variable is not a string, or is a Redis or Valkey DSN that names a stream or
+     *                          has a comma that does not begin another host
      */
     public function getEnv(string $prefix, string $name, \Closure $getEnv): string
     {
@@ -26,11 +28,17 @@ final readonly class DsnWithoutStreamEnvVarProcessor implements EnvVarProcessorI
         if (!\is_string($dsn)) {
             throw new RuntimeException(\sprintf('The "%s" environment variable must be a DSN string.', $name));
         }
+        if (1 !== preg_match('#^(?:redis|rediss|valkey|valkeys):#', $dsn)) {
+            return $dsn;
+        }
 
-        // A comma separates the hosts of a Redis Cluster DSN, and each one can carry a path. Split only where a new scheme
-        // starts: a password may hold a comma.
-        $hostDsns = preg_split('#,(?=(?:redis|rediss|valkey|valkeys)://)#', $dsn);
-        foreach (false === $hostDsns ? [$dsn] : $hostDsns as $hostDsn) {
+        // A comma separates the hosts of a Redis Cluster DSN, and each one can carry a path.
+        try {
+            $hostDsns = RedisDsnHosts::of($dsn);
+        } catch (\InvalidArgumentException) {
+            throw new RuntimeException(\sprintf('The "%s" environment variable has a comma that does not begin another host. Write a comma in a password as %%2C.', $name));
+        }
+        foreach ($hostDsns as $hostDsn) {
             if (self::namesAStream($hostDsn)) {
                 throw new RuntimeException(\sprintf('The "%s" environment variable names a Redis stream in its path or its "stream" query parameter. Remove it: each Messenger transport names its own stream.', $name));
             }

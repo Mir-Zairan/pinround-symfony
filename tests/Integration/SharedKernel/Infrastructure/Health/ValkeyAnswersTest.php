@@ -72,7 +72,25 @@ final class ValkeyAnswersTest extends KernelTestCase
         yield 'nothing listens' => ['redis://127.0.0.1:1'];
         // RedisAdapter would return a proxy that never connects, so a lazy DSN alone must not pass.
         yield 'nothing listens, lazy' => ['valkey://127.0.0.1:1?lazy=1'];
-        yield 'not a Valkey DSN' => ['in-memory://'];
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function dsnsMessengerWouldRefuse(): iterable
+    {
+        yield 'not a Valkey DSN' => ['in-memory://', 'not a Redis or Valkey DSN'];
+        yield 'a raw comma in the password' => ['redis://'.self::PROBE_USER.':pa?ss,word@127.0.0.1:6379', 'Write a comma in a password as %2C'];
+    }
+
+    #[Test]
+    #[DataProvider('dsnsMessengerWouldRefuse')]
+    public function aDsnMessengerWouldRefuseFailsBeforeAnyConnect(string $dsn, string $expectedMessage): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains($expectedMessage);
+
+        new ValkeyAnswers('probe', $dsn)->verify();
     }
 
     #[Test]
@@ -94,7 +112,8 @@ final class ValkeyAnswersTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{string}> sprintf patterns; %1$s is the password, %2$s the state Valkey's host:port
+     * @return iterable<string, array{string}> sprintf patterns; %1$s is the password as a DSN writes it (a raw `?`, the
+     *                                         comma as %2C), %2$s the state Valkey's host:port
      */
     public static function dsnsWithAPasswordHoldingAQuestionMarkAndAComma(): iterable
     {
@@ -105,10 +124,11 @@ final class ValkeyAnswersTest extends KernelTestCase
 
     #[Test]
     #[DataProvider('dsnsWithAPasswordHoldingAQuestionMarkAndAComma')]
-    public function aPasswordHoldingAQuestionMarkAndACommaStillAuthenticates(string $dsnPattern): void
+    public function aPasswordHoldingAQuestionMarkAndAnEncodedCommaAuthenticates(string $dsnPattern): void
     {
         $this->withProbeUser(static function () use ($dsnPattern): void {
-            new ValkeyAnswers('probe', \sprintf($dsnPattern, self::PROBE_PASSWORD, self::stateValkeyAddress()))->verify();
+            $passwordInDsn = str_replace(',', '%2C', self::PROBE_PASSWORD);
+            new ValkeyAnswers('probe', \sprintf($dsnPattern, $passwordInDsn, self::stateValkeyAddress()))->verify();
         });
 
         $this->addToAssertionCount(1);

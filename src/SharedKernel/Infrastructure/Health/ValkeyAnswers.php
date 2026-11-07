@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace App\SharedKernel\Infrastructure\Health;
 
+use App\SharedKernel\Infrastructure\Messenger\RedisDsnHosts;
 use Symfony\Component\Cache\Adapter\RedisAdapter;
 use Symfony\Component\DependencyInjection\Attribute\Exclude;
 
 /**
  * A Valkey answers within a second. config/services.yaml defines one per Valkey (the cache and the state one,
  * ADR-0010), each with its name and DSN. A DSN of several hosts (`redis://a:6379,redis://b:6379`, as Messenger
- * takes it) must answer on every host.
+ * takes it) must answer on every host. A comma anywhere else, such as a raw one in a password, fails the check,
+ * because Messenger refuses that DSN when a worker starts: write it as %2C (RedisDsnHosts).
  *
  * The second bounds the connect and each reply, not the lookup of a host name, which no PHP timeout covers.
  */
@@ -40,9 +42,7 @@ final readonly class ValkeyAnswers implements ReadinessCheck
 
     public function verify(): void
     {
-        // Split only where a new scheme starts: a password may hold a comma.
-        $hostDsns = preg_split('#,(?=(?:redis|rediss|valkey|valkeys)://)#', $this->dsn);
-        foreach (false === $hostDsns ? [$this->dsn] : $hostDsns as $hostDsn) {
+        foreach (RedisDsnHosts::of($this->dsn) as $hostDsn) {
             // createConnection connects, authenticates and runs SELECT on the DSN's database before it returns, and
             // throws when any of them fails: returning is the answer. The connection closes when it goes out of scope.
             RedisAdapter::createConnection(self::withoutProbeOptions($hostDsn), [

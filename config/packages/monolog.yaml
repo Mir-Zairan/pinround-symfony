@@ -39,11 +39,19 @@ when@prod:
             # Info and above, written as they happen (ADR-0029): no fingers_crossed buffer, which would drop a warning
             # (a failed readiness check, a failed rollback) unless an error followed in the same request. It writes for
             # commands and workers too, so prod has no console handler: that one would print each record a second time.
+            # The request channel logs "Matched route" at info on every request, so every healthcheck and load-balancer
+            # probe of /health/* would add a line; it gets its own handler from warning up (5xx errors still show).
             main:
                 type: stream
                 path: php://stdout
                 level: info
-                channels: ["!deprecation"]
+                channels: ["!deprecation", "!request"]
+                formatter: monolog.formatter.json
+            request:
+                type: stream
+                path: php://stdout
+                level: warning
+                channels: [request]
                 formatter: monolog.formatter.json
             deprecation:
                 type: stream

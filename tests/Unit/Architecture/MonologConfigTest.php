@@ -23,28 +23,30 @@ final class MonologConfigTest extends TestCase
 
     /**
      * Prod writes info and above unbuffered (ADR-0029): a fingers_crossed handler there would drop every warning that
-     * no error followed, and a console handler would print each worker record a second time.
+     * no error followed, and a console handler would print each worker record a second time. The request channel goes
+     * to its own handler from warning up, so the "Matched route" info line of every health probe is not written.
      *
-     * @return iterable<string, array{string, array<string, array{type: string, handler: ?string, path: ?string, level: ?string, formatter: ?string}>}>
+     * @return iterable<string, array{string, array<string, array{type: string, handler: ?string, path: ?string, level: ?string, channels: ?list<string>, formatter: ?string}>}>
      */
     public static function handlersPerEnvironment(): iterable
     {
         yield 'dev' => ['when@dev', [
-            'main' => ['type' => 'stream', 'handler' => null, 'path' => self::ENV_LOG_FILE, 'level' => 'debug', 'formatter' => self::JSON],
-            'console' => ['type' => 'console', 'handler' => null, 'path' => null, 'level' => null, 'formatter' => null],
+            'main' => ['type' => 'stream', 'handler' => null, 'path' => self::ENV_LOG_FILE, 'level' => 'debug', 'channels' => ['!event'], 'formatter' => self::JSON],
+            'console' => ['type' => 'console', 'handler' => null, 'path' => null, 'level' => null, 'channels' => ['!event', '!doctrine', '!console'], 'formatter' => null],
         ]];
         yield 'test' => ['when@test', [
-            'main' => ['type' => 'fingers_crossed', 'handler' => 'nested', 'path' => null, 'level' => null, 'formatter' => null],
-            'nested' => ['type' => 'stream', 'handler' => null, 'path' => self::ENV_LOG_FILE, 'level' => 'debug', 'formatter' => self::JSON],
+            'main' => ['type' => 'fingers_crossed', 'handler' => 'nested', 'path' => null, 'level' => null, 'channels' => ['!event'], 'formatter' => null],
+            'nested' => ['type' => 'stream', 'handler' => null, 'path' => self::ENV_LOG_FILE, 'level' => 'debug', 'channels' => null, 'formatter' => self::JSON],
         ]];
         yield 'prod' => ['when@prod', [
-            'main' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'level' => 'info', 'formatter' => self::JSON],
-            'deprecation' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'level' => null, 'formatter' => self::JSON],
+            'main' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'level' => 'info', 'channels' => ['!deprecation', '!request'], 'formatter' => self::JSON],
+            'request' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'level' => 'warning', 'channels' => ['request'], 'formatter' => self::JSON],
+            'deprecation' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'level' => null, 'channels' => ['deprecation'], 'formatter' => self::JSON],
         ]];
     }
 
     /**
-     * @param array<string, array{type: string, handler: ?string, path: ?string, level: ?string, formatter: ?string}> $expectedHandlers
+     * @param array<string, array{type: string, handler: ?string, path: ?string, level: ?string, channels: ?list<string>, formatter: ?string}> $expectedHandlers
      */
     #[Test]
     #[DataProvider('handlersPerEnvironment')]
@@ -66,6 +68,7 @@ final class MonologConfigTest extends TestCase
                 'handler' => $handler['handler'] ?? null,
                 'path' => $handler['path'] ?? null,
                 'level' => $handler['level'] ?? null,
+                'channels' => $handler['channels'] ?? null,
                 'formatter' => $handler['formatter'] ?? null,
             ] : [],
             $handlers,
