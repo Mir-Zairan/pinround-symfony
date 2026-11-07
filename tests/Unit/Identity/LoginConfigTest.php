@@ -17,7 +17,7 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class LoginConfigTest extends TestCase
 {
-    private const string USER_CLASS = 'App\Identity\Infrastructure\Security\SecurityUser';
+    private const string USER_CLASS = \App\Identity\Infrastructure\Security\SecurityUser::class;
 
     #[Test]
     public function passwordsAreHashedWithArgon2idNamedExplicitlyInEveryEnvironment(): void
@@ -86,7 +86,7 @@ final class LoginConfigTest extends TestCase
         self::assertSame(
             [
                 'class' => 'Redis',
-                'factory' => ['Symfony\Component\Cache\Adapter\RedisAdapter', 'createConnection'],
+                'factory' => [\Symfony\Component\Cache\Adapter\RedisAdapter::class, 'createConnection'],
                 'arguments' => ['%env(STATE_VALKEY_DSN)%', ['lazy' => true]],
             ],
             self::at($services, 'services', 'state_valkey.connection'),

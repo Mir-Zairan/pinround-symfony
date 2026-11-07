@@ -118,13 +118,29 @@ final class LoginAttemptRecorderTest extends TestCase
         self::assertStringNotContainsString('SECRET', json_encode($this->warnings, \JSON_THROW_ON_ERROR));
     }
 
+    #[Test]
+    public function aCodingErrorWhileWritingIsNotSwallowed(): void
+    {
+        $recorder = $this->recorderOver(static function (): void {
+            throw new \LogicException('a bug');
+        });
+
+        $this->expectException(\LogicException::class);
+
+        try {
+            $recorder->onLoginFailure($this->failure(self::loginRequest('omar@acme-foods.example')));
+        } finally {
+            self::assertSame([], $this->warnings);
+        }
+    }
+
     /**
      * @param \Closure(string, string, bool): void $onRecord
      */
     private function recorderOver(\Closure $onRecord): LoginAttemptRecorder
     {
-        $attempts = new class($onRecord) implements LoginAttempts {
-            public function __construct(private readonly \Closure $onRecord)
+        $attempts = new readonly class($onRecord) implements LoginAttempts {
+            public function __construct(private \Closure $onRecord)
             {
             }
 

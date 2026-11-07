@@ -58,7 +58,7 @@ final class DemoSeedCommandTest extends KernelTestCase
 
         self::assertSame(Command::SUCCESS, $tester->getStatusCode());
         self::assertSame(self::EMAILS, $this->emails());
-        $hashes = $this->connection()->fetchFirstColumn('SELECT password_hash FROM idn_credential');
+        $hashes = $this->credentialHashes();
         self::assertCount(5, $hashes);
         foreach ($hashes as $hash) {
             self::assertIsString($hash);
@@ -74,13 +74,13 @@ final class DemoSeedCommandTest extends KernelTestCase
         $this->startWithPassword(self::PASSWORD);
         $this->runSeed();
         // Argon2id salts every hash, so an unchanged hash proves the credential was not written again.
-        $hashesAfterFirstRun = $this->connection()->fetchAllKeyValue('SELECT user_id, password_hash FROM idn_credential');
+        $hashesAfterFirstRun = $this->credentialHashes();
 
         $second = $this->runSeed();
 
         self::assertSame(Command::SUCCESS, $second->getStatusCode());
         self::assertSame(self::EMAILS, $this->emails());
-        self::assertSame($hashesAfterFirstRun, $this->connection()->fetchAllKeyValue('SELECT user_id, password_hash FROM idn_credential'));
+        self::assertSame($hashesAfterFirstRun, $this->credentialHashes());
         self::assertStringContainsString('created 0', $second->getDisplay());
     }
 
@@ -90,10 +90,11 @@ final class DemoSeedCommandTest extends KernelTestCase
         $this->startWithPassword(self::PASSWORD);
         $omar = UserFactory::createOne(['email' => new Email('omar@acme-foods.example'), 'name' => 'Omar']);
 
-        $this->runSeed();
+        $tester = $this->runSeed();
 
+        self::assertStringContainsString('created 4 (Lena, Mia, Raj, Sara), added a password to 1 (Omar), kept 0 ()', $tester->getDisplay());
         self::assertSame(self::EMAILS, $this->emails());
-        self::assertSame(5, $this->connection()->fetchOne('SELECT count(*) FROM idn_credential'));
+        self::assertCount(5, $this->credentialHashes());
         self::assertSame(
             $omar->id()->toString(),
             $this->connection()->fetchOne("SELECT id FROM idn_user WHERE email = 'omar@acme-foods.example'"),
@@ -159,12 +160,23 @@ final class DemoSeedCommandTest extends KernelTestCase
     }
 
     /**
+     * @return array<array-key, mixed> password hash by user id, for the five demo people only
+     */
+    private function credentialHashes(): array
+    {
+        return $this->connection()->fetchAllKeyValue(
+            'SELECT c.user_id, c.password_hash FROM idn_credential c JOIN idn_user u ON u.id = c.user_id WHERE u.email IN (?, ?, ?, ?, ?) ORDER BY c.user_id',
+            self::EMAILS,
+        );
+    }
+
+    /**
      * @return list<string>
      */
     private function emails(): array
     {
         $emails = [];
-        foreach ($this->connection()->fetchFirstColumn('SELECT email FROM idn_user ORDER BY email') as $email) {
+        foreach ($this->connection()->fetchFirstColumn('SELECT email FROM idn_user WHERE email IN (?, ?, ?, ?, ?) ORDER BY email', self::EMAILS) as $email) {
             self::assertIsString($email);
             $emails[] = $email;
         }

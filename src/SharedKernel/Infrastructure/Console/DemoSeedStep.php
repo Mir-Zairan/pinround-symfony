@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\SharedKernel\Application;
+namespace App\SharedKernel\Infrastructure\Console;
 
 use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 

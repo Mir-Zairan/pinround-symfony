@@ -63,6 +63,16 @@ final class ConsumeFirstLoginRateLimiterTest extends TestCase
     }
 
     #[Test]
+    public function anEmailWithSpacesAndCapitalsSharesTheLimiterOfItsPlainForm(): void
+    {
+        for ($try = 1; $try <= 5; ++$try) {
+            self::assertTrue($this->limiter->consume(self::loginRequest(' Omar@Acme-Foods.Example '))->isAccepted());
+        }
+
+        self::assertFalse($this->limiter->consume(self::loginRequest('omar@acme-foods.example'))->isAccepted());
+    }
+
+    #[Test]
     public function theFiftyFirstTryFromOneIpIsRefusedForAtMostSixtyMinutesWhateverTheEmail(): void
     {
         for ($try = 1; $try <= 50; ++$try) {

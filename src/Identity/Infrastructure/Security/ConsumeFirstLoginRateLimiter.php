@@ -19,7 +19,7 @@ use Symfony\Component\Security\Http\SecurityRequestAttributes;
  * checked. A successful login gives its per-IP try back, so only wrong tries fill the per-IP limit, and the tries still
  * being checked count too: a burst across many emails gets at most 50 password checks.
  *
- * Counters are keyed by an HMAC of the client IP, and of the lowercased email with the IP, so Valkey holds neither.
+ * Counters are keyed by an HMAC of the client IP, and of the normalized email (trimmed, lowercase) with the IP, so Valkey holds neither.
  * A refusal waits at most the refusing limiter's own interval: Symfony's fixed window counts from the start of the
  * current second, which would otherwise make a 15-minute window read "16 minutes".
  */
@@ -83,10 +83,9 @@ final readonly class ConsumeFirstLoginRateLimiter implements RequestRateLimiterI
 
     private function perEmailAndIpLimiter(Request $request): LimiterInterface
     {
-        $email = $request->attributes->getString(SecurityRequestAttributes::LAST_USERNAME);
-        $lowercaseEmail = mb_check_encoding($email, 'UTF-8') ? mb_strtolower($email, 'UTF-8') : strtolower($email);
+        $email = LoginKeyHasher::normalizeEmail($request->attributes->getString(SecurityRequestAttributes::LAST_USERNAME));
 
-        return $this->perEmailAndIp->create($this->hash($lowercaseEmail.'-'.$request->getClientIp()));
+        return $this->perEmailAndIp->create($this->hash($email.'-'.$request->getClientIp()));
     }
 
     private function hash(string $data): string

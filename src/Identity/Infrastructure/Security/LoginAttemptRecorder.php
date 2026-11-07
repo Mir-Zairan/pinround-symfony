@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Identity\Infrastructure\Security;
 
 use App\Identity\Domain\LoginAttempts;
+use Doctrine\DBAL\Exception as DbalException;
 use Doctrine\DBAL\Exception\DriverException;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
@@ -18,7 +19,7 @@ use Symfony\Component\Security\Http\SecurityRequestAttributes;
  * CSRF token and throttled try as a failure, a login as a success.
  *
  * The firewall runs before RequestTransaction begins, so the row is committed on its own and a failed try, which
- * only redirects, still keeps it. A failure to write it is logged and swallowed: the person sees the same page, and
+ * only redirects, still keeps it. A database failure writing it is logged and swallowed (a coding error is not): the person sees the same page, and
  * the throttle, not this history, is what limits the tries.
  */
 final readonly class LoginAttemptRecorder
@@ -57,7 +58,7 @@ final readonly class LoginAttemptRecorder
                 $this->keyHasher->bytesOf((string) $request->getClientIp()),
                 $success,
             );
-        } catch (\Throwable $failure) {
+        } catch (DbalException $failure) {
             // Class and code only: a database message can quote row values.
             $this->logger->warning('Recording a login try failed.', [
                 'exception_class' => $failure::class,

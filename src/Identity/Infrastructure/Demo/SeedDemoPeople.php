@@ -12,8 +12,8 @@ use App\Identity\Domain\PasswordHashing;
 use App\Identity\Domain\PasswordTooShort;
 use App\Identity\Domain\User;
 use App\Identity\Domain\Users;
-use App\SharedKernel\Application\DemoSeedRefused;
-use App\SharedKernel\Application\DemoSeedStep;
+use App\SharedKernel\Infrastructure\Console\DemoSeedRefused;
+use App\SharedKernel\Infrastructure\Console\DemoSeedStep;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -42,6 +42,7 @@ final readonly class SeedDemoPeople implements DemoSeedStep
     {
         $password = $this->password();
         $created = [];
+        $gotPassword = [];
         $kept = [];
 
         foreach (self::NAMES as $name) {
@@ -52,17 +53,28 @@ final readonly class SeedDemoPeople implements DemoSeedStep
                 $user = new User($this->users->nextIdentity(), $email, $name, 'en', 'Europe/Berlin', $this->clock->now());
                 $this->users->add($user);
             }
-            if (null === $this->credentials->byUserId($user->id())) {
+            $needsCredential = null === $this->credentials->byUserId($user->id());
+            if ($needsCredential) {
                 $this->credentials->add(new Credential($user, $this->passwordHashing->hash($password), $this->clock->now()));
             }
             if ($isNew) {
                 $created[] = $name;
+            } elseif ($needsCredential) {
+                $gotPassword[] = $name;
             } else {
                 $kept[] = $name;
             }
         }
 
-        return \sprintf('People: created %d (%s), kept %d (%s).', \count($created), implode(', ', $created), \count($kept), implode(', ', $kept));
+        return \sprintf(
+            'People: created %d (%s), added a password to %d (%s), kept %d (%s).',
+            \count($created),
+            implode(', ', $created),
+            \count($gotPassword),
+            implode(', ', $gotPassword),
+            \count($kept),
+            implode(', ', $kept),
+        );
     }
 
     private function password(): NewPassword

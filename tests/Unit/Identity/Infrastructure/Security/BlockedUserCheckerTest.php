@@ -32,6 +32,7 @@ final class BlockedUserCheckerTest extends TestCase
     }
 
     #[Test]
+    #[\PHPUnit\Framework\Attributes\DoesNotPerformAssertions]
     public function anActiveUserPassesBothChecks(): void
     {
         $checker = new BlockedUserChecker();
@@ -39,8 +40,6 @@ final class BlockedUserCheckerTest extends TestCase
 
         $checker->checkPreAuth($active);
         $checker->checkPostAuth($active);
-
-        $this->addToAssertionCount(1);
     }
 
     /**

@@ -24,7 +24,7 @@ Every module has the same five folders:
 
 ```text
 src/
-  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck
+  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep
   Ticketing/
     Api/                        # PUBLIC: interfaces + DTOs other modules may use
       TicketQueries.php
@@ -86,7 +86,8 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - the `DomainEvent` base (event id, occurred at, organization id, actor id);
   - `Result`/`Problem` types for expected failures;
   - `OnceOnlyHandling` (Application: run an async handler's effect once per message), with `MessageIdStamp`, `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in `Infrastructure/Messenger` ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key));
-  - `ReadinessCheck` (`Infrastructure/Health`): one thing `/health/ready` proves. The module that owns what is checked implements it (Audit: `NextAuditPartitionExists`; Media: `ObjectStorageIsReachable`), and autoconfiguration tags it. SharedKernel holds the platform checks `DatabaseAnswers`, `MigrationsAreCurrent` and `ValkeyAnswers` (one service per Valkey), and `ReadinessCheckFailed` for a dependency that answered in the wrong state ([operations.md](operations.md#observability)).
+  - `ReadinessCheck` (`Infrastructure/Health`): one thing `/health/ready` proves. The module that owns what is checked implements it (Audit: `NextAuditPartitionExists`; Media: `ObjectStorageIsReachable`), and autoconfiguration tags it. SharedKernel holds the platform checks `DatabaseAnswers`, `MigrationsAreCurrent` and `ValkeyAnswers` (one service per Valkey), and `ReadinessCheckFailed` for a dependency that answered in the wrong state ([operations.md](operations.md#observability));
+  - `DemoSeedStep` (`Infrastructure/Console`, with `DemoSeedRefused`): one part of the demo data that `app:demo:seed` runs, dev and test only. The module that owns the tables implements it (Identity: `SeedDemoPeople`; Organization from P01.T3), autoconfiguration tags it, and `#[AsTaggedItem(priority: …)]` sets the order, highest first. It lives in SharedKernel because the seed command must not import modules, the same reason as `ReadinessCheck`, although only Identity and, from P01.T3, Organization use it.
 - **Owns tables:** `processed_message` (global plumbing, no `organization_id`; see [data-model.md](data-model.md)).
 - **Rule:** keep it tiny. A type joins SharedKernel only when three or more modules need it.
 

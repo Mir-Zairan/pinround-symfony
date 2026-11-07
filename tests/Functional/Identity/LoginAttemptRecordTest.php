@@ -72,6 +72,22 @@ final class LoginAttemptRecordTest extends WebTestCase
     }
 
     #[Test]
+    public function aWrongCsrfTokenWritesOneRowWithSuccessFalse(): void
+    {
+        $client = $this->httpsClient();
+        $user = $this->createUserWithPassword('Lena Brandt');
+        $client->request('GET', '/login');
+        self::assertResponseStatusCodeSame(200);
+
+        $client->submitForm('Log in', ['email' => $user->email()->toString(), 'password' => self::PASSWORD, '_csrf_token' => 'forged']);
+
+        self::assertResponseRedirects('/login', 302);
+        $rows = $this->rowsOf();
+        self::assertCount(1, $rows);
+        self::assertFalse($rows[0]['success']);
+    }
+
+    #[Test]
     public function theEmailHashIsTheSameInEveryLetterCaseAndTheRowHoldsNothingInPlain(): void
     {
         $client = $this->httpsClient();

@@ -61,7 +61,7 @@ final class ValkeyLimiterStorageTest extends KernelTestCase
 
         // The lazy connection reports a failed connect this way; a dropped connection later throws \RedisException.
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Redis connection failed');
+        $this->expectExceptionMessageIsOrContains('Redis connection failed');
         $limiter->consume(0);
     }
 
