@@ -125,11 +125,13 @@
             "phpstan analyse --memory-limit=1G"
         ],
         "deptrac": "deptrac analyse --no-interaction --no-progress --no-cache --fail-on-uncovered --report-uncovered",
+        "lint:docs": "@php bin/lint-docs",
         "lint": [
             "@php bin/console lint:container",
             "@php bin/console lint:yaml config",
             "@php bin/console lint:twig src",
-            "@php bin/check-tenant-setting"
+            "@php bin/check-tenant-setting",
+            "@lint:docs"
         ],
         "qa": [
             "@composer validate --strict",

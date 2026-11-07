@@ -1,0 +1,251 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * CI lint for Markdown docs (CLAUDE.md, "Writing docs"). Prints `file:line: reason` for every problem and exits 1.
+ *
+ * Checks, in every scanned file:
+ * - a file of more than MAX_LINES_WITHOUT_INDEX lines has a `## Index` line within its first INDEX_WITHIN_LINES lines;
+ * - every relative link points at an existing file or folder, and its `#anchor` (also a same-file `#anchor`) is the
+ *   slug of a heading in the target Markdown file. Slugs follow GitHub: lowercase, punctuation dropped except `-` and
+ *   `_`, spaces to `-`, a repeated heading gets `-1`, `-2`, ... A link starting with `/` is read from the repository root.
+ * Links with a scheme (`https:`, `mailto:`, ...), links inside fenced code blocks and links inside inline code
+ * spans are skipped. Reference-style links are not checked.
+ *
+ * Usage: bin/lint-docs [path...]. Without paths it scans every *.md in the repository except the folders in
+ * SKIPPED_FOLDERS and its own fixture folder. With paths it scans those files, or the *.md files in those folders
+ * (SKIPPED_FOLDERS still apply to folders inside the repository). Exits 1 on a problem, 2 when a given path
+ * does not exist.
+ */
+const MAX_LINES_WITHOUT_INDEX = 100;
+const INDEX_WITHIN_LINES = 40;
+const INDEX_HEADING = '## Index';
+const SKIPPED_FOLDERS = ['.claude', '.git', 'vendor', 'var', 'node_modules'];
+const OWN_FIXTURE_FOLDER = 'tests/Fixtures/DocsLint';
+
+/**
+ * @return list<string> absolute paths of the Markdown files at or under $absolute
+ */
+function collectFiles(string $root, string $absolute): array
+{
+    if (is_file($absolute)) {
+        return [$absolute];
+    }
+
+    $files = [];
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($absolute, FilesystemIterator::SKIP_DOTS));
+    foreach ($iterator as $file) {
+        \assert($file instanceof SplFileInfo);
+        if ('md' === $file->getExtension() && !isSkipped(relativeTo($root, $file->getPathname()))) {
+            $files[] = $file->getPathname();
+        }
+    }
+
+    return $files;
+}
+
+function relativeTo(string $root, string $absolute): string
+{
+    $absolute = str_replace('//', '/', $absolute);
+
+    return str_starts_with($absolute, $root.'/') ? substr($absolute, \strlen($root) + 1) : $absolute;
+}
+
+/**
+ * Only paths inside the repository can be skipped: a folder named var outside it is not ours.
+ */
+function isSkipped(string $relative): bool
+{
+    if (str_starts_with($relative, '/')) {
+        return false;
+    }
+    foreach (SKIPPED_FOLDERS as $folder) {
+        if (str_starts_with($relative, $folder.'/') || str_contains($relative, '/'.$folder.'/')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @param list<string> $lines
+ *
+ * @return list<bool> for each line, whether it is part of a fenced code block (fence lines included)
+ */
+function fencedLines(array $lines): array
+{
+    $fenced = [];
+    $fence = null;
+    foreach ($lines as $line) {
+        if (null === $fence) {
+            $opens = 1 === preg_match('/^ {0,3}(`{3,}|~{3,})/', $line, $match);
+            $fence = $opens ? $match[1] : null;
+            $fenced[] = $opens;
+            continue;
+        }
+        $fenced[] = true;
+        if (1 === preg_match('/^ {0,3}(['.$fence[0].']{'.\strlen($fence).',})\s*$/', $line)) {
+            $fence = null;
+        }
+    }
+
+    return $fenced;
+}
+
+function withoutInlineCode(string $line): string
+{
+    return (string) preg_replace('/(`+)(?:(?!\1).)+\1/', '', $line);
+}
+
+function headingSlug(string $headingText): string
+{
+    $text = (string) preg_replace('/\[([^\]]*)\]\([^)]*\)/', '$1', $headingText);
+    $slug = (string) preg_replace('/[^\p{L}\p{N}\p{M}_\- ]/u', '', mb_strtolower($text));
+
+    return str_replace(' ', '-', $slug);
+}
+
+/**
+ * @return array<string, true> every anchor GitHub gives the headings of the file
+ */
+function anchorsOf(string $absolute): array
+{
+    static $cache = [];
+    if (isset($cache[$absolute])) {
+        return $cache[$absolute];
+    }
+
+    $lines = explode("\n", (string) file_get_contents($absolute));
+    $fenced = fencedLines($lines);
+    $anchors = [];
+    foreach ($lines as $index => $line) {
+        if ($fenced[$index] || 1 !== preg_match('/^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/', $line, $match)) {
+            continue;
+        }
+        $base = headingSlug($match[1]);
+        $anchor = $base;
+        for ($suffix = 1; isset($anchors[$anchor]); ++$suffix) {
+            $anchor = $base.'-'.$suffix;
+        }
+        $anchors[$anchor] = true;
+    }
+
+    return $cache[$absolute] = $anchors;
+}
+
+/**
+ * @return array<int, string> line number => reason
+ */
+function findProblems(string $root, string $absolute): array
+{
+    $content = (string) file_get_contents($absolute);
+    $lines = explode("\n", $content);
+    $fenced = fencedLines($lines);
+    $problems = [];
+
+    $lineCount = str_ends_with($content, "\n") ? \count($lines) - 1 : \count($lines);
+    if ($lineCount > MAX_LINES_WITHOUT_INDEX) {
+        $indexLine = null;
+        foreach ($lines as $index => $line) {
+            if (!$fenced[$index] && INDEX_HEADING === rtrim($line)) {
+                $indexLine = $index + 1;
+                break;
+            }
+        }
+        if (null === $indexLine) {
+            $problems[1] = \sprintf('%d lines and no `%s` in the first %d lines', $lineCount, INDEX_HEADING, INDEX_WITHIN_LINES);
+        } elseif ($indexLine > INDEX_WITHIN_LINES) {
+            $problems[$indexLine] = \sprintf('`%s` must be within the first %d lines', INDEX_HEADING, INDEX_WITHIN_LINES);
+        }
+    }
+
+    foreach ($lines as $index => $line) {
+        if ($fenced[$index]) {
+            continue;
+        }
+        if (0 === preg_match_all('/\]\(\s*<?([^)\s>]*)>?(?:\s+(?:"[^"]*"|\'[^\']*\'))?\s*\)/', withoutInlineCode($line), $matches)) {
+            continue;
+        }
+        foreach ($matches[1] as $destination) {
+            $reason = brokenLinkReason($root, $absolute, $destination);
+            if (null !== $reason) {
+                $problems[$index + 1] ??= $reason;
+            }
+        }
+    }
+    ksort($problems);
+
+    return $problems;
+}
+
+function brokenLinkReason(string $root, string $fromAbsolute, string $destination): ?string
+{
+    if ('' === $destination || 1 === preg_match('~^(?:[a-z][a-z0-9+.\-]*:|//)~i', $destination)) {
+        return null;
+    }
+
+    [$pathPart, $anchor] = array_pad(explode('#', $destination, 2), 2, null);
+    $pathPart = rawurldecode((string) preg_replace('/\?.*$/', '', $pathPart));
+
+    if ('' === $pathPart) {
+        $target = $fromAbsolute;
+    } else {
+        $target = str_starts_with($pathPart, '/') ? $root.$pathPart : \dirname($fromAbsolute).'/'.$pathPart;
+        if (!file_exists($target)) {
+            return \sprintf('broken link, no such file or folder: %s', $destination);
+        }
+    }
+
+    if (null === $anchor || '' === $anchor || !is_file($target) || 'md' !== pathinfo($target, \PATHINFO_EXTENSION)) {
+        return null;
+    }
+    if (!isset(anchorsOf($target)[mb_strtolower(rawurldecode($anchor))])) {
+        return \sprintf('broken anchor, no such heading: %s', $destination);
+    }
+
+    return null;
+}
+
+$root = \dirname(__DIR__);
+$arguments = \array_slice($argv, 1);
+$paths = [] === $arguments ? [$root] : $arguments;
+
+$absolutePaths = [];
+foreach ($paths as $path) {
+    $absolutePaths[$path] = str_starts_with($path, '/') ? $path : $root.'/'.$path;
+}
+$missingPaths = array_keys(array_filter($absolutePaths, static fn (string $absolute): bool => !file_exists($absolute)));
+if ([] !== $missingPaths) {
+    foreach ($missingPaths as $path) {
+        fwrite(\STDERR, \sprintf("%s: no such file or folder\n", $path));
+    }
+    exit(2);
+}
+
+$files = [];
+foreach ($absolutePaths as $absolute) {
+    foreach (collectFiles($root, $absolute) as $file) {
+        $relative = relativeTo($root, $file);
+        if ([] === $arguments && str_starts_with($relative, OWN_FIXTURE_FOLDER.'/')) {
+            continue;
+        }
+        $files[$relative] = $file;
+    }
+}
+ksort($files);
+
+$problemCount = 0;
+foreach ($files as $relative => $absolute) {
+    foreach (findProblems($root, $absolute) as $line => $reason) {
+        fwrite(\STDOUT, \sprintf("%s:%d: %s\n", $relative, $line, $reason));
+        ++$problemCount;
+    }
+}
+
+if ($problemCount > 0) {
+    fwrite(\STDERR, \sprintf("%d doc problem(s). A Markdown file over %d lines needs `%s` in its first %d lines, and relative links and anchors must resolve (CLAUDE.md, Writing docs).\n", $problemCount, MAX_LINES_WITHOUT_INDEX, INDEX_HEADING, INDEX_WITHIN_LINES));
+    exit(1);
+}
