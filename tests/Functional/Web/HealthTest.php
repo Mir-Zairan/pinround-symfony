@@ -5,11 +5,17 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\SharedKernel\Infrastructure\Health\DatabaseAnswers;
+use App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent;
 use App\SharedKernel\Infrastructure\Health\ObjectStorageIsReachable;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\DBAL\Exception\ConnectionException;
+use Doctrine\Migrations\Configuration\Configuration;
+use Doctrine\Migrations\Configuration\Connection\ExistingConnection;
+use Doctrine\Migrations\Configuration\Migration\ExistingConfiguration;
+use Doctrine\Migrations\DependencyFactory;
+use Doctrine\Migrations\Metadata\Storage\TableMetadataStorageConfiguration;
 use Monolog\Level;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -88,6 +94,23 @@ final class HealthTest extends WebTestCase
     #[Test]
     public function readyAnswersOkWhenEveryDependencyAnswers(): void
     {
+        $this->client->request('GET', '/health/ready');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('{"status":"ok"}', $this->client->getResponse()->getContent());
+    }
+
+    #[Test]
+    public function readyAnswersOkWhenTheMigrationsTableIsReadAsTheAppRoleAsInProd(): void
+    {
+        // Prod has no migrator connection: the migrations DependencyFactory uses the app's (Version20261107180000).
+        $configuration = new Configuration();
+        $configuration->setMetadataStorageConfiguration(new TableMetadataStorageConfiguration());
+        $configuration->addMigrationsDirectory('DoctrineMigrations', self::getContainer()->getParameter('kernel.project_dir').'/migrations');
+        $migrationsAsTheApp = DependencyFactory::fromConnection(new ExistingConfiguration($configuration), new ExistingConnection($this->defaultConnection()));
+        self::getContainer()->set(MigrationsAreCurrent::class, new MigrationsAreCurrent($migrationsAsTheApp->getMigrationStatusCalculator()));
+        self::assertSame('pinround_app', $this->defaultConnection()->fetchOne('SELECT current_user'));
+
         $this->client->request('GET', '/health/ready');
 
         self::assertResponseStatusCodeSame(200);

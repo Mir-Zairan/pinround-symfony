@@ -17,22 +17,22 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * subscribe to) join img-src and connect-src. An empty value adds no source; a value that is not http(s) with a
  * plain host throws \InvalidArgumentException.
  */
-final class SecurityHeadersSubscriber
+final readonly class SecurityHeadersSubscriber
 {
     // A plain host only: no wildcard, no second source and no "; directive" can reach the header.
     private const string PUBLIC_URL_PATTERN = '#^(?<origin>https?://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?)(?:[/?\#][^\s;,]*)?\z#';
 
-    private readonly ?string $objectStorageOrigin;
-    private readonly ?string $mercureOrigin;
+    private ?string $objectStorageOrigin;
+    private ?string $mercureOrigin;
 
     public function __construct(
-        private readonly CspNonce $cspNonce,
+        private CspNonce $cspNonce,
         #[Autowire(env: 'OBJECT_STORAGE_PUBLIC_URL')]
         string $objectStoragePublicUrl,
         #[Autowire(env: 'MERCURE_PUBLIC_URL')]
         string $mercurePublicUrl,
         #[Autowire(param: 'kernel.environment')]
-        private readonly string $kernelEnvironment,
+        private string $kernelEnvironment,
     ) {
         $this->objectStorageOrigin = self::originOf($objectStoragePublicUrl, 'OBJECT_STORAGE_PUBLIC_URL');
         $this->mercureOrigin = self::originOf($mercurePublicUrl, 'MERCURE_PUBLIC_URL');

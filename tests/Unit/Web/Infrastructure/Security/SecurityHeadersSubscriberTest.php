@@ -94,7 +94,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     public function anUnsafeStorageUrlIsRefused(string $publicUrl): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('OBJECT_STORAGE_PUBLIC_URL');
+        $this->expectExceptionMessageIsOrContains('OBJECT_STORAGE_PUBLIC_URL');
 
         new SecurityHeadersSubscriber(new CspNonce(), $publicUrl, self::MERCURE_URL, 'dev');
     }
@@ -104,7 +104,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     public function anUnsafeMercureUrlIsRefused(string $publicUrl): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('MERCURE_PUBLIC_URL');
+        $this->expectExceptionMessageIsOrContains('MERCURE_PUBLIC_URL');
 
         new SecurityHeadersSubscriber(new CspNonce(), self::STORAGE_URL, $publicUrl, 'dev');
     }

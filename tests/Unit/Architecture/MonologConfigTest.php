@@ -20,28 +20,29 @@ final class MonologConfigTest extends TestCase
     private const string ENV_LOG_FILE = '%kernel.logs_dir%/%kernel.environment%.log';
 
     /**
-     * @return iterable<string, array{string, array<string, array{type: string, handler: ?string, path: ?string, formatter: ?string}>}>
+     * Prod writes info and above unbuffered (ADR-0029): a fingers_crossed handler there would drop every warning that
+     * no error followed, and a console handler would print each worker record a second time.
+     *
+     * @return iterable<string, array{string, array<string, array{type: string, handler: ?string, path: ?string, level: ?string, formatter: ?string}>}>
      */
     public static function handlersPerEnvironment(): iterable
     {
         yield 'dev' => ['when@dev', [
-            'main' => ['type' => 'stream', 'handler' => null, 'path' => self::ENV_LOG_FILE, 'formatter' => self::JSON],
-            'console' => ['type' => 'console', 'handler' => null, 'path' => null, 'formatter' => null],
+            'main' => ['type' => 'stream', 'handler' => null, 'path' => self::ENV_LOG_FILE, 'level' => 'debug', 'formatter' => self::JSON],
+            'console' => ['type' => 'console', 'handler' => null, 'path' => null, 'level' => null, 'formatter' => null],
         ]];
         yield 'test' => ['when@test', [
-            'main' => ['type' => 'fingers_crossed', 'handler' => 'nested', 'path' => null, 'formatter' => null],
-            'nested' => ['type' => 'stream', 'handler' => null, 'path' => self::ENV_LOG_FILE, 'formatter' => self::JSON],
+            'main' => ['type' => 'fingers_crossed', 'handler' => 'nested', 'path' => null, 'level' => null, 'formatter' => null],
+            'nested' => ['type' => 'stream', 'handler' => null, 'path' => self::ENV_LOG_FILE, 'level' => 'debug', 'formatter' => self::JSON],
         ]];
         yield 'prod' => ['when@prod', [
-            'main' => ['type' => 'fingers_crossed', 'handler' => 'nested', 'path' => null, 'formatter' => null],
-            'nested' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'formatter' => self::JSON],
-            'console' => ['type' => 'console', 'handler' => null, 'path' => null, 'formatter' => self::JSON],
-            'deprecation' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'formatter' => self::JSON],
+            'main' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'level' => 'info', 'formatter' => self::JSON],
+            'deprecation' => ['type' => 'stream', 'handler' => null, 'path' => 'php://stdout', 'level' => null, 'formatter' => self::JSON],
         ]];
     }
 
     /**
-     * @param array<string, array{type: string, handler: ?string, path: ?string, formatter: ?string}> $expectedHandlers
+     * @param array<string, array{type: string, handler: ?string, path: ?string, level: ?string, formatter: ?string}> $expectedHandlers
      */
     #[Test]
     #[DataProvider('handlersPerEnvironment')]
@@ -62,6 +63,7 @@ final class MonologConfigTest extends TestCase
                 'type' => $handler['type'] ?? null,
                 'handler' => $handler['handler'] ?? null,
                 'path' => $handler['path'] ?? null,
+                'level' => $handler['level'] ?? null,
                 'formatter' => $handler['formatter'] ?? null,
             ] : [],
             $handlers,

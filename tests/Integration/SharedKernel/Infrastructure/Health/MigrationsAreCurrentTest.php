@@ -17,7 +17,8 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * On the migrated test database, as pinround_migrator (the connection doctrine:migrations:migrate uses in test).
+ * On the migrated test database. The test env reads the migrations table as pinround_migrator (the connection
+ * doctrine:migrations:migrate uses); prod's app container reads it as pinround_app (Version20261107180000).
  */
 final class MigrationsAreCurrentTest extends KernelTestCase
 {
@@ -32,20 +33,47 @@ final class MigrationsAreCurrentTest extends KernelTestCase
     }
 
     #[Test]
+    public function theCheckPassesReadingAsTheAppRoleAsProdDoes(): void
+    {
+        $appConnection = $this->appConnection();
+        self::assertSame('pinround_app', $appConnection->fetchOne('SELECT current_user'));
+
+        new MigrationsAreCurrent($this->migrationsOn($appConnection)->getMigrationStatusCalculator())->verify();
+
+        $this->addToAssertionCount(1);
+    }
+
+    #[Test]
     public function aMigrationTheCodeShipsButTheDatabaseNeverRanFailsTheCheck(): void
     {
-        $configuration = new Configuration();
-        $configuration->setMetadataStorageConfiguration(new TableMetadataStorageConfiguration());
-        $configuration->addMigrationsDirectory('DoctrineMigrations', self::bootKernel()->getProjectDir().'/migrations');
-        $configuration->addMigrationsDirectory(
-            new \ReflectionClass(Version29991231000000::class)->getNamespaceName(),
-            __DIR__.'/UnexecutedMigration',
+        $dependencyFactory = $this->migrationsOn(
+            $this->migratorConnection(),
+            [new \ReflectionClass(Version29991231000000::class)->getNamespaceName() => __DIR__.'/UnexecutedMigration'],
         );
-        $dependencyFactory = DependencyFactory::fromConnection(new ExistingConfiguration($configuration), new ExistingConnection($this->migratorConnection()));
 
         $this->expectException(ReadinessCheckFailed::class);
 
         new MigrationsAreCurrent($dependencyFactory->getMigrationStatusCalculator())->verify();
+    }
+
+    /**
+     * @param array<string, string> $extraMigrationDirectories namespace => directory
+     */
+    private function migrationsOn(Connection $connection, array $extraMigrationDirectories = []): DependencyFactory
+    {
+        $configuration = new Configuration();
+        $configuration->setMetadataStorageConfiguration(new TableMetadataStorageConfiguration());
+        $configuration->addMigrationsDirectory('DoctrineMigrations', self::getContainer()->getParameter('kernel.project_dir').'/migrations');
+        foreach ($extraMigrationDirectories as $namespace => $directory) {
+            $configuration->addMigrationsDirectory($namespace, $directory);
+        }
+
+        return DependencyFactory::fromConnection(new ExistingConfiguration($configuration), new ExistingConnection($connection));
+    }
+
+    private function appConnection(): Connection
+    {
+        return self::getContainer()->get('doctrine.dbal.default_connection');
     }
 
     private function migratorConnection(): Connection

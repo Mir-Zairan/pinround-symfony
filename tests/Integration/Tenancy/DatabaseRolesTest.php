@@ -177,13 +177,19 @@ final class DatabaseRolesTest extends KernelTestCase
         ));
     }
 
+    /** The app only reads which migrations ran, for /health/ready (Version20261107180000); roles.sql keeps it that way. */
     #[Test]
-    public function nobodyButTheMigratorHasRightsOnTheMigrationsTable(): void
+    public function theAppRoleMayOnlyReadTheMigrationsTableAndNobodyElseHasRights(): void
     {
         $connection = $this->connection();
 
-        self::assertFalse($connection->fetchOne("SELECT has_table_privilege('pinround_app', 'public.doctrine_migration_versions', 'INSERT')"));
-        self::assertSame([], $this->grantsToOthersThanTheOwner($connection, 'doctrine_migration_versions'));
+        self::assertEqualsCanonicalizing(
+            ['pinround_app SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'doctrine_migration_versions'),
+        );
+        self::assertSame('pinround_migrator', $connection->fetchOne("SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass('public.doctrine_migration_versions')"));
+        self::assertGreaterThan(0, $connection->fetchOne('SELECT count(*) FROM doctrine_migration_versions'));
+        self::assertFalse($connection->fetchOne("SELECT has_table_privilege('pinround_readonly', 'public.doctrine_migration_versions', 'SELECT')"));
     }
 
     /** The worker inserts, locks, marks and deletes rows; support reports never read envelopes (Version20261107150000). */

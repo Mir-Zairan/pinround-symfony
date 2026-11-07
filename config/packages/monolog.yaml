@@ -36,23 +36,14 @@ when@test:
 when@prod:
     monolog:
         handlers:
+            # Info and above, written as they happen (ADR-0029): no fingers_crossed buffer, which would drop a warning
+            # (a failed readiness check, a failed rollback) unless an error followed in the same request. It writes for
+            # commands and workers too, so prod has no console handler: that one would print each record a second time.
             main:
-                type: fingers_crossed
-                action_level: error
-                handler: nested
-                excluded_http_codes: [404, 405]
-                channels: ["!deprecation"]
-                buffer_size: 50 # How many messages should be saved? Prevent memory leaks
-            nested:
                 type: stream
                 path: php://stdout
-                level: debug
-                formatter: monolog.formatter.json
-            # A worker's stdout is a log stream, so what the console handler writes there is JSON as well. Unlike the
-            # console formatter, the JSON one fills no placeholders, so the handler's PSR-3 message processor does.
-            console:
-                type: console
-                channels: ["!event", "!doctrine"]
+                level: info
+                channels: ["!deprecation"]
                 formatter: monolog.formatter.json
             deprecation:
                 type: stream

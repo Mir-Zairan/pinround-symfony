@@ -111,6 +111,12 @@ ALTER DEFAULT PRIVILEGES FOR ROLE pinround_migrator IN SCHEMA public
     REVOKE ALL ON TABLES FROM pinround_app, pinround_readonly;
 ALTER DEFAULT PRIVILEGES FOR ROLE pinround_migrator IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM pinround_app, pinround_readonly;
-SELECT 'REVOKE ALL ON public.doctrine_migration_versions FROM pinround_app, pinround_readonly'
+-- The migrations table is the exception: pinround_app keeps the SELECT a migration grants it, so /health/ready can
+-- tell whether every migration ran (operations.md, Health); every other right on it is taken away.
+SELECT statement
+FROM unnest(ARRAY[
+    'REVOKE ALL ON public.doctrine_migration_versions FROM pinround_readonly',
+    'REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON public.doctrine_migration_versions FROM pinround_app'
+]) AS statement
 WHERE to_regclass('public.doctrine_migration_versions') IS NOT NULL
 \gexec
