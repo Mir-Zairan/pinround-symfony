@@ -3,7 +3,7 @@
 # a built or credential-holding service can pull its image, the workers do not consume every Messenger transport
 # but `failed` exactly once with `outbox` alone in worker-outbox, a messenger:consume service does not wait for
 # a healthy postgres (and the workers for a healthy valkey-state), or docker/minio/Dockerfile lacks pinned commits
-# and digests.
+# and digests, and the opt-in jaeger service is digest-pinned, loopback-only and has a healthcheck.
 # Only POSIX tools are used, so CI needs nothing beyond docker compose.
 set -eu
 
@@ -128,6 +128,44 @@ done
 unpinned=$(grep '^FROM ' "$dockerfile" | grep -v '@sha256:' || true)
 if [ -n "$unpinned" ]; then
     echo "compose-config-check: base image not pinned by digest in $dockerfile: $unpinned" >&2
+    exit 1
+fi
+
+# jaeger sits in the opt-in `observability` profile: absent from a plain config, present with the profile.
+if printf '%s\n' "$services" | grep -qx jaeger; then
+    echo "compose-config-check: service 'jaeger' must not start without --profile observability" >&2
+    exit 1
+fi
+
+profile_config=$($compose --profile observability config)
+
+if ! $compose --profile observability config --services | grep -qx jaeger; then
+    echo "compose-config-check: service 'jaeger' is missing from the observability profile" >&2
+    exit 1
+fi
+
+# The lines of the jaeger service in the normalised config.
+jaeger_config=$(printf '%s\n' "$profile_config" | awk '
+    /^[a-z]/ { in_services = ($0 == "services:") }
+    in_services && /^  [a-z0-9-]+:$/ { current = substr($1, 1, length($1) - 1) }
+    in_services && current == "jaeger" { print }
+')
+
+if ! printf '%s\n' "$jaeger_config" | grep -Eq '^    image: [^ @]+@sha256:[0-9a-f]{64}$'; then
+    echo "compose-config-check: jaeger image is not pinned by a 64-hex @sha256 digest" >&2
+    exit 1
+fi
+
+# Every published port must be bound to loopback, so Jaeger's UI and OTLP port are not open to the network.
+jaeger_ports=$(printf '%s\n' "$jaeger_config" | grep -c '^        target: ' || true)
+jaeger_loopback_ports=$(printf '%s\n' "$jaeger_config" | grep -c '^        host_ip: 127\.0\.0\.1$' || true)
+if [ "$jaeger_ports" -lt 1 ] || [ "$jaeger_ports" != "$jaeger_loopback_ports" ]; then
+    echo "compose-config-check: every jaeger port must have host_ip 127.0.0.1 ($jaeger_loopback_ports of $jaeger_ports do)" >&2
+    exit 1
+fi
+
+if ! printf '%s\n' "$jaeger_config" | grep -q '^    healthcheck:'; then
+    echo "compose-config-check: no healthcheck for: jaeger" >&2
     exit 1
 fi
 
