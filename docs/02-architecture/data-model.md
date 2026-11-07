@@ -158,7 +158,7 @@ Only the important columns are listed. Every tenant table also has `organization
 
 | Table | Columns | Constraints / indexes |
 |---|---|---|
-| idn_user | id, email `citext`, name, status (`active`/`blocked`), locale, time_zone, created_at | `UNIQUE (email)` (`idn_user_email_key`, so any letter case counts); `CHECK` on status. Created by `Version20261107190000`, like the two below; `pinround_app` has `SELECT, INSERT, UPDATE`, `pinround_readonly` nothing (a global table has no tenant policy to limit it) |
+| idn_user | id, email `citext`, name, status (`active`/`blocked`), locale, time_zone, created_at, session_stamp `text` (32 random hex digits; a new one ends every session of the user), theme `text` default `system` (`system`/`light`/`dark`) | `UNIQUE (email)` (`idn_user_email_key`, so any letter case counts); `CHECK` on status and on theme (`idn_user_theme_check`). Created by `Version20261107190000`, like the two below; session_stamp and theme added by `Version20261108100000` (each existing row got its own random stamp); `pinround_app` has `SELECT, INSERT, UPDATE`, `pinround_readonly` nothing (a global table has no tenant policy to limit it) |
 | idn_credential | user_id PK, password_hash (argon2id), changed_at | FK user (`idn_credential_user_id_fkey`); `pinround_app` has `SELECT, INSERT, UPDATE` |
 | idn_mfa_secret | user_id PK, secret_enc `bytea` (sodium, key id), confirmed_at, recovery_codes_hash `text[]` | — |
 | idn_sso_identity | id, user_id, provider_config_id (the org's IdP config), issuer (`iss`), subject (`sub`), linked_at | `UNIQUE (provider_config_id, issuer, subject)`. Never matched by email; linking to an existing account needs the account password + MFA ([ADR-0012](../03-adr/0012-authentication.md)) |

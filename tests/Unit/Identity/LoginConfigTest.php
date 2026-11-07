@@ -80,7 +80,7 @@ final class LoginConfigTest extends TestCase
             self::at($framework, 'framework', 'session'),
         );
         self::assertSame(
-            ['arguments' => ['@state_valkey.connection', ['prefix' => 'session:']]],
+            ['arguments' => ['@state_valkey.connection', ['prefix' => 'session:', 'ttl' => '%identity.session_idle_seconds%']]],
             self::at($services, 'services', RedisSessionHandler::class),
         );
         self::assertSame(
@@ -91,6 +91,17 @@ final class LoginConfigTest extends TestCase
             ],
             self::at($services, 'services', 'state_valkey.connection'),
         );
+    }
+
+    #[Test]
+    public function sessionsEndAfterEightIdleHoursOrThirtyDays(): void
+    {
+        $services = self::config('services.yaml');
+
+        self::assertSame(28800, self::at($services, 'parameters', 'identity.session_idle_seconds'));
+        self::assertSame(30, self::at($services, 'parameters', 'identity.session_absolute_days'));
+        self::assertSame([], self::environmentsRedefining($services, 'parameters', 'identity.session_idle_seconds'));
+        self::assertSame([], self::environmentsRedefining($services, 'parameters', 'identity.session_absolute_days'));
     }
 
     #[Test]

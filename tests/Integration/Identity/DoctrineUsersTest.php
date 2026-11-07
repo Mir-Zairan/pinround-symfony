@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Identity;
 
 use App\Identity\Domain\Email;
+use App\Identity\Domain\Theme;
 use App\Identity\Domain\User;
 use App\Identity\Domain\UserStatus;
 use App\Identity\Infrastructure\Doctrine\DoctrineUsers;
@@ -57,6 +58,44 @@ final class DoctrineUsersTest extends KernelTestCase
         self::assertSame('de', $found->locale());
         self::assertSame('Europe/Berlin', $found->timeZone());
         self::assertSame($createdAt->getTimestamp(), $found->createdAt()->getTimestamp());
+        self::assertSame(Theme::System, $found->theme());
+        self::assertSame($user->sessionStamp(), $found->sessionStamp());
+    }
+
+    #[Test]
+    public function aRotatedSessionStampIsSavedOnFlush(): void
+    {
+        $user = UserFactory::createOne();
+        $before = $user->sessionStamp();
+
+        $user->rotateSessionStamp();
+        $this->entityManager->flush();
+
+        $saved = $this->connection()->fetchOne('SELECT session_stamp FROM idn_user WHERE id = ?', [$user->id()->toString()]);
+        self::assertSame($user->sessionStamp(), $saved);
+        self::assertNotSame($before, $saved);
+    }
+
+    #[Test]
+    public function theDatabaseRefusesAThemeOutsideSystemLightAndDark(): void
+    {
+        $this->expectExceptionMessageMatches('/idn_user_theme_check/');
+
+        $this->connection()->executeStatement(
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp, theme)
+             VALUES ('0197a3c0-0000-7000-8000-0000000000c6', 'raj@acme-foods.example', 'Raj', 'active', 'en', 'UTC', now(), 'a-stamp', 'blue')",
+        );
+    }
+
+    #[Test]
+    public function aRowWrittenWithoutAThemeFollowsTheSystem(): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp)
+             VALUES ('0197a3c0-0000-7000-8000-0000000000c7', 'raj@acme-foods.example', 'Raj', 'active', 'en', 'UTC', now(), 'a-stamp')",
+        );
+
+        self::assertSame(Theme::System, $this->users()->byId(new UserId('0197a3c0-0000-7000-8000-0000000000c7'))?->theme());
     }
 
     #[Test]
@@ -68,8 +107,8 @@ final class DoctrineUsersTest extends KernelTestCase
         $this->entityManager->clear();
 
         self::assertSame(
-            [['id' => '0197a3c0-0000-7000-8000-0000000000c5', 'email' => 'omar@acme-foods.example', 'name' => 'Omar', 'status' => 'active', 'locale' => 'en', 'time_zone' => 'Europe/Berlin', 'created_at' => '2026-11-02 09:30:00']],
-            $this->connection()->fetchAllAssociative("SELECT id, email, name, status, locale, time_zone, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at FROM idn_user"),
+            [['id' => '0197a3c0-0000-7000-8000-0000000000c5', 'email' => 'omar@acme-foods.example', 'name' => 'Omar', 'status' => 'active', 'locale' => 'en', 'time_zone' => 'Europe/Berlin', 'created_at' => '2026-11-02 09:30:00', 'theme' => 'system', 'session_stamp' => $user->sessionStamp()]],
+            $this->connection()->fetchAllAssociative("SELECT id, email, name, status, locale, time_zone, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at, theme, session_stamp FROM idn_user"),
         );
     }
 
@@ -86,8 +125,8 @@ final class DoctrineUsersTest extends KernelTestCase
     public function aUserIsFoundByEmailWhateverTheCaseOfTheStoredRow(): void
     {
         $this->connection()->executeStatement(
-            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at)
-             VALUES ('0197a3c0-0000-7000-8000-0000000000c2', 'Omar@Acme-Foods.Example', 'Omar', 'active', 'en', 'UTC', now())",
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp)
+             VALUES ('0197a3c0-0000-7000-8000-0000000000c2', 'Omar@Acme-Foods.Example', 'Omar', 'active', 'en', 'UTC', now(), 'a-stamp')",
         );
 
         $found = $this->users()->byEmail(new Email('omar@acme-foods.example'));
@@ -114,8 +153,8 @@ final class DoctrineUsersTest extends KernelTestCase
         $this->expectException(UniqueConstraintViolationException::class);
 
         $this->connection()->executeStatement(
-            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at)
-             VALUES ('0197a3c0-0000-7000-8000-0000000000c3', 'MIA@Acme-Foods.Example', 'Mia', 'active', 'en', 'UTC', now())",
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp)
+             VALUES ('0197a3c0-0000-7000-8000-0000000000c3', 'MIA@Acme-Foods.Example', 'Mia', 'active', 'en', 'UTC', now(), 'a-stamp')",
         );
     }
 
@@ -125,8 +164,8 @@ final class DoctrineUsersTest extends KernelTestCase
         $this->expectExceptionMessageMatches('/idn_user_status_check/');
 
         $this->connection()->executeStatement(
-            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at)
-             VALUES ('0197a3c0-0000-7000-8000-0000000000c4', 'raj@acme-foods.example', 'Raj', 'deleted', 'en', 'UTC', now())",
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp)
+             VALUES ('0197a3c0-0000-7000-8000-0000000000c4', 'raj@acme-foods.example', 'Raj', 'deleted', 'en', 'UTC', now(), 'a-stamp')",
         );
     }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Identity\Domain;
 
 use App\Identity\Domain\Email;
+use App\Identity\Domain\Theme;
 use App\Identity\Domain\User;
 use App\Identity\Domain\UserStatus;
 use App\SharedKernel\Domain\UserId;
@@ -29,6 +30,29 @@ final class UserTest extends TestCase
         self::assertSame('en', $user->locale());
         self::assertSame('Asia/Kolkata', $user->timeZone());
         self::assertSame($createdAt, $user->createdAt());
+        self::assertSame(Theme::System, $user->theme());
+    }
+
+    #[Test]
+    public function aNewUserGetsARandomSessionStamp(): void
+    {
+        $first = new User(new UserId(self::ID), new Email('raj@acme-foods.example'), 'Raj', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+        $second = new User(new UserId(self::ID), new Email('raj@acme-foods.example'), 'Raj', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+
+        self::assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $first->sessionStamp());
+        self::assertNotSame($first->sessionStamp(), $second->sessionStamp());
+    }
+
+    #[Test]
+    public function rotatingTheSessionStampReplacesItWithANewRandomOne(): void
+    {
+        $user = new User(new UserId(self::ID), new Email('raj@acme-foods.example'), 'Raj', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+        $before = $user->sessionStamp();
+
+        $user->rotateSessionStamp();
+
+        self::assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $user->sessionStamp());
+        self::assertNotSame($before, $user->sessionStamp());
     }
 
     #[Test]
