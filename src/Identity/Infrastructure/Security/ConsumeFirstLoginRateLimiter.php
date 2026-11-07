@@ -42,9 +42,7 @@ final readonly class ConsumeFirstLoginRateLimiter implements RequestRateLimiterI
         #[Autowire(param: 'identity.login_per_ip_minutes')]
         private int $perIpMinutes,
         private FixedWindowTryRefund $perIpRefund,
-        #[Autowire(param: 'kernel.secret')]
-        #[\SensitiveParameter]
-        private string $secret,
+        private LoginKeyHasher $keyHasher,
     ) {
     }
 
@@ -93,7 +91,7 @@ final readonly class ConsumeFirstLoginRateLimiter implements RequestRateLimiterI
 
     private function hash(string $data): string
     {
-        return hash_hmac('sha256', $data, $this->secret);
+        return $this->keyHasher->hexOf($data);
     }
 
     private static function cappedAt(RateLimit $limit, int $minutes): RateLimit
