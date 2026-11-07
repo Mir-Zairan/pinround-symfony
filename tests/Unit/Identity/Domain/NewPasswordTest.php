@@ -55,11 +55,17 @@ final class NewPasswordTest extends TestCase
     #[Test]
     public function aStackTraceShowsNoPlainText(): void
     {
+        // Production ini (CI's too) drops every argument from traces, which would make this pass without the attribute.
+        $ignoreArgs = ini_set('zend.exception_ignore_args', '0');
+
         try {
             new NewPassword('too-short');
             self::fail('A short password was accepted.');
         } catch (PasswordTooShort $refusal) {
+            self::assertStringContainsString('NewPassword->__construct(Object(SensitiveParameterValue))', $refusal->getTraceAsString());
             self::assertStringNotContainsString('too-short', $refusal->getTraceAsString());
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $ignoreArgs);
         }
     }
 }

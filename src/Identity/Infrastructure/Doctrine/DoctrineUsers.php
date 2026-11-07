@@ -6,8 +6,8 @@ namespace App\Identity\Infrastructure\Doctrine;
 
 use App\Identity\Domain\Email;
 use App\Identity\Domain\User;
-use App\Identity\Domain\UserId;
 use App\Identity\Domain\Users;
+use App\SharedKernel\Domain\UserId;
 use Doctrine\ORM\EntityManagerInterface;
 
 final readonly class DoctrineUsers implements Users

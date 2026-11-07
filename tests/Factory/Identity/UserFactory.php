@@ -6,7 +6,7 @@ namespace App\Tests\Factory\Identity;
 
 use App\Identity\Domain\Email;
 use App\Identity\Domain\User;
-use App\Identity\Domain\UserId;
+use App\SharedKernel\Domain\UserId;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Persistence\PersistentObjectFactory;
 

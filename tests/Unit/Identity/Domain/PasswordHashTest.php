@@ -27,6 +27,23 @@ final class PasswordHashTest extends TestCase
     }
 
     #[Test]
+    public function aStackTraceShowsNoValueGivenAsAHash(): void
+    {
+        // Production ini (CI's too) drops every argument from traces, which would make this pass without the attribute.
+        $ignoreArgs = ini_set('zend.exception_ignore_args', '0');
+
+        try {
+            new PasswordHash('lena-knows-this-one');
+            self::fail('A value without the crypt form was accepted.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertStringContainsString('PasswordHash->__construct(Object(SensitiveParameterValue))', $refusal->getTraceAsString());
+            self::assertStringNotContainsString('lena-knows', $refusal->getTraceAsString());
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $ignoreArgs);
+        }
+    }
+
+    #[Test]
     public function itCannotBeTurnedIntoAString(): void
     {
         self::assertFalse(new \ReflectionClass(PasswordHash::class)->hasMethod('__toString'));

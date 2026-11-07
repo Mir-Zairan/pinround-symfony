@@ -6,8 +6,8 @@ namespace App\Tests\Integration\Identity;
 
 use App\Identity\Domain\Credential;
 use App\Identity\Domain\PasswordHash;
-use App\Identity\Domain\UserId;
 use App\Identity\Infrastructure\Doctrine\DoctrineCredentials;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Factory\Identity\UserFactory;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
@@ -53,6 +53,21 @@ final class DoctrineCredentialsTest extends KernelTestCase
         self::assertTrue($user->id()->equals($found->userId()));
         self::assertSame(self::ARGON2ID_HASH, $found->passwordHash()->encoded());
         self::assertSame($changedAt->getTimestamp(), $found->changedAt()->getTimestamp());
+    }
+
+    #[Test]
+    public function addingTheSameCredentialTwiceSavesOneRowWithTheOriginalValues(): void
+    {
+        $user = UserFactory::createOne();
+        $credential = new Credential($user, new PasswordHash(self::ARGON2ID_HASH), new \DateTimeImmutable('2026-11-03 14:00:00 UTC'));
+        $this->credentials()->add($credential);
+        $this->credentials()->add($credential);
+        $this->entityManager->clear();
+
+        self::assertSame(
+            [['user_id' => $user->id()->toString(), 'password_hash' => self::ARGON2ID_HASH, 'changed_at' => '2026-11-03 14:00:00']],
+            $this->connection()->fetchAllAssociative("SELECT user_id, password_hash, to_char(changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS changed_at FROM idn_credential"),
+        );
     }
 
     #[Test]

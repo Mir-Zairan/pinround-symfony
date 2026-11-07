@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Identity\Domain;
+namespace App\SharedKernel\Domain;
 
 /**
  * The id of a user: a UUIDv7 in canonical 8-4-4-4-12 form, kept in lowercase (ADR-0006).

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Identity\Domain;
 
+use App\SharedKernel\Domain\UserId;
+
 /**
  * A person who can log in. Global: one user can belong to several organizations (data-model.md, Identity).
  */
@@ -20,7 +22,8 @@ final readonly class User
     /**
      * A new user is active.
      *
-     * @param string $timeZone an IANA time zone identifier, for example "Europe/Berlin"
+     * @param string $timeZone an IANA time zone identifier, for example "Europe/Berlin"; old names that browsers still
+     *                         report, such as "Asia/Calcutta" or "US/Pacific", are kept as given
      *
      * @throws \InvalidArgumentException when the name is blank or the time zone is not an IANA identifier
      */
@@ -30,7 +33,7 @@ final readonly class User
         if ('' === $trimmedName) {
             throw new \InvalidArgumentException('A user needs a name.');
         }
-        if (!\in_array($timeZone, \DateTimeZone::listIdentifiers(), true)) {
+        if (!\in_array($timeZone, \DateTimeZone::listIdentifiers(\DateTimeZone::ALL_WITH_BC), true)) {
             throw new \InvalidArgumentException('A user time zone must be an IANA time zone identifier.');
         }
 

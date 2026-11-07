@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Identity\Domain;
 
+use App\SharedKernel\Domain\UserId;
+
 interface Users
 {
     public function byId(UserId $id): ?User;

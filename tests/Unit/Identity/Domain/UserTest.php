@@ -6,8 +6,9 @@ namespace App\Tests\Unit\Identity\Domain;
 
 use App\Identity\Domain\Email;
 use App\Identity\Domain\User;
-use App\Identity\Domain\UserId;
 use App\Identity\Domain\UserStatus;
+use App\SharedKernel\Domain\UserId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -36,6 +37,25 @@ final class UserTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         new User(new UserId(self::ID), new Email('raj@acme-foods.example'), '   ', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function oldIanaNamesBrowsersStillReport(): iterable
+    {
+        yield 'renamed city' => ['Asia/Calcutta'];
+        yield 'renamed spelling' => ['Europe/Kiev'];
+        yield 'US alias' => ['US/Pacific'];
+    }
+
+    #[Test]
+    #[DataProvider('oldIanaNamesBrowsersStillReport')]
+    public function itKeepsAnOldIanaNameAsGiven(string $timeZone): void
+    {
+        $user = new User(new UserId(self::ID), new Email('raj@acme-foods.example'), 'Raj', 'en', $timeZone, new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+
+        self::assertSame($timeZone, $user->timeZone());
     }
 
     #[Test]

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Identity\Domain;
+namespace App\Tests\Unit\SharedKernel\Domain;
 
-use App\Identity\Domain\UserId;
+use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;

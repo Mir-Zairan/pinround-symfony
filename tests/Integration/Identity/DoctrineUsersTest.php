@@ -6,9 +6,9 @@ namespace App\Tests\Integration\Identity;
 
 use App\Identity\Domain\Email;
 use App\Identity\Domain\User;
-use App\Identity\Domain\UserId;
 use App\Identity\Domain\UserStatus;
 use App\Identity\Infrastructure\Doctrine\DoctrineUsers;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Factory\Identity\UserFactory;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
@@ -57,6 +57,20 @@ final class DoctrineUsersTest extends KernelTestCase
         self::assertSame('de', $found->locale());
         self::assertSame('Europe/Berlin', $found->timeZone());
         self::assertSame($createdAt->getTimestamp(), $found->createdAt()->getTimestamp());
+    }
+
+    #[Test]
+    public function addingTheSameUserTwiceSavesOneRowWithTheOriginalValues(): void
+    {
+        $user = new User(new UserId('0197a3c0-0000-7000-8000-0000000000c5'), new Email('omar@acme-foods.example'), 'Omar', 'en', 'Europe/Berlin', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+        $this->users()->add($user);
+        $this->users()->add($user);
+        $this->entityManager->clear();
+
+        self::assertSame(
+            [['id' => '0197a3c0-0000-7000-8000-0000000000c5', 'email' => 'omar@acme-foods.example', 'name' => 'Omar', 'status' => 'active', 'locale' => 'en', 'time_zone' => 'Europe/Berlin', 'created_at' => '2026-11-02 09:30:00']],
+            $this->connection()->fetchAllAssociative("SELECT id, email, name, status, locale, time_zone, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at FROM idn_user"),
+        );
     }
 
     #[Test]

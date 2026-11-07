@@ -6,7 +6,7 @@ namespace App\Identity\Infrastructure\Doctrine;
 
 use App\Identity\Domain\Credential;
 use App\Identity\Domain\Credentials;
-use App\Identity\Domain\UserId;
+use App\SharedKernel\Domain\UserId;
 use Doctrine\ORM\EntityManagerInterface;
 
 final readonly class DoctrineCredentials implements Credentials
