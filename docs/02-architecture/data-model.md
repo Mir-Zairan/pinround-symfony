@@ -158,13 +158,13 @@ Only the important columns are listed. Every tenant table also has `organization
 
 | Table | Columns | Constraints / indexes |
 |---|---|---|
-| idn_user | id, email `citext`, name, status (`active`/`blocked`), locale, time_zone, created_at | `UNIQUE (email)` |
-| idn_credential | user_id PK, password_hash (argon2id), changed_at | FK user |
+| idn_user | id, email `citext`, name, status (`active`/`blocked`), locale, time_zone, created_at | `UNIQUE (email)` (`idn_user_email_key`, so any letter case counts); `CHECK` on status. Created by `Version20261107190000`, like the two below; `pinround_app` has `SELECT, INSERT, UPDATE`, `pinround_readonly` nothing (a global table has no tenant policy to limit it) |
+| idn_credential | user_id PK, password_hash (argon2id), changed_at | FK user (`idn_credential_user_id_fkey`); `pinround_app` has `SELECT, INSERT, UPDATE` |
 | idn_mfa_secret | user_id PK, secret_enc `bytea` (sodium, key id), confirmed_at, recovery_codes_hash `text[]` | — |
 | idn_sso_identity | id, user_id, provider_config_id (the org's IdP config), issuer (`iss`), subject (`sub`), linked_at | `UNIQUE (provider_config_id, issuer, subject)`. Never matched by email; linking to an existing account needs the account password + MFA ([ADR-0012](../03-adr/0012-authentication.md)) |
 | idn_sso_provider | id, organization_id, issuer, client_id, secret_enc, allowed_domains `text[]` (each proven by a DNS TXT record), verified_at | `UNIQUE (organization_id, issuer)`. Read before login through a resolver function (see [Row-level security](#row-level-security)) |
 | idn_api_token | id, organization_id, user_id, name, token_hash (SHA-256 of a 32-byte random value plus a server pepper; tokens look like `pr_…`), prefix (8 characters, for display), scopes `text[]`, expires_at, last_used_at, revoked_at | `UNIQUE (token_hash)`; `(organization_id, user_id)` |
-| idn_login_attempt | id, email_hash, ip_hash, success, at | `(email_hash, at)`; purged after 30 days |
+| idn_login_attempt | id, email_hash, ip_hash, success, at | `(email_hash, at)`; purged after 30 days; `pinround_app` has `SELECT, INSERT`. No entity maps it (hidden by `schema_filter`) |
 
 ### Organization
 
@@ -496,7 +496,7 @@ ORDER BY at DESC LIMIT 6;
 - **Retention** is per organization. Because some orgs choose "always", partitions of `tkt_ticket_event` are normally **not dropped**; the purge deletes rows instead (below). Partitions of `ntf_notification` and `ast_usage` have one fixed lifetime for everyone and are dropped whole. A partition of `aud_event` or `tkt_ticket_event` may be dropped only when no org with a longer retention has rows in it (checked by the job).
 - **Ticket events follow the ticket:** events are deleted only together with their closed ticket (§10.3 rule: open tickets and their history are never deleted). The nightly job, as `pinround_retention`, finds closed tickets older than the org's cutoff and deletes, in chunks of 5,000 rows, their events, messages, rounds, pins and media references, then the tickets. Audit events are purged by `at < cutoff` per org, with a minimum of 1 year for security events.
 - The purge writes its own audit event per org and run.
-- Tables no entity maps are **excluded from the Doctrine schema diff** by the `schema_filter` regex on the default and migrator connections in `config/packages/doctrine.yaml`, and their DDL lives in hand-written migrations. Today it hides `processed_message`, `aud_event` and its partitions `aud_event_YYYYMM`; `tkt_ticket_event`, `ntf_notification` and `ast_usage` join it with their migrations. The Messenger tables stay visible: Messenger adds them to the expected schema. `DatabaseRolesTest::doctrineMigrationsDiffFindsNoChanges` runs the diff's comparison and fails on any difference.
+- Tables no entity maps are **excluded from the Doctrine schema diff** by the `schema_filter` regex on the default and migrator connections in `config/packages/doctrine.yaml`, and their DDL lives in hand-written migrations. Today it hides `processed_message`, `idn_login_attempt`, `aud_event` and its partitions `aud_event_YYYYMM`; `tkt_ticket_event`, `ntf_notification` and `ast_usage` join it with their migrations. The Messenger tables stay visible: Messenger adds them to the expected schema. `DatabaseRolesTest::doctrineMigrationsDiffFindsNoChanges` runs the diff's comparison and fails on any difference.
 - Open tickets are never deleted, whatever their age. Media is deleted from the bucket by a worker. Bucket lifecycle rules catch orphans after 7 days.
 - **Export** before deletion is the admin's job. pinround shows a warning 30 days before the first purge after a change.
 

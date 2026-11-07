@@ -247,12 +247,37 @@ final class DatabaseRolesTest extends KernelTestCase
         }
     }
 
+    /**
+     * Global Identity tables: the app reads, adds and changes users and credentials, and only adds login attempts,
+     * which the retention job purges. pinround_readonly gets nothing, as no tenant policy would limit it
+     * (Version20261107190000).
+     */
+    #[Test]
+    public function theAppRoleAloneHasRightsOnTheIdentityTablesAndOnlyAddsLoginAttempts(): void
+    {
+        $connection = $this->connection();
+        $expectedGrants = [
+            'idn_user' => ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
+            'idn_credential' => ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
+            'idn_login_attempt' => ['pinround_app INSERT', 'pinround_app SELECT'],
+        ];
+
+        foreach ($expectedGrants as $table => $grants) {
+            self::assertEqualsCanonicalizing($grants, $this->grantsToOthersThanTheOwner($connection, $table), $table);
+            self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
+        }
+        self::assertSame(
+            ['CREATE INDEX idn_login_attempt_email_hash_at_idx ON public.idn_login_attempt USING btree (email_hash, at)'],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_login_attempt' AND indexname <> 'idn_login_attempt_pkey'"),
+        );
+    }
+
     /** The tables no entity maps; the diff must neither drop them nor hide a table that is mapped. */
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);
