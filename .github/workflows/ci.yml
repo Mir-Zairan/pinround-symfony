@@ -208,6 +208,14 @@ jobs:
         run: docker compose --env-file .env --env-file .env.dev up -d --wait app
       - name: Apply the database roles and migrate
         run: make --no-print-directory db-roles migrate
+      # A password made for this run only, never stored in the repo: the seed gives it to the five demo people and
+      # Playwright logs in as Lena with it. The mask keeps it out of the job log.
+      - name: Seed the demo people with a password made for this run
+        run: |
+          demo_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$demo_password"
+          echo "DEMO_PASSWORD=$demo_password" >> "$GITHUB_ENV"
+          DEMO_PASSWORD="$demo_password" make --no-print-directory seed
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.12"
@@ -219,6 +227,8 @@ jobs:
         working-directory: tests/e2e
       - run: npx playwright test
         working-directory: tests/e2e
+        env:
+          E2E_PASSWORD: ${{ env.DEMO_PASSWORD }}
       - name: Show the app logs
         if: failure()
         run: docker compose --env-file .env --env-file .env.dev logs app

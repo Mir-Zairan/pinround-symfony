@@ -16,6 +16,9 @@ final class Avatar
 
     public AvatarSize $size = AvatarSize::Md;
 
+    /** The page header's avatar: 36 px in the primary colours (prototype "Global layout"); it ignores the size. */
+    public bool $isInHeader = false;
+
     /**
      * Templates pass a plain string; from() throws a ValueError for an unknown size, so a typo fails at mount.
      *
@@ -43,6 +46,10 @@ final class Avatar
 
     public function classes(): string
     {
+        if ($this->isInHeader) {
+            return 'site-header__avatar';
+        }
+
         return AvatarSize::Lg === $this->size ? 'av av-lg' : 'av';
     }
 

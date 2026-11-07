@@ -7,6 +7,8 @@
 # Put parameters here that don't need to change on each machine where the app is deployed
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
+    # The session cookie (framework.yaml); the test env's mock session storage uses the same name.
+    app.session_cookie_name: '__Host-pinround'
 
 services:
     # default configuration for services in *this* file
@@ -36,6 +38,15 @@ services:
         class: App\SharedKernel\Infrastructure\Health\ValkeyAnswers
         arguments: ['state_valkey', '%env(MESSENGER_TRANSPORT_DSN)%']
 
+    # The state Valkey (ADR-0010): noeviction and persistent, so sessions and login counters are never dropped to make
+    # room. Sessions get their own key prefix. LoginConfigTest pins these definitions.
+    state_valkey.connection:
+        class: Redis
+        factory: [Symfony\Component\Cache\Adapter\RedisAdapter, createConnection]
+        arguments: ['%env(STATE_VALKEY_DSN)%', { lazy: true }]
+    Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler:
+        arguments: ['@state_valkey.connection', { prefix: 'session:' }]
+
     # Tracing (ADR-0029). An empty OTEL_EXPORTER_OTLP_ENDPOINT turns it off. The OTEL_* values are read here and
     # nowhere else: the SDK's own environment autoloading stays off (OTEL_PHP_AUTOLOAD_ENABLED is never set).
     App\SharedKernel\Infrastructure\Tracing\TracerProviderFactory:
@@ -60,6 +71,21 @@ when@test:
             class: App\SharedKernel\Infrastructure\Health\ValkeyAnswers
             arguments: ['state_valkey', '%env(TEST_STATE_VALKEY_DSN)%']
             autoconfigure: true
+
+        # The same state Valkey for the login counters and SessionHandlerTest; STATE_VALKEY_DSN is not set in tests.
+        state_valkey.connection:
+            class: Redis
+            factory: [Symfony\Component\Cache\Adapter\RedisAdapter, createConnection]
+            arguments: ['%env(TEST_STATE_VALKEY_DSN)%', { lazy: true }]
+        # SessionHandlerTest reads sessions through the handler dev and prod use; the mock storage below never does.
+        test.session_handler:
+            alias: Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler
+            public: true
+        # framework.yaml's test storage: Symfony's own mock_file one is named MOCKSESSID, so the cookie tests would not
+        # see the real cookie name.
+        test.session.storage.factory.mock_file:
+            class: Symfony\Component\HttpFoundation\Session\Storage\MockFileSessionStorageFactory
+            arguments: ['%kernel.cache_dir%/sessions', '%app.session_cookie_name%']
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
         tracing.in_memory_exporter:

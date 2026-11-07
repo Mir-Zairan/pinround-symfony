@@ -1,0 +1,34 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Log in · pinround{% endblock %}
+
+{# Nobody is logged in here, so the page has no app header; the card shows the logo instead. #}
+{% block site_header %}{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="login">
+        <twig:Card tag="section" class="login__card" aria-labelledby="login-title">
+            <p class="logo">{{ block('logo', '@Web/base.html.twig') }}</p>
+            <h1 class="login__title" id="login-title">Log in</h1>
+            {% if errorMessage %}
+                <p class="login__error" role="alert">{{ errorMessage }}</p>
+            {% endif %}
+            <form class="login__form" method="post" action="{{ path('identity_login') }}">
+                <label class="login__field">
+                    Email
+                    <input class="login__input" type="email" name="email" value="{{ lastEmail }}" autocomplete="username" required{% if not lastEmail %} autofocus{% endif %}>
+                </label>
+                <label class="login__field">
+                    Password
+                    <input class="login__input" type="password" name="password" autocomplete="current-password" required{% if lastEmail %} autofocus{% endif %}>
+                </label>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
+                <twig:Button type="submit">Log in</twig:Button>
+            </form>
+        </twig:Card>
+    </div>
+{% endblock %}

@@ -13,17 +13,25 @@ doctrine:
         # A failed nested savepoint is not covered: DBAL's nesting level stays one too high (DBAL's own behaviour).
         wrapper_class: &connection_class App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection
         # Tables no entity maps, built by hand-written migrations, that doctrine:migrations:diff would otherwise drop:
-        # processed_message, and aud_event with its monthly partitions aud_event_YYYYMM (data-model.md, Partitions and
-        # retention). The Messenger tables stay visible: Messenger adds them to the expected schema, so diff checks them.
-        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|aud_event(?:_\d{6})?)$)~'
+        # processed_message, idn_login_attempt, and aud_event with its monthly partitions aud_event_YYYYMM (data-model.md,
+        # Partitions and retention). The Messenger tables stay visible: Messenger adds them to the expected schema, so diff checks them.
+        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|aud_event(?:_\d{6})?)$)~'
 
         profiling_collect_backtrace: '%kernel.debug%'
+        types:
+            citext: App\Identity\Infrastructure\Doctrine\CitextType
     orm:
         validate_xml_mapping: true
         naming_strategy: doctrine.orm.naming_strategy.underscore
         identity_generation_preferences:
             Doctrine\DBAL\Platforms\PostgreSQLPlatform: identity
         auto_mapping: false
+        mappings:
+            Identity:
+                type: xml
+                dir: '%kernel.project_dir%/src/Identity/Infrastructure/Doctrine/Mapping'
+                prefix: 'App\Identity\Domain'
+                is_bundle: false
         # A result cache that never stores anything, in every environment: TenantFilter's SQL holds no organization
         # id, so a result cache key would not tell organizations apart and could serve one organization's rows to
         # another without asking the database. Left unset, DoctrineBundle would add an in-memory one. Replace it

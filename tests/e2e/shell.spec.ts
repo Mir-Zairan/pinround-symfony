@@ -1,7 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { LENA_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
+// The shell is the logged-in page: every test here starts as Lena (auth.setup.ts).
+test.use({ storageState: LENA_STORAGE_STATE });
+
 const LIGHT_SURFACE = 'rgb(244, 251, 248)';
 const DARK_SURFACE = 'rgb(14, 21, 19)';
 

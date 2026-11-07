@@ -20,6 +20,7 @@ final class AssetPipelineTest extends KernelTestCase
         'styles/shell.css',
         'styles/components.css',
         'styles/gallery.css',
+        'styles/login.css',
     ];
 
     private const array FONTS = [

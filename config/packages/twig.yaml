@@ -2,6 +2,7 @@ twig:
     file_name_pattern: '*.twig'
     paths:
         '%kernel.project_dir%/src/Web/UI/templates': Web
+        '%kernel.project_dir%/src/Identity/UI/templates': Identity
 
 when@test:
     twig:

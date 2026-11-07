@@ -1,0 +1,5 @@
+# The firewall's logout listener answers this route before any controller runs, and refuses a missing or wrong CSRF
+# token. POST only, so a link or an image on another page cannot log anyone out: GET gets 405 from the router.
+identity_logout:
+    path: /logout
+    methods: [POST]

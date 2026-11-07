@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Tests\Fixtures\Security\ExpectedSecurityHeaders;
+use App\Tests\Functional\Identity\LogsInUsers;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -12,6 +13,7 @@ use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
+use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The headers of the CSP example in docs/02-architecture/security.md, with the storage and Mercure origins
@@ -19,6 +21,9 @@ use Symfony\Component\HttpKernel\KernelEvents;
  */
 final class SecurityHeadersTest extends WebTestCase
 {
+    use Factories;
+    use LogsInUsers;
+
     private KernelBrowser $client;
 
     protected function setUp(): void
@@ -30,6 +35,7 @@ final class SecurityHeadersTest extends WebTestCase
     #[Test]
     public function theHomePageCarriesTheHeadersWithTheNonceItsScriptsPrint(): void
     {
+        $this->logIn($this->client, $this->createUserWithPassword('Lena Berg'));
         $page = $this->client->request('GET', '/');
         self::assertResponseStatusCodeSame(200);
 
@@ -44,6 +50,7 @@ final class SecurityHeadersTest extends WebTestCase
     public function twoRequestsOnOneKernelGetDifferentNonces(): void
     {
         $this->client->disableReboot();
+        $this->logIn($this->client, $this->createUserWithPassword('Lena Berg'));
 
         $this->client->request('GET', '/');
         self::assertResponseStatusCodeSame(200);
@@ -59,6 +66,7 @@ final class SecurityHeadersTest extends WebTestCase
     #[Test]
     public function theTestEnvironmentSendsNoStrictTransportSecurity(): void
     {
+        $this->logIn($this->client, $this->createUserWithPassword('Lena Berg'));
         $this->client->request('GET', '/');
 
         self::assertResponseStatusCodeSame(200);
@@ -107,14 +115,15 @@ final class SecurityHeadersTest extends WebTestCase
 
     private static function createClientWithFreshNonDebugContainer(): KernelBrowser
     {
-        // A kernel with debug off never checks its cached container, so after a service change it would load the
-        // old one; deleting the cached file makes it compile the current code (ConfigCache, Kernel::initializeContainer).
+        // Debug off never revalidates the cached container or bundle list, so stale ones would load after a change.
         $kernel = static::createKernel(['debug' => false]);
         $containerClass = new \ReflectionMethod($kernel, 'getContainerClass')->invoke($kernel);
         self::assertIsString($containerClass);
         $cachedContainer = $kernel->getBuildDir().'/'.$containerClass.'.php';
-        if (is_file($cachedContainer)) {
-            unlink($cachedContainer);
+        foreach ([$cachedContainer, $kernel->getBuildDir().'/'.$containerClass.'.bundles.php'] as $cachedFile) {
+            if (is_file($cachedFile)) {
+                unlink($cachedFile);
+            }
         }
 
         $client = self::createClient(['debug' => false]);

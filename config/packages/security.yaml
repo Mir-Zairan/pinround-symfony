@@ -1,0 +1,56 @@
+# Password login (ADR-0012). LoginTest, LogoutTest and LoginConfigTest (tests/*/Identity) pin what this file promises.
+security:
+    # Argon2id by name, not "auto": "auto" may pick bcrypt on a PHP build without Argon2.
+    password_hashers:
+        App\Identity\Infrastructure\Security\SecurityUser:
+            algorithm: argon2id
+
+    providers:
+        identity_users:
+            id: App\Identity\Infrastructure\Security\SecurityUserProvider
+
+    # A new session id at login, so an id planted before the login is worthless after it.
+    session_fixation_strategy: migrate
+    # Unknown email and blocked user fail as "bad credentials", like a wrong password.
+    expose_security_errors: none
+
+    firewalls:
+        # Health probes answer without a session or a database read, also while either is down.
+        health:
+            pattern: ^/health/
+            security: false
+        main:
+            # Not lazy: RequestTransaction begins at priority 7 and needs the firewall (8) to have run first.
+            lazy: false
+            provider: identity_users
+            user_checker: App\Identity\Infrastructure\Security\BlockedUserChecker
+            form_login:
+                login_path: identity_login
+                check_path: identity_login
+                username_parameter: email
+                password_parameter: password
+                enable_csrf: true
+                default_target_path: web_home
+            login_throttling:
+                limiter: App\Identity\Infrastructure\Security\ConsumeFirstLoginRateLimiter
+            logout:
+                path: identity_logout
+                target: identity_login
+                enable_csrf: true
+
+    # Deny by default (ADR-0013): only the first matching rule applies, and the last one asks for a login everywhere.
+    # Routes match by name, so the dev and test routes match nothing in prod, where they do not exist.
+    access_control:
+        - { route: ^identity_login$, roles: PUBLIC_ACCESS }
+        - { route: ^web_component_gallery$, roles: PUBLIC_ACCESS }
+        - { route: ^test_, roles: PUBLIC_ACCESS }
+        - { path: ^/, roles: IS_AUTHENTICATED_FULLY }
+
+when@test:
+    security:
+        password_hashers:
+            # Still Argon2id, at the lowest cost PHP accepts, so the many logins of the tests stay fast.
+            App\Identity\Infrastructure\Security\SecurityUser:
+                algorithm: argon2id
+                time_cost: 3
+                memory_cost: 10
