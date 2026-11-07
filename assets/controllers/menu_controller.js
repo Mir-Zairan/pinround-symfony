@@ -2,6 +2,8 @@ import { Controller } from '@hotwired/stimulus';
 
 // The "⋯" menu uses the ARIA menu pattern (role="menu" with role="menuitem" buttons) because every item
 // is an action, as in the prototype. Items stay out of the Tab order; arrow keys move focus between them.
+// The avatar menu is a disclosure instead (links, a switch and a form, all in the Tab order): it binds
+// closeOnEscape on its list where the "⋯" menu binds navigate.
 export default class extends Controller {
   static targets = ['trigger', 'list', 'item'];
 
@@ -73,6 +75,13 @@ export default class extends Controller {
       this.#closeToTrigger();
     } else if (event.key === 'Tab') {
       // Focus leaves from the trigger, so Tab continues after the menu and Shift+Tab before it.
+      this.#closeToTrigger();
+    }
+  }
+
+  closeOnEscape(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
       this.#closeToTrigger();
     }
   }

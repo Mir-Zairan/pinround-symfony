@@ -68,6 +68,9 @@ test('a correct login lands on Home showing the initials of Lena', async ({ page
   await submitLogin(page, demoPassword());
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole('img', { name: 'Lena' })).toHaveText('L');
+  const avatar = page.getByRole('button', { name: 'Lena', exact: true });
+  await expect(avatar).toHaveText('L');
+  await page.waitForLoadState('networkidle');
+  await avatar.click();
   await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
 });

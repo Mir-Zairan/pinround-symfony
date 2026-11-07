@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity\Domain;
 
+use App\Identity\Domain\BlankUserName;
 use App\Identity\Domain\Email;
 use App\Identity\Domain\Theme;
+use App\Identity\Domain\UnknownTimeZone;
 use App\Identity\Domain\User;
 use App\Identity\Domain\UserStatus;
 use App\SharedKernel\Domain\UserId;
@@ -58,7 +60,7 @@ final class UserTest extends TestCase
     #[Test]
     public function itRefusesABlankName(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(BlankUserName::class);
 
         new User(new UserId(self::ID), new Email('raj@acme-foods.example'), '   ', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
     }
@@ -85,8 +87,75 @@ final class UserTest extends TestCase
     #[Test]
     public function itRefusesATimeZoneThatIsNotAnIanaIdentifier(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(UnknownTimeZone::class);
 
         new User(new UserId(self::ID), new Email('raj@acme-foods.example'), 'Raj', 'en', '+02:00', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+    }
+
+    #[Test]
+    public function renamingKeepsTheNameTrimmedAndTheSessionStamp(): void
+    {
+        $user = self::raj();
+        $stampBefore = $user->sessionStamp();
+
+        $user->rename("  Raj Kumar \t");
+
+        self::assertSame('Raj Kumar', $user->name());
+        self::assertSame($stampBefore, $user->sessionStamp());
+    }
+
+    #[Test]
+    public function renamingToABlankNameIsRefusedAndKeepsTheOldName(): void
+    {
+        $user = self::raj();
+
+        try {
+            $user->rename(" \n ");
+            self::fail('A blank name was accepted.');
+        } catch (BlankUserName) {
+        }
+
+        self::assertSame('Raj', $user->name());
+    }
+
+    #[Test]
+    public function changingTheTimeZoneKeepsAnIanaNameAsGiven(): void
+    {
+        $user = self::raj();
+
+        $user->changeTimeZone('Asia/Calcutta');
+
+        self::assertSame('Asia/Calcutta', $user->timeZone());
+    }
+
+    #[Test]
+    public function changingToATimeZoneThatIsNotAnIanaIdentifierIsRefusedAndKeepsTheOldOne(): void
+    {
+        $user = self::raj();
+
+        try {
+            $user->changeTimeZone('+02:00');
+            self::fail('An offset was accepted as a time zone.');
+        } catch (UnknownTimeZone) {
+        }
+
+        self::assertSame('UTC', $user->timeZone());
+    }
+
+    #[Test]
+    public function changingTheThemeKeepsTheSessionStamp(): void
+    {
+        $user = self::raj();
+        $stampBefore = $user->sessionStamp();
+
+        $user->changeTheme(Theme::Dark);
+
+        self::assertSame(Theme::Dark, $user->theme());
+        self::assertSame($stampBefore, $user->sessionStamp());
+    }
+
+    private static function raj(): User
+    {
+        return new User(new UserId(self::ID), new Email('raj@acme-foods.example'), 'Raj', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
     }
 }

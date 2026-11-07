@@ -1,0 +1,53 @@
+/* The profile page (src/Identity/UI/templates/profile.html.twig); its fields and messages come from login.css. */
+
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 560px;
+}
+
+.profile__title {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.profile__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile__error {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
+.profile__themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.profile__legend {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 0;
+  font-weight: 600;
+}
+
+.profile__theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.profile__themes .profile__error {
+  width: 100%;
+}

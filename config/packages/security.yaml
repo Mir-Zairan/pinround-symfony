@@ -40,9 +40,9 @@ security:
 
     # Deny by default (ADR-0013): only the first matching rule applies, and the last one asks for a login everywhere.
     # Routes match by name, so the dev and test routes match nothing in prod, where they do not exist.
-    # The self-service pages under /me (identity_security) need the full login of the last rule here, and each action
-    # then asks OwnAccountVoter for ACCOUNT_EDIT_OWN (ADR-0013); they act only on the logged-in user, never on an id
-    # from the request.
+    # The self-service pages under /me (identity_security, identity_profile, identity_theme) need the full login of the
+    # last rule here, and each action then asks OwnAccountVoter for ACCOUNT_EDIT_OWN (ADR-0013); they act only on the
+    # logged-in user, never on an id from the request.
     access_control:
         - { route: ^identity_login$, roles: PUBLIC_ACCESS }
         # Password reset (FR-ID-08), public by design: the visitor is logged out and the emailed token is the proof.

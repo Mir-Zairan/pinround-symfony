@@ -143,6 +143,46 @@
   font-weight: 700;
 }
 
+.avatar-menu__trigger {
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.avatar-menu__trigger[aria-expanded="true"] .site-header__avatar {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.avatar-menu__list {
+  min-width: 240px;
+}
+
+.avatar-menu__list .menu__item {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  font: inherit;
+}
+
+.avatar-menu__theme {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.avatar-menu__label {
+  color: var(--on-surface-var);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.avatar-menu__log-out {
+  width: 100%;
+}
+
 .page {
   flex: 1;
   width: 100%;

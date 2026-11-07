@@ -15,10 +15,10 @@ final class User
     // stays free of value-object types.
     private readonly string $id;
     private readonly string $email;
-    private readonly string $name;
+    private string $name;
     private readonly UserStatus $status;
-    private readonly string $timeZone;
-    private readonly Theme $theme;
+    private string $timeZone;
+    private Theme $theme;
     private string $sessionStamp;
 
     /**
@@ -27,25 +27,47 @@ final class User
      * @param string $timeZone an IANA time zone identifier, for example "Europe/Berlin"; old names that browsers still
      *                         report, such as "Asia/Calcutta" or "US/Pacific", are kept as given
      *
-     * @throws \InvalidArgumentException when the name is blank or the time zone is not an IANA identifier
+     * @throws BlankUserName   when the name is blank
+     * @throws UnknownTimeZone when the time zone is not an IANA identifier
      */
     public function __construct(UserId $id, Email $email, string $name, private readonly string $locale, string $timeZone, private readonly \DateTimeImmutable $createdAt)
     {
-        $trimmedName = trim($name);
-        if ('' === $trimmedName) {
-            throw new \InvalidArgumentException('A user needs a name.');
-        }
-        if (!\in_array($timeZone, \DateTimeZone::listIdentifiers(\DateTimeZone::ALL_WITH_BC), true)) {
-            throw new \InvalidArgumentException('A user time zone must be an IANA time zone identifier.');
-        }
-
         $this->id = $id->toString();
         $this->email = $email->toString();
-        $this->name = $trimmedName;
+        $this->name = self::trimmedName($name);
         $this->status = UserStatus::Active;
-        $this->timeZone = $timeZone;
+        $this->timeZone = self::ianaTimeZone($timeZone);
         $this->theme = Theme::System;
         $this->sessionStamp = self::newSessionStamp();
+    }
+
+    /**
+     * The name as a user keeps it. Public so a command can check every field of a form before it changes any.
+     *
+     * @throws BlankUserName when nothing is left after trimming
+     */
+    public static function trimmedName(string $name): string
+    {
+        $trimmedName = trim($name);
+        if ('' === $trimmedName) {
+            throw new BlankUserName('A user needs a name.');
+        }
+
+        return $trimmedName;
+    }
+
+    /**
+     * The time zone as given, old IANA names included. Public for the same reason as trimmedName().
+     *
+     * @throws UnknownTimeZone when it is not an IANA identifier
+     */
+    public static function ianaTimeZone(string $timeZone): string
+    {
+        if (!\in_array($timeZone, \DateTimeZone::listIdentifiers(\DateTimeZone::ALL_WITH_BC), true)) {
+            throw new UnknownTimeZone('A user time zone must be an IANA time zone identifier.');
+        }
+
+        return $timeZone;
     }
 
     public function id(): UserId
@@ -86,6 +108,27 @@ final class User
     public function theme(): Theme
     {
         return $this->theme;
+    }
+
+    /**
+     * @throws BlankUserName when nothing is left after trimming
+     */
+    public function rename(string $name): void
+    {
+        $this->name = self::trimmedName($name);
+    }
+
+    /**
+     * @throws UnknownTimeZone when it is not an IANA identifier
+     */
+    public function changeTimeZone(string $timeZone): void
+    {
+        $this->timeZone = self::ianaTimeZone($timeZone);
+    }
+
+    public function changeTheme(Theme $theme): void
+    {
+        $this->theme = $theme;
     }
 
     /**

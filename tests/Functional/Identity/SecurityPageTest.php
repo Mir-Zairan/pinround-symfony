@@ -6,10 +6,10 @@ namespace App\Tests\Functional\Identity;
 
 use App\Identity\Application\AccountPermission;
 use App\Identity\Domain\User;
-use App\Identity\Infrastructure\Security\OwnAccountVoter;
 use App\Identity\UI\Controller\LoginController;
 use App\Identity\UI\Controller\PasswordResetController;
 use App\Identity\UI\Controller\SecurityPageController;
+use App\Identity\UI\Voter\OwnAccountVoter;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
