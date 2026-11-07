@@ -43,7 +43,7 @@ final class TeamIdTest extends TestCase
     public function itRejectsAnythingButACanonicalUuidV7(string $value): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A team id must be a canonical UUIDv7.');
+        $this->expectExceptionMessageIsOrContains('A team id must be a canonical UUIDv7.');
 
         new TeamId($value);
     }

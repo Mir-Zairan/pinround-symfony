@@ -72,14 +72,8 @@ final class Membership implements TenantOwned
      */
     private function hasAnotherAdminAmong(array $memberships): bool
     {
-        foreach ($memberships as $membership) {
-            if ($membership->organizationId === $this->organizationId
-                && $membership->userId !== $this->userId
-                && $membership->orgRoles()->isAdmin()) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($memberships, fn (Membership $membership): bool => $membership->organizationId === $this->organizationId
+            && $membership->userId !== $this->userId
+            && $membership->orgRoles()->isAdmin());
     }
 }

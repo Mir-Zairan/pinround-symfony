@@ -92,11 +92,11 @@ final class OrganizationMemberVoterTest extends TestCase
                 return $tokenUser instanceof InMemoryUser ? new UserId($tokenUser->getUserIdentifier()) : null;
             }
         };
-        $membershipQueries = new class($organizationIdsByUser) implements MembershipQueries {
+        $membershipQueries = new readonly class($organizationIdsByUser) implements MembershipQueries {
             /**
              * @param array<string, list<string>> $organizationIdsByUser
              */
-            public function __construct(private readonly array $organizationIdsByUser)
+            public function __construct(private array $organizationIdsByUser)
             {
             }
 

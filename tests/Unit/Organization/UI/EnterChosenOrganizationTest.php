@@ -100,8 +100,8 @@ final class EnterChosenOrganizationTest extends TestCase
      */
     private function handle(?string $userId, array $organizationIds, ?string $chosen = null, string $route = 'web_home', int $requestType = HttpKernelInterface::MAIN_REQUEST): RequestEvent
     {
-        $currentUser = new class($userId) implements CurrentUser {
-            public function __construct(private readonly ?string $userId)
+        $currentUser = new readonly class($userId) implements CurrentUser {
+            public function __construct(private ?string $userId)
             {
             }
 
@@ -115,11 +115,11 @@ final class EnterChosenOrganizationTest extends TestCase
                 throw new \LogicException('The listener works for the request\'s user.');
             }
         };
-        $membershipQueries = new class($organizationIds) implements MembershipQueries {
+        $membershipQueries = new readonly class($organizationIds) implements MembershipQueries {
             /**
              * @param list<string> $organizationIds
              */
-            public function __construct(private readonly array $organizationIds)
+            public function __construct(private array $organizationIds)
             {
             }
 

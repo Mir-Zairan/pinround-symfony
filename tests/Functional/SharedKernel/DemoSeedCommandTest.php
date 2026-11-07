@@ -243,7 +243,7 @@ final class DemoSeedCommandTest extends KernelTestCase
         $step = self::getContainer()->get(SeedDemoOrganizations::class);
 
         $this->expectException(DemoSeedRefused::class);
-        $this->expectExceptionMessage('does not exist yet');
+        $this->expectExceptionMessageIsOrContains('does not exist yet');
 
         $step->seed();
     }

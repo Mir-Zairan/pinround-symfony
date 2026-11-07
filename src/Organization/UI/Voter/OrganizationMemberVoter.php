@@ -42,12 +42,9 @@ final class OrganizationMemberVoter extends Voter
             return true;
         }
 
-        foreach ($this->membershipQueries->organizationsOf($userId) as $organizationId) {
-            if ($organizationId->equals($subject)) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any(
+            $this->membershipQueries->organizationsOf($userId),
+            static fn (OrganizationId $organizationId): bool => $organizationId->equals($subject),
+        );
     }
 }

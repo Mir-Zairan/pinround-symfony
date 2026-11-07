@@ -161,7 +161,7 @@ final class DoctrineMembershipsTest extends KernelTestCase
         self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Locking the admins of an organization needs an open transaction.');
+        $this->expectExceptionMessageIsOrContains('Locking the admins of an organization needs an open transaction.');
         $this->memberships()->lockAdminsOf(new OrganizationId(self::ACME_FOODS));
     }
 

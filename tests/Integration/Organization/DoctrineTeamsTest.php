@@ -190,7 +190,7 @@ final class DoctrineTeamsTest extends KernelTestCase
         self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Locking a team needs an open transaction.');
+        $this->expectExceptionMessageIsOrContains('Locking a team needs an open transaction.');
         $this->teams()->lockById(new TeamId(self::SHOP_TEAM));
     }
 
