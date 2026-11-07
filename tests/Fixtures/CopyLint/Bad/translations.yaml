@@ -1,0 +1,9 @@
+shop:
+    # an issue in a comment is not copy
+    title: Acme Foods
+    empty: "No resolution yet"
+    steps:
+        - Backlog grooming for SHOP
+    help: >
+        Sara reads
+        the story points here

@@ -1,0 +1,12 @@
+# CI-only override for the e2e job: `docker compose -f compose.yaml -f compose.ci.yaml`.
+# No spec touches file storage or mail, and MinIO builds from Go source (ADR-0031), so app waits only for
+# the database and the two Valkeys. A journey that needs storage must add minio and minio-init back here.
+services:
+  app:
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      valkey-state:
+        condition: service_healthy
+      valkey-cache:
+        condition: service_healthy

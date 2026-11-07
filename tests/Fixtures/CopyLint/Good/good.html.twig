@@ -1,0 +1,11 @@
+{% extends 'issue_base.html.twig' %}
+{% include 'issue_row.html.twig' with {title: 'Ticket'} %}
+{# Lena says issue and workflow status in a comment #}
+<div role="status" class="status-pill issue marker" id="watcher" data-epic="1" aria-live="polite">
+    <p>Status</p>
+    <twig:StatusPill group="todo">Backlog</twig:StatusPill>
+    <p>Statuses for Acme Foods</p>
+    <a href="/issue/1" aria-label="Open the ticket">Omar</a>
+    {{ path('issue_show') }}
+</div>
+<script>const issue = 'workflow status';</script>

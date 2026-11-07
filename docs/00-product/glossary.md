@@ -156,6 +156,8 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 ## Words we do not use
 
+`bin/lint-copy` reads this table at run time: keep the header row and the `Avoid` / `Say instead` columns, and separate several words in one `Avoid` cell with commas.
+
 | Avoid | Say instead | Why |
 |---|---|---|
 | Status transition | Action / move | People think in actions. |

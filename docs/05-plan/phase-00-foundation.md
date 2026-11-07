@@ -48,7 +48,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - **Tenancy flow:** firewall → `TenantContext` resolves the org → Doctrine middleware starts each transaction with `SELECT set_config('app.org_id', $1, true)` (a bound parameter; `true` = local to the transaction) → RLS policy `USING (organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid)` with the same `WITH CHECK` → the Doctrine SQL filter adds the same condition. `NULLIF` matters: on a pooled connection that ran an earlier transaction, `current_setting(..., true)` returns `''` (not NULL), and `''::uuid` would raise an error. No org set means zero rows (fails closed). Plain `SET app.org_id …` without `LOCAL` is banned.
 - **Lookups before the org is known** (personal access token by hash, org picker after login, invite token, webhook `connectionId`, Mercure and laptop-package resolution) never use `BYPASSRLS`. They call `SECURITY DEFINER` resolver functions that return ids only (for example `pinround_resolve_token(hash) → (user_id, organization_id)`). These functions are the only RLS exceptions; the list lives in [data-model.md](../02-architecture/data-model.md) and each has its own test.
 - **Worker mode:** no static state; stateful services implement `ResetInterface` ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)).
-- **Composer scripts:** `test`, `test:unit`, `test:integration`, `test:functional`, `phpstan`, `deptrac`, `cs`, `cs:fix`, `rector`, `lint`, `qa` (all). There is no `audit` script: `composer audit` is a built-in command and `qa` calls `@composer audit`. `lint:docs` and `lint:copy` come in P00.T9.
+- **Composer scripts:** `test`, `test:unit`, `test:integration`, `test:functional`, `phpstan`, `deptrac`, `cs`, `cs:fix`, `rector`, `lint`, `qa` (all). There is no `audit` script: `composer audit` is a built-in command and `qa` calls `@composer audit`. `lint:docs` and `lint:copy` exist (P00.T9) and `lint` runs both.
 - **Security:** CSP with nonces and no inline scripts, HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, frame-ancestors none.
 - **Performance:** OPcache with preloading, FrankenPHP worker count from env, AssetMapper with long cache headers.
 
@@ -209,20 +209,20 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 **Prototype check:** none (backend task).
 **Size:** M
 
-### P00.T9 — Doc lints, plain-copy lint, e2e skeleton and config docs
+### P00.T9 — Doc lints, plain-copy lint, e2e skeleton and config docs 🏁
 **Why:** the docs are part of the product; Claude Code relies on the Index rule (NFR-MNT-05, NFR-USE-04).
 **Steps:**
 1. `bin/lint-docs`: fails when a Markdown file has more than 100 lines and no `## Index` in its first 40 lines, or when a relative link or anchor is broken. Run in CI stage 1.
 2. `bin/lint-copy`: scans Twig templates and translation files for words from "Words we do not use" in the [glossary](../00-product/glossary.md#words-we-do-not-use) and for status jargon; prints file and line.
-3. Playwright project under `tests/e2e/` with one journey: open `/`, see the shell. Add the CI e2e stage with the Docker stack and axe.
+3. Playwright project under `tests/e2e/` with one journey: open `/`, see the shell. Add the CI e2e stage with the Docker stack and axe. CI runs it without MinIO and mailpit and skips the 4 pixel compares (they run locally with `make e2e`).
 4. Write `docs/operations/config.md`: every env var, default, which service reads it, whether it is secret. Give it an Index when it passes 100 lines.
 5. Seed command stub `app:demo:seed` (filled in P01).
-**Files:** `bin/lint-docs`, `bin/lint-copy`, `tests/e2e/`, `.github/workflows/ci.yml`, `docs/operations/config.md`.
+**Files:** `bin/lint-docs`, `bin/lint-copy`, `tests/Unit/Architecture/{DocsLintTest,CopyLintTest,ComposerLintScriptTest,ConfigDocTest}.php`, `tests/Fixtures/{DocsLint,CopyLint,ConfigDoc}/`, `tests/e2e/`, `compose.ci.yaml`, `tests/shell/compose-config-check.sh`, `.github/workflows/ci.yml`, `docs/operations/config.md`, `src/SharedKernel/Infrastructure/Console/DemoSeedCommand.php`, `tests/Functional/SharedKernel/DemoSeedCommandTest.php`.
 **Acceptance criteria:**
-- [ ] Removing the Index from a long doc makes CI fail.
-- [ ] Adding "workflow status" or another banned word to a template makes `lint:copy` fail.
-- [ ] The e2e stage runs in CI and uploads a trace on failure.
-- [ ] `docs/operations/config.md` lists every variable in `.env`.
+- [x] Removing the Index from a long doc makes CI fail (`tests/Unit/Architecture/DocsLintTest.php`: the Bad fixtures and `aRealLongDocLosingItsIndexFails`; `ComposerLintScriptTest` pins `composer lint` to `lint:docs`, which CI's `static` job runs).
+- [x] Adding "workflow status" or another banned word to a template makes `lint:copy` fail (`tests/Unit/Architecture/CopyLintTest.php`).
+- [x] The e2e stage runs in CI and uploads a trace on failure (PR #9: run 42381547028 green, `e2e` about 5 min; run 42382386247 with a deliberately failing spec uploaded `playwright-traces` holding its `trace.zip`; the spec was then removed).
+- [x] `docs/operations/config.md` lists every variable in `.env` (`tests/Unit/Architecture/ConfigDocTest.php`, which checks `.env`, `.env.dev` and `.env.test`).
 **Tests:** the lints have their own small fixture tests.
 **Prototype check:** none (tooling task).
 **Size:** S
@@ -251,7 +251,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-07 (P00.T8): prod logs `info` and above straight to stdout as JSON, with no `fingers_crossed` buffer and no console handler (which would print each worker record twice); warnings such as a failed readiness check now reach the log. A 404 or 405 is logged at `debug` (`framework.exceptions`), so scanners and outside callers of `/health/*` do not fill it with errors.
 - 2026-11-07 (P00.T8): done: tracing with hand-written spans (request root span, one DBAL span per statement by query kind only, Messenger process and send spans), OTLP export after the response, and an `observability` compose profile that runs only Jaeger for now, as a dev viewer. The user chose hand-written spans over the C extension (ADR-0029 note).
 - 2026-11-07 (P00.T8, later): `traceparent` is not read from incoming requests and not propagated into messages, so every request and message starts a new trace. Tail sampling (keep all errors and slow requests) needs a collector; the app change is env only. `ext-protobuf` is not in the image, so the pure-PHP `google/protobuf` serializes the export. `LoggerHolder::disable()` is process-wide on purpose: the SDK never prints exception messages, and this stops it from writing to stderr.
-- 2026-11-07 (P00.T9 or P12): CI's `postgres` and `valkey` service images are pinned by tag, not digest; pin them by digest.
+- 2026-11-07 (P00.T9): The `integration` job's `postgres`, `valkey` and `valkey-state` service images are pinned by digest. A new tag means updating the digests in `ci.yml` by hand; the `compose.yaml` images are still tags.
 - 2026-11-07 (P00.T2): the criterion "CI blocks merge" also needs GitHub branch protection turned on (a repo setting, not code).
 - 2026-11-06 (P00.T3): the first migration installs trusted extensions, so `pinround_migrator` needs `CREATE` on the database (or a superuser bootstrap creates them). Test that migration as that role. Its `down()` is irreversible on purpose.
 - 2026-11-06 (P00.T7): `src/SharedKernel/Infrastructure/Scheduler/DefaultSchedule.php` is an empty placeholder so the scheduler service starts. Modules add jobs with `#[AsCronTask]` or `#[AsPeriodicTask]`.
@@ -272,7 +272,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T2): events live in `<Module>\Api\Event`, their own Deptrac layer. Any module's Application and Infrastructure may use them; UI may not.
 - 2026-11-06 (P00.T2): Application, Domain, Api and Event layers may not use vendor code; only Infrastructure and UI may. Put framework glue in Infrastructure.
 - 2026-11-06 (P00.T2): the CI integration job creates `pinround_test` but runs no migrations. P00.T3 must add a migrate step for the test database.
-- 2026-11-06 (P00.T2): ADR-0028 describes one "unit+integration" job and a nightly e2e. The real workflow has separate `unit` and `integration` jobs, and `e2e` is a stub that runs on pull requests only until P00.T9.
+- 2026-11-06 (P00.T2): ADR-0028 describes one "unit+integration" job and a nightly e2e. The real workflow has separate `unit` and `integration` jobs, and `e2e` runs on pull requests and on pushes to `main` since P00.T9.
 - 2026-11-06 (P00.T2): PHPUnit 13 fails an empty suite. Keep it that way: the unit and integration suites have tests, so a suite that finds none (a renamed folder) turns CI red.
 - 2026-11-06 (P00.T2): `symfony/property-info` is dev-only (it comes with Foundry), so `config/packages/property_info.yaml` sets it only for dev and test. Move it to `require` before prod code needs it.
 - 2026-11-06 (P00.T2): PHP-CS-Fixer prints a "minimum PHP 8.4" warning on PHP 8.5 but runs correctly.
@@ -299,7 +299,12 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-07 (P00.T4): buses use `default_middleware: false`. If `framework.lock` is turned on, add `deduplicate_middleware` by hand, and re-check the list after a Symfony upgrade.
 - 2026-11-07 (P00.T4): a later phase fills a resolver body with `CREATE OR REPLACE FUNCTION` in a migration, using `SET ROLE pinround_resolver` and a temporary `CREATE` grant on the schema (see `Version20261106140000`). Keep the `p_` parameter names and the ids-only return columns.
 - 2026-11-07 (P00.T4): each tenant table a resolver reads opts in with `TenantTable::allowResolverRead(table, columns)`.
-- 2026-11-07 (P00.T9): tests/e2e exists with the shell spec; T9 adds the CI stage, axe on more pages, and the trace upload.
+- 2026-11-07 (P00.T9): CI `e2e` starts only `app`, `postgres`, `valkey-state` and `valkey-cache` through `compose.ci.yaml` (set as `COMPOSE_FILE`), so it runs without MinIO and mailpit and needs no 5-minute MinIO build. It skips the 4 pixel compares (the four tests call `test.skip` when `CI` is set); run `make e2e` locally for them. A later journey that touches storage or mail must add `minio`, `minio-init` or `mailpit` back to `compose.ci.yaml`. A red run uploads traces as the `playwright-traces` artifact. Seen on GitHub (PR #9): the job runs green in about 5 minutes, `make db-roles migrate` works without a TTY, and a failing spec's `trace.zip` is uploaded.
+- 2026-11-07 (P00.T9): `bin/lint-docs` skips `.claude/`, `.git`, `vendor`, `var` and `node_modules` (user decision: `.claude/agents/*.md` are generated by hygiene-calibrate).
+- 2026-11-07 (P00.T9): `bin/lint-copy` reads its banned words from the glossary's "Words we do not use" table at run time, plus a status-jargon list in the script. "status" alone and "Backlog" alone are allowed.
+- 2026-11-07 (P00.T9): the four e2e pixel compares run only locally (`make e2e`), not in CI (user decision; the baselines are made on the developer's machine).
+- 2026-11-07 (P00.T9): `ConfigDocTest` covers only `.env`, `.env.dev` and `.env.test`. Rows for compose-only, Makefile, CI and Caddyfile variables are kept by hand.
+- 2026-11-07 (P00.T9): open, not fixed, small: `bin/lint-copy` checks the 2nd and later template names in `form_theme` and `include [...]` as copy, and its "skip the template name" rule has no fixture with a standalone banned word in a template name. The lint-docs titled and angle-bracket links are proven only in Good fixtures. The file-walking helpers are copied across `bin/lint-docs`, `bin/lint-copy` and `bin/check-tenant-setting`.
 - 2026-11-07 (P00.T6): Toast is markup only. The 3.6 s one-at-a-time timer comes with the first real toast (user decision).
 - 2026-11-07 (P00.T6): `assets/vendor` is git-ignored and restored by the composer auto-script `importmap:install`. The Docker entrypoint now also runs it when `assets/vendor` is missing.
 - 2026-11-07 (P00.T6): the gallery shows one theme at a time via `?theme=` because `data-theme` only works on `:root`.
