@@ -555,6 +555,75 @@
         "message": "Classes are final by default (CLAUDE.md). Add `final`, or `abstract` for a base class; if it must be extended, add `// hygiene:allow` with the reason.",
         "source": [],
         "enabled": false
+      },
+      {
+        "id": "lp-20261107-c5a1",
+        "class": "performance",
+        "lens": "hygiene-performance",
+        "ext": [
+          "css"
+        ],
+        "paths": [
+          "assets/"
+        ],
+        "pattern": "^[[:space:]]*@import",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Don't @import one stylesheet from another; import each sheet from assets/app.js (import './styles/x.css';) so AssetMapper links them all at once and the browser loads them in parallel.",
+        "source": [
+          "20261107-aece",
+          "20261107-ab55"
+        ],
+        "enabled": true,
+        "origin": "learned"
+      },
+      {
+        "id": "lp-20261107-f12a",
+        "class": "a11y",
+        "lens": "hygiene-frontend",
+        "ext": [
+          "css",
+          "twig"
+        ],
+        "paths": [
+          "assets/",
+          "src/",
+          "templates/"
+        ],
+        "pattern": "font-size:[[:space:]]*([0-9]|1[01])(\\.[0-9]+)?px",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Text is never below 12px (ux-principles.md). Use 12px or more, and widen the padding or min-width so the element still fits.",
+        "source": [
+          "20261107-58c5",
+          "20261107-ab51"
+        ],
+        "enabled": true,
+        "origin": "learned"
+      },
+      {
+        "id": "lp-20261107-0c3d",
+        "class": "a11y",
+        "lens": "hygiene-frontend",
+        "ext": [
+          "css"
+        ],
+        "paths": [
+          "assets/styles/"
+        ],
+        "pattern": ":[^;{]*#[0-9a-fA-F]{3,8}([^0-9A-Za-z_-]|$)",
+        "exclude": "^[[:space:]]*--[A-Za-z0-9-]+:|url\\(",
+        "astPattern": null,
+        "astLang": null,
+        "message": "No fixed colours in a rule; use a token from tokens.css (color: var(--on-error);) so dark mode changes it too. If no token fits, add one to both themes in tokens.css.",
+        "source": [
+          "20261107-d352",
+          "20261107-ab50"
+        ],
+        "enabled": true,
+        "origin": "learned"
       }
     ]
   },

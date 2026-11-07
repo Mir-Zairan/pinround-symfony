@@ -104,3 +104,11 @@ Repo rules (frontend.md, ux-principles.md, glossary.md, ADR-0007, CLAUDE.md):
   "resolution", "watcher", "backlog grooming", "epic", "story points". No exclamation marks except rare
   good news, no "Oops". Red counts only when something hidden needs the user — never for "new" or
   "updated". Copy findings are class `i18n`.
+<!-- hygiene-machine-checked:start — managed by /hygiene-learn; do not hand-edit -->
+Machine-checked in this repo — the deterministic gate already catches these; do NOT
+spend review effort flagging instances of exactly these classes:
+- injection: inline event handlers (onclick= and the like) in templates
+- other-copy: "Oops" in product copy
+- a11y: font-size below 12px in CSS or Twig
+- a11y: a hard-coded hex colour in a CSS rule instead of a tokens.css token
+<!-- hygiene-machine-checked:end -->

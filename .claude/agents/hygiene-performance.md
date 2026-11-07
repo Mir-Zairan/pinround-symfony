@@ -86,3 +86,8 @@ Repo rules (performance-and-scale.md, frontend.md, ADR-0008, ADR-0015):
 - Fragment caches are per user or not at all; cache keys carry the org id.
 - Frontend: every `<img>` has `width`/`height`; `loading="lazy"` below the fold; AssetMapper assets
   with long cache headers; no third-party hosts.
+<!-- hygiene-machine-checked:start — managed by /hygiene-learn; do not hand-edit -->
+Machine-checked in this repo — the deterministic gate already catches these; do NOT
+spend review effort flagging instances of exactly these classes:
+- performance: @import of one stylesheet from another
+<!-- hygiene-machine-checked:end -->
