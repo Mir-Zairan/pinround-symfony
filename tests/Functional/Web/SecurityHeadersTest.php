@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
+use App\Tests\Fixtures\Security\ExpectedSecurityHeaders;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
-use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
 
@@ -37,7 +37,7 @@ final class SecurityHeadersTest extends WebTestCase
         self::assertCount(1, $scriptNonces);
         [$nonce] = array_values($scriptNonces);
         self::assertNotSame('', $nonce);
-        self::assertSame($this->expectedHeaders($nonce), $this->securityHeaders($this->client->getResponse()));
+        self::assertSame($this->expectedHeaders($nonce), ExpectedSecurityHeaders::presentIn($this->client->getResponse()));
     }
 
     #[Test]
@@ -67,16 +67,29 @@ final class SecurityHeadersTest extends WebTestCase
     }
 
     #[Test]
-    public function aNotFoundPageCarriesTheHeadersToo(): void
+    public function aNotFoundPageWithDebugOffCarriesTheHeaders(): void
     {
-        // With kernel.debug on, ErrorListener::removeCspHeader (priority -128) drops the CSP so the exception page
-        // can run inline code; prod has debug off, so the headers are read before that listener runs.
+        self::ensureKernelShutdown();
+        $client = self::createClientWithFreshNonDebugContainer();
+
+        $client->request('GET', '/no-such-page');
+        self::assertResponseStatusCodeSame(404);
+
+        $headers = ExpectedSecurityHeaders::presentIn($client->getResponse());
+        self::assertSame($this->expectedHeaders($this->cspNonce($headers['content-security-policy'] ?? '')), $headers);
+    }
+
+    #[Test]
+    public function aNotFoundPageWithDebugOnLosesOnlyTheCspAfterTheSubscriberSetIt(): void
+    {
+        // ErrorListener::removeCspHeader (priority -128) drops the CSP when kernel.debug is on, so the exception page
+        // can run inline code; this listener reads the headers before it runs.
         $headersBeforeDebugCspRemoval = [];
         $this->eventDispatcher()->addListener(
             KernelEvents::RESPONSE,
-            function (ResponseEvent $event) use (&$headersBeforeDebugCspRemoval): void {
+            static function (ResponseEvent $event) use (&$headersBeforeDebugCspRemoval): void {
                 if ($event->isMainRequest()) {
-                    $headersBeforeDebugCspRemoval = $this->securityHeaders($event->getResponse());
+                    $headersBeforeDebugCspRemoval = ExpectedSecurityHeaders::presentIn($event->getResponse());
                 }
             },
             -64,
@@ -89,7 +102,20 @@ final class SecurityHeadersTest extends WebTestCase
         self::assertSame($this->expectedHeaders($nonce), $headersBeforeDebugCspRemoval);
         $headersWithoutCsp = $this->expectedHeaders($nonce);
         unset($headersWithoutCsp['content-security-policy']);
-        self::assertSame($headersWithoutCsp, $this->securityHeaders($this->client->getResponse()));
+        self::assertSame($headersWithoutCsp, ExpectedSecurityHeaders::presentIn($this->client->getResponse()));
+    }
+
+    private static function createClientWithFreshNonDebugContainer(): KernelBrowser
+    {
+        // A kernel with debug off never checks its cached container, so after a service change it would load the
+        // old one; deleting the cached file makes it compile the current code (ConfigCache, Kernel::initializeContainer).
+        $kernel = static::createKernel(['debug' => false]);
+        $cachedContainer = $kernel->getBuildDir().'/'.str_replace('\\', '_', $kernel::class).ucfirst($kernel->getEnvironment()).'Container.php';
+        if (is_file($cachedContainer)) {
+            unlink($cachedContainer);
+        }
+
+        return self::createClient(['debug' => false]);
     }
 
     /**
@@ -97,28 +123,7 @@ final class SecurityHeadersTest extends WebTestCase
      */
     private function expectedHeaders(string $nonce): array
     {
-        return [
-            'content-security-policy' => "default-src 'self'; script-src 'self' 'nonce-{$nonce}'; style-src 'self' 'nonce-{$nonce}'; img-src 'self' http://localhost:9000 data:; connect-src 'self' https://localhost; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
-            'x-content-type-options' => 'nosniff',
-            'referrer-policy' => 'strict-origin-when-cross-origin',
-            'permissions-policy' => 'camera=(), microphone=(), geolocation=()',
-            'cross-origin-opener-policy' => 'same-origin',
-        ];
-    }
-
-    /**
-     * @return array<string, string|null>
-     */
-    private function securityHeaders(Response $response): array
-    {
-        $headers = [];
-        foreach (['content-security-policy', 'strict-transport-security', 'x-content-type-options', 'referrer-policy', 'permissions-policy', 'cross-origin-opener-policy'] as $name) {
-            if ($response->headers->has($name)) {
-                $headers[$name] = $response->headers->get($name);
-            }
-        }
-
-        return $headers;
+        return ExpectedSecurityHeaders::withoutStrictTransportSecurity($nonce, 'http://localhost:9000', 'https://localhost');
     }
 
     private function cspNonce(string $contentSecurityPolicy): string

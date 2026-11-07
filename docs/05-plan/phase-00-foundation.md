@@ -199,7 +199,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 3. **Log-leak marker test:** a test sends a request containing a unique marker string in a body field and asserts the marker never appears in the logs.
 4. OpenTelemetry baseline: HTTP server spans, Doctrine spans, Messenger spans; exporter configurable by env (verify package names at implementation).
 5. Security headers listener: CSP with nonce, HSTS (prod), `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `Permissions-Policy` (camera, microphone, geolocation off), `frame-ancestors 'none'`.
-**Files:** `src/Web/UI/Controller/HealthController.php`, `config/packages/monolog.yaml`, `src/SharedKernel/Infrastructure/Logging/RedactionProcessor.php`, `src/Web/Infrastructure/SecurityHeadersSubscriber.php`.
+**Files:** `src/Web/UI/Controller/HealthController.php`, `config/packages/monolog.yaml`, `src/SharedKernel/Infrastructure/Logging/RedactionProcessor.php`, `src/Web/Infrastructure/Security/SecurityHeadersSubscriber.php`.
 **Acceptance criteria:**
 - [ ] `/health/ready` returns 503 when PostgreSQL is stopped.
 - [ ] The log-leak marker test passes.

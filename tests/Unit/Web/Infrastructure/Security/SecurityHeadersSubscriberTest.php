@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Web\Infrastructure\Security;
 
+use App\Tests\Fixtures\Security\ExpectedSecurityHeaders;
 use App\Web\Infrastructure\Security\CspNonce;
 use App\Web\Infrastructure\Security\SecurityHeadersSubscriber;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -17,7 +18,8 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
 final class SecurityHeadersSubscriberTest extends TestCase
 {
     private const string STORAGE_URL = 'https://acme-pinround.s3.eu-central-1.amazonaws.com';
-    private const string MERCURE_URL = 'https://pinround.example/.well-known/mercure';
+    private const string MERCURE_ORIGIN = 'https://pinround.example';
+    private const string MERCURE_URL = self::MERCURE_ORIGIN.'/.well-known/mercure';
 
     #[Test]
     public function itSetsTheCspExampleHeadersWithTheRequestNonce(): void
@@ -25,16 +27,9 @@ final class SecurityHeadersSubscriberTest extends TestCase
         $cspNonce = new CspNonce();
         $response = $this->respond(new SecurityHeadersSubscriber($cspNonce, self::STORAGE_URL, self::MERCURE_URL, 'dev'));
 
-        $nonce = $cspNonce->current();
         self::assertSame(
-            [
-                'content-security-policy' => "default-src 'self'; script-src 'self' 'nonce-{$nonce}'; style-src 'self' 'nonce-{$nonce}'; img-src 'self' https://acme-pinround.s3.eu-central-1.amazonaws.com data:; connect-src 'self' https://pinround.example; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
-                'x-content-type-options' => 'nosniff',
-                'referrer-policy' => 'strict-origin-when-cross-origin',
-                'permissions-policy' => 'camera=(), microphone=(), geolocation=()',
-                'cross-origin-opener-policy' => 'same-origin',
-            ],
-            $this->securityHeaders($response),
+            ExpectedSecurityHeaders::withoutStrictTransportSecurity($cspNonce->current(), self::STORAGE_URL, self::MERCURE_ORIGIN),
+            ExpectedSecurityHeaders::presentIn($response),
         );
     }
 
@@ -43,7 +38,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     {
         $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), self::STORAGE_URL, self::MERCURE_URL, 'prod'));
 
-        self::assertSame('max-age=63072000; includeSubDomains', $response->headers->get('Strict-Transport-Security'));
+        self::assertSame(ExpectedSecurityHeaders::STRICT_TRANSPORT_SECURITY, $response->headers->get('Strict-Transport-Security'));
     }
 
     #[Test]
@@ -119,7 +114,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     {
         $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), self::STORAGE_URL, self::MERCURE_URL, 'prod'), HttpKernelInterface::SUB_REQUEST);
 
-        self::assertSame([], $this->securityHeaders($response));
+        self::assertSame([], ExpectedSecurityHeaders::presentIn($response));
         self::assertFalse($response->headers->has('Strict-Transport-Security'));
     }
 
@@ -133,8 +128,10 @@ final class SecurityHeadersSubscriberTest extends TestCase
 
         $this->respond(new SecurityHeadersSubscriber($cspNonce, self::STORAGE_URL, self::MERCURE_URL, 'dev'), HttpKernelInterface::MAIN_REQUEST, $response);
 
-        self::assertStringStartsWith("default-src 'self'; script-src 'self' 'nonce-".$cspNonce->current()."';", (string) $response->headers->get('Content-Security-Policy'));
-        self::assertSame('strict-origin-when-cross-origin', $response->headers->get('Referrer-Policy'));
+        self::assertSame(
+            ExpectedSecurityHeaders::withoutStrictTransportSecurity($cspNonce->current(), self::STORAGE_URL, self::MERCURE_ORIGIN),
+            ExpectedSecurityHeaders::presentIn($response),
+        );
     }
 
     private function respond(SecurityHeadersSubscriber $subscriber, int $requestType = HttpKernelInterface::MAIN_REQUEST, Response $response = new Response()): Response
@@ -142,21 +139,6 @@ final class SecurityHeadersSubscriberTest extends TestCase
         $subscriber->addSecurityHeaders(new ResponseEvent(self::createStub(HttpKernelInterface::class), Request::create('/'), $requestType, $response));
 
         return $response;
-    }
-
-    /**
-     * @return array<string, string|null>
-     */
-    private function securityHeaders(Response $response): array
-    {
-        $headers = [];
-        foreach (['content-security-policy', 'strict-transport-security', 'x-content-type-options', 'referrer-policy', 'permissions-policy', 'cross-origin-opener-policy'] as $name) {
-            if ($response->headers->has($name)) {
-                $headers[$name] = $response->headers->get($name);
-            }
-        }
-
-        return $headers;
     }
 
     /**
