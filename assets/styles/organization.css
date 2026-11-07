@@ -15,8 +15,15 @@
   gap: 12px;
 }
 
+/* .btn is one 40px line that never wraps; a long organization name wraps here instead of widening the card. */
 .organization-choice__button {
   flex: 1;
   justify-content: flex-start;
+  min-width: 0;
+  height: auto;
+  min-height: 40px;
+  padding-block: 8px;
+  white-space: normal;
+  text-align: start;
   overflow-wrap: anywhere;
 }

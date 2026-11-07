@@ -63,6 +63,7 @@ final class OrganizationChoiceTest extends WebTestCase
         self::assertSame('Choose an organization', $picker->filter('main h1')->text());
         self::assertEqualsCanonicalizing(['Acme Foods', 'Beta Bakery'], $this->organizationButtons($picker));
         self::assertCount(0, $picker->filter('main .tag'));
+        self::assertCount(0, $picker->filter('#avatar-menu-list a[href="/org/choose"]'), 'no link to the page itself');
 
         $client->submit($picker->selectButton('Acme Foods')->form());
         self::assertResponseRedirects('/', 302);
@@ -112,7 +113,8 @@ final class OrganizationChoiceTest extends WebTestCase
         $user = $this->createUserWithoutOrganization('Raj Patel');
         $acmeFoods = $this->createOrganization('Acme Foods');
         $this->addMembership($user, $acmeFoods);
-        $this->addMembership($user, $this->createOrganization('Beta Bakery'));
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($user, $betaBakery);
         $this->logIn($client, $user);
         $this->choose($client, $acmeFoods);
 
@@ -123,6 +125,15 @@ final class OrganizationChoiceTest extends WebTestCase
         self::assertRouteSame('web_home');
         // One organization left: no switch item, so the name is not shown either.
         self::assertCount(0, $home->filter('a[href="/org/choose"]'));
+        // The picker marks the session's choice, which is now the organization left.
+        $picker = $client->request('GET', '/org/choose');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Beta Bakery'], $this->organizationButtons($picker));
+        self::assertSame(
+            [$betaBakery->toString()],
+            $picker->filter('main form')->reduce(static fn (Crawler $form): bool => 1 === $form->filter('.tag')->count())
+                ->each(static fn (Crawler $form): string => (string) $form->filter('input[name="organization_id"]')->attr('value')),
+        );
     }
 
     #[Test]

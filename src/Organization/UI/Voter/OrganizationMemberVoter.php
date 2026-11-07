@@ -14,7 +14,8 @@ use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 
 /**
  * Decides the OrganizationPermission attributes (ADR-0013): any logged-in user may open the picker of their own
- * organizations (CHOOSE), and only a member may enter an organization (ENTER). Membership comes from the resolver,
+ * organizations (CHOOSE), and only a member may enter an organization (ENTER). It decides for the user of the token it
+ * is given (CurrentUser::idOf), not for the request's. Membership comes from the resolver,
  * never from the request, so an id sent in a form proves nothing by itself.
  *
  * @extends Voter<string, OrganizationId|null>
@@ -33,7 +34,7 @@ final class OrganizationMemberVoter extends Voter
 
     protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
     {
-        $userId = $this->currentUser->id();
+        $userId = $this->currentUser->idOf($token->getUser());
         if (null === $userId) {
             return false;
         }

@@ -109,6 +109,11 @@ final class EnterChosenOrganizationTest extends TestCase
             {
                 return null === $this->userId ? null : new UserId($this->userId);
             }
+
+            public function idOf(mixed $tokenUser): ?UserId
+            {
+                throw new \LogicException('The listener works for the request\'s user.');
+            }
         };
         $membershipQueries = new class($organizationIds) implements MembershipQueries {
             /**

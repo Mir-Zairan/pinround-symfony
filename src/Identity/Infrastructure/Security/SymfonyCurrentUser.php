@@ -19,8 +19,11 @@ final readonly class SymfonyCurrentUser implements CurrentUser
 
     public function id(): ?UserId
     {
-        $user = $this->tokenStorage->getToken()?->getUser();
+        return $this->idOf($this->tokenStorage->getToken()?->getUser());
+    }
 
-        return $user instanceof SecurityUser ? new UserId($user->id()) : null;
+    public function idOf(mixed $tokenUser): ?UserId
+    {
+        return $tokenUser instanceof SecurityUser ? new UserId($tokenUser->id()) : null;
     }
 }

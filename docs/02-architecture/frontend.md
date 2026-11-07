@@ -248,6 +248,6 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Personal access tokens | `GET/POST /me/tokens` | Identity | for MCP and the plugin |
 | Security (password, two-factor) | `GET /me/security` (`identity_security`), `POST /me/security/password`, `POST /me/security/log-out-everywhere` | Identity | |
 | Login, invite accept, SSO callback | `/login`, `/invite/{token}`, `/login/sso/{provider}/callback` | Identity | |
-| Organization picker | `GET/POST /org/choose` (`organization_choose`); a logged-in user without a chosen organization is sent here, and the avatar menu links it as "Switch organization" for users in two or more | Organization | `choose.html.twig` (`@Organization`), the login card |
+| Organization picker | `GET/POST /org/choose` (`organization_choose`); a logged-in user without a chosen organization is sent here, and the avatar menu links it as "Switch organization" for users in two or more (not on the picker itself) | Organization | `choose.html.twig` (`@Organization`), the login card |
 | MCP endpoint | `POST /mcp` | AgentApi | no HTML |
 | REST for the plugin | `/api/v1/…` | AgentApi | no HTML |

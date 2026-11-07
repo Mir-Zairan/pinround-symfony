@@ -55,8 +55,8 @@
                         </button>
                         <div id="avatar-menu-list" class="menu__list avatar-menu__list" hidden
                             {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#closeOnEscape">
-                            {# Only for a user in two or more organizations; the name is missing on pages without one, such as the picker. #}
-                            {% if can_switch_organization() %}
+                            {# Only for a user in two or more organizations, and not on the picker itself, which has no current name either. #}
+                            {% if can_switch_organization() and app.current_route != 'organization_choose' %}
                                 {% set organizationName = current_organization_name() %}
                                 {% if organizationName %}
                                     <p class="avatar-menu__organization">

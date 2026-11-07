@@ -47,10 +47,12 @@ final class RequestTenantTest extends WebTestCase
         $dispatcher = self::getContainer()->get('event_dispatcher');
         $enterChosenOrganization = self::getContainer()->get(EnterChosenOrganization::class);
         $requestTransaction = self::getContainer()->get(RequestTransaction::class);
+        $firewall = self::getContainer()->get('security.firewall');
 
         $listenerPriority = $dispatcher->getListenerPriority(KernelEvents::REQUEST, [$enterChosenOrganization, '__invoke']);
 
         self::assertSame(7, $listenerPriority);
+        self::assertLessThan($dispatcher->getListenerPriority(KernelEvents::REQUEST, [$firewall, 'onKernelRequest']), $listenerPriority);
         self::assertGreaterThan($dispatcher->getListenerPriority(KernelEvents::REQUEST, [$requestTransaction, 'beginTransaction']), $listenerPriority);
     }
 

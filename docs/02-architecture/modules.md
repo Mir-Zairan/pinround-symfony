@@ -97,7 +97,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Story:** Sara invites Omar. Omar sets a password and turns on two-factor login. Later the company switches to Microsoft login, and Omar's account is linked, not duplicated.
 - **Owns:** `idn_user`, `idn_credential`, `idn_password_reset`, `idn_mfa_secret`, `idn_sso_identity`, `idn_api_token`, `idn_login_attempt`. Sessions live in Valkey.
 - **Api:**
-  - `CurrentUser::id(): ?UserId` (built in P01.T3: the logged-in user of the request, null when nobody is; `Infrastructure\Security\SymfonyCurrentUser`)
+  - `CurrentUser::id(): ?UserId` and `CurrentUser::idOf(mixed $tokenUser): ?UserId` (built in P01.T3: the logged-in user of the request, or of the token a voter is given; null when nobody is; `Infrastructure\Security\SymfonyCurrentUser`)
   - `UserQueries::byId(UserId): ?UserView`
   - `UserQueries::byIds(list<UserId>): array<string, UserView>`
   - `UserQueries::byEmail(string): ?UserView`

@@ -155,8 +155,10 @@
   box-shadow: 0 0 0 2px var(--primary);
 }
 
+/* The cap keeps a long organization name wrapping inside the viewport instead of widening the menu past it. */
 .avatar-menu__list {
   min-width: 240px;
+  max-width: calc(100vw - 32px);
 }
 
 .avatar-menu__list .menu__item {
