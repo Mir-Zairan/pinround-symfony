@@ -101,6 +101,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `UserQueries::byId(UserId): ?UserView`
   - `UserQueries::byIds(list<UserId>): array<string, UserView>`
   - `UserQueries::byEmail(string): ?UserView`
+  - `UserQueries::idByEmail(string): ?UserId` (built in P01.T3 for the demo seed: plain SQL on `idn_user`, null when no one has the address; `Infrastructure\Doctrine\DbalUserQueries`; the others above are not built yet)
   - `TokenAuthenticator::authenticate(string $bearer): ?TokenPrincipal` (scopes included)
   - `ApiTokens::issue(UserId, OrganizationId, string $name, list<Scope>, \DateTimeImmutable $expires): IssuedToken` (the plain token is returned once)
 - **Commands:** RegisterFromInvite, ChangePassword, EnableTotp, DisableTotp, LinkSsoIdentity, IssueApiToken, RevokeApiToken.

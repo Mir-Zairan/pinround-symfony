@@ -19,13 +19,21 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
- * The five people of the neutral example company Acme Foods, all with the password in DEMO_PASSWORD. Organizations
- * and teams come from later steps, which run after this one.
+ * The five people of the neutral example company Acme Foods and Ben of Beta Bakery, all with the password in
+ * DEMO_PASSWORD. Organizations and teams come from later steps, which run after this one.
  */
 #[AsTaggedItem(priority: 100)]
 final readonly class SeedDemoPeople implements DemoSeedStep
 {
-    private const array NAMES = ['Lena', 'Omar', 'Mia', 'Raj', 'Sara'];
+    /** Email domain by name: Ben belongs to a second company, so the organization picker can be tried. */
+    private const array PEOPLE = [
+        'Lena' => 'acme-foods.example',
+        'Omar' => 'acme-foods.example',
+        'Mia' => 'acme-foods.example',
+        'Raj' => 'acme-foods.example',
+        'Sara' => 'acme-foods.example',
+        'Ben' => 'beta-bakery.example',
+    ];
 
     public function __construct(
         private Users $users,
@@ -45,8 +53,8 @@ final readonly class SeedDemoPeople implements DemoSeedStep
         $gotPassword = [];
         $kept = [];
 
-        foreach (self::NAMES as $name) {
-            $email = new Email(\sprintf('%s@acme-foods.example', strtolower($name)));
+        foreach (self::PEOPLE as $name => $domain) {
+            $email = new Email(\sprintf('%s@%s', strtolower($name), $domain));
             $user = $this->users->byEmail($email);
             $isNew = null === $user;
             if ($isNew) {

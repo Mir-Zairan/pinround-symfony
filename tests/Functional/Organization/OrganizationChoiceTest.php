@@ -7,11 +7,13 @@ namespace App\Tests\Functional\Organization;
 use App\Identity\Domain\User;
 use App\Organization\UI\OrganizationChoiceController;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
 use App\Tests\Functional\Identity\LogsInUsers;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\HttpKernel\KernelEvents;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -110,6 +112,7 @@ final class OrganizationChoiceTest extends WebTestCase
     public function aMemberRemovedFromTheChosenOrganizationMovesToTheOnlyOneLeft(): void
     {
         $client = self::httpsClient();
+        $client->disableReboot();
         $user = $this->createUserWithoutOrganization('Raj Patel');
         $acmeFoods = $this->createOrganization('Acme Foods');
         $this->addMembership($user, $acmeFoods);
@@ -117,12 +120,19 @@ final class OrganizationChoiceTest extends WebTestCase
         $this->addMembership($user, $betaBakery);
         $this->logIn($client, $user);
         $this->choose($client, $acmeFoods);
+        $tenantSettingsSeen = [];
+        $connection = self::getContainer()->get('doctrine.dbal.default_connection');
+        self::getContainer()->get('event_dispatcher')->addListener(KernelEvents::CONTROLLER, static function () use ($connection, &$tenantSettingsSeen): void {
+            $tenantSettingsSeen[] = $connection->fetchOne('SELECT current_setting(?, true)', [TenantSetting::NAME]);
+        });
 
         $this->removeMembership($user, $acmeFoods);
         $home = $client->request('GET', '/');
 
         self::assertResponseStatusCodeSame(200);
         self::assertRouteSame('web_home');
+        // The home request itself ran for the organization left, not only the picker afterwards.
+        self::assertSame([$betaBakery->toString()], $tenantSettingsSeen);
         // One organization left: no switch item, so the name is not shown either.
         self::assertCount(0, $home->filter('a[href="/org/choose"]'));
         // The picker marks the session's choice, which is now the organization left.
