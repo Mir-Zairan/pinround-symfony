@@ -27,8 +27,10 @@ final readonly class DsnWithoutStreamEnvVarProcessor implements EnvVarProcessorI
             throw new RuntimeException(\sprintf('The "%s" environment variable must be a DSN string.', $name));
         }
 
-        // A comma separates the hosts of a Redis Cluster DSN, and each one can carry a path.
-        foreach (explode(',', $dsn) as $hostDsn) {
+        // A comma separates the hosts of a Redis Cluster DSN, and each one can carry a path. Split only where a new scheme
+        // starts: a password may hold a comma.
+        $hostDsns = preg_split('#,(?=(?:redis|rediss|valkey|valkeys)://)#', $dsn);
+        foreach (false === $hostDsns ? [$dsn] : $hostDsns as $hostDsn) {
             if (self::namesAStream($hostDsn)) {
                 throw new RuntimeException(\sprintf('The "%s" environment variable names a Redis stream in its path or its "stream" query parameter. Remove it: each Messenger transport names its own stream.', $name));
             }

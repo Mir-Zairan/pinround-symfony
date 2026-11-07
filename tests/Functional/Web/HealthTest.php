@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
-use App\Audit\Infrastructure\NextAuditPartitionExists;
+use App\Audit\Infrastructure\Health\NextAuditPartitionExists;
 use App\Media\Infrastructure\Health\ObjectStorageIsReachable;
 use App\SharedKernel\Infrastructure\Health\DatabaseAnswers;
 use App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent;
@@ -22,9 +22,11 @@ use Monolog\Level;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
@@ -167,6 +169,8 @@ final class HealthTest extends WebTestCase
         // The checks that query the database rely on it having answered within its short timeout first.
         self::assertSame('database', $ranCheckNames[0] ?? null);
         self::assertEqualsCanonicalizing(array_values(self::READINESS_CHECKS), $ranCheckNames);
+        // So a check added later cannot run unrecorded above: these are all the container tags.
+        self::assertEqualsCanonicalizing(array_keys(self::READINESS_CHECKS), self::taggedReadinessCheckIds());
     }
 
     #[Test]
@@ -279,6 +283,21 @@ final class HealthTest extends WebTestCase
             $observed,
         );
         self::assertSame([], $this->client->getCookieJar()->all());
+    }
+
+    /**
+     * @return list<string> the ids of every service tagged as a ReadinessCheck, read from the compiled container
+     */
+    private static function taggedReadinessCheckIds(): array
+    {
+        $debugContainer = new CommandTester(new Application(self::$kernel ?? throw new \LogicException('No kernel.'))->find('debug:container'));
+        $debugContainer->execute(['--tag' => ReadinessCheck::class, '--format' => 'json']);
+        $debugContainer->assertCommandIsSuccessful();
+        $output = json_decode($debugContainer->getDisplay(), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertIsArray($output);
+        self::assertIsArray($output['definitions'] ?? null);
+
+        return array_map(strval(...), array_keys($output['definitions']));
     }
 
     /**

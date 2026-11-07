@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Audit\Infrastructure;
+namespace App\Audit\Infrastructure\Health;
 
 use App\SharedKernel\Infrastructure\Health\ReadinessCheck;
 use App\SharedKernel\Infrastructure\Health\ReadinessCheckFailed;

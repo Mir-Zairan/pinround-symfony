@@ -23,6 +23,7 @@ final class DsnWithoutStreamEnvVarProcessorTest extends TestCase
         yield 'valkey scheme' => ['valkey://valkey-state:6379?lazy=1'];
         yield 'unix socket' => ['redis:///var/run/valkey/valkey.sock'];
         yield 'cluster hosts' => ['redis://valkey-a:6379,redis://valkey-b:6379'];
+        yield 'a password with a comma, a slash and a question mark' => ['redis://user:se,c/r?et@valkey-state:6379'];
         yield 'not a Redis DSN' => ['in-memory://'];
         yield 'a Doctrine DSN with a path' => ['doctrine://default/messages'];
     }
@@ -45,6 +46,7 @@ final class DsnWithoutStreamEnvVarProcessorTest extends TestCase
         yield 'stream in the query' => ['valkey://valkey-state:6379?stream=messages'];
         yield 'stream on the second cluster host' => ['redis://valkey-a:6379,redis://valkey-b:6379/messages'];
         yield 'stream after a password' => ['rediss://user:secret-pass@valkey-state:6380/messages'];
+        yield 'stream after a password with a comma and a question mark' => ['redis://user:secret,pa?ss@valkey-state:6379/messages'];
     }
 
     #[Test]

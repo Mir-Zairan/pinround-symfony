@@ -8,11 +8,19 @@ use App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent;
 use App\SharedKernel\Infrastructure\Health\ReadinessCheckFailed;
 use App\Tests\Integration\SharedKernel\Infrastructure\Health\UnexecutedMigration\Version29991231000000;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver;
+use Doctrine\DBAL\Driver\Connection as DriverConnection;
+use Doctrine\DBAL\Driver\Middleware\AbstractConnectionMiddleware;
+use Doctrine\DBAL\Driver\Middleware\AbstractDriverMiddleware;
+use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
+use Doctrine\DBAL\Driver\Result;
+use Doctrine\DBAL\Driver\Statement;
 use Doctrine\DBAL\Exception\TableNotFoundException;
 use Doctrine\Migrations\Configuration\Configuration;
 use Doctrine\Migrations\Configuration\Connection\ExistingConnection;
 use Doctrine\Migrations\Configuration\Migration\ExistingConfiguration;
 use Doctrine\Migrations\DependencyFactory;
+use Doctrine\Migrations\Metadata\Storage\MetadataStorageConfiguration;
 use Doctrine\Migrations\Metadata\Storage\TableMetadataStorageConfiguration;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -69,6 +77,74 @@ final class MigrationsAreCurrentTest extends KernelTestCase
         $this->expectException(TableNotFoundException::class);
 
         new MigrationsAreCurrent(DependencyFactory::fromConnection(new ExistingConfiguration($configuration), new ExistingConnection($this->appConnection())))->verify();
+    }
+
+    #[Test]
+    public function migrationsKeptAnywhereButInATableFailTheCheck(): void
+    {
+        $configuration = self::configuration();
+        $configuration->setMetadataStorageConfiguration(new class implements MetadataStorageConfiguration {});
+
+        $this->expectException(ReadinessCheckFailed::class);
+
+        new MigrationsAreCurrent(DependencyFactory::fromConnection(new ExistingConfiguration($configuration), new ExistingConnection($this->appConnection())))->verify();
+    }
+
+    #[Test]
+    public function oneProbeSendsOnePlainSelectOfTheMigrationsTable(): void
+    {
+        /** @var \ArrayObject<int, string> $sentSql */
+        $sentSql = new \ArrayObject();
+        $recordsSql = new class(new PgSQLDriver(), $sentSql) extends AbstractDriverMiddleware {
+            /**
+             * @param \ArrayObject<int, string> $sentSql
+             */
+            public function __construct(Driver $driver, private readonly \ArrayObject $sentSql)
+            {
+                parent::__construct($driver);
+            }
+
+            public function connect(
+                #[\SensitiveParameter]
+                array $params,
+            ): DriverConnection {
+                return new class(parent::connect($params), $this->sentSql) extends AbstractConnectionMiddleware {
+                    /**
+                     * @param \ArrayObject<int, string> $sentSql
+                     */
+                    public function __construct(DriverConnection $connection, private readonly \ArrayObject $sentSql)
+                    {
+                        parent::__construct($connection);
+                    }
+
+                    public function prepare(string $sql): Statement
+                    {
+                        $this->sentSql->append($sql);
+
+                        return parent::prepare($sql);
+                    }
+
+                    public function query(string $sql): Result
+                    {
+                        $this->sentSql->append($sql);
+
+                        return parent::query($sql);
+                    }
+
+                    public function exec(string $sql): int|string
+                    {
+                        $this->sentSql->append($sql);
+
+                        return parent::exec($sql);
+                    }
+                };
+            }
+        };
+        $migrations = $this->migrationsOn(new Connection($this->appConnection()->getParams(), $recordsSql));
+
+        new MigrationsAreCurrent($migrations)->verify();
+
+        self::assertSame(['SELECT "version" FROM "doctrine_migration_versions"'], $sentSql->getArrayCopy());
     }
 
     /**

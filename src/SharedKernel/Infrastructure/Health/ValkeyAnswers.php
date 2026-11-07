@@ -40,7 +40,9 @@ final readonly class ValkeyAnswers implements ReadinessCheck
 
     public function verify(): void
     {
-        foreach (explode(',', $this->dsn) as $hostDsn) {
+        // Split only where a new scheme starts: a password may hold a comma.
+        $hostDsns = preg_split('#,(?=(?:redis|rediss|valkey|valkeys)://)#', $this->dsn);
+        foreach (false === $hostDsns ? [$this->dsn] : $hostDsns as $hostDsn) {
             // createConnection connects, authenticates and runs SELECT on the DSN's database before it returns, and
             // throws when any of them fails: returning is the answer. The connection closes when it goes out of scope.
             RedisAdapter::createConnection(self::withoutProbeOptions($hostDsn), [
@@ -57,7 +59,9 @@ final readonly class ValkeyAnswers implements ReadinessCheck
         #[\SensitiveParameter]
         string $hostDsn,
     ): string {
-        $queryStart = strpos($hostDsn, '?');
+        // As in RedisAdapter, the user-info ends at the first `@`; the password before it may hold a `?`.
+        $userInfoEnd = strpos($hostDsn, '@');
+        $queryStart = strpos($hostDsn, '?', false === $userInfoEnd ? 0 : $userInfoEnd + 1);
         if (false === $queryStart) {
             return $hostDsn;
         }

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Integration\Audit;
+namespace App\Tests\Integration\Audit\Infrastructure\Health;
 
-use App\Audit\Infrastructure\NextAuditPartitionExists;
+use App\Audit\Infrastructure\Health\NextAuditPartitionExists;
 use App\SharedKernel\Infrastructure\Health\ReadinessCheckFailed;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
