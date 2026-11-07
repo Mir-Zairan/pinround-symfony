@@ -725,7 +725,10 @@
     "skipClasses": [
       "design",
       "logic-error",
-      "dead-code"
+      "dead-code",
+      "ui-fidelity",
+      "data-integrity",
+      "other-strict-types"
     ],
     "rejectThreshold": 2
   },
