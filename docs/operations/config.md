@@ -111,7 +111,7 @@ Tracing is off while `OTEL_EXPORTER_OTLP_ENDPOINT` is empty. Spans go to the rec
 | `COMPOSER_ALLOW_SUPERUSER` | `0` | app image | no | Keeps Composer's warning about running as root on. The image runs as the non-root `app` user anyway. |
 
 ## Docker and compose host settings
-These are read by `docker compose` or `make`, not by PHP. The ports, `JAEGER_*`, `MINIO_ROOT_*` and `POSTGRES_*` values go in the git-ignored `.env.local`, which `make` passes to compose with `--env-file`. The `DB_*`, `APP_UID` and `APP_GID` values are make variables: `.env.local` does not set them. Override them on the make command line or in the shell, for example `make db-roles DB_APP_PASSWORD=...`. `COMPOSE_FILE` is read by compose and make from the shell.
+These are read by `docker compose` or `make`, not by PHP. The ports, `JAEGER_*`, `MINIO_ROOT_*` and `POSTGRES_*` values go in the git-ignored `.env.local`, which `make` passes to compose with `--env-file`. The `DB_*`, `APP_UID` and `APP_GID` values are make variables: `.env.local` does not set them. Override them on the make command line or in the shell, for example `make db-roles DB_APP_PASSWORD=...`. `COMPOSE_FILE` is read by compose from the shell; make only passes the environment through.
 
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
@@ -124,8 +124,8 @@ These are read by `docker compose` or `make`, not by PHP. The ports, `JAEGER_*`,
 | `JAEGER_OTLP_HTTP_PORT` | `4318` | compose only | no | Host port of the Jaeger OTLP receiver (`observability` profile). |
 | `APP_UID` | your user id (`make` sets it from `id -u`); `1000` otherwise | compose and Makefile only | no | Shell or make command line only. User id of the image user, so the bind mount stays writable. `0` falls back to `1000`. |
 | `APP_GID` | your group id (`make`); `1000` otherwise | compose and Makefile only | no | Shell or make command line only. Group id of the image user. |
-| `COMPOSE_FILE` | none; CI sets `compose.yaml:compose.ci.yaml` | compose and Makefile only | no | Adds the CI override to the compose files. |
-| `DB_ADMIN_USER` | `pinround` | Makefile only | no | Admin account `make db-roles` connects as. |
+| `COMPOSE_FILE` | none; CI sets `compose.yaml:compose.ci.yaml` | compose only | no | Adds the CI override to the compose files. |
+| `DB_ADMIN_USER` | `pinround` | Makefile only | no | Admin account `make db-roles` connects as. Must match `POSTGRES_USER` when that is changed; pass it as `make db-roles DB_ADMIN_USER=...`. |
 | `DB_APP_PASSWORD` | dev placeholder | Makefile only | yes | Password `make db-roles` gives `pinround_app`. Must match `DATABASE_URL`. |
 | `DB_MIGRATOR_PASSWORD` | dev placeholder | Makefile only | yes | Password for `pinround_migrator`. Must match `MIGRATOR_DATABASE_URL`. |
 | `DB_RETENTION_PASSWORD` | dev placeholder | Makefile only | yes | Password for `pinround_retention`. No service uses it yet. |
