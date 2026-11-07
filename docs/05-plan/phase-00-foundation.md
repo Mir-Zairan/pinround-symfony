@@ -228,10 +228,10 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 **Size:** S
 
 ## Definition of done
-- [ ] All tasks P00.T1–P00.T9 ticked.
-- [ ] `make up` + `make test` work on a clean clone in under 10 minutes.
+- [ ] All tasks P00.T1–P00.T9 ticked (open: P00.T2's "blocks merge" box needs GitHub branch protection, which this private repo cannot turn on without a paid plan).
+- [ ] `make up` + `make test` work on a clean clone in under 10 minutes (open: 84 s with a warm Docker build cache; a first-ever image build is not timed yet, see the phase-0 close-out hand-off note).
 - [x] CI green on `main` with all gates: PHPUnit, PHPStan max, Deptrac, CS, Rector dry-run, `composer audit`, doc lint, copy lint, e2e (run 42383363808 on `1a8d0ad`, the P00.T9 merge: `static`, `unit`, `integration`, `build` and `e2e` green).
-- [x] Tenant isolation suite, catalog test (tables and partitions), resolver-function tests, worker state-leak and EntityManager reset tests, and the log-leak marker test exist and pass (`TenantIsolationTest`, `CatalogTest`, `ResolverFunctionTest`, `WorkerStateBetweenMessagesTest`, `WorkerResetTest`, `TenantStampedMessageTest`, `LogLeakMarkerTest`; `make test` 752 tests OK on 2026-11-07).
+- [x] Tenant isolation suite, catalog test (tables and partitions), resolver-function tests, worker state-leak and EntityManager reset tests, and the log-leak marker test exist and pass (`TenantIsolationTest`, `CatalogTest`, `ResolverFunctionTest`, `WorkerStateBetweenMessagesTest`, `WorkerResetTest`, `TenantStampedMessageTest`, `LogLeakMarkerTest`; `make test` 751 tests OK on 2026-11-07 on `main` after the P00.T9 merge).
 - [x] `aud_event` exists with parent-only grants; no role except `pinround_retention` has `BYPASSRLS` (`DatabaseRolesTest::theAuditParentAloneHasGrantsAndTheAppMayOnlyReadAndAdd`, `::onlyTheRetentionRoleBypassesRowLevelSecurity`, `AuditEventTableTest`).
 - [x] The shell matches the prototype tokens in light and dark mode (`DesignTokensTest`; the light and dark shell baselines in `tests/e2e/shell.spec.ts`, run locally with `make e2e`; differences are in the P00.T5 hand-off notes).
 - [x] `docs/operations/config.md` written; any doc you changed has an up-to-date Index (`ConfigDocTest`; `bin/lint-docs` in `composer lint`).
