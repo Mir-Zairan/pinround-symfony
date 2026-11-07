@@ -18,7 +18,7 @@ use Symfony\Component\Uid\UuidV7;
  */
 final class DbalLoginAttemptsTest extends KernelTestCase
 {
-    // The microseconds show that at is cut to the millisecond a UUIDv7 can hold.
+    // The microseconds show that at and the UUIDv7 id keep the clock's instant to the microsecond.
     private const string NOW = '2027-03-15 10:00:00.123456 UTC';
 
     protected function tearDown(): void
