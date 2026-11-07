@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
+use App\Tests\Fixtures\Tracing\ExportedSpans;
 use Doctrine\ORM\EntityManagerInterface;
+use OpenTelemetry\API\Trace\SpanContextValidator;
+use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -53,6 +57,24 @@ final class WorkerResetTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['organizationId' => null, 'isEntityManagerOpen' => true], $this->responseJson());
+    }
+
+    #[Test]
+    public function theNextRequestStartsANewTraceWithNoParentAfterARequestThatThrew(): void
+    {
+        $exporter = $this->client->getContainer()->get('tracing.in_memory_exporter');
+        self::assertInstanceOf(InMemoryExporter::class, $exporter);
+
+        $this->client->request('GET', '/_test/tracing/fail');
+        self::assertResponseStatusCodeSame(500);
+        $this->client->request('GET', '/_test/tracing');
+        self::assertResponseStatusCodeSame(200);
+
+        $spans = ExportedSpans::of($exporter);
+        self::assertCount(2, $spans);
+        self::assertNotSame($spans[0]->getTraceId(), $spans[1]->getTraceId());
+        self::assertFalse(SpanContextValidator::isValidSpanId($spans[1]->getParentSpanId()));
+        self::assertNull($this->client->getContainer()->get(CurrentSpan::class)->span());
     }
 
     private function tenantContext(): TenantContext

@@ -64,3 +64,13 @@ when@test:
         path: /_test/tracing/fail
         controller: App\Tests\Fixtures\Http\TracingProbeController::fail
         methods: [GET]
+
+    test_tracing_forbid:
+        path: /_test/tracing/forbid
+        controller: App\Tests\Fixtures\Http\TracingProbeController::forbid
+        methods: [GET]
+
+    test_tracing_sub_request:
+        path: /_test/tracing/sub-request
+        controller: App\Tests\Fixtures\Http\TracingProbeController::respondAfterAFailingSubRequest
+        methods: [GET]

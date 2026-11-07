@@ -45,6 +45,7 @@ services:
             $samplingRatio: '%env(OTEL_TRACES_SAMPLER_ARG)%'
             $protocol: '%env(OTEL_EXPORTER_OTLP_PROTOCOL)%'
             $exporter: ~
+            $httpClient: ~
     OpenTelemetry\SDK\Trace\TracerProviderInterface:
         factory: ['@App\SharedKernel\Infrastructure\Tracing\TracerProviderFactory', 'create']
 
@@ -65,13 +66,17 @@ when@test:
             class: OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter
             public: true
         App\SharedKernel\Infrastructure\Tracing\TracerProviderFactory:
+            autowire: true
             arguments:
                 $endpoint: ''
                 $serviceName: '%env(OTEL_SERVICE_NAME)%'
                 $samplingRatio: '%env(OTEL_TRACES_SAMPLER_ARG)%'
                 $protocol: '%env(OTEL_EXPORTER_OTLP_PROTOCOL)%'
                 $exporter: '@tracing.in_memory_exporter'
+                $httpClient: ~
+        # Redefined only to make it public; autoconfigure keeps it tagged as resettable.
         App\SharedKernel\Infrastructure\Tracing\CurrentSpan:
+            autoconfigure: true
             public: true
 
         # Test-only controllers behind config/routes/test_fixtures.yaml.

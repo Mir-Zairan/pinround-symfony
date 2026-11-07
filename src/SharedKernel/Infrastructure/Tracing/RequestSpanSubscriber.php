@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\SharedKernel\Infrastructure\Tracing;
 
+use OpenTelemetry\API\Trace\SpanInterface;
 use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\Context\Context;
@@ -20,16 +21,21 @@ use Symfony\Component\HttpKernel\KernelEvents;
 /**
  * One root span per main web request (sub-requests start none), named "HTTP {METHOD} {route name}" and carrying
  * only the keys of SpanAttributes. The span ends and is exported on kernel.terminate, after the response is sent;
- * a collector that is down or slow never fails the request.
+ * a collector that is down or slow never fails the request. Only a response with status 500 or above marks the span
+ * as an error, with the exception class as error.type when one was thrown.
  */
 final readonly class RequestSpanSubscriber
 {
-    // Before the router (32) and the firewall (8), so the span covers them; the route is read later, on the response.
+    // Before the router (32) and the firewall (8), so the span covers them; the route is read later, on terminate.
     private const int START_PRIORITY = 4000;
     private const string INSTRUMENTATION_NAME = 'pinround.http';
     private const array KNOWN_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'CONNECT', 'TRACE'];
     // The OpenTelemetry value for a method outside the known list; the raw one is client input.
     private const string OTHER_METHOD = '_OTHER';
+    // Request attribute that carries a thrown exception's class from kernel.exception to the response, which decides
+    // whether the request failed.
+    private const string THROWN_CLASS_ATTRIBUTE = '_tracing_thrown_class';
+    private const int FIRST_SERVER_ERROR_STATUS = 500;
 
     public function __construct(
         private TracerProviderInterface $tracerProvider,
@@ -61,22 +67,25 @@ final readonly class RequestSpanSubscriber
             return;
         }
 
-        $this->describeRequest($event->getRequest());
-        $span->setAttribute(SpanAttributes::HTTP_RESPONSE_STATUS_CODE, $event->getResponse()->getStatusCode());
+        $statusCode = $event->getResponse()->getStatusCode();
+        $span->setAttribute(SpanAttributes::HTTP_RESPONSE_STATUS_CODE, $statusCode);
+        // A 4xx (not found, access denied, bad input) is the caller's mistake, not a failure of ours.
+        if ($statusCode >= self::FIRST_SERVER_ERROR_STATUS) {
+            $thrownClass = $event->getRequest()->attributes->get(self::THROWN_CLASS_ATTRIBUTE);
+            if (\is_string($thrownClass)) {
+                $span->setAttribute(SpanAttributes::ERROR_TYPE, $thrownClass);
+            }
+            $span->setStatus(StatusCode::STATUS_ERROR);
+        }
     }
 
-    // Before other exception listeners, so the failure is recorded even when one of them turns it into a response.
+    // Before other exception listeners, so the class is noted even when one of them turns the exception into a response.
     #[AsEventListener(event: KernelEvents::EXCEPTION, priority: 2048)]
-    public function recordFailure(ExceptionEvent $event): void
+    public function noteThrown(ExceptionEvent $event): void
     {
-        $span = $this->currentSpan->span();
-        if (!$event->isMainRequest() || null === $span) {
-            return;
+        if ($event->isMainRequest()) {
+            $event->getRequest()->attributes->set(self::THROWN_CLASS_ATTRIBUTE, $event->getThrowable()::class);
         }
-
-        $this->describeRequest($event->getRequest());
-        $span->setAttribute(SpanAttributes::ERROR_TYPE, $event->getThrowable()::class);
-        $span->setStatus(StatusCode::STATUS_ERROR);
     }
 
     #[AsEventListener(event: KernelEvents::TERMINATE, priority: -2048)]
@@ -88,7 +97,7 @@ final readonly class RequestSpanSubscriber
         }
 
         try {
-            $this->describeRequest($event->getRequest());
+            $this->describeRequest($span, $event->getRequest());
             $span->end();
             $this->tracerProvider->forceFlush();
         } catch (\Throwable $exportFailure) {
@@ -102,13 +111,8 @@ final readonly class RequestSpanSubscriber
     }
 
     /** The route is only known after routing, so name and route attribute are set here, not on start. */
-    private function describeRequest(Request $request): void
+    private function describeRequest(SpanInterface $span, Request $request): void
     {
-        $span = $this->currentSpan->span();
-        if (null === $span) {
-            return;
-        }
-
         $method = $this->methodOf($request);
         $route = $request->attributes->get('_route');
         $span->setAttribute(SpanAttributes::HTTP_REQUEST_METHOD, $method);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\SharedKernel\Infrastructure\Tracing;
 
 use Nyholm\Psr7\Factory\Psr17Factory;
+use OpenTelemetry\API\Common\Time\SystemClock;
 use OpenTelemetry\API\LoggerHolder;
 use OpenTelemetry\Contrib\Otlp\ContentTypes;
 use OpenTelemetry\Contrib\Otlp\SpanExporter;
@@ -16,29 +17,47 @@ use OpenTelemetry\SDK\Trace\NoopTracerProvider;
 use OpenTelemetry\SDK\Trace\Sampler\ParentBased;
 use OpenTelemetry\SDK\Trace\Sampler\TraceIdRatioBasedSampler;
 use OpenTelemetry\SDK\Trace\SpanExporterInterface;
-use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
+use OpenTelemetry\SDK\Trace\SpanProcessor\BatchSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use OpenTelemetry\SDK\Trace\TracerProviderInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\HttpClient\Psr18Client;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
  * Builds the tracer provider from the OTEL_* environment values, without the SDK's own environment autoloading
- * or any global. An empty endpoint gives a no-op provider, unless a test hands in its own exporter.
+ * and without OpenTelemetry\API\Globals. An empty endpoint gives a no-op provider, unless a test hands in its own
+ * exporter.
  *
- * Spans export one by one as they end; the request span ends on kernel.terminate, after the response is sent.
+ * Ended spans queue in memory and leave only on forceFlush, which RequestSpanSubscriber calls on kernel.terminate,
+ * after the response is sent: no query span blocks the request. The queue is bounded, and spans past it are dropped.
+ *
+ * One process-wide side effect, on purpose: building a provider with the OTLP exporter calls
+ * LoggerHolder::disable(), so the SDK's internal diagnostics (which quote exception messages) never reach stderr.
+ * FailureLoggingSpanExporter reports a failed export instead.
  */
 final readonly class TracerProviderFactory
 {
-    /** The whole export of one request, connect included, so a slow collector cannot hold the worker. */
+    /**
+     * Caps one HTTP export call to the collector (the connection idle time and the whole call), so a slow collector
+     * cannot hold the worker for long after the response. It is not a cap on a request's total tracing work.
+     */
     private const float EXPORT_TIMEOUT_SECONDS = 1.0;
+    // One request's spans fit in a single batch; a request with more spans than the queue holds loses the rest.
+    private const int MAX_QUEUE_SIZE = 2048;
+    private const int MAX_EXPORT_BATCH_SIZE = 512;
+    // Never reached: the processor runs without auto flush, so only forceFlush exports.
+    private const int SCHEDULE_DELAY_MILLIS = 600_000;
 
     public function __construct(
         private string $endpoint,
         private string $serviceName,
         private string $samplingRatio,
         private string $protocol,
+        private LoggerInterface $logger,
         private ?SpanExporterInterface $exporter = null,
+        private ?HttpClientInterface $httpClient = null,
     ) {
     }
 
@@ -50,13 +69,20 @@ final readonly class TracerProviderFactory
                 return new NoopTracerProvider();
             }
 
-            // A failed export is dropped; the SDK would otherwise print the exception to stderr.
             LoggerHolder::disable();
             $exporter = $this->createOtlpExporter();
         }
 
         return new TracerProvider(
-            new SimpleSpanProcessor($exporter),
+            new BatchSpanProcessor(
+                new FailureLoggingSpanExporter($exporter, $this->logger),
+                SystemClock::create(),
+                self::MAX_QUEUE_SIZE,
+                self::SCHEDULE_DELAY_MILLIS,
+                (int) (self::EXPORT_TIMEOUT_SECONDS * 1000),
+                self::MAX_EXPORT_BATCH_SIZE,
+                autoFlush: false,
+            ),
             new ParentBased(new TraceIdRatioBasedSampler($this->parseSamplingRatio())),
             ResourceInfoFactory::emptyResource()->merge(ResourceInfo::create(Attributes::create([
                 'service.name' => '' === $this->serviceName ? 'pinround' : $this->serviceName,
@@ -68,7 +94,7 @@ final readonly class TracerProviderFactory
     {
         $psr17Factory = new Psr17Factory();
         $client = new Psr18Client(
-            HttpClient::create(['timeout' => self::EXPORT_TIMEOUT_SECONDS, 'max_duration' => self::EXPORT_TIMEOUT_SECONDS]),
+            ($this->httpClient ?? HttpClient::create())->withOptions(['timeout' => self::EXPORT_TIMEOUT_SECONDS, 'max_duration' => self::EXPORT_TIMEOUT_SECONDS]),
             $psr17Factory,
             $psr17Factory,
         );

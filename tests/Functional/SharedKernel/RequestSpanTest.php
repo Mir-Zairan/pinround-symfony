@@ -79,6 +79,8 @@ final class RequestSpanTest extends WebTestCase
         self::assertSame('HTTP GET', $span->getName());
         self::assertFalse($span->getAttributes()->has(SpanAttributes::HTTP_ROUTE));
         self::assertSame(404, $span->getAttributes()->get(SpanAttributes::HTTP_RESPONSE_STATUS_CODE));
+        self::assertSame(StatusCode::STATUS_UNSET, $span->getStatus()->getCode());
+        self::assertFalse($span->getAttributes()->has(SpanAttributes::ERROR_TYPE));
     }
 
     #[Test]
@@ -88,6 +90,8 @@ final class RequestSpanTest extends WebTestCase
         $exporter = self::exporter();
 
         $client->request('MARKERMETHOD', '/_test/tracing');
+
+        self::assertResponseStatusCodeSame(405);
 
         $span = self::onlySpan($exporter);
         self::assertSame('_OTHER', $span->getAttributes()->get(SpanAttributes::HTTP_REQUEST_METHOD));
@@ -115,6 +119,40 @@ final class RequestSpanTest extends WebTestCase
     }
 
     #[Test]
+    public function aClientErrorThrownAsAnHttpExceptionLeavesTheSpanUnmarked(): void
+    {
+        $client = self::createClient();
+        $exporter = self::exporter();
+
+        $client->request('GET', '/_test/tracing/forbid');
+
+        self::assertResponseStatusCodeSame(403);
+        $span = self::onlySpan($exporter);
+        self::assertSame(StatusCode::STATUS_UNSET, $span->getStatus()->getCode());
+        self::assertFalse($span->getAttributes()->has(SpanAttributes::ERROR_TYPE));
+        self::assertSame(403, $span->getAttributes()->get(SpanAttributes::HTTP_RESPONSE_STATUS_CODE));
+        self::assertSame('HTTP GET test_tracing_forbid', $span->getName());
+    }
+
+    #[Test]
+    public function aSubRequestAddsNoSpanAndItsFailureDoesNotMarkTheMainSpan(): void
+    {
+        $client = self::createClient();
+        $exporter = self::exporter();
+
+        $client->request('GET', '/_test/tracing/sub-request');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['subRequestStatus' => 500], json_decode((string) $client->getResponse()->getContent(), true));
+        $span = self::onlySpan($exporter);
+        self::assertSame('HTTP GET test_tracing_sub_request', $span->getName());
+        self::assertSame('test_tracing_sub_request', $span->getAttributes()->get(SpanAttributes::HTTP_ROUTE));
+        self::assertSame(200, $span->getAttributes()->get(SpanAttributes::HTTP_RESPONSE_STATUS_CODE));
+        self::assertSame(StatusCode::STATUS_UNSET, $span->getStatus()->getCode());
+        self::assertFalse($span->getAttributes()->has(SpanAttributes::ERROR_TYPE));
+    }
+
+    #[Test]
     public function aMarkerInTheQueryStringAHeaderAndTheBodyReachesNoSpan(): void
     {
         $client = self::createClient();
@@ -128,7 +166,9 @@ final class RequestSpanTest extends WebTestCase
             'HTTP_USER_AGENT' => $marker,
             'HTTP_REFERER' => 'https://example.test/'.$marker,
         ]);
+        self::assertResponseStatusCodeSame(200);
         $client->request('GET', '/_test/tracing/fail?q='.$marker, [], [], ['HTTP_X_PROBE' => $marker]);
+        self::assertResponseStatusCodeSame(500);
 
         $spans = ExportedSpans::of($exporter);
         self::assertCount(2, $spans);
