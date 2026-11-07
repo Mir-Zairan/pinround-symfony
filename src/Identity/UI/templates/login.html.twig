@@ -6,59 +6,7 @@
 {% block site_header %}{% endblock %}
 
 {% block stylesheets %}
-    <style nonce="{{ csp_nonce() }}">
-        .login {
-            display: grid;
-            place-items: center;
-            min-height: 70vh;
-            padding: 48px 0;
-        }
-
-        .login__card {
-            width: 100%;
-            max-width: 400px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            padding: 28px 24px;
-        }
-
-        .login__title {
-            font-size: 28px;
-            font-weight: 700;
-        }
-
-        .login__error {
-            padding: 10px 12px;
-            border-radius: 12px;
-            background: var(--error-container);
-            color: var(--on-error-container);
-        }
-
-        .login__form {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .login__field {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            font-weight: 600;
-        }
-
-        .login__input {
-            height: 44px;
-            padding: 0 12px;
-            border: 1px solid var(--outline);
-            border-radius: var(--radius-input);
-            background: var(--s-lowest);
-            color: var(--on-surface);
-            font: inherit;
-            font-weight: 400;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
 {% endblock %}
 
 {% block main %}

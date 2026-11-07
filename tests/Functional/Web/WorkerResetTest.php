@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Web;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
+use App\Tests\Functional\Identity\LogsInUsers;
 use Doctrine\ORM\EntityManagerInterface;
 use OpenTelemetry\API\Trace\SpanContextValidator;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
@@ -14,6 +15,7 @@ use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Zenstruck\Foundry\Test\Factories;
 
 /**
  * In worker mode (ADR-0008) one kernel handles request after request; disableReboot() keeps the browser on one
@@ -22,6 +24,9 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class WorkerResetTest extends WebTestCase
 {
+    use Factories;
+    use LogsInUsers;
+
     private const string ORG_A = '0197a3c0-0000-7000-8000-00000000000a';
 
     private KernelBrowser $client;
@@ -31,6 +36,19 @@ final class WorkerResetTest extends WebTestCase
         self::ensureKernelShutdown();
         $this->client = self::createClient();
         $this->client->disableReboot();
+    }
+
+    #[Test]
+    public function noLoginSurvivesIntoTheNextRequestWithoutTheSessionCookie(): void
+    {
+        $this->logIn($this->client, $this->createUserWithPassword('Lena Berg'));
+        $this->client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->getCookieJar()->clear();
+        $this->client->request('GET', '/');
+
+        self::assertResponseRedirects('/login', 302);
     }
 
     #[Test]

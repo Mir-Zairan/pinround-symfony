@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\HttpFoundation\RateLimiter\PeekableRequestRateLimiterInterface;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Process\Process;
 use Symfony\Component\Security\Http\SecurityRequestAttributes;
 
 /**
@@ -42,6 +43,36 @@ final class LoginRateLimiterTest extends KernelTestCase
 
         self::assertSame(0, $limiter->peek(self::loginRequest('OMAR@acme-foods.example', $ip))->getRemainingTokens());
         self::assertGreaterThan(0, $limiter->peek(self::loginRequest('mia@acme-foods.example', $ip))->getRemainingTokens());
+    }
+
+    /**
+     * Ten PHP processes, like ten app workers, count a failed try for one email and IP at the same instant. Without
+     * the lock their read-add-write of the counter would overwrite each other and let more than five through.
+     */
+    #[Test]
+    public function failedTriesSentInParallelAllCountSoOnlyFiveAreLetThrough(): void
+    {
+        $email = 'lena.'.bin2hex(random_bytes(4)).'@acme-foods.example';
+        $ip = self::randomIp();
+        $startAt = (string) (microtime(true) + 4);
+        $processes = [];
+        for ($worker = 1; $worker <= 10; ++$worker) {
+            $process = new Process([\PHP_BINARY, __DIR__.'/count-failed-login.php', $email, $ip, $startAt]);
+            $process->start();
+            $processes[] = $process;
+        }
+
+        $answers = [];
+        foreach ($processes as $process) {
+            $process->wait();
+            self::assertTrue($process->isSuccessful(), $process->getErrorOutput());
+            $answers[] = $process->getOutput();
+        }
+
+        $counts = array_count_values($answers) + ['accepted' => 0, 'refused' => 0];
+        ksort($counts);
+        self::assertSame(['accepted' => 5, 'refused' => 5], $counts);
+        self::assertSame(0, self::limiter()->peek(self::loginRequest($email, $ip))->getRemainingTokens());
     }
 
     private static function limiter(): PeekableRequestRateLimiterInterface

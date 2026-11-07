@@ -33,21 +33,21 @@ final readonly class ValkeyLimiterStorage implements StorageInterface
     /**
      * Lets the Valkey client's exception through when Valkey cannot be reached.
      *
-     * @throws LimiterStateNotStored when Valkey refused the write
+     * @throws LoginCounterUnusable when Valkey refused the write
      */
     public function save(LimiterStateInterface $limiterState): void
     {
         $expiresAfter = $limiterState->getExpirationTime();
         $options = null === $expiresAfter ? [] : ['EX' => max(1, $expiresAfter)];
         if (true !== $this->connection->set(self::key($limiterState->getId()), serialize($limiterState), $options)) {
-            throw new LimiterStateNotStored('The login limiter could not save its counter.');
+            throw new LoginCounterUnusable('The login limiter could not save its counter.');
         }
     }
 
     /**
      * Lets the Valkey client's exception through when Valkey cannot be reached.
      *
-     * @throws LimiterStateNotStored when the stored value is not a limiter state
+     * @throws LoginCounterUnusable when the stored value is not a limiter state
      */
     public function fetch(string $limiterStateId): ?LimiterStateInterface
     {
@@ -58,7 +58,7 @@ final readonly class ValkeyLimiterStorage implements StorageInterface
 
         $state = unserialize($stored, ['allowed_classes' => self::STATE_CLASSES]);
         if (!$state instanceof LimiterStateInterface) {
-            throw new LimiterStateNotStored('The login limiter found a counter it cannot read.');
+            throw new LoginCounterUnusable('The login limiter found a counter it cannot read.');
         }
 
         return $state;

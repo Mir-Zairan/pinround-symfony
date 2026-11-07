@@ -111,12 +111,13 @@ final class LoginTest extends WebTestCase
             self::assertSame(LoginController::WRONG_CREDENTIALS, $page->filter('[role="alert"]')->text());
         }
 
+        self::waitPastTheSecondTheWindowOpened();
         $this->submitLogin($client, $email, self::PASSWORD);
 
         self::assertResponseRedirects('/login', 302);
         $page = $client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(LoginController::TOO_MANY_TRIES, $page->filter('[role="alert"]')->text());
+        self::assertSame('Too many tries. Wait 15 minutes.', $page->filter('[role="alert"]')->text());
         self::assertIsNotLoggedIn($client);
     }
 
@@ -131,12 +132,60 @@ final class LoginTest extends WebTestCase
             self::assertResponseRedirects('/login', 302);
             $client->followRedirect();
         }
+        self::waitPastTheSecondTheWindowOpened();
         $this->submitLogin($client, $email, self::PASSWORD);
 
         self::assertResponseRedirects('/login', 302);
         $page = $client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(LoginController::TOO_MANY_TRIES, $page->filter('[role="alert"]')->text());
+        self::assertSame('Too many tries. Wait 15 minutes.', $page->filter('[role="alert"]')->text());
+    }
+
+    #[Test]
+    public function fiftyFailedTriesFromOneIpRefuseAnyEmailForTheRestOfTheHour(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Omar Haddad');
+        for ($try = 1; $try <= 50; ++$try) {
+            $this->submitLogin($client, 'nobody'.$try.'.'.bin2hex(random_bytes(4)).'@acme-foods.example', self::PASSWORD);
+            self::assertResponseRedirects('/login', 302);
+        }
+
+        $this->submitLogin($client, $user->email()->toString(), self::PASSWORD);
+
+        self::assertResponseRedirects('/login', 302);
+        $page = $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Too many tries. Wait 60 minutes.', $page->filter('[role="alert"]')->text());
+        self::assertIsNotLoggedIn($client);
+    }
+
+    #[Test]
+    public function aStringThatIsNoEmailGetsTheSameMessage(): void
+    {
+        $client = self::httpsClient();
+
+        $this->submitLogin($client, 'not an email', self::PASSWORD);
+
+        self::assertResponseRedirects('/login', 302);
+        $page = $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(LoginController::WRONG_CREDENTIALS, $page->filter('[role="alert"]')->text());
+    }
+
+    #[Test]
+    public function theOpenSessionOfAUserWhosePasswordWasRemovedEnds(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Lena Berg');
+        $this->logIn($client, $user);
+        $client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+
+        $this->migrator()->executeStatement('DELETE FROM idn_credential WHERE user_id = ?', [$user->id()->toString()]);
+        $client->request('GET', '/');
+
+        self::assertResponseRedirects('/login', 302);
     }
 
     #[Test]
@@ -182,6 +231,7 @@ final class LoginTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSelectorTextSame('title', 'Log in · pinround');
         self::assertCount(0, $page->filter('header.site-header'));
+        self::assertCount(1, $page->filter('link[rel="stylesheet"][href^="/assets/styles/login-"]'));
         $card = $page->filter('main section.card');
         self::assertCount(1, $card);
         self::assertSame('pinround', trim($card->filter('.logo')->text()));
@@ -271,6 +321,15 @@ final class LoginTest extends WebTestCase
         $client->request('GET', '/login');
         self::assertResponseStatusCodeSame(200);
         $client->submitForm('Log in', ['email' => $email, 'password' => $password]);
+    }
+
+    /**
+     * Symfony's fixed window measures the wait from the start of the current second, so a try in the same second as
+     * the window's first failure reads 901 seconds, "16 minutes". People never type that fast.
+     */
+    private static function waitPastTheSecondTheWindowOpened(): void
+    {
+        usleep(1_100_000);
     }
 
     private static function assertIsNotLoggedIn(KernelBrowser $client): void

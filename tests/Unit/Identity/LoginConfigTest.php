@@ -112,12 +112,13 @@ final class LoginConfigTest extends TestCase
 
         self::assertSame(
             [
-                'login_per_email_and_ip' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '15 minutes', 'storage_service' => ValkeyLimiterStorage::class],
-                'login_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '1 hour', 'storage_service' => ValkeyLimiterStorage::class],
+                'login_per_email_and_ip' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '15 minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'login_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '1 hour', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
             ],
             self::at($rateLimiter, 'framework', 'rate_limiter'),
         );
         self::assertSame(['framework'], array_keys($rateLimiter));
+        self::assertSame(['framework' => ['lock' => 'state_valkey.connection']], self::config('packages/lock.yaml'));
     }
 
     /**

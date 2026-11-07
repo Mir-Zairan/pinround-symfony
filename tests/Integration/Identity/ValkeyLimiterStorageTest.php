@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Identity;
 
-use App\Identity\Infrastructure\Security\LimiterStateNotStored;
+use App\Identity\Infrastructure\Security\LoginCounterUnusable;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Cache\Adapter\RedisAdapter;
+use Symfony\Component\Cache\Exception\InvalidArgumentException;
 use Symfony\Component\RateLimiter\Policy\FixedWindowLimiter;
 use Symfony\Component\RateLimiter\Policy\Window;
 
@@ -44,7 +45,7 @@ final class ValkeyLimiterStorageTest extends KernelTestCase
         $id = 'login_per_ip-'.bin2hex(random_bytes(8));
         $connection->set('login_throttling:'.sha1($id), serialize(new \ArrayObject()), ['EX' => 60]);
 
-        $this->expectException(LimiterStateNotStored::class);
+        $this->expectException(LoginCounterUnusable::class);
         new ValkeyLimiterStorage($connection)->fetch($id);
     }
 
@@ -58,7 +59,9 @@ final class ValkeyLimiterStorageTest extends KernelTestCase
         self::assertInstanceOf(\Redis::class, $unreachable);
         $limiter = new FixedWindowLimiter('login_per_ip-abc', 5, new \DateInterval('PT15M'), new ValkeyLimiterStorage($unreachable));
 
-        $this->expectException(\Throwable::class);
+        // The lazy connection reports a failed connect this way; a dropped connection later throws \RedisException.
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Redis connection failed');
         $limiter->consume(0);
     }
 

@@ -1,0 +1,4 @@
+# Locks on the state Valkey (ADR-0010), through the connection config/services.yaml defines; the test env points it at
+# TEST_STATE_VALKEY_DSN. The login limiters (rate_limiter.yaml) lock their counter around each read and write.
+framework:
+    lock: state_valkey.connection
