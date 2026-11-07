@@ -19,7 +19,8 @@ use Symfony\Component\Messenger\Stamp\ReceivedStamp;
  * Spans for Messenger, on every bus. A message a worker received, with no span active, gets a root span "messenger
  * process {Class}" that ends and is exported when the message is done, so the next message starts a new trace. A message
  * dispatched while a span is active (inside a request or a handler) gets a child span "messenger send {Class}". With no
- * span active and no ReceivedStamp (a console command) nothing is recorded. Attributes: the system, the operation, the
+ * span active and no ReceivedStamp (a console command), or while the active span is not recording, nothing is
+ * recorded. Attributes: the system, the operation, the
  * bus and the short class name; never message content (ADR-0029). Listed after add_bus_name_stamp_middleware, whose
  * stamp names the bus, and before every other middleware, so the span covers the tenant ones.
  */
@@ -38,11 +39,15 @@ final readonly class TracingMessengerMiddleware implements MiddlewareInterface
 
     public function handle(Envelope $envelope, StackInterface $stack): Envelope
     {
-        $parentContext = $this->currentSpan->context();
-        if (null !== $parentContext) {
+        if (null !== $this->currentSpan->span()) {
+            $parentContext = $this->currentSpan->recordingContext();
+            if (null === $parentContext) {
+                return $stack->next()->handle($envelope, $stack);
+            }
+
             $span = $this->startSpan($envelope, self::OPERATION_SEND, SpanKind::KIND_PRODUCER, $parentContext);
 
-            return $this->runInSpan($span, $envelope, $stack);
+            return SpanScope::runAndEnd($span, static fn (): Envelope => $stack->next()->handle($envelope, $stack));
         }
 
         if (null === $envelope->last(ReceivedStamp::class)) {
@@ -60,19 +65,6 @@ final readonly class TracingMessengerMiddleware implements MiddlewareInterface
             throw $failure;
         } finally {
             $this->rootSpanExporter->endAndExport($span);
-        }
-    }
-
-    private function runInSpan(SpanInterface $span, Envelope $envelope, StackInterface $stack): Envelope
-    {
-        try {
-            return $stack->next()->handle($envelope, $stack);
-        } catch (\Throwable $failure) {
-            SpanFailure::record($span, $failure);
-
-            throw $failure;
-        } finally {
-            $span->end();
         }
     }
 

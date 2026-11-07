@@ -18,6 +18,22 @@ final class SqlKindTest extends TestCase
         self::assertSame($expectedKind, SqlKind::of($sql));
     }
 
+    #[Test]
+    public function aLongWhitespacePrefixBeforeANonLetterIsOtherWithoutBacktracking(): void
+    {
+        $result = SqlKind::of(str_repeat(' ', 100_000).'(SELECT 1)');
+
+        self::assertSame('OTHER', $result);
+        self::assertSame(\PREG_NO_ERROR, preg_last_error());
+    }
+
+    #[Test]
+    public function aLongWhitespacePrefixBeforeAKeywordStillReadsTheKeyword(): void
+    {
+        self::assertSame('SELECT', SqlKind::of(str_repeat(' ', 100_000).'SELECT 1'));
+        self::assertSame(\PREG_NO_ERROR, preg_last_error());
+    }
+
     /**
      * @return iterable<string, array{string, string}>
      */

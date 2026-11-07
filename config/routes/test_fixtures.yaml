@@ -84,3 +84,8 @@ when@test:
         path: /_test/tracing/dispatch
         controller: App\Tests\Fixtures\Http\TracingProbeController::dispatchAnEvent
         methods: [GET]
+
+    test_tracing_query:
+        path: /_test/tracing/query
+        controller: App\Tests\Fixtures\Http\TracingProbeController::runAQuery
+        methods: [GET]

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Fixtures\Http;
 
+use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -23,7 +24,7 @@ final readonly class TracingProbeController
     public const string LOG_MESSAGE = 'Tracing probe record.';
     public const string FAILURE_MESSAGE = 'The tracing probe failed with a private detail.';
 
-    public function __construct(private LoggerInterface $logger, private HttpKernelInterface $httpKernel, private MessageBusInterface $eventBus)
+    public function __construct(private LoggerInterface $logger, private HttpKernelInterface $httpKernel, private MessageBusInterface $eventBus, private Connection $connection)
     {
     }
 
@@ -49,6 +50,14 @@ final readonly class TracingProbeController
     public function dispatchAnEvent(): JsonResponse
     {
         $this->eventBus->dispatch(new \stdClass());
+
+        return new JsonResponse(['ok' => true]);
+    }
+
+    /** Runs one real query inside the request's own transaction. */
+    public function runAQuery(): JsonResponse
+    {
+        $this->connection->executeQuery('SELECT 1');
 
         return new JsonResponse(['ok' => true]);
     }

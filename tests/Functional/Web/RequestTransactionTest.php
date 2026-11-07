@@ -53,6 +53,7 @@ final class RequestTransactionTest extends WebTestCase
         'test_tracing_sub_request',
         'test_tracing_server_error',
         'test_tracing_dispatch',
+        'test_tracing_query',
     ];
 
     private KernelBrowser $client;

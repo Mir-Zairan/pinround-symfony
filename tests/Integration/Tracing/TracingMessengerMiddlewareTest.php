@@ -84,6 +84,69 @@ final class TracingMessengerMiddlewareTest extends KernelTestCase
     }
 
     #[Test]
+    public function aFailingMessageDoesNotMarkTheTraceOfTheNextMessageAndEachHasItsOwnTrace(): void
+    {
+        self::getContainer()->get('doctrine.dbal.default_connection')->executeStatement('DELETE FROM messenger_failed');
+        $commandBus = $this->bus('command.bus');
+        $commandBus->dispatch(new TracedProbeMessage('first', isFailing: true), [new TransportNamesStamp(['test_queue'])]);
+        $commandBus->dispatch(new TracedProbeMessage('second'), [new TransportNamesStamp(['test_queue'])]);
+
+        self::runTheWorkerUntilIdle('test_queue');
+
+        $processSpans = array_values(array_filter(
+            ExportedSpans::of($this->exporter()),
+            static fn (SpanDataInterface $span): bool => 'messenger process TracedProbeMessage' === $span->getName(),
+        ));
+        self::assertCount(2, $processSpans);
+        self::assertSame(StatusCode::STATUS_ERROR, $processSpans[0]->getStatus()->getCode());
+        self::assertSame(HandlerFailedException::class, $processSpans[0]->getAttributes()->get(SpanAttributes::ERROR_TYPE));
+        self::assertSame(StatusCode::STATUS_UNSET, $processSpans[1]->getStatus()->getCode());
+        self::assertFalse($processSpans[1]->getAttributes()->has(SpanAttributes::ERROR_TYPE));
+        self::assertNotSame($processSpans[0]->getTraceId(), $processSpans[1]->getTraceId());
+        self::assertFalse(SpanContextValidator::isValidSpanId($processSpans[0]->getParentSpanId()));
+        self::assertFalse(SpanContextValidator::isValidSpanId($processSpans[1]->getParentSpanId()));
+        self::getContainer()->get('doctrine.dbal.default_connection')->executeStatement('DELETE FROM messenger_failed');
+    }
+
+    #[Test]
+    public function aMessageDispatchedFromInsideAHandlerGetsASendSpanUnderTheProcessSpan(): void
+    {
+        $this->bus('command.bus')->dispatch(new TracedProbeMessage('x', dispatchesFollowUp: true), [new TransportNamesStamp(['test_queue'])]);
+
+        self::runTheWorkerUntilIdle('test_queue');
+
+        $spans = ExportedSpans::of($this->exporter());
+        $processSpans = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => 'messenger process TracedProbeMessage' === $span->getName()));
+        $sendSpans = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => 'messenger send stdClass' === $span->getName()));
+        self::assertCount(1, $processSpans);
+        self::assertCount(1, $sendSpans);
+        self::assertSame($processSpans[0]->getSpanId(), $sendSpans[0]->getParentSpanId());
+        self::assertSame($processSpans[0]->getTraceId(), $sendSpans[0]->getTraceId());
+        self::assertSame('event.bus', $sendSpans[0]->getAttributes()->get(SpanAttributes::MESSAGING_DESTINATION_NAME));
+    }
+
+    #[Test]
+    public function aSendThatThrowsMarksTheSendSpanAsAnErrorWithTheExceptionClassAndPropagates(): void
+    {
+        $span = self::getContainer()->get(TracerProviderInterface::class)->getTracer('test')->spanBuilder('test root')->setParent(false)->startSpan();
+        self::getContainer()->get(CurrentSpan::class)->begin($span, $span->storeInContext(Context::getRoot()));
+        $thrown = null;
+
+        try {
+            $this->bus('command.bus')->dispatch(new TracedProbeMessage('x'), [new TransportNamesStamp(['unreachable_valkey'])]);
+        } catch (\Throwable $thrown) {
+        }
+
+        self::assertNotNull($thrown, 'The unreachable transport must make the dispatch fail.');
+        self::getContainer()->get(TracerProviderInterface::class)->forceFlush();
+        $sendSpans = array_values(array_filter(ExportedSpans::of($this->exporter()), static fn (SpanDataInterface $exported): bool => 'messenger send TracedProbeMessage' === $exported->getName()));
+        self::assertCount(1, $sendSpans);
+        self::assertSame(StatusCode::STATUS_ERROR, $sendSpans[0]->getStatus()->getCode());
+        self::assertSame('', $sendSpans[0]->getStatus()->getDescription());
+        self::assertSame($thrown::class, $sendSpans[0]->getAttributes()->get(SpanAttributes::ERROR_TYPE));
+    }
+
+    #[Test]
     public function aMessageDispatchedInsideAnActiveSpanGetsASendChildSpanOnItsBus(): void
     {
         $span = self::getContainer()->get(TracerProviderInterface::class)->getTracer('test')->spanBuilder('test root')->setParent(false)->startSpan();

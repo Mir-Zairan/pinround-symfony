@@ -24,7 +24,7 @@ final class SqlKind
     /** Leading whitespace and comments are skipped before the keyword is read. */
     public static function of(string $sql): string
     {
-        if (1 !== preg_match('/\A(?:\s+|--[^\n]*(?:\n|\z)|\/\*.*?\*\/)*([A-Za-z]+)/s', $sql, $match)) {
+        if (1 !== preg_match('/\A(?>\s++|--[^\n]*+(?:\n|\z)|\/\*.*?\*\/)*+([A-Za-z]+)/s', $sql, $match)) {
             return self::OTHER;
         }
 
