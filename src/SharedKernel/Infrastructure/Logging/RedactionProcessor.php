@@ -135,11 +135,15 @@ final class RedactionProcessor implements ProcessorInterface
      */
     private static function containsAsWholeWord(array $pieces, string $exceptionMessage): bool
     {
+        // Word boundaries need UTF-8 on both sides, and a /u pattern built from invalid UTF-8 would not even compile
+        // (a warning raised inside the logger); without them any copy counts, so the message is never let through.
+        $isUtf8 = mb_check_encoding($exceptionMessage, 'UTF-8');
         $pattern = '/(?<![\p{L}\p{N}_])'.preg_quote($exceptionMessage, '/').'(?![\p{L}\p{N}_])/u';
         foreach ($pieces as $piece) {
-            $match = preg_match($pattern, $piece);
-            // false: the text is not valid UTF-8, so any copy counts rather than none.
-            if (1 === $match || (false === $match && str_contains($piece, $exceptionMessage))) {
+            $isWord = $isUtf8 && mb_check_encoding($piece, 'UTF-8')
+                ? 1 === preg_match($pattern, $piece)
+                : str_contains($piece, $exceptionMessage);
+            if ($isWord) {
                 return true;
             }
         }

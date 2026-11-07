@@ -8,6 +8,7 @@ use App\SharedKernel\Infrastructure\Logging\RedactionProcessor;
 use Monolog\Level;
 use Monolog\LogRecord;
 use Monolog\Processor\PsrLogMessageProcessor;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -120,6 +121,55 @@ final class RedactionProcessorTest extends TestCase
         $redacted = self::redact(self::record(message: "Failed \xff Invalid", context: ['exception' => new \RuntimeException('Invalid')]));
 
         self::assertSame(RedactionProcessor::WITHHELD_LOG_MESSAGE, $redacted->message);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function unquotedExceptionMessagesAroundTheCutOff(): iterable
+    {
+        yield 'exactly 16 characters' => ['Sixteen chars ok', 'Failed (RuntimeException: '.RedactionProcessor::WITHHELD_EXCEPTION_MESSAGE.' at x.php line 1)'];
+        yield 'exactly 15 characters' => ['Fifteen chars!!', RedactionProcessor::WITHHELD_LOG_MESSAGE];
+    }
+
+    #[Test]
+    #[DataProvider('unquotedExceptionMessagesAroundTheCutOff')]
+    public function anUnquotedExceptionMessageOfSixteenCharactersOrMoreIsReplacedInPlaceAndAShorterOneWithholdsTheLogMessage(string $exceptionMessage, string $expectedMessage): void
+    {
+        $redacted = self::redact(self::record(
+            message: 'Failed (RuntimeException: '.$exceptionMessage.' at x.php line 1)',
+            context: ['exception' => new \RuntimeException($exceptionMessage)],
+        ));
+
+        self::assertSame($expectedMessage, $redacted->message);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function logMessagesWithAShortExceptionMessageThatIsNotUtf8(): iterable
+    {
+        yield 'quoted' => ["Failed: \"Bad \xff\"", 'Failed: "'.RedactionProcessor::WITHHELD_EXCEPTION_MESSAGE.'"'];
+        yield 'unquoted' => ["Failed: Bad \xff here", RedactionProcessor::WITHHELD_LOG_MESSAGE];
+    }
+
+    /**
+     * A pattern built from text that is not UTF-8 would raise a warning inside the logger, which debug mode throws.
+     */
+    #[Test]
+    #[DataProvider('logMessagesWithAShortExceptionMessageThatIsNotUtf8')]
+    public function aShortExceptionMessageThatIsNotUtf8IsWithheldWithoutAWarning(string $message, string $expectedMessage): void
+    {
+        set_error_handler(static function (int $level, string $error): never {
+            throw new \ErrorException($error, 0, $level);
+        });
+        try {
+            $redacted = self::redact(self::record(message: $message, context: ['exception' => new \RuntimeException("Bad \xff")]));
+        } finally {
+            restore_error_handler();
+        }
+
+        self::assertSame($expectedMessage, $redacted->message);
     }
 
     #[Test]
