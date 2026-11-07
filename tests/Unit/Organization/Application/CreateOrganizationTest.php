@@ -49,7 +49,7 @@ final class CreateOrganizationTest extends TestCase
         new CreateOrganization(self::organizations(), new InMemoryMemberships(), self::settingsStore(), $events)(new OrganizationId(self::ACME_FOODS), 'Acme Foods', 'acme-foods', new UserId(self::SARA), null, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
 
         self::assertCount(1, $events->published);
-        self::assertNull($events->published[0]->actorUserId);
+        self::assertNull($events->published[0]->actorId);
     }
 
     /**

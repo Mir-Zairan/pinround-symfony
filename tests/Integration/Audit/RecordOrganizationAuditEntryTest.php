@@ -30,6 +30,8 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
     private const string SLUG = 'acme-foods-audit';
     // Inside the months the migrations created aud_event partitions for (2026-11 to 2027-12).
     private const string NOW = '2027-03-15 10:00:00 UTC';
+    // Earlier than the worker's clock, as when the relay or a retry from failed delivers the event late.
+    private const string OCCURRED_AT = '2027-03-14 08:30:00 UTC';
 
     protected function setUp(): void
     {
@@ -52,7 +54,7 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
     #[Test]
     public function eachOrganizationEventWritesOneAuditRowWithOnlyItsAllowListedData(): void
     {
-        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->setUpShop(self::ACME_FOODS, self::SLUG, new \DateTimeImmutable(self::NOW)));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->setUpShop(self::ACME_FOODS, self::SLUG, new \DateTimeImmutable(self::OCCURRED_AT)));
 
         self::runTheWorkerUntilIdle('outbox');
         self::runTheWorkerUntilIdle('async_notify');
@@ -81,6 +83,7 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
             ],
             array_map(static fn (array $row): array => $row['data'], $rows),
         );
+        self::assertSame(array_fill(0, 6, '2027-03-14 08:30:00'), array_column($rows, 'at'), 'Each row keeps the time of its event, not of its handling.');
         foreach ($rows as $row) {
             self::assertEqualsCanonicalizing(RecordOrganizationAuditEntry::DATA_KEYS[$row['action']] ?? [], array_keys($row['data']));
         }
@@ -89,7 +92,7 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
     #[Test]
     public function aRedeliveredEventWritesNoSecondRow(): void
     {
-        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->setUpShop(self::ACME_FOODS, self::SLUG, new \DateTimeImmutable(self::NOW)));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->setUpShop(self::ACME_FOODS, self::SLUG, new \DateTimeImmutable(self::OCCURRED_AT)));
         self::runTheWorkerUntilIdle('outbox');
         self::runTheWorkerUntilIdle('async_notify');
         $asyncNotify = self::getContainer()->get('messenger.transport.async_notify');
@@ -104,12 +107,14 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
     }
 
     /**
-     * @return list<array{actor_kind: mixed, actor_user_id: mixed, action: string, target_type: mixed, target_id: mixed, data: array<mixed>}>
+     * @return list<array{actor_kind: mixed, actor_user_id: mixed, action: string, target_type: mixed, target_id: mixed, at: mixed, data: array<mixed>}>
      */
     private function auditRows(): array
     {
         $rows = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->entityManager()->getConnection()->fetchAllAssociative(
-            'SELECT actor_kind, actor_user_id, action, target_type, target_id, data::text AS data FROM aud_event WHERE organization_id = ? ORDER BY id',
+            "SELECT actor_kind, actor_user_id, action, target_type, target_id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS at,
+                    data::text AS data
+             FROM aud_event WHERE organization_id = ? ORDER BY id",
             [self::ACME_FOODS],
         ));
 
@@ -125,6 +130,7 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
                 'action' => $row['action'],
                 'target_type' => $row['target_type'],
                 'target_id' => $row['target_id'],
+                'at' => $row['at'],
                 'data' => $data,
             ];
         }, $rows);

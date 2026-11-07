@@ -17,8 +17,8 @@ use App\SharedKernel\Domain\OrganizationId;
 /**
  * Writes one aud_event row per Organization event (ADR-0026: role and membership changes, team changes), once per
  * message however often it is delivered. It runs in worker-notify on event.bus (config/services.yaml), in the bus's
- * transaction under the event's organization. The data of each action holds only the keys of DATA_KEYS: ids and role
- * values.
+ * transaction under the event's organization, and keeps the event's time. The data of each action holds exactly the
+ * keys of DATA_KEYS, ids and role values, and requireAllowListedData() refuses any other.
  */
 final readonly class RecordOrganizationAuditEntry
 {
@@ -51,17 +51,38 @@ final readonly class RecordOrganizationAuditEntry
 
     private function entryFor(OrganizationEvent $event): AuditEntry
     {
-        [$action, $targetType, $targetId, $data] = match (true) {
+        [$action, $targetType, $targetId, $idsAndRoleValues] = match (true) {
             $event instanceof MemberJoined => ['member.joined', 'user', $event->userId, ['org_roles' => $event->orgRoles]],
             $event instanceof OrgRolesChanged => ['org_roles.changed', 'user', $event->userId, ['from' => $event->orgRolesBefore, 'to' => $event->orgRolesAfter]],
             $event instanceof TeamCreated => ['team.created', 'team', $event->teamId, ['lead_user_id' => $event->leadUserId]],
             $event instanceof TeamRoleChanged => ['team_role.changed', 'user', $event->userId, ['team_id' => $event->teamId, 'from' => $event->teamRoleBefore, 'to' => $event->teamRoleAfter]],
             default => throw new \LogicException(\sprintf('"%s" has no audit action.', $event::class)),
         };
+        $allowListedValues = self::requireAllowListedData($action, $idsAndRoleValues);
         $organizationId = new OrganizationId($event->organizationId);
 
-        return null === $event->actorUserId
-            ? AuditEntry::bySystem($organizationId, $action, $targetType, $targetId, $data)
-            : AuditEntry::byUser($organizationId, $event->actorUserId, $action, $targetType, $targetId, $data);
+        return null === $event->actorId
+            ? AuditEntry::bySystem($organizationId, $action, $targetType, $targetId, $allowListedValues, $event->occurredAt)
+            : AuditEntry::byUser($organizationId, $event->actorId, $action, $targetType, $targetId, $allowListedValues, occurredAt: $event->occurredAt);
+    }
+
+    /**
+     * The check entryFor() runs on the data of every entry (ADR-0026: a schema allow-list per action).
+     *
+     * @param array<string, mixed> $entryData
+     *
+     * @return array<string, mixed> $entryData unchanged
+     *
+     * @throws \LogicException when the action has no allow-list, or $entryData does not hold exactly its keys
+     */
+    public static function requireAllowListedData(string $action, array $entryData): array
+    {
+        $allowedKeys = self::DATA_KEYS[$action] ?? throw new \LogicException(\sprintf('The audit action "%s" has no data allow-list.', $action));
+        $keys = array_keys($entryData);
+        if ([] !== array_diff($keys, $allowedKeys) || [] !== array_diff($allowedKeys, $keys)) {
+            throw new \LogicException(\sprintf('The data of the audit action "%s" must hold exactly the keys %s.', $action, implode(', ', $allowedKeys)));
+        }
+
+        return $entryData;
     }
 }

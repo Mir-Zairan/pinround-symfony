@@ -18,7 +18,7 @@ final readonly class OrgRolesChanged implements OrganizationEvent
         public string $userId,
         public array $orgRolesBefore,
         public array $orgRolesAfter,
-        public ?string $actorUserId,
+        public ?string $actorId,
         public \DateTimeImmutable $occurredAt,
     ) {
     }

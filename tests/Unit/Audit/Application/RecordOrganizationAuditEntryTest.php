@@ -57,6 +57,37 @@ final class RecordOrganizationAuditEntryTest extends TestCase
             [$entry->organizationId->toString(), $entry->actorKind, $entry->actorUserId, $entry->action, $entry->targetType, $entry->targetId, $entry->data],
         );
         self::assertSame(RecordOrganizationAuditEntry::DATA_KEYS[$expectedAction], array_keys($entry->data));
+        self::assertSame($event->occurredAt, $entry->occurredAt);
+    }
+
+    #[Test]
+    public function dataWithExactlyTheAllowListedKeysPasses(): void
+    {
+        $data = ['to' => 'viewer', 'team_id' => self::SHOP_TEAM, 'from' => null];
+
+        self::assertSame($data, RecordOrganizationAuditEntry::requireAllowListedData('team_role.changed', $data));
+    }
+
+    /**
+     * @return iterable<string, array{string, array<string, mixed>}>
+     */
+    public static function refusedData(): iterable
+    {
+        yield 'a key outside the list' => ['team.created', ['lead_user_id' => self::LENA, 'name' => 'Shop']];
+        yield 'a listed key missing' => ['org_roles.changed', ['to' => ['admin']]];
+        yield 'an action with no list' => ['team.renamed', []];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    #[Test]
+    #[DataProvider('refusedData')]
+    public function dataThatIsNotExactlyTheActionsAllowListIsRefused(string $action, array $data): void
+    {
+        $this->expectException(\LogicException::class);
+
+        RecordOrganizationAuditEntry::requireAllowListedData($action, $data);
     }
 
     #[Test]
@@ -68,6 +99,7 @@ final class RecordOrganizationAuditEntryTest extends TestCase
 
         self::assertCount(1, $auditLog->entries);
         self::assertSame([ActorKind::System, null], [$auditLog->entries[0]->actorKind, $auditLog->entries[0]->actorUserId]);
+        self::assertEquals(new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), $auditLog->entries[0]->occurredAt);
     }
 
     #[Test]
@@ -96,7 +128,7 @@ final class RecordOrganizationAuditEntryTest extends TestCase
     public function anOrganizationEventWithNoAuditActionFailsInsteadOfGoingUnrecorded(): void
     {
         $unknownEvent = new class(self::ACME_FOODS, null, new \DateTimeImmutable('2027-03-15 10:00:00 UTC')) implements OrganizationEvent {
-            public function __construct(public string $organizationId, public ?string $actorUserId, public \DateTimeImmutable $occurredAt)
+            public function __construct(public string $organizationId, public ?string $actorId, public \DateTimeImmutable $occurredAt)
             {
             }
         };

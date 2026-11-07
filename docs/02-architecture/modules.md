@@ -120,7 +120,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `TeamQueries::members(TeamId): list<MemberView>`
   - `OrgSettings::get(OrganizationId): SettingsView`
 - **Commands:** CreateOrganization, AddMember (makes a user a member with org roles; used by the demo seed and by AcceptInvitation), InviteMember, AcceptInvitation, SetOrgRoles, CreateTeam, SetTeamRole, ChangeSettings. Built so far (P01.T3): CreateOrganization, AddMember, SetOrgRoles, CreateTeam, SetTeamRole, invokable services in `Application` that write in the caller's transaction and take the acting user (null for the system) and the time.
-- **Events:** `MemberJoined`, `OrgRolesChanged`, `TeamCreated`, `TeamRoleChanged`, `SettingsChanged`. They implement `Api\Event\OrganizationEvent` (organization id, actor user id or null for the system, occurred at; ids as UUID strings, roles as their values) and are published through `Application\OrganizationEvents` (`Infrastructure\Messenger\MessengerOrganizationEvents`, on `event.bus`), which routes the interface to the outbox; the relay sends it to `async_notify`.
+- **Events:** `MemberJoined`, `OrgRolesChanged`, `TeamCreated`, `TeamRoleChanged`, `SettingsChanged`. They implement `Api\Event\OrganizationEvent` (organization id, actor id: the acting user's id or null for the system, occurred at; ids as UUID strings, roles as their values) and are published through `Application\OrganizationEvents` (`Infrastructure\Messenger\MessengerOrganizationEvents`, on `event.bus`), which routes the interface to the outbox; the relay sends it to `async_notify`.
 - **Depends on:** Identity Api.
 - **ADRs:** [0013](../03-adr/0013-authorization.md).
 
@@ -259,10 +259,10 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 
 - **Story:** Sara wants to know who turned off the lead check last week. The activity log shows the person, the time and the old and new value.
 - **Owns:** `aud_event` (append-only, partitioned by month; P00.T7), `aud_export` (P11).
-- **Api:** `AuditLog::record(AuditEntry)` (for actions that have no domain event, for example an MCP call or an export download). `AuditEntry` is built with `byUser`, `byToken` or `bySystem` (`ActorKind`); `record` writes in the caller's transaction and throws `AuditEntryForAnotherTenantRefused` for an entry of another organization than `TenantContext`'s. Implemented by `Infrastructure\DbalAuditLog`.
+- **Api:** `AuditLog::record(AuditEntry)` (for actions that have no domain event, for example an MCP call or an export download). `AuditEntry` is built with `byUser`, `byToken` or `bySystem` (`ActorKind`); `record` writes in the caller's transaction and throws `AuditEntryForAnotherTenantRefused` for an entry of another organization than `TenantContext`'s. An entry built with `occurredAt` (an event consumer passes the event's time) is stored at that time, else at the clock's now. Implemented by `Infrastructure\DbalAuditLog`.
 - **Readiness:** `Infrastructure\Health\NextAuditPartitionExists` (a `ReadinessCheck`): `aud_event` has next month's partition (UTC).
-- **Consumes:** admin, settings, role, token, login, AI-policy, export and ticket-move events. Built so far: `Application\RecordOrganizationAuditEntry` writes one row per Organization event, once per message (`OnceOnlyHandling`), with actions `member.joined`, `org_roles.changed`, `team.created` and `team_role.changed` and the data keys of its `DATA_KEYS` allow-list; it is tagged as an `event.bus` handler in `config/services.yaml`, as Application code cannot use `#[AsMessageHandler]`.
-- **Depends on:** SharedKernel only.
+- **Consumes:** admin, settings, role, token, login, AI-policy, export and ticket-move events. Built so far: `Application\RecordOrganizationAuditEntry` writes one row per Organization event, once per message (`OnceOnlyHandling`), with actions `member.joined`, `org_roles.changed`, `team.created` and `team_role.changed`, at the event's `occurredAt`, and with exactly the data keys of its `DATA_KEYS` allow-list (`requireAllowListedData` refuses others); it is tagged as an `event.bus` handler in `config/services.yaml`, as Application code cannot use `#[AsMessageHandler]`.
+- **Depends on:** SharedKernel only; its Application and Infrastructure may also listen to the events (`Api\Event`) of every module, as every module's may (deptrac.yaml).
 - **ADRs:** [0026](../03-adr/0026-audit-log.md).
 
 ### AgentApi (`api_`)
@@ -286,7 +286,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 
 ## Event catalogue
 
-All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `occurredAt`, `organizationId` and `actorId`. Until SharedKernel has that base, the Organization events implement `Organization\Api\Event\OrganizationEvent` (`organizationId`, `actorUserId`, `occurredAt`), and the message's `MessageIdStamp` stands in for `eventId`. "Outbox" means the event is stored in the same transaction and delivered at least once to async handlers.
+All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `occurredAt`, `organizationId` and `actorId`. Until SharedKernel has that base, the Organization events implement `Organization\Api\Event\OrganizationEvent` (`organizationId`, `actorId`: the acting user's id or null for the system, `occurredAt`), and the message's `MessageIdStamp` stands in for `eventId`. "Outbox" means the event is stored in the same transaction and delivered at least once to async handlers.
 
 | Event | Producer | Consumers | Payload (besides the base) | Delivery |
 |---|---|---|---|---|

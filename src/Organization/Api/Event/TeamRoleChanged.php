@@ -20,7 +20,7 @@ final readonly class TeamRoleChanged implements OrganizationEvent
         public string $userId,
         public ?string $teamRoleBefore,
         public string $teamRoleAfter,
-        public ?string $actorUserId,
+        public ?string $actorId,
         public \DateTimeImmutable $occurredAt,
     ) {
     }

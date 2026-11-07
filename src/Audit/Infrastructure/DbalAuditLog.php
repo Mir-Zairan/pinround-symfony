@@ -39,9 +39,10 @@ final readonly class DbalAuditLog implements AuditLog
             throw new \LogicException('An audit entry is recorded in the transaction of the change it describes; none is open.');
         }
 
-        $now = $this->clock->now();
+        // An entry recorded from an event keeps the time of the action, not of its (possibly delayed) handling.
+        $at = $entry->occurredAt ?? $this->clock->now();
         // The id carries the same instant as at, so ordering by id and by at agree.
-        $id = new UuidV7(UuidV7::generate($now));
+        $id = new UuidV7(UuidV7::generate($at));
         $this->connection->executeStatement(
             self::INSERT,
             [

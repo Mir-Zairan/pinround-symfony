@@ -18,6 +18,10 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class DatabaseRolesTest extends KernelTestCase
 {
+    private const array DOCUMENTED_ORGANIZATION_INDEXES_NOT_LED_BY_THE_ORGANIZATION = [
+        'CREATE UNIQUE INDEX org_organization_slug_key ON public.org_organization USING btree (slug)',
+        'CREATE INDEX org_membership_user_id_idx ON public.org_membership USING btree (user_id)',
+    ];
     private const array ROLES = ['pinround_app', 'pinround_migrator', 'pinround_retention', 'pinround_readonly'];
     private const array MESSENGER_TABLES = ['messenger_outbox', 'messenger_failed'];
 
@@ -315,25 +319,36 @@ final class DatabaseRolesTest extends KernelTestCase
 
     /**
      * Every index of an org_ table starts with organization_id but the two data-model.md names as exceptions: the
-     * global slug key and the user_id index of resolve_user_orgs, which runs before the tenant is known. An index whose
-     * first key is an expression (indkey[0] = 0) has no attribute there, so the LEFT JOIN keeps it as a violation.
+     * global slug key and the user_id index of resolve_user_orgs, which runs before the tenant is known.
      */
     #[Test]
     public function onlyTheDocumentedOrganizationIndexesDoNotStartWithTheOrganization(): void
     {
-        self::assertEqualsCanonicalizing(
-            [
-                'CREATE UNIQUE INDEX org_organization_slug_key ON public.org_organization USING btree (slug)',
-                'CREATE INDEX org_membership_user_id_idx ON public.org_membership USING btree (user_id)',
-            ],
-            $this->connection()->fetchFirstColumn(
-                "SELECT pg_get_indexdef(i.indexrelid)
-                 FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
-                 LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = i.indkey[0]
-                 WHERE c.relnamespace = 'public'::regnamespace AND c.relname LIKE 'org\\_%'
-                 AND a.attname IS DISTINCT FROM 'organization_id'",
-            ),
-        );
+        self::assertEqualsCanonicalizing(self::DOCUMENTED_ORGANIZATION_INDEXES_NOT_LED_BY_THE_ORGANIZATION, self::organizationIndexesNotLedByTheOrganization($this->connection()));
+    }
+
+    /**
+     * An index whose first key is an expression has no column there (indkey[0] = 0), so an inner join would drop it;
+     * one on an expression of organization_id does not start with the column either.
+     */
+    #[Test]
+    public function anOrganizationIndexLedByAnExpressionIsReported(): void
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $migrator->beginTransaction();
+        try {
+            $migrator->executeStatement('CREATE INDEX org_membership_expression_probe_idx ON org_membership ((organization_id::text), user_id)');
+
+            self::assertEqualsCanonicalizing(
+                [
+                    ...self::DOCUMENTED_ORGANIZATION_INDEXES_NOT_LED_BY_THE_ORGANIZATION,
+                    'CREATE INDEX org_membership_expression_probe_idx ON public.org_membership USING btree (((organization_id)::text), user_id)',
+                ],
+                self::organizationIndexesNotLedByTheOrganization($migrator),
+            );
+        } finally {
+            $migrator->rollBack();
+        }
     }
 
     /** The tables no entity maps; the diff must neither drop them nor hide a table that is mapped. */
@@ -425,6 +440,27 @@ final class DatabaseRolesTest extends KernelTestCase
 
         self::assertSame('pinround_migrator', $migrations->getConnection()->fetchOne('SELECT current_user'));
         self::assertInstanceOf(OrmSchemaProvider::class, $migrations->getSchemaProvider());
+    }
+
+    /**
+     * @return list<string> the definition of every index of an org_ table whose first key is not the organization_id
+     *                      column, expressions included
+     */
+    private static function organizationIndexesNotLedByTheOrganization(Connection $connection): array
+    {
+        $definitions = $connection->fetchFirstColumn(
+            "SELECT pg_get_indexdef(i.indexrelid)
+             FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+             LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = i.indkey[0]
+             WHERE c.relnamespace = 'public'::regnamespace AND c.relname LIKE 'org\\_%'
+             AND a.attname IS DISTINCT FROM 'organization_id'",
+        );
+
+        return array_map(static function (mixed $definition): string {
+            self::assertIsString($definition);
+
+            return $definition;
+        }, $definitions);
     }
 
     private function connection(): Connection

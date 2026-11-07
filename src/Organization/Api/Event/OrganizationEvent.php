@@ -14,7 +14,7 @@ interface OrganizationEvent
     public string $organizationId { get; }
 
     /** The user who made the change; null when the system did, as the demo seed does. */
-    public ?string $actorUserId { get; }
+    public ?string $actorId { get; }
 
     public \DateTimeImmutable $occurredAt { get; }
 }

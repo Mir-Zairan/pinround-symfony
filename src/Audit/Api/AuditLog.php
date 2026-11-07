@@ -13,7 +13,8 @@ use App\SharedKernel\Application\TenantNotSet;
 interface AuditLog
 {
     /**
-     * Writes the entry in the caller's open transaction, so it is kept only if the change it describes is.
+     * Writes the entry in the caller's open transaction, so it is kept only if the change it describes is. Its time is
+     * the entry's occurredAt, or now when it has none; the month of that time must have its aud_event partition.
      *
      * @throws TenantNotSet
      * @throws AuditEntryForAnotherTenantRefused when the entry's organization is not the one in TenantContext

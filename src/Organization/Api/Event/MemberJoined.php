@@ -16,7 +16,7 @@ final readonly class MemberJoined implements OrganizationEvent
         public string $organizationId,
         public string $userId,
         public array $orgRoles,
-        public ?string $actorUserId,
+        public ?string $actorId,
         public \DateTimeImmutable $occurredAt,
     ) {
     }

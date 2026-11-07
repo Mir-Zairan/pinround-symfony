@@ -13,7 +13,7 @@ final readonly class TeamCreated implements OrganizationEvent
         public string $organizationId,
         public string $teamId,
         public string $leadUserId,
-        public ?string $actorUserId,
+        public ?string $actorId,
         public \DateTimeImmutable $occurredAt,
     ) {
     }
