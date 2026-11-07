@@ -137,7 +137,10 @@ test('a late failure of an older save keeps the newer pick', async ({ page }) =>
   await pickTheme(page, 'Light');
 
   // The controller warns at the end of its catch block, after any roll-back; the 500 response alone comes earlier.
-  const darkSaveHandled = page.waitForEvent('console', (message) => message.type() === 'warning');
+  const darkSaveHandled = page.waitForEvent(
+    'console',
+    (message) => message.type() === 'warning' && message.text().includes('The theme was not saved (500).'),
+  );
   releaseDarkSave();
   await darkSaveHandled;
 
