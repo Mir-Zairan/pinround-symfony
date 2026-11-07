@@ -234,6 +234,7 @@ final class RedactionProcessorTest extends TestCase
                 'route', 'method', 'status_code', 'duration_ms',
                 'class', 'message_id', 'transport', 'retryCount', 'delay',
                 'exception', 'exception_class', 'sqlstate', 'code',
+                'check',
             ],
             RedactionProcessor::ALLOWED_KEYS,
         );

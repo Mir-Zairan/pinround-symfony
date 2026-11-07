@@ -39,14 +39,15 @@ final class RedactionProcessor implements ProcessorInterface
 
     /**
      * Correlation ids (CorrelationIdsProcessor; trace_id and span_id come with OpenTelemetry), the HTTP keys of
-     * Symfony's RouterListener, the Messenger keys of its worker and retry listener, and the keys RequestTransaction
-     * logs a failed rollback with.
+     * Symfony's RouterListener, the Messenger keys of its worker and retry listener, the keys RequestTransaction
+     * logs a failed rollback with, and the name of a failed readiness check (HealthController).
      */
     public const array ALLOWED_KEYS = [
         'request_id', 'trace_id', 'span_id', 'organization_id', 'user_id',
         'route', 'method', 'status_code', 'duration_ms',
         'class', 'message_id', 'transport', 'retryCount', 'delay',
         'exception', 'exception_class', 'sqlstate', 'code',
+        'check',
     ];
 
     public function __invoke(LogRecord $record): LogRecord

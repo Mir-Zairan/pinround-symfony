@@ -27,11 +27,32 @@ services:
     # The ORM result cache (doctrine.yaml says why it must not store anything).
     Symfony\Component\Cache\Adapter\NullAdapter: ~
 
+    # Readiness checks of /health/ready (HealthController). The migrations one reads what doctrine:migrations:migrate
+    # reads; the two Valkeys are the cache one and the state one, whose host MESSENGER_TRANSPORT_DSN names (ADR-0010).
+    health.migration_status_calculator:
+        class: Doctrine\Migrations\Version\MigrationStatusCalculator
+        factory: ['@doctrine.migrations.dependency_factory', 'getMigrationStatusCalculator']
+    App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent:
+        arguments: ['@health.migration_status_calculator']
+    health.cache_valkey_answers:
+        class: App\SharedKernel\Infrastructure\Health\ValkeyAnswers
+        arguments: ['cache_valkey', '%env(REDIS_CACHE_DSN)%']
+    health.state_valkey_answers:
+        class: App\SharedKernel\Infrastructure\Health\ValkeyAnswers
+        arguments: ['state_valkey', '%env(MESSENGER_TRANSPORT_DSN)%']
+
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
 when@test:
     services:
+        # The test env's messenger transport is in-memory, so the readiness check of the state Valkey gets its DSN
+        # from TEST_STATE_VALKEY_DSN (.env.test).
+        health.state_valkey_answers:
+            class: App\SharedKernel\Infrastructure\Health\ValkeyAnswers
+            arguments: ['state_valkey', '%env(TEST_STATE_VALKEY_DSN)%']
+            autoconfigure: true
+
         # Test-only controllers behind config/routes/test_fixtures.yaml.
         App\Tests\Fixtures\Http\:
             resource: '../tests/Fixtures/Http/*Controller.php'

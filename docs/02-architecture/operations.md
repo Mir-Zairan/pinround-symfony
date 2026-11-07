@@ -12,7 +12,7 @@ How pinround is run: environments, deployment, backups, monitoring and the jobs 
 - [Zero-downtime migrations](#zero-downtime-migrations) — expand and contract.
 - [Backups](#backups) — PostgreSQL PITR, bucket versioning, Valkey.
 - [Restore drill](#restore-drill) — proving backups work.
-- [Observability](#observability) — traces, logs, metrics, SLOs, alerts.
+- [Observability](#observability) — traces, logs, metrics, health endpoints, SLOs, alerts.
 - [Scheduled jobs](#scheduled-jobs) — retention, digests, partitions, rebuilds.
 - [Capacity alarms](#capacity-alarms) — when to grow.
 - [Runbooks](#runbooks) — the list of written procedures.
@@ -59,7 +59,7 @@ Containers run as a non-root user, with a read-only root file system where possi
 - Twelve-factor style: everything through environment variables, documented in `.env` (defaults, no secrets) and `docs/operations/config.md` (created in phase 0).
 - Secrets: Symfony secrets vault per environment, or the platform's secret store injected as env vars. Never in the repo ([ADR-0027](../03-adr/0027-secrets-and-encryption.md)).
 - Database roles: `app`, `worker-outbox`, `worker`, `worker-heavy` and `scheduler` get a `DATABASE_URL` for `pinround_app`. The `migrate` container gets its own `DATABASE_URL` for `pinround_migrator`; prod has no second connection. Dev and test add `MIGRATOR_DATABASE_URL` (in `.env.dev` and `.env.test`), which the `migrator` Doctrine connection uses for migrations. Test alone adds `READONLY_DATABASE_URL` (in `.env.test` and on the CI test steps) for a `readonly` connection that tests use to prove what `pinround_readonly` is refused. The `pinround_retention` credentials go only to the retention job and the `pinround_readonly` ones only to support tooling and that test connection, never into the web or worker env. The admin account runs `docker/postgres/roles.sql` at install, before the first migration, and again after an upgrade that changes it. The script grants no table rights. Each table's migration grants `pinround_app` and `pinround_readonly` their rights explicitly, and child partitions are never granted ([data-model.md › Row-level security](data-model.md#row-level-security)).
-- Database connection: every Doctrine connection turns server-side prepares off (`Pdo\Pgsql::ATTR_DISABLE_PREPARES`), so PgBouncer transaction pooling is safe and a bound query is one round trip. Every main web request runs in one transaction and the tenant setting lasts only for it, so streamed response bodies, which run after the commit, see no tenant rows. Never add an ORM result cache for tenant data without a tenant-aware key ([data-model.md › Row-level security](data-model.md#row-level-security)).
+- Database connection: every Doctrine connection turns server-side prepares off (`Pdo\Pgsql::ATTR_DISABLE_PREPARES`), so PgBouncer transaction pooling is safe and a bound query is one round trip. Every main web request runs in one transaction (except on a route whose `_request_transaction` default is `false`, today only the health routes) and the tenant setting lasts only for it, so streamed response bodies, which run after the commit, see no tenant rows. Never add an ORM result cache for tenant data without a tenant-aware key ([data-model.md › Row-level security](data-model.md#row-level-security)).
 - Feature flags: a small org-level flag table for risky features (laptop AI, vision pins, Jira comment copy), so we can turn them off per org without a deploy.
 
 ## Deploy pipeline
@@ -111,7 +111,12 @@ See [ADR-0029](../03-adr/0029-observability.md).
 - **Traces:** OpenTelemetry for HTTP requests, Doctrine queries (no parameter values), Messenger handlers, AI calls (provider, model, tokens, time; no content), storage calls.
 - **Logs:** JSON lines to stdout with `request_id`, `trace_id`, `organization_id`, `user_id`, route, timing. `RedactionProcessor` keeps only the keys on its allow-list and drops every other one ([security.md](security.md#logging-without-leaking), [ADR-0034](../03-adr/0034-allow-list-log-redaction.md)).
 - **Metrics:** request rate, error rate, latency per route; queue depth and oldest message age per transport; worker memory; DB connections; cache hit rate; AI calls and cost per org; storage per org.
-- **Health:** `/healthz` (process alive) and `/readyz` (DB, Valkey, storage reachable). Readiness never leaks details publicly.
+- **Health** (`HealthController`, [ADR-0029](../03-adr/0029-observability.md)): two `GET` routes that answer `{"status":"ok"}` (200) or `{"status":"fail"}` (503), never which check failed, a version or an error text.
+  - `/health/live`: the PHP process answers. It touches no database or service. The image `HEALTHCHECK` probes it through Caddy over HTTPS from loopback.
+  - `/health/ready`: for the load balancer. In order, stopping at the first failure: PostgreSQL answers `SELECT 1` as the default connection's role (its own connection, 1 s connect timeout); then, in any order, every migration is executed, `aud_event` has next month's partition (`aud_event_YYYYMM`, UTC), both Valkeys answer (`REDIS_CACHE_DSN`, and the host of `MESSENGER_TRANSPORT_DSN`; 1 s timeouts) and `OBJECT_STORAGE_ENDPOINT` (the storage's internal address, empty in `.env`, so readiness fails until it is set) accepts a TCP connection within 1 s. Each check is a `ReadinessCheck` in the module that owns what it checks. A failed check logs one warning with its name (`check`), the exception class, SQLSTATE and code only. No check reads a tenant table.
+  - Who may call them: only a client whose IP is loopback or private (`IpUtils::PRIVATE_RANGES`); anyone else gets the 404 of a missing route. Behind a reverse proxy the client IP is the proxy's until trusted proxies are configured (P12).
+  - Neither route opens the request transaction (route default `_request_transaction: false`, read by `RequestTransaction`) or a session, so both answer while PostgreSQL or Valkey is down.
+  - The Caddy admin API is off in the prod image (`CADDY_ADMIN=off`); dev keeps it on `localhost:2019`, the only place Caddy's `/metrics` is served.
 
 SLOs:
 

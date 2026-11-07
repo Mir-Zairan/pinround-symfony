@@ -2,7 +2,11 @@
 	# Keeps the internal CA out of the container trust store; browsers and curl -k still accept localhost.
 	skip_install_trust
 
-	# Exposes /metrics on the admin endpoint (localhost:2019), used by the container healthcheck.
+	# The prod image sets CADDY_ADMIN=off: nothing there may change the running config. Dev keeps it on localhost:2019.
+	admin {$CADDY_ADMIN:localhost:2019}
+
+	# Request metrics, served only on the admin endpoint (/metrics), so in dev only. The container healthcheck
+	# probes /health/live instead.
 	metrics
 
 	frankenphp
