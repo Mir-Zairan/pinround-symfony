@@ -6,10 +6,12 @@ namespace App\Tests\Integration\Tracing;
 
 use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
 use App\SharedKernel\Infrastructure\Tracing\SpanAttributes;
+use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Fixtures\Tracing\TracedProbeMessage;
 use App\Tests\Fixtures\Tracing\TracedProbeMessageHandler;
 use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
+use Monolog\LogRecord;
 use OpenTelemetry\API\Trace\SpanContextValidator;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\Context\Context;
@@ -105,6 +107,36 @@ final class TracingMessengerMiddlewareTest extends KernelTestCase
         self::assertNotSame($processSpans[0]->getTraceId(), $processSpans[1]->getTraceId());
         self::assertFalse(SpanContextValidator::isValidSpanId($processSpans[0]->getParentSpanId()));
         self::assertFalse(SpanContextValidator::isValidSpanId($processSpans[1]->getParentSpanId()));
+        self::getContainer()->get('doctrine.dbal.default_connection')->executeStatement('DELETE FROM messenger_failed');
+    }
+
+    #[Test]
+    public function theWorkersOwnLogLinesAboutAMessageCarryTheTraceOfItsProcessSpan(): void
+    {
+        self::getContainer()->get('doctrine.dbal.default_connection')->executeStatement('DELETE FROM messenger_failed');
+        $capturedLogRecords = self::getContainer()->get(CapturedLogRecords::class);
+        self::assertInstanceOf(CapturedLogRecords::class, $capturedLogRecords);
+        $capturedLogRecords->clear();
+        $commandBus = $this->bus('command.bus');
+        $commandBus->dispatch(new TracedProbeMessage('first', isFailing: true), [new TransportNamesStamp(['test_queue'])]);
+        $commandBus->dispatch(new TracedProbeMessage('second'), [new TransportNamesStamp(['test_queue'])]);
+
+        self::runTheWorkerUntilIdle('test_queue');
+
+        $processSpans = array_values(array_filter(
+            ExportedSpans::of($this->exporter()),
+            static fn (SpanDataInterface $span): bool => 'messenger process TracedProbeMessage' === $span->getName(),
+        ));
+        self::assertCount(2, $processSpans);
+        $messengerRecords = array_values(array_filter($capturedLogRecords->all(), static fn (LogRecord $record): bool => 'messenger' === $record->channel));
+        $failureLines = array_values(array_filter($messengerRecords, static fn (LogRecord $record): bool => str_starts_with($record->message, 'Error thrown while handling message')));
+        $handledLines = array_values(array_filter($messengerRecords, static fn (LogRecord $record): bool => str_contains($record->message, 'was handled successfully')));
+        self::assertCount(1, $failureLines);
+        self::assertCount(1, $handledLines);
+        self::assertSame($processSpans[0]->getTraceId(), $failureLines[0]->extra['trace_id'] ?? null);
+        self::assertSame($processSpans[0]->getSpanId(), $failureLines[0]->extra['span_id'] ?? null);
+        self::assertSame($processSpans[1]->getTraceId(), $handledLines[0]->extra['trace_id'] ?? null);
+        self::assertSame($processSpans[1]->getSpanId(), $handledLines[0]->extra['span_id'] ?? null);
         self::getContainer()->get('doctrine.dbal.default_connection')->executeStatement('DELETE FROM messenger_failed');
     }
 

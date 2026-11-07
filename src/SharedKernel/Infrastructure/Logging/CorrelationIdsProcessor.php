@@ -12,8 +12,8 @@ use Monolog\LogRecord;
 use Monolog\Processor\ProcessorInterface;
 
 /**
- * Adds request_id, organization_id, and trace_id and span_id (lowercase hex, only while a sampled request span is
- * active) to the extra of every record, each only when it is known. user_id comes with the users of P01;
+ * Adds request_id, organization_id, and trace_id and span_id (lowercase hex, only while a sampled request or message
+ * span is active) to the extra of every record, each only when it is known. user_id comes with the users of P01;
  * RedactionProcessor already allows them all.
  */
 #[AsMonologProcessor]

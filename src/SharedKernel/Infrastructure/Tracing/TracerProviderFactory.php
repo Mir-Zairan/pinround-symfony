@@ -30,8 +30,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  * and without OpenTelemetry\API\Globals. An empty endpoint gives a no-op provider, unless a test hands in its own
  * exporter.
  *
- * Ended spans queue in memory and leave only on forceFlush, which RequestSpanSubscriber calls on kernel.terminate,
- * after the response is sent: no query span blocks the request. The queue is bounded, and spans past it are dropped.
+ * Ended spans queue in memory and leave only on forceFlush, which RootSpanExporter calls after each request (on
+ * kernel.terminate, after the response is sent) and after each message a worker handles (after it acknowledged it):
+ * no query span blocks the request. The queue is bounded, and spans past it are dropped.
  *
  * One process-wide side effect, on purpose: building a provider with the OTLP exporter calls
  * LoggerHolder::disable(), so the SDK's internal diagnostics (which quote exception messages) never reach stderr.

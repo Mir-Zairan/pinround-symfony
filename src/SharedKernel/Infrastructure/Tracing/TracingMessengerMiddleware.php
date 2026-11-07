@@ -16,13 +16,16 @@ use Symfony\Component\Messenger\Stamp\BusNameStamp;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 
 /**
- * Spans for Messenger, on every bus. A message a worker received, with no span active, gets a root span "messenger
- * process {Class}" that ends and is exported when the message is done, so the next message starts a new trace. A message
- * dispatched while a span is active (inside a request or a handler) gets a child span "messenger send {Class}". With no
- * span active and no ReceivedStamp (a console command), or while the active span is not recording, nothing is
- * recorded. Attributes: the system, the operation, the
- * bus and the short class name; never message content (ADR-0029). Listed after add_bus_name_stamp_middleware, whose
- * stamp names the bus, and before every other middleware, so the span covers the tenant ones.
+ * Spans for Messenger, on every bus. A message a worker received, with no span active, always gets a root span
+ * "messenger process {Class}", a non-recording one when tracing is off or the trace is not sampled, so nested sends
+ * and database statements see an active span and record nothing. It ends and is exported when the worker is done with
+ * the message (WorkerMessageSpanSubscriber, so the worker's own log lines carry the trace), and the next message starts
+ * a new trace. A received message without SpanEndedByWorkerStamp (dispatched outside a worker) ends it here. A message
+ * dispatched while a span is active (inside a request or a handler) gets a child span "messenger send {Class}"; while
+ * the active span is not recording, nothing. With no span active and no ReceivedStamp (a console command) nothing is
+ * recorded. Attributes: the system, the operation, the bus and the short class name; never message content (ADR-0029).
+ * Listed after add_bus_name_stamp_middleware, whose stamp names the bus, and before every other middleware, so the
+ * span covers the tenant ones.
  */
 final readonly class TracingMessengerMiddleware implements MiddlewareInterface
 {
@@ -64,7 +67,9 @@ final readonly class TracingMessengerMiddleware implements MiddlewareInterface
 
             throw $failure;
         } finally {
-            $this->rootSpanExporter->endAndExport($span);
+            if (null === $envelope->last(SpanEndedByWorkerStamp::class)) {
+                $this->rootSpanExporter->endAndExport($span);
+            }
         }
     }
 
