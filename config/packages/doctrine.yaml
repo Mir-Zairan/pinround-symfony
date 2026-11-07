@@ -20,6 +20,7 @@ doctrine:
         profiling_collect_backtrace: '%kernel.debug%'
         types:
             citext: App\Identity\Infrastructure\Doctrine\CitextType
+            text_array: App\Organization\Infrastructure\Doctrine\TextArrayType
     orm:
         validate_xml_mapping: true
         naming_strategy: doctrine.orm.naming_strategy.underscore
@@ -31,6 +32,11 @@ doctrine:
                 type: xml
                 dir: '%kernel.project_dir%/src/Identity/Infrastructure/Doctrine/Mapping'
                 prefix: 'App\Identity\Domain'
+                is_bundle: false
+            Organization:
+                type: xml
+                dir: '%kernel.project_dir%/src/Organization/Infrastructure/Doctrine/Mapping'
+                prefix: 'App\Organization\Domain'
                 is_bundle: false
         # A result cache that never stores anything, in every environment: TenantFilter's SQL holds no organization
         # id, so a result cache key would not tell organizations apart and could serve one organization's rows to

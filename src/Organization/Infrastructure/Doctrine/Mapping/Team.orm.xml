@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="App\Organization\Domain\Team" table="org_team">
+        <unique-constraints>
+            <unique-constraint name="org_team_organization_id_name_key" columns="organization_id,name"/>
+        </unique-constraints>
+
+        <id name="id" type="guid" column="id"/>
+
+        <field name="organizationId" type="guid" column="organization_id"/>
+        <field name="name" type="citext" column="name"/>
+        <field name="leadUserId" type="guid" column="lead_user_id"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+
+        <one-to-many field="members" target-entity="App\Organization\Domain\TeamMember" mapped-by="team">
+            <cascade>
+                <cascade-persist/>
+            </cascade>
+        </one-to-many>
+    </entity>
+</doctrine-mapping>

@@ -281,6 +281,38 @@ final class DatabaseRolesTest extends KernelTestCase
         self::assertFalse($connection->fetchOne("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.idn_password_reset'::regclass"));
     }
 
+    /**
+     * Tenant tables of Organization: the app reads, adds and changes all of them and removes only memberships and team
+     * members; support reads under the tenant policy; resolve_user_orgs reads two columns of org_membership
+     * (Version20261108140000).
+     */
+    #[Test]
+    public function theOrganizationTablesGrantTheAppNoDeleteButOnMembershipsAndTeamMembers(): void
+    {
+        $connection = $this->connection();
+        $readAddChange = ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'];
+        $expectedGrants = [
+            'org_organization' => $readAddChange,
+            'org_membership' => [...$readAddChange, 'pinround_app DELETE'],
+            'org_team' => $readAddChange,
+            'org_team_member' => [...$readAddChange, 'pinround_app DELETE'],
+            'org_settings' => $readAddChange,
+        ];
+
+        foreach ($expectedGrants as $table => $grants) {
+            self::assertEqualsCanonicalizing($grants, $this->grantsToOthersThanTheOwner($connection, $table), $table);
+            self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
+        }
+        self::assertEqualsCanonicalizing(
+            ['org_membership.organization_id SELECT', 'org_membership.user_id SELECT'],
+            $connection->fetchFirstColumn(
+                "SELECT a.attrelid::regclass::text || '.' || a.attname || ' ' || acl.privilege_type
+                 FROM pg_attribute a, aclexplode(a.attacl) acl
+                 WHERE acl.grantee = 'pinround_resolver'::regrole AND a.attrelid::regclass::text LIKE 'org\\_%'",
+            ),
+        );
+    }
+
     /** The tables no entity maps; the diff must neither drop them nor hide a table that is mapped. */
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
