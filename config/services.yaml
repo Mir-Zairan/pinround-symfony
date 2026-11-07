@@ -65,6 +65,12 @@ services:
     OpenTelemetry\SDK\Trace\TracerProviderInterface:
         factory: ['@App\SharedKernel\Infrastructure\Tracing\TracerProviderFactory', 'create']
 
+    # Tagged here, not with #[AsMessageHandler]: the Application layer may not use a Vendor class (deptrac.yaml).
+    # Organization events reach it from async_notify on event.bus (messenger.yaml).
+    App\Audit\Application\RecordOrganizationAuditEntry:
+        tags:
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Organization\Api\Event\OrganizationEvent }
+
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
@@ -127,7 +133,7 @@ when@test:
             autowire: true
             autoconfigure: true
 
-        # Nothing in src injects AuditLog yet; this consumer keeps it in the test container as a real module would get it.
+        # Public, so DbalAuditLogTest reads the AuditLog a module is given from the test container.
         App\Tests\Fixtures\Audit\AuditLogConsumer:
             autowire: true
             public: true

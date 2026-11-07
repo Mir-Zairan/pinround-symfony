@@ -110,19 +110,42 @@ final class DoctrineTeamsTest extends KernelTestCase
     public function aSecondLeadRowIsRefusedAtCommit(): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->teams()->add($this->shopTeam()));
+        $updatedRowCount = null;
 
         try {
-            $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
-                "UPDATE org_team_member SET team_role = 'lead' WHERE user_id = ?",
-                [self::OMAR],
-            ));
+            $this->transactions()->committedAs(self::ACME_FOODS, function () use (&$updatedRowCount): void {
+                $updatedRowCount = $this->connection()->executeStatement(
+                    "UPDATE org_team_member SET team_role = 'lead' WHERE user_id = ?",
+                    [self::OMAR],
+                );
+            });
             self::fail('A second lead was committed.');
         } catch (DriverException $exception) {
+            self::assertSame(1, $updatedRowCount, 'The UPDATE itself was accepted; only the COMMIT refuses it.');
             self::assertSame('23P01', $exception->getSQLState());
             self::assertStringContainsString('org_team_member_one_lead_excl', $exception->getMessage());
         }
 
         self::assertSame([self::LENA], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn(
+            "SELECT user_id FROM org_team_member WHERE team_role = 'lead'",
+        )));
+    }
+
+    /**
+     * The new lead is promoted before the old one is demoted, so for a moment the team has two leads: the constraint
+     * is deferred to COMMIT, by which time only one is left.
+     */
+    #[Test]
+    public function twoLeadsInsideATransactionAreAcceptedWhenOneIsLeftAtCommit(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->teams()->add($this->shopTeam()));
+
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            self::assertSame(1, $this->connection()->executeStatement("UPDATE org_team_member SET team_role = 'lead' WHERE user_id = ?", [self::OMAR]));
+            self::assertSame(1, $this->connection()->executeStatement("UPDATE org_team_member SET team_role = 'member' WHERE user_id = ?", [self::LENA]));
+        });
+
+        self::assertSame([self::OMAR], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn(
             "SELECT user_id FROM org_team_member WHERE team_role = 'lead'",
         )));
     }
