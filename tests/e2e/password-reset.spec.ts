@@ -10,18 +10,9 @@ test.use({ storageState: { cookies: [], origins: [] } });
 
 type View = { name: string; open: (page: Page) => Promise<void> };
 
-// Each "link sent" visit takes one try of the per-IP limit (50 per hour), so the address is new on every run.
+// Views opened without asking for a link, so they take no try from the request limits.
 const VIEWS: View[] = [
   { name: 'forgot password', open: async (page) => { await page.goto('/password/forgot'); } },
-  {
-    name: 'link sent',
-    open: async (page) => {
-      await page.goto('/password/forgot');
-      await page.getByLabel('Email').fill(`nobody.${Date.now()}.${Math.floor(Math.random() * 1e6)}@acme-foods.example`);
-      await page.getByRole('button', { name: 'Send link' }).click();
-      await expect(page.getByRole('main').getByRole('status')).toHaveText(LINK_SENT);
-    },
-  },
   {
     name: 'link no longer works',
     open: async (page) => {
@@ -75,11 +66,29 @@ test.describe('narrow viewport', () => {
     test(`the ${view.name} view does not scroll horizontally at 360px`, async ({ page }) => {
       await view.open(page);
 
-      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        clientWidth: document.documentElement.clientWidth,
-      }));
-      expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     });
   }
 });
+
+// The notice is a one-time flash and each request takes a try from the request limits, so the view is opened once
+// and checked in both colour schemes and at 360 px. A new address each run keeps the per-email limit (5 per 15 min)
+// from refusing it; every run still takes one try from the per-IP limit (50 per hour).
+test('the link sent view has no serious or critical accessibility violations in light or dark and fits 360px', async ({ page }) => {
+  await page.goto('/password/forgot');
+  await page.getByLabel('Email').fill(`nobody.${Date.now()}.${Math.floor(Math.random() * 1e6)}@acme-foods.example`);
+  await page.getByRole('button', { name: 'Send link' }).click();
+  await expect(page.getByRole('main').getByRole('status')).toHaveText(LINK_SENT);
+  await page.evaluate(() => document.fonts.ready);
+
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    expect(await seriousViolations(page), scheme).toEqual([]);
+  }
+  await page.setViewportSize({ width: 360, height: 800 });
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+});
+
+async function horizontalOverflow(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+}

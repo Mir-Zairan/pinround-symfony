@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Identity\Application;
 
 /**
- * Someone asked for a reset link for this email on /password/forgot. Queued for every request that passed the
+ * The command to email a reset link for this email, queued by /password/forgot for every request that passed the
  * throttle, whether or not a user has the email; SendPasswordResetLink decides in the worker.
  */
-final readonly class PasswordResetRequested
+final readonly class EmailPasswordResetLink
 {
     /**
      * @param string $email as typed, trimmed; not checked to be an address

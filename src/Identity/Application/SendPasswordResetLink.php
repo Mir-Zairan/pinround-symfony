@@ -15,7 +15,7 @@ use App\Identity\Domain\UserStatus;
 use App\SharedKernel\Application\OnceOnlyHandling;
 
 /**
- * Handles a queued PasswordResetRequested: when an active user with a password has the email, it saves a reset that
+ * Handles a queued EmailPasswordResetLink: when an active user with a password has the email, it saves a reset that
  * works for one hour from $now and emails its link; for any other email it does nothing. It runs once per message
  * (OnceOnlyHandling), so a redelivered message neither adds a second reset nor sends a second email, unless the
  * email was sent and the transaction then failed to commit.
@@ -34,7 +34,7 @@ final readonly class SendPasswordResetLink
     ) {
     }
 
-    public function __invoke(PasswordResetRequested $request, \DateTimeImmutable $now): void
+    public function __invoke(EmailPasswordResetLink $request, \DateTimeImmutable $now): void
     {
         $this->onceOnlyHandling->runOnce(self::HANDLER_NAME, function () use ($request, $now): void {
             try {

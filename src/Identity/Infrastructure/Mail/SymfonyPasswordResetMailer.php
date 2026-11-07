@@ -18,7 +18,7 @@ use Symfony\Component\Routing\RouterInterface;
 
 /**
  * The reset email, plain text and HTML, sent straight to the mailer transport: it runs in worker-notify already
- * (PasswordResetRequestedHandler), so it is not queued again. The From address comes from mailer.yaml. The link is
+ * (EmailPasswordResetLinkHandler), so it is not queued again. The From address comes from mailer.yaml. The link is
  * built on DEFAULT_URI, never on a request context the router may still hold, whose Host a visitor controls.
  */
 final readonly class SymfonyPasswordResetMailer implements PasswordResetMailer

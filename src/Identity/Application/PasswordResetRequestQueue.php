@@ -9,5 +9,5 @@ interface PasswordResetRequestQueue
     /**
      * Hands the request to a worker; returns once it is queued, before it is handled.
      */
-    public function add(PasswordResetRequested $request): void;
+    public function add(EmailPasswordResetLink $request): void;
 }

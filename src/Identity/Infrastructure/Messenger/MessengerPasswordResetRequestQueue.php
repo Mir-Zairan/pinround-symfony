@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\Infrastructure\Messenger;
 
-use App\Identity\Application\PasswordResetRequested;
+use App\Identity\Application\EmailPasswordResetLink;
 use App\Identity\Application\PasswordResetRequestQueue;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\Messenger\MessageBusInterface;
@@ -19,7 +19,7 @@ final readonly class MessengerPasswordResetRequestQueue implements PasswordReset
     {
     }
 
-    public function add(PasswordResetRequested $request): void
+    public function add(EmailPasswordResetLink $request): void
     {
         $this->commandBus->dispatch($request);
     }

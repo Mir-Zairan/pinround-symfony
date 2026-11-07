@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\Infrastructure\Messenger;
 
-use App\Identity\Application\PasswordResetRequested;
+use App\Identity\Application\EmailPasswordResetLink;
 use App\Identity\Application\SendPasswordResetLink;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
@@ -14,13 +14,13 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
  * carries no TenantStamp.
  */
 #[AsMessageHandler(bus: 'command.bus')]
-final readonly class PasswordResetRequestedHandler
+final readonly class EmailPasswordResetLinkHandler
 {
     public function __construct(private SendPasswordResetLink $sendPasswordResetLink, private ClockInterface $clock)
     {
     }
 
-    public function __invoke(PasswordResetRequested $request): void
+    public function __invoke(EmailPasswordResetLink $request): void
     {
         ($this->sendPasswordResetLink)($request, $this->clock->now());
     }

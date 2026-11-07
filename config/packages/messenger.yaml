@@ -118,7 +118,10 @@ framework:
         routing:
             # Sent straight from the request, not through the outbox: that request writes nothing to the database. It
             # is dispatched with no organization set, so it carries no TenantStamp and is handled with none set.
-            App\Identity\Application\PasswordResetRequested: async_notify
+            App\Identity\Application\EmailPasswordResetLink: async_notify
+            # Mail sent through MailerInterface goes out from worker-notify (ADR-0033). Symfony's handler of it is not
+            # once-only: a redelivered message can send the email twice.
+            Symfony\Component\Mailer\Messenger\SendEmailMessage: async_notify
 
 when@test:
     parameters:

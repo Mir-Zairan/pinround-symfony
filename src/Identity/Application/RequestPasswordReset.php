@@ -23,6 +23,6 @@ final readonly class RequestPasswordReset
     public function __invoke(string $email, string $clientIp): void
     {
         $this->limiter->consume($email, $clientIp);
-        $this->queue->add(new PasswordResetRequested(trim($email)));
+        $this->queue->add(new EmailPasswordResetLink(trim($email)));
     }
 }
