@@ -15,7 +15,7 @@ use Symfony\Component\Security\Http\Authentication\AuthenticationUtils;
 final class LoginController extends AbstractController
 {
     public const string WRONG_CREDENTIALS = 'Email or password is wrong';
-    /** With the minutes until the limiter that refused lets the next try in. */
+    /** With the minutes until the refusing limiter takes tries again, never more than its interval. */
     public const string TOO_MANY_TRIES = 'Too many tries. Wait %s.';
     public const string FORM_EXPIRED = 'The page was open too long. Try again.';
 
@@ -51,9 +51,9 @@ final class LoginController extends AbstractController
 
     private static function tooManyTries(TooManyLoginAttemptsAuthenticationException $error): string
     {
-        // LoginThrottlingListener already rounds the wait up to whole minutes; it can be 0 at the very end of a window.
+        // LoginThrottlingListener rounds the wait up to whole minutes; it can be 0 at the very end of a window.
         $wait = $error->getMessageData()['%minutes%'] ?? null;
-        $minutes = \is_int($wait) || \is_float($wait) ? max(1, (int) ceil($wait)) : 1;
+        $minutes = \is_int($wait) ? max(1, $wait) : 1;
 
         return \sprintf(self::TOO_MANY_TRIES, 1 === $minutes ? '1 minute' : $minutes.' minutes');
     }

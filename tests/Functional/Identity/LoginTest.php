@@ -111,7 +111,6 @@ final class LoginTest extends WebTestCase
             self::assertSame(LoginController::WRONG_CREDENTIALS, $page->filter('[role="alert"]')->text());
         }
 
-        self::waitPastTheSecondTheWindowOpened();
         $this->submitLogin($client, $email, self::PASSWORD);
 
         self::assertResponseRedirects('/login', 302);
@@ -132,7 +131,6 @@ final class LoginTest extends WebTestCase
             self::assertResponseRedirects('/login', 302);
             $client->followRedirect();
         }
-        self::waitPastTheSecondTheWindowOpened();
         $this->submitLogin($client, $email, self::PASSWORD);
 
         self::assertResponseRedirects('/login', 302);
@@ -321,15 +319,6 @@ final class LoginTest extends WebTestCase
         $client->request('GET', '/login');
         self::assertResponseStatusCodeSame(200);
         $client->submitForm('Log in', ['email' => $email, 'password' => $password]);
-    }
-
-    /**
-     * Symfony's fixed window measures the wait from the start of the current second, so a try in the same second as
-     * the window's first failure reads 901 seconds, "16 minutes". People never type that fast.
-     */
-    private static function waitPastTheSecondTheWindowOpened(): void
-    {
-        usleep(1_100_000);
     }
 
     private static function assertIsNotLoggedIn(KernelBrowser $client): void

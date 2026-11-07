@@ -4,80 +4,76 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Identity;
 
+use App\Identity\Infrastructure\Security\ConsumeFirstLoginRateLimiter;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
-use Symfony\Component\HttpFoundation\RateLimiter\PeekableRequestRateLimiterInterface;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Process\InputStream;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Security\Http\SecurityRequestAttributes;
 
 /**
- * The firewall's limiter (identity.login_rate_limiter) on the tests' state Valkey, as the firewall uses it: a peek
- * before each try, a consume after each failure. Each test uses its own random IP, as the counters outlive the run.
+ * The firewall's login limiter on the tests' state Valkey. Each test uses its own random IP and email, as the counters
+ * outlive the run.
  */
 final class LoginRateLimiterTest extends KernelTestCase
 {
     #[Test]
-    public function fiftyFailuresFromOneIpWithFiftyEmailsRefuseTheNextEmail(): void
+    public function theAppsLimiterRefusesTheSixthTryForOneEmailAndIp(): void
     {
-        $limiter = self::limiter();
-        $ip = self::randomIp();
-        for ($try = 1; $try <= 50; ++$try) {
-            $request = self::loginRequest('person'.$try.'@acme-foods.example', $ip);
-            self::assertTrue($limiter->peek($request)->isAccepted(), 'try '.$try);
-            $limiter->consume($request);
-        }
-
-        self::assertSame(0, $limiter->peek(self::loginRequest('fresh@acme-foods.example', $ip))->getRemainingTokens());
-        self::assertGreaterThan(0, $limiter->peek(self::loginRequest('fresh@acme-foods.example', self::randomIp()))->getRemainingTokens());
-    }
-
-    #[Test]
-    public function fiveFailuresForOneEmailAndIpRefuseThatPairOnly(): void
-    {
-        $limiter = self::limiter();
+        $limiter = self::getContainer()->get(ConsumeFirstLoginRateLimiter::class);
+        $email = 'omar.'.bin2hex(random_bytes(4)).'@acme-foods.example';
         $ip = self::randomIp();
         for ($try = 1; $try <= 5; ++$try) {
-            $limiter->consume(self::loginRequest('omar@acme-foods.example', $ip));
+            self::assertTrue($limiter->consume(self::loginRequest($email, $ip))->isAccepted());
         }
 
-        self::assertSame(0, $limiter->peek(self::loginRequest('OMAR@acme-foods.example', $ip))->getRemainingTokens());
-        self::assertGreaterThan(0, $limiter->peek(self::loginRequest('mia@acme-foods.example', $ip))->getRemainingTokens());
+        self::assertFalse($limiter->consume(self::loginRequest(strtoupper($email), $ip))->isAccepted());
     }
 
     /**
-     * Ten PHP processes, like ten app workers, count a failed try for one email and IP at the same instant. Without
-     * the lock their read-add-write of the counter would overwrite each other and let more than five through.
+     * Ten PHP processes, like ten app workers, send a wrong password for one email and IP at the same moment, through
+     * the real firewall. Only five may get their password checked: a peekable limiter would check every try that starts
+     * before a failure is stored, and an unlocked counter would lose some of the tries.
      */
     #[Test]
-    public function failedTriesSentInParallelAllCountSoOnlyFiveAreLetThrough(): void
+    public function aBurstOfTenTriesGetsAtMostFivePasswordChecks(): void
     {
         $email = 'lena.'.bin2hex(random_bytes(4)).'@acme-foods.example';
         $ip = self::randomIp();
-        $startAt = (string) (microtime(true) + 4);
-        $processes = [];
+        $checkCounterKey = 'test:login_burst_checks:'.bin2hex(random_bytes(8));
+        $tries = [];
         for ($worker = 1; $worker <= 10; ++$worker) {
-            $process = new Process([\PHP_BINARY, __DIR__.'/count-failed-login.php', $email, $ip, $startAt]);
+            $starter = new InputStream();
+            $process = new Process([\PHP_BINARY, __DIR__.'/try-login.php', $email, $ip, '10', $checkCounterKey]);
+            $process->setInput($starter);
             $process->start();
-            $processes[] = $process;
+            $tries[] = [$process, $starter];
         }
 
-        $answers = [];
-        foreach ($processes as $process) {
+        foreach ($tries as [$process]) {
+            $process->waitUntil(static fn (): bool => str_contains($process->getOutput(), "ready\n"));
+        }
+        foreach ($tries as [, $starter]) {
+            $starter->write("go\n");
+            $starter->close();
+        }
+        // A process writes its input only while it is polled, so all are polled until each has read its start line.
+        do {
+            $startedCount = \count(array_filter($tries, static fn (array $try): bool => !$try[0]->isRunning() || str_contains($try[0]->getOutput(), "started\n")));
+        } while ($startedCount < \count($tries));
+        $refusals = [];
+        foreach ($tries as [$process]) {
             $process->wait();
             self::assertTrue($process->isSuccessful(), $process->getErrorOutput());
-            $answers[] = $process->getOutput();
+            $refusals[] = substr($process->getOutput(), \strlen("ready\nstarted\n"));
         }
 
-        $counts = array_count_values($answers) + ['accepted' => 0, 'refused' => 0];
+        $counts = array_count_values($refusals);
         ksort($counts);
-        self::assertSame(['accepted' => 5, 'refused' => 5], $counts);
-        self::assertSame(0, self::limiter()->peek(self::loginRequest($email, $ip))->getRemainingTokens());
-    }
-
-    private static function limiter(): PeekableRequestRateLimiterInterface
-    {
-        return self::getContainer()->get('identity.login_rate_limiter');
+        self::assertSame(['BadCredentialsException' => 5, 'TooManyLoginAttemptsAuthenticationException' => 5], $counts);
+        $stateValkey = self::getContainer()->get('state_valkey.connection');
+        self::assertSame('5', $stateValkey->get($checkCounterKey), 'password checks');
     }
 
     private static function loginRequest(string $email, string $ip): Request

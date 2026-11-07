@@ -32,7 +32,7 @@ security:
                 enable_csrf: true
                 default_target_path: web_home
             login_throttling:
-                limiter: identity.login_rate_limiter
+                limiter: App\Identity\Infrastructure\Security\ConsumeFirstLoginRateLimiter
             logout:
                 path: identity_logout
                 target: identity_login

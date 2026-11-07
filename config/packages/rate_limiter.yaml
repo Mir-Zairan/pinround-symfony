@@ -1,20 +1,25 @@
-# Login throttling (ADR-0012), joined by the identity.login_rate_limiter service (config/services.yaml): a try is
-# refused when either limiter has no tries left. Only failed tries count. The counters live on the state Valkey,
-# which never evicts (ADR-0010), through ValkeyLimiterStorage, which fails the login when Valkey cannot be reached.
-# A lock on the same Valkey (lock.yaml) makes each read-add-write of a counter whole, so tries sent in parallel all count.
+# Login throttling (ADR-0012), joined by ConsumeFirstLoginRateLimiter: every try, failed or not, takes a token from
+# both before the password check; a successful login gives the email and IP ones back. The counters live on the state
+# Valkey, which never evicts (ADR-0010), through ValkeyLimiterStorage, which fails the login when Valkey cannot be
+# reached. A lock on the same Valkey (lock.yaml) makes each read-add-write of a counter whole, so parallel tries all count.
+parameters:
+    # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter).
+    identity.login_per_email_and_ip_minutes: 15
+    identity.login_per_ip_minutes: 60
+
 framework:
     rate_limiter:
         # Keyed by the email in lowercase and the client IP together.
         login_per_email_and_ip:
             policy: fixed_window
             limit: 5
-            interval: '15 minutes'
+            interval: '%identity.login_per_email_and_ip_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
         # Keyed by the client IP: bounds how many emails one client may try.
         login_per_ip:
             policy: fixed_window
             limit: 50
-            interval: '1 hour'
+            interval: '%identity.login_per_ip_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory

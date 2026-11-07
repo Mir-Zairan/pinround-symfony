@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity;
 
+use App\Identity\Infrastructure\Security\ConsumeFirstLoginRateLimiter;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -55,7 +56,7 @@ final class LoginConfigTest extends TestCase
 
         self::assertSame('migrate', self::at($security, 'security', 'session_fixation_strategy'));
         self::assertFalse(self::at($security, 'security', 'firewalls', 'main', 'lazy'));
-        self::assertSame(['limiter' => 'identity.login_rate_limiter'], self::at($security, 'security', 'firewalls', 'main', 'login_throttling'));
+        self::assertSame(['limiter' => ConsumeFirstLoginRateLimiter::class], self::at($security, 'security', 'firewalls', 'main', 'login_throttling'));
         self::assertTrue(self::at($security, 'security', 'firewalls', 'main', 'form_login', 'enable_csrf'));
         self::assertTrue(self::at($security, 'security', 'firewalls', 'main', 'logout', 'enable_csrf'));
     }
@@ -112,12 +113,13 @@ final class LoginConfigTest extends TestCase
 
         self::assertSame(
             [
-                'login_per_email_and_ip' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '15 minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
-                'login_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '1 hour', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'login_per_email_and_ip' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.login_per_email_and_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'login_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '%identity.login_per_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
             ],
             self::at($rateLimiter, 'framework', 'rate_limiter'),
         );
-        self::assertSame(['framework'], array_keys($rateLimiter));
+        self::assertSame(['identity.login_per_email_and_ip_minutes' => 15, 'identity.login_per_ip_minutes' => 60], self::at($rateLimiter, 'parameters'));
+        self::assertSame(['parameters', 'framework'], array_keys($rateLimiter));
         self::assertSame(['framework' => ['lock' => 'state_valkey.connection']], self::config('packages/lock.yaml'));
     }
 
