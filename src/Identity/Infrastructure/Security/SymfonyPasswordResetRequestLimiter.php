@@ -7,7 +7,6 @@ namespace App\Identity\Infrastructure\Security;
 use App\Identity\Application\PasswordResetRequestLimiter;
 use App\Identity\Application\TooManyPasswordResetRequests;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use Symfony\Component\RateLimiter\RateLimit;
 use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 
 /**
@@ -40,8 +39,8 @@ final readonly class SymfonyPasswordResetRequestLimiter implements PasswordReset
     public function consume(string $email, string $clientIp): void
     {
         $waits = array_filter([
-            self::minutesToWait($this->perIp->create($this->keyHasher->hexOf($clientIp))->consume(), $this->perIpMinutes),
-            self::minutesToWait(
+            RefusedTryWait::minutesFor($this->perIp->create($this->keyHasher->hexOf($clientIp))->consume(), $this->perIpMinutes),
+            RefusedTryWait::minutesFor(
                 $this->perEmailAndIp->create($this->keyHasher->hexOf(ThrottleKeyHasher::normalizeEmail($email).'-'.$clientIp))->consume(),
                 $this->perEmailAndIpMinutes,
             ),
@@ -49,18 +48,5 @@ final readonly class SymfonyPasswordResetRequestLimiter implements PasswordReset
         if ([] !== $waits) {
             throw new TooManyPasswordResetRequests(max($waits));
         }
-    }
-
-    /**
-     * @return int|null null when accepted; else whole minutes, at least 1 and at most the interval, because the fixed
-     *                  window counts from the start of the current second and could otherwise read one minute more
-     */
-    private static function minutesToWait(RateLimit $limit, int $intervalMinutes): ?int
-    {
-        if ($limit->isAccepted()) {
-            return null;
-        }
-
-        return min($intervalMinutes, max(1, (int) ceil(($limit->getRetryAfter()->getTimestamp() - time()) / 60)));
     }
 }

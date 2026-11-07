@@ -34,7 +34,7 @@ final class PasswordResetTest extends WebTestCase
 
     private const string NEW_PASSWORD = 'a much longer new passphrase';
 
-    /** @var list<Envelope> what the last askForLink() queued */
+    /** @var list<Envelope> what the last submitForgot() queued */
     private array $queuedRequests = [];
 
     #[Test]
@@ -95,7 +95,8 @@ final class PasswordResetTest extends WebTestCase
         self::assertCount(1, $this->queuedRequests);
         $envelope = $this->queuedRequests[0]->with(new ReceivedStamp('async_notify'));
         $isMailServerDown = true;
-        // Ahead of the mailer's logger, so the failed try is not counted as sent.
+        // Fails the first real send. The failed try is left out of the count below because services_resetter->reset()
+        // clears the mailer's message log, so the count covers only the sends after it.
         self::getContainer()->get('event_dispatcher')->addListener(MessageEvent::class, static function (MessageEvent $event) use (&$isMailServerDown): void {
             if (!$event->isQueued() && $isMailServerDown) {
                 $isMailServerDown = false;

@@ -18,6 +18,8 @@ use Symfony\Component\Mime\Email;
 final class SendTestMailCommand extends Command
 {
     public const string RECIPIENT = 'omar@acme-foods.example';
+    /** With the recipient. The mail waits on async_notify (messenger.yaml) until worker-notify sends it. */
+    public const string QUEUED = 'Test mail to %s is queued. worker-notify sends it.';
 
     public function __construct(private readonly MailerInterface $mailer)
     {
@@ -34,7 +36,7 @@ final class SendTestMailCommand extends Command
                 ->text('If you can read this, mail from the app reaches your inbox.'),
         );
 
-        $output->writeln('Test mail sent to '.self::RECIPIENT.'.');
+        $output->writeln(\sprintf(self::QUEUED, self::RECIPIENT));
 
         return Command::SUCCESS;
     }

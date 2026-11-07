@@ -1,0 +1,24 @@
+/* The security page (src/Identity/UI/templates/security.html.twig); its fields and messages come from login.css. */
+
+.security {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 560px;
+}
+
+.security__title {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.security__section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.security__heading {
+  font-size: 20px;
+  font-weight: 700;
+}

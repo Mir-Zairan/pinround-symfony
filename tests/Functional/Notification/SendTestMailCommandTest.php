@@ -12,7 +12,7 @@ use Symfony\Component\DependencyInjection\Attribute\When;
 
 final class SendTestMailCommandTest extends KernelTestCase
 {
-    public function testItSendsOneMailToTheNeutralAddress(): void
+    public function testItQueuesOneMailToTheNeutralAddressAndSaysSo(): void
     {
         $kernel = self::bootKernel();
         $command = new Application($kernel)->find('app:mail:send-test');
@@ -21,6 +21,7 @@ final class SendTestMailCommandTest extends KernelTestCase
         $exitCode = $tester->execute([]);
 
         self::assertSame(0, $exitCode);
+        self::assertSame('Test mail to omar@acme-foods.example is queued. worker-notify sends it.'.\PHP_EOL, $tester->getDisplay());
         // Queued on async_notify (messenger.yaml); worker-notify sends it.
         self::assertQueuedEmailCount(1);
         $email = self::getMailerMessage();

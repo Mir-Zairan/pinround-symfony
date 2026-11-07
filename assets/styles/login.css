@@ -1,4 +1,5 @@
-/* The logged-out pages (src/Identity/UI/templates: login, forgot password, choose a new password): a centered card. */
+/* The logged-out pages (src/Identity/UI/templates: login, forgot password, choose a new password): a centered card.
+   The security page reuses its form fields, errors, notices and hints. */
 
 .login {
   display: grid;
