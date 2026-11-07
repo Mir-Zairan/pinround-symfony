@@ -10,8 +10,9 @@ use Doctrine\Migrations\AbstractMigration;
 
 /**
  * The Organization tables (data-model.md, Organization), all tenant tables with row-level security; org_organization's
- * key is its own organization_id, so an organization's row is visible only while it is the tenant. No foreign key
- * points at idn_user: global tables are reached only through Identity. pinround_readonly reads under the tenant
+ * key is its own organization_id, so an organization's row is visible only while it is the tenant. The one foreign key
+ * inside the module carries organization_id; none points at idn_user: global tables are reached only through Identity.
+ * pinround_readonly reads under the tenant
  * policy. The app may delete memberships and team members (people leave), never organizations, teams or settings.
  * Then resolve_user_orgs gets its body: the organization ids of one user's memberships, read through resolver_read.
  */
@@ -33,7 +34,7 @@ final class Version20261108140000 extends AbstractMigration
             .' status TEXT NOT NULL, created_at TIMESTAMP(0) WITH TIME ZONE NOT NULL, PRIMARY KEY (organization_id),'
             ." CONSTRAINT org_organization_status_check CHECK (status IN ('active')))",
         );
-        // Slugs are unique across organizations, so this is the one index that does not start with organization_id.
+        // Slugs are unique across organizations, so this index does not start with organization_id.
         $this->addSql('CREATE UNIQUE INDEX org_organization_slug_key ON org_organization (slug)');
 
         $this->addSql(
@@ -41,24 +42,30 @@ final class Version20261108140000 extends AbstractMigration
             .' joined_at TIMESTAMP(0) WITH TIME ZONE NOT NULL, PRIMARY KEY (organization_id, user_id),'
             ." CONSTRAINT org_membership_org_roles_check CHECK (org_roles <@ ARRAY['admin', 'manager']::text[]))",
         );
+        // resolve_user_orgs runs before any tenant is known, so this index does not start with organization_id.
+        $this->addSql('CREATE INDEX org_membership_user_id_idx ON org_membership (user_id)');
 
         $this->addSql(
-            'CREATE TABLE org_team (id UUID NOT NULL, organization_id UUID NOT NULL, name CITEXT NOT NULL,'
-            .' lead_user_id UUID NOT NULL, created_at TIMESTAMP(0) WITH TIME ZONE NOT NULL, PRIMARY KEY (id))',
+            'CREATE TABLE org_team (organization_id UUID NOT NULL, id UUID NOT NULL, name CITEXT NOT NULL,'
+            .' lead_user_id UUID NOT NULL, created_at TIMESTAMP(0) WITH TIME ZONE NOT NULL, PRIMARY KEY (organization_id, id))',
         );
         // citext: two teams of one organization cannot share a name in any letter case.
         $this->addSql('CREATE UNIQUE INDEX org_team_organization_id_name_key ON org_team (organization_id, name)');
 
+        // Foreign key checks skip row-level security, so the key carries organization_id; the lead check waits for COMMIT.
         $this->addSql(
             'CREATE TABLE org_team_member (organization_id UUID NOT NULL, team_id UUID NOT NULL, user_id UUID NOT NULL,'
             .' team_role TEXT NOT NULL, job TEXT NOT NULL, created_at TIMESTAMP(0) WITH TIME ZONE NOT NULL,'
             .' PRIMARY KEY (organization_id, team_id, user_id),'
-            .' CONSTRAINT org_team_member_team_id_fkey FOREIGN KEY (team_id) REFERENCES org_team (id),'
+            .' CONSTRAINT org_team_member_team_fkey FOREIGN KEY (organization_id, team_id) REFERENCES org_team (organization_id, id),'
             ." CONSTRAINT org_team_member_team_role_check CHECK (team_role IN ('lead', 'member', 'viewer')),"
-            ." CONSTRAINT org_team_member_job_check CHECK (job IN ('tester', 'developer', 'other')))",
+            ." CONSTRAINT org_team_member_job_check CHECK (job IN ('tester', 'developer', 'other')),"
+            .' CONSTRAINT org_team_member_one_lead_excl EXCLUDE USING btree (organization_id WITH =, team_id WITH =)'
+            ." WHERE (team_role = 'lead') DEFERRABLE INITIALLY DEFERRED)",
         );
         $this->addSql('CREATE INDEX org_team_member_organization_id_user_id_idx ON org_team_member (organization_id, user_id)');
-        $this->addSql('CREATE INDEX org_team_member_team_id_idx ON org_team_member (team_id)');
+        // DBAL wants an index of exactly the foreign key's columns, though the primary key's prefix would serve.
+        $this->addSql('CREATE INDEX org_team_member_organization_id_team_id_idx ON org_team_member (organization_id, team_id)');
 
         $this->addSql(
             'CREATE TABLE org_settings (organization_id UUID NOT NULL, version INT DEFAULT 1 NOT NULL, data JSONB NOT NULL,'

@@ -16,6 +16,7 @@ use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\DBAL\Exception\DriverException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -82,6 +83,31 @@ final class DoctrineMembershipsTest extends KernelTestCase
         });
 
         self::assertSame([], $roles);
+    }
+
+    #[Test]
+    public function aSecondMembershipOfTheSameUserInTheOrganizationIsRefusedAndTheFirstStays(): void
+    {
+        $this->addMembershipsOfBothOrganizations();
+
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->memberships()->add(
+                new Membership(new OrganizationId(self::ACME_FOODS), new UserId(self::SARA), new OrgRoles(OrgRole::Manager), new \DateTimeImmutable('2027-04-01 08:00:00 UTC')),
+            ));
+            self::fail('A second membership of Sara was saved.');
+        } catch (UniqueConstraintViolationException $exception) {
+            self::assertSame('23505', $exception->getSQLState());
+            self::assertStringContainsString('org_membership_pkey', $exception->getMessage());
+        }
+
+        self::getContainer()->get('doctrine')->resetManager();
+        self::assertSame(
+            [['org_roles' => '{admin}', 'joined_at' => '2027-03-15 10:00:00+00']],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->entityManager()->getConnection()->fetchAllAssociative(
+                "SELECT org_roles::text AS org_roles, to_char(joined_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') || '+00' AS joined_at FROM org_membership WHERE user_id = ?",
+                [self::SARA],
+            )),
+        );
     }
 
     #[Test]
@@ -188,15 +214,16 @@ final class DoctrineMembershipsTest extends KernelTestCase
     }
 
     /**
-     * Acme Foods: Sara admin, Lena admin and manager, Omar no role, Raj manager. Beta Bakery: Mia admin.
+     * Acme Foods: Lena admin and manager, then Sara admin (Lena's id is the higher one, so only ORDER BY puts Sara
+     * first), Omar no role, Raj manager. Beta Bakery: Mia admin.
      */
     private function addMembershipsOfBothOrganizations(): void
     {
         $joinedAt = new \DateTimeImmutable('2027-03-15 10:00:00 UTC');
         $this->transactions()->committedAs(self::ACME_FOODS, function () use ($joinedAt): void {
             $acmeFoods = new OrganizationId(self::ACME_FOODS);
-            $this->memberships()->add(new Membership($acmeFoods, new UserId(self::SARA), new OrgRoles(OrgRole::Admin), $joinedAt));
             $this->memberships()->add(new Membership($acmeFoods, new UserId(self::LENA), new OrgRoles(OrgRole::Admin, OrgRole::Manager), $joinedAt));
+            $this->memberships()->add(new Membership($acmeFoods, new UserId(self::SARA), new OrgRoles(OrgRole::Admin), $joinedAt));
             $this->memberships()->add(new Membership($acmeFoods, new UserId(self::OMAR), new OrgRoles(), $joinedAt));
             $this->memberships()->add(new Membership($acmeFoods, new UserId(self::RAJ), new OrgRoles(OrgRole::Manager), $joinedAt));
         });

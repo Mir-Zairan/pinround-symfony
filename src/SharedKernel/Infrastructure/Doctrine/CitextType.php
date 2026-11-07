@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Identity\Infrastructure\Doctrine;
+namespace App\SharedKernel\Infrastructure\Doctrine;
 
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Types\TextType;

@@ -313,6 +313,27 @@ final class DatabaseRolesTest extends KernelTestCase
         );
     }
 
+    /**
+     * Every index of an org_ table starts with organization_id but the two data-model.md names as exceptions: the
+     * global slug key and the user_id index of resolve_user_orgs, which runs before the tenant is known.
+     */
+    #[Test]
+    public function onlyTheDocumentedOrganizationIndexesDoNotStartWithTheOrganization(): void
+    {
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX org_organization_slug_key ON public.org_organization USING btree (slug)',
+                'CREATE INDEX org_membership_user_id_idx ON public.org_membership USING btree (user_id)',
+            ],
+            $this->connection()->fetchFirstColumn(
+                "SELECT pg_get_indexdef(i.indexrelid)
+                 FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+                 JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = i.indkey[0]
+                 WHERE c.relnamespace = 'public'::regnamespace AND c.relname LIKE 'org\\_%' AND a.attname <> 'organization_id'",
+            ),
+        );
+    }
+
     /** The tables no entity maps; the diff must neither drop them nor hide a table that is mapped. */
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void

@@ -11,7 +11,8 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * A team of an organization with its members. It always has exactly one lead, who is also one of its members with
- * the team role Lead; lead_user_id repeats that person for queries that need only the lead.
+ * the team role Lead; lead_user_id repeats that person for queries that need only the lead. Every team role change
+ * goes through this class; members are handed out as TeamMemberView copies.
  */
 final class Team implements TenantOwned
 {
@@ -19,6 +20,9 @@ final class Team implements TenantOwned
     private readonly string $id;
     private readonly string $name;
     private string $leadUserId;
+    // Not readonly: Teams::lockById refreshes a loaded team, and Doctrine then sets every field again, which a
+    // readonly property refuses for a new but equal date object.
+    private \DateTimeImmutable $createdAt;
 
     /**
      * Starts as a list and becomes Doctrine's collection once the team is saved or loaded; both take `[] =`.
@@ -30,7 +34,7 @@ final class Team implements TenantOwned
     /**
      * @throws BlankTeamName when nothing is left of the name after trimming
      */
-    public function __construct(TeamId $id, OrganizationId $organizationId, string $name, UserId $lead, Job $leadJob, private readonly \DateTimeImmutable $createdAt)
+    public function __construct(TeamId $id, OrganizationId $organizationId, string $name, UserId $lead, Job $leadJob, \DateTimeImmutable $createdAt)
     {
         $trimmedName = trim($name);
         if ('' === $trimmedName) {
@@ -41,6 +45,7 @@ final class Team implements TenantOwned
         $this->organizationId = $organizationId->toString();
         $this->name = $trimmedName;
         $this->leadUserId = $lead->toString();
+        $this->createdAt = $createdAt;
         $this->members = [new TeamMember($this, $lead, TeamRole::Lead, $leadJob, $createdAt)];
     }
 
@@ -70,28 +75,22 @@ final class Team implements TenantOwned
     }
 
     /**
-     * @return list<TeamMember> in the order they joined the team in this object; a loaded team's order is the
-     *                          database's
+     * @return list<TeamMemberView> in the order they joined the team in this object; a loaded team's order is the
+     *                              database's
      */
     public function members(): array
     {
-        $members = [];
+        $views = [];
         foreach ($this->members as $member) {
-            $members[] = $member;
+            $views[] = $member->view();
         }
 
-        return $members;
+        return $views;
     }
 
-    public function memberOf(UserId $userId): ?TeamMember
+    public function memberOf(UserId $userId): ?TeamMemberView
     {
-        foreach ($this->members as $member) {
-            if ($member->userId()->equals($userId)) {
-                return $member;
-            }
-        }
-
-        return null;
+        return $this->memberEntityOf($userId)?->view();
     }
 
     /**
@@ -105,7 +104,7 @@ final class Team implements TenantOwned
         if (TeamRole::Lead === $teamRole) {
             throw new TeamHasOneLead('A team has exactly one lead. Appoint a member as the new lead instead.');
         }
-        if (null !== $this->memberOf($userId)) {
+        if (null !== $this->memberEntityOf($userId)) {
             throw new AlreadyATeamMember('This person is in the team already.');
         }
 
@@ -121,17 +120,57 @@ final class Team implements TenantOwned
      */
     public function appointLead(UserId $userId): array
     {
-        $newLead = $this->memberOf($userId) ?? throw new NotATeamMember('Only a member of the team can become its lead.');
+        $newLead = $this->memberEntityOf($userId) ?? throw new NotATeamMember('Only a member of the team can become its lead.');
         if ($newLead->isLead()) {
             return [];
         }
-        $oldLead = $this->memberOf($this->leadUserId()) ?? throw new \LogicException('A team always has its lead among its members.');
+        $oldLead = $this->memberEntityOf($this->leadUserId()) ?? throw new \LogicException('A team always has its lead among its members.');
 
-        $changes = [new TeamRoleChange($userId, $newLead->teamRole(), TeamRole::Lead), new TeamRoleChange($oldLead->userId(), TeamRole::Lead, TeamRole::Member)];
+        $changes = [new TeamRoleChange($userId, $newLead->teamRole(), TeamRole::Lead), new TeamRoleChange($this->leadUserId(), TeamRole::Lead, TeamRole::Member)];
         $newLead->changeTeamRole(TeamRole::Lead);
         $oldLead->changeTeamRole(TeamRole::Member);
         $this->leadUserId = $userId->toString();
 
         return $changes;
+    }
+
+    /**
+     * Moves a person between Member and Viewer. The lead changes only through appointLead().
+     *
+     * @param TeamRole $teamRole Member or Viewer
+     *
+     * @return TeamRoleChange|null null when the person has that role already
+     *
+     * @throws TeamHasOneLead when $teamRole is Lead, or the person is the lead
+     * @throws NotATeamMember when the person is not in the team
+     */
+    public function changeTeamRole(UserId $userId, TeamRole $teamRole): ?TeamRoleChange
+    {
+        $member = $this->memberEntityOf($userId) ?? throw new NotATeamMember('Only a member of the team can change role in it.');
+        if (TeamRole::Lead === $teamRole) {
+            throw new TeamHasOneLead('A team has exactly one lead. Appoint a member as the new lead instead.');
+        }
+        if ($member->isLead()) {
+            throw new TeamHasOneLead('A team has exactly one lead. Appoint a new lead first.');
+        }
+        if ($member->teamRole() === $teamRole) {
+            return null;
+        }
+
+        $change = new TeamRoleChange($userId, $member->teamRole(), $teamRole);
+        $member->changeTeamRole($teamRole);
+
+        return $change;
+    }
+
+    private function memberEntityOf(UserId $userId): ?TeamMember
+    {
+        foreach ($this->members as $member) {
+            if ($member->isOf($userId)) {
+                return $member;
+            }
+        }
+
+        return null;
     }
 }

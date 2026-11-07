@@ -16,7 +16,8 @@ interface Memberships
 
     /**
      * Every membership of the organization that holds Admin, locked for update until the transaction ends, so two
-     * admins removing each other's Admin role at the same time are checked one after the other.
+     * admins removing each other's Admin role at the same time are checked one after the other. Admin memberships
+     * already loaded are reloaded from the locked rows, which drops their unsaved changes: lock before changing roles.
      *
      * @return list<Membership>
      *

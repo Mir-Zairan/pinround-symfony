@@ -6,13 +6,22 @@
     <entity name="App\Organization\Domain\TeamMember" table="org_team_member">
         <indexes>
             <index name="org_team_member_organization_id_user_id_idx" columns="organization_id,user_id"/>
-            <!-- The foreign key's index, which DBAL requires; no tenant query uses it (data-model.md, org_team_member). -->
-            <index name="org_team_member_team_id_idx" columns="team_id"/>
+            <!-- The foreign key's index: DBAL wants one of exactly its columns, though the key's prefix would serve. -->
+            <index name="org_team_member_organization_id_team_id_idx" columns="organization_id,team_id"/>
+            <!-- In the database the index of the EXCLUDE constraint that allows one lead per team; Doctrine sees only its index. -->
+            <index name="org_team_member_one_lead_excl" columns="organization_id,team_id">
+                <options>
+                    <option name="where">(team_role = 'lead'::text)</option>
+                </options>
+            </index>
         </indexes>
 
-        <!-- Positions give the key order (organization_id, team_id, user_id); without them the association comes last. -->
+        <!--
+            The key (organization_id, team_id, user_id). TeamMemberKeyThroughTeam marks the first two as written by the
+            team association below, whose join columns are the same two columns: XML cannot say insertable="false" on an id.
+        -->
         <id name="organizationId" type="guid" column="organization_id" position="0"/>
-        <id name="team" association-key="true" position="1"/>
+        <id name="teamId" type="guid" column="team_id" position="1"/>
         <id name="userId" type="guid" column="user_id" position="2"/>
 
         <field name="teamRole" type="text" column="team_role" enum-type="App\Organization\Domain\TeamRole"/>
@@ -20,7 +29,10 @@
         <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
 
         <many-to-one field="team" target-entity="App\Organization\Domain\Team" inversed-by="members">
-            <join-column name="team_id" referenced-column-name="id" nullable="false"/>
+            <join-columns>
+                <join-column name="organization_id" referenced-column-name="organization_id" nullable="false"/>
+                <join-column name="team_id" referenced-column-name="id" nullable="false"/>
+            </join-columns>
         </many-to-one>
     </entity>
 </doctrine-mapping>

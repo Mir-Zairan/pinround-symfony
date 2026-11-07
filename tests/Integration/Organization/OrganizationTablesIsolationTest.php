@@ -144,6 +144,31 @@ final class OrganizationTablesIsolationTest extends KernelTestCase
         self::assertSame($betaRowsBefore, $rowsOfBetaBakery());
     }
 
+    /**
+     * Foreign key checks skip row-level security, so only the composite key (organization_id, team_id) stops this.
+     */
+    #[Test]
+    public function aTeamMemberRowCannotNameATeamOfAnotherOrganization(): void
+    {
+        try {
+            $this->asAcmeFoods(\sprintf(
+                "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES ('%s', '%s', '%s', 'member', 'other', now())",
+                self::ACME_FOODS,
+                self::BETA_TEAM,
+                self::SARA,
+            ));
+            self::fail('An Acme Foods member row named a Beta Bakery team.');
+        } catch (DriverException $exception) {
+            self::assertSame('23503', $exception->getSQLState());
+            self::assertStringContainsString('org_team_member_team_fkey', $exception->getMessage());
+        }
+
+        self::assertSame([], $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => $this->connection()->fetchFirstColumn(
+            'SELECT user_id FROM org_team_member WHERE team_id = ? AND user_id = ?',
+            [self::BETA_TEAM, self::SARA],
+        )));
+    }
+
     private function assertRefusedByRowLevelSecurity(string $table, string $sql): void
     {
         try {

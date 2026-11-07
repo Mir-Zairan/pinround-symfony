@@ -10,7 +10,7 @@ use App\Organization\Domain\Job;
 use App\Organization\Domain\NotATeamMember;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamHasOneLead;
-use App\Organization\Domain\TeamMember;
+use App\Organization\Domain\TeamMemberView;
 use App\Organization\Domain\TeamRole;
 use App\Organization\Domain\TeamRoleChange;
 use App\SharedKernel\Domain\OrganizationId;
@@ -28,18 +28,6 @@ final class TeamTest extends TestCase
     private const string MIA = '0197a3c0-0000-7000-8000-000000000054';
 
     #[Test]
-    public function aTeamCannotBeBuiltWithoutALead(): void
-    {
-        $parameters = [];
-        foreach (new \ReflectionMethod(Team::class, '__construct')->getParameters() as $parameter) {
-            $parameters[$parameter->getName()] = (string) $parameter->getType();
-        }
-
-        self::assertSame(UserId::class, $parameters['lead'] ?? null);
-        self::assertSame(Job::class, $parameters['leadJob'] ?? null);
-    }
-
-    #[Test]
     public function aNewTeamHasItsLeadAsItsOnlyMemberWithRoleLeadAndTheGivenJob(): void
     {
         $team = $this->shopTeamLedByLena();
@@ -49,10 +37,8 @@ final class TeamTest extends TestCase
         self::assertSame('Shop', $team->name());
         self::assertSame(self::LENA, $team->leadUserId()->toString());
         self::assertSame([[self::LENA, TeamRole::Lead, Job::Developer]], self::rolesOf($team));
-        self::assertSame(self::SHOP_TEAM, $team->members()[0]->teamId()->toString());
-        self::assertSame(self::ACME_FOODS, $team->members()[0]->organizationId()->toString());
         self::assertEquals(self::createdAt(), $team->createdAt());
-        self::assertEquals(self::createdAt(), $team->members()[0]->createdAt());
+        self::assertEquals(self::createdAt(), $team->members()[0]->joinedAt);
     }
 
     #[Test]
@@ -76,7 +62,7 @@ final class TeamTest extends TestCase
             [[self::LENA, TeamRole::Lead, Job::Developer], [self::OMAR, TeamRole::Member, Job::Developer], [self::MIA, TeamRole::Viewer, Job::Tester]],
             self::rolesOf($team),
         );
-        self::assertEquals(self::addedAt(), $team->memberOf(new UserId(self::MIA))?->createdAt());
+        self::assertEquals(self::addedAt(), $team->memberOf(new UserId(self::MIA))?->joinedAt);
     }
 
     #[Test]
@@ -116,10 +102,7 @@ final class TeamTest extends TestCase
             [[self::LENA, TeamRole::Member, Job::Developer], [self::OMAR, TeamRole::Lead, Job::Developer], [self::MIA, TeamRole::Member, Job::Tester]],
             self::rolesOf($team),
         );
-        self::assertSame(
-            [[self::OMAR, TeamRole::Viewer, TeamRole::Lead], [self::LENA, TeamRole::Lead, TeamRole::Member]],
-            array_map(static fn (TeamRoleChange $change): array => [$change->userId->toString(), $change->from, $change->to], $changes),
-        );
+        self::assertSame([[self::OMAR, TeamRole::Viewer, TeamRole::Lead], [self::LENA, TeamRole::Lead, TeamRole::Member]], self::changesOf(...$changes));
     }
 
     #[Test]
@@ -147,11 +130,72 @@ final class TeamTest extends TestCase
     }
 
     #[Test]
+    public function aMemberBecomesAViewerAndBackAndEachChangeIsReturned(): void
+    {
+        $team = $this->shopTeamLedByLena();
+        $team->addMember(new UserId(self::OMAR), TeamRole::Member, Job::Developer, self::addedAt());
+
+        $toViewer = $team->changeTeamRole(new UserId(self::OMAR), TeamRole::Viewer);
+        self::assertSame(TeamRole::Viewer, $team->memberOf(new UserId(self::OMAR))?->teamRole);
+        $toMember = $team->changeTeamRole(new UserId(self::OMAR), TeamRole::Member);
+
+        self::assertSame([[self::OMAR, TeamRole::Member, TeamRole::Viewer], [self::OMAR, TeamRole::Viewer, TeamRole::Member]], self::changesOf($toViewer, $toMember));
+        self::assertSame([[self::LENA, TeamRole::Lead, Job::Developer], [self::OMAR, TeamRole::Member, Job::Developer]], self::rolesOf($team));
+    }
+
+    #[Test]
+    public function changingToTheRoleAPersonHasAlreadyChangesNothing(): void
+    {
+        $team = $this->shopTeamLedByLena();
+        $team->addMember(new UserId(self::OMAR), TeamRole::Viewer, Job::Developer, self::addedAt());
+
+        self::assertNull($team->changeTeamRole(new UserId(self::OMAR), TeamRole::Viewer));
+    }
+
+    #[Test]
+    public function changeTeamRoleCannotMakeASecondLead(): void
+    {
+        $team = $this->shopTeamLedByLena();
+        $team->addMember(new UserId(self::OMAR), TeamRole::Member, Job::Developer, self::addedAt());
+
+        try {
+            $team->changeTeamRole(new UserId(self::OMAR), TeamRole::Lead);
+            self::fail('A second lead was made.');
+        } catch (TeamHasOneLead) {
+        }
+
+        self::assertSame([[self::LENA, TeamRole::Lead, Job::Developer], [self::OMAR, TeamRole::Member, Job::Developer]], self::rolesOf($team));
+    }
+
+    #[Test]
+    public function changeTeamRoleCannotLeaveTheTeamWithoutALead(): void
+    {
+        $team = $this->shopTeamLedByLena();
+
+        try {
+            $team->changeTeamRole(new UserId(self::LENA), TeamRole::Member);
+            self::fail('The lead stepped down without a new lead.');
+        } catch (TeamHasOneLead) {
+        }
+
+        self::assertSame(self::LENA, $team->leadUserId()->toString());
+        self::assertSame([[self::LENA, TeamRole::Lead, Job::Developer]], self::rolesOf($team));
+    }
+
+    #[Test]
+    public function changeTeamRoleNeedsAMemberOfTheTeam(): void
+    {
+        $this->expectException(NotATeamMember::class);
+
+        $this->shopTeamLedByLena()->changeTeamRole(new UserId(self::OMAR), TeamRole::Viewer);
+    }
+
+    #[Test]
     public function memberOfFindsAPersonOrNobody(): void
     {
         $team = $this->shopTeamLedByLena();
 
-        self::assertSame(TeamRole::Lead, $team->memberOf(new UserId(self::LENA))?->teamRole());
+        self::assertSame(TeamRole::Lead, $team->memberOf(new UserId(self::LENA))?->teamRole);
         self::assertNull($team->memberOf(new UserId(self::OMAR)));
     }
 
@@ -176,8 +220,19 @@ final class TeamTest extends TestCase
     private static function rolesOf(Team $team): array
     {
         return array_map(
-            static fn (TeamMember $member): array => [$member->userId()->toString(), $member->teamRole(), $member->job()],
+            static fn (TeamMemberView $member): array => [$member->userId->toString(), $member->teamRole, $member->job],
             $team->members(),
+        );
+    }
+
+    /**
+     * @return list<array{string, TeamRole, TeamRole}>
+     */
+    private static function changesOf(?TeamRoleChange ...$changes): array
+    {
+        return array_map(
+            static fn (?TeamRoleChange $change): array => null === $change ? throw new \LogicException('No change was returned.') : [$change->userId->toString(), $change->from, $change->to],
+            array_values($changes),
         );
     }
 }

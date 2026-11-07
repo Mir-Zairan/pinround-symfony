@@ -8,9 +8,10 @@
             <unique-constraint name="org_team_organization_id_name_key" columns="organization_id,name"/>
         </unique-constraints>
 
-        <id name="id" type="guid" column="id"/>
+        <!-- (organization_id, id): the target of the member's foreign key, so a member names a team of its own organization. -->
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
 
-        <field name="organizationId" type="guid" column="organization_id"/>
         <field name="name" type="citext" column="name"/>
         <field name="leadUserId" type="guid" column="lead_user_id"/>
         <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
