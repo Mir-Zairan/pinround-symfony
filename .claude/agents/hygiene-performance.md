@@ -1,6 +1,6 @@
 ---
 name: hygiene-performance
-description: Application performance lens for pinround — read models on hot pages, N+1 and lazy loading, keyset paging, worker-mode memory, queues, image and cache rules. Dispatch on every code change.
+description: Application performance lens for pinround — read models on hot pages, N+1 and lazy loading, keyset paging, the request transaction, worker-mode memory, the ADR-0033 transports, workers and retries, image and cache rules. Dispatch on every code change.
 tools: Read, Grep, Glob
 maxTurns: 30
 ---
@@ -58,8 +58,9 @@ behaviour the prototype shows (what opens, what closes, what a click does). If y
 one of the images, say so in a row with file `screenshots` instead of guessing.
 
 **About this repo.** pinround is a Symfony 8.1 / PHP 8.4+ modular monolith (FrankenPHP worker
-mode, PostgreSQL 18 with row-level security, Valkey, Messenger with an outbox, server-rendered
-Twig with Turbo and Stimulus). Modules live in `src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
+mode, PostgreSQL 18 with row-level security, Valkey, Messenger with a PostgreSQL outbox relayed to
+four Valkey transports, server-rendered Twig with Turbo and Stimulus). Modules live in
+`src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
 The rules below come from `CLAUDE.md`, the ADRs in `docs/03-adr/` and `docs/02-architecture/`.
 
 ## Your lens: application performance
@@ -68,7 +69,7 @@ Accidental O(n²), needless allocations, blocking or repeated I/O on hot paths, 
 caching, unbounded growth. (The database lens owns SQL shape and indexes; you own how the
 application calls it.)
 
-Repo rules (performance-and-scale.md, frontend.md, ADR-0008, ADR-0015):
+Repo rules (performance-and-scale.md, operations.md, frontend.md, ADR-0008, ADR-0015, ADR-0033):
 - **Hot pages read from read models** (Home, whose-turn, ticket lists use `ins_*` tables). Entities
   are for writes only; templates never receive entities; controllers pass ready DTOs. A template or
   DTO getter that triggers lazy loading is `"I"`, class `n-plus-one`.
@@ -78,14 +79,35 @@ Repo rules (performance-and-scale.md, frontend.md, ADR-0008, ADR-0015):
   a user's turns. Counts come from a separate count query so a limit never cuts them.
 - Instant read models (`ins_ticket_turn`) are updated synchronously in the same transaction through
   `Insight\Api\TurnProjector`; other side effects go through the outbox.
-- Queues are separate (`async_media`, `async_ai`, `async_notify`, `async_integration`) so a slow AI
-  provider never delays notifications. Putting slow work on the wrong transport is `"I"`.
+- **One transaction per main web request** (`RequestTransaction`, begun at `kernel.request` priority
+  7, committed on the response). `wrapInTransaction` inside a request is only a savepoint; nothing is
+  saved until the response commits. A streamed body runs after the commit and sees no tenant rows.
+- Server-side prepares are off on every connection (`Pdo\Pgsql::ATTR_DISABLE_PREPARES`), so a bound
+  query is one round trip and `set_config` costs one per transaction; do not turn them back on.
+- **Transports and workers (ADR-0033, supersedes ADR-0009's `async` / `heavy`):** `outbox`
+  (PostgreSQL, `use_notify` off) → `worker-outbox`, polling with `--sleep=0.5` so events leave in
+  under 1 s; `async_notify` (notifications, Mercure, email) and `async_integration` (Jira sync) →
+  `worker`; `async_media` (screenshot processing) and `async_ai` (AI) → `worker-heavy`. Putting slow
+  work on `async_notify`, `async_integration` or the outbox path, or a message on the wrong
+  transport, is `"I"`, class `performance`.
+- Retries live in `config/packages/messenger.yaml` and are pinned by `RetryStrategyConfigTest`:
+  `outbox` 10 (1 s doubling to 60 s), `async_notify` and `async_media` 3 (1 s, 10 s, 60 s),
+  `async_integration` and `async_ai` 5 (30 s ×3, capped at 900 s, jitter 0.1). A handler that reads
+  `Retry-After` throws `RecoverableMessageHandlingException` with that delay instead of retrying hot.
+- **One stream per transport:** the four Valkey transports read
+  `%env(dsn_without_stream:MESSENGER_TRANSPORT_DSN)%` and name their stream in `options.stream`; a
+  DSN with a path after the host or a `stream` query parameter would merge all four queues — `"I"`.
+- Workers run with `--time-limit=3600` and a memory limit (`worker-outbox` 128M, `worker` and
+  `worker-heavy` 256M) and never with `--no-reset`.
 - **Worker mode:** long-lived services must not grow without bound (arrays used as caches in service
-  properties); Doctrine metadata and query caches live in the system cache, never rebuilt per request.
+  properties); Doctrine metadata and query caches live in the system cache, never rebuilt per
+  request. The ORM result cache is a `NullAdapter` on purpose; adding one for tenant data without a
+  tenant-aware key is `"C"`, class `authz`.
 - The PHP app never streams image bytes; object storage (or a CDN) serves them.
 - Fragment caches are per user or not at all; cache keys carry the org id.
 - Frontend: every `<img>` has `width`/`height`; `loading="lazy"` below the fold; AssetMapper assets
-  with long cache headers; no third-party hosts.
+  with long cache headers (Caddy sends `immutable` for `/assets/*`; the prod image runs
+  `asset-map:compile`); no third-party hosts.
 <!-- hygiene-machine-checked:start — managed by /hygiene-learn; do not hand-edit -->
 Machine-checked in this repo — the deterministic gate already catches these; do NOT
 spend review effort flagging instances of exactly these classes:

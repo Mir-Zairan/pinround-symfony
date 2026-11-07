@@ -1,6 +1,6 @@
 ---
 name: hygiene-senior-engineer
-description: Correctness lens for pinround — logic, null handling, worker-mode state, errors, naming in product words, comments, DRY/YAGNI. Dispatch on every code change.
+description: Correctness lens for pinround — logic, null handling, worker-mode state and resets, the request transaction, once-only message handling, errors, naming in product words, comments, DRY/YAGNI. Dispatch on every code change.
 tools: Read, Grep, Glob
 maxTurns: 30
 ---
@@ -58,8 +58,9 @@ behaviour the prototype shows (what opens, what closes, what a click does). If y
 one of the images, say so in a row with file `screenshots` instead of guessing.
 
 **About this repo.** pinround is a Symfony 8.1 / PHP 8.4+ modular monolith (FrankenPHP worker
-mode, PostgreSQL 18 with row-level security, Valkey, Messenger with an outbox, server-rendered
-Twig with Turbo and Stimulus). Modules live in `src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
+mode, PostgreSQL 18 with row-level security, Valkey, Messenger with a PostgreSQL outbox relayed to
+four Valkey transports, server-rendered Twig with Turbo and Stimulus). Modules live in
+`src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
 The rules below come from `CLAUDE.md`, the ADRs in `docs/03-adr/` and `docs/02-architecture/`.
 
 ## Your lens: correctness and readability
@@ -68,17 +69,34 @@ Logic errors, off-by-one, null handling, race conditions, swallowed or overly br
 handling, resource leaks, readability, cognitive load, DRY versus premature abstraction, YAGNI
 (flag copy-paste *and* speculative generality).
 
-Repo rules to hold the code to (CLAUDE.md, ADR-0008, modules.md, glossary.md):
+Repo rules to hold the code to (CLAUDE.md, ADR-0008, ADR-0033, modules.md, data-model.md, glossary.md):
 - PHP 8.4+, `declare(strict_types=1);` in every PHP file, `final` classes by default, `readonly`
   value objects, constructor injection only (no setter injection, no service locator).
 - **Worker mode (FrankenPHP) is on.** No static properties or static variables holding state; no
   request data kept in service properties; a service that holds state implements
-  `ResetInterface`. State that survives into the next request is `"C"`, class `concurrency`.
+  `ResetInterface` (tagged `kernel.reset`, so the container's `services_resetter` clears it between
+  requests and after every message). State that survives into the next request is `"C"`, class
+  `concurrency`. Never start `messenger:consume` with `--no-reset`.
+- **Request transaction:** every main web request runs in one transaction (`RequestTransaction`);
+  `wrapInTransaction` inside it is only a savepoint and nothing is saved until the response commits.
+  Code that relies on a write being saved before the response commits, or a
+  streamed body that reads tenant data (it runs after the commit and sees no tenant rows), is `"I"`,
+  class `logic-error`.
+- **Tenant switches:** `TenantContext` throws `TenantSwitchRefused` on a switch to another
+  organization or `clear()` while a transaction is open or the EntityManager holds an entity; a loop
+  over organizations ends the transaction, flushes and clears first.
+- When a database step fails and the code rolls back or closes the connection, it logs a warning
+  with only the exception class, SQLSTATE and code (never the message), as `RequestTransaction`
+  does, and leaves the connection closed so the next request or message starts clean.
 - Time comes from the SharedKernel `Clock` interface (tests freeze it). `new \DateTimeImmutable()`
   or `time()` in Domain/Application code is `"I"`, class `time-handling`.
 - Ids are UUIDv7 value objects generated in PHP (Symfony Uid). Sequential integers are never exposed.
-- Domain events are facts in the past tense (`TicketMoved`), never requests. Consumers are
-  idempotent (store the handled `eventId`, or upsert by natural key).
+- Domain events are facts in the past tense (`TicketMoved`), never requests. **Async consumers are
+  idempotent** — delivery is at least once (relay, retries, `failed`): wrap the database effect in
+  `OnceOnlyHandling::runOnce(<stable handler name>, <effect>)`, which keys on the `MessageIdStamp`
+  id, or upsert by natural key. Keying on the event id or Messenger's `TransportMessageIdStamp`
+  (each transport adds its own) is `"I"`, class `data-integrity`; so is an effect outside the
+  `runOnce` callback, or a handler name that changes between deploys.
 - **AI never writes on its own.** AI output is a suggestion a person accepts with a click; code that
   applies an AI answer to a ticket without a user action is `"C"`, class `logic-error`.
 - **Naming uses the product words** (glossary): round, pin, verdict, step, group, turn, ticket,
@@ -94,3 +112,9 @@ Repo rules to hold the code to (CLAUDE.md, ADR-0008, modules.md, glossary.md):
 - No real company, customer or people data anywhere: only Acme Foods, project SHOP, Lena, Omar,
   Mia, Raj, Sara. Names, ticket keys or text copied from the prototype are `"I"`, class `data-integrity`.
 - No ticket text, AI prompts, AI answers or tokens in log calls or exception messages (`"C"`, class `secrets`).
+<!-- hygiene-machine-checked:start — managed by /hygiene-learn; do not hand-edit -->
+Machine-checked in this repo — the deterministic gate already catches these; do NOT
+spend review effort flagging instances of exactly these classes:
+- concurrency: static properties or static variables in src/
+- concurrency: a Messenger worker started with --no-reset
+<!-- hygiene-machine-checked:end -->

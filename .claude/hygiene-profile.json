@@ -1,5 +1,5 @@
 {
-  "_comment": "Calibrated 2026-11-06 (--force) after P00.T2: composer.json scripts, .github/workflows/ci.yml, phpunit.dist.xml, deptrac.yaml, .php-cs-fixer.dist.php and the Makefile are read from the real files. The host has no PHP: every PHP command runs in the running Docker 'app' service with `docker compose exec -T app …` from the checkout root (exec uses the container's own environment, so the Makefile's --env-file flags are not needed for exec; `make up` starts the stack). Those commands fail while the stack is down or in a checkout whose compose project has no running 'app' service. CI runs the same composer scripts on the runner's PHP 8.5.",
+  "_comment": "Calibrated 2026-11-07 (--force) after P00.T5-T7: composer.json scripts, .github/workflows/ci.yml, phpunit.dist.xml, deptrac.yaml, .php-cs-fixer.dist.php, the Makefile and tests/e2e are read from the real files. The host has no PHP: every PHP command runs in the running Docker 'app' service with `docker compose exec -T app ...` from the checkout root (`make up` builds the stack, applies docker/postgres/roles.sql and migrates both databases). Those commands fail while the stack is down. Only `make e2e` runs on the host, with Node 22.12 or newer. CI runs the same composer scripts on the runner's PHP 8.5.",
   "schemaVersion": 2,
   "repo": "pinround-symfony",
   "language": "php",
@@ -12,7 +12,11 @@
     "frankenphp",
     "phpunit",
     "zenstruck-foundry",
-    "deptrac"
+    "deptrac",
+    "asset-mapper",
+    "stimulus",
+    "ux-twig-component",
+    "playwright"
   ],
   "packageManager": "composer",
   "guidelines": [
@@ -36,32 +40,48 @@
     ".claude/rules/hygiene-learned-docker.md",
     ".claude/rules/hygiene-learned-docs.md",
     ".claude/rules/hygiene-learned-tests.md",
-    ".claude/rules/hygiene-learned-process.md"
+    ".claude/rules/hygiene-learned-process.md",
+    "docs/03-adr/0005-multi-tenancy.md",
+    "docs/03-adr/0009-async-messaging-and-outbox.md",
+    "docs/03-adr/0033-valkey-transports-workers-and-outbox-relay.md",
+    "docs/02-architecture/operations.md",
+    "docs/05-plan/phase-00-foundation.md",
+    ".claude/rules/hygiene-learned-php-db.md",
+    ".claude/rules/hygiene-learned-db-grants.md",
+    ".claude/rules/hygiene-learned-dependencies.md"
   ],
   "guidelineHashes": {
     "CLAUDE.md": "57ea8f4de9209c7a554a5b6ef1dcab32bba83591",
+    "README.md": "6cccebb6da5499657401fc98cb3e3c3977ee8f12",
     "docs/README.md": "5925df43a8107d1ea0759a028539ab1d09fb8b97",
     "docs/05-plan/README.md": "5e4fcda995fef94ec7d55550f3a8c216ea96df19",
     "docs/00-product/glossary.md": "873c8a7868ecac9f39678316edda6739f9ae93ab",
     "docs/00-product/ux-principles.md": "9c31b8dc24140aaaf021ab8e2d0e604584ce6019",
-    "docs/02-architecture/modules.md": "ed8518a057ab45940fbed568e6b4b50f0a565783",
-    "docs/02-architecture/data-model.md": "88c348da77d0c375aedf20bb35eeb1a529215aa9",
-    "docs/02-architecture/security.md": "39e760fa21eb7243af7fb85beebf4e812bd639a3",
-    "docs/02-architecture/performance-and-scale.md": "3dd719be51facddbc9357810b2f19585de73d5ae",
-    "docs/02-architecture/frontend.md": "bf1c3bdeb012f49866a4cda8b2db727961d6707b",
-    "docs/02-architecture/testing-strategy.md": "39334e6b189b1e4e7cc792e1f09e8fa968945bdd",
+    "docs/02-architecture/modules.md": "9c95b6996f8106614e2dea50002ea93de457f93e",
+    "docs/02-architecture/data-model.md": "3eaa5ccb9c2850ee542d7f4086c11dc5c6b5e2a2",
+    "docs/02-architecture/security.md": "720d533bc4f7dbea736f7356118220080c1dbfc7",
+    "docs/02-architecture/performance-and-scale.md": "23c2273e92594d2239f9e28e4d38b09403fce582",
+    "docs/02-architecture/frontend.md": "6a1349dd61a15b691e60b5ddea171ba5b7b99d50",
+    "docs/02-architecture/testing-strategy.md": "c09700f1686c09884ba91d1f3fcc7c2f8ac90d29",
     "docs/02-architecture/ai-architecture.md": "e512acae0aed2f65e880ba848169a1e64aa0e6a0",
-    "docs/03-adr/README.md": "930faa4867bc64a21d0a7e221ab66bb0dd83eb28",
-    "docs/04-prototype/prototype-guide.md": "75921d6da5d5e939aa2984b7462721bf2b896413",
+    "docs/03-adr/README.md": "be3229f077417711f9565ba6d6cd574c11752814",
     "docs/03-adr/0002-modular-monolith.md": "0370329ca3c706c51fcd969a43c4f4a9312b10ef",
-    "docs/03-adr/0005-multi-tenancy.md": "dfe32003b0a32e816463ff0420cad46f787f08b1",
+    "docs/03-adr/0028-testing-and-quality-gates.md": "8c8c048dac4980e7420818aa8a77415d177c7ebc",
+    "docs/03-adr/0032-module-call-edges-follow-modules-catalogue.md": "4181d3a1e15fe66a52cab85e29a55d34225af906",
+    ".claude/rules/hygiene-learned-docker.md": "b3896aec9d9642cf74aa6a77c253fc0145a66a7f",
+    ".claude/rules/hygiene-learned-docs.md": "16cd4373447164f42beabc388b4db5c302a1aa8d",
+    ".claude/rules/hygiene-learned-tests.md": "015e093cbe29662c9e4a7b1aa9c7d3e0e4329e26",
+    ".claude/rules/hygiene-learned-process.md": "c1b929c0fe2643b04377fbf1654175de8299c72b",
+    "docs/04-prototype/prototype-guide.md": "75921d6da5d5e939aa2984b7462721bf2b896413",
+    "docs/03-adr/0005-multi-tenancy.md": "32caaf6cff36965e2b4a14568c0ba7e3f1f7d928",
     "docs/03-adr/0013-authorization.md": "928d7a5a201259183f9cc4f7380ce8452113b527",
     "docs/03-adr/0027-secrets-and-encryption.md": "cc74095ae161d06b797d74fff4d7b19019d12503",
     "docs/03-adr/0020-ai-safety-and-prompt-injection.md": "676752913ac430a903efd093b2ae6dfb01942e32",
     "docs/03-adr/0011-screenshot-storage-and-processing.md": "35b78e1d05f0cf02f367b675abfd59525a75a895",
     "docs/03-adr/0008-frankenphp-runtime.md": "609ad7a0d5a900f674fc3871ffd8b014d463859c",
+    "docs/05-plan/phase-00-foundation.md": "9e7c2ac507869431126ec51fae82923bb2035a6b",
     "docs/00-product/vision.md": "c0cb59188afe8f89d82d2614b0ed298f54ab15a4",
-    "docs/02-architecture/architecture-overview.md": "32f5610a48ce5bb52d9dc6b4781886a64ca881a0",
+    "docs/02-architecture/architecture-overview.md": "2e1cd0b8575f491e7db4c7b5de8b0e513da93fad",
     "docs/02-architecture/trade-offs.md": "7fa05fa7d4483c293fd2dee1e53d46b4d4b5bb31",
     "docs/00-product/personas-and-roles.md": "6642222e895be6d430301cf7be733e673b6152cd",
     "docs/01-requirements/functional-requirements.md": "954a65e23eec62d76f3721aa8ef6893153f19db1",
@@ -71,8 +91,7 @@
     "docs/02-architecture/realtime-and-notifications.md": "12a3e9138171c706b0188be6936ec422d1c68f6a",
     "docs/02-architecture/media-pipeline.md": "8492ef207fd9d8e01ba6be06f401644ed50a3153",
     "docs/02-architecture/integrations.md": "f8a292b03d6159f3a701ec08c6aabddab7f3f2cd",
-    "docs/02-architecture/operations.md": "30f3e7c364ce15509747e35d0f1f1ff1c9ef0fc8",
-    "docs/05-plan/phase-00-foundation.md": "48ead97c3f4b5e7510db17903a3774e9c06c9383",
+    "docs/02-architecture/operations.md": "39946e5e2fca39d47e4510ab92791ce5be56bac8",
     "docs/05-plan/phase-01-identity-and-organization.md": "2e37e3f0e25f12a75c9c4f0dd720957c8ba4e14a",
     "docs/05-plan/phase-02-projects-and-workflow.md": "0a50b65a169e82f598f0965077313a94c8bce07d",
     "docs/05-plan/phase-03-tickets-core.md": "e51a1c2b6c1e9cf54d94b470a45a488d88e42245",
@@ -87,9 +106,10 @@
     "docs/05-plan/phase-12-hardening-and-launch.md": "6352e67cecf2762a025e21103b529efb6fb47d2b",
     "docs/03-adr/0003-php-and-symfony-versions.md": "0f926861cdff330d6d6cd27aa5ff8bbe9906aea8",
     "docs/03-adr/0019-browser-local-ai.md": "0309fca283cd404a4b86bad537262236ca7f0829",
-    "docs/03-adr/0009-async-messaging-and-outbox.md": "d6e06be2bd97e703031e54874a6ea5a0c0a7d57e",
+    "docs/03-adr/0009-async-messaging-and-outbox.md": "c112890b87fcc9cec2b440ce3ef957773bb011e2",
     "docs/03-adr/0015-turn-read-model.md": "e41930f958cdc625bc00c46f25e1cfc56817c8c7",
     "docs/03-adr/0006-identifiers.md": "959e5ad1cf945f47e1322871b1a60ab64a0fee5c",
+    "docs/03-adr/0033-valkey-transports-workers-and-outbox-relay.md": "23df05ddf56599890de07a1f9b7870a1e7d4ccff",
     "docs/03-adr/0012-authentication.md": "ba6974e563ea094814e4733932a8dc238f2723cf",
     "docs/03-adr/0014-status-model-five-groups.md": "e4ca463a5ada0c436c8f70f5b879cafc91d7161e",
     "docs/03-adr/0016-direct-ticket-creation-with-check-flags.md": "3c6853a7481628dba2aa48962df3db0fdbc9caec",
@@ -100,8 +120,6 @@
     "docs/03-adr/0025-jira-integration.md": "37cef5a1a6b92e336fb0d6ee7bc0a8e87648b928",
     "docs/03-adr/0026-audit-log.md": "5e97699d5c77e748ab8d000b6288defeb5b08ad8",
     "docs/03-adr/0021-mcp-server.md": "62b24471dd270f93320703fd299e7a7bd9f31ffd",
-    "docs/03-adr/0028-testing-and-quality-gates.md": "8c8c048dac4980e7420818aa8a77415d177c7ebc",
-    "docs/03-adr/0032-module-call-edges-follow-modules-catalogue.md": "4181d3a1e15fe66a52cab85e29a55d34225af906",
     "docs/03-adr/0030-deployment-model.md": "65058cefa813138647eeb4c30be6c99cafc8b6d3",
     "docs/03-adr/0029-observability.md": "5796879825435c05bab24bad91bfc1da7f715b9c",
     "docs/03-adr/0010-cache-sessions-locks.md": "c4afcb9be8575e0b8e3db272665469fd3e6f7772",
@@ -110,8 +128,7 @@
     "docs/03-adr/template.md": "5eb3d2003839c109c16388e06d60ee7c29191254",
     "docs/03-adr/0001-record-architecture-decisions.md": "79ec178b0d395cd259742b991982e1d52a48a4d8",
     "docs/03-adr/0004-postgresql.md": "5bf272a78f7353339b758633786ab95be9ccfdee",
-    "docs/03-adr/0031-minio-built-from-pinned-source.md": "8d08defeffdd5072168b4903014a87559e9360e9",
-    "README.md": "246d71bf53bd860d91854d7dd4d9794b7d92eed0"
+    "docs/03-adr/0031-minio-built-from-pinned-source.md": "0f6d5ee4cfe743af9a529f3d773df44ad8cdb9f7"
   },
   "baseBranch": "main",
   "models": {
@@ -134,7 +151,7 @@
     "budgetLine": true
   },
   "checks": {
-    "_comment": "composer scripts from composer.json, run in the Docker 'app' service (host has no PHP). `composer qa` (or `make qa`) runs validate, cs, rector, phpstan, deptrac, lint, audit and test in one go. `ci` names the CI job in .github/workflows/ci.yml. build and compose run on the host (Docker), like the CI build job.",
+    "_comment": "composer scripts from composer.json, run in the Docker 'app' service (host has no PHP). `composer qa` (or `make qa`) runs validate, cs, rector, phpstan, deptrac, lint (with bin/check-tenant-setting), audit and test in one go. The integration and functional suites need the test database migrated and its roles applied: `make test` does both (migrate-test, then roles.sql once more, then PHPUnit); after changing docker/postgres/roles.sql run `make db-roles` first. `ci` names the CI job in .github/workflows/ci.yml. build and compose run on the host (Docker), like the CI build job.",
     "validate": {
       "cmd": "docker compose exec -T app composer validate --strict",
       "tier": "fast",
@@ -210,10 +227,10 @@
       "ci": "build"
     },
     "e2e": {
-      "cmd": null,
+      "cmd": "make e2e",
       "tier": "slow",
       "needsDb": true,
-      "ci": "e2e (stub on pull requests until the Playwright journeys arrive in P00.T9)"
+      "ci": "e2e (still a stub in CI; run locally against the running stack, Node 22.12+ on the host)"
     },
     "frontend": {
       "cmd": null,
@@ -238,7 +255,7 @@
     "build",
     "compose"
   ],
-  "_ciGate_comment": "In CI order from .github/workflows/ci.yml: static job (validate, cs, rector, phpstan, deptrac, lint, audit), unit, integration (test:integration then test:functional, with postgres:18.6 and valkey 8.1.4 services), build (docker build --target prod, compose-config-check.sh). The jobs run in parallel on every push and on pull requests to main. e2e is a stub that runs nothing yet, so it is left out.",
+  "_ciGate_comment": "In CI order from .github/workflows/ci.yml: static job (validate, cs, rector, phpstan, deptrac, lint, audit), unit, integration (roles.sql, the roles-sql check, migrate as pinround_migrator, roles.sql again, then test:integration and test:functional, with postgres:18.6 and valkey services), build (docker build --target prod, compose-config-check.sh). The jobs run in parallel on every push and on pull requests to main. The CI e2e job is still a stub that runs nothing, so e2e is left out of the gate; `make e2e` runs the Playwright tests locally.",
   "reviewAgents": [
     {
       "name": "hygiene-senior-engineer",
@@ -278,12 +295,12 @@
     }
   ],
   "review": {
-    "_comment": "Settings; overridable per person. prSizeGuide left at the default: no merged PRs to measure yet (gh lists none).",
+    "_comment": "Settings; overridable per person. prSizeGuide is the median additions of the 6 merged PRs (gh, 2026-11-07).",
     "smallDiffLines": 100,
     "frameOnReview": "auto",
     "gateOnReview": "auto",
     "batchTasks": 3,
-    "prSizeGuide": 1500,
+    "prSizeGuide": 3445,
     "prePushCheck": "offer",
     "maxFixRounds": 1
   },
@@ -373,6 +390,75 @@
           "20261106-0020"
         ],
         "enabled": true
+      },
+      {
+        "id": "lp-20261107-c5a1",
+        "class": "performance",
+        "lens": "hygiene-performance",
+        "ext": [
+          "css"
+        ],
+        "paths": [
+          "assets/"
+        ],
+        "pattern": "^[[:space:]]*@import",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Don't @import one stylesheet from another; link each sheet in base.html.twig (<link rel=\"stylesheet\" href=\"{{ asset('styles/x.css') }}\">) so the browser loads them in parallel. Never import CSS from JS: it becomes a data: URL the CSP blocks.",
+        "source": [
+          "20261107-aece",
+          "20261107-ab55"
+        ],
+        "enabled": true,
+        "origin": "learned"
+      },
+      {
+        "id": "lp-20261107-f12a",
+        "class": "a11y",
+        "lens": "hygiene-frontend",
+        "ext": [
+          "css",
+          "twig"
+        ],
+        "paths": [
+          "assets/",
+          "src/",
+          "templates/"
+        ],
+        "pattern": "font-size:[[:space:]]*([0-9]|1[01])(\\.[0-9]+)?px",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Text is never below 12px (ux-principles.md). Use 12px or more, and widen the padding or min-width so the element still fits.",
+        "source": [
+          "20261107-58c5",
+          "20261107-ab51"
+        ],
+        "enabled": true,
+        "origin": "learned"
+      },
+      {
+        "id": "lp-20261107-0c3d",
+        "class": "a11y",
+        "lens": "hygiene-frontend",
+        "ext": [
+          "css"
+        ],
+        "paths": [
+          "assets/styles/"
+        ],
+        "pattern": ":[^;{]*#[0-9a-fA-F]{3,8}([^0-9A-Za-z_-]|$)",
+        "exclude": "^[[:space:]]*--[A-Za-z0-9-]+:|url\\(",
+        "astPattern": null,
+        "astLang": null,
+        "message": "No fixed colours in a rule; use a token from tokens.css (color: var(--on-error);) so dark mode changes it too. If no token fits, add one to both themes in tokens.css.",
+        "source": [
+          "20261107-d352",
+          "20261107-ab50"
+        ],
+        "enabled": true,
+        "origin": "learned"
       },
       {
         "id": "cal-set-org-id",
@@ -557,73 +643,79 @@
         "enabled": false
       },
       {
-        "id": "lp-20261107-c5a1",
-        "class": "performance",
-        "lens": "hygiene-performance",
-        "ext": [
-          "css"
-        ],
+        "id": "cal-worker-no-reset",
+        "class": "concurrency",
+        "lens": "hygiene-senior-engineer",
+        "ext": [],
         "paths": [
-          "assets/"
+          "compose",
+          "Makefile",
+          "docker/",
+          ".github/",
+          "config/",
+          "bin/"
         ],
-        "pattern": "^[[:space:]]*@import",
+        "pattern": "(^|[[:space:]])--no-reset([[:space:]]|$)",
         "exclude": null,
         "astPattern": null,
         "astLang": null,
-        "message": "Don't @import one stylesheet from another; import each sheet from assets/app.js (import './styles/x.css';) so AssetMapper links them all at once and the browser loads them in parallel.",
-        "source": [
-          "20261107-aece",
-          "20261107-ab55"
-        ],
+        "message": "Never start a Messenger worker with --no-reset: services_resetter must run after every message so no organization's state reaches the next one. Drop the flag.",
+        "origin": "calibrate",
+        "confidence": "high",
         "enabled": true,
-        "origin": "learned"
+        "provenance": {
+          "file": "docs/02-architecture/data-model.md",
+          "line": 308,
+          "text": "never start a worker with `--no-reset`"
+        }
       },
       {
-        "id": "lp-20261107-f12a",
-        "class": "a11y",
-        "lens": "hygiene-frontend",
+        "id": "cal-orm-result-cache",
+        "class": "authz",
+        "lens": "hygiene-security",
         "ext": [
-          "css",
-          "twig"
+          "php"
         ],
         "paths": [
-          "assets/",
-          "src/",
-          "templates/"
+          "src/"
         ],
-        "pattern": "font-size:[[:space:]]*([0-9]|1[01])(\\.[0-9]+)?px",
+        "pattern": "(enableResultCache|setResultCacheProfile|useResultCache|setResultCacheLifetime)\\(",
         "exclude": null,
         "astPattern": null,
         "astLang": null,
-        "message": "Text is never below 12px (ux-principles.md). Use 12px or more, and widen the padding or min-width so the element still fits.",
-        "source": [
-          "20261107-58c5",
-          "20261107-ab51"
-        ],
+        "message": "No ORM result cache for tenant data: the filter SQL holds no organization id, so a cache key cannot tell organizations apart. Query without the cache, or add a tenant-aware cache key first (data-model.md).",
+        "origin": "calibrate",
+        "confidence": "high",
         "enabled": true,
-        "origin": "learned"
+        "provenance": {
+          "file": "docs/02-architecture/data-model.md",
+          "line": 295,
+          "text": "Never add a result cache for tenant data without a tenant-aware"
+        }
       },
       {
-        "id": "lp-20261107-0c3d",
-        "class": "a11y",
-        "lens": "hygiene-frontend",
+        "id": "cal-wide-table-grant",
+        "class": "authz",
+        "lens": "hygiene-database",
         "ext": [
-          "css"
+          "php"
         ],
         "paths": [
-          "assets/styles/"
+          "migrations/"
         ],
-        "pattern": ":[^;{]*#[0-9a-fA-F]{3,8}([^0-9A-Za-z_-]|$)",
-        "exclude": "^[[:space:]]*--[A-Za-z0-9-]+:|url\\(",
+        "pattern": "GRANT[[:space:]][^;']*(TRUNCATE|REFERENCES|TRIGGER|ALL[[:space:]])[^;']*TO[[:space:]][^;']*pinround_(app|readonly)",
+        "exclude": null,
         "astPattern": null,
         "astLang": null,
-        "message": "No fixed colours in a rule; use a token from tokens.css (color: var(--on-error);) so dark mode changes it too. If no token fits, add one to both themes in tokens.css.",
-        "source": [
-          "20261107-d352",
-          "20261107-ab50"
-        ],
+        "message": "Grant pinround_app and pinround_readonly only what the table needs (for example SELECT, INSERT); never TRUNCATE, REFERENCES, TRIGGER or ALL (data-model.md).",
+        "origin": "calibrate",
+        "confidence": "high",
         "enabled": true,
-        "origin": "learned"
+        "provenance": {
+          "file": "docs/02-architecture/data-model.md",
+          "line": 324,
+          "text": "It never grants `TRUNCATE`, `REFERENCES` or `TRIGGER`"
+        }
       }
     ]
   },
@@ -663,7 +755,7 @@
     "extraChecks": []
   },
   "browser": {
-    "_comment": "`make up` serves https://localhost (Caddy local TLS). The ports come from .env.local (HTTP_PORT, HTTPS_PORT) and the stack's other ports (MinIO, Mailpit) are fixed too, so a worktree cannot start a second stack beside the first: no {port} placeholder, and the stage refuses to reuse a busy address. There is no health route in the app; the home page (route web_home) answers when the stack is up. No login exists yet (P01), so no auth. Playwright resolves from node on this machine. Pages map only templates that exist today; the component gallery and assets/ arrive in P00.T5/T6.",
+    "_comment": "`make up` serves https://localhost (Caddy local TLS). The ports come from .env.local (HTTP_PORT, HTTPS_PORT) and the stack's other ports (MinIO, Mailpit) are fixed too, so a worktree cannot start a second stack beside the first: no {port} placeholder, and the stage refuses to reuse a busy address. There is no health route yet (P00.T8); the home page (route web_home) answers when the stack is up. The component gallery (/_gallery) exists in dev and test only. No login exists yet (P01), so no auth. Playwright resolves from node on this machine; tests/e2e holds the repo's own Playwright suite (chromium, E2E_BASE_URL).",
     "driver": "auto",
     "agentsPerPr": 1,
     "dependentScreens": 3,
@@ -671,8 +763,13 @@
     "startCmd": "make up",
     "readyUrl": "https://localhost/",
     "pages": {
-      "src/Web/UI/templates/**": "https://localhost/",
-      "src/Web/UI/Controller/**": "https://localhost/"
+      "src/Web/UI/templates/home.html.twig": "https://localhost/",
+      "src/Web/UI/templates/base.html.twig": "https://localhost/",
+      "src/Web/UI/Controller/HomeController.php": "https://localhost/",
+      "src/Web/UI/templates/components/**": "https://localhost/_gallery",
+      "src/Web/UI/Component/**": "https://localhost/_gallery",
+      "src/Web/UI/templates/gallery.html.twig": "https://localhost/_gallery",
+      "assets/**": "https://localhost/_gallery"
     },
     "autoWhen": [
       "**/*.twig",
@@ -728,9 +825,16 @@
     }
   },
   "ui": {
-    "_comment": "No design-system files exist yet: no assets/ dir, no CSS, no Twig components. frontend.md and P00.T5/T6 plan assets/styles/tokens.css (token names from the prototype's CSS custom properties) and components in src/Web/UI/Component/, templates/components/ and assets/controllers/. Fill these at the next calibration once they exist.",
-    "tokenFiles": [],
-    "componentDirs": []
+    "_comment": "Design tokens are CSS custom properties in assets/styles/tokens.css (light, dark media query and [data-theme=dark]); component styles in components.css and shell.css. Components are Twig components: PHP classes in src/Web/UI/Component with templates in src/Web/UI/templates/components; behaviour in Stimulus controllers under assets/controllers. /_gallery (dev and test) shows every component state.",
+    "tokenFiles": [
+      "assets/styles/tokens.css",
+      "assets/styles/fonts.css"
+    ],
+    "componentDirs": [
+      "src/Web/UI/Component",
+      "src/Web/UI/templates/components",
+      "assets/controllers"
+    ]
   },
   "testing": {
     "_comment": "Settings for /hygiene-test. Overridable per person.",
@@ -873,14 +977,14 @@
     ]
   },
   "generatedAgentHashes": {
-    "hygiene-architect": "47292597",
-    "hygiene-database": "3134392123",
-    "hygiene-dependency-auditor": "3715399079",
-    "hygiene-framing": "1765473501",
-    "hygiene-frontend": "2740864799",
-    "hygiene-performance": "1018974380",
-    "hygiene-security": "1139616860",
-    "hygiene-senior-engineer": "2892674783",
-    "hygiene-test-engineer": "884157845"
+    "hygiene-architect": "3278663655",
+    "hygiene-database": "1505651834",
+    "hygiene-dependency-auditor": "4230132713",
+    "hygiene-framing": "3838386376",
+    "hygiene-frontend": "1719610686",
+    "hygiene-performance": "252228371",
+    "hygiene-security": "1250190627",
+    "hygiene-senior-engineer": "1214397166",
+    "hygiene-test-engineer": "3168968219"
   }
 }

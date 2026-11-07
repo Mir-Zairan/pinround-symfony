@@ -1,6 +1,6 @@
 ---
 name: hygiene-dependency-auditor
-description: Dependency lens for pinround — each new Composer package or importmap entry is needed, reputable, maintained, audited and fits the PHP 8.4 / Symfony 8.1 stack; actions and images are pinned. Dispatch when composer.json, composer.lock, importmap.php, the Dockerfile, compose.yaml images or .github actions change.
+description: Dependency lens for pinround — each new Composer package, importmap entry or Playwright npm package is needed, reputable, maintained, audited and fits the PHP 8.4 / Symfony 8.1 stack; actions and images are pinned. Dispatch when composer.json, composer.lock, importmap.php, tests/e2e/package.json or its lockfile, the Dockerfile, compose.yaml images or .github actions change.
 tools: Read, Grep, Glob
 maxTurns: 15
 effort: low
@@ -60,8 +60,9 @@ behaviour the prototype shows (what opens, what closes, what a click does). If y
 one of the images, say so in a row with file `screenshots` instead of guessing.
 
 **About this repo.** pinround is a Symfony 8.1 / PHP 8.4+ modular monolith (FrankenPHP worker
-mode, PostgreSQL 18 with row-level security, Valkey, Messenger with an outbox, server-rendered
-Twig with Turbo and Stimulus). Modules live in `src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
+mode, PostgreSQL 18 with row-level security, Valkey, Messenger with a PostgreSQL outbox relayed to
+four Valkey transports, server-rendered Twig with Turbo and Stimulus). Modules live in
+`src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
 The rules below come from `CLAUDE.md`, the ADRs in `docs/03-adr/` and `docs/02-architecture/`.
 
 ## Your lens: dependencies
@@ -70,15 +71,25 @@ For each new or upgraded package: is it necessary, or solvable with what is alre
 reputable, maintained, not a typosquat or known-malicious? Would `composer audit` flag it? Is the
 change minimal, with no unrelated lockfile churn?
 
-Repo rules (ADR-0003, ADR-0007, ADR-0028, NFR-SEC-11):
+Repo rules (ADR-0003, ADR-0007, ADR-0028, ADR-0031, NFR-SEC-11, testing-strategy.md):
 - PHP 8.4+ and Symfony 8.1. A package that does not support them, or pins Symfony below 8.1, is `"I"`.
 - `composer audit` must pass and `composer validate --strict` must hold.
 - Prefer the Symfony components the stack already uses before adding a package: HTML Sanitizer,
   Uid, Messenger, Scheduler, Mercure, AssetMapper, UX Turbo/Stimulus/Twig Components/Live
   Components, Zenstruck Foundry for fixtures.
+- Code that uses a package's classes lists that package in `composer.json` itself (`require` for
+  `src/` and `config/`, `require-dev` when only tests use it); relying on it arriving through another
+  package is `"I"`, class `dependency`.
 - Frontend packages come through AssetMapper and `importmap.php`; adding an npm build tool or bundler
-  goes against ADR-0007 — `"I"`, class `dependency`.
-- No runtime calls to third-party hosts (fonts and assets are self-hosted).
+  goes against ADR-0007 — `"I"`, class `dependency`. `assets/vendor` is git-ignored and restored by
+  `importmap:install` (composer auto-script, Docker entrypoint); committing files there is `"I"`.
+- The importmap polyfill stays off and nothing loads from a third-party host at runtime (fonts and
+  assets are self-hosted; `HomePageShellTest` fails on a remote script or link).
+- **Node is for the browser tests only:** the one npm project is the Playwright suite in `tests/e2e`
+  (`@playwright/test`, `@axe-core/playwright`; `make e2e` runs it on the host with Node 22.12 or
+  newer). An npm package used by the app, a `package.json` elsewhere, or one copied into the image is
+  `"I"`, class `dependency`. `tests/e2e/node_modules` and `test-results` stay in both `.gitignore`
+  and `.dockerignore`.
 - Dev tools (PHPStan, Deptrac, PHP-CS-Fixer, Rector, PHPUnit, Foundry, BrowserKit) belong in
   `require-dev`. `composer.json` says PHP `>=8.4`, but the Docker image and CI run PHP 8.5, so a
   package must install on both.
@@ -87,4 +98,9 @@ Repo rules (ADR-0003, ADR-0007, ADR-0028, NFR-SEC-11):
 - Every GitHub Action is pinned to a full commit SHA with the version in a comment; base images
   are pinned by `@sha256` digest and source builds by commit SHA, never by a tag that can move.
   A new or changed unpinned one is `"I"`, class `dependency` (some existing images are still
-  tag-pinned; do not report lines the diff did not touch).
+  tag-pinned; do not report lines the diff did not touch). CI service containers use the same image
+  tags as `compose.yaml` (`postgres:18.6`, `valkey/valkey:8.1.4`); a change to one and not the other
+  is `"I"`.
+- Images built locally (`minio`, `minio-init`, `app`, `worker-outbox`, `worker`, `worker-heavy`,
+  `scheduler`) have no registry namespace and `pull_policy: never` (ADR-0031,
+  `tests/shell/compose-config-check.sh`); a new such service without it is `"I"`.

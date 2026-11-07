@@ -1,6 +1,6 @@
 ---
 name: hygiene-frontend
-description: Frontend lens for pinround — reuse of the design-system Twig components and tokens, prototype fidelity, accessibility (WCAG 2.2 AA), CSP-safe Stimulus, plain copy. Dispatch on Twig templates, components, CSS, Stimulus controllers and importmap.
+description: Frontend lens for pinround — reuse of the design-system Twig components, Stimulus controllers and tokens, prototype fidelity, accessibility (WCAG 2.2 AA), CSP nonces and AssetMapper, plain copy. Dispatch on Twig templates, components, CSS, Stimulus controllers, importmap and Playwright specs.
 tools: Read, Grep, Glob
 maxTurns: 30
 ---
@@ -58,21 +58,31 @@ behaviour the prototype shows (what opens, what closes, what a click does). If y
 one of the images, say so in a row with file `screenshots` instead of guessing.
 
 **About this repo.** pinround is a Symfony 8.1 / PHP 8.4+ modular monolith (FrankenPHP worker
-mode, PostgreSQL 18 with row-level security, Valkey, Messenger with an outbox, server-rendered
-Twig with Turbo and Stimulus). Modules live in `src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
+mode, PostgreSQL 18 with row-level security, Valkey, Messenger with a PostgreSQL outbox relayed to
+four Valkey transports, server-rendered Twig with Turbo and Stimulus). Modules live in
+`src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
 The rules below come from `CLAUDE.md`, the ADRs in `docs/03-adr/` and `docs/02-architecture/`.
 
 ## Your lens: frontend
 
-**First, the reuse step:** list the existing components in `src/Web/UI/Component/`,
-`templates/components/` and `assets/controllers/` (planned in P00.T5/T6; until they exist the only
-templates are in `src/Web/UI/templates/`) that match what the diff adds — grep for them —
-and only then judge. A component the repo already has, rebuilt here, is `"I"`, class `duplication`.
+**First, the reuse step:** list the existing components and helpers that match what the diff adds
+— grep for them — and only then judge. A component the repo already has, rebuilt here, is `"I"`,
+class `duplication`. Where to look:
+- Twig component classes `src/Web/UI/Component/*.php` (today `AiChip`, `Avatar`, `AvatarStack`,
+  `Button`, `Card`, `Chip`, `Dialog`, `EmptyState`, `SegmentedControl`, `StatusPill`,
+  `SwitchControl` — registered as `<twig:Switch>` because PHP reserves `switch` — `Tag`, `Toast`,
+  plus the enums `AvatarSize`, `ButtonSize`, `ButtonVariant`, `Group`).
+- Their templates `src/Web/UI/templates/components/*.html.twig` (Twig namespace `@Web`); page
+  templates `src/Web/UI/templates/` (`base.html.twig`, `home.html.twig`, `gallery.html.twig`) and
+  per module `src/<Module>/UI/templates/`. There is no top-level `templates/` folder.
+- Stimulus controllers `assets/controllers/` (today `dialog`, `menu`).
+- Styles `assets/styles/`: `tokens.css` (colour, type and spacing tokens), `fonts.css`, `base.css`,
+  `shell.css`, `components.css`, `gallery.css`.
 Then: semantic HTML, accessibility, framework idioms, avoidable client-side complexity, locale and
 date pitfalls, component and handler naming (by what the user sees; Stimulus actions by the user
 action they answer). CSS and template comments follow `reference/comments.md`.
 
-Repo rules (frontend.md, ux-principles.md, glossary.md, ADR-0007, CLAUDE.md):
+Repo rules (frontend.md, security.md, ux-principles.md, glossary.md, ADR-0007, CLAUDE.md, phase-00 hand-off notes):
 - Server-rendered Twig with Turbo Drive, Stimulus, Twig Components and Live Components (only where
   the server must recompute). AssetMapper and importmap, no bundler.
 - The design-system components are named after the prototype classes: `Button` (`.btn-*`, always a
@@ -80,25 +90,41 @@ Repo rules (frontend.md, ux-principles.md, glossary.md, ADR-0007, CLAUDE.md):
   `StatusPill`, `Avatar`/`AvatarStack` (4 faces then +N), `Card`, `NeedItem`, `GroupedList`
   (`aria-expanded`), `QueueBar`, `NextStepBox`, `PingCard`, `BellPopover`, `PersonPicker`, `Tracker`,
   `GroupBar`, `WorkloadBar`, `Screenshot` + `PinLayer`, `PinList`, `Thread`/`Message`/`Reply`/`Composer`,
-  `Dialog` (native `<dialog>`, focus trap and return), `Toast` (`role="status"`, one at a time),
-  `Switch` (`role="switch"`, `aria-checked`), `EmptyState`.
+  `Dialog` (native `<dialog>`, focus trap and return), `Toast` (`role="status"`, one at a time; markup
+  only until the first real toast brings the 3.6 s timer), `Switch` (`role="switch"`, `aria-checked`),
+  `EmptyState`. A new component goes in that folder pair and on the dev/test gallery `/_gallery`
+  (`config/routes/component_gallery.yaml`, 404 in prod), which shows every built component.
+- Stimulus controllers stay small (under about 150 lines), are named in kebab-case and have a
+  Playwright test for their behaviour.
 - Colours, type and spacing come from the tokens in `assets/styles/tokens.css` (same names as the
-  prototype: `--primary`, `--surface`, `--s-low`, `--waiting-container` …), light and dark. A new
-  hard-coded colour or font is `"I"`, class `ui-fidelity`. The five group colours are fixed.
+  prototype: `--primary`, `--surface`, `--s-low`, `--waiting-container` …), light and dark; the one
+  named extra is `--on-error`. A new hard-coded colour or font is `"I"`, class `ui-fidelity`. The
+  five group colours are fixed tokens `--group-*` (status pills: 30 px high, pill radius, a
+  decorative dot in the group colour). Theme switching uses `data-theme`, which works only on `:root`.
+- **Stylesheets** are linked from `base.html.twig` with `asset()`; `assets/app.js` imports no CSS,
+  because a CSS import becomes a `data:` URL in the importmap that the CSP forbids. A CSS import in
+  JS, or a remote script or link (`HomePageShellTest` fails on one), is `"I"`.
 - **Prototype fidelity:** the screen must match the prototype's layout, words and behaviour unless a
-  requirement or ADR says otherwise (then the difference is in the task's hand-off notes).
-  Prototype-only devices ("view as", "Big team", simulated screenshots, made-up pings, example
-  teams) are never built.
+  requirement or ADR says otherwise (then the difference is in the task's hand-off notes; for
+  example text never below 12 px wins over smaller prototype sizes). Prototype-only devices ("view
+  as", "Big team", simulated screenshots, made-up pings, example teams) are never built.
 - Accessibility (WCAG 2.2 AA): colour is never the only signal (groups and verdicts carry text);
-  visible focus ring `2px solid var(--primary)`, offset 2 px, not hidden by the sticky header;
-  targets at least 24×24 px; works at 360 px width and 200% zoom without horizontal scroll; base
-  size 15 px, never below 12 px; `PinList` is the text equivalent of pins.
-- CSP: no inline scripts, no inline event handlers (`onclick=` …), nonce on every `<script>`; no
-  `|raw`; no third-party hosts (fonts are self-hosted).
+  visible focus ring `2px solid var(--primary)`, offset 2 px, not hidden by the sticky header (it can
+  wrap to two rows; `scroll-padding-top` uses `--header-height-max` from `base.css`); targets at
+  least 24×24 px; works at 360 px width and 200% zoom without horizontal scroll; base size 15 px,
+  never below 12 px; `PinList` is the text equivalent of pins.
+- **CSP:** no inline scripts, no inline event handlers (`onclick=` …), no `|raw`; no third-party
+  hosts (fonts are self-hosted WOFF2). Every `<script>` carries the request nonce:
+  `<script nonce="{{ csp_nonce() }}">`, and the import map is printed with
+  `{{ importmap('app', {nonce: csp_nonce()}) }}` (nonce on the JSON and the entry module;
+  `modulepreload` links need none). A script tag without it is `"I"`, class `injection`.
 - Turbo: `<meta name="turbo-cache-control" content="no-cache">` on pages that must be fresh (Home,
   ticket page). The `local-ai` controller never runs on page load.
 - Templates never contain bucket URLs (use `/media/{id}/{variant}`); every `<img>` has
   `width`/`height`, `loading="lazy"` below the fold; templates never trigger lazy loading.
+- **Browser tests:** Playwright specs in `tests/e2e` (`shell`, `components`, `gallery`; run with
+  `make e2e` against the running stack). A visible change to the shell or gallery updates the Linux
+  screenshot baselines in `tests/e2e/screenshots` (`make e2e-update`), or the specs fail.
 - **Copy:** plain English, short, active voice, product words (ticket, pin, round, verdict, step,
   turn, check, planning). Never "issue", "annotation", "marker", "status transition", "triage",
   "resolution", "watcher", "backlog grooming", "epic", "story points". No exclamation marks except rare
@@ -107,8 +133,8 @@ Repo rules (frontend.md, ux-principles.md, glossary.md, ADR-0007, CLAUDE.md):
 <!-- hygiene-machine-checked:start — managed by /hygiene-learn; do not hand-edit -->
 Machine-checked in this repo — the deterministic gate already catches these; do NOT
 spend review effort flagging instances of exactly these classes:
-- injection: inline event handlers (onclick= and the like) in templates
-- other-copy: "Oops" in product copy
 - a11y: font-size below 12px in CSS or Twig
 - a11y: a hard-coded hex colour in a CSS rule instead of a tokens.css token
+- injection: inline event handlers (onclick= and the like) in templates
+- other-copy: "Oops" in product copy
 <!-- hygiene-machine-checked:end -->

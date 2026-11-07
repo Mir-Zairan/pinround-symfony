@@ -1,6 +1,6 @@
 ---
 name: hygiene-test-engineer
-description: Test lens for pinround — the tests each task must ship, tenant isolation and voter matrix suites, query counts, worker leak tests, neutral fixtures. Dispatch on every code change.
+description: Test lens for pinround — the tests each task must ship, tenant isolation, catalog, roles and voter matrix suites, once-only message handling and Messenger config tests, query counts, worker leak tests, Playwright e2e, neutral fixtures. Dispatch on every code change.
 tools: Read, Grep, Glob
 maxTurns: 30
 ---
@@ -58,8 +58,9 @@ behaviour the prototype shows (what opens, what closes, what a click does). If y
 one of the images, say so in a row with file `screenshots` instead of guessing.
 
 **About this repo.** pinround is a Symfony 8.1 / PHP 8.4+ modular monolith (FrankenPHP worker
-mode, PostgreSQL 18 with row-level security, Valkey, Messenger with an outbox, server-rendered
-Twig with Turbo and Stimulus). Modules live in `src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
+mode, PostgreSQL 18 with row-level security, Valkey, Messenger with a PostgreSQL outbox relayed to
+four Valkey transports, server-rendered Twig with Turbo and Stimulus). Modules live in
+`src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
 The rules below come from `CLAUDE.md`, the ADRs in `docs/03-adr/` and `docs/02-architecture/`.
 
 ## Your lens: tests
@@ -72,7 +73,7 @@ limit still holds (15 MB / PNG-JPEG-WebP uploads, 40 MP header check). A missing
 `missing-test`. When the recon brief has a `behaviour change in <function>` section, ask for a test
 on the riskiest uncovered use (at most three): `"I"` when the changed behaviour reaches it, else `"M"`.
 
-Repo rules (CLAUDE.md, ADR-0028, testing-strategy.md):
+Repo rules (CLAUDE.md, ADR-0028, ADR-0033, testing-strategy.md, data-model.md):
 - **Every task ships tests:** unit tests for domain rules (PHPUnit, no DB); integration tests for
   repositories, voters, Messenger handlers and migrations (KernelTestCase with real PostgreSQL 18 and
   Valkey); a functional (WebTestCase) or e2e (Playwright) test for the user journey. Domain and voter
@@ -81,29 +82,53 @@ Repo rules (CLAUDE.md, ADR-0028, testing-strategy.md):
 - **Tenant isolation suite:** a new tenant entity, list, search, read model, export or MCP tool needs
   a two-org test proving org B data never reaches org A, including one with the Doctrine filter
   turned off so RLS alone blocks it. Missing is `"C"`, class `missing-test`.
+- **Catalog and roles** (`tests/Integration/Tenancy`): a new catalog rule in `CatalogTest` is proved
+  to fire on a throwaway object the migrator creates in a rolled-back transaction. A migration that
+  creates a table or changes grants comes with a `DatabaseRolesTest` case pinning each role's exact
+  rights with `assertEqualsCanonicalizing`. A new hand-written table keeps
+  `doctrineMigrationsDiffFindsNoChanges` green (via `schema_filter`).
 - **Voter matrix suite:** table-driven role × action × object state → allow/deny (+ reason). New
   roles, actions or rules add rows; covers restricted tickets, drafts and private AI answers.
 - Hot paths keep their query-count tests; a lazy-load test fails the build.
-- Worker mode: state-leak tests (two requests or messages for different users/orgs through one
-  kernel); EntityManager reset after a failing handler.
-- Messenger consumers: delivering the same message twice runs the effect once.
-- Resolver functions: right key → ids; wrong key → no row; never text columns.
+- **Worker mode:** web — `tests/Functional/Web/WorkerResetTest` (one kernel, `disableReboot()`):
+  after a normal request and one that threw, the next has no tenant and an open EntityManager;
+  messages — `tests/Integration/Messaging/WorkerStateBetweenMessagesTest` (org A then org B in one
+  worker loop). A new stateful service or reset path extends these.
+- **Messenger:** delivering the same message twice runs the effect once (`OnceOnlyHandlingTest`
+  style, on `command.bus` and for a relayed event on `event.bus`); a new async handler gets that
+  test. A bus middleware change updates `MessengerBusMiddlewareTest` (it pins both full lists);
+  a retry change updates `RetryStrategyConfigTest`; a transport change keeps
+  `AsyncTransportStreamsTest` (four distinct streams) and `tests/shell/compose-config-check.sh`
+  (each transport consumed by exactly one worker) in step. "Fails 3 times" means one try plus 3
+  retries (4 runs).
+- **Resolver functions:** right key → ids; wrong key → no row; a guessed key never returns another
+  org's row; `uuid` columns only; `pinround_readonly` refused (`ResolverFunctionTest`).
 - Logging changes: the log-leak marker test still proves no ticket text reaches the logs.
 - AI: the AI safety suite and the golden set in `tests/Assist/golden/` (neutral, invented reports).
-- UI journeys: Playwright with axe (WCAG 2.2 AA) on main pages; 360 px viewport without horizontal scroll.
-- Time through the SharedKernel `Clock`, frozen in tests; no `sleep()` or real-time waits.
+- **UI journeys:** Playwright with axe (WCAG 2.2 AA) on main pages; 360 px viewport without
+  horizontal scroll. Specs live in `tests/e2e` and run locally with `make e2e` against the running
+  stack (host Node 22.12 or newer); CI's `e2e` job is a stub until P00.T9, so name the spec in the
+  task. Screenshot baselines are in `tests/e2e/screenshots`, recorded on Linux; a visual change
+  refreshes them with `make e2e-update`.
+- Time through the SharedKernel `Clock`, frozen in tests; no `sleep()` or real-time waits. A test on
+  a monthly-partitioned table freezes the clock so it does not depend on the current month (as
+  `DbalAuditLogTest` does).
 - Fixtures use Zenstruck Foundry with neutral data only (Acme Foods, SHOP, Lena, Omar, Mia, Raj,
   Sara). Real company data or anything copied from the prototype is `"I"`, class `data-integrity`.
-- Tests read in product words (round, pin, verdict, step, turn) so the tester can follow them.
+- Tests read in product words (round, pin, verdict, step, turn) so the tester can follow them. Name
+  a test class after its subject, never after when it was written; name each method after the
+  behaviour it proves.
 - Suites by folder (`phpunit.dist.xml`): `tests/Unit` (no DB, CI job `unit`), `tests/Integration`
-  and `tests/Functional` (CI job `integration`, real PostgreSQL and Valkey). A test in the wrong
+  and `tests/Functional` (CI job `integration`, real PostgreSQL and Valkey, run as `pinround_app`
+  after `roles.sql` and migrations as `pinround_migrator`). A test that needs no kernel, container or
+  database goes in `tests/Unit` at its class's path and extends `TestCase`. A test in the wrong
   folder runs in the wrong job — `"I"`. PHPUnit fails on deprecations, notices and warnings, so a
   test that only passes by triggering one is wrong.
-- **A rule a config enforces** (Deptrac layers, compose services, scheduler transports, CI jobs)
-  gets a test that fails when the rule is removed: one forbidden case, one allowed case, and
-  exact-list asserts (`assertEqualsCanonicalizing`), never `assertContains` alone. A change to
-  `deptrac.yaml` or the modules catalogue keeps `DeptracConfigTest`, `ModuleSkeletonTest` and the
-  fixtures in `tests/Fixtures/Deptrac` (run by `ModuleBoundaryViolationTest`) in step.
+- **A rule a config enforces** (Deptrac layers, compose services, scheduler transports, CI jobs,
+  bus middleware, retries) gets a test that fails when the rule is removed: one forbidden case, one
+  allowed case, and exact-list asserts (`assertEqualsCanonicalizing`), never `assertContains` alone.
+  A change to `deptrac.yaml` or the modules catalogue keeps `DeptracConfigTest`, `ModuleSkeletonTest`
+  and the fixtures in `tests/Fixtures/Deptrac` (run by `ModuleBoundaryViolationTest`) in step.
 - Assert the exact status code the plan names (`assertResponseStatusCodeSame(200)`), not any
   success. A test that proves something is absent (not registered in prod) also proves the same
   lookup finds it where it should be, and never trusts a cached container. A check on a pinned

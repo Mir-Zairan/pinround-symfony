@@ -1,6 +1,6 @@
 ---
 name: hygiene-architect
-description: Design lens for pinround — module boundaries (Api or events only), layer rules, events and queued shapes, ADR discipline, design-level naming. Dispatch on new classes or dirs, controllers, repositories, events, Api changes or cross-module edits.
+description: Design lens for pinround — module boundaries (Api or events only), layer rules, SharedKernel plumbing (tenancy, request transaction, once-only handling), events, queued shapes and the outbox relay, ADR discipline, design-level naming. Dispatch on new classes or dirs, controllers, repositories, events, Messenger messages or config, Api changes or cross-module edits.
 tools: Read, Grep, Glob
 maxTurns: 30
 ---
@@ -58,8 +58,9 @@ behaviour the prototype shows (what opens, what closes, what a click does). If y
 one of the images, say so in a row with file `screenshots` instead of guessing.
 
 **About this repo.** pinround is a Symfony 8.1 / PHP 8.4+ modular monolith (FrankenPHP worker
-mode, PostgreSQL 18 with row-level security, Valkey, Messenger with an outbox, server-rendered
-Twig with Turbo and Stimulus). Modules live in `src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
+mode, PostgreSQL 18 with row-level security, Valkey, Messenger with a PostgreSQL outbox relayed to
+four Valkey transports, server-rendered Twig with Turbo and Stimulus). Modules live in
+`src/<Module>/{Api,Domain,Application,Infrastructure,UI}`.
 The rules below come from `CLAUDE.md`, the ADRs in `docs/03-adr/` and `docs/02-architecture/`.
 
 ## Your lens: design and boundaries
@@ -104,16 +105,46 @@ Repo rules (ADR-0002, ADR-0032, modules.md "Deptrac rules", CLAUDE.md):
   module's entity (store the id value object); using another module's repository or Domain class.
 - Read models that must be instant are updated synchronously in the same transaction
   (`Insight\Api\TurnProjector`); everything else reacts to outbox events.
-- Events are past-tense facts; consumers are idempotent. Event classes are public, so a payload
-  change adds fields only; removing or renaming a field needs a new event version. Changing an event
-  or Messenger message shape otherwise breaks queued messages in the outbox — `"I"`, class
-  `api-contract`.
+- **SharedKernel stays tiny** (modules.md): a type joins it only when three or more modules need it.
+  It holds the id value objects (UUIDv7), `Clock`, `TenantContext` (callers only fill it), the
+  `DomainEvent` base, `Result`/`Problem`, and `OnceOnlyHandling` (Application) with `MessageIdStamp`,
+  `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in
+  `Infrastructure/Messenger`. It owns one table, `processed_message`. Reuse these; a module-local
+  copy of tenancy, transaction or dedupe plumbing is `"I"`, class `duplication`.
+- **Tenant flow** (architecture-overview.md, data-model.md "How the tenant is set", ADR-0005): the
+  firewall (kernel.request priority 8, non-lazy) fills `TenantContext`; `RequestTransaction`
+  (priority 7) begins one transaction per main request; the DBAL driver middleware `TenantMiddleware`
+  runs `set_config` at each outermost `BEGIN`; `TenantFilter` scopes ORM queries on `TenantOwned`
+  entities. Code that sets `app.org_id` itself, fills the tenant after priority 7, or opens its own
+  request-wide transaction bypasses this flow — `"I"`, class `design`.
+- Events are past-tense facts. **Consumers are idempotent:** an async handler wraps its effect in
+  `OnceOnlyHandling::runOnce(<stable handler name>, <effect>)`, keyed by the `MessageIdStamp` id, or
+  upserts by natural key (modules.md, ADR-0033 "Idempotency key"; not ADR-0009's event id). Event
+  classes are public, so a payload change adds fields only; removing or renaming a field needs a new
+  event version. Changing an event or Messenger message shape otherwise breaks queued messages in
+  the outbox — `"I"`, class `api-contract`.
+- **Transports and the relay (ADR-0033, supersedes ADR-0009 in part):** domain events go to `outbox`
+  (PostgreSQL, same transaction); `RelayOutboxMessageMiddleware` forwards each to the transport
+  named for its class (then parents, then interfaces) in the `outbox_relay.target_transports`
+  parameter. Async work runs on `async_notify`, `async_integration`, `async_media` or `async_ai`;
+  `failed` holds spent retries. A new relayed event without a route (it fails into `failed`), a
+  route back to `outbox`, or the old `async` / `heavy` names is `"I"`, class `design`.
+- **Bus middleware** (messenger.yaml): both buses set `default_middleware: false` and list every
+  middleware by hand, in an order the tenancy and dedupe rules depend on; `MessengerBusMiddlewareTest`
+  pins both lists. A middleware added, removed or moved without that test changing is `"I"`.
+- **Audit** (modules.md, ADR-0026): actions with no domain event call `Audit\Api\AuditLog::record`
+  with an `AuditEntry` built by `byUser`, `byToken` or `bySystem`; it writes in the caller's
+  transaction and refuses an entry of another organization. Writing `aud_event` any other way is `"I"`.
 - AI prompt templates are versioned files in `src/Assist/Infrastructure/Prompt/` with output schemas
   `{feature}.v{n}.schema.json` beside them; editing a released version in place is `"I"`.
 - UI is server-rendered (ADR-0007): Twig, Turbo, Stimulus, Twig and Live Components; no SPA layer.
+  Design-system components live in `src/Web/UI/Component/` with templates in
+  `src/Web/UI/templates/components/` (frontend.md).
 - A change that alters an architecture decision needs a new ADR; an accepted ADR's decision is
   never edited, only superseded (the old ADR gets a "Superseded in part by" line, and the ADR
   README index lists the new one). When code changes behaviour that a doc, ADR, README status line
   or phase hand-off note describes, that text changes in the same commit; a doc that names a check
-  states exactly what the script enforces (`"I"`, class `docs`).
-- Worker mode (ADR-0008): services that hold state implement `ResetInterface`.
+  states exactly what the script enforces; a ticked phase criterion, its Files line and its steps
+  match what was built (`"I"`, class `docs`).
+- Worker mode (ADR-0008): services that hold state implement `ResetInterface` (they are reset by the
+  container's `services_resetter` between requests and messages).
