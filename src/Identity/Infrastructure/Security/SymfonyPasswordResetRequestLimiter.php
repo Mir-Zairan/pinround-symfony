@@ -30,7 +30,7 @@ final readonly class SymfonyPasswordResetRequestLimiter implements PasswordReset
         private RateLimiterFactoryInterface $perIp,
         #[Autowire(param: 'identity.password_reset_per_ip_minutes')]
         private int $perIpMinutes,
-        private LoginKeyHasher $keyHasher,
+        private ThrottleKeyHasher $keyHasher,
     ) {
     }
 
@@ -42,7 +42,7 @@ final readonly class SymfonyPasswordResetRequestLimiter implements PasswordReset
         $waits = array_filter([
             self::minutesToWait($this->perIp->create($this->keyHasher->hexOf($clientIp))->consume(), $this->perIpMinutes),
             self::minutesToWait(
-                $this->perEmailAndIp->create($this->keyHasher->hexOf(LoginKeyHasher::normalizeEmail($email).'-'.$clientIp))->consume(),
+                $this->perEmailAndIp->create($this->keyHasher->hexOf(ThrottleKeyHasher::normalizeEmail($email).'-'.$clientIp))->consume(),
                 $this->perEmailAndIpMinutes,
             ),
         ], static fn (?int $minutes): bool => null !== $minutes);

@@ -4,25 +4,25 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Identity;
 
+use App\Identity\Application\PasswordResetRequested;
 use App\Identity\Infrastructure\Mail\SymfonyPasswordResetMailer;
 use App\Identity\UI\Controller\LoginController;
 use App\Identity\UI\Controller\PasswordResetController;
 use App\Tests\Factory\Identity\UserFactory;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Twig\Mime\TemplatedEmail;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
-use Symfony\Component\DomCrawler\Crawler;
-use Symfony\Component\Mailer\Event\MessageEvent;
+use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 use Symfony\Component\Mime\Email;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
- * "Forgot password" and the reset form through the real firewall, over HTTPS. The request counters live on the state
- * Valkey and outlast a test run, so every client asks from its own random IP.
+ * "Forgot password" and the reset form through the real firewall, over HTTPS. The forgot request only queues a
+ * PasswordResetRequested on async_notify (in memory in tests); the tests hand it to the bus as worker-notify would.
+ * The request counters live on the state Valkey and outlast a test run, so every client asks from its own random IP.
  */
 final class PasswordResetTest extends WebTestCase
 {
@@ -31,8 +31,11 @@ final class PasswordResetTest extends WebTestCase
 
     private const string NEW_PASSWORD = 'a much longer new passphrase';
 
+    /** @var list<Envelope> what the last askForLink() queued */
+    private array $queuedRequests = [];
+
     #[Test]
-    public function aKnownEmailGetsOneQueuedEmailAndTheSamePageAsAnUnknownBlockedOrPasswordlessOne(): void
+    public function everyEmailGetsTheSameAnswerAndQueuesOneRequestButOnlyAnActiveUserWithAPasswordGetsMail(): void
     {
         $client = self::httpsClient();
         $known = $this->createUserWithPassword('Lena Berg');
@@ -48,17 +51,51 @@ final class PasswordResetTest extends WebTestCase
             'blocked' => [$blocked->email()->toString(), 0],
             'without password' => [$withoutPassword->email()->toString(), 0],
             'not an email' => ['not an email', 0],
-        ] as $case => [$email, $queuedEmails]) {
-            $page = $this->askForLink($client, $email);
+        ] as $case => [$email, $sentEmails]) {
+            $this->askForLink($client, $email);
             self::assertResponseStatusCodeSame(200, $case);
-            self::assertQueuedEmailCount($queuedEmails, message: $case);
-            self::assertEmailCount(0, message: $case);
-            $pages[$case] = $page->filter('main')->text();
+            self::assertSame('/password/forgot', $client->getRequest()->getPathInfo(), $case);
+            self::assertCount(1, $this->queuedRequests, $case);
+            self::assertInstanceOf(PasswordResetRequested::class, $this->queuedRequests[0]->getMessage(), $case);
+            self::assertQueuedEmailCount(0, message: $case);
+            $pages[$case] = $client->getCrawler()->filter('main')->text();
+
+            self::assertCount($sentEmails, $this->deliverQueuedRequests(), $case);
         }
 
         self::assertSame(PasswordResetController::LINK_SENT, $this->lastCrawlerText($client, 'main [role="status"]'));
         self::assertCount(1, array_unique($pages));
-        self::assertStringContainsString(PasswordResetController::LINK_SENT, $pages['known'] ?? '');
+        self::assertCount(0, $client->getCrawler()->filter('main input[name="email"]'));
+    }
+
+    #[Test]
+    public function aRequestDeliveredTwiceSavesOneResetAndSendsOneEmail(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Omar Haddad');
+        $this->askForLink($client, $user->email()->toString());
+        self::assertCount(1, $this->queuedRequests);
+        $this->queuedRequests[] = $this->queuedRequests[0];
+
+        $sent = $this->deliverQueuedRequests();
+
+        self::assertCount(1, $sent);
+        self::assertSame(1, $this->migrator()->fetchOne('SELECT count(*) FROM idn_password_reset WHERE user_id = ?', [$user->id()->toString()]));
+    }
+
+    #[Test]
+    public function reloadingTheLinkSentPageQueuesNothingMore(): void
+    {
+        $client = self::httpsClient();
+        $this->askForLink($client, 'nobody.'.bin2hex(random_bytes(4)).'@acme-foods.example');
+        self::assertResponseStatusCodeSame(200);
+
+        $client->request('GET', '/password/forgot');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([], self::takeQueuedRequests());
+        self::assertCount(1, $client->getCrawler()->filter('main input[name="email"]'));
+        self::assertCount(0, $client->getCrawler()->filter('main [role="status"]'));
     }
 
     #[Test]
@@ -68,20 +105,17 @@ final class PasswordResetTest extends WebTestCase
         $client->setServerParameter('HTTP_HOST', 'evil.example');
         $user = $this->createUserWithPassword('Omar Haddad');
         $this->askForLink($client, $user->email()->toString());
-        self::assertResponseStatusCodeSame(200);
-        $queued = self::getMailerMessage();
-        self::assertInstanceOf(TemplatedEmail::class, $queued);
-        $link = self::linkIn($queued);
 
-        $sent = $this->sendQueuedEmailAsWorkerNotifyWould();
+        $sent = $this->deliverQueuedRequests();
 
+        self::assertCount(1, $sent);
+        $link = self::linkIn($sent[0]);
         self::assertMatchesRegularExpression('~^http://localhost/password/reset/[A-Za-z0-9_-]{43}$~', $link);
-        self::assertSame([$user->email()->toString()], array_map(static fn ($address): string => $address->getAddress(), $sent->getTo()));
-        self::assertSame('no-reply@pinround.localhost', $sent->getFrom()[0]->getAddress());
-        self::assertSame(SymfonyPasswordResetMailer::SUBJECT, $sent->getSubject());
-        self::assertStringContainsString($link, (string) $sent->getTextBody());
-        self::assertStringContainsString('href="'.$link.'"', (string) $sent->getHtmlBody());
-        self::assertStringContainsString('60 minutes', (string) $sent->getTextBody());
+        self::assertSame([$user->email()->toString()], array_map(static fn ($address): string => $address->getAddress(), $sent[0]->getTo()));
+        self::assertSame('no-reply@pinround.localhost', $sent[0]->getFrom()[0]->getAddress());
+        self::assertSame(SymfonyPasswordResetMailer::SUBJECT, $sent[0]->getSubject());
+        self::assertStringContainsString('href="'.$link.'"', (string) $sent[0]->getHtmlBody());
+        self::assertStringContainsString('60 minutes', (string) $sent[0]->getTextBody());
     }
 
     #[Test]
@@ -286,7 +320,7 @@ final class PasswordResetTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(422);
         self::assertSame(LoginController::FORM_EXPIRED, $this->lastCrawlerText($client, '[role="alert"]'));
-        self::assertQueuedEmailCount(0);
+        self::assertSame([], self::takeQueuedRequests());
     }
 
     #[Test]
@@ -298,14 +332,14 @@ final class PasswordResetTest extends WebTestCase
         foreach ([$email, strtoupper($email), $email, ucfirst($email), $email] as $typedEmail) {
             $this->askForLink($client, $typedEmail);
             self::assertResponseStatusCodeSame(200);
-            self::assertQueuedEmailCount(1);
+            self::assertCount(1, $this->queuedRequests);
         }
 
         $this->askForLink($client, $email);
 
         self::assertResponseStatusCodeSame(429);
         self::assertSame('Too many tries. Wait 15 minutes.', $this->lastCrawlerText($client, '[role="alert"]'));
-        self::assertQueuedEmailCount(0);
+        self::assertSame([], $this->queuedRequests);
         self::assertCount(0, $client->getCrawler()->filter('main [role="status"]'));
     }
 
@@ -350,7 +384,7 @@ final class PasswordResetTest extends WebTestCase
         self::assertResponseRedirects('/', 302);
         $client->request('POST', '/password/forgot', ['email' => 'lena@acme-foods.example']);
         self::assertResponseRedirects('/', 302);
-        self::assertQueuedEmailCount(0);
+        self::assertSame([], self::takeQueuedRequests());
     }
 
     #[Test]
@@ -364,30 +398,70 @@ final class PasswordResetTest extends WebTestCase
         self::assertSame('Forgot password?', $page->filter('main a[href="/password/forgot"]')->text());
     }
 
-    private function askForLink(KernelBrowser $client, string $email): Crawler
+    /**
+     * Asks on the form and keeps what the request queued, before a redirect is followed: the client's next request
+     * boots a new kernel, whose in-memory transport is empty.
+     */
+    private function askForLink(KernelBrowser $client, string $email): void
     {
         $client->request('GET', '/password/forgot');
         self::assertResponseStatusCodeSame(200);
+        $client->submitForm('Send link', ['email' => $email]);
+        $this->queuedRequests = self::takeQueuedRequests();
+        if ($client->getResponse()->isRedirect()) {
+            self::assertResponseRedirects('/password/forgot', 302);
+            $client->followRedirect();
+        }
+    }
 
-        return $client->submitForm('Send link', ['email' => $email]);
+    /**
+     * @return list<Envelope>
+     */
+    private static function takeQueuedRequests(): array
+    {
+        $transport = self::getContainer()->get('messenger.transport.async_notify');
+        self::assertInstanceOf(InMemoryTransport::class, $transport);
+        $sent = array_values([...$transport->getSent()]);
+        $transport->reset();
+
+        return $sent;
+    }
+
+    /**
+     * Hands the queued requests to the bus as worker-notify receiving them from async_notify would; the test env's
+     * null mailer transport then renders and "sends" the emails.
+     *
+     * @return list<Email> every email sent since the current kernel booted
+     */
+    private function deliverQueuedRequests(): array
+    {
+        foreach ($this->queuedRequests as $envelope) {
+            self::getContainer()->get('command.bus')->dispatch($envelope->with(new ReceivedStamp('async_notify')));
+        }
+        $this->queuedRequests = [];
+
+        $sent = [];
+        foreach (self::getMailerEvents() as $event) {
+            $message = $event->getMessage();
+            if (!$event->isQueued() && $message instanceof Email) {
+                $sent[] = $message;
+            }
+        }
+
+        return $sent;
     }
 
     private function linkFor(KernelBrowser $client, string $email): string
     {
         $this->askForLink($client, $email);
         self::assertResponseStatusCodeSame(200);
-        self::assertQueuedEmailCount(1);
-        $email = self::getMailerMessage();
-        self::assertInstanceOf(TemplatedEmail::class, $email);
+        $sent = $this->deliverQueuedRequests();
+        self::assertCount(1, $sent);
 
-        return self::linkIn($email);
+        return self::linkIn($sent[0]);
     }
 
-    /**
-     * The mailer logs a rendered copy of a queued email (rendering empties the context), so the link is read from its
-     * text part.
-     */
-    private static function linkIn(TemplatedEmail $email): string
+    private static function linkIn(Email $email): string
     {
         self::assertSame(1, preg_match('~https?://\S+/password/reset/[A-Za-z0-9_-]+~', (string) $email->getTextBody(), $match));
 
@@ -400,26 +474,6 @@ final class PasswordResetTest extends WebTestCase
         self::assertResponseRedirects('/password/reset', 302);
         $client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-    }
-
-    /**
-     * Hands the queued message to the bus as a worker receiving it from async_notify would; the test env's null mailer
-     * transport then renders and "sends" it.
-     */
-    private function sendQueuedEmailAsWorkerNotifyWould(): Email
-    {
-        $transport = self::getContainer()->get('messenger.transport.async_notify');
-        self::assertInstanceOf(InMemoryTransport::class, $transport);
-        $envelopes = $transport->getSent();
-        self::assertCount(1, $envelopes);
-        self::getContainer()->get('command.bus')->dispatch($envelopes[0]->with(new ReceivedStamp('async_notify')));
-
-        $sent = array_values(array_filter(self::getMailerEvents(), static fn (MessageEvent $event): bool => !$event->isQueued()));
-        self::assertCount(1, $sent);
-        $email = $sent[0]->getMessage();
-        self::assertInstanceOf(Email::class, $email);
-
-        return $email;
     }
 
     private function submitLogin(KernelBrowser $client, string $email, string $password): void
@@ -447,8 +501,9 @@ final class PasswordResetTest extends WebTestCase
     }
 
     /**
-     * A client that keeps its kernel, so the clock it is given stays in every service across requests. The clock
-     * starts at the real time: the session's own timestamps come from PHP's time().
+     * A client that keeps its kernel, so the clock it is given stays in every service across requests, the handler
+     * of the queued request included. The clock starts at the real time: the session's own timestamps come from PHP's
+     * time().
      *
      * @return array{KernelBrowser, MockClock}
      */

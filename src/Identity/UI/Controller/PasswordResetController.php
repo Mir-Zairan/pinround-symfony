@@ -54,12 +54,15 @@ final class PasswordResetController extends AbstractController
         }
 
         try {
-            ($this->requestPasswordReset)($request->request->getString('email'), (string) $request->getClientIp(), $this->clock->now());
+            ($this->requestPasswordReset)($request->request->getString('email'), (string) $request->getClientIp());
         } catch (TooManyPasswordResetRequests $refusal) {
             return $this->renderForgot(errorMessage: LoginController::tooManyTriesFor($refusal->minutesToWait), status: Response::HTTP_TOO_MANY_REQUESTS);
         }
 
-        return $this->renderForgot(notice: self::LINK_SENT);
+        // Redirected, so reloading the page neither queues another request nor takes another try.
+        $this->addFlash('notice', self::LINK_SENT);
+
+        return $this->redirectToRoute('identity_password_forgot');
     }
 
     #[Route('/password/reset/{token}', name: 'identity_password_reset_token', methods: ['GET'])]
@@ -105,10 +108,9 @@ final class PasswordResetController extends AbstractController
         return $this->redirectToRoute('identity_login');
     }
 
-    private function renderForgot(?string $notice = null, ?string $errorMessage = null, int $status = Response::HTTP_OK): Response
+    private function renderForgot(?string $errorMessage = null, int $status = Response::HTTP_OK): Response
     {
         return $this->render('@Identity/password_forgot.html.twig', [
-            'notice' => $notice,
             'errorMessage' => $errorMessage,
         ], new Response(status: $status));
     }

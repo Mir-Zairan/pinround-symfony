@@ -28,7 +28,7 @@ final readonly class LoginAttemptRecorder
 
     public function __construct(
         private LoginAttempts $loginAttempts,
-        private LoginKeyHasher $keyHasher,
+        private ThrottleKeyHasher $keyHasher,
         private LoggerInterface $logger,
     ) {
     }
@@ -54,7 +54,7 @@ final readonly class LoginAttemptRecorder
         $email = $request->attributes->get(SecurityRequestAttributes::LAST_USERNAME);
         try {
             $this->loginAttempts->record(
-                $this->keyHasher->bytesOf(LoginKeyHasher::normalizeEmail(\is_string($email) ? $email : '')),
+                $this->keyHasher->bytesOf(ThrottleKeyHasher::normalizeEmail(\is_string($email) ? $email : '')),
                 $this->keyHasher->bytesOf((string) $request->getClientIp()),
                 $success,
             );

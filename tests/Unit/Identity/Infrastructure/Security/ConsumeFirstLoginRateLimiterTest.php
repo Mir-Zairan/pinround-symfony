@@ -6,7 +6,7 @@ namespace App\Tests\Unit\Identity\Infrastructure\Security;
 
 use App\Identity\Infrastructure\Security\ConsumeFirstLoginRateLimiter;
 use App\Identity\Infrastructure\Security\FixedWindowTryRefund;
-use App\Identity\Infrastructure\Security\LoginKeyHasher;
+use App\Identity\Infrastructure\Security\ThrottleKeyHasher;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\RateLimiter\PeekableRequestRateLimiterInterface;
@@ -38,7 +38,7 @@ final class ConsumeFirstLoginRateLimiterTest extends TestCase
             new RateLimiterFactory(['id' => 'login_per_ip', 'policy' => 'fixed_window', 'limit' => 50, 'interval' => '60 minutes'], $storage, $lockFactory),
             60,
             new FixedWindowTryRefund($storage, $lockFactory),
-            new LoginKeyHasher('the-app-secret'),
+            new ThrottleKeyHasher('the-app-secret'),
         );
     }
 

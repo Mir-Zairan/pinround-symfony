@@ -116,9 +116,9 @@ framework:
                 retry_strategy: *provider_retry
 
         routing:
-            # Mail is sent by worker-notify, so a request never waits on SMTP. Mail sent with no organization set (the
-            # password reset) carries no TenantStamp; the tenant middleware lets it through and sends it with none set.
-            Symfony\Component\Mailer\Messenger\SendEmailMessage: async_notify
+            # Sent straight from the request, not through the outbox: that request writes nothing to the database. It
+            # is dispatched with no organization set, so it carries no TenantStamp and is handled with none set.
+            App\Identity\Application\PasswordResetRequested: async_notify
 
 when@test:
     parameters:

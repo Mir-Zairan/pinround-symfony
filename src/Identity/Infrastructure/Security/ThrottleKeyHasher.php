@@ -11,7 +11,7 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * counters in Valkey and the idn_login_attempt rows hold it instead of the email or IP, which a leaked store would
  * otherwise show.
  */
-final readonly class LoginKeyHasher
+final readonly class ThrottleKeyHasher
 {
     public function __construct(
         #[Autowire(param: 'kernel.secret')]

@@ -42,7 +42,7 @@ final readonly class ConsumeFirstLoginRateLimiter implements RequestRateLimiterI
         #[Autowire(param: 'identity.login_per_ip_minutes')]
         private int $perIpMinutes,
         private FixedWindowTryRefund $perIpRefund,
-        private LoginKeyHasher $keyHasher,
+        private ThrottleKeyHasher $keyHasher,
     ) {
     }
 
@@ -83,7 +83,7 @@ final readonly class ConsumeFirstLoginRateLimiter implements RequestRateLimiterI
 
     private function perEmailAndIpLimiter(Request $request): LimiterInterface
     {
-        $email = LoginKeyHasher::normalizeEmail($request->attributes->getString(SecurityRequestAttributes::LAST_USERNAME));
+        $email = ThrottleKeyHasher::normalizeEmail($request->attributes->getString(SecurityRequestAttributes::LAST_USERNAME));
 
         return $this->perEmailAndIp->create($this->hash($email.'-'.$request->getClientIp()));
     }

@@ -21,8 +21,7 @@ final class SendTestMailCommandTest extends KernelTestCase
         $exitCode = $tester->execute([]);
 
         self::assertSame(0, $exitCode);
-        // Queued on async_notify (messenger.yaml); worker-notify sends it in dev.
-        self::assertQueuedEmailCount(1);
+        self::assertEmailCount(1);
         $email = self::getMailerMessage();
         self::assertNotNull($email);
         self::assertEmailAddressContains($email, 'to', SendTestMailCommand::RECIPIENT);

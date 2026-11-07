@@ -6,7 +6,7 @@ namespace App\Tests\Unit\Identity\Infrastructure\Security;
 
 use App\Identity\Domain\LoginAttempts;
 use App\Identity\Infrastructure\Security\LoginAttemptRecorder;
-use App\Identity\Infrastructure\Security\LoginKeyHasher;
+use App\Identity\Infrastructure\Security\ThrottleKeyHasher;
 use Doctrine\DBAL\Driver\Exception as DriverExceptionInterface;
 use Doctrine\DBAL\Exception\ConnectionLost;
 use PHPUnit\Framework\Attributes\Test;
@@ -47,7 +47,7 @@ final class LoginAttemptRecorderTest extends TestCase
     {
         $this->recorder->onLoginFailure($this->failure(self::loginRequest('  Omar@Acme-Foods.Example ')));
 
-        $hasher = new LoginKeyHasher(self::SECRET);
+        $hasher = new ThrottleKeyHasher(self::SECRET);
         self::assertSame([[$hasher->bytesOf('omar@acme-foods.example'), $hasher->bytesOf(self::IP), false]], $this->recorded);
         self::assertSame(32, \strlen($this->recorded[0][0]));
         self::assertNotSame('omar@acme-foods.example', $this->recorded[0][0]);
@@ -163,7 +163,7 @@ final class LoginAttemptRecorderTest extends TestCase
             }
         };
 
-        return new LoginAttemptRecorder($attempts, new LoginKeyHasher(self::SECRET), $logger);
+        return new LoginAttemptRecorder($attempts, new ThrottleKeyHasher(self::SECRET), $logger);
     }
 
     private static function loginRequest(string $email): Request

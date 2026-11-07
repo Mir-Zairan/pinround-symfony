@@ -10,7 +10,9 @@ use App\Identity\Domain\User;
 interface PasswordResetMailer
 {
     /**
-     * Queues the email with the link to /password/reset/{token}; the token is its only secret.
+     * Sends the email with the link to /password/reset/{token} at once; the token is its only secret.
+     *
+     * @throws \RuntimeException when the mail server refuses or cannot be reached
      */
     public function sendLink(User $user, PasswordResetToken $token): void;
 }

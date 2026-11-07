@@ -10,23 +10,23 @@ use App\Identity\Domain\PasswordResetToken;
 use App\Identity\Domain\User;
 use Symfony\Bridge\Twig\Mime\TemplatedEmail;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use Symfony\Component\Mailer\MailerInterface;
+use Symfony\Component\Mailer\Transport\TransportInterface;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Routing\RequestContext;
 use Symfony\Component\Routing\RouterInterface;
 
 /**
- * The reset email, plain text and HTML. The mailer queues it on async_notify (messenger.yaml), where worker-notify
- * renders and sends it; the From address comes from mailer.yaml. The link is built on DEFAULT_URI, never on the
- * request's Host header, which the person asking for the link controls.
+ * The reset email, plain text and HTML, sent straight to the mailer transport: it runs in worker-notify already
+ * (PasswordResetRequestedHandler), so it is not queued again. The From address comes from mailer.yaml. The link is
+ * built on DEFAULT_URI, never on a request context the router may still hold, whose Host a visitor controls.
  */
 final readonly class SymfonyPasswordResetMailer implements PasswordResetMailer
 {
     public const string SUBJECT = 'Reset your pinround password';
 
     public function __construct(
-        private MailerInterface $mailer,
+        private TransportInterface $mailerTransport,
         private RouterInterface $router,
         #[Autowire(env: 'DEFAULT_URI')]
         private string $defaultUri,
@@ -46,7 +46,7 @@ final readonly class SymfonyPasswordResetMailer implements PasswordResetMailer
                 'validMinutes' => PasswordReset::LIFETIME_MINUTES,
             ]);
 
-        $this->mailer->send($email);
+        $this->mailerTransport->send($email);
     }
 
     private function linkFor(PasswordResetToken $token): string
