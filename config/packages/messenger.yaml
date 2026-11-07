@@ -15,7 +15,9 @@ framework:
             # message held back by dispatch_after_current_bus is released after the organization is cleared, so it must
             # be stamped before, and the check then sees the stamp the message is sent with. MessageIdStampMiddleware
             # comes directly after dispatch_after_current_bus, so a message held back there is handled under its own
-            # id. MessengerBusMiddlewareTest fails for a bus that does not, and pins the full list.
+            # id. TracingMessengerMiddleware comes directly after add_bus_name_stamp_middleware, whose stamp names the bus,
+            # and before every other custom middleware, so its span also times the tenant ones.
+            # MessengerBusMiddlewareTest fails for a bus that does not, and pins the full list.
             # The lists are written by hand: re-check them against FrameworkExtension's defaults after a Symfony
             # upgrade, and add deduplicate_middleware if framework.lock is enabled.
             command.bus:
@@ -23,6 +25,7 @@ framework:
                 middleware:
                     - add_default_stamps_middleware
                     - add_bus_name_stamp_middleware
+                    - App\SharedKernel\Infrastructure\Tracing\TracingMessengerMiddleware
                     - reject_redelivered_message_middleware
                     - App\SharedKernel\Infrastructure\Messenger\AddTenantStampMiddleware
                     - App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware
@@ -44,6 +47,7 @@ framework:
                 middleware:
                     - add_default_stamps_middleware
                     - add_bus_name_stamp_middleware
+                    - App\SharedKernel\Infrastructure\Tracing\TracingMessengerMiddleware
                     - reject_redelivered_message_middleware
                     - App\SharedKernel\Infrastructure\Messenger\AddTenantStampMiddleware
                     - App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware

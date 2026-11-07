@@ -9,6 +9,7 @@ use App\SharedKernel\Infrastructure\Messenger\MessageIdStampMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\RelayOutboxMessageMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware;
+use App\SharedKernel\Infrastructure\Tracing\TracingMessengerMiddleware;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -40,6 +41,9 @@ final class MessengerBusMiddlewareTest extends KernelTestCase
             // a message retried from failed, and must stop the message before any handler or tenant switch.
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, 'messenger.middleware.failed_message_processing_middleware', RelayOutboxMessageMiddleware::class);
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, RelayOutboxMessageMiddleware::class, TenantStampMiddleware::class);
+            // The span names the bus from the stamp the bus-name middleware adds, and times everything after it.
+            self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, $busId.'.middleware.add_bus_name_stamp_middleware', TracingMessengerMiddleware::class);
+            self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, TracingMessengerMiddleware::class, 'messenger.middleware.reject_redelivered_message_middleware');
             // A message dispatch_after_current_bus holds back must be handled under its own id, not the one before it.
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, 'messenger.middleware.dispatch_after_current_bus', MessageIdStampMiddleware::class);
         }
@@ -55,6 +59,7 @@ final class MessengerBusMiddlewareTest extends KernelTestCase
                 $busId.'.middleware.traceable',
                 'messenger.middleware.add_default_stamps_middleware',
                 $busId.'.middleware.add_bus_name_stamp_middleware',
+                TracingMessengerMiddleware::class,
                 'messenger.middleware.reject_redelivered_message_middleware',
                 AddTenantStampMiddleware::class,
                 RejectMessageForAnotherTenantMiddleware::class,

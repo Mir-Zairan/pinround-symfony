@@ -36,6 +36,19 @@ services:
         class: App\SharedKernel\Infrastructure\Health\ValkeyAnswers
         arguments: ['state_valkey', '%env(MESSENGER_TRANSPORT_DSN)%']
 
+    # Tracing (ADR-0029). An empty OTEL_EXPORTER_OTLP_ENDPOINT turns it off. The OTEL_* values are read here and
+    # nowhere else: the SDK's own environment autoloading stays off (OTEL_PHP_AUTOLOAD_ENABLED is never set).
+    App\SharedKernel\Infrastructure\Tracing\TracerProviderFactory:
+        arguments:
+            $endpoint: '%env(OTEL_EXPORTER_OTLP_ENDPOINT)%'
+            $serviceName: '%env(OTEL_SERVICE_NAME)%'
+            $samplingRatio: '%env(OTEL_TRACES_SAMPLER_ARG)%'
+            $protocol: '%env(OTEL_EXPORTER_OTLP_PROTOCOL)%'
+            $exporter: ~
+            $httpClient: ~
+    OpenTelemetry\SDK\Trace\TracerProviderInterface:
+        factory: ['@App\SharedKernel\Infrastructure\Tracing\TracerProviderFactory', 'create']
+
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
@@ -48,6 +61,24 @@ when@test:
             arguments: ['state_valkey', '%env(TEST_STATE_VALKEY_DSN)%']
             autoconfigure: true
 
+        # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
+        tracing.in_memory_exporter:
+            class: OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter
+            public: true
+        App\SharedKernel\Infrastructure\Tracing\TracerProviderFactory:
+            autowire: true
+            arguments:
+                $endpoint: ''
+                $serviceName: '%env(OTEL_SERVICE_NAME)%'
+                $samplingRatio: '%env(OTEL_TRACES_SAMPLER_ARG)%'
+                $protocol: '%env(OTEL_EXPORTER_OTLP_PROTOCOL)%'
+                $exporter: '@tracing.in_memory_exporter'
+                $httpClient: ~
+        # Redefined only to make it public; autoconfigure keeps it tagged as resettable.
+        App\SharedKernel\Infrastructure\Tracing\CurrentSpan:
+            autoconfigure: true
+            public: true
+
         # Test-only controllers behind config/routes/test_fixtures.yaml.
         App\Tests\Fixtures\Http\:
             resource: '../tests/Fixtures/Http/*Controller.php'
@@ -57,6 +88,11 @@ when@test:
         # Test-only message handlers, used by TenantStampedMessageTest through the real bus.
         App\Tests\Fixtures\Messenger\:
             resource: '../tests/Fixtures/Messenger/*Handler.php'
+            autowire: true
+            autoconfigure: true
+
+        # Test-only handler of the Messenger span tests (tests/Integration/Tracing).
+        App\Tests\Fixtures\Tracing\TracedProbeMessageHandler:
             autowire: true
             autoconfigure: true
 

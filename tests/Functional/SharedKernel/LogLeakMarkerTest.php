@@ -63,8 +63,16 @@ final class LogLeakMarkerTest extends WebTestCase
         $requestId = $summaryLine['extra']['request_id'] ?? null;
         self::assertIsString($requestId);
         self::assertTrue(Uuid::isValid($requestId));
-        self::assertSame(['request_id' => $requestId, 'organization_id' => self::ORG_A], $summaryLine['extra']);
-        self::assertSame(['request_id' => $requestId, 'organization_id' => self::ORG_A], $exceptionLine['extra']);
+        foreach ([$summaryLine, $exceptionLine] as $line) {
+            $traceId = $line['extra']['trace_id'] ?? null;
+            $spanId = $line['extra']['span_id'] ?? null;
+            self::assertIsString($traceId);
+            self::assertIsString($spanId);
+            self::assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $traceId);
+            self::assertMatchesRegularExpression('/^[0-9a-f]{16}$/', $spanId);
+            self::assertSame(['request_id' => $requestId, 'organization_id' => self::ORG_A, 'trace_id' => $traceId, 'span_id' => $spanId], $line['extra']);
+        }
+        self::assertSame($summaryLine['extra']['trace_id'], $exceptionLine['extra']['trace_id']);
     }
 
     /**

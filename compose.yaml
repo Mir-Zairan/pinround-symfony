@@ -198,6 +198,22 @@ services:
       timeout: 3s
       retries: 10
 
+  # Local trace viewer, off by default: `docker compose --profile observability up`.
+  # To send traces, set OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 in .env.local. Traces are kept in memory only.
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0@sha256:b585df1b6299bbbd16bf7c679da30389349736e4b6bc8f4f500142a75bf26ca8
+    profiles: ["observability"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+      - "127.0.0.1:${JAEGER_OTLP_HTTP_PORT:-4318}:4318"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:16686/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
 volumes:
   caddy_data:
   caddy_config:

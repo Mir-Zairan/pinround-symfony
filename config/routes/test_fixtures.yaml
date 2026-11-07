@@ -54,3 +54,38 @@ when@test:
         path: /_test/log-leak/{organizationId}
         controller: App\Tests\Fixtures\Http\LogLeakProbeController::logTheSummaryThenFail
         methods: [POST]
+
+    test_tracing_respond:
+        path: /_test/tracing
+        controller: App\Tests\Fixtures\Http\TracingProbeController::respondAndLog
+        methods: [GET, POST]
+
+    test_tracing_fail:
+        path: /_test/tracing/fail
+        controller: App\Tests\Fixtures\Http\TracingProbeController::fail
+        methods: [GET]
+
+    test_tracing_forbid:
+        path: /_test/tracing/forbid
+        controller: App\Tests\Fixtures\Http\TracingProbeController::forbid
+        methods: [GET]
+
+    test_tracing_sub_request:
+        path: /_test/tracing/sub-request
+        controller: App\Tests\Fixtures\Http\TracingProbeController::respondAfterAFailingSubRequest
+        methods: [GET]
+
+    test_tracing_server_error:
+        path: /_test/tracing/server-error
+        controller: App\Tests\Fixtures\Http\TracingProbeController::respondWithServerError
+        methods: [GET]
+
+    test_tracing_dispatch:
+        path: /_test/tracing/dispatch
+        controller: App\Tests\Fixtures\Http\TracingProbeController::dispatchAnEvent
+        methods: [GET]
+
+    test_tracing_query:
+        path: /_test/tracing/query
+        controller: App\Tests\Fixtures\Http\TracingProbeController::runAQuery
+        methods: [GET]
