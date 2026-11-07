@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Integration\Architecture;
+namespace App\Tests\Unit\Architecture;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -38,6 +38,11 @@ final class CopyLintTest extends TestCase
                 self::FIXTURES.'Bad/literal.html.twig:2',
                 self::FIXTURES.'Bad/literal.html.twig:3',
                 self::FIXTURES.'Bad/after_comment.html.twig:5',
+                self::FIXTURES.'Bad/include_with.html.twig:2',
+                self::FIXTURES.'Bad/other_attributes.html.twig:2',
+                self::FIXTURES.'Bad/other_attributes.html.twig:3',
+                self::FIXTURES.'Bad/other_attributes.html.twig:4',
+                self::FIXTURES.'Bad/messages.yml:3',
                 self::FIXTURES.'Bad/translations.yaml:4',
                 self::FIXTURES.'Bad/translations.yaml:6',
                 self::FIXTURES.'Bad/translations.yaml:9',

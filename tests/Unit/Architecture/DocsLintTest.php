@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Integration\Architecture;
+namespace App\Tests\Unit\Architecture;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -32,6 +32,7 @@ final class DocsLintTest extends TestCase
                 self::FIXTURES.'Bad/long_without_index.md:1',
                 self::FIXTURES.'Bad/missing_anchor_other_file.md:5',
                 self::FIXTURES.'Bad/missing_same_file_anchor.md:5',
+                self::FIXTURES.'Bad/missing_root_relative_target.md:3',
                 self::FIXTURES.'Bad/missing_target_file.md:3',
             ],
             self::reportedLocations($process),
@@ -47,6 +48,7 @@ final class DocsLintTest extends TestCase
         self::assertStringContainsString('long_without_index.md:1: 101 lines and no `## Index` in the first 40 lines', $output);
         self::assertStringContainsString('index_after_line_40.md:41: `## Index` must be within the first 40 lines', $output);
         self::assertStringContainsString('missing_target_file.md:3: broken link, no such file or folder: does-not-exist.md', $output);
+        self::assertStringContainsString('missing_root_relative_target.md:3: broken link, no such file or folder: /tests/Fixtures/DocsLint/Bad/no-such-file.md', $output);
         self::assertStringContainsString('missing_anchor_other_file.md:5: broken anchor, no such heading: target.md#no-such-heading', $output);
         self::assertStringContainsString('missing_same_file_anchor.md:5: broken anchor, no such heading: #absent', $output);
     }

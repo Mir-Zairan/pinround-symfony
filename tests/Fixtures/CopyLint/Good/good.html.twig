@@ -1,4 +1,5 @@
 {% extends 'issue_base.html.twig' %}
+{% include 'issue_row.html.twig' with {title: 'Ticket'} %}
 {# Lena says issue and workflow status in a comment #}
 <div role="status" class="status-pill issue marker" id="watcher" data-epic="1" aria-live="polite">
     <p>Status</p>

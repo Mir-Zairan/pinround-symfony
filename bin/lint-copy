@@ -15,7 +15,7 @@ declare(strict_types=1);
  *
  * What is copy:
  * - Twig: text between tags, the values of COPY_ATTRIBUTES, and string literals inside `{{ ... }}` and `{% ... %}`
- *   (except in TEMPLATE_NAME_TAGS, whose literals are template names). Twig comments, tag names, every other
+ *   (except the first literal of a TEMPLATE_NAME_TAGS tag, which is a template name). Twig comments, tag names, every other
  *   attribute and the content of <script> and <style> are not copy.
  * - YAML translation files: the values (not the keys, not comments).
  * - XLIFF files: the text of <source> and <target>.
@@ -101,11 +101,10 @@ function twigCopy(string $content): array
     preg_match_all('/\{\{.*?\}\}|\{%.*?%\}/s', $content, $tags, \PREG_OFFSET_CAPTURE);
     foreach ($tags[0] as [$tag, $tagOffset]) {
         $isTemplateNameTag = 1 === preg_match('/^\{%-?\s*(\w+)/', $tag, $name) && \in_array($name[1], TEMPLATE_NAME_TAGS, true);
-        if (!$isTemplateNameTag) {
-            preg_match_all('/"(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\'/s', $tag, $literals, \PREG_OFFSET_CAPTURE);
-            foreach ($literals[0] as [$literal, $offset]) {
-                $segments[] = [lineAt($content, $tagOffset + $offset), $literal];
-            }
+        preg_match_all('/"(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\'/s', $tag, $literals, \PREG_OFFSET_CAPTURE);
+        $literalsToScan = $isTemplateNameTag ? \array_slice($literals[0], 1) : $literals[0];
+        foreach ($literalsToScan as [$literal, $offset]) {
+            $segments[] = [lineAt($content, $tagOffset + $offset), $literal];
         }
         $html = substr_replace($html, blankOut($tag), $tagOffset, \strlen($tag));
     }
