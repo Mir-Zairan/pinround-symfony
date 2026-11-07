@@ -47,6 +47,7 @@ final class DatabaseSpanTest extends WebTestCase
     {
         $client = self::createClient();
         $this->logIn($client, $this->createUserWithPassword('Lena Berg'));
+        self::getContainer()->get('doctrine.orm.entity_manager')->clear();
         $exporter = self::getContainer()->get('tracing.in_memory_exporter');
         self::assertInstanceOf(InMemoryExporter::class, $exporter);
 
@@ -57,7 +58,7 @@ final class DatabaseSpanTest extends WebTestCase
         $roots = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => !SpanContextValidator::isValidSpanId($span->getParentSpanId())));
         self::assertCount(1, $roots);
         $children = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => $span !== $roots[0]));
-        self::assertSame(['db BEGIN', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
+        self::assertSame(['db SELECT', 'db SELECT', 'db BEGIN', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
         foreach ($children as $child) {
             self::assertSame($roots[0]->getTraceId(), $child->getTraceId());
             self::assertSame($roots[0]->getSpanId(), $child->getParentSpanId());

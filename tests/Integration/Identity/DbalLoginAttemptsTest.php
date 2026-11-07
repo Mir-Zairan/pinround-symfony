@@ -39,17 +39,17 @@ final class DbalLoginAttemptsTest extends KernelTestCase
         $this->attempts()->record($emailHash, $ipHash, true);
 
         $rows = $this->connection()->fetchAllAssociative(
-            "SELECT id::text AS id, email_hash, ip_hash, success, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') AS at"
+            "SELECT id::text AS id, email_hash, ip_hash, success, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US') AS at"
             .' FROM idn_login_attempt WHERE ip_hash = ?',
             [$ipHash],
             [ParameterType::BINARY],
         );
         self::assertCount(1, $rows);
         $row = $rows[0];
-        self::assertSame('2027-03-15T10:00:00.123', $row['at']);
+        self::assertSame('2027-03-15T10:00:00.123456', $row['at']);
         $idText = $this->asString($row['id']);
         $id = new UuidV7($idText);
-        self::assertSame('2027-03-15T10:00:00.123', $id->getDateTime()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v'));
+        self::assertSame('2027-03-15T10:00:00.123456', $id->getDateTime()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.u'));
         self::assertSame('7', $idText[14], 'a UUIDv7');
         $storedEmailHash = $this->asString($row['email_hash']);
         $storedIpHash = $this->asString($row['ip_hash']);
