@@ -11,8 +11,9 @@ use Symfony\Component\DependencyInjection\Attribute\Exclude;
 /**
  * A Valkey answers within a second. config/services.yaml defines one per Valkey (the cache and the state one,
  * ADR-0010), each with its name and DSN. A DSN of several hosts (`redis://a:6379,redis://b:6379`, as Messenger
- * takes it) must answer on every host. A comma anywhere else, such as a raw one in a password, fails the check,
- * because Messenger refuses that DSN when a worker starts: write it as %2C (RedisDsnHosts).
+ * takes it) must answer on every host. A comma anywhere else, such as a raw one in a password, fails the check: for
+ * the state Valkey because Messenger refuses that DSN when a worker starts; for the cache one, whose client would read
+ * it, only so both DSNs follow one rule. Write it as %2C (RedisDsnHosts).
  *
  * The second bounds the connect and each reply, not the lookup of a host name, which no PHP timeout covers.
  */
