@@ -1,3 +1,6 @@
 framework:
     mailer:
         dsn: '%env(MAILER_DSN)%'
+        # Every email the app sends comes from this address unless it sets its own From.
+        headers:
+            From: '%env(MAILER_FROM)%'

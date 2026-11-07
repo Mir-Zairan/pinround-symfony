@@ -1,4 +1,4 @@
-/* The login page (src/Identity/UI/templates/login.html.twig): a centered card. */
+/* The logged-out pages (src/Identity/UI/templates: login, forgot password, choose a new password): a centered card. */
 
 .login {
   display: grid;
@@ -26,6 +26,22 @@
   border-radius: 12px;
   background: var(--error-container);
   color: var(--on-error-container);
+}
+
+.login__notice {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--passed-container);
+  color: var(--on-passed-container);
+}
+
+.login__hint {
+  color: var(--on-surface-var);
+}
+
+.login__link {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .login__form {

@@ -37,4 +37,9 @@ final readonly class DoctrineUsers implements Users
         $this->entityManager->persist($user);
         $this->entityManager->flush();
     }
+
+    public function save(User $user): void
+    {
+        $this->add($user);
+    }
 }

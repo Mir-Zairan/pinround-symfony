@@ -14,8 +14,9 @@ use Symfony\Component\RateLimiter\Policy\Window;
 use Symfony\Component\RateLimiter\Storage\StorageInterface;
 
 /**
- * Keeps the login limiters' counters on the state Valkey, which never evicts (ADR-0010), and fails closed: a read or
- * write that does not reach Valkey throws, so the login fails instead of running unthrottled. Not a cache pool on
+ * Keeps the counters of the login and password reset limiters on the state Valkey, which never evicts (ADR-0010), and
+ * fails closed: a read or write that does not reach Valkey throws, so the login or reset request fails instead of
+ * running unthrottled. Not a cache pool on
  * purpose: a cache adapter turns a failed read into a miss, and a peek (which never writes) would then let every try
  * through with a fresh window.
  */

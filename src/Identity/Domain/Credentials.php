@@ -14,4 +14,9 @@ interface Credentials
      * Saves the credential at once.
      */
     public function add(Credential $credential): void;
+
+    /**
+     * Saves the changes to a credential already added, at once.
+     */
+    public function save(Credential $credential): void;
 }

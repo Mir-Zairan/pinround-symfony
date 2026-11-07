@@ -9,7 +9,7 @@ One page that lists every environment variable pinround reads: its default, who 
 - [App and Symfony](#app-and-symfony) — environment, secret, share folder, public URL
 - [Database](#database) — the three connection URLs and the compose database settings
 - [Valkey and messaging](#valkey-and-messaging) — cache, state (sessions, login counters) and queue DSNs
-- [Mail](#mail) — the mailer DSN
+- [Mail](#mail) — the mailer DSN and the From address
 - [Mercure](#mercure) — hub keys and the public hub URL
 - [Object storage](#object-storage) — health endpoint, public URL, MinIO credentials
 - [Tracing](#tracing) — the OpenTelemetry settings
@@ -31,7 +31,7 @@ Real secrets never enter the repo ([ADR-0027](../03-adr/0027-secrets-and-encrypt
 ## Rules for prod
 - The prod image sets `APP_ENV=prod`, `APP_DEBUG=0` and `CADDY_ADMIN=off`. With the admin API off, nothing can change the running Caddy config and there is no `/metrics` endpoint.
 - `APP_SECRET` must be a plain environment variable, not a Symfony secret. The entrypoint guard reads only the environment. The same guard refuses to start (for every command, so workers and the scheduler too) when `APP_SECRET`, `MERCURE_PUBLISHER_JWT_KEY` or `MERCURE_SUBSCRIBER_JWT_KEY` is empty or starts with `change-me`.
-- Prod must provide `DATABASE_URL`, `MAILER_DSN`, `MESSENGER_TRANSPORT_DSN`, `DEFAULT_URI`, `REDIS_CACHE_DSN`, `STATE_VALKEY_DSN` and the two Mercure keys. Nothing in the prod image supplies them. The image build uses throwaway values for the cache warm-up only; none is kept.
+- Prod must provide `DATABASE_URL`, `MAILER_DSN`, `MAILER_FROM`, `MESSENGER_TRANSPORT_DSN`, `DEFAULT_URI`, `REDIS_CACHE_DSN`, `STATE_VALKEY_DSN` and the two Mercure keys. Nothing in the prod image supplies them. The image build uses throwaway values for the cache warm-up only; none is kept.
 - `MESSENGER_TRANSPORT_DSN` points at the state Valkey and names no stream: no path after the host (`redis://valkey-state:6379`, not `.../messages` or `.../1`) and no `stream` query parameter. Otherwise the four `async_*` queues merge into one stream. The `dsn_without_stream` env processor makes `worker` and `worker-heavy` fail at start on such a DSN. It also fails on a comma that does not begin another host, so a comma in the password must be written `%2C`. See [ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md).
 - `STATE_VALKEY_DSN` points at the state Valkey (`noeviction`), never at the cache one: sessions and the login counters live there, and an LRU eviction would log people out and hand an attacker fresh login tries. When it cannot be reached, logins fail (no unthrottled tries) and pages that need a session fail too.
 - The session cookie is `__Host-pinround`: browsers keep it only over HTTPS, so pinround must be served over HTTPS (dev uses `https://localhost`).
@@ -67,13 +67,14 @@ Dev and test use the app role for the web and workers, and the migrator role for
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
 | `REDIS_CACHE_DSN` | empty on purpose in `.env`; `redis://valkey-cache:6379` in `.env.dev` and `.env.test`; none, required in prod | app, all workers, migrate | yes, when it holds a password | DSN of the cache Valkey, read by `cache.app`. |
-| `STATE_VALKEY_DSN` | empty on purpose in `.env`; `redis://valkey-state:6379` in `.env.dev`; not set in tests (they use `TEST_STATE_VALKEY_DSN`); none, required in prod | app, all workers, migrate | yes, when it holds a password | DSN of the state Valkey for sessions (key prefix `session:`) and the login counters (prefix `login_throttling:`). |
+| `STATE_VALKEY_DSN` | empty on purpose in `.env`; `redis://valkey-state:6379` in `.env.dev`; not set in tests (they use `TEST_STATE_VALKEY_DSN`); none, required in prod | app, all workers, migrate | yes, when it holds a password | DSN of the state Valkey for sessions (key prefix `session:`) and the login and password reset counters (prefix `login_throttling:`). |
 | `MESSENGER_TRANSPORT_DSN` | `redis://valkey-state:6379` in `.env.dev`; `in-memory://` in `.env.test`; none, required in prod | app, all workers | yes, when it holds a password | DSN of the state Valkey that holds the queues. See [Rules for prod](#rules-for-prod) for the path, stream and comma rules. |
 
 ## Mail
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
 | `MAILER_DSN` | `smtp://mailpit:1025` in `.env.dev`; `null://null` in `.env.test`; none, required in prod | app, all workers | yes, in prod (it holds the SMTP login) | Where the mailer sends mail. Dev mail goes to Mailpit. |
+| `MAILER_FROM` | `pinround <no-reply@pinround.localhost>` in `.env.dev` and `.env.test`; none, required in prod | app, all workers | no | The From header of every email (`framework.mailer.headers`), for example the password reset link. Worker-notify sends mail from the `async_notify` queue. |
 
 ## Mercure
 | Variable | Default | Read by | Secret | What it does |
@@ -142,7 +143,7 @@ These are read by `docker compose` or `make`, not by PHP. The ports, `JAEGER_*`,
 | `E2E_BASE_URL` | `https://localhost` | test only (Playwright) | no | The address the end-to-end tests open. |
 | `E2E_PASSWORD` | none; `make e2e` takes `DEMO_PASSWORD`; CI passes the run's `DEMO_PASSWORD` | test only (Playwright) | yes | The password the specs log in as Lena with. It must be the `DEMO_PASSWORD` the seed used. No file in the repo sets it, and the specs fail with a clear message when it is empty. |
 
-`APP_ENV`, `APP_SECRET`, `DEFAULT_URI`, `MERCURE_PUBLIC_URL`, `OBJECT_STORAGE_PUBLIC_URL`, `OBJECT_STORAGE_ENDPOINT`, `REDIS_CACHE_DSN`, the database URLs, `MAILER_DSN` and `MESSENGER_TRANSPORT_DSN` also have test values in `.env.test`. They are listed in the sections above.
+`APP_ENV`, `APP_SECRET`, `DEFAULT_URI`, `MERCURE_PUBLIC_URL`, `OBJECT_STORAGE_PUBLIC_URL`, `OBJECT_STORAGE_ENDPOINT`, `REDIS_CACHE_DSN`, the database URLs, `MAILER_DSN`, `MAILER_FROM` and `MESSENGER_TRANSPORT_DSN` also have test values in `.env.test`. They are listed in the sections above.
 
 ## CI only
 | Variable | Default | Read by | Secret | What it does |

@@ -14,6 +14,9 @@
         <twig:Card tag="section" class="login__card" aria-labelledby="login-title">
             <p class="logo">{{ block('logo', '@Web/base.html.twig') }}</p>
             <h1 class="login__title" id="login-title">Log in</h1>
+            {% for notice in app.flashes('notice') %}
+                <p class="login__notice" role="status">{{ notice }}</p>
+            {% endfor %}
             {% if errorMessage %}
                 <p class="login__error" role="alert">{{ errorMessage }}</p>
             {% endif %}
@@ -29,6 +32,7 @@
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
                 <twig:Button type="submit">Log in</twig:Button>
             </form>
+            <p><a class="login__link" href="{{ path('identity_password_forgot') }}">Forgot password?</a></p>
         </twig:Card>
     </div>
 {% endblock %}

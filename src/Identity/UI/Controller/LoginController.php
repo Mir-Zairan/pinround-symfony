@@ -53,7 +53,18 @@ final class LoginController extends AbstractController
     {
         // LoginThrottlingListener rounds the wait up to whole minutes; it can be 0 at the very end of a window.
         $wait = $error->getMessageData()['%minutes%'] ?? null;
-        $minutes = \is_int($wait) ? max(1, $wait) : 1;
+
+        return self::tooManyTriesFor(\is_int($wait) ? $wait : 1);
+    }
+
+    /**
+     * Also the refusal of a throttled password reset request (PasswordResetController).
+     *
+     * @param int $minutes the wait; less than 1 reads as 1
+     */
+    public static function tooManyTriesFor(int $minutes): string
+    {
+        $minutes = max(1, $minutes);
 
         return \sprintf(self::TOO_MANY_TRIES, 1 === $minutes ? '1 minute' : $minutes.' minutes');
     }

@@ -25,4 +25,9 @@ final readonly class DoctrineCredentials implements Credentials
         $this->entityManager->persist($credential);
         $this->entityManager->flush();
     }
+
+    public function save(Credential $credential): void
+    {
+        $this->add($credential);
+    }
 }

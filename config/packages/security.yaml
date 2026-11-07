@@ -42,6 +42,8 @@ security:
     # Routes match by name, so the dev and test routes match nothing in prod, where they do not exist.
     access_control:
         - { route: ^identity_login$, roles: PUBLIC_ACCESS }
+        # Password reset (FR-ID-08), public by design: the visitor is logged out and the emailed token is the proof.
+        - { route: ^identity_password_(forgot|reset_token|reset)$, roles: PUBLIC_ACCESS }
         - { route: ^web_component_gallery$, roles: PUBLIC_ACCESS }
         - { route: ^test_, roles: PUBLIC_ACCESS }
         - { path: ^/, roles: IS_AUTHENTICATED_FULLY }
