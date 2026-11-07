@@ -202,7 +202,8 @@ jobs:
             APP_GID=${{ env.APP_GID }}
           cache-from: type=gha,scope=e2e-dev
           cache-to: type=gha,scope=e2e-dev,mode=max
-      # No minio, mailpit, workers or scheduler: see compose.ci.yaml. The first start runs composer install.
+      # No minio, mailpit, workers or scheduler: see compose.ci.yaml. vendor/ and assets/vendor come from
+      # php-setup, so the entrypoint skips composer install.
       - name: Start the stack
         run: docker compose --env-file .env --env-file .env.dev up -d --wait app
       - name: Apply the database roles and migrate
