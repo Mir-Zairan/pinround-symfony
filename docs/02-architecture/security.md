@@ -19,7 +19,7 @@ How pinround protects tickets, screenshots and people's data: threats, controls,
 - [AI-specific threats](#ai-specific-threats) — prompt injection, data leaks through AI, unsafe output.
 - [MCP and personal access token threats](#mcp-and-personal-access-token-threats) — Claude Code and API access.
 - [Supply chain](#supply-chain) — dependencies, images, SBOM.
-- [Logging without leaking](#logging-without-leaking) — what may and may not be logged.
+- [Logging without leaking](#logging-without-leaking) — what may and may not be logged; the allow-list processor and the marker test.
 - [Incident response basics](#incident-response-basics) — first hour, roles, notification.
 - [Security test plan per phase](#security-test-plan-per-phase) — what each phase must prove.
 
@@ -184,7 +184,7 @@ Details: [media-pipeline.md](media-pipeline.md).
 
 ## Browser hardening and CSP
 
-Headers on every HTML response:
+Headers on every response the app answers:
 
 ```http
 Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{random}'; style-src 'self' 'nonce-{random}'; img-src 'self' https://{bucket-host} data:; connect-src 'self' https://{mercure-host} http://localhost:11434; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
@@ -197,7 +197,11 @@ Cross-Origin-Opener-Policy: same-origin
 
 Notes:
 
-- `http://localhost:11434` is added to `connect-src` **only** when the org's AI policy allows laptop AI.
+- `App\Web\Infrastructure\Security\SecurityHeadersSubscriber` sends these headers on every main-request response the app answers (HTML, JSON, redirects and error pages), and replaces any value a controller set. `Strict-Transport-Security` is sent only when the kernel environment is `prod`. Files Caddy serves straight from `public/` (in prod the compiled `/assets/*`) and the Mercure hub's own responses get none of them.
+- `{bucket-host}` comes from `OBJECT_STORAGE_PUBLIC_URL` and `{mercure-host}` from `MERCURE_PUBLIC_URL`. The subscriber keeps only the origin (scheme, host, port) of each, so `http://localhost:9000` in dev is allowed. An empty value adds no source. A value that is not an `http` or `https` URL whose host is only letters, digits, dots and hyphens (optional port; a path or query may follow but holds no space, `;` or `,`) throws, so a bad setting fails loudly instead of widening the policy. `.env` leaves both empty; `.env.dev` and `.env.test` set the local hub and MinIO.
+- With `kernel.debug` on (dev, test), Symfony's `ErrorListener` drops the CSP from error pages so its exception page can run; the other headers stay. Prod has debug off and keeps it.
+- `Referrer-Policy` is `strict-origin-when-cross-origin` as above. The P00.T8 plan step said `same-origin`; this doc wins.
+- `http://localhost:11434` is added to `connect-src` **only** when the org's AI policy allows laptop AI. TODO(P08): the subscriber does not add it yet, because orgs and the AI policy do not exist.
 - `{bucket-host}` is the bucket's **own** hostname (for example `acme-pinround.s3.eu-central-1.amazonaws.com` or the CDN host for this bucket), never a shared storage host like `*.amazonaws.com`, which would allow images from any bucket.
 - No inline event handlers. Stimulus controllers only.
 - One nonce per request comes from `App\Web\Infrastructure\Security\CspNonce::current()` (128 random bits, base64). Templates print it with `csp_nonce()`; the security-headers subscriber (P00.T8) reads the same service. The kernel resets it between requests, so worker mode never reuses one.
@@ -276,11 +280,17 @@ See [ADR-0021](../03-adr/0021-mcp-server.md).
 
 ## Logging without leaking
 
-Allowed in logs: request id, trace id, org id, user id, route name, ticket id, timing, status codes, error class, token id.
+Allowed in logs: request id, trace id, org id (as `organization_id`), user id, route name, ticket id, timing, status codes, error class, token id. Ticket id and token id join the allow-list below when their modules log them.
 
 Never in logs: ticket titles or text, comment text, AI prompts or outputs, screenshot URLs with signatures, tokens, passwords, cookies, email bodies.
 
-A Monolog processor redacts known sensitive keys and caps string length. A test sends a ticket with a unique marker text through the main flows and fails if that marker appears in any log line.
+Logs are JSON in every environment; in production they go to stdout (ADR-0029); the dev console handler keeps Symfony's console format for the terminal (`MonologConfigTest` pins each environment's handlers). The allow-list is [ADR-0034](../03-adr/0034-allow-list-log-redaction.md). Every record of every channel passes two Monolog processors before any handler sees it (`src/SharedKernel/Infrastructure/Logging`):
+
+- `CorrelationIdsProcessor` adds `request_id` (a new UUID for each main web request, from `RequestId`, which the kernel resets between requests) and `organization_id` (from `TenantContext`), each only when known. `user_id` comes with users in P01, `trace_id` and `span_id` with OpenTelemetry.
+- `RedactionProcessor` runs after every other processor and keeps only an **allow-list** of context and extra keys; every other key is dropped, whatever its name. The allowed keys: `request_id`, `trace_id`, `span_id`, `organization_id`, `user_id`, `route`, `method`, `status_code`, `duration_ms`, `class`, `message_id`, `transport`, `retryCount`, `delay`, `exception`, `exception_class`, `sqlstate`, `code`, `check` (the constant name of a failed readiness check). A value is kept only when it is a scalar or null; strings are capped at 255 characters. `exception` keeps only a throwable's class, code, file and line, never its message. So DBAL's `sql`, `params` and `types`, Messenger's `error` and Symfony's `route_parameters` and `request_uri` never reach a log.
+- The record message loses the message of every throwable in the context (and of its previous ones): Symfony quotes it in messages it formats itself, such as "Uncaught PHP Exception …". Each quoted copy (`"…"`) becomes `"[exception message withheld]"`. A copy outside quotes is replaced the same way when the exception message has at least 16 characters; a shorter one that stands as a whole word replaces the whole record message with `[log message withheld: it quoted an exception message]`, and one inside a longer word (such as a class name) stays. When the exception message or the text around it is not valid UTF-8, words cannot be told apart, so any copy of a shorter one withholds the whole record message. Placeholders are filled later, by each handler, from the allowed keys only, so a placeholder of a dropped key stays as `{key}`. Log a constant message with placeholders, never one built from content.
+
+`LogLeakMarkerTest` sends a unique marker in a request body to a test-only endpoint that logs it under an unlisted key, under `description`, as a bound SQL value and in an exception message, and fails if the marker appears in what the log handler wrote. It also fails if `RedactionProcessor` is not the last processor of every channel.
 
 ## Incident response basics
 

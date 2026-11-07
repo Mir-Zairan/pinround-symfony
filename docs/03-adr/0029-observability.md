@@ -16,7 +16,7 @@ We can see how fast and how healthy pinround is without reading anyone's tickets
 
 ## Status and people
 
-- Status: Accepted
+- Status: Accepted · Superseded in part by [ADR-0034](0034-allow-list-log-redaction.md): only the log field name `org_id`, now `organization_id`. The rest stands.
 - Date: 2026-11-06
 - Deciders: Zairan (lead), Toyib (developer), Anka (tester)
 

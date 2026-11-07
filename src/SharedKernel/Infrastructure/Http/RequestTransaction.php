@@ -21,12 +21,18 @@ use Symfony\Contracts\Service\ResetInterface;
  * request's tenant (ADR-0005). Commits on the response, rolls back on an exception, and rolls back anything
  * it opened that is still open when the request finishes, terminates or the worker resets (ADR-0008).
  *
+ * A route whose defaults set ROUTE_DEFAULT to false runs without one, so it still answers while the database is down
+ * (the health routes); it must then read no tenant data.
+ *
  * A streamed response body runs after the commit, outside any transaction, so it sees no tenant rows (fails closed).
  * Whatever fills TenantContext must do it on kernel.request at a priority above 7 (the firewall runs at 8), so the
  * firewall must not be lazy: a lazy firewall would set the tenant after BEGIN.
  */
 final class RequestTransaction implements ResetInterface
 {
+    /** The route default that, set to false, keeps the request out of a transaction. */
+    public const string ROUTE_DEFAULT = '_request_transaction';
+
     // Below the security firewall (8): the firewall fills TenantContext, and TenantMiddleware reads it at BEGIN.
     private const int BEGIN_PRIORITY = 7;
     // Before any other exception listener can turn the exception into a response and stop propagation.
@@ -49,6 +55,10 @@ final class RequestTransaction implements ResetInterface
         }
 
         $this->rollBackOpenTransaction();
+        if (false === $event->getRequest()->attributes->get(self::ROUTE_DEFAULT, true)) {
+            return;
+        }
+
         $this->connection->beginTransaction();
         $this->openNestingLevel = $this->connection->getTransactionNestingLevel();
     }

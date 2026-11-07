@@ -24,7 +24,7 @@ Every module has the same five folders:
 
 ```text
 src/
-  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result
+  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck
   Ticketing/
     Api/                        # PUBLIC: interfaces + DTOs other modules may use
       TicketQueries.php
@@ -82,10 +82,11 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Contains:**
   - id value objects (`OrganizationId`, `UserId`, `TicketId` …, all UUIDv7, [ADR-0006](../03-adr/0006-identifiers.md));
   - `Clock` (an interface, so tests can freeze time);
-  - `TenantContext` (the current `OrganizationId`; callers only fill it). The DBAL driver middleware `TenantMiddleware` in `Infrastructure/Doctrine` reads it and runs `set_config('app.org_id', …, true)` at the start of each transaction. `TenantFilter` scopes ORM queries on `TenantOwned` entities and throws `TenantNotSet` without a tenant; `RequestTransaction` wraps each main web request in one transaction; `TenantContext` refuses (`TenantSwitchRefused`) an org switch or `clear()` while a transaction is open or the EntityManager holds an entity ([ADR-0005](../03-adr/0005-multi-tenancy.md), [row-level security](data-model.md#row-level-security));
+  - `TenantContext` (the current `OrganizationId`; callers only fill it). The DBAL driver middleware `TenantMiddleware` in `Infrastructure/Doctrine` reads it and runs `set_config('app.org_id', …, true)` at the start of each transaction. `TenantFilter` scopes ORM queries on `TenantOwned` entities and throws `TenantNotSet` without a tenant; `RequestTransaction` wraps each main web request in one transaction, except on a route whose `_request_transaction` default is `false` (today only the health routes); `TenantContext` refuses (`TenantSwitchRefused`) an org switch or `clear()` while a transaction is open or the EntityManager holds an entity ([ADR-0005](../03-adr/0005-multi-tenancy.md), [row-level security](data-model.md#row-level-security));
   - the `DomainEvent` base (event id, occurred at, organization id, actor id);
   - `Result`/`Problem` types for expected failures;
-  - `OnceOnlyHandling` (Application: run an async handler's effect once per message), with `MessageIdStamp`, `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in `Infrastructure/Messenger` ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key)).
+  - `OnceOnlyHandling` (Application: run an async handler's effect once per message), with `MessageIdStamp`, `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in `Infrastructure/Messenger` ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key));
+  - `ReadinessCheck` (`Infrastructure/Health`): one thing `/health/ready` proves. The module that owns what is checked implements it (Audit: `NextAuditPartitionExists`; Media: `ObjectStorageIsReachable`), and autoconfiguration tags it. SharedKernel holds the platform checks `DatabaseAnswers`, `MigrationsAreCurrent` and `ValkeyAnswers` (one service per Valkey), and `ReadinessCheckFailed` for a dependency that answered in the wrong state ([operations.md](operations.md#observability)).
 - **Owns tables:** `processed_message` (global plumbing, no `organization_id`; see [data-model.md](data-model.md)).
 - **Rule:** keep it tiny. A type joins SharedKernel only when three or more modules need it.
 
@@ -194,6 +195,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `MediaQueries::status(MediaId): MediaStatus`
   - `SignedUrls::forVariant(MediaId, Variant, UserId): SignedUrl` (the caller must check access first)
 - **Events:** `MediaReady`, `MediaRejected`.
+- **Readiness:** `Infrastructure\Health\ObjectStorageIsReachable` (a `ReadinessCheck`): `OBJECT_STORAGE_ENDPOINT` accepts a TCP connection.
 - **Depends on:** SharedKernel only. Media is generic and does not know about tickets.
 - **More:** [media-pipeline.md](media-pipeline.md).
 
@@ -256,6 +258,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Story:** Sara wants to know who turned off the lead check last week. The activity log shows the person, the time and the old and new value.
 - **Owns:** `aud_event` (append-only, partitioned by month; P00.T7), `aud_export` (P11).
 - **Api:** `AuditLog::record(AuditEntry)` (for actions that have no domain event, for example an MCP call or an export download). `AuditEntry` is built with `byUser`, `byToken` or `bySystem` (`ActorKind`); `record` writes in the caller's transaction and throws `AuditEntryForAnotherTenantRefused` for an entry of another organization than `TenantContext`'s. Implemented by `Infrastructure\DbalAuditLog`.
+- **Readiness:** `Infrastructure\Health\NextAuditPartitionExists` (a `ReadinessCheck`): `aud_event` has next month's partition (UTC).
 - **Consumes:** admin, settings, role, token, login, AI-policy, export and ticket-move events.
 - **Depends on:** SharedKernel only.
 - **ADRs:** [0026](../03-adr/0026-audit-log.md).
@@ -275,6 +278,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 
 - **Purpose:** the layout, the navigation (built from the user's roles), Home composition with focus chips, and the design-system Twig components.
 - **Rule:** no business logic. Web only puts the other modules' UI pieces together.
+- **Health:** `UI\Controller\HealthController` serves `/health/live` and `/health/ready`, which runs every tagged `ReadinessCheck` ([operations.md](operations.md#observability)).
 - **Depends on:** Api of Insight, Organization, Notification and Ticketing (read only).
 - **More:** [frontend.md](frontend.md).
 

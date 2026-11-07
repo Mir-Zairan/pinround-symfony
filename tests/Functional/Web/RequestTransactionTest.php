@@ -46,6 +46,7 @@ final class RequestTransactionTest extends WebTestCase
         'test_worker_reset_report',
         'test_worker_reset_enter',
         'test_worker_reset_enter_then_fail',
+        'test_log_leak',
     ];
 
     private KernelBrowser $client;

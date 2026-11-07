@@ -78,10 +78,24 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      # The state Valkey of compose.yaml; /health/ready checks it through TEST_STATE_VALKEY_DSN, because the test
+      # env's messenger transport is in-memory.
+      valkey-state:
+        image: valkey/valkey:8.1.4@sha256:81db6d39e1bba3b3ff32bd3a1b19a6d69690f94a3954ec131277b9a26b95b3aa
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://pinround_app:change-me-ci-only-app-db@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
       MIGRATOR_DATABASE_URL: postgresql://pinround_migrator:change-me-ci-only-migrator-db@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
       REDIS_CACHE_DSN: redis://127.0.0.1:6379
+      TEST_STATE_VALKEY_DSN: redis://127.0.0.1:6380
+      # The stand-in listener started below: the object storage check is a plain TCP reach.
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
       MESSENGER_TRANSPORT_DSN: in-memory://
       MAILER_DSN: null://null
       DEFAULT_URI: http://localhost
@@ -90,6 +104,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/php-setup
+      # No MinIO here: there is no upstream image to pin (ADR-0031), and building docker/minio compiles Go for about
+      # five minutes of this job's eight. ObjectStorageIsReachable only opens a TCP connection, so a local listener
+      # stands in for the endpoint; the check's own tests cover a refused and an unanswered endpoint.
+      - name: Start a stand-in for the object storage endpoint
+        run: nohup python3 -m http.server 9000 --bind 127.0.0.1 --directory "$RUNNER_TEMP" > /dev/null 2>&1 &
       # psql comes with the runner image's preinstalled PostgreSQL client.
       - name: Apply the database roles
         env:

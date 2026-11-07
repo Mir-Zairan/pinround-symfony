@@ -5,6 +5,14 @@ framework:
     # Note that the session will be started ONLY if you read or write from it.
     session: true
 
+    # A missing route or a wrong method is the caller's doing (scanners, outside callers of /health/*), not an error:
+    # logged at debug, below prod's info, so it never lands in the prod log (MonologConfigTest pins it).
+    exceptions:
+        Symfony\Component\HttpKernel\Exception\NotFoundHttpException:
+            log_level: debug
+        Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException:
+            log_level: debug
+
     #esi: true
     #fragments: true
 

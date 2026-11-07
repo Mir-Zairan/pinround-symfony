@@ -33,8 +33,11 @@ ENV COMPOSER_ALLOW_SUPERUSER=0
 
 ENTRYPOINT ["docker-entrypoint"]
 CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
+# Through Caddy to the app, from loopback (an internal caller, so not refused). HTTPS, because Caddy answers plain HTTP
+# with a redirect that curl -f counts as success; -k, because the local CA is not in the trust store (skip_install_trust);
+# --connect-to keeps SERVER_NAME's TLS name and Host while connecting to this container. SERVER_NAME must be one host name.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=5 \
-    CMD curl -fsS http://localhost:2019/metrics -o /dev/null || exit 1
+    CMD curl -fsSk --connect-to ::127.0.0.1: "https://${SERVER_NAME:-localhost}/health/live" -o /dev/null || exit 1
 
 USER app
 
@@ -48,6 +51,8 @@ FROM base AS prod
 
 ENV APP_ENV=prod
 ENV APP_DEBUG=0
+# Caddy's admin API off (docker/frankenphp/Caddyfile): no config change and no /metrics endpoint at run time.
+ENV CADDY_ADMIN=off
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 COPY --chown=app:app docker/frankenphp/conf.d/10-prod.ini $PHP_INI_DIR/conf.d/10-prod.ini
 

@@ -146,7 +146,7 @@ FR check (regression only): all FR IDs through the e2e suite.
   1. Dashboards: request rate/errors/latency per route, queue depth and oldest message per transport, worker memory, DB connections, cache hit rate, AI calls and cost per org, storage per org.
   2. SLOs in `docs/operations/slo.md` (availability 99.9%, Home p95, ticket p95, notification in 5 s, screenshot ready in 10 s) with error budgets.
   3. Alerts: error rate > 2% for 5 min, `notify` oldest > 30 s, `media` > 2 min, DB connections > 85%, disk > 80%, any RLS violation error, backup failed; capacity warnings from operations.md.
-  4. Health endpoints `/healthz`, `/readyz` checked by the platform; readiness leaks no detail publicly.
+  4. Health endpoints `/health/live` and `/health/ready` (P00.T8, [operations.md](../02-architecture/operations.md#observability)) checked by the platform from its internal network. They answer only loopback and private client IPs (others get a 404), so configure trusted proxies: otherwise a request a proxy forwards from the internet carries the proxy's private IP and gets through. The body says only ok or fail.
   5. Log-leak marker test runs in CI on the main journeys.
 - **Files:** `docs/operations/slo.md`, `deploy/observability/*` (dashboards as code where possible).
 - **Acceptance:**

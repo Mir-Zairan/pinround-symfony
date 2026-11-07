@@ -23,6 +23,8 @@ final class DsnWithoutStreamEnvVarProcessorTest extends TestCase
         yield 'valkey scheme' => ['valkey://valkey-state:6379?lazy=1'];
         yield 'unix socket' => ['redis:///var/run/valkey/valkey.sock'];
         yield 'cluster hosts' => ['redis://valkey-a:6379,redis://valkey-b:6379'];
+        yield 'a password with an encoded comma, a slash and a question mark' => ['redis://user:se%2Cc/r?et@valkey-state:6379'];
+        yield 'a non-Redis DSN with a comma' => ['doctrine://default?table_name=a,b'];
         yield 'not a Redis DSN' => ['in-memory://'];
         yield 'a Doctrine DSN with a path' => ['doctrine://default/messages'];
     }
@@ -45,6 +47,7 @@ final class DsnWithoutStreamEnvVarProcessorTest extends TestCase
         yield 'stream in the query' => ['valkey://valkey-state:6379?stream=messages'];
         yield 'stream on the second cluster host' => ['redis://valkey-a:6379,redis://valkey-b:6379/messages'];
         yield 'stream after a password' => ['rediss://user:secret-pass@valkey-state:6380/messages'];
+        yield 'stream after a password with an encoded comma and a question mark' => ['redis://user:secret%2Cpa?ss@valkey-state:6379/messages'];
     }
 
     #[Test]
@@ -57,6 +60,31 @@ final class DsnWithoutStreamEnvVarProcessorTest extends TestCase
         } catch (RuntimeException $refusal) {
             self::assertStringContainsString('"MESSENGER_TRANSPORT_DSN" environment variable names a Redis stream', $refusal->getMessage());
             self::assertStringNotContainsString('secret-pass', $refusal->getMessage());
+            self::assertStringNotContainsString('valkey', $refusal->getMessage());
+        }
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function dsnsWithACommaThatBeginsNoHost(): iterable
+    {
+        yield 'a raw comma in the password' => ['redis://user:secret,pass@valkey-state:6379'];
+        yield 'a raw comma and a question mark in the password' => ['redis://user:se,c/r?et@valkey-state:6379'];
+        yield 'a raw comma in a cluster host password' => ['redis://valkey-a:6379,redis://user:secret,pass@valkey-b:6379'];
+        yield 'a trailing comma' => ['redis://valkey-state:6379,'];
+    }
+
+    #[Test]
+    #[DataProvider('dsnsWithACommaThatBeginsNoHost')]
+    public function aCommaThatBeginsNoHostFailsWithoutShowingTheDsn(string $dsn): void
+    {
+        try {
+            self::resolve($dsn);
+            self::fail('The DSN Messenger would refuse was accepted.');
+        } catch (RuntimeException $refusal) {
+            self::assertStringContainsString('"MESSENGER_TRANSPORT_DSN" environment variable has a comma that does not begin another host. Write a comma in a password as %2C.', $refusal->getMessage());
+            self::assertStringNotContainsString('secret', $refusal->getMessage());
             self::assertStringNotContainsString('valkey', $refusal->getMessage());
         }
     }
