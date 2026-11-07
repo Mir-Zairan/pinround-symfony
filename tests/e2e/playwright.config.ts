@@ -5,9 +5,6 @@ export default defineConfig({
   testMatch: '*.spec.ts',
   // Baselines sit beside the spec, one file per screenshot and platform, because font rendering differs per OS.
   snapshotPathTemplate: '{testDir}/screenshots/{arg}-{platform}{ext}',
-  // Baselines are recorded on a developer's machine and font rendering differs on the CI runner, so CI skips
-  // every toHaveScreenshot compare; `make e2e` runs them locally.
-  ignoreSnapshots: !!process.env.CI,
   reporter: process.env.CI ? [['list'], ['github']] : [['list']],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'https://localhost',

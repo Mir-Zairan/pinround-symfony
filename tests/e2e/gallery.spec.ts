@@ -26,6 +26,7 @@ for (const scheme of ['light', 'dark'] as const) {
     });
 
     test(`looks the same as the ${scheme} baseline`, async ({ page }) => {
+      test.skip(!!process.env.CI, 'Baselines come from a developer machine and CI fonts render differently; run make e2e locally.');
       await openGallery(page, scheme);
       await expect(page).toHaveScreenshot(`gallery-${scheme}.png`, { fullPage: true });
     });

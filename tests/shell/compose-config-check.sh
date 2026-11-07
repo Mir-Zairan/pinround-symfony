@@ -3,7 +3,8 @@
 # a built or credential-holding service can pull its image, the workers do not consume every Messenger transport
 # but `failed` exactly once with `outbox` alone in worker-outbox, a messenger:consume service does not wait for
 # a healthy postgres (and the workers for a healthy valkey-state), or docker/minio/Dockerfile lacks pinned commits
-# and digests, and the opt-in jaeger service is digest-pinned, loopback-only and has a healthcheck.
+# and digests, app's depends_on differs from what compose.yaml and compose.ci.yaml say, or the opt-in jaeger
+# service is not digest-pinned, loopback-only and healthchecked.
 # Only POSIX tools are used, so CI needs nothing beyond docker compose.
 set -eu
 
@@ -115,6 +116,33 @@ for worker in worker-outbox worker worker-heavy; do
         exit 1
     fi
 done
+
+# The "name:condition" lines of app's depends_on in a normalised config on stdin.
+app_dependencies() {
+    awk '
+        /^[a-z]/ { in_services = ($0 == "services:") }
+        in_services && /^  [a-z0-9-]+:$/ { current = substr($1, 1, length($1) - 1); in_depends = 0 }
+        in_services && current == "app" && /^    [a-z_]+:/ { in_depends = ($1 == "depends_on:") }
+        in_services && current == "app" && in_depends && /^      [a-z0-9-]+:$/ { dep = substr($1, 1, length($1) - 1) }
+        in_services && current == "app" && in_depends && /^        condition: / { print dep ":" $2 }
+    ' | sort
+}
+
+# app waits for every service its first request needs; a dependency added to compose.yaml has to be weighed
+# against compose.ci.yaml, which replaces the list for the e2e job (it must not start minio, minio-init or mailpit).
+app_all=$(printf '%s\n' "$config" | app_dependencies)
+app_all_expected=$(printf '%s\n' minio-init:service_completed_successfully mailpit:service_healthy postgres:service_healthy valkey-cache:service_healthy valkey-state:service_healthy | sort)
+if [ "$app_all" != "$app_all_expected" ]; then
+    echo "compose-config-check: app in compose.yaml must depend on [$(echo $app_all_expected)]; it depends on [$(echo $app_all)]. Update compose.ci.yaml too." >&2
+    exit 1
+fi
+
+app_ci=$($compose -f compose.yaml -f compose.ci.yaml config | app_dependencies)
+app_ci_expected=$(printf '%s\n' postgres:service_healthy valkey-cache:service_healthy valkey-state:service_healthy | sort)
+if [ "$app_ci" != "$app_ci_expected" ]; then
+    echo "compose-config-check: app with compose.ci.yaml must depend on exactly [$(echo $app_ci_expected)]; it depends on [$(echo $app_ci)]" >&2
+    exit 1
+fi
 
 dockerfile=docker/minio/Dockerfile
 

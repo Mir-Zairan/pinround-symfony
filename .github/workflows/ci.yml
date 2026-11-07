@@ -47,8 +47,8 @@ jobs:
   integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
-    # The postgres image is pinned by digest and is the tag of compose.yaml; valkey is the digest of valkey-state. Real environment variables beat .env.test, whose
-    # URLs point at the compose host name "postgres". The URLs name "pinround";
+    # The postgres and valkey images are the compose.yaml tags, pinned here by digest. Real environment
+    # variables beat .env.test, whose URLs point at the compose host name "postgres". The URLs name "pinround";
     # config/packages/doctrine.yaml appends "_test" in the test env, so the service
     # must create "pinround_test". The service user "pinround" is the admin account:
     # it only runs docker/postgres/roles.sql and its check. Migrations run as pinround_migrator,
@@ -181,6 +181,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Installs vendor/ and assets/vendor on the runner (cached Composer downloads), so the app container's
+      # entrypoint skips its slow first-start composer install inside the health window.
+      - uses: ./.github/actions/php-setup
       # The bind-mounted /app is writable only when the image user is the runner user.
       - name: Use the runner user for the app image
         run: |
