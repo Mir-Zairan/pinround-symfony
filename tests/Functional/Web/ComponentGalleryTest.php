@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
+use App\Tests\Functional\Identity\LogsInUsers;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Zenstruck\Foundry\Test\Factories;
 
 final class ComponentGalleryTest extends WebTestCase
 {
+    use Factories;
+    use LogsInUsers;
+
     #[Test]
     public function theGalleryShowsEveryButtonVariantAndSize(): void
     {
@@ -91,6 +96,7 @@ final class ComponentGalleryTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $gallery->filter('link[rel="stylesheet"][href*="styles/gallery-"]'));
 
+        $this->logIn($client, $this->createUserWithPassword('Lena Berg'));
         $home = $client->request('GET', '/');
         self::assertResponseStatusCodeSame(200);
         self::assertCount(0, $home->filter('link[href*="gallery"]'));

@@ -2,8 +2,19 @@
 framework:
     secret: '%env(APP_SECRET)%'
 
-    # Note that the session will be started ONLY if you read or write from it.
-    session: true
+    # Session-backed tokens on the login form, the logout button and every later form (ADR-0012).
+    csrf_protection: true
+
+    # Sessions live in the state Valkey (ADR-0010, config/services.yaml); the session starts only when read or written.
+    # The __Host- prefix makes browsers refuse the cookie unless it is Secure, has Path=/ and no Domain (ADR-0012), so
+    # it is sent over HTTPS only, in dev too (https://localhost).
+    session:
+        handler_id: Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler
+        name: '%app.session_cookie_name%'
+        cookie_secure: true
+        cookie_httponly: true
+        cookie_samesite: lax
+        cookie_path: /
 
     # A missing route or a wrong method is the caller's doing (scanners, outside callers of /health/*), not an error:
     # logged at debug, below prod's info, so it never lands in the prod log (MonologConfigTest pins it).
@@ -20,4 +31,5 @@ when@test:
     framework:
         test: true
         session:
-            storage_factory_id: session.storage.factory.mock_file
+            # Files instead of Valkey, under the real cookie name (config/services.yaml).
+            storage_factory_id: test.session.storage.factory.mock_file

@@ -1,0 +1,169 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Unit\Identity;
+
+use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler;
+use Symfony\Component\Yaml\Yaml;
+
+/**
+ * The login settings as the config files define them for dev and prod. The test env replaces the session storage and
+ * the state Valkey's DSN, so no booted test kernel sees what dev and prod run.
+ */
+final class LoginConfigTest extends TestCase
+{
+    private const string USER_CLASS = 'App\Identity\Infrastructure\Security\SecurityUser';
+
+    #[Test]
+    public function passwordsAreHashedWithArgon2idNamedExplicitlyInEveryEnvironment(): void
+    {
+        $security = self::config('packages/security.yaml');
+
+        self::assertSame(['algorithm' => 'argon2id'], self::at($security, 'security', 'password_hashers', self::USER_CLASS));
+        self::assertSame(
+            ['algorithm' => 'argon2id', 'time_cost' => 3, 'memory_cost' => 10],
+            self::at($security, 'when@test', 'security', 'password_hashers', self::USER_CLASS),
+        );
+    }
+
+    #[Test]
+    public function everyRouteButTheLoginPageAndTheDevAndTestRoutesNeedsALogin(): void
+    {
+        $security = self::config('packages/security.yaml');
+
+        self::assertSame(
+            [
+                ['route' => '^identity_login$', 'roles' => 'PUBLIC_ACCESS'],
+                ['route' => '^web_component_gallery$', 'roles' => 'PUBLIC_ACCESS'],
+                ['route' => '^test_', 'roles' => 'PUBLIC_ACCESS'],
+                ['path' => '^/', 'roles' => 'IS_AUTHENTICATED_FULLY'],
+            ],
+            self::at($security, 'security', 'access_control'),
+        );
+        self::assertSame(['health', 'main'], array_keys((array) self::at($security, 'security', 'firewalls')));
+        self::assertSame(['pattern' => '^/health/', 'security' => false], self::at($security, 'security', 'firewalls', 'health'));
+    }
+
+    #[Test]
+    public function theFirewallRotatesTheSessionAtLoginAndRunsBeforeTheRequestTransaction(): void
+    {
+        $security = self::config('packages/security.yaml');
+
+        self::assertSame('migrate', self::at($security, 'security', 'session_fixation_strategy'));
+        self::assertFalse(self::at($security, 'security', 'firewalls', 'main', 'lazy'));
+        self::assertSame(['limiter' => 'identity.login_rate_limiter'], self::at($security, 'security', 'firewalls', 'main', 'login_throttling'));
+        self::assertTrue(self::at($security, 'security', 'firewalls', 'main', 'form_login', 'enable_csrf'));
+        self::assertTrue(self::at($security, 'security', 'firewalls', 'main', 'logout', 'enable_csrf'));
+    }
+
+    #[Test]
+    public function devAndProdKeepSessionsInTheStateValkeyUnderTheirOwnPrefix(): void
+    {
+        $services = self::config('services.yaml');
+        $framework = self::config('packages/framework.yaml');
+
+        self::assertSame('__Host-pinround', self::at($services, 'parameters', 'app.session_cookie_name'));
+        self::assertSame(
+            [
+                'handler_id' => RedisSessionHandler::class,
+                'name' => '%app.session_cookie_name%',
+                'cookie_secure' => true,
+                'cookie_httponly' => true,
+                'cookie_samesite' => 'lax',
+                'cookie_path' => '/',
+            ],
+            self::at($framework, 'framework', 'session'),
+        );
+        self::assertSame(
+            ['arguments' => ['@state_valkey.connection', ['prefix' => 'session:']]],
+            self::at($services, 'services', RedisSessionHandler::class),
+        );
+        self::assertSame(
+            [
+                'class' => 'Redis',
+                'factory' => ['Symfony\Component\Cache\Adapter\RedisAdapter', 'createConnection'],
+                'arguments' => ['%env(STATE_VALKEY_DSN)%', ['lazy' => true]],
+            ],
+            self::at($services, 'services', 'state_valkey.connection'),
+        );
+    }
+
+    #[Test]
+    public function onlyTheTestEnvReplacesTheStateValkeyAndTheSessionStorage(): void
+    {
+        $services = self::config('services.yaml');
+        $framework = self::config('packages/framework.yaml');
+
+        self::assertSame(['%env(TEST_STATE_VALKEY_DSN)%', ['lazy' => true]], self::at($services, 'when@test', 'services', 'state_valkey.connection', 'arguments'));
+        self::assertSame(['when@test'], self::environmentsRedefining($services, 'services', 'state_valkey.connection'));
+        self::assertSame([], self::environmentsRedefining($services, 'services', RedisSessionHandler::class));
+        self::assertSame(['storage_factory_id' => 'test.session.storage.factory.mock_file'], self::at($framework, 'when@test', 'framework', 'session'));
+        self::assertSame(['when@test'], self::environmentsRedefining($framework, 'framework', 'session'));
+    }
+
+    #[Test]
+    public function theLoginCountersLiveOnTheStateValkeyInEveryEnvironment(): void
+    {
+        $rateLimiter = self::config('packages/rate_limiter.yaml');
+
+        self::assertSame(
+            [
+                'login_per_email_and_ip' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '15 minutes', 'storage_service' => ValkeyLimiterStorage::class],
+                'login_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '1 hour', 'storage_service' => ValkeyLimiterStorage::class],
+            ],
+            self::at($rateLimiter, 'framework', 'rate_limiter'),
+        );
+        self::assertSame(['framework'], array_keys($rateLimiter));
+    }
+
+    /**
+     * @param array<mixed> $config
+     *
+     * @return list<string>
+     */
+    private static function environmentsRedefining(array $config, string $section, string $key): array
+    {
+        $environments = [];
+        foreach ($config as $name => $environment) {
+            if (str_starts_with((string) $name, 'when@') && \is_array($environment) && \is_array($environment[$section] ?? null)
+                && \array_key_exists($key, $environment[$section])) {
+                $environments[] = (string) $name;
+            }
+        }
+
+        return $environments;
+    }
+
+    /**
+     * The value at the path of keys, or null when a key is missing.
+     *
+     * @param array<mixed> $config
+     */
+    private static function at(array $config, string ...$keys): mixed
+    {
+        $value = $config;
+        foreach ($keys as $key) {
+            if (!\is_array($value) || !\array_key_exists($key, $value)) {
+                return null;
+            }
+            $value = $value[$key];
+        }
+
+        return $value;
+    }
+
+    /**
+     * @return array<mixed>
+     */
+    private static function config(string $file): array
+    {
+        $config = Yaml::parseFile(\dirname(__DIR__, 3).'/config/'.$file);
+        self::assertIsArray($config);
+
+        return $config;
+    }
+}

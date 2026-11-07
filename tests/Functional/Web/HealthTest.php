@@ -270,15 +270,15 @@ final class HealthTest extends WebTestCase
         self::assertFalse($connection->isConnected(), 'live touched the database');
         $this->client->request('GET', '/health/ready');
         self::assertResponseStatusCodeSame(200);
-        // The same listener sees the transaction of a route that does not opt out.
-        $this->client->request('GET', '/');
+        // The same listener sees the transaction of a route that does not opt out (a public one, so no login starts a session).
+        $this->client->request('GET', '/_test/tracing');
         self::assertResponseStatusCodeSame(200);
 
         self::assertSame(
             [
                 '/health/live' => ['isTransactionActive' => false, 'isSessionStarted' => false],
                 '/health/ready' => ['isTransactionActive' => false, 'isSessionStarted' => false],
-                '/' => ['isTransactionActive' => true, 'isSessionStarted' => false],
+                '/_test/tracing' => ['isTransactionActive' => true, 'isSessionStarted' => false],
             ],
             $observed,
         );

@@ -9,11 +9,17 @@ use App\Identity\Domain\User;
 use App\Identity\Domain\Users;
 use App\SharedKernel\Domain\UserId;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\Uid\Uuid;
 
 final readonly class DoctrineUsers implements Users
 {
     public function __construct(private EntityManagerInterface $entityManager)
     {
+    }
+
+    public function nextIdentity(): UserId
+    {
+        return new UserId(Uuid::v7()->toRfc4122());
     }
 
     public function byId(UserId $id): ?User

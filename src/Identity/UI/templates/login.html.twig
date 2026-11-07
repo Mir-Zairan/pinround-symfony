@@ -1,0 +1,86 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Log in · pinround{% endblock %}
+
+{# Nobody is logged in here, so the page has no app header; the card shows the logo instead. #}
+{% block site_header %}{% endblock %}
+
+{% block stylesheets %}
+    <style nonce="{{ csp_nonce() }}">
+        .login {
+            display: grid;
+            place-items: center;
+            min-height: 70vh;
+            padding: 48px 0;
+        }
+
+        .login__card {
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding: 28px 24px;
+        }
+
+        .login__title {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .login__error {
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: var(--error-container);
+            color: var(--on-error-container);
+        }
+
+        .login__form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .login__field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-weight: 600;
+        }
+
+        .login__input {
+            height: 44px;
+            padding: 0 12px;
+            border: 1px solid var(--outline);
+            border-radius: var(--radius-input);
+            background: var(--s-lowest);
+            color: var(--on-surface);
+            font: inherit;
+            font-weight: 400;
+        }
+    </style>
+{% endblock %}
+
+{% block main %}
+    <div class="login">
+        <twig:Card tag="section" class="login__card" aria-labelledby="login-title">
+            <p class="logo">{{ block('logo', '@Web/base.html.twig') }}</p>
+            <h1 class="login__title" id="login-title">Log in</h1>
+            {% if errorMessage %}
+                <p class="login__error" role="alert">{{ errorMessage }}</p>
+            {% endif %}
+            <form class="login__form" method="post" action="{{ path('identity_login') }}">
+                <label class="login__field">
+                    Email
+                    <input class="login__input" type="email" name="email" value="{{ lastEmail }}" autocomplete="username" required{% if not lastEmail %} autofocus{% endif %}>
+                </label>
+                <label class="login__field">
+                    Password
+                    <input class="login__input" type="password" name="password" autocomplete="current-password" required{% if lastEmail %} autofocus{% endif %}>
+                </label>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
+                <twig:Button type="submit">Log in</twig:Button>
+            </form>
+        </twig:Card>
+    </div>
+{% endblock %}

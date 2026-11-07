@@ -1,0 +1,17 @@
+# Login throttling (ADR-0012), joined by the identity.login_rate_limiter service (config/services.yaml): a try is
+# refused when either limiter has no tries left. Only failed tries count. The counters live on the state Valkey,
+# which never evicts (ADR-0010), through ValkeyLimiterStorage, which fails the login when Valkey cannot be reached.
+framework:
+    rate_limiter:
+        # Keyed by the email in lowercase and the client IP together.
+        login_per_email_and_ip:
+            policy: fixed_window
+            limit: 5
+            interval: '15 minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+        # Keyed by the client IP: bounds how many emails one client may try.
+        login_per_ip:
+            policy: fixed_window
+            limit: 50
+            interval: '1 hour'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage

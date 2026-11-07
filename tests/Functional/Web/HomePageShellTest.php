@@ -4,13 +4,18 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
+use App\Tests\Functional\Identity\LogsInUsers;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
+use Zenstruck\Foundry\Test\Factories;
 
 final class HomePageShellTest extends WebTestCase
 {
+    use Factories;
+    use LogsInUsers;
+
     #[Test]
     public function theHomePageHasOneMainAndOneHeading(): void
     {
@@ -135,6 +140,8 @@ final class HomePageShellTest extends WebTestCase
 
     private function openHome(): Crawler
     {
+        $this->logIn($this->client(), $this->createUserWithPassword('Lena Berg'));
+
         return $this->client()->request('GET', '/');
     }
 }

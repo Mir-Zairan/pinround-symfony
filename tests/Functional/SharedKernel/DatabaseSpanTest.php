@@ -6,17 +6,22 @@ namespace App\Tests\Functional\SharedKernel;
 
 use App\SharedKernel\Infrastructure\Tracing\SpanAttributes;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
+use App\Tests\Functional\Identity\LogsInUsers;
 use OpenTelemetry\API\Trace\SpanContextValidator;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The phase criterion "a trace shows one span per DB query for GET /", through the real kernel (ADR-0029).
  */
 final class DatabaseSpanTest extends WebTestCase
 {
+    use Factories;
+    use LogsInUsers;
+
     #[Test]
     public function aRealQueryInsideTheRequestGetsItsOwnSpanBetweenBeginAndCommit(): void
     {
@@ -41,6 +46,7 @@ final class DatabaseSpanTest extends WebTestCase
     public function theHomePageExportsOneChildSpanPerStatementItSendsUnderTheRequestSpan(): void
     {
         $client = self::createClient();
+        $this->logIn($client, $this->createUserWithPassword('Lena Berg'));
         $exporter = self::getContainer()->get('tracing.in_memory_exporter');
         self::assertInstanceOf(InMemoryExporter::class, $exporter);
 

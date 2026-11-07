@@ -8,7 +8,7 @@ One page that lists every environment variable pinround reads: its default, who 
 - [Rules for prod](#rules-for-prod) — what the prod environment must provide
 - [App and Symfony](#app-and-symfony) — environment, secret, share folder, public URL
 - [Database](#database) — the three connection URLs and the compose database settings
-- [Valkey and messaging](#valkey-and-messaging) — cache and queue DSNs
+- [Valkey and messaging](#valkey-and-messaging) — cache, state (sessions, login counters) and queue DSNs
 - [Mail](#mail) — the mailer DSN
 - [Mercure](#mercure) — hub keys and the public hub URL
 - [Object storage](#object-storage) — health endpoint, public URL, MinIO credentials
@@ -31,8 +31,10 @@ Real secrets never enter the repo ([ADR-0027](../03-adr/0027-secrets-and-encrypt
 ## Rules for prod
 - The prod image sets `APP_ENV=prod`, `APP_DEBUG=0` and `CADDY_ADMIN=off`. With the admin API off, nothing can change the running Caddy config and there is no `/metrics` endpoint.
 - `APP_SECRET` must be a plain environment variable, not a Symfony secret. The entrypoint guard reads only the environment. The same guard refuses to start (for every command, so workers and the scheduler too) when `APP_SECRET`, `MERCURE_PUBLISHER_JWT_KEY` or `MERCURE_SUBSCRIBER_JWT_KEY` is empty or starts with `change-me`.
-- Prod must provide `DATABASE_URL`, `MAILER_DSN`, `MESSENGER_TRANSPORT_DSN`, `DEFAULT_URI`, `REDIS_CACHE_DSN` and the two Mercure keys. Nothing in the prod image supplies them. The image build uses throwaway values for the cache warm-up only; none is kept.
+- Prod must provide `DATABASE_URL`, `MAILER_DSN`, `MESSENGER_TRANSPORT_DSN`, `DEFAULT_URI`, `REDIS_CACHE_DSN`, `STATE_VALKEY_DSN` and the two Mercure keys. Nothing in the prod image supplies them. The image build uses throwaway values for the cache warm-up only; none is kept.
 - `MESSENGER_TRANSPORT_DSN` points at the state Valkey and names no stream: no path after the host (`redis://valkey-state:6379`, not `.../messages` or `.../1`) and no `stream` query parameter. Otherwise the four `async_*` queues merge into one stream. The `dsn_without_stream` env processor makes `worker` and `worker-heavy` fail at start on such a DSN. It also fails on a comma that does not begin another host, so a comma in the password must be written `%2C`. See [ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md).
+- `STATE_VALKEY_DSN` points at the state Valkey (`noeviction`), never at the cache one: sessions and the login counters live there, and an LRU eviction would log people out and hand an attacker fresh login tries. When it cannot be reached, logins fail (no unthrottled tries) and pages that need a session fail too.
+- The session cookie is `__Host-pinround`: browsers keep it only over HTTPS, so pinround must be served over HTTPS (dev uses `https://localhost`).
 - Set `OBJECT_STORAGE_ENDPOINT` to the storage's address on the app's network. `/health/ready` fails while it is empty.
 - `/health/live` and `/health/ready` answer only loopback and private client IPs. Anyone else gets the 404 of a missing route. Behind a reverse proxy or load balancer on a private network every client looks private, so configure trusted proxies or block `/health/*` at the edge. Symfony reads trusted proxies from `SYMFONY_TRUSTED_PROXIES` and `SYMFONY_TRUSTED_HEADERS` (the framework defaults; the repo sets neither). Caddy has its own `trusted_proxies` option if it sits behind a proxy. This is open work for phase 12.
 - Prod has no `MIGRATOR_DATABASE_URL`. The `migrate` container gets its own `DATABASE_URL` for the migrator role. See [operations.md](../02-architecture/operations.md#configuration).
@@ -65,6 +67,7 @@ Dev and test use the app role for the web and workers, and the migrator role for
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
 | `REDIS_CACHE_DSN` | empty on purpose in `.env`; `redis://valkey-cache:6379` in `.env.dev` and `.env.test`; none, required in prod | app, all workers, migrate | yes, when it holds a password | DSN of the cache Valkey, read by `cache.app`. |
+| `STATE_VALKEY_DSN` | empty on purpose in `.env`; `redis://valkey-state:6379` in `.env.dev`; not set in tests (they use `TEST_STATE_VALKEY_DSN`); none, required in prod | app, all workers, migrate | yes, when it holds a password | DSN of the state Valkey for sessions (key prefix `session:`) and the login counters (prefix `login_throttling:`). |
 | `MESSENGER_TRANSPORT_DSN` | `redis://valkey-state:6379` in `.env.dev`; `in-memory://` in `.env.test`; none, required in prod | app, all workers | yes, when it holds a password | DSN of the state Valkey that holds the queues. See [Rules for prod](#rules-for-prod) for the path, stream and comma rules. |
 
 ## Mail
@@ -134,7 +137,7 @@ These are read by `docker compose` or `make`, not by PHP. The ports, `JAEGER_*`,
 ## Test-only
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
-| `TEST_STATE_VALKEY_DSN` | `redis://valkey-state:6379` in `.env.test` | test only | no | The state Valkey that `/health/ready` checks in tests, because the test messenger transport is in-memory. |
+| `TEST_STATE_VALKEY_DSN` | `redis://valkey-state:6379` in `.env.test` | test only | no | The state Valkey that `/health/ready` checks in tests, because the test messenger transport is in-memory. The test env also points the state Valkey connection (`STATE_VALKEY_DSN` elsewhere) at it, for the login counters and the session handler test. |
 | `E2E_BASE_URL` | `https://localhost` | test only (Playwright) | no | The address the end-to-end tests open. |
 
 `APP_ENV`, `APP_SECRET`, `DEFAULT_URI`, `MERCURE_PUBLIC_URL`, `OBJECT_STORAGE_PUBLIC_URL`, `OBJECT_STORAGE_ENDPOINT`, `REDIS_CACHE_DSN`, the database URLs, `MAILER_DSN` and `MESSENGER_TRANSPORT_DSN` also have test values in `.env.test`. They are listed in the sections above.

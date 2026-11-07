@@ -8,6 +8,11 @@ use App\SharedKernel\Domain\UserId;
 
 interface Users
 {
+    /**
+     * A new id no user has yet: a UUIDv7, so ids sort by creation time (ADR-0006).
+     */
+    public function nextIdentity(): UserId;
+
     public function byId(UserId $id): ?User;
 
     /**
