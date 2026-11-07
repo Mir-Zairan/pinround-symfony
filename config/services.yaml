@@ -43,3 +43,33 @@ when@test:
             resource: '../tests/Fixtures/Messenger/*Handler.php'
             autowire: true
             autoconfigure: true
+
+        # Nothing in src injects AuditLog yet; this consumer keeps it in the test container as a real module would get it.
+        App\Tests\Fixtures\Audit\AuditLogConsumer:
+            autowire: true
+            public: true
+
+        # Test-only handler and log capture of the outbox, retry and failed-transport tests (tests/Integration/Messaging).
+        App\Tests\Fixtures\Messaging\SaveProbeNoteHandler:
+            autoconfigure: true
+            public: true
+        App\Tests\Fixtures\Messaging\OutboxProbeRecordedHandler:
+            autoconfigure: true
+            public: true
+        App\Tests\Fixtures\Messaging\CapturedLogRecords:
+            autoconfigure: true
+            public: true
+        App\Tests\Fixtures\Messaging\ValkeyWithOutageTransportFactory:
+            autoconfigure: true
+        App\Tests\Fixtures\Messaging\RecordProbeEffectHandler:
+            autowire: true
+            autoconfigure: true
+            public: true
+        # Used by AddTenantStampTest and WorkerStateBetweenMessagesTest.
+        App\Tests\Fixtures\Messaging\RecordHandlerSightingHandler:
+            autowire: true
+            autoconfigure: true
+            public: true
+        App\Tests\Fixtures\Messaging\DispatchSightingAfterCurrentMessageHandler:
+            autowire: true
+            autoconfigure: true

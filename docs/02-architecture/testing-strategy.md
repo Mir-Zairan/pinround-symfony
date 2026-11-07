@@ -67,7 +67,7 @@ See [ADR-0028](../03-adr/0028-testing-and-quality-gates.md).
 - **Tenant isolation** (always on): two orgs with mirrored data; every list, search, read model, export and MCP tool must return only the caller's org. Plus `CatalogTest`, which reads the catalog and fails on a tenant table or partition without RLS, `FORCE` and the `tenant_isolation` policy (rules in [data-model.md](data-model.md#row-level-security)). See [security.md](security.md#tenant-isolation).
 - **Voter suite:** a table-driven test per voter: (role set, ticket state, rule settings) → allow/deny + reason. New roles or rules must add rows.
 - **Query count:** hot-path functional tests assert a maximum number of SQL queries per request (Home 8, list 5, ticket page 10).
-- **Worker state leak:** two requests through one booted kernel with different users and orgs; assert no data from the first appears in the second.
+- **Worker state leak:** two requests through one booted kernel with different orgs; the next request has no tenant and an open EntityManager (`tests/Functional/Web/WorkerResetTest`). For messages, `tests/Integration/Messaging/WorkerStateBetweenMessagesTest` runs one worker loop over a message of org A and then one of org B, and the B handler sees nothing of A.
 - **Prompt golden tests:** offline runner for real models (not in CI); in CI, mocked provider responses test parsing, validation, retry and labeling. Includes a prompt-injection set. See [ai-architecture.md](ai-architecture.md#evaluation).
 - **MCP contract tests:** for each tool, valid input → expected output shape; invalid input → error; wrong scope → denied; other org's id → not found.
 - **Log leak test:** run main journeys with a unique marker in ticket text; fail if the marker appears in logs.

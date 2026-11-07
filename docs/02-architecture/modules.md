@@ -84,8 +84,9 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `Clock` (an interface, so tests can freeze time);
   - `TenantContext` (the current `OrganizationId`; callers only fill it). The DBAL driver middleware `TenantMiddleware` in `Infrastructure/Doctrine` reads it and runs `set_config('app.org_id', …, true)` at the start of each transaction. `TenantFilter` scopes ORM queries on `TenantOwned` entities and throws `TenantNotSet` without a tenant; `RequestTransaction` wraps each main web request in one transaction; `TenantContext` refuses (`TenantSwitchRefused`) an org switch or `clear()` while a transaction is open or the EntityManager holds an entity ([ADR-0005](../03-adr/0005-multi-tenancy.md), [row-level security](data-model.md#row-level-security));
   - the `DomainEvent` base (event id, occurred at, organization id, actor id);
-  - `Result`/`Problem` types for expected failures.
-- **Owns tables:** none.
+  - `Result`/`Problem` types for expected failures;
+  - `OnceOnlyHandling` (Application: run an async handler's effect once per message), with `MessageIdStamp`, `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in `Infrastructure/Messenger` ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key)).
+- **Owns tables:** `processed_message` (global plumbing, no `organization_id`; see [data-model.md](data-model.md)).
 - **Rule:** keep it tiny. A type joins SharedKernel only when three or more modules need it.
 
 ### Identity (`idn_`)
@@ -253,8 +254,8 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 ### Audit (`aud_`)
 
 - **Story:** Sara wants to know who turned off the lead check last week. The activity log shows the person, the time and the old and new value.
-- **Owns:** `aud_event` (append-only, partitioned by month), `aud_export`.
-- **Api:** `AuditLog::record(AuditEntry)` (for actions that have no domain event, for example an MCP call or an export download).
+- **Owns:** `aud_event` (append-only, partitioned by month; P00.T7), `aud_export` (P11).
+- **Api:** `AuditLog::record(AuditEntry)` (for actions that have no domain event, for example an MCP call or an export download). `AuditEntry` is built with `byUser`, `byToken` or `bySystem` (`ActorKind`); `record` writes in the caller's transaction and throws `AuditEntryForAnotherTenantRefused` for an entry of another organization than `TenantContext`'s. Implemented by `Infrastructure\DbalAuditLog`.
 - **Consumes:** admin, settings, role, token, login, AI-policy, export and ticket-move events.
 - **Depends on:** SharedKernel only.
 - **ADRs:** [0026](../03-adr/0026-audit-log.md).
@@ -311,7 +312,7 @@ All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `oc
 Rules:
 
 - **An event is a fact in the past tense.** It never asks someone to do something.
-- **Consumers must be idempotent.** Store the handled `eventId`, or upsert by natural key.
+- **Consumers must be idempotent.** Wrap the effect in `OnceOnlyHandling::runOnce`, keyed by the `MessageIdStamp` id and a stable handler name, or upsert by natural key ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key)).
 - **Event classes are public** (they live in `Api/Event`). Changing a payload means adding fields only. To remove a field, create a new event version.
 
 ## Deptrac rules

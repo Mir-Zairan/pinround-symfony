@@ -180,13 +180,13 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 5. Symfony Scheduler service with an empty schedule; `scheduler` container runs it.
 6. **Minimal audit store:** `aud_event` (id, organization_id, at, actor_kind, actor_id, action, target_type, target_id, data jsonb without content) as a table partitioned by month with primary key `(id, at)`; RLS on the parent and every partition; grants **on the parent only** (`INSERT`, `SELECT` for `pinround_app`), all privileges revoked on the partitions; `Audit\Api\AuditLog::record(...)`. P11 adds the UI, filters, export and retention.
 7. **Worker state-leak test:** run two messages for two orgs in one worker loop and assert no tenant or user state leaks.
-**Files:** `config/packages/messenger.yaml`, `src/SharedKernel/Infrastructure/Messenger/*`, `src/Audit/**`, `tests/Integration/Messaging/*`, `tests/Integration/Audit/*`.
+**Files:** `config/packages/messenger.yaml`, `src/SharedKernel/Infrastructure/Messenger/*`, `src/Audit/**`, `migrations/Version20261107150000.php`, `migrations/Version20261107160000.php`, `migrations/Version20261107170000.php`, `tests/Integration/Messaging/*`, `tests/Integration/Audit/*`, `docs/03-adr/0033-*.md`.
 **Acceptance criteria:**
-- [ ] An event recorded inside a transaction that rolls back is never delivered.
-- [ ] A handler that fails 3 times lands in `failed` with the error, without ticket content in the log.
-- [ ] Delivering the same message twice runs the handler's effect once.
-- [ ] The state-leak test passes.
-- [ ] `UPDATE` and `DELETE` on `aud_event` fail for `pinround_app`; a direct `SELECT` on a partition fails (grants on the parent only).
+- [x] An event recorded inside a transaction that rolls back is never delivered.
+- [x] A handler that fails 3 times lands in `failed` with the error, without ticket content in the log.
+- [x] Delivering the same message twice runs the handler's effect once.
+- [x] The state-leak test passes.
+- [x] `UPDATE` and `DELETE` on `aud_event` fail for `pinround_app`; a direct `SELECT` on a partition fails (grants on the parent only).
 **Tests:** integration tests above.
 **Prototype check:** none (backend task).
 **Size:** M
@@ -247,7 +247,17 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-06 (P00.T8): turn the Caddy admin API off in prod and point the image `HEALTHCHECK` at the app health route.
 - 2026-11-06 (P00.T3): the first migration installs trusted extensions, so `pinround_migrator` needs `CREATE` on the database (or a superuser bootstrap creates them). Test that migration as that role. Its `down()` is irreversible on purpose.
 - 2026-11-06 (P00.T7): `src/SharedKernel/Infrastructure/Scheduler/DefaultSchedule.php` is an empty placeholder so the scheduler service starts. Modules add jobs with `#[AsCronTask]` or `#[AsPeriodicTask]`.
-- 2026-11-06 (P00.T9, P12): the prod env must provide `APP_SECRET` as a plain environment variable (not a Symfony secret; the entrypoint guard reads only the environment), `DATABASE_URL`, `MAILER_DSN`, `MESSENGER_TRANSPORT_DSN`, `DEFAULT_URI`, `REDIS_CACHE_DSN` and the Mercure keys (prod refuses `change-me` keys). `config.md` and P12 `compose.prod.yaml` must list them.
+- 2026-11-06 (P00.T9, P12): the prod env must provide `APP_SECRET` as a plain environment variable (not a Symfony secret; the entrypoint guard reads only the environment), `DATABASE_URL`, `MAILER_DSN`, `MESSENGER_TRANSPORT_DSN`, `DEFAULT_URI`, `REDIS_CACHE_DSN` and the Mercure keys (prod refuses `change-me` keys). `config.md` and P12 `compose.prod.yaml` must list them. `MESSENGER_TRANSPORT_DSN` points at the state Valkey and names no stream: no path after the host (`redis://valkey-state:6379`, not `.../messages` or `.../1`) and no `stream` query parameter, or the four `async_*` queues merge into one stream. The `dsn_without_stream` env processor makes `worker` and `worker-heavy` fail at start on such a DSN ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md)).
+- 2026-11-07 (P00.T7, P12): P12 `compose.prod.yaml` runs the three workers of [ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md) as `compose.yaml` does: `worker-outbox` (`outbox`, `--sleep=0.5`), `worker` (`async_notify async_integration`) and `worker-heavy` (`async_media async_ai`). `tests/shell/compose-config-check.sh` checks `compose.yaml` only.
+- 2026-11-07 (P00.T7, P11): `processed_message` grows with every message an async handler runs once ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key)). P11 adds a chunked purge job as `pinround_retention` that deletes rows by `processed_at` (indexed), older than the longest redelivery window (the outbox's 3600 s redeliver timeout plus the `failed` retention an operator may retry from). No role has `DELETE` on it yet: `roles.sql` and the migrations give `pinround_retention` no table grants today, so P11's migration grants it `SELECT, DELETE`.
+- 2026-11-07 (P00.T7): `doctrine:migrations:diff` finds no changes. The `schema_filter` regex in `config/packages/doctrine.yaml` (default and migrator connections) hides the tables no entity maps: `processed_message`, `aud_event` and `aud_event_YYYYMM`. A new hand-written table that no entity maps (for example `tkt_ticket_event`) must be added to it, or `DatabaseRolesTest::doctrineMigrationsDiffFindsNoChanges` fails.
+- 2026-11-07 (P00.T7): `aud_event` partitions exist to 2027-12; a monthly job (and ADR-0026's boot/CI check for next month's partition) must be added before then. The job runs as `pinround_migrator`, names partitions `aud_event_YYYYMM` with UTC bounds, runs `TenantTable::enableRls` on each and revokes all on it from `PUBLIC`, `pinround_app` and `pinround_readonly`, as `Version20261107170000` does. `DbalAuditLogTest` freezes its clock at 2027-03-15, so it does not depend on the current month.
+- 2026-11-07 (P00.T7, P11): `pinround_readonly` has `SELECT` on `aud_event` (parent, under RLS) for support. `pinround_retention` has no right on it yet; P11's retention migration grants what the purge needs, on the parent only.
+- 2026-11-07 (P00.T7): the actor stamp waits for P01 users; the tenant stamp is added on dispatch now.
+- 2026-11-07 (P00.T7): "fails 3 times" is met as one try plus 3 retries (max_retries 3, waits 1 s, 10 s, 60 s per ADR-0009); FailedMessageTest asserts 4 runs.
+- 2026-11-07 (P00.T7): after pulling, run `make up` so `worker-outbox` and `worker-heavy` start; without them outbox events and `async_media`/`async_ai` messages wait unread.
+- 2026-11-07 (P00.T7, P00.T8): the DBAL debug SQL logger writes bound parameters (ticket text) to the dev and test logs. P00.T8's redaction processor must drop the `params` key or turn `dbal.logging` off.
+- 2026-11-07 (P00.T7): [ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md) supersedes [ADR-0009](../03-adr/0009-async-messaging-and-outbox.md) in part: transports, workers, the relay and the idempotency key.
 - 2026-11-06 (P00.T1): MinIO and `mc` are built from pinned source ([ADR-0031](../03-adr/0031-minio-built-from-pinned-source.md)) because upstream stopped publishing images. `pgvector` is not in the stock postgres image and was skipped.
 - 2026-11-06 (P00.T1): the disk on a dev machine can fill up. The MinIO source build needs about 2-3 GB.
 - 2026-11-06 (P00.T2): [ADR-0032](../03-adr/0032-module-call-edges-follow-modules-catalogue.md) replaces ADR-0002's allowed-dependency diagram. Module calls follow the "Depends on" lines in modules.md. `DeptracConfigTest` fails if `deptrac.yaml` and those lines differ, so change both together.

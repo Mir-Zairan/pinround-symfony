@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Messaging;
 
+use App\SharedKernel\Infrastructure\Messenger\AddTenantStampMiddleware;
+use App\SharedKernel\Infrastructure\Messenger\MessageIdStampMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\RejectMessageForAnotherTenantMiddleware;
+use App\SharedKernel\Infrastructure\Messenger\RelayOutboxMessageMiddleware;
 use App\SharedKernel\Infrastructure\Messenger\TenantStampMiddleware;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\Messenger\Exception\NoHandlerForMessageException;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\HandledStamp;
 
 /**
  * Every Messenger bus must fill TenantContext before doctrine_transaction begins, and refuse a message for another
@@ -19,35 +25,69 @@ use Symfony\Component\Console\Tester\CommandTester;
 final class MessengerBusMiddlewareTest extends KernelTestCase
 {
     #[Test]
-    public function everyBusRunsBothTenantMiddlewareInTheirPlace(): void
+    public function everyBusRunsTheTenantMiddlewareInTheirPlace(): void
     {
         $middlewareByBus = $this->middlewareByBus();
 
         // A new bus is added here on purpose, so its author sees this rule.
-        self::assertEqualsCanonicalizing(['messenger.bus.default'], array_keys($middlewareByBus));
+        self::assertEqualsCanonicalizing(['command.bus', 'event.bus'], array_keys($middlewareByBus));
         foreach ($middlewareByBus as $busId => $middlewareIds) {
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, TenantStampMiddleware::class, $busId.'.middleware.doctrine_transaction');
             self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, RejectMessageForAnotherTenantMiddleware::class, 'messenger.middleware.dispatch_after_current_bus');
+            // A message dispatch_after_current_bus holds back is released after the organization is cleared.
+            self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, AddTenantStampMiddleware::class, RejectMessageForAnotherTenantMiddleware::class);
+            // The relay must see the outbox's ReceivedStamp, which failed_message_processing_middleware puts back on
+            // a message retried from failed, and must stop the message before any handler or tenant switch.
+            self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, 'messenger.middleware.failed_message_processing_middleware', RelayOutboxMessageMiddleware::class);
+            self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, RelayOutboxMessageMiddleware::class, TenantStampMiddleware::class);
+            // A message dispatch_after_current_bus holds back must be handled under its own id, not the one before it.
+            self::assertMiddlewareDirectlyBefore($busId, $middlewareIds, 'messenger.middleware.dispatch_after_current_bus', MessageIdStampMiddleware::class);
         }
     }
 
     #[Test]
-    public function theDefaultBusRunsTheFrameworkMiddlewareAroundTheTenantMiddleware(): void
+    public function eachBusRunsTheFrameworkMiddlewareAroundTheTenantMiddlewareAndTheRelay(): void
     {
-        self::assertSame([
-            'messenger.bus.default.middleware.traceable',
-            'messenger.middleware.add_default_stamps_middleware',
-            'messenger.bus.default.middleware.add_bus_name_stamp_middleware',
-            'messenger.middleware.reject_redelivered_message_middleware',
-            RejectMessageForAnotherTenantMiddleware::class,
-            'messenger.middleware.dispatch_after_current_bus',
-            'messenger.middleware.decode_failed_message_middleware',
-            'messenger.middleware.failed_message_processing_middleware',
-            TenantStampMiddleware::class,
-            'messenger.bus.default.middleware.doctrine_transaction',
-            'messenger.bus.default.middleware.send_message',
-            'messenger.bus.default.middleware.handle_message',
-        ], $this->middlewareByBus()['messenger.bus.default'] ?? null);
+        $middlewareByBus = $this->middlewareByBus();
+
+        foreach (['command.bus', 'event.bus'] as $busId) {
+            self::assertSame([
+                $busId.'.middleware.traceable',
+                'messenger.middleware.add_default_stamps_middleware',
+                $busId.'.middleware.add_bus_name_stamp_middleware',
+                'messenger.middleware.reject_redelivered_message_middleware',
+                AddTenantStampMiddleware::class,
+                RejectMessageForAnotherTenantMiddleware::class,
+                'messenger.middleware.dispatch_after_current_bus',
+                MessageIdStampMiddleware::class,
+                'messenger.middleware.decode_failed_message_middleware',
+                'messenger.middleware.failed_message_processing_middleware',
+                RelayOutboxMessageMiddleware::class,
+                TenantStampMiddleware::class,
+                $busId.'.middleware.doctrine_transaction',
+                $busId.'.middleware.send_message',
+                $busId.'.middleware.handle_message',
+            ], $middlewareByBus[$busId] ?? null, $busId);
+        }
+    }
+
+    #[Test]
+    public function theCommandBusIsTheDefaultBus(): void
+    {
+        $container = self::getContainer();
+
+        self::assertSame($container->get('command.bus'), $container->get(MessageBusInterface::class));
+    }
+
+    #[Test]
+    public function theEventBusAcceptsAMessageNobodyHandlesAndTheCommandBusRefusesIt(): void
+    {
+        $container = self::getContainer();
+
+        self::assertSame([], $container->get('event.bus')->dispatch(new \stdClass())->all(HandledStamp::class));
+
+        $this->expectException(NoHandlerForMessageException::class);
+        $container->get('command.bus')->dispatch(new \stdClass());
     }
 
     /**
