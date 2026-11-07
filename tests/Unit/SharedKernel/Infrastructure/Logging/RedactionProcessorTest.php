@@ -93,6 +93,65 @@ final class RedactionProcessorTest extends TestCase
     }
 
     #[Test]
+    public function aShortQuotedExceptionMessageGoesAndTheClassNameThatHoldsItsWordStays(): void
+    {
+        $redacted = self::redact(self::record(
+            message: 'Uncaught PHP Exception App\InvalidThing: "Invalid" at x.php line 1',
+            context: ['exception' => new \RuntimeException('Invalid')],
+        ));
+
+        self::assertSame('Uncaught PHP Exception App\InvalidThing: "'.RedactionProcessor::WITHHELD_EXCEPTION_MESSAGE.'" at x.php line 1', $redacted->message);
+    }
+
+    #[Test]
+    public function aShortUnquotedExceptionMessageWithholdsTheWholeLogMessage(): void
+    {
+        $redacted = self::redact(self::record(
+            message: 'Exception thrown when handling an exception (RuntimeException: Invalid at x.php line 1)',
+            context: ['exception' => new \RuntimeException('Invalid')],
+        ));
+
+        self::assertSame(RedactionProcessor::WITHHELD_LOG_MESSAGE, $redacted->message);
+    }
+
+    #[Test]
+    public function aShortExceptionMessageInTextThatIsNotUtf8WithholdsTheWholeLogMessage(): void
+    {
+        $redacted = self::redact(self::record(message: "Failed \xff Invalid", context: ['exception' => new \RuntimeException('Invalid')]));
+
+        self::assertSame(RedactionProcessor::WITHHELD_LOG_MESSAGE, $redacted->message);
+    }
+
+    #[Test]
+    public function aLongUnquotedExceptionMessageIsReplacedInPlace(): void
+    {
+        $exception = new \RuntimeException('Leak probe failed on '.self::MARKER);
+
+        $redacted = self::redact(self::record(message: 'Handling failed (RuntimeException: '.$exception->getMessage().' at x.php line 1)', context: ['exception' => $exception]));
+
+        self::assertSame('Handling failed (RuntimeException: '.RedactionProcessor::WITHHELD_EXCEPTION_MESSAGE.' at x.php line 1)', $redacted->message);
+    }
+
+    /**
+     * "withheld" is part of the replacement text; only what is left around the replacements is checked again.
+     */
+    #[Test]
+    public function aShortExceptionMessageInsideTheReplacementTextDoesNotWithholdTheLogMessage(): void
+    {
+        $redacted = self::redact(self::record(message: 'Failed: "withheld"', context: ['exception' => new \RuntimeException('withheld')]));
+
+        self::assertSame('Failed: "'.RedactionProcessor::WITHHELD_EXCEPTION_MESSAGE.'"', $redacted->message);
+    }
+
+    #[Test]
+    public function anExceptionWithAnEmptyMessageLeavesTheLogMessageAsWritten(): void
+    {
+        $redacted = self::redact(self::record(message: 'Uncaught PHP Exception RuntimeException: "" at x.php line 1', context: ['exception' => new \RuntimeException()]));
+
+        self::assertSame('Uncaught PHP Exception RuntimeException: "" at x.php line 1', $redacted->message);
+    }
+
+    #[Test]
     public function aMessageWithoutAnExceptionStaysAsWritten(): void
     {
         $redacted = self::redact(self::record(message: 'Matched route "{route}".', context: ['route' => 'home']));

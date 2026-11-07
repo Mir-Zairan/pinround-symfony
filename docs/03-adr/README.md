@@ -9,7 +9,7 @@ This folder holds every important architecture decision for pinround, why we mad
 - [Status lifecycle](#status-lifecycle) — Proposed, Accepted, Deprecated, Superseded.
 - [Naming and format](#naming-and-format) — file names, numbering, the template.
 - [How to change a decision](#how-to-change-a-decision) — superseding instead of editing.
-- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0033.
+- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0034.
 
 ## What an ADR is
 
@@ -65,7 +65,7 @@ stateDiagram-v2
 
 ## All decisions
 
-All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 on 2026-11-07) (deciders: Zairan Mir, lead, with the team).
+All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07) (deciders: Zairan Mir, lead, with the team).
 
 | ADR | Title | Decision in one line |
 |---|---|---|
@@ -102,3 +102,4 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 on 2026-11-07) (deci
 | [0031](0031-minio-built-from-pinned-source.md) | Build MinIO from pinned source | MinIO stays the store; we build `minio` and `mc` from pinned tags and commits in `docker/minio`. |
 | [0032](0032-module-call-edges-follow-modules-catalogue.md) | Module call edges follow the modules catalogue | Api calls follow the "Depends on" lines in `modules.md`; any module may listen to any module's events. Supersedes only the ADR-0002 dependency diagram. |
 | [0033](0033-valkey-transports-workers-and-outbox-relay.md) | Valkey transports, workers and the outbox relay | Four `async_*` Valkey streams, three workers (outbox, short, heavy), an at-least-once relay polled every 0.5 s, longer retries for AI and Jira. Supersedes part of ADR-0009. |
+| [0034](0034-allow-list-log-redaction.md) | Keep only allow-listed ids in log records | Log records keep only allow-listed id and shape keys; exception messages are withheld; the org id is `organization_id`. Supersedes part of ADR-0027 and ADR-0029. |

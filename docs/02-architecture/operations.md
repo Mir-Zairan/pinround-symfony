@@ -109,7 +109,7 @@ Every quarter on staging:
 See [ADR-0029](../03-adr/0029-observability.md).
 
 - **Traces:** OpenTelemetry for HTTP requests, Doctrine queries (no parameter values), Messenger handlers, AI calls (provider, model, tokens, time; no content), storage calls.
-- **Logs:** JSON lines to stdout with `request_id`, `trace_id`, `org_id`, `user_id`, route, timing. A redaction processor removes content ([security.md](security.md#logging-without-leaking)).
+- **Logs:** JSON lines to stdout with `request_id`, `trace_id`, `organization_id`, `user_id`, route, timing. `RedactionProcessor` keeps only the keys on its allow-list and drops every other one ([security.md](security.md#logging-without-leaking), [ADR-0034](../03-adr/0034-allow-list-log-redaction.md)).
 - **Metrics:** request rate, error rate, latency per route; queue depth and oldest message age per transport; worker memory; DB connections; cache hit rate; AI calls and cost per org; storage per org.
 - **Health:** `/healthz` (process alive) and `/readyz` (DB, Valkey, storage reachable). Readiness never leaks details publicly.
 

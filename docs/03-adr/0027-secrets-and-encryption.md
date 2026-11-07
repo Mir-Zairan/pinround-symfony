@@ -16,7 +16,7 @@ Credentials are encrypted inside the database. Every connection uses TLS. Logs n
 
 ## Status and people
 
-- Status: Accepted
+- Status: Accepted · Superseded in part by [ADR-0034](0034-allow-list-log-redaction.md): the first "Logs and traces" bullet (redact known keys and token patterns) and the `[redacted]` Confirmation line. Logs keep only allow-listed keys instead. The rest stands.
 - Date: 2026-11-06
 - Deciders: Zairan (lead), Toyib (developer), Anka (tester)
 

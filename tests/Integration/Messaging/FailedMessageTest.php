@@ -25,7 +25,8 @@ use Symfony\Component\Messenger\Transport\Receiver\ListableReceiverInterface;
 /**
  * A message whose handler always fails is tried once and retried 3 times (the async retry strategy; when@test drops
  * the waits), then waits in the failed transport with its error. Its note, standing for ticket text, never reaches a
- * log record of any channel (ADR-0027), as the prod JSON formatter or the dev line formatter would write it.
+ * log record of any channel (ADR-0027), formatted as JSON or as a line, even before RedactionProcessor runs: the records
+ * checked are the raw ones CapturedLogRecords keeps.
  */
 final class FailedMessageTest extends KernelTestCase
 {

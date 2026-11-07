@@ -16,7 +16,7 @@ We can see how fast and how healthy pinround is without reading anyone's tickets
 
 ## Status and people
 
-- Status: Accepted
+- Status: Accepted · Superseded in part by [ADR-0034](0034-allow-list-log-redaction.md): only the log field name `org_id`, now `organization_id`. The rest stands.
 - Date: 2026-11-06
 - Deciders: Zairan (lead), Toyib (developer), Anka (tester)
 
@@ -88,4 +88,3 @@ Chosen option: **3**.
 - Related: [ADR-0008](0008-frankenphp-runtime.md), [ADR-0009](0009-async-messaging-and-outbox.md), [ADR-0027](0027-secrets-and-encryption.md), [ADR-0030](0030-deployment-model.md).
 - Architecture: [operations.md](../02-architecture/operations.md), [performance-and-scale.md](../02-architecture/performance-and-scale.md).
 - Revisit when telemetry cost exceeds 5% of hosting cost, or when sampling hides real problems.
-- 2026-11-07 (P00.T8): the redaction processor keeps an allow-list of context and extra keys and drops every other key, rather than dropping a list of known sensitive keys, so a new key name can never leak. The org id is logged as `organization_id`. The exact list is in [security.md](../02-architecture/security.md#logging-without-leaking).

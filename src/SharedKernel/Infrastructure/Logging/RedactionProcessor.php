@@ -11,8 +11,12 @@ use Monolog\Processor\ProcessorInterface;
 /**
  * Keeps only ids and shapes in every record of every channel, so ticket text, prompts, tokens and bound SQL values
  * never reach a log (ADR-0027, security.md "Logging without leaking"). Context and extra keep only ALLOWED_KEYS with a
- * scalar or null value, strings capped; `exception` keeps a throwable's class, code, file and line. The record message
- * loses the message of every throwable in the context, which Symfony quotes in messages it formats itself.
+ * scalar or null value, strings capped; `exception` keeps a throwable's class, code, file and line.
+ *
+ * Symfony quotes a throwable's message in record messages it formats itself, so the record message loses the message
+ * of every throwable in the context (and of their previous ones): each quoted copy is replaced; a copy left outside
+ * quotes is replaced too when the exception message is long enough not to match unrelated text, and otherwise, when it
+ * stands as a whole word, the whole record message is withheld.
  *
  * Runs after the other logger processors; each handler's PSR-3 message processor runs later still, so a placeholder
  * of a dropped key stays unfilled. Log a constant message with placeholders, never one built from content.
@@ -27,6 +31,11 @@ final class RedactionProcessor implements ProcessorInterface
     public const int MAX_STRING_LENGTH = 255;
 
     public const string WITHHELD_EXCEPTION_MESSAGE = '[exception message withheld]';
+
+    public const string WITHHELD_LOG_MESSAGE = '[log message withheld: it quoted an exception message]';
+
+    /** In characters; a shorter exception message outside quotes could be part of a class name or other words. */
+    public const int MIN_UNQUOTED_EXCEPTION_MESSAGE_LENGTH = 16;
 
     /**
      * Correlation ids (CorrelationIdsProcessor; trace_id and span_id come with OpenTelemetry), the HTTP keys of
@@ -86,16 +95,56 @@ final class RedactionProcessor implements ProcessorInterface
      */
     private static function withoutExceptionMessages(string $message, array $context): string
     {
-        $replacements = [];
+        $exceptionMessages = [];
         foreach ($context as $value) {
             for ($throwable = $value instanceof \Throwable ? $value : null; null !== $throwable; $throwable = $throwable->getPrevious()) {
-                $replacements[$throwable->getMessage()] = self::WITHHELD_EXCEPTION_MESSAGE;
+                if ('' !== $throwable->getMessage()) {
+                    $exceptionMessages[] = $throwable->getMessage();
+                }
+            }
+        }
+        if ([] === $exceptionMessages) {
+            return $message;
+        }
+
+        $quotedReplacements = [];
+        foreach ($exceptionMessages as $exceptionMessage) {
+            $quotedReplacements['"'.$exceptionMessage.'"'] = '"'.self::WITHHELD_EXCEPTION_MESSAGE.'"';
+        }
+        // strtr replaces the longest match first and never inside a replacement, so a message that quotes its previous
+        // one goes whole. The pieces between replacements are what is left to check.
+        $pieces = explode(self::WITHHELD_EXCEPTION_MESSAGE, strtr($message, $quotedReplacements));
+
+        $unquotedReplacements = [];
+        foreach (array_unique($exceptionMessages) as $exceptionMessage) {
+            if (mb_strlen($exceptionMessage) >= self::MIN_UNQUOTED_EXCEPTION_MESSAGE_LENGTH) {
+                $unquotedReplacements[$exceptionMessage] = self::WITHHELD_EXCEPTION_MESSAGE;
+            } elseif (self::containsAsWholeWord($pieces, $exceptionMessage)) {
+                return self::WITHHELD_LOG_MESSAGE;
             }
         }
 
-        // strtr ignores an empty message, replaces the longest match first and never inside a replacement, so a message
-        // that quotes its previous one goes whole.
-        return [] === $replacements ? $message : strtr($message, $replacements);
+        return implode(self::WITHHELD_EXCEPTION_MESSAGE, array_map(
+            static fn (string $piece): string => strtr($piece, $unquotedReplacements),
+            $pieces,
+        ));
+    }
+
+    /**
+     * @param list<string> $pieces
+     */
+    private static function containsAsWholeWord(array $pieces, string $exceptionMessage): bool
+    {
+        $pattern = '/(?<![\p{L}\p{N}_])'.preg_quote($exceptionMessage, '/').'(?![\p{L}\p{N}_])/u';
+        foreach ($pieces as $piece) {
+            $match = preg_match($pattern, $piece);
+            // false: the text is not valid UTF-8, so any copy counts rather than none.
+            if (1 === $match || (false === $match && str_contains($piece, $exceptionMessage))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function capped(string $value): string
