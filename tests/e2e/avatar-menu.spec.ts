@@ -136,9 +136,10 @@ test('a late failure of an older save keeps the newer pick', async ({ page }) =>
   await expect.poll(() => saves).toBe(1);
   await pickTheme(page, 'Light');
 
-  const darkSaveFailed = page.waitForResponse((response) => response.url().endsWith('/me/theme') && response.status() === 500);
+  // The controller warns at the end of its catch block, after any roll-back; the 500 response alone comes earlier.
+  const darkSaveHandled = page.waitForEvent('console', (message) => message.type() === 'warning');
   releaseDarkSave();
-  await darkSaveFailed;
+  await darkSaveHandled;
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await expect(themeOption(page, 'Light')).toHaveAttribute('aria-pressed', 'true');
