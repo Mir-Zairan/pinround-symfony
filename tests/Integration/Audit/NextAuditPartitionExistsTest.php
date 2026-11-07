@@ -62,16 +62,36 @@ final class NextAuditPartitionExistsTest extends KernelTestCase
     #[Test]
     public function aTableNamedLikeAPartitionButNotAttachedToAudEventDoesNotCount(): void
     {
+        // Never committed: the check reads the catalog on the same connection, inside the transaction.
         $migrator = $this->migratorConnection();
-        $migrator->executeStatement('CREATE TABLE aud_event_202801 (id INT)');
+        $migrator->beginTransaction();
 
         try {
+            $migrator->executeStatement('CREATE TABLE aud_event_202801 (id INT)');
             $this->expectException(ReadinessCheckFailed::class);
 
-            new NextAuditPartitionExists($this->connection(), new MockClock('2027-12-15 10:00:00 UTC'))->verify();
+            new NextAuditPartitionExists($migrator, new MockClock('2027-12-15 10:00:00 UTC'))->verify();
         } finally {
-            $migrator->executeStatement('DROP TABLE aud_event_202801');
+            $migrator->rollBack();
         }
+    }
+
+    #[Test]
+    public function aPartitionAddedForNextMonthMakesTheCheckPass(): void
+    {
+        // The counterpart of the test above, also never committed: the same name as a real partition of aud_event.
+        $migrator = $this->migratorConnection();
+        $migrator->beginTransaction();
+
+        try {
+            $migrator->executeStatement("CREATE TABLE aud_event_202801 PARTITION OF aud_event FOR VALUES FROM ('2028-01-01+00') TO ('2028-02-01+00')");
+
+            new NextAuditPartitionExists($migrator, new MockClock('2027-12-15 10:00:00 UTC'))->verify();
+        } finally {
+            $migrator->rollBack();
+        }
+
+        self::assertNull($migrator->fetchOne("SELECT to_regclass('public.aud_event_202801')"), 'The partition was committed.');
     }
 
     private function connection(): Connection

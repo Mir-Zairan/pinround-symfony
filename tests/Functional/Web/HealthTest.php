@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
+use App\Audit\Infrastructure\NextAuditPartitionExists;
+use App\Media\Infrastructure\Health\ObjectStorageIsReachable;
 use App\SharedKernel\Infrastructure\Health\DatabaseAnswers;
 use App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent;
-use App\SharedKernel\Infrastructure\Health\ObjectStorageIsReachable;
+use App\SharedKernel\Infrastructure\Health\ReadinessCheck;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
@@ -22,6 +24,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
@@ -31,6 +34,19 @@ use Symfony\Component\HttpKernel\KernelEvents;
  */
 final class HealthTest extends WebTestCase
 {
+    /** Every readiness check's service id, with its name. */
+    private const array READINESS_CHECKS = [
+        DatabaseAnswers::class => 'database',
+        MigrationsAreCurrent::class => 'migrations',
+        NextAuditPartitionExists::class => 'next_audit_partition',
+        'health.cache_valkey_answers' => 'cache_valkey',
+        'health.state_valkey_answers' => 'state_valkey',
+        ObjectStorageIsReachable::class => 'object_storage',
+    ];
+
+    // Inside the months the migrations created partitions for (2026-11 to 2027-12), so next month always has one.
+    private const string NOW = '2027-03-15 10:00:00 UTC';
+
     private KernelBrowser $client;
 
     protected function setUp(): void
@@ -91,9 +107,73 @@ final class HealthTest extends WebTestCase
         self::assertSame(\sprintf('No route found for "GET http://localhost%s" (404 Not Found)', $path), $healthPage->filter('title')->text());
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function callerMistakes(): iterable
+    {
+        yield 'a missing route' => ['GET', '/no-such-page'];
+        yield 'an outside caller of a health route' => ['GET', '/health/ready'];
+        yield 'a wrong method' => ['POST', '/health/live'];
+    }
+
+    #[Test]
+    #[DataProvider('callerMistakes')]
+    public function aCallersMistakeIsLoggedAtDebugNotAsAnError(string $method, string $path): void
+    {
+        $capturedLogRecords = $this->capturedLogRecords();
+        $capturedLogRecords->clear();
+
+        $this->client->request($method, $path, server: ['REMOTE_ADDR' => '203.0.113.7']);
+
+        self::assertResponseStatusCodeSame('POST' === $method ? 405 : 404);
+        $levels = array_map(static fn (LogRecord $record): Level => $record->level, array_values(array_filter(
+            $capturedLogRecords->all(),
+            static fn (LogRecord $record): bool => str_starts_with($record->message, 'Uncaught PHP Exception'),
+        )));
+        self::assertSame([Level::Debug], $levels);
+    }
+
+    #[Test]
+    public function readyRunsEveryReadinessCheckOnceWithTheDatabaseFirst(): void
+    {
+        /** @var \ArrayObject<int, string> $ranChecks */
+        $ranChecks = new \ArrayObject();
+        foreach (self::READINESS_CHECKS as $serviceId => $name) {
+            self::getContainer()->set($serviceId, new readonly class($name, $ranChecks) implements ReadinessCheck {
+                /**
+                 * @param \ArrayObject<int, string> $ranChecks
+                 */
+                public function __construct(private string $name, private \ArrayObject $ranChecks)
+                {
+                }
+
+                public function name(): string
+                {
+                    return $this->name;
+                }
+
+                public function verify(): void
+                {
+                    $this->ranChecks->append($this->name);
+                }
+            });
+        }
+
+        $this->client->request('GET', '/health/ready');
+
+        self::assertResponseStatusCodeSame(200);
+        $ranCheckNames = $ranChecks->getArrayCopy();
+        // The checks that query the database rely on it having answered within its short timeout first.
+        self::assertSame('database', $ranCheckNames[0] ?? null);
+        self::assertEqualsCanonicalizing(array_values(self::READINESS_CHECKS), $ranCheckNames);
+    }
+
     #[Test]
     public function readyAnswersOkWhenEveryDependencyAnswers(): void
     {
+        self::freezeTheClockAt(self::NOW);
+
         $this->client->request('GET', '/health/ready');
 
         self::assertResponseStatusCodeSame(200);
@@ -101,14 +181,33 @@ final class HealthTest extends WebTestCase
     }
 
     #[Test]
+    public function readyAnswersFailWhenNextMonthHasNoAuditPartition(): void
+    {
+        self::freezeTheClockAt('2027-12-15 10:00:00 UTC');
+        $capturedLogRecords = $this->capturedLogRecords();
+        $capturedLogRecords->clear();
+
+        $this->client->request('GET', '/health/ready');
+
+        self::assertResponseStatusCodeSame(503);
+        self::assertSame('{"status":"fail"}', $this->client->getResponse()->getContent());
+        $failedChecks = array_map(
+            static fn (LogRecord $record): mixed => $record->context['check'] ?? null,
+            array_values(array_filter($capturedLogRecords->all(), static fn (LogRecord $record): bool => Level::Warning === $record->level)),
+        );
+        self::assertSame(['next_audit_partition'], $failedChecks);
+    }
+
+    #[Test]
     public function readyAnswersOkWhenTheMigrationsTableIsReadAsTheAppRoleAsInProd(): void
     {
+        self::freezeTheClockAt(self::NOW);
         // Prod has no migrator connection: the migrations DependencyFactory uses the app's (Version20261107180000).
         $configuration = new Configuration();
         $configuration->setMetadataStorageConfiguration(new TableMetadataStorageConfiguration());
         $configuration->addMigrationsDirectory('DoctrineMigrations', self::getContainer()->getParameter('kernel.project_dir').'/migrations');
         $migrationsAsTheApp = DependencyFactory::fromConnection(new ExistingConfiguration($configuration), new ExistingConnection($this->defaultConnection()));
-        self::getContainer()->set(MigrationsAreCurrent::class, new MigrationsAreCurrent($migrationsAsTheApp->getMigrationStatusCalculator()));
+        self::getContainer()->set(MigrationsAreCurrent::class, new MigrationsAreCurrent($migrationsAsTheApp));
         self::assertSame('pinround_app', $this->defaultConnection()->fetchOne('SELECT current_user'));
 
         $this->client->request('GET', '/health/ready');
@@ -147,6 +246,7 @@ final class HealthTest extends WebTestCase
     #[Test]
     public function neitherRouteOpensATransactionOrStartsASession(): void
     {
+        self::freezeTheClockAt(self::NOW);
         $this->client->disableReboot();
         $observed = [];
         $connection = $this->defaultConnection();
@@ -179,6 +279,15 @@ final class HealthTest extends WebTestCase
             $observed,
         );
         self::assertSame([], $this->client->getCookieJar()->all());
+    }
+
+    /**
+     * NextAuditPartitionExists reads this clock. Call it before the test's first request: the client reboots the
+     * kernel after it, which drops the frozen clock unless the test disabled reboots.
+     */
+    private static function freezeTheClockAt(string $now): void
+    {
+        self::getContainer()->set('clock', new MockClock($now));
     }
 
     private function capturedLogRecords(): CapturedLogRecords

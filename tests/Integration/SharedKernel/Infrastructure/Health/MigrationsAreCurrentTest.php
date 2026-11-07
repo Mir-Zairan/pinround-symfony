@@ -8,6 +8,7 @@ use App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent;
 use App\SharedKernel\Infrastructure\Health\ReadinessCheckFailed;
 use App\Tests\Integration\SharedKernel\Infrastructure\Health\UnexecutedMigration\Version29991231000000;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\TableNotFoundException;
 use Doctrine\Migrations\Configuration\Configuration;
 use Doctrine\Migrations\Configuration\Connection\ExistingConnection;
 use Doctrine\Migrations\Configuration\Migration\ExistingConfiguration;
@@ -38,7 +39,7 @@ final class MigrationsAreCurrentTest extends KernelTestCase
         $appConnection = $this->appConnection();
         self::assertSame('pinround_app', $appConnection->fetchOne('SELECT current_user'));
 
-        new MigrationsAreCurrent($this->migrationsOn($appConnection)->getMigrationStatusCalculator())->verify();
+        new MigrationsAreCurrent($this->migrationsOn($appConnection))->verify();
 
         $this->addToAssertionCount(1);
     }
@@ -46,14 +47,28 @@ final class MigrationsAreCurrentTest extends KernelTestCase
     #[Test]
     public function aMigrationTheCodeShipsButTheDatabaseNeverRanFailsTheCheck(): void
     {
-        $dependencyFactory = $this->migrationsOn(
+        $migrations = $this->migrationsOn(
             $this->migratorConnection(),
             [new \ReflectionClass(Version29991231000000::class)->getNamespaceName() => __DIR__.'/UnexecutedMigration'],
         );
 
         $this->expectException(ReadinessCheckFailed::class);
+        $this->expectExceptionMessageIsOrContains('1 migrations are not executed.');
 
-        new MigrationsAreCurrent($dependencyFactory->getMigrationStatusCalculator())->verify();
+        new MigrationsAreCurrent($migrations)->verify();
+    }
+
+    #[Test]
+    public function aDatabaseWithoutTheMigrationsTableFailsTheCheck(): void
+    {
+        $configuration = self::configuration();
+        $missingTable = new TableMetadataStorageConfiguration();
+        $missingTable->setTableName('zz_no_such_migration_versions');
+        $configuration->setMetadataStorageConfiguration($missingTable);
+
+        $this->expectException(TableNotFoundException::class);
+
+        new MigrationsAreCurrent(DependencyFactory::fromConnection(new ExistingConfiguration($configuration), new ExistingConnection($this->appConnection())))->verify();
     }
 
     /**
@@ -61,14 +76,21 @@ final class MigrationsAreCurrentTest extends KernelTestCase
      */
     private function migrationsOn(Connection $connection, array $extraMigrationDirectories = []): DependencyFactory
     {
-        $configuration = new Configuration();
-        $configuration->setMetadataStorageConfiguration(new TableMetadataStorageConfiguration());
-        $configuration->addMigrationsDirectory('DoctrineMigrations', self::getContainer()->getParameter('kernel.project_dir').'/migrations');
+        $configuration = self::configuration();
         foreach ($extraMigrationDirectories as $namespace => $directory) {
             $configuration->addMigrationsDirectory($namespace, $directory);
         }
 
         return DependencyFactory::fromConnection(new ExistingConfiguration($configuration), new ExistingConnection($connection));
+    }
+
+    private static function configuration(): Configuration
+    {
+        $configuration = new Configuration();
+        $configuration->setMetadataStorageConfiguration(new TableMetadataStorageConfiguration());
+        $configuration->addMigrationsDirectory('DoctrineMigrations', self::getContainer()->getParameter('kernel.project_dir').'/migrations');
+
+        return $configuration;
     }
 
     private function appConnection(): Connection

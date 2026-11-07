@@ -11,7 +11,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Cache\Exception\InvalidArgumentException;
 
 /**
- * Against the compose stack's two Valkeys, through the services /health/ready runs.
+ * Against the compose stack's two Valkeys (CI: its two Valkey services), through the services /health/ready runs and
+ * with the DSN shapes MESSENGER_TRANSPORT_DSN may take in prod (DsnWithoutStreamEnvVarProcessorTest).
  */
 final class ValkeyAnswersTest extends KernelTestCase
 {
@@ -36,19 +37,62 @@ final class ValkeyAnswersTest extends KernelTestCase
         self::assertSame($expectedName, $valkeyAnswers->name());
     }
 
+    /**
+     * @return iterable<string, array{string}> sprintf patterns; %1$s is the state Valkey's host:port
+     */
+    public static function messengerDsnShapes(): iterable
+    {
+        yield 'host and port' => ['redis://%1$s'];
+        yield 'trailing slash' => ['redis://%1$s/'];
+        yield 'db index in the query' => ['redis://%1$s?dbindex=2'];
+        yield 'valkey scheme, lazy' => ['valkey://%1$s?lazy=1'];
+        yield 'Messenger options RedisAdapter does not know' => ['redis://%1$s?auto_setup=false&delete_after_ack=true&serializer=1'];
+        yield 'a long timeout of its own' => ['redis://%1$s?timeout=30&read_timeout=30&retry_interval=100'];
+        yield 'several hosts' => ['redis://%1$s,redis://%1$s'];
+    }
+
     #[Test]
-    public function itThrowsWhenNothingListens(): void
+    #[DataProvider('messengerDsnShapes')]
+    public function theStateValkeyAnswersOnEveryMessengerDsnShape(string $dsnPattern): void
+    {
+        new ValkeyAnswers('state_valkey', \sprintf($dsnPattern, self::stateValkeyAddress()))->verify();
+
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function dsnsOfAValkeyThatIsDown(): iterable
+    {
+        yield 'nothing listens' => ['redis://127.0.0.1:1'];
+        // RedisAdapter would return a proxy that never connects, so a lazy DSN alone must not pass.
+        yield 'nothing listens, lazy' => ['valkey://127.0.0.1:1?lazy=1'];
+        yield 'not a Valkey DSN' => ['in-memory://'];
+    }
+
+    #[Test]
+    #[DataProvider('dsnsOfAValkeyThatIsDown')]
+    public function itThrowsWhenTheValkeyDoesNotAnswer(string $dsn): void
     {
         $this->expectException(InvalidArgumentException::class);
 
-        new ValkeyAnswers('probe', 'redis://127.0.0.1:1')->verify();
+        new ValkeyAnswers('probe', $dsn)->verify();
+    }
+
+    #[Test]
+    public function aDsnOfSeveralHostsFailsWhenOneOfThemIsDown(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        new ValkeyAnswers('probe', 'redis://'.self::stateValkeyAddress().',redis://127.0.0.1:1')->verify();
     }
 
     #[Test]
     public function itGivesUpOnAHostThatNeverAnswersWithinTheTimeout(): void
     {
         // TEST-NET-1 (RFC 5737): routed nowhere, so a connect waits for its timeout (30 s by default).
-        $unanswered = new ValkeyAnswers('probe', 'redis://192.0.2.1:6379');
+        $unanswered = new ValkeyAnswers('probe', 'redis://192.0.2.1:6379?timeout=30');
         $startedAt = microtime(true);
 
         try {
@@ -57,14 +101,20 @@ final class ValkeyAnswersTest extends KernelTestCase
         } catch (InvalidArgumentException) {
         }
 
-        self::assertLessThan(3.0, microtime(true) - $startedAt);
+        $elapsedSeconds = microtime(true) - $startedAt;
+        if ($elapsedSeconds < 0.5) {
+            self::markTestSkipped('This network refused 192.0.2.1 at once, so the connect timeout was not reached.');
+        }
+        self::assertLessThan(3.0, $elapsedSeconds);
     }
 
-    #[Test]
-    public function aDsnThatIsNotAValkeyFails(): void
+    private static function stateValkeyAddress(): string
     {
-        $this->expectException(InvalidArgumentException::class);
+        $dsn = $_SERVER['TEST_STATE_VALKEY_DSN'] ?? null;
+        self::assertIsString($dsn, 'TEST_STATE_VALKEY_DSN is not set (.env.test).');
+        $host = parse_url($dsn, \PHP_URL_HOST);
+        self::assertIsString($host);
 
-        new ValkeyAnswers('probe', 'in-memory://')->verify();
+        return $host.':'.(parse_url($dsn, \PHP_URL_PORT) ?? 6379);
     }
 }

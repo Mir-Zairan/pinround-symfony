@@ -27,13 +27,8 @@ services:
     # The ORM result cache (doctrine.yaml says why it must not store anything).
     Symfony\Component\Cache\Adapter\NullAdapter: ~
 
-    # Readiness checks of /health/ready (HealthController). The migrations one reads what doctrine:migrations:migrate
-    # reads; the two Valkeys are the cache one and the state one, whose host MESSENGER_TRANSPORT_DSN names (ADR-0010).
-    health.migration_status_calculator:
-        class: Doctrine\Migrations\Version\MigrationStatusCalculator
-        factory: ['@doctrine.migrations.dependency_factory', 'getMigrationStatusCalculator']
-    App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent:
-        arguments: ['@health.migration_status_calculator']
+    # Readiness checks of /health/ready (HealthController) for the two Valkeys: the cache one and the state one, whose
+    # host MESSENGER_TRANSPORT_DSN names (ADR-0010). ReadinessWiringTest pins both definitions.
     health.cache_valkey_answers:
         class: App\SharedKernel\Infrastructure\Health\ValkeyAnswers
         arguments: ['cache_valkey', '%env(REDIS_CACHE_DSN)%']

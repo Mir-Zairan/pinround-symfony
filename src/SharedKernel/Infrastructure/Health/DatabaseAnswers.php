@@ -10,7 +10,8 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 /**
  * PostgreSQL answers `SELECT 1` as the default connection's role, on a short-lived connection with the default
  * connection's settings and a 1 s connect timeout. The app's own connection keeps pdo_pgsql's 30 s default and is
- * left untouched, so a probe never changes its state.
+ * left untouched, so a probe never changes its state. The timeout does not cover the lookup of the host name, which
+ * no PHP timeout can bound.
  *
  * Runs first: the checks that query the database run only after it answered here, so a database that does not
  * answer costs the readiness route about a second, not 30.

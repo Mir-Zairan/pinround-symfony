@@ -7,6 +7,8 @@ namespace App\Tests\Unit\Architecture;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -68,6 +70,27 @@ final class MonologConfigTest extends TestCase
             ] : [],
             $handlers,
         ));
+    }
+
+    /**
+     * Symfony logs a 4xx HttpException at error. Without these, prod's unbuffered info handler would write an error
+     * line for every scanner's 404 and every outside caller of /health/* (which gets a 404 on purpose).
+     */
+    #[Test]
+    public function aMissingRouteOrAWrongMethodIsLoggedBelowProdsLevel(): void
+    {
+        $framework = Yaml::parseFile(\dirname(__DIR__, 3).'/config/packages/framework.yaml');
+        self::assertIsArray($framework);
+        self::assertIsArray($framework['framework'] ?? null);
+
+        self::assertSame(
+            [
+                NotFoundHttpException::class => ['log_level' => 'debug'],
+                MethodNotAllowedHttpException::class => ['log_level' => 'debug'],
+            ],
+            $framework['framework']['exceptions'] ?? null,
+            'Prod main writes info and above (handlersPerEnvironment), so these must stay at debug.',
+        );
     }
 
     /**

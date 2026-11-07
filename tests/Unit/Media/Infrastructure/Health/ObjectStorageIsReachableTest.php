@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\SharedKernel\Infrastructure\Health;
+namespace App\Tests\Unit\Media\Infrastructure\Health;
 
-use App\SharedKernel\Infrastructure\Health\ObjectStorageIsReachable;
+use App\Media\Infrastructure\Health\ObjectStorageIsReachable;
 use App\SharedKernel\Infrastructure\Health\ReadinessCheckFailed;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -55,7 +55,11 @@ final class ObjectStorageIsReachableTest extends TestCase
         } catch (ReadinessCheckFailed) {
         }
 
-        self::assertLessThan(3.0, microtime(true) - $startedAt);
+        $elapsedSeconds = microtime(true) - $startedAt;
+        if ($elapsedSeconds < 0.5) {
+            self::markTestSkipped('This network refused 192.0.2.1 at once, so the connect timeout was not reached.');
+        }
+        self::assertLessThan(3.0, $elapsedSeconds);
     }
 
     /**

@@ -2,14 +2,19 @@
 
 declare(strict_types=1);
 
-namespace App\SharedKernel\Infrastructure\Health;
+namespace App\Media\Infrastructure\Health;
 
+use App\SharedKernel\Infrastructure\Health\ReadinessCheck;
+use App\SharedKernel\Infrastructure\Health\ReadinessCheckFailed;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
- * The object storage endpoint the app talks to (OBJECT_STORAGE_ENDPOINT, the internal one, not the browser-facing
+ * The object storage endpoint Media talks to (OBJECT_STORAGE_ENDPOINT, the internal one, not the browser-facing
  * OBJECT_STORAGE_PUBLIC_URL) accepts a TCP connection within a second. No credentials and no request: an S3 API
  * has no anonymous health route common to every provider.
+ *
+ * The second bounds the connect only: resolving a host name is a blocking system lookup that no PHP timeout covers,
+ * so a slow resolver can hold the readiness route longer (operations.md, Health).
  */
 final readonly class ObjectStorageIsReachable implements ReadinessCheck
 {
