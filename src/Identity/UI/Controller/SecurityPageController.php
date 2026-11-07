@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\UI\Controller;
 
+use App\Identity\Application\AccountPermission;
 use App\Identity\Application\ChangePassword;
 use App\Identity\Application\CurrentSession;
 use App\Identity\Application\LogOutEverywhere;
@@ -17,7 +18,7 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * The security page (FR-ID-06): change password and "Log out of all devices". It acts only on the logged-in user, never
- * on an id from the request, so the firewall's full login is its whole access check (security.yaml).
+ * on an id from the request; every action asks OwnAccountVoter for AccountPermission::EDIT_OWN first (ADR-0013).
  */
 final class SecurityPageController extends AbstractController
 {
@@ -39,12 +40,15 @@ final class SecurityPageController extends AbstractController
     #[Route('/me/security', name: 'identity_security', methods: ['GET'])]
     public function show(): Response
     {
+        $this->denyAccessUnlessGranted(AccountPermission::EDIT_OWN);
+
         return $this->renderPage();
     }
 
     #[Route('/me/security/password', name: 'identity_security_password', methods: ['POST'])]
     public function changePassword(Request $request): Response
     {
+        $this->denyAccessUnlessGranted(AccountPermission::EDIT_OWN);
         if (!$this->isCsrfTokenValid(self::PASSWORD_CSRF_ID, $request->request->getString('_csrf_token'))) {
             return $this->renderPage(passwordError: LoginController::FORM_EXPIRED);
         }
@@ -74,6 +78,7 @@ final class SecurityPageController extends AbstractController
     #[Route('/me/security/log-out-everywhere', name: 'identity_security_log_out_everywhere', methods: ['POST'])]
     public function logOutEverywhere(Request $request): Response
     {
+        $this->denyAccessUnlessGranted(AccountPermission::EDIT_OWN);
         if (!$this->isCsrfTokenValid(self::LOG_OUT_EVERYWHERE_CSRF_ID, $request->request->getString('_csrf_token'))) {
             return $this->renderPage(logOutError: LoginController::FORM_EXPIRED);
         }

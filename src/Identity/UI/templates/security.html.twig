@@ -46,7 +46,7 @@
             {% if logOutError %}
                 <p class="login__error" role="alert">{{ logOutError }}</p>
             {% endif %}
-            <p class="login__hint">Ends every session, also this one. Then you log in again.</p>
+            <p class="login__hint">Ends every session, including this one. You then log in again.</p>
             <form method="post" action="{{ path('identity_security_log_out_everywhere') }}">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('security_log_out_everywhere') }}">
                 <twig:Button type="submit" variant="outline">Log out of all devices</twig:Button>

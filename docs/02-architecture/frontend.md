@@ -244,7 +244,7 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Manager "Teams at a glance" | part of `/` for managers | Insight | GroupBar per team |
 | Local AI sheet | dialog from the header chip; `POST /ai/laptop/status`, `POST /ai/laptop/package`, `POST /ai/laptop/result` | Assist | `local-ai` controller |
 | Personal access tokens | `GET/POST /me/tokens` | Identity | for MCP and the plugin |
-| Security (password, two-factor) | `GET/POST /me/security` | Identity | |
+| Security (password, two-factor) | `GET /me/security` (`identity_security`), `POST /me/security/password`, `POST /me/security/log-out-everywhere` | Identity | |
 | Login, invite accept, SSO callback | `/login`, `/invite/{token}`, `/login/sso/{provider}/callback` | Identity | |
 | MCP endpoint | `POST /mcp` | AgentApi | no HTML |
 | REST for the plugin | `/api/v1/…` | AgentApi | no HTML |

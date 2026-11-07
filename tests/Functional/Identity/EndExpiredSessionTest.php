@@ -18,6 +18,7 @@ final class EndExpiredSessionTest extends WebTestCase
 {
     use Factories;
     use LogsInUsers;
+    use ReadsSessionMetadata;
 
     #[Test]
     public function aSessionIdleForMoreThanEightHoursLandsOnTheLoginPageAndStaysOut(): void
@@ -80,43 +81,6 @@ final class EndExpiredSessionTest extends WebTestCase
 
         self::assertResponseRedirects('/', 302);
         self::assertGreaterThanOrEqual($beforeLogin, self::sessionMetadata($client)['c']);
-    }
-
-    /**
-     * The test env keeps sessions in files (MockFileSessionStorage); PHP's time() stamps their metadata, so the first
-     * visit is moved back in the file instead of moving the clock forward.
-     */
-    private static function writeSessionCreatedTime(KernelBrowser $client, int $created): void
-    {
-        $file = self::sessionFileOf($client);
-        $data = unserialize((string) file_get_contents($file));
-        self::assertIsArray($data);
-        self::assertIsArray($data['_sf2_meta'] ?? null);
-        $data['_sf2_meta']['c'] = $created;
-        file_put_contents($file, serialize($data));
-    }
-
-    /**
-     * @return array{c: int, u: int, l: int}
-     */
-    private static function sessionMetadata(KernelBrowser $client): array
-    {
-        $data = unserialize((string) file_get_contents(self::sessionFileOf($client)));
-        self::assertIsArray($data);
-        /** @var array{c: int, u: int, l: int} $metadata */
-        $metadata = $data['_sf2_meta'];
-
-        return $metadata;
-    }
-
-    private static function sessionFileOf(KernelBrowser $client): string
-    {
-        $cookie = $client->getCookieJar()->get('__Host-pinround', '/', 'localhost');
-        self::assertNotNull($cookie);
-        $file = self::getContainer()->getParameter('kernel.cache_dir').'/sessions/'.$cookie->getValue().'.mocksess';
-        self::assertFileExists($file);
-
-        return $file;
     }
 
     /**

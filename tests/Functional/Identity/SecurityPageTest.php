@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Identity;
 
+use App\Identity\Application\AccountPermission;
 use App\Identity\Domain\User;
+use App\Identity\Infrastructure\Security\OwnAccountVoter;
 use App\Identity\UI\Controller\LoginController;
 use App\Identity\UI\Controller\PasswordResetController;
 use App\Identity\UI\Controller\SecurityPageController;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Component\Security\Core\Authorization\Voter\Vote;
+use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -22,6 +28,7 @@ final class SecurityPageTest extends WebTestCase
 {
     use Factories;
     use LogsInUsers;
+    use ReadsSessionMetadata;
 
     private const string NEW_PASSWORD = 'a much longer new passphrase';
     private const string HASH_QUERY = 'SELECT password_hash FROM idn_credential WHERE user_id = ?';
@@ -125,7 +132,8 @@ final class SecurityPageTest extends WebTestCase
         $this->logIn($client, $user);
         $hashBefore = $this->passwordHashOf($user);
 
-        for ($try = 1; $try <= 3; ++$try) {
+        // Five of each: if either kind took a try, the good change below would be the sixth and be refused.
+        for ($try = 1; $try <= 5; ++$try) {
             $this->submitPasswordChange($client, self::PASSWORD, 'eleven char');
             self::assertResponseStatusCodeSame(422);
             self::assertSame('A password needs at least 12 characters.', $client->getCrawler()->filter('main [role="alert"]')->text());
@@ -137,6 +145,34 @@ final class SecurityPageTest extends WebTestCase
 
         $this->submitPasswordChange($client, self::PASSWORD, self::NEW_PASSWORD);
         self::assertResponseRedirects('/me/security', 302);
+    }
+
+    #[Test]
+    public function aPasswordChangeRestartsTheThirtyDaysOfThisSessionAsALoginDoes(): void
+    {
+        $client = self::httpsClient();
+        // The client keeps its kernel, so the clock stays in every service across requests. It starts at the real time:
+        // the session's own timestamps come from PHP's time().
+        $client->disableReboot();
+        $clock = new MockClock();
+        self::getContainer()->set('clock', $clock);
+        $this->logIn($client, $this->createUserWithPassword('Raj Patel'));
+        $client->request('GET', '/me/security');
+        self::assertResponseStatusCodeSame(200);
+        $created = time() - 30 * 86400 + 3600;
+        self::writeSessionCreatedTime($client, $created);
+        self::assertSame($created, self::sessionMetadata($client)['c']);
+        $beforeChange = time();
+
+        $this->submitPasswordChange($client, self::PASSWORD, self::NEW_PASSWORD);
+
+        self::assertResponseRedirects('/me/security', 302);
+        self::assertGreaterThanOrEqual($beforeChange, self::sessionMetadata($client)['c']);
+        // Two hours on, the old start would be past 30 days and the idle limit (8 h) is not reached; EndExpiredSession
+        // reads now from the Clock.
+        $clock->modify('+2 hours');
+        $client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
     }
 
     #[Test]
@@ -177,6 +213,40 @@ final class SecurityPageTest extends WebTestCase
         self::assertResponseRedirects('/login', 302);
         $miasBrowser->request('GET', '/');
         self::assertSame(200, $miasBrowser->getResponse()->getStatusCode());
+    }
+
+    #[Test]
+    public function everyActionIsRefusedWhenTheVoterDenies(): void
+    {
+        $client = self::httpsClient();
+        $client->disableReboot();
+        $user = $this->createUserWithPassword('Omar Haddad');
+        $this->logIn($client, $user);
+        $hashBefore = $this->passwordHashOf($user);
+        $stampBefore = $this->sessionStampOf($user);
+        // Before the first request, while the voter is not built yet; the client keeps this kernel.
+        self::getContainer()->set(OwnAccountVoter::class, new class extends Voter {
+            protected function supports(string $attribute, mixed $subject): bool
+            {
+                return AccountPermission::EDIT_OWN === $attribute;
+            }
+
+            protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
+            {
+                return false;
+            }
+        });
+
+        $client->request('GET', '/me/security');
+        self::assertResponseStatusCodeSame(403);
+        // 403, not the 422 of the missing CSRF token: the voter is asked first.
+        $client->request('POST', '/me/security/password', ['current_password' => self::PASSWORD, 'new_password' => self::NEW_PASSWORD, 'new_password_repeat' => self::NEW_PASSWORD]);
+        self::assertResponseStatusCodeSame(403);
+        $client->request('POST', '/me/security/log-out-everywhere');
+        self::assertResponseStatusCodeSame(403);
+
+        self::assertSame($hashBefore, $this->passwordHashOf($user));
+        self::assertSame($stampBefore, $this->sessionStampOf($user));
     }
 
     #[Test]
