@@ -20,14 +20,15 @@ export default class extends Controller {
     this.#apply(option.value);
     const save = ++this.#latestSave;
     try {
-      // The server answers with a redirect back to this page; there is nothing to read from it.
+      // Only 204 means saved; a redirect is the firewall sending an ended session to the login page.
       const response = await fetch(this.element.action, {
         method: 'POST',
         body: new FormData(this.element),
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
         credentials: 'same-origin',
         redirect: 'manual',
       });
-      if (response.type !== 'opaqueredirect' && !response.ok) {
+      if (response.status !== 204) {
         throw new Error(`The theme was not saved (${response.status}).`);
       }
     } catch (error) {

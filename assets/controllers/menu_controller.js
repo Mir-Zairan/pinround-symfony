@@ -37,16 +37,17 @@ export default class extends Controller {
     this.triggerTarget.setAttribute('aria-expanded', 'false');
   }
 
-  // Focus stays on the trigger after a mouse open, so the trigger needs Escape and Tab handling too.
+  // Focus stays on the trigger after a mouse open, so the trigger needs Escape and Tab handling too. Tab closes
+  // only a menu whose items are out of the Tab order; in a disclosure it moves on into the open list.
   triggerKey(event) {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       this.open();
       this.#focusItem(0);
-    } else if ((event.key === 'Escape' || event.key === 'Tab') && this.isOpen) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-      }
+    } else if (event.key === 'Escape' && this.isOpen) {
+      event.preventDefault();
+      this.close();
+    } else if (event.key === 'Tab' && this.isOpen && !this.itemTargets.some((item) => item.tabIndex >= 0)) {
       this.close();
     }
   }

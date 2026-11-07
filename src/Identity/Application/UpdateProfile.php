@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Identity\Application;
 
 use App\Identity\Domain\BlankUserName;
-use App\Identity\Domain\Theme;
+use App\Identity\Domain\InvalidProfile;
+use App\Identity\Domain\UnknownTheme;
 use App\Identity\Domain\UnknownTimeZone;
 use App\Identity\Domain\User;
+use App\Identity\Domain\UserNameTooLong;
 use App\Identity\Domain\Users;
 use App\SharedKernel\Domain\UserId;
 
@@ -17,22 +19,14 @@ use App\SharedKernel\Domain\UserId;
  */
 final readonly class UpdateProfile
 {
+    public const int MAXIMUM_NAME_LENGTH = User::MAXIMUM_NAME_LENGTH;
+
     public function __construct(private Users $users)
     {
     }
 
     /**
-     * @throws \LogicException when no user has this id
-     */
-    public function current(UserId $userId): Profile
-    {
-        $user = $this->userOf($userId);
-
-        return new Profile($user->name(), $user->timeZone(), $user->theme()->value);
-    }
-
-    /**
-     * Saves all three fields or none: every field is checked before the user changes.
+     * Saves all three fields or none.
      *
      * @param string $theme a Theme value: "system", "light" or "dark"
      *
@@ -42,37 +36,20 @@ final readonly class UpdateProfile
      */
     public function __invoke(UserId $userId, string $name, string $timeZone, string $theme): array
     {
-        $problems = [];
+        // The firewall reloads the logged-in user on every request and logs the session out when it is gone.
+        $user = $this->users->byId($userId) ?? throw new \LogicException('No user has this id.');
         try {
-            User::trimmedName($name);
-        } catch (BlankUserName) {
-            $problems[] = ProfileProblem::NameBlank;
+            $user->changeProfile($name, $timeZone, $theme);
+        } catch (InvalidProfile $invalidProfile) {
+            return array_map(static fn (BlankUserName|UserNameTooLong|UnknownTimeZone|UnknownTheme $refusal): ProfileProblem => match ($refusal::class) {
+                BlankUserName::class => ProfileProblem::NameBlank,
+                UserNameTooLong::class => ProfileProblem::NameTooLong,
+                UnknownTimeZone::class => ProfileProblem::TimeZoneUnknown,
+                UnknownTheme::class => ProfileProblem::ThemeUnknown,
+            }, $invalidProfile->refusals);
         }
-        try {
-            User::ianaTimeZone($timeZone);
-        } catch (UnknownTimeZone) {
-            $problems[] = ProfileProblem::TimeZoneUnknown;
-        }
-        $chosenTheme = Theme::tryFrom($theme);
-        if (null === $chosenTheme) {
-            $problems[] = ProfileProblem::ThemeUnknown;
-        }
-        if ([] !== $problems || null === $chosenTheme) {
-            return $problems;
-        }
-
-        $user = $this->userOf($userId);
-        $user->rename($name);
-        $user->changeTimeZone($timeZone);
-        $user->changeTheme($chosenTheme);
         $this->users->save($user);
 
         return [];
-    }
-
-    private function userOf(UserId $userId): User
-    {
-        // The firewall reloads the logged-in user on every request and logs the session out when it is gone.
-        return $this->users->byId($userId) ?? throw new \LogicException('No user has this id.');
     }
 }

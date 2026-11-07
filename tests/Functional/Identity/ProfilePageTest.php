@@ -41,6 +41,7 @@ final class ProfilePageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Profile', $page->filter('main h1')->text());
         self::assertSame('Mia Lund', $page->filter('input[name="name"]')->attr('value'));
+        self::assertSame('100', $page->filter('input[name="name"]')->attr('maxlength'));
         self::assertSame(['Europe/Berlin'], $page->filter('select[name="time_zone"] option[selected]')->each(static fn (Crawler $option): string => $option->text()));
         self::assertSame(\DateTimeZone::listIdentifiers(), $page->filter('select[name="time_zone"] option')->each(static fn (Crawler $option): string => (string) $option->attr('value')));
         self::assertSame(['system'], $page->filter('input[name="theme"][checked]')->each(static fn (Crawler $radio): string => (string) $radio->attr('value')));
@@ -95,6 +96,7 @@ final class ProfilePageTest extends WebTestCase
     public static function refusedProfiles(): iterable
     {
         yield 'blank name' => [['name' => '   ', 'time_zone' => 'Asia/Kolkata', 'theme' => 'dark'], [ProfileController::NAME_BLANK]];
+        yield 'name of 101 characters' => [['name' => str_repeat('a', 101), 'time_zone' => 'Asia/Kolkata', 'theme' => 'dark'], ['Use at most 100 characters.']];
         yield 'time zone not in the list' => [['name' => 'Omar Said', 'time_zone' => 'Mars/Olympus', 'theme' => 'dark'], [ProfileController::TIME_ZONE_UNKNOWN]];
         yield 'offset instead of a time zone' => [['name' => 'Omar Said', 'time_zone' => '+02:00', 'theme' => 'dark'], [ProfileController::TIME_ZONE_UNKNOWN]];
         yield 'unknown theme' => [['name' => 'Omar Said', 'time_zone' => 'Asia/Kolkata', 'theme' => 'purple'], [ProfileController::THEME_UNKNOWN]];
@@ -294,6 +296,23 @@ final class ProfilePageTest extends WebTestCase
         $client->request('POST', '/me/theme', $form->getValues(), [], ['HTTP_REFERER' => $referer ?? '']);
 
         self::assertResponseRedirects('/', 302);
+        self::assertSame('dark', $this->storedProfileOf($user)['theme']);
+    }
+
+    #[Test]
+    public function theScriptsSaveIsAnsweredWithNoContentAndNoRedirect(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Mia Lund');
+        $this->logIn($client, $user);
+        $client->request('GET', '/me/security');
+        self::assertResponseStatusCodeSame(200);
+        $form = $client->getCrawler()->filter('form[action="/me/theme"]')->form(['theme' => 'dark']);
+
+        $client->xmlHttpRequest('POST', '/me/theme', $form->getValues());
+
+        self::assertResponseStatusCodeSame(204);
+        self::assertSame('', (string) $client->getResponse()->getContent());
         self::assertSame('dark', $this->storedProfileOf($user)['theme']);
     }
 

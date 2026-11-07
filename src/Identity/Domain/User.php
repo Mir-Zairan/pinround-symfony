@@ -11,6 +11,9 @@ use App\SharedKernel\Domain\UserId;
  */
 final class User
 {
+    /** In characters, not bytes. */
+    public const int MAXIMUM_NAME_LENGTH = 100;
+
     // Kept as strings and wrapped on the way out: Doctrine hashes an id by casting it to a string, and the mapping
     // stays free of value-object types.
     private readonly string $id;
@@ -28,6 +31,7 @@ final class User
      *                         report, such as "Asia/Calcutta" or "US/Pacific", are kept as given
      *
      * @throws BlankUserName   when the name is blank
+     * @throws UserNameTooLong when the trimmed name has more than 100 characters
      * @throws UnknownTimeZone when the time zone is not an IANA identifier
      */
     public function __construct(UserId $id, Email $email, string $name, private readonly string $locale, string $timeZone, private readonly \DateTimeImmutable $createdAt)
@@ -42,26 +46,28 @@ final class User
     }
 
     /**
-     * The name as a user keeps it. Public so a command can check every field of a form before it changes any.
-     *
-     * @throws BlankUserName when nothing is left after trimming
+     * @throws BlankUserName   when nothing is left after trimming
+     * @throws UserNameTooLong when more than 100 characters are left
      */
-    public static function trimmedName(string $name): string
+    private static function trimmedName(string $name): string
     {
         $trimmedName = trim($name);
         if ('' === $trimmedName) {
             throw new BlankUserName('A user needs a name.');
+        }
+        if (mb_strlen($trimmedName, 'UTF-8') > self::MAXIMUM_NAME_LENGTH) {
+            throw new UserNameTooLong(\sprintf('A user name has at most %d characters.', self::MAXIMUM_NAME_LENGTH));
         }
 
         return $trimmedName;
     }
 
     /**
-     * The time zone as given, old IANA names included. Public for the same reason as trimmedName().
+     * The time zone as given, old IANA names included.
      *
      * @throws UnknownTimeZone when it is not an IANA identifier
      */
-    public static function ianaTimeZone(string $timeZone): string
+    private static function ianaTimeZone(string $timeZone): string
     {
         if (!\in_array($timeZone, \DateTimeZone::listIdentifiers(\DateTimeZone::ALL_WITH_BC), true)) {
             throw new UnknownTimeZone('A user time zone must be an IANA time zone identifier.');
@@ -111,19 +117,37 @@ final class User
     }
 
     /**
-     * @throws BlankUserName when nothing is left after trimming
+     * Changes all three or none: every field is checked first, with the constructor's rules for name and time zone.
+     *
+     * @param string $theme a Theme value: "system", "light" or "dark"
+     *
+     * @throws InvalidProfile listing every field that was refused, in this order: name, time zone, theme
      */
-    public function rename(string $name): void
+    public function changeProfile(string $name, string $timeZone, string $theme): void
     {
-        $this->name = self::trimmedName($name);
-    }
+        $refusals = [];
+        $trimmedName = '';
+        try {
+            $trimmedName = self::trimmedName($name);
+        } catch (BlankUserName|UserNameTooLong $refusal) {
+            $refusals[] = $refusal;
+        }
+        try {
+            self::ianaTimeZone($timeZone);
+        } catch (UnknownTimeZone $refusal) {
+            $refusals[] = $refusal;
+        }
+        $chosenTheme = Theme::tryFrom($theme);
+        if (null === $chosenTheme) {
+            $refusals[] = new UnknownTheme('A theme is system, light or dark.');
+        }
+        if ([] !== $refusals || null === $chosenTheme) {
+            throw new InvalidProfile($refusals);
+        }
 
-    /**
-     * @throws UnknownTimeZone when it is not an IANA identifier
-     */
-    public function changeTimeZone(string $timeZone): void
-    {
-        $this->timeZone = self::ianaTimeZone($timeZone);
+        $this->name = $trimmedName;
+        $this->timeZone = $timeZone;
+        $this->theme = $chosenTheme;
     }
 
     public function changeTheme(Theme $theme): void

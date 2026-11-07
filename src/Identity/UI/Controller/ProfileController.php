@@ -9,6 +9,7 @@ use App\Identity\Application\ChangeTheme;
 use App\Identity\Application\CurrentSession;
 use App\Identity\Application\Profile;
 use App\Identity\Application\ProfileProblem;
+use App\Identity\Application\ShowProfile;
 use App\Identity\Application\UpdateProfile;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -23,6 +24,7 @@ final class ProfileController extends AbstractController
 {
     public const string PROFILE_SAVED = 'Your profile is saved.';
     public const string NAME_BLANK = 'Enter your name.';
+    public const string NAME_TOO_LONG = 'Use at most %d characters.';
     public const string TIME_ZONE_UNKNOWN = 'Pick a time zone from the list.';
     public const string THEME_UNKNOWN = 'Pick System, Light or Dark.';
 
@@ -34,6 +36,7 @@ final class ProfileController extends AbstractController
     private const string THEME_CSRF_ID = 'identity_theme';
 
     public function __construct(
+        private readonly ShowProfile $showProfile,
         private readonly UpdateProfile $updateProfile,
         private readonly ChangeTheme $changeTheme,
         private readonly CurrentSession $currentSession,
@@ -44,7 +47,7 @@ final class ProfileController extends AbstractController
     public function edit(Request $request): Response
     {
         $this->denyAccessUnlessGranted(AccountPermission::EDIT_OWN);
-        $savedProfile = $this->updateProfile->current($this->currentSession->userId());
+        $savedProfile = ($this->showProfile)($this->currentSession->userId());
         if (!$request->isMethod('POST')) {
             return $this->renderPage($savedProfile, $savedProfile);
         }
@@ -64,7 +67,8 @@ final class ProfileController extends AbstractController
     }
 
     /**
-     * The avatar menu's switch. Its script reads no answer; without the script the browser follows the redirect back.
+     * The avatar menu's switch. Its script asks with X-Requested-With and takes only 204 as saved, so the firewall's
+     * redirect to the login page counts as a failure; a plain form post is redirected back to its page.
      */
     #[Route('/me/theme', name: 'identity_theme', methods: ['POST'])]
     public function changeTheme(Request $request): Response
@@ -72,14 +76,18 @@ final class ProfileController extends AbstractController
         $this->denyAccessUnlessGranted(AccountPermission::EDIT_OWN);
         $userId = $this->currentSession->userId();
         if (!$this->isCsrfTokenValid(self::THEME_CSRF_ID, $request->request->getString('_csrf_token'))) {
-            $savedProfile = $this->updateProfile->current($userId);
+            $savedProfile = ($this->showProfile)($userId);
 
             return $this->renderPage($savedProfile, $savedProfile, formError: LoginController::FORM_EXPIRED);
         }
         if (!($this->changeTheme)($userId, $request->request->getString('theme'))) {
-            $savedProfile = $this->updateProfile->current($userId);
+            $savedProfile = ($this->showProfile)($userId);
 
             return $this->renderPage($savedProfile, $savedProfile, problems: [ProfileProblem::ThemeUnknown]);
+        }
+
+        if ($request->isXmlHttpRequest()) {
+            return new Response(status: Response::HTTP_NO_CONTENT);
         }
 
         return $this->redirect($this->returnPathOf($request));
@@ -128,7 +136,12 @@ final class ProfileController extends AbstractController
             'timeZones' => $timeZones,
             'themeOptions' => self::THEME_OPTIONS,
             'formError' => $formError,
-            'nameError' => \in_array(ProfileProblem::NameBlank, $problems, true) ? self::NAME_BLANK : null,
+            'maximumNameLength' => UpdateProfile::MAXIMUM_NAME_LENGTH,
+            'nameError' => match (true) {
+                \in_array(ProfileProblem::NameBlank, $problems, true) => self::NAME_BLANK,
+                \in_array(ProfileProblem::NameTooLong, $problems, true) => \sprintf(self::NAME_TOO_LONG, UpdateProfile::MAXIMUM_NAME_LENGTH),
+                default => null,
+            },
             'timeZoneError' => \in_array(ProfileProblem::TimeZoneUnknown, $problems, true) ? self::TIME_ZONE_UNKNOWN : null,
             'themeError' => \in_array(ProfileProblem::ThemeUnknown, $problems, true) ? self::THEME_UNKNOWN : null,
         ], new Response(status: $hasError ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK));

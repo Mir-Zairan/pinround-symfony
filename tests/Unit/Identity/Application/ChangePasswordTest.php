@@ -137,11 +137,11 @@ final class ChangePasswordTest extends TestCase
         $user = $hasUser ? $this->user : null;
         $credential = $hasCredential ? $this->credential : null;
 
-        $users = new class($user, $recordSave) implements Users {
+        $users = new readonly class($user, $recordSave) implements Users {
             /**
              * @param \Closure(string): void $recordSave
              */
-            public function __construct(private readonly ?User $user, private readonly \Closure $recordSave)
+            public function __construct(private ?User $user, private \Closure $recordSave)
             {
             }
 
@@ -170,11 +170,11 @@ final class ChangePasswordTest extends TestCase
                 ($this->recordSave)('user');
             }
         };
-        $credentials = new class($credential, $recordSave) implements Credentials {
+        $credentials = new readonly class($credential, $recordSave) implements Credentials {
             /**
              * @param \Closure(string): void $recordSave
              */
-            public function __construct(private readonly ?Credential $credential, private readonly \Closure $recordSave)
+            public function __construct(private ?Credential $credential, private \Closure $recordSave)
             {
             }
 
@@ -204,11 +204,11 @@ final class ChangePasswordTest extends TestCase
                 return $hash->encoded() === '$plain$'.$typedPassword;
             }
         };
-        $limiter = new class($takeTry) implements PasswordChangeLimiter {
+        $limiter = new readonly class($takeTry) implements PasswordChangeLimiter {
             /**
              * @param \Closure(): void $takeTry
              */
-            public function __construct(private readonly \Closure $takeTry)
+            public function __construct(private \Closure $takeTry)
             {
             }
 

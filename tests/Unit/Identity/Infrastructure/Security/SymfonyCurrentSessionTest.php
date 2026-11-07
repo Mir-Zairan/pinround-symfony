@@ -42,7 +42,7 @@ final class SymfonyCurrentSessionTest extends TestCase
     public function withoutATokenItRefuses(\Closure $call): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Nobody is logged in.');
+        $this->expectExceptionMessageIsOrContains('Nobody is logged in.');
 
         $call($this->currentSession(new TokenStorage()));
     }
@@ -55,7 +55,7 @@ final class SymfonyCurrentSessionTest extends TestCase
         $tokenStorage->setToken(new UsernamePasswordToken(new InMemoryUser('omar@acme-foods.example', null), 'main'));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Nobody is logged in.');
+        $this->expectExceptionMessageIsOrContains('Nobody is logged in.');
 
         $call($this->currentSession($tokenStorage));
     }

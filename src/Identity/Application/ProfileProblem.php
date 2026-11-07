@@ -10,6 +10,7 @@ namespace App\Identity\Application;
 enum ProfileProblem
 {
     case NameBlank;
+    case NameTooLong;
     case TimeZoneUnknown;
     case ThemeUnknown;
 }

@@ -78,6 +78,40 @@ final class DoctrineUsersTest extends KernelTestCase
     }
 
     #[Test]
+    public function aChangedProfileSavedTwiceIsOneRowWithTheNewValuesAndTheSameSessionStamp(): void
+    {
+        $user = new User(new UserId('0197a3c0-0000-7000-8000-0000000000ca'), new Email('mia@acme-foods.example'), 'Mia', 'en', 'Europe/Berlin', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+        $this->users()->add($user);
+        $stampBefore = $user->sessionStamp();
+
+        $user->changeProfile('Mia Lund', 'US/Pacific', 'dark');
+        $this->users()->save($user);
+        $this->users()->save($user);
+        $this->entityManager->flush();
+        $this->entityManager->clear();
+
+        self::assertSame(
+            [['id' => '0197a3c0-0000-7000-8000-0000000000ca', 'name' => 'Mia Lund', 'time_zone' => 'US/Pacific', 'theme' => 'dark', 'session_stamp' => $stampBefore]],
+            $this->connection()->fetchAllAssociative('SELECT id, name, time_zone, theme, session_stamp FROM idn_user'),
+        );
+        $found = $this->users()->byId(new UserId('0197a3c0-0000-7000-8000-0000000000ca'));
+        self::assertNotNull($found);
+        self::assertSame(['Mia Lund', 'US/Pacific', Theme::Dark], [$found->name(), $found->timeZone(), $found->theme()]);
+    }
+
+    #[Test]
+    public function aChangedThemeIsSaved(): void
+    {
+        $user = UserFactory::createOne();
+
+        $user->changeTheme(Theme::Light);
+        $this->users()->save($user);
+        $this->entityManager->clear();
+
+        self::assertSame('light', $this->connection()->fetchOne('SELECT theme FROM idn_user WHERE id = ?', [$user->id()->toString()]));
+    }
+
+    #[Test]
     public function theDatabaseRefusesAThemeOutsideSystemLightAndDark(): void
     {
         $this->expectExceptionMessageMatches('/idn_user_theme_check/');

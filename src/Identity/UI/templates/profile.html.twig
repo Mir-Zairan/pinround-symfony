@@ -23,7 +23,7 @@
                 <div class="profile__field">
                     <label class="login__field">
                         Display name
-                        <input class="login__input" type="text" name="name" value="{{ profile.name }}" autocomplete="name" required
+                        <input class="login__input" type="text" name="name" value="{{ profile.name }}" autocomplete="name" maxlength="{{ maximumNameLength }}" required
                             {%- if nameError %} aria-invalid="true" aria-describedby="profile-name-error"{% endif %}>
                     </label>
                     {% if nameError %}

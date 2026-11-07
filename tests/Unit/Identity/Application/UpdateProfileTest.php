@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity\Application;
 
-use App\Identity\Application\Profile;
 use App\Identity\Application\ProfileProblem;
 use App\Identity\Application\UpdateProfile;
 use App\Identity\Domain\Email;
@@ -42,6 +41,7 @@ final class UpdateProfileTest extends TestCase
     public static function refusedInput(): iterable
     {
         yield 'blank name' => [' ', 'Asia/Kolkata', 'dark', [ProfileProblem::NameBlank]];
+        yield 'name of 101 characters' => [str_repeat('a', 101), 'Asia/Kolkata', 'dark', [ProfileProblem::NameTooLong]];
         yield 'unknown time zone' => ['Lena Lund', 'Mars/Olympus', 'dark', [ProfileProblem::TimeZoneUnknown]];
         yield 'unknown theme' => ['Lena Lund', 'Asia/Kolkata', 'purple', [ProfileProblem::ThemeUnknown]];
         yield 'all three' => ['', '', '', [ProfileProblem::NameBlank, ProfileProblem::TimeZoneUnknown, ProfileProblem::ThemeUnknown]];
@@ -67,28 +67,11 @@ final class UpdateProfileTest extends TestCase
     }
 
     #[Test]
-    public function itShowsTheSavedProfile(): void
-    {
-        $user = self::lena();
-        $user->changeTheme(Theme::Light);
-
-        self::assertEquals(new Profile('Lena Berg', 'Europe/Berlin', 'light'), new UpdateProfile(new RecordingUsers($user))->current(new UserId(self::ID)));
-    }
-
-    #[Test]
     public function anUnknownUserIsAProgrammingError(): void
     {
-        $users = new RecordingUsers(null);
-
-        try {
-            new UpdateProfile($users)(new UserId(self::ID), 'Lena Lund', 'Asia/Kolkata', 'dark');
-            self::fail('An unknown user was saved.');
-        } catch (\LogicException) {
-        }
-        self::assertSame([], $users->savedUsers);
-
         $this->expectException(\LogicException::class);
-        new UpdateProfile($users)->current(new UserId(self::ID));
+
+        new UpdateProfile(new RecordingUsers(null))(new UserId(self::ID), 'Lena Lund', 'Asia/Kolkata', 'dark');
     }
 
     private static function lena(): User

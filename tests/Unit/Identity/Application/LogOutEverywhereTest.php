@@ -45,11 +45,11 @@ final class LogOutEverywhereTest extends TestCase
             $this->savedUsers[] = $saved;
         };
 
-        return new class($user, $recordSave) implements Users {
+        return new readonly class($user, $recordSave) implements Users {
             /**
              * @param \Closure(User): void $recordSave
              */
-            public function __construct(private readonly ?User $user, private readonly \Closure $recordSave)
+            public function __construct(private ?User $user, private \Closure $recordSave)
             {
             }
 

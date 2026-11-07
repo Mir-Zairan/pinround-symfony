@@ -6,9 +6,12 @@ namespace App\Tests\Unit\Identity\Domain;
 
 use App\Identity\Domain\BlankUserName;
 use App\Identity\Domain\Email;
+use App\Identity\Domain\InvalidProfile;
 use App\Identity\Domain\Theme;
+use App\Identity\Domain\UnknownTheme;
 use App\Identity\Domain\UnknownTimeZone;
 use App\Identity\Domain\User;
+use App\Identity\Domain\UserNameTooLong;
 use App\Identity\Domain\UserStatus;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -93,53 +96,61 @@ final class UserTest extends TestCase
     }
 
     #[Test]
-    public function renamingKeepsTheNameTrimmedAndTheSessionStamp(): void
+    public function aNameOfAHundredCharactersIsKeptAndOneMoreIsRefused(): void
+    {
+        $hundred = str_repeat('é', 100);
+        $user = new User(new UserId(self::ID), new Email('raj@acme-foods.example'), ' '.$hundred.' ', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+        self::assertSame($hundred, $user->name());
+
+        $this->expectException(UserNameTooLong::class);
+        new User(new UserId(self::ID), new Email('raj@acme-foods.example'), $hundred.'é', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+    }
+
+    #[Test]
+    public function changingTheProfileKeepsTheTrimmedNameTheOldIanaNameTheThemeAndTheSessionStamp(): void
     {
         $user = self::raj();
         $stampBefore = $user->sessionStamp();
 
-        $user->rename("  Raj Kumar \t");
+        $user->changeProfile("  Raj Kumar \t", 'Asia/Calcutta', 'dark');
 
         self::assertSame('Raj Kumar', $user->name());
+        self::assertSame('Asia/Calcutta', $user->timeZone());
+        self::assertSame(Theme::Dark, $user->theme());
         self::assertSame($stampBefore, $user->sessionStamp());
     }
 
+    /**
+     * @return iterable<string, array{string, string, string, list<class-string>}>
+     */
+    public static function refusedProfiles(): iterable
+    {
+        yield 'blank name' => [" \n ", 'Asia/Calcutta', 'dark', [BlankUserName::class]];
+        yield 'name of 101 characters' => [str_repeat('a', 101), 'Asia/Calcutta', 'dark', [UserNameTooLong::class]];
+        yield 'offset instead of a time zone' => ['Raj Kumar', '+02:00', 'dark', [UnknownTimeZone::class]];
+        yield 'theme in another case' => ['Raj Kumar', 'Asia/Calcutta', 'Dark', [UnknownTheme::class]];
+        yield 'all three' => ['', 'Mars/Olympus', 'purple', [BlankUserName::class, UnknownTimeZone::class, UnknownTheme::class]];
+    }
+
+    /**
+     * @param list<class-string> $expectedRefusals
+     */
     #[Test]
-    public function renamingToABlankNameIsRefusedAndKeepsTheOldName(): void
+    #[DataProvider('refusedProfiles')]
+    public function aRefusedFieldChangesNoFieldAndEveryRefusalIsReported(string $name, string $timeZone, string $theme, array $expectedRefusals): void
     {
         $user = self::raj();
 
         try {
-            $user->rename(" \n ");
-            self::fail('A blank name was accepted.');
-        } catch (BlankUserName) {
+            $user->changeProfile($name, $timeZone, $theme);
+            self::fail('A wrong profile was accepted.');
+        } catch (InvalidProfile $invalidProfile) {
+            self::assertSame($expectedRefusals, array_map(static fn (\InvalidArgumentException $refusal): string => $refusal::class, $invalidProfile->refusals));
         }
 
         self::assertSame('Raj', $user->name());
-    }
-
-    #[Test]
-    public function changingTheTimeZoneKeepsAnIanaNameAsGiven(): void
-    {
-        $user = self::raj();
-
-        $user->changeTimeZone('Asia/Calcutta');
-
-        self::assertSame('Asia/Calcutta', $user->timeZone());
-    }
-
-    #[Test]
-    public function changingToATimeZoneThatIsNotAnIanaIdentifierIsRefusedAndKeepsTheOldOne(): void
-    {
-        $user = self::raj();
-
-        try {
-            $user->changeTimeZone('+02:00');
-            self::fail('An offset was accepted as a time zone.');
-        } catch (UnknownTimeZone) {
-        }
-
         self::assertSame('UTC', $user->timeZone());
+        self::assertSame(Theme::System, $user->theme());
     }
 
     #[Test]

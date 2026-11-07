@@ -103,6 +103,75 @@ test('a failed save puts the previous theme back', async ({ page }) => {
   await page.unroute('**/me/theme');
 });
 
+test('a redirect to the login page counts as a failed save and puts the previous theme back', async ({ page }) => {
+  await openHome(page);
+  // What the firewall answers once the session has ended.
+  await page.route('**/me/theme', (route) => route.fulfill({ status: 302, headers: { location: '/login' }, body: '' }));
+  await avatar(page).click();
+
+  await pickTheme(page, 'Dark');
+
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/);
+  await expect(themeOption(page, 'System')).toHaveAttribute('aria-pressed', 'true');
+  await page.unroute('**/me/theme');
+});
+
+test('a late failure of an older save keeps the newer pick', async ({ page }) => {
+  await openHome(page);
+  let releaseDarkSave: () => void = () => {};
+  let saves = 0;
+  await page.route('**/me/theme', async (route) => {
+    saves += 1;
+    if (saves === 1) {
+      await new Promise<void>((resolve) => {
+        releaseDarkSave = resolve;
+      });
+      await route.fulfill({ status: 500, body: '' });
+      return;
+    }
+    await route.continue();
+  });
+  await avatar(page).click();
+  await themeOption(page, 'Dark').click();
+  await expect.poll(() => saves).toBe(1);
+  await pickTheme(page, 'Light');
+
+  const darkSaveFailed = page.waitForResponse((response) => response.url().endsWith('/me/theme') && response.status() === 500);
+  releaseDarkSave();
+  await darkSaveFailed;
+
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(themeOption(page, 'Light')).toHaveAttribute('aria-pressed', 'true');
+  await expect(themeOption(page, 'Dark')).toHaveAttribute('aria-pressed', 'false');
+  await page.unroute('**/me/theme');
+});
+
+test('Tab from the avatar after a mouse open moves into the menu', async ({ page }) => {
+  await openHome(page);
+  await avatar(page).click();
+  await expect(avatar(page)).toBeFocused();
+
+  await page.keyboard.press('Tab');
+
+  await expect(avatar(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('link', { name: 'Profile' })).toBeFocused();
+});
+
+test.describe('narrow viewport', () => {
+  test.use({ viewport: { width: 360, height: 800 } });
+
+  test('the open menu does not scroll the page horizontally at 360px', async ({ page }) => {
+    await openHome(page);
+    await avatar(page).click();
+    await expect(page.getByRole('link', { name: 'Profile' })).toBeVisible();
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    const list = (await page.locator('#avatar-menu-list').boundingBox())!;
+    expect(list.x).toBeGreaterThanOrEqual(0);
+    expect(list.x + list.width).toBeLessThanOrEqual(360);
+  });
+});
+
 test('on the profile page the theme radios follow the menu, so Save keeps the pick', async ({ page }) => {
   await page.goto('/me/profile', { waitUntil: 'networkidle' });
   await avatar(page).click();
