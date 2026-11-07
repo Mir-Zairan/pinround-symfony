@@ -8,7 +8,7 @@ use App\SharedKernel\Application\TenantSwitchGuard;
 use App\SharedKernel\Application\TenantSwitchRefused;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
-use Symfony\Component\DependencyInjection\Attribute\AutowireServiceClosure;
+use Symfony\Component\DependencyInjection\Attribute\AutowireCallable;
 
 /**
  * Refuses an organization switch while anything of the current organization is still open: a transaction on the
@@ -20,13 +20,17 @@ use Symfony\Component\DependencyInjection\Attribute\AutowireServiceClosure;
 final readonly class DoctrineTenantSwitchGuard implements TenantSwitchGuard
 {
     /**
-     * @param \Closure(): Connection             $connection    a closure: the connection's middleware needs TenantContext
-     * @param \Closure(): EntityManagerInterface $entityManager a closure, for the same reason
+     * Both are taken from the registry, never as service references, not even lazy ones: the connection's
+     * middleware needs TenantContext, which needs this guard, and any reference back to the connection makes the
+     * dumped dev and prod containers create the connection before they give it its middlewares.
+     *
+     * @param \Closure(): Connection             $connection
+     * @param \Closure(): EntityManagerInterface $entityManager
      */
     public function __construct(
-        #[AutowireServiceClosure('doctrine.dbal.default_connection')]
+        #[AutowireCallable(service: 'doctrine', method: 'getConnection')]
         private \Closure $connection,
-        #[AutowireServiceClosure('doctrine.orm.default_entity_manager')]
+        #[AutowireCallable(service: 'doctrine', method: 'getManager')]
         private \Closure $entityManager,
     ) {
     }
