@@ -257,7 +257,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 - 2026-11-07 (P00.T7): the actor stamp waits for P01 users; the tenant stamp is added on dispatch now.
 - 2026-11-07 (P00.T7): "fails 3 times" is met as one try plus 3 retries (max_retries 3, waits 1 s, 10 s, 60 s per ADR-0009); FailedMessageTest asserts 4 runs.
 - 2026-11-07 (P00.T7): after pulling, run `make up` so `worker-outbox` and `worker-heavy` start; without them outbox events and `async_media`/`async_ai` messages wait unread.
-- 2026-11-07 (P00.T7, P00.T8): the DBAL debug SQL logger writes bound parameters (ticket text) to the dev and test logs. P00.T8's redaction processor must drop the `params` key or turn `dbal.logging` off.
+- 2026-11-07 (P00.T7, P00.T8): the DBAL debug SQL logger writes bound parameters (ticket text) to the dev and test logs. Since P00.T8, `RedactionProcessor` keeps only allow-listed keys, so the logger's `sql`, `params` and `types` are dropped from every record and `dbal.logging` stays on; `LogLeakMarkerTest` proves a bound value never reaches a written log line. `CapturedLogRecords` runs before the redaction, so `FailedMessageTest` still sees the raw records.
 - 2026-11-07 (P00.T7): [ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md) supersedes [ADR-0009](../03-adr/0009-async-messaging-and-outbox.md) in part: transports, workers, the relay and the idempotency key.
 - 2026-11-06 (P00.T1): MinIO and `mc` are built from pinned source ([ADR-0031](../03-adr/0031-minio-built-from-pinned-source.md)) because upstream stopped publishing images. `pgvector` is not in the stock postgres image and was skipped.
 - 2026-11-06 (P00.T1): the disk on a dev machine can fill up. The MinIO source build needs about 2-3 GB.

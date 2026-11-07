@@ -49,3 +49,8 @@ when@test:
         path: /_test/worker-reset/{organizationId}/fail
         controller: App\Tests\Fixtures\Http\WorkerResetProbeController::enterOrganizationThenFail
         methods: [POST]
+
+    test_log_leak:
+        path: /_test/log-leak/{organizationId}
+        controller: App\Tests\Fixtures\Http\LogLeakProbeController::logTheSummaryThenFail
+        methods: [POST]

@@ -1,3 +1,5 @@
+# Every record of every channel passes CorrelationIdsProcessor and then RedactionProcessor
+# (src/SharedKernel/Infrastructure/Logging) before any handler sees it. Logs are JSON in every environment (ADR-0029).
 monolog:
     channels: # To see all channels, run bin/console debug:autowiring logger
         - deprecation # Deprecations are logged in the dedicated "deprecation" channel when it exists
@@ -10,6 +12,7 @@ when@dev:
                 path: "%kernel.logs_dir%/%kernel.environment%.log"
                 level: debug
                 channels: ["!event"]
+                formatter: monolog.formatter.json
             console:
                 type: console
                 process_psr_3_messages: false
@@ -28,6 +31,7 @@ when@test:
                 type: stream
                 path: "%kernel.logs_dir%/%kernel.environment%.log"
                 level: debug
+                formatter: monolog.formatter.json
 
 when@prod:
     monolog:
@@ -41,15 +45,17 @@ when@prod:
                 buffer_size: 50 # How many messages should be saved? Prevent memory leaks
             nested:
                 type: stream
-                path: php://stderr
+                path: php://stdout
                 level: debug
                 formatter: monolog.formatter.json
+            # A worker's stdout is a log stream, so what the console handler writes there is JSON as well. Unlike the
+            # console formatter, the JSON one fills no placeholders, so the handler's PSR-3 message processor does.
             console:
                 type: console
-                process_psr_3_messages: false
                 channels: ["!event", "!doctrine"]
+                formatter: monolog.formatter.json
             deprecation:
                 type: stream
                 channels: [deprecation]
-                path: php://stderr
+                path: php://stdout
                 formatter: monolog.formatter.json

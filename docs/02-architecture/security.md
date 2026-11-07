@@ -19,7 +19,7 @@ How pinround protects tickets, screenshots and people's data: threats, controls,
 - [AI-specific threats](#ai-specific-threats) — prompt injection, data leaks through AI, unsafe output.
 - [MCP and personal access token threats](#mcp-and-personal-access-token-threats) — Claude Code and API access.
 - [Supply chain](#supply-chain) — dependencies, images, SBOM.
-- [Logging without leaking](#logging-without-leaking) — what may and may not be logged.
+- [Logging without leaking](#logging-without-leaking) — what may and may not be logged; the allow-list processor and the marker test.
 - [Incident response basics](#incident-response-basics) — first hour, roles, notification.
 - [Security test plan per phase](#security-test-plan-per-phase) — what each phase must prove.
 
@@ -284,7 +284,13 @@ Allowed in logs: request id, trace id, org id, user id, route name, ticket id, t
 
 Never in logs: ticket titles or text, comment text, AI prompts or outputs, screenshot URLs with signatures, tokens, passwords, cookies, email bodies.
 
-A Monolog processor redacts known sensitive keys and caps string length. A test sends a ticket with a unique marker text through the main flows and fails if that marker appears in any log line.
+Logs are JSON in every environment; in production they go to stdout (ADR-0029). Every record of every channel passes two Monolog processors before any handler sees it (`src/SharedKernel/Infrastructure/Logging`):
+
+- `CorrelationIdsProcessor` adds `request_id` (a new UUID for each main web request, from `RequestId`, which the kernel resets between requests) and `organization_id` (from `TenantContext`), each only when known. `user_id` comes with users in P01, `trace_id` and `span_id` with OpenTelemetry.
+- `RedactionProcessor` runs after every other processor and keeps only an **allow-list** of context and extra keys; every other key is dropped, whatever its name. The allowed keys: `request_id`, `trace_id`, `span_id`, `organization_id`, `user_id`, `route`, `method`, `status_code`, `duration_ms`, `class`, `message_id`, `transport`, `retryCount`, `delay`, `exception`, `exception_class`, `sqlstate`, `code`. A value is kept only when it is a scalar or null; strings are capped at 255 characters. `exception` keeps only a throwable's class, code, file and line, never its message. So DBAL's `sql`, `params` and `types`, Messenger's `error` and Symfony's `route_parameters` and `request_uri` never reach a log.
+- The record message loses the message of every throwable in the context (and of its previous ones), replaced with `[exception message withheld]`: Symfony quotes it in messages it formats itself, such as "Uncaught PHP Exception …". Placeholders are filled later, by each handler, from the allowed keys only, so a placeholder of a dropped key stays as `{key}`. Log a constant message with placeholders, never one built from content.
+
+`LogLeakMarkerTest` sends a unique marker in a request body to a test-only endpoint that logs it under an unlisted key, under `description`, as a bound SQL value and in an exception message, and fails if the marker appears in what the log handler wrote. It also fails if `RedactionProcessor` is not the last processor of every channel.
 
 ## Incident response basics
 
