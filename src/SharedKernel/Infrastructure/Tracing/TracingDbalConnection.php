@@ -41,18 +41,36 @@ final class TracingDbalConnection extends AbstractConnectionMiddleware
     public function beginTransaction(): void
     {
         $span = $this->tracing->startTransactionSpan(SqlKind::BEGIN);
-        null === $span ? parent::beginTransaction() : SpanScope::runAndEnd($span, fn () => parent::beginTransaction());
+        if (null === $span) {
+            parent::beginTransaction();
+
+            return;
+        }
+
+        SpanScope::runAndEnd($span, fn () => parent::beginTransaction());
     }
 
     public function commit(): void
     {
         $span = $this->tracing->startTransactionSpan(SqlKind::COMMIT);
-        null === $span ? parent::commit() : SpanScope::runAndEnd($span, fn () => parent::commit());
+        if (null === $span) {
+            parent::commit();
+
+            return;
+        }
+
+        SpanScope::runAndEnd($span, fn () => parent::commit());
     }
 
     public function rollBack(): void
     {
         $span = $this->tracing->startTransactionSpan(SqlKind::ROLLBACK);
-        null === $span ? parent::rollBack() : SpanScope::runAndEnd($span, fn () => parent::rollBack());
+        if (null === $span) {
+            parent::rollBack();
+
+            return;
+        }
+
+        SpanScope::runAndEnd($span, fn () => parent::rollBack());
     }
 }

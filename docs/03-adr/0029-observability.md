@@ -87,4 +87,5 @@ Chosen option: **3**.
 
 - Related: [ADR-0008](0008-frankenphp-runtime.md), [ADR-0009](0009-async-messaging-and-outbox.md), [ADR-0027](0027-secrets-and-encryption.md), [ADR-0030](0030-deployment-model.md).
 - Architecture: [operations.md](../02-architecture/operations.md), [performance-and-scale.md](../02-architecture/performance-and-scale.md).
+- Note 2026-11-07 (P00.T8): spans are written by hand, not by the auto-instrumentation C extension, whose global context storage conflicts with worker mode and the no-static-state rule ([ADR-0008](0008-frankenphp-runtime.md)). The local `observability` compose profile runs Jaeger instead of a Collector plus Grafana. Tail sampling (keep 100% of errors and slow requests) needs a collector later; the app change is env only.
 - Revisit when telemetry cost exceeds 5% of hosting cost, or when sampling hides real problems.
