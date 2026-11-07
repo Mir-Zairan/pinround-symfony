@@ -108,10 +108,10 @@ Tracing is off while `OTEL_EXPORTER_OTLP_ENDPOINT` is empty. Spans go to the rec
 | `FRANKENPHP_WORKER_CONFIG` | `watch` in `compose.yaml`; empty in prod | app (Caddyfile) | no | In dev, `watch` restarts workers when code changes on the bind mount. |
 | `FRANKENPHP_LOOP_MAX` | `500`, fixed in the Caddyfile | app | no | Requests before the Symfony Runtime restarts a worker. Not an env file setting. |
 | `CADDY_ADMIN` | `localhost:2019` in dev; `off` in the prod image | app (Caddyfile) | no | Address of Caddy's admin API. |
-| `COMPOSER_ALLOW_SUPERUSER` | `0` | app image | no | Set in the Dockerfile so Composer refuses to run as root. |
+| `COMPOSER_ALLOW_SUPERUSER` | `0` | app image | no | Keeps Composer's warning about running as root on. The image runs as the non-root `app` user anyway. |
 
 ## Docker and compose host settings
-These are read by `docker compose` or `make`, not by PHP. Override them per machine in `.env.local`.
+These are read by `docker compose` or `make`, not by PHP. The ports, `JAEGER_*`, `MINIO_ROOT_*` and `POSTGRES_*` values go in the git-ignored `.env.local`, which `make` passes to compose with `--env-file`. The `DB_*`, `APP_UID` and `APP_GID` values are make variables: `.env.local` does not set them. Override them on the make command line or in the shell, for example `make db-roles DB_APP_PASSWORD=...`. `COMPOSE_FILE` is read by compose and make from the shell.
 
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
@@ -122,8 +122,8 @@ These are read by `docker compose` or `make`, not by PHP. Override them per mach
 | `MAILPIT_UI_PORT` | `8025` | compose only | no | Host port of the Mailpit web page. SMTP stays inside the compose network. |
 | `JAEGER_UI_PORT` | `16686` | compose only | no | Host port of the Jaeger page (`observability` profile). |
 | `JAEGER_OTLP_HTTP_PORT` | `4318` | compose only | no | Host port of the Jaeger OTLP receiver (`observability` profile). |
-| `APP_UID` | your user id (`make`); `1000` otherwise | compose and Makefile only | no | User id of the image user, so the bind mount stays writable. `0` falls back to `1000`. |
-| `APP_GID` | your group id (`make`); `1000` otherwise | compose and Makefile only | no | Group id of the image user. |
+| `APP_UID` | your user id (`make` sets it from `id -u`); `1000` otherwise | compose and Makefile only | no | Shell or make command line only. User id of the image user, so the bind mount stays writable. `0` falls back to `1000`. |
+| `APP_GID` | your group id (`make`); `1000` otherwise | compose and Makefile only | no | Shell or make command line only. Group id of the image user. |
 | `COMPOSE_FILE` | none; CI sets `compose.yaml:compose.ci.yaml` | compose and Makefile only | no | Adds the CI override to the compose files. |
 | `DB_ADMIN_USER` | `pinround` | Makefile only | no | Admin account `make db-roles` connects as. |
 | `DB_APP_PASSWORD` | dev placeholder | Makefile only | yes | Password `make db-roles` gives `pinround_app`. Must match `DATABASE_URL`. |
