@@ -47,7 +47,7 @@ jobs:
   integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
-    # Images match compose.yaml. Real environment variables beat .env.test, whose
+    # The postgres image is pinned by digest and is the tag of compose.yaml; valkey is the digest of valkey-state. Real environment variables beat .env.test, whose
     # URLs point at the compose host name "postgres". The URLs name "pinround";
     # config/packages/doctrine.yaml appends "_test" in the test env, so the service
     # must create "pinround_test". The service user "pinround" is the admin account:
@@ -57,7 +57,7 @@ jobs:
     # never in the job env.
     services:
       postgres:
-        image: postgres:18.6
+        image: postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
         env:
           POSTGRES_USER: pinround
           POSTGRES_PASSWORD: pinround
@@ -70,7 +70,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
       valkey:
-        image: valkey/valkey:8.1.4
+        image: valkey/valkey:8.1.4@sha256:81db6d39e1bba3b3ff32bd3a1b19a6d69690f94a3954ec131277b9a26b95b3aa
         ports:
           - 6379:6379
         options: >-
@@ -168,11 +168,61 @@ jobs:
           cache-to: type=gha,mode=max
       - run: sh tests/shell/compose-config-check.sh
 
-  # Stub until the Playwright journeys arrive in P00.T9. It runs on pull requests only;
-  # on a push the job is skipped, which branch protection counts as passing.
+  # The dev stack without file storage or mail (compose.ci.yaml), then every Playwright spec but the pixel compares.
+  # Runs on pull requests and on pushes to main only.
   e2e:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: 10
+    env:
+      # Read by `docker compose` and `make`: the CI override replaces app's depends_on.
+      COMPOSE_FILE: compose.yaml:compose.ci.yaml
     steps:
-      - run: echo "Playwright journeys arrive in P00.T9; nothing to run yet."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The bind-mounted /app is writable only when the image user is the runner user.
+      - name: Use the runner user for the app image
+        run: |
+          echo "APP_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "APP_GID=$(id -g)" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: dev
+          load: true
+          push: false
+          tags: pinround-app:dev
+          build-args: |
+            APP_UID=${{ env.APP_UID }}
+            APP_GID=${{ env.APP_GID }}
+          cache-from: type=gha,scope=e2e-dev
+          cache-to: type=gha,scope=e2e-dev,mode=max
+      # No minio, mailpit, workers or scheduler: see compose.ci.yaml. The first start runs composer install.
+      - name: Start the stack
+        run: docker compose --env-file .env --env-file .env.dev up -d --wait app
+      - name: Apply the database roles and migrate
+        run: make --no-print-directory db-roles migrate
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.12"
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - run: npm ci
+        working-directory: tests/e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: tests/e2e
+      - run: npx playwright test
+        working-directory: tests/e2e
+      - name: Show the app logs
+        if: failure()
+        run: docker compose --env-file .env --env-file .env.dev logs app
+      - name: Keep the Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-traces
+          path: tests/e2e/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
