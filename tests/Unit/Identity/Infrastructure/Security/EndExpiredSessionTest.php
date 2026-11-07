@@ -8,8 +8,13 @@ use App\Identity\Infrastructure\Security\EndExpiredSession;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Symfony\Bundle\SecurityBundle\Security\FirewallConfig;
+use Symfony\Bundle\SecurityBundle\Security\FirewallContext;
+use Symfony\Bundle\SecurityBundle\Security\FirewallMap;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\DependencyInjection\ServiceLocator;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestMatcher\PathRequestMatcher;
 use Symfony\Component\HttpFoundation\Session\Session;
 use Symfony\Component\HttpFoundation\Session\Storage\MockArraySessionStorage;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
@@ -90,9 +95,48 @@ final class EndExpiredSessionTest extends TestCase
         self::assertSame('the token', $session->get('_security_main'));
     }
 
-    private static function endExpiredSession(Request $request, int $requestType = HttpKernelInterface::MAIN_REQUEST): void
+    #[Test]
+    public function itLeavesARequestUnderAFirewallWithoutSecurityAlone(): void
     {
-        $listener = new EndExpiredSession(new MockClock(self::NOW), self::IDLE_SECONDS, self::ABSOLUTE_DAYS);
+        $session = self::sessionOf('-31 days', '-9 hours');
+
+        self::endExpiredSession(self::requestWithCookieFor($session, '/health/live'));
+
+        self::assertFalse($session->isStarted());
+        self::assertSame('the token', $session->get('_security_main'));
+    }
+
+    #[Test]
+    public function itLeavesARequestNoFirewallMatchesAlone(): void
+    {
+        $session = self::sessionOf('-31 days', '-9 hours');
+        $onlyHealth = new FirewallMap(
+            new ServiceLocator(['health' => static fn (): FirewallContext => new FirewallContext([], config: new FirewallConfig('health', 'user_checker', securityEnabled: false))]),
+            ['health' => new PathRequestMatcher('^/health/')],
+        );
+
+        self::endExpiredSession(self::requestWithCookieFor($session), firewallMap: $onlyHealth);
+
+        self::assertFalse($session->isStarted());
+    }
+
+    /**
+     * The firewalls of security.yaml: health without security, then main for every other path.
+     */
+    private static function firewallMap(): FirewallMap
+    {
+        return new FirewallMap(
+            new ServiceLocator([
+                'health' => static fn (): FirewallContext => new FirewallContext([], config: new FirewallConfig('health', 'user_checker', securityEnabled: false)),
+                'main' => static fn (): FirewallContext => new FirewallContext([], config: new FirewallConfig('main', 'user_checker')),
+            ]),
+            ['health' => new PathRequestMatcher('^/health/'), 'main' => null],
+        );
+    }
+
+    private static function endExpiredSession(Request $request, int $requestType = HttpKernelInterface::MAIN_REQUEST, ?FirewallMap $firewallMap = null): void
+    {
+        $listener = new EndExpiredSession(new MockClock(self::NOW), $firewallMap ?? self::firewallMap(), self::IDLE_SECONDS, self::ABSOLUTE_DAYS);
         $kernel = new class implements HttpKernelInterface {
             public function handle(Request $request, int $type = self::MAIN_REQUEST, bool $catch = true): never
             {
@@ -115,9 +159,9 @@ final class EndExpiredSessionTest extends TestCase
         return new Session($storage);
     }
 
-    private static function requestWithCookieFor(Session $session): Request
+    private static function requestWithCookieFor(Session $session, string $path = '/'): Request
     {
-        $request = new Request(cookies: [$session->getName() => 'the session id']);
+        $request = Request::create($path, cookies: [$session->getName() => 'the session id']);
         $request->setSession($session);
 
         return $request;

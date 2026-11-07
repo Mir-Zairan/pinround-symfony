@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Identity\Infrastructure\Security;
 
 use App\Identity\Domain\Credential;
+use App\Identity\Domain\Theme;
 use App\Identity\Domain\User;
 use App\Identity\Domain\UserStatus;
 use Symfony\Component\Security\Core\User\EquatableInterface;
@@ -26,7 +27,7 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
         private bool $isBlocked,
         private string $passwordHash,
         private string $sessionStamp,
-        private string $theme,
+        private Theme $theme,
     ) {
     }
 
@@ -39,7 +40,7 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
             UserStatus::Blocked === $user->status(),
             $credential->passwordHash()->encoded(),
             $user->sessionStamp(),
-            $user->theme()->value,
+            $user->theme(),
         );
     }
 
@@ -57,11 +58,11 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
     }
 
     /**
-     * "system", "light" or "dark", for templates through `app.user.theme`.
+     * The Theme's value, for the page's data-theme through `app.user.theme`.
      */
     public function theme(): string
     {
-        return $this->theme;
+        return $this->theme->value;
     }
 
     public function sessionStamp(): string
@@ -127,12 +128,13 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
             'isBlocked' => $this->isBlocked,
             'passwordHash' => hash('crc32c', $this->passwordHash),
             'sessionStamp' => $this->sessionStamp,
-            'theme' => $this->theme,
+            'theme' => $this->theme->value,
         ];
     }
 
     /**
      * A session saved before the stamp existed comes back with an empty one, which equals no user, so it is logged out.
+     * A missing or unknown theme comes back as System.
      *
      * @param array{id: string, email: string, name: string, isBlocked: bool, passwordHash: string, sessionStamp?: string, theme?: string} $data
      */
@@ -144,6 +146,6 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
         $this->isBlocked = $data['isBlocked'];
         $this->passwordHash = $data['passwordHash'];
         $this->sessionStamp = $data['sessionStamp'] ?? '';
-        $this->theme = $data['theme'] ?? 'system';
+        $this->theme = Theme::tryFrom($data['theme'] ?? '') ?? Theme::System;
     }
 }

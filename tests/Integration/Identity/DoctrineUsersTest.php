@@ -14,6 +14,7 @@ use App\Tests\Factory\Identity\UserFactory;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Zenstruck\Foundry\Test\Factories;
@@ -85,6 +86,52 @@ final class DoctrineUsersTest extends KernelTestCase
             "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp, theme)
              VALUES ('0197a3c0-0000-7000-8000-0000000000c6', 'raj@acme-foods.example', 'Raj', 'active', 'en', 'UTC', now(), 'a-stamp', 'blue')",
         );
+    }
+
+    /**
+     * @return iterable<string, array{Theme}>
+     */
+    public static function everyTheme(): iterable
+    {
+        foreach (Theme::cases() as $theme) {
+            yield $theme->value => [$theme];
+        }
+    }
+
+    #[Test]
+    #[DataProvider('everyTheme')]
+    public function theDatabaseTakesEveryThemeAndItReadsBackAsTheSameCase(Theme $theme): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp, theme)
+             VALUES ('0197a3c0-0000-7000-8000-0000000000c8', 'raj@acme-foods.example', 'Raj', 'active', 'en', 'UTC', now(), 'a-stamp', ?)",
+            [$theme->value],
+        );
+
+        self::assertSame($theme, $this->users()->byId(new UserId('0197a3c0-0000-7000-8000-0000000000c8'))?->theme());
+    }
+
+    /**
+     * @return iterable<string, array{UserStatus}>
+     */
+    public static function everyStatus(): iterable
+    {
+        foreach (UserStatus::cases() as $status) {
+            yield $status->value => [$status];
+        }
+    }
+
+    #[Test]
+    #[DataProvider('everyStatus')]
+    public function theDatabaseTakesEveryStatusAndItReadsBackAsTheSameCase(UserStatus $status): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp)
+             VALUES ('0197a3c0-0000-7000-8000-0000000000c9', 'raj@acme-foods.example', 'Raj', ?, 'en', 'UTC', now(), 'a-stamp')",
+            [$status->value],
+        );
+
+        self::assertSame($status, $this->users()->byId(new UserId('0197a3c0-0000-7000-8000-0000000000c9'))?->status());
     }
 
     #[Test]

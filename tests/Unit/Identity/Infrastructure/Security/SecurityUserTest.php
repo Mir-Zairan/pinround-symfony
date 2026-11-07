@@ -95,6 +95,30 @@ final class SecurityUserTest extends TestCase
     }
 
     #[Test]
+    public function aChangedNameOrThemeKeepsTheSession(): void
+    {
+        $user = self::user();
+        $savedBeforeTheProfileChange = str_replace(
+            ['s:9:"Lena Berg"', 's:6:"system"'],
+            ['s:9:"Lena Lund"', 's:4:"dark"'],
+            serialize(self::securityUser($user)),
+        );
+        $fromSession = self::restored($savedBeforeTheProfileChange);
+        self::assertSame('Lena Lund', $fromSession->name());
+        self::assertSame('dark', $fromSession->theme());
+
+        self::assertTrue($fromSession->isEqualTo(self::securityUser($user)));
+    }
+
+    #[Test]
+    public function anUnknownThemeInTheSessionComesBackAsSystem(): void
+    {
+        $fromSession = self::restored(str_replace('s:6:"system"', 's:4:"blue"', serialize(self::securityUser(self::user()))));
+
+        self::assertSame('system', $fromSession->theme());
+    }
+
+    #[Test]
     public function aSessionSavedBeforeTheStampExistedIsLoggedOut(): void
     {
         $user = self::user();
