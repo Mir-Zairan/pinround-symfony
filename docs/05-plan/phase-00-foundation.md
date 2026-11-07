@@ -217,7 +217,7 @@ NFR-SEC-03, NFR-SEC-07, NFR-SEC-09, NFR-SEC-10, NFR-SEC-11, NFR-SCAL-02, NFR-SCA
 3. Playwright project under `tests/e2e/` with one journey: open `/`, see the shell. Add the CI e2e stage with the Docker stack and axe.
 4. Write `docs/operations/config.md`: every env var, default, which service reads it, whether it is secret. Give it an Index when it passes 100 lines.
 5. Seed command stub `app:demo:seed` (filled in P01).
-**Files:** `bin/lint-docs`, `bin/lint-copy`, `tests/e2e/`, `.github/workflows/ci.yml`, `docs/operations/config.md`, `tests/Unit/Architecture/ConfigDocTest.php`.
+**Files:** `bin/lint-docs`, `bin/lint-copy`, `tests/e2e/`, `.github/workflows/ci.yml`, `docs/operations/config.md`, `tests/Unit/Architecture/ConfigDocTest.php`, `src/SharedKernel/Infrastructure/Console/DemoSeedCommand.php`, `tests/Functional/SharedKernel/DemoSeedCommandTest.php`.
 **Acceptance criteria:**
 - [ ] Removing the Index from a long doc makes CI fail.
 - [ ] Adding "workflow status" or another banned word to a template makes `lint:copy` fail.

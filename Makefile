@@ -75,5 +75,5 @@ migrate-test: ## Run the database migrations on the test database (as pinround_m
 check-compose: ## Validate compose.yaml and the service list
 	sh tests/shell/compose-config-check.sh
 
-seed: ## Load demo data (empty until P01)
-	@echo "Nothing to seed yet: demo data arrives in P01."
+seed: ## Load demo data into the dev database (a stub until P01)
+	$(COMPOSE) exec app bin/console app:demo:seed
