@@ -110,12 +110,17 @@ final class SecurityHeadersTest extends WebTestCase
         // A kernel with debug off never checks its cached container, so after a service change it would load the
         // old one; deleting the cached file makes it compile the current code (ConfigCache, Kernel::initializeContainer).
         $kernel = static::createKernel(['debug' => false]);
-        $cachedContainer = $kernel->getBuildDir().'/'.str_replace('\\', '_', $kernel::class).ucfirst($kernel->getEnvironment()).'Container.php';
+        $containerClass = new \ReflectionMethod($kernel, 'getContainerClass')->invoke($kernel);
+        self::assertIsString($containerClass);
+        $cachedContainer = $kernel->getBuildDir().'/'.$containerClass.'.php';
         if (is_file($cachedContainer)) {
             unlink($cachedContainer);
         }
 
-        return self::createClient(['debug' => false]);
+        $client = self::createClient(['debug' => false]);
+        self::assertFileExists($cachedContainer, 'the kernel compiled its container somewhere else, so the stale one was not removed');
+
+        return $client;
     }
 
     /**
