@@ -58,7 +58,8 @@ final class DatabaseSpanTest extends WebTestCase
         $roots = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => !SpanContextValidator::isValidSpanId($span->getParentSpanId())));
         self::assertCount(1, $roots);
         $children = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => $span !== $roots[0]));
-        self::assertSame(['db SELECT', 'db SELECT', 'db BEGIN', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
+        // The user and their password, the user's organizations (resolve_user_orgs), then BEGIN with the tenant's set_config.
+        self::assertSame(['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
         foreach ($children as $child) {
             self::assertSame($roots[0]->getTraceId(), $child->getTraceId());
             self::assertSame($roots[0]->getSpanId(), $child->getParentSpanId());

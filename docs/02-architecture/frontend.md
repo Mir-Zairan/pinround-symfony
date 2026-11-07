@@ -47,7 +47,7 @@ Verify the exact bundle names and Twig function names against the Symfony UX doc
   - "Report a problem" (tonal button, for every team member);
   - the "Local AI" status chip (only when the org's AI runs on laptops);
   - the bell with a count;
-  - the user's avatar menu (Profile, Security, Personal access tokens, Theme, Log out). Profile is not in the prototype; FR-ID-07 needs the page reachable. Personal access tokens come with P09. Theme is a System | Light | Dark switch that applies at once and is saved on the user.
+  - the user's avatar menu (for a user in two or more organizations, the current one's name and "Switch organization" first; then Profile, Security, Personal access tokens, Theme, Log out). Profile is not in the prototype; FR-ID-07 needs the page reachable. Personal access tokens come with P09. Theme is a System | Light | Dark switch that applies at once and is saved on the user.
 - **Main:** one `<main>` per page.
 - **Overlays:** the toast area (an `aria-live="polite"` region) and the dialog root.
 
@@ -248,5 +248,6 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Personal access tokens | `GET/POST /me/tokens` | Identity | for MCP and the plugin |
 | Security (password, two-factor) | `GET /me/security` (`identity_security`), `POST /me/security/password`, `POST /me/security/log-out-everywhere` | Identity | |
 | Login, invite accept, SSO callback | `/login`, `/invite/{token}`, `/login/sso/{provider}/callback` | Identity | |
+| Organization picker | `GET/POST /org/choose` (`organization_choose`); a logged-in user without a chosen organization is sent here, and the avatar menu links it as "Switch organization" for users in two or more | Organization | `choose.html.twig` (`@Organization`), the login card |
 | MCP endpoint | `POST /mcp` | AgentApi | no HTML |
 | REST for the plugin | `/api/v1/…` | AgentApi | no HTML |

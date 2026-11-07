@@ -1,0 +1,38 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Choose an organization · pinround{% endblock %}
+
+{# The card, notices and errors of the login pages; organization.css lays out the list. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/organization.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="login">
+        <twig:Card tag="section" class="login__card" aria-labelledby="organization-choice-title">
+            <h1 class="login__title" id="organization-choice-title">Choose an organization</h1>
+            {% if formError %}
+                <p class="login__error" role="alert">{{ formError }}</p>
+            {% endif %}
+            {% if organizationNames is empty %}
+                <twig:EmptyState message="You are not in any organization yet. Ask your admin to invite you."/>
+            {% else %}
+                <ul class="organization-choice">
+                    {% for organizationId, organizationName in organizationNames %}
+                        <li>
+                            <form class="organization-choice__form" method="post" action="{{ path('organization_choose') }}">
+                                <input type="hidden" name="organization_id" value="{{ organizationId }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_choose') }}">
+                                <twig:Button type="submit" variant="tonal" class="organization-choice__button">{{ organizationName }}</twig:Button>
+                                {% if organizationId == chosenOrganizationId %}
+                                    <twig:Tag>Current</twig:Tag>
+                                {% endif %}
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </twig:Card>
+    </div>
+{% endblock %}

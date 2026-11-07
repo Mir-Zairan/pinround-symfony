@@ -97,6 +97,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Story:** Sara invites Omar. Omar sets a password and turns on two-factor login. Later the company switches to Microsoft login, and Omar's account is linked, not duplicated.
 - **Owns:** `idn_user`, `idn_credential`, `idn_password_reset`, `idn_mfa_secret`, `idn_sso_identity`, `idn_api_token`, `idn_login_attempt`. Sessions live in Valkey.
 - **Api:**
+  - `CurrentUser::id(): ?UserId` (built in P01.T3: the logged-in user of the request, null when nobody is; `Infrastructure\Security\SymfonyCurrentUser`)
   - `UserQueries::byId(UserId): ?UserView`
   - `UserQueries::byIds(list<UserId>): array<string, UserView>`
   - `UserQueries::byEmail(string): ?UserView`
@@ -112,6 +113,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Story:** Sara creates the team "Shop" with Lena as lead. She gives Raj the Manager role. Omar is a member of Shop and a viewer in "Mobile".
 - **Owns:** `org_organization`, `org_membership` (org roles: admin, manager), `org_team`, `org_team_member` (team role: lead, member, viewer; job: tester, developer, other), `org_invitation`, `org_settings` (ping limits, quiet hours, lead-check switch, triager, step policy, AI policy, retention).
 - **Api:**
+  - `MembershipQueries::organizationsOf(UserId): list<OrganizationId>` (built in P01.T3, through `resolve_user_orgs`, so it needs no tenant)
   - `MembershipQueries::rolesOf(UserId, OrganizationId): Roles`
   - `MembershipQueries::teamsOf(UserId): list<TeamRole>`
   - `TeamQueries::team(TeamId): TeamView`

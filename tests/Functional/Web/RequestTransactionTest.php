@@ -89,14 +89,14 @@ final class RequestTransactionTest extends WebTestCase
     }
 
     #[Test]
-    public function theTransactionBeginsAtKernelRequestPriority7(): void
+    public function theTransactionBeginsAtKernelRequestPriority6(): void
     {
         $dispatcher = self::getContainer()->get('event_dispatcher');
         $requestTransaction = self::getContainer()->get(RequestTransaction::class);
 
         $priority = $dispatcher->getListenerPriority(KernelEvents::REQUEST, [$requestTransaction, 'beginTransaction']);
 
-        self::assertSame(7, $priority);
+        self::assertSame(6, $priority);
     }
 
     #[Test]

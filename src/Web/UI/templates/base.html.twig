@@ -55,6 +55,17 @@
                         </button>
                         <div id="avatar-menu-list" class="menu__list avatar-menu__list" hidden
                             {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#closeOnEscape">
+                            {# Only for a user in two or more organizations; the name is missing on pages without one, such as the picker. #}
+                            {% if can_switch_organization() %}
+                                {% set organizationName = current_organization_name() %}
+                                {% if organizationName %}
+                                    <p class="avatar-menu__organization">
+                                        <span class="avatar-menu__label">Organization</span>
+                                        <span class="avatar-menu__organization-name">{{ organizationName }}</span>
+                                    </p>
+                                {% endif %}
+                                <a class="menu__item" href="{{ path('organization_choose') }}" {{ stimulus_target('menu', 'item') }}>Switch organization</a>
+                            {% endif %}
                             <a class="menu__item" href="{{ path('identity_profile') }}" {{ stimulus_target('menu', 'item') }}>Profile</a>
                             <a class="menu__item" href="{{ path('identity_security') }}" {{ stimulus_target('menu', 'item') }}>Security</a>
                             <form class="avatar-menu__theme" method="post" action="{{ path('identity_theme') }}" {{ stimulus_controller('theme-switch') }} data-action="click->theme-switch#choose">

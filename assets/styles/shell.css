@@ -173,6 +173,20 @@
   padding: 8px 12px;
 }
 
+.avatar-menu__organization {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--outline-var);
+}
+
+.avatar-menu__organization-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .avatar-menu__label {
   color: var(--on-surface-var);
   font-size: 13px;

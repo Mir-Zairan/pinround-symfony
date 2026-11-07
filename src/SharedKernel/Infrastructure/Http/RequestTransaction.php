@@ -25,16 +25,17 @@ use Symfony\Contracts\Service\ResetInterface;
  * (the health routes); it must then read no tenant data.
  *
  * A streamed response body runs after the commit, outside any transaction, so it sees no tenant rows (fails closed).
- * Whatever fills TenantContext must do it on kernel.request at a priority above 7 (the firewall runs at 8), so the
- * firewall must not be lazy: a lazy firewall would set the tenant after BEGIN.
+ * Whatever fills TenantContext must do it on kernel.request at a priority above 6. Organization's
+ * EnterChosenOrganization does it at 7, after the firewall (8) has authenticated the user, so the firewall must not be
+ * lazy: a lazy firewall would authenticate after BEGIN.
  */
 final class RequestTransaction implements ResetInterface
 {
     /** The route default that, set to false, keeps the request out of a transaction. */
     public const string ROUTE_DEFAULT = '_request_transaction';
 
-    // Below the security firewall (8): the firewall fills TenantContext, and TenantMiddleware reads it at BEGIN.
-    private const int BEGIN_PRIORITY = 7;
+    // Below EnterChosenOrganization (7), which fills TenantContext; TenantMiddleware reads it at BEGIN.
+    private const int BEGIN_PRIORITY = 6;
     // Before any other exception listener can turn the exception into a response and stop propagation.
     private const int ROLL_BACK_PRIORITY = 2048;
     // After the other response listeners, so a failure in one of them still rolls the request back.
