@@ -32,13 +32,13 @@ final class RequestSpanTest extends WebTestCase
         $client->request('GET', '/_test/tracing');
         self::assertResponseStatusCodeSame(200);
         self::assertNull($currentSpan->span());
-        $firstSpans = ExportedSpans::of($exporter);
+        $firstSpans = self::rootSpans($exporter);
         self::assertCount(1, $firstSpans);
 
         $client->request('GET', '/_test/tracing');
         self::assertResponseStatusCodeSame(200);
         self::assertNull($currentSpan->span());
-        $spans = ExportedSpans::of($exporter);
+        $spans = self::rootSpans($exporter);
         self::assertCount(2, $spans);
 
         self::assertFalse(SpanContextValidator::isValidSpanId($spans[0]->getParentSpanId()));
@@ -135,6 +135,40 @@ final class RequestSpanTest extends WebTestCase
     }
 
     #[Test]
+    public function aReturnedServerErrorResponseMarksTheSpanAsAnErrorWithoutAnErrorType(): void
+    {
+        $client = self::createClient();
+        $exporter = self::exporter();
+
+        $client->request('GET', '/_test/tracing/server-error');
+
+        self::assertResponseStatusCodeSame(500);
+        $span = self::onlySpan($exporter);
+        self::assertSame(StatusCode::STATUS_ERROR, $span->getStatus()->getCode());
+        self::assertSame(500, $span->getAttributes()->get(SpanAttributes::HTTP_RESPONSE_STATUS_CODE));
+        self::assertFalse($span->getAttributes()->has(SpanAttributes::ERROR_TYPE));
+    }
+
+    #[Test]
+    public function aMessageDispatchedDuringTheRequestGetsASendSpanUnderTheRootSpan(): void
+    {
+        $client = self::createClient();
+        $exporter = self::exporter();
+
+        $client->request('GET', '/_test/tracing/dispatch');
+
+        self::assertResponseStatusCodeSame(200);
+        $root = self::onlySpan($exporter);
+        $sendSpans = array_values(array_filter(
+            ExportedSpans::of($exporter),
+            static fn (SpanDataInterface $span): bool => 'messenger send stdClass' === $span->getName(),
+        ));
+        self::assertCount(1, $sendSpans);
+        self::assertSame($root->getSpanId(), $sendSpans[0]->getParentSpanId());
+        self::assertSame($root->getTraceId(), $sendSpans[0]->getTraceId());
+    }
+
+    #[Test]
     public function aSubRequestAddsNoSpanAndItsFailureDoesNotMarkTheMainSpan(): void
     {
         $client = self::createClient();
@@ -170,7 +204,7 @@ final class RequestSpanTest extends WebTestCase
         $client->request('GET', '/_test/tracing/fail?q='.$marker, [], [], ['HTTP_X_PROBE' => $marker]);
         self::assertResponseStatusCodeSame(500);
 
-        $spans = ExportedSpans::of($exporter);
+        $spans = self::rootSpans($exporter);
         self::assertCount(2, $spans);
         foreach ($spans as $span) {
             self::assertStringNotContainsString($marker, serialize(self::visibleText($span)));
@@ -220,9 +254,22 @@ final class RequestSpanTest extends WebTestCase
         return self::getContainer()->get(CurrentSpan::class);
     }
 
+    /**
+     * The exported spans that start a trace; the database spans of the request are covered by DatabaseSpanTest.
+     *
+     * @return list<SpanDataInterface>
+     */
+    private static function rootSpans(InMemoryExporter $exporter): array
+    {
+        return array_values(array_filter(
+            ExportedSpans::of($exporter),
+            static fn (SpanDataInterface $span): bool => !SpanContextValidator::isValidSpanId($span->getParentSpanId()),
+        ));
+    }
+
     private static function onlySpan(InMemoryExporter $exporter): SpanDataInterface
     {
-        $spans = ExportedSpans::of($exporter);
+        $spans = self::rootSpans($exporter);
         self::assertCount(1, $spans);
 
         return $spans[0];

@@ -9,7 +9,6 @@ use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\Context\Context;
 use OpenTelemetry\SDK\Trace\TracerProviderInterface;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
@@ -40,7 +39,7 @@ final readonly class RequestSpanSubscriber
     public function __construct(
         private TracerProviderInterface $tracerProvider,
         private CurrentSpan $currentSpan,
-        private LoggerInterface $logger,
+        private RootSpanExporter $rootSpanExporter,
     ) {
     }
 
@@ -96,18 +95,8 @@ final readonly class RequestSpanSubscriber
             return;
         }
 
-        try {
-            $this->describeRequest($span, $event->getRequest());
-            $span->end();
-            $this->tracerProvider->forceFlush();
-        } catch (\Throwable $exportFailure) {
-            // Class only: the message can quote the collector URL or a payload.
-            $this->logger->warning('Exporting the request trace failed; it was dropped.', [
-                'exception_class' => $exportFailure::class,
-            ]);
-        } finally {
-            $this->currentSpan->reset();
-        }
+        $this->describeRequest($span, $event->getRequest());
+        $this->rootSpanExporter->endAndExport($span);
     }
 
     /** The route is only known after routing, so name and route attribute are set here, not on start. */

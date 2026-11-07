@@ -74,3 +74,13 @@ when@test:
         path: /_test/tracing/sub-request
         controller: App\Tests\Fixtures\Http\TracingProbeController::respondAfterAFailingSubRequest
         methods: [GET]
+
+    test_tracing_server_error:
+        path: /_test/tracing/server-error
+        controller: App\Tests\Fixtures\Http\TracingProbeController::respondWithServerError
+        methods: [GET]
+
+    test_tracing_dispatch:
+        path: /_test/tracing/dispatch
+        controller: App\Tests\Fixtures\Http\TracingProbeController::dispatchAnEvent
+        methods: [GET]

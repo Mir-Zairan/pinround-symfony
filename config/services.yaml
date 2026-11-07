@@ -91,6 +91,11 @@ when@test:
             autowire: true
             autoconfigure: true
 
+        # Test-only handler of the Messenger span tests (tests/Integration/Tracing).
+        App\Tests\Fixtures\Tracing\TracedProbeMessageHandler:
+            autowire: true
+            autoconfigure: true
+
         # Nothing in src injects AuditLog yet; this consumer keeps it in the test container as a real module would get it.
         App\Tests\Fixtures\Audit\AuditLogConsumer:
             autowire: true

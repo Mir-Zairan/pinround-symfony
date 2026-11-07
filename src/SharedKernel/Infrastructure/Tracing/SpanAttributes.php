@@ -17,11 +17,30 @@ final class SpanAttributes
     /** The exception class of a failure; never its message. */
     public const string ERROR_TYPE = 'error.type';
 
+    /** Always "postgresql". */
+    public const string DB_SYSTEM_NAME = 'db.system.name';
+    /** The first SQL keyword (SqlKind); never the statement. */
+    public const string DB_OPERATION_NAME = 'db.operation.name';
+    /** Always "symfony_messenger". */
+    public const string MESSAGING_SYSTEM = 'messaging.system';
+    /** "send" or "process". */
+    public const string MESSAGING_OPERATION_TYPE = 'messaging.operation.type';
+    /** The bus name. */
+    public const string MESSAGING_DESTINATION_NAME = 'messaging.destination.name';
+    /** The short class name of the message; never its content. */
+    public const string MESSAGING_MESSAGE_CLASS = 'messaging.message.class';
+
     public const array ALLOWED = [
         self::HTTP_REQUEST_METHOD,
         self::HTTP_ROUTE,
         self::HTTP_RESPONSE_STATUS_CODE,
         self::ERROR_TYPE,
+        self::DB_SYSTEM_NAME,
+        self::DB_OPERATION_NAME,
+        self::MESSAGING_SYSTEM,
+        self::MESSAGING_OPERATION_TYPE,
+        self::MESSAGING_DESTINATION_NAME,
+        self::MESSAGING_MESSAGE_CLASS,
     ];
 
     private function __construct()

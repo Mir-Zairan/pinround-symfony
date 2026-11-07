@@ -44,7 +44,8 @@ final readonly class TracerProviderFactory
      * cannot hold the worker for long after the response. It is not a cap on a request's total tracing work.
      */
     private const float EXPORT_TIMEOUT_SECONDS = 1.0;
-    // One request's spans fit in a single batch; a request with more spans than the queue holds loses the rest.
+    // Up to 2048 spans per request are queued and leave in batches of 512 (one HTTP call each, each capped at 1 s);
+    // spans past 2048 are dropped.
     private const int MAX_QUEUE_SIZE = 2048;
     private const int MAX_EXPORT_BATCH_SIZE = 512;
     // Never reached: the processor runs without auto flush, so only forceFlush exports.

@@ -6,6 +6,7 @@ namespace App\Tests\Unit\SharedKernel\Infrastructure\Tracing;
 
 use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
 use App\SharedKernel\Infrastructure\Tracing\RequestSpanSubscriber;
+use App\SharedKernel\Infrastructure\Tracing\RootSpanExporter;
 use App\SharedKernel\Infrastructure\Tracing\SpanAttributes;
 use App\SharedKernel\Infrastructure\Tracing\TracerProviderFactory;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
@@ -29,7 +30,7 @@ final class RequestSpanSubscriberTest extends TestCase
     {
         $currentSpan = new CurrentSpan();
         $provider = new TracerProviderFactory('', 'pinround', '1', 'http/protobuf', new NullLogger(), new InMemoryExporter())->create();
-        $subscriber = new RequestSpanSubscriber($provider, $currentSpan, new NullLogger());
+        $subscriber = new RequestSpanSubscriber($provider, $currentSpan, new RootSpanExporter($provider, $currentSpan, new NullLogger()));
 
         $subscriber->startSpan(new RequestEvent(self::createStub(HttpKernelInterface::class), new Request(), HttpKernelInterface::SUB_REQUEST));
 
@@ -44,7 +45,7 @@ final class RequestSpanSubscriberTest extends TestCase
         $currentSpan = new CurrentSpan();
         $client = new MockHttpClient(new MockResponse('', ['error' => 'collector-secret-detail']));
         $provider = new TracerProviderFactory('http://collector.test:4318', 'pinround', '1', 'http/protobuf', new NullLogger(), null, $client)->create();
-        $subscriber = new RequestSpanSubscriber($provider, $currentSpan, new NullLogger());
+        $subscriber = new RequestSpanSubscriber($provider, $currentSpan, new RootSpanExporter($provider, $currentSpan, new NullLogger()));
 
         $subscriber->startSpan(new RequestEvent($kernel, $request, HttpKernelInterface::MAIN_REQUEST));
         self::assertNotNull($currentSpan->sampledSpanContext());
@@ -68,7 +69,7 @@ final class RequestSpanSubscriberTest extends TestCase
         $failingProvider = self::createStub(TracerProviderInterface::class);
         $failingProvider->method('getTracer')->willReturn($provider->getTracer('probe'));
         $failingProvider->method('forceFlush')->willThrowException(new \RuntimeException('private detail'));
-        $subscriber = new RequestSpanSubscriber($failingProvider, $currentSpan, $logger);
+        $subscriber = new RequestSpanSubscriber($failingProvider, $currentSpan, new RootSpanExporter($failingProvider, $currentSpan, $logger));
 
         $subscriber->startSpan(new RequestEvent($kernel, $request, HttpKernelInterface::MAIN_REQUEST));
         $subscriber->endAndExport(new TerminateEvent($kernel, $request, new Response()));
@@ -78,8 +79,12 @@ final class RequestSpanSubscriberTest extends TestCase
     }
 
     #[Test]
-    public function theAllowListHoldsExactlyTheFourKeys(): void
+    public function theAllowListHoldsExactlyTheRequestDatabaseAndMessengerKeys(): void
     {
-        self::assertEqualsCanonicalizing(['http.request.method', 'http.route', 'http.response.status_code', 'error.type'], SpanAttributes::ALLOWED);
+        self::assertEqualsCanonicalizing([
+            'http.request.method', 'http.route', 'http.response.status_code', 'error.type',
+            'db.system.name', 'db.operation.name',
+            'messaging.system', 'messaging.operation.type', 'messaging.destination.name', 'messaging.message.class',
+        ], SpanAttributes::ALLOWED);
     }
 }
