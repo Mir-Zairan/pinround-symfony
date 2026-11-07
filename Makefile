@@ -29,8 +29,11 @@ help: ## List the targets
 
 up: ## Build the image, start the stack, apply the database roles and migrate
 	$(COMPOSE) build
-	$(COMPOSE) up -d --wait
+	@# The workers log in as pinround_app and read the outbox table, so on a fresh database they only turn
+	@# healthy after the roles and migrations exist: start app and its dependencies first, the workers last.
+	$(COMPOSE) up -d --wait app
 	$(MAKE) --no-print-directory db-roles migrate migrate-test
+	$(COMPOSE) up -d --wait
 
 down: ## Stop the stack
 	$(COMPOSE) down
