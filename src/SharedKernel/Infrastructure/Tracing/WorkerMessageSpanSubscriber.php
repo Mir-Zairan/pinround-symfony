@@ -30,6 +30,7 @@ final readonly class WorkerMessageSpanSubscriber
         $event->addStamps(new SpanEndedByWorkerStamp());
     }
 
+    // Must run after the stop-worker listeners (priority 0 and 100) and before ResetServicesListener (-1024), which clears CurrentSpan.
     #[AsEventListener(event: WorkerRunningEvent::class, priority: -1000)]
     public function endProcessSpan(WorkerRunningEvent $event): void
     {
