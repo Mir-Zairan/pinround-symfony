@@ -248,9 +248,9 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
-     * Global Identity tables: the app reads, adds and changes users and credentials, and only adds login attempts,
-     * which the retention job purges. pinround_readonly gets nothing, as no tenant policy would limit it
-     * (Version20261107190000).
+     * Global Identity tables: the app reads, adds and changes users, credentials and password resets, and only adds
+     * login attempts; the retention job purges attempts and resets. pinround_readonly gets nothing, as no tenant policy
+     * would limit it (Version20261107190000, Version20261108120000).
      */
     #[Test]
     public function theAppRoleAloneHasRightsOnTheIdentityTablesAndOnlyAddsLoginAttempts(): void
@@ -260,6 +260,7 @@ final class DatabaseRolesTest extends KernelTestCase
             'idn_user' => ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
             'idn_credential' => ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
             'idn_login_attempt' => ['pinround_app INSERT', 'pinround_app SELECT'],
+            'idn_password_reset' => ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
         ];
 
         foreach ($expectedGrants as $table => $grants) {
@@ -270,6 +271,14 @@ final class DatabaseRolesTest extends KernelTestCase
             ['CREATE INDEX idn_login_attempt_email_hash_at_idx ON public.idn_login_attempt USING btree (email_hash, at)'],
             $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_login_attempt' AND indexname <> 'idn_login_attempt_pkey'"),
         );
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX idn_password_reset_token_hash_key ON public.idn_password_reset USING btree (token_hash)',
+                'CREATE INDEX idn_password_reset_user_id_idx ON public.idn_password_reset USING btree (user_id)',
+            ],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_password_reset' AND indexname <> 'idn_password_reset_pkey'"),
+        );
+        self::assertFalse($connection->fetchOne("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.idn_password_reset'::regclass"));
     }
 
     /** The tables no entity maps; the diff must neither drop them nor hide a table that is mapped. */
@@ -277,7 +286,7 @@ final class DatabaseRolesTest extends KernelTestCase
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
         $hidden = ['processed_message', 'idn_login_attempt', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);

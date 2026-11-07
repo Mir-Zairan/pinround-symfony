@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
+use App\Identity\Domain\Theme;
+use App\Identity\UI\Controller\ProfileController;
 use App\Tests\Functional\Identity\LogsInUsers;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -49,6 +51,34 @@ final class HomePageShellTest extends WebTestCase
         self::assertSame('Skip to main content', $page->filter('a.skip-link')->text());
         self::assertSame('#main', $page->filter('a.skip-link')->attr('href'));
         self::assertCount(1, $page->filter('main#main'));
+    }
+
+    #[Test]
+    public function theAvatarOpensAMenuWithProfileSecurityThemeAndLogOutInThatOrder(): void
+    {
+        $page = $this->openHome();
+        self::assertResponseStatusCodeSame(200);
+
+        $trigger = $page->filter('header .avatar-menu > button[aria-expanded="false"][aria-controls="avatar-menu-list"]');
+        self::assertCount(1, $trigger);
+        self::assertSame('Lena Berg', $trigger->filter('[role="img"]')->attr('title'));
+        $menu = $page->filter('header #avatar-menu-list[hidden]');
+        self::assertCount(1, $menu);
+        $items = $menu->children()->each(static fn (Crawler $item): string => match ($item->nodeName()) {
+            'a' => $item->text().' → '.$item->attr('href'),
+            'form' => $item->filter('[role="group"]')->count() > 0
+                ? (string) $item->filter('[role="group"]')->attr('aria-label').' → '.$item->attr('action')
+                : $item->filter('button[type="submit"]')->text().' → '.$item->attr('action'),
+            default => $item->nodeName(),
+        });
+        self::assertSame(['Profile → /me/profile', 'Security → /me/security', 'Theme → /me/theme', 'Log out → /logout'], $items);
+
+        $themeForm = $menu->filter('form[action="/me/theme"][method="post"]');
+        self::assertSame(array_values(ProfileController::THEME_OPTIONS), $themeForm->filter('button.seg')->each(static fn (Crawler $option): string => $option->text()));
+        self::assertSame(array_map(static fn (Theme $theme): string => $theme->value, Theme::cases()), $themeForm->filter('button.seg')->each(static fn (Crawler $option): string => (string) $option->attr('value')));
+        self::assertSame(['system'], $themeForm->filter('button.seg[aria-pressed="true"]')->each(static fn (Crawler $option): string => (string) $option->attr('value')));
+        self::assertNotSame('', $themeForm->filter('input[type="hidden"][name="_csrf_token"]')->attr('value'));
+        self::assertNotSame('', $menu->filter('form[action="/logout"] input[type="hidden"][name="_csrf_token"]')->attr('value'));
     }
 
     #[Test]

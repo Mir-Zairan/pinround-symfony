@@ -1,0 +1,56 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Security · pinround{% endblock %}
+
+{# The form fields, errors and notices of the logged-out pages; security.css lays out the two sections. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="security">
+        <h1 class="security__title">Security</h1>
+        {% for notice in app.flashes('notice') %}
+            <p class="login__notice" role="status">{{ notice }}</p>
+        {% endfor %}
+
+        <twig:Card tag="section" class="security__section" aria-labelledby="change-password-title">
+            <h2 class="security__heading" id="change-password-title">Change password</h2>
+            {% if passwordError %}
+                <p class="login__error" role="alert">{{ passwordError }}</p>
+            {% endif %}
+            <form class="login__form" method="post" action="{{ path('identity_security_password') }}">
+                <label class="login__field">
+                    Current password
+                    <input class="login__input" type="password" name="current_password" autocomplete="current-password" required>
+                </label>
+                <label class="login__field">
+                    New password
+                    <input class="login__input" type="password" name="new_password" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" aria-describedby="new-password-hint" required>
+                </label>
+                <label class="login__field">
+                    Repeat the new password
+                    <input class="login__input" type="password" name="new_password_repeat" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" required>
+                </label>
+                <p class="login__hint" id="new-password-hint">At least {{ minimumPasswordLength }} characters. Other devices are logged out.</p>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('security_password') }}">
+                <div>
+                    <twig:Button type="submit">Change password</twig:Button>
+                </div>
+            </form>
+        </twig:Card>
+
+        <twig:Card tag="section" class="security__section" aria-labelledby="log-out-everywhere-title">
+            <h2 class="security__heading" id="log-out-everywhere-title">Log out of all devices</h2>
+            {% if logOutError %}
+                <p class="login__error" role="alert">{{ logOutError }}</p>
+            {% endif %}
+            <p class="login__hint">Ends every session, including this one. You then log in again.</p>
+            <form method="post" action="{{ path('identity_security_log_out_everywhere') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('security_log_out_everywhere') }}">
+                <twig:Button type="submit" variant="outline">Log out of all devices</twig:Button>
+            </form>
+        </twig:Card>
+    </div>
+{% endblock %}

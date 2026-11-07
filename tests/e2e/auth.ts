@@ -5,6 +5,10 @@ export const LENA_EMAIL = 'lena@acme-foods.example';
 // Written by auth.setup.ts and read by the specs that open a logged-in page. It sits in test-results/, which is git-ignored.
 export const LENA_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'lena.json');
 
+// Omar's own session for the specs that save a preference, so Lena's pages in the other specs keep their look.
+export const OMAR_EMAIL = 'omar@acme-foods.example';
+export const OMAR_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'omar.json');
+
 /** The password make seed gave the demo people (DEMO_PASSWORD); the tests never hold a value of their own. */
 export function demoPassword(): string {
   const password = process.env.E2E_PASSWORD;

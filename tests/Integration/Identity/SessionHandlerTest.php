@@ -30,4 +30,25 @@ final class SessionHandlerTest extends KernelTestCase
         self::assertSame('', $handler->read($sessionId));
         self::assertSame(0, $connection->exists('session:'.$sessionId));
     }
+
+    #[Test]
+    public function aSessionKeyLivesEightHoursFromItsLastWriteOrTouch(): void
+    {
+        $handler = self::getContainer()->get('test.session_handler');
+        self::assertInstanceOf(RedisSessionHandler::class, $handler);
+        $connection = self::getContainer()->get('state_valkey.connection');
+        $sessionId = bin2hex(random_bytes(16));
+        $key = 'session:'.$sessionId;
+
+        try {
+            self::assertTrue($handler->write($sessionId, 'the session data'));
+            self::assertSame(28800, $connection->ttl($key));
+
+            $connection->expire($key, 60);
+            self::assertTrue($handler->updateTimestamp($sessionId, 'the session data'));
+            self::assertSame(28800, $connection->ttl($key));
+        } finally {
+            $handler->destroy($sessionId);
+        }
+    }
 }

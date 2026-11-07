@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Identity;
 
-use App\Identity\Infrastructure\Security\LoginKeyHasher;
+use App\Identity\Infrastructure\Security\ThrottleKeyHasher;
 use Doctrine\DBAL\ParameterType;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -99,7 +99,7 @@ final class LoginAttemptRecordTest extends WebTestCase
         $rows = $this->rowsOf();
         self::assertCount(2, $rows);
         self::assertSame($rows[0]['email_hash'], $rows[1]['email_hash']);
-        $hasher = self::getContainer()->get(LoginKeyHasher::class);
+        $hasher = self::getContainer()->get(ThrottleKeyHasher::class);
         self::assertSame($hasher->hexOf('omar@acme-foods.example'), $rows[0]['email_hash']);
         self::assertSame($hasher->hexOf($this->ip), $rows[0]['ip_hash']);
         foreach ($rows as $row) {
@@ -115,7 +115,7 @@ final class LoginAttemptRecordTest extends WebTestCase
         if ('' !== $this->ip) {
             $this->migrator()->executeStatement(
                 'DELETE FROM idn_login_attempt WHERE ip_hash = ?',
-                [self::getContainer()->get(LoginKeyHasher::class)->bytesOf($this->ip)],
+                [self::getContainer()->get(ThrottleKeyHasher::class)->bytesOf($this->ip)],
                 [ParameterType::BINARY],
             );
             $this->ip = '';
@@ -134,7 +134,7 @@ final class LoginAttemptRecordTest extends WebTestCase
         $rows = $this->migrator()->fetchAllAssociative(
             "SELECT id::text AS id, encode(email_hash, 'hex') AS email_hash, encode(ip_hash, 'hex') AS ip_hash, success, at::text AS at"
             .' FROM idn_login_attempt WHERE ip_hash = ? ORDER BY id',
-            [self::getContainer()->get(LoginKeyHasher::class)->bytesOf($this->ip)],
+            [self::getContainer()->get(ThrottleKeyHasher::class)->bytesOf($this->ip)],
             [ParameterType::BINARY],
         );
 

@@ -1,5 +1,8 @@
 <!DOCTYPE html>
-<html lang="en"{% if theme is defined and theme in ['light', 'dark'] %} data-theme="{{ theme }}"{% endif %}>
+{#- A page's own theme (the gallery's ?theme=) wins over the user's saved one; "system" prints nothing, so the
+    prefers-color-scheme media query decides. -#}
+{%- set pageTheme = theme ?? (app.user ? app.user.theme : null) -%}
+<html lang="en"{% if pageTheme in ['light', 'dark'] %} data-theme="{{ pageTheme }}"{% endif %}>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -44,12 +47,28 @@
                     </svg>
                 </button>
                 {% if app.user %}
-                    {# TODO(P01.T2): the avatar opens the avatar menu (Security, Theme, Log out) and this button moves into it. #}
-                    <twig:Avatar name="{{ app.user.name }}" :isInHeader="true" title="{{ app.user.name }}"/>
-                    <form method="post" action="{{ path('identity_logout') }}">
-                        <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
-                        <twig:Button type="submit" variant="text" size="sm">Log out</twig:Button>
-                    </form>
+                    {# A disclosure, not an ARIA menu: it holds links, a switch and a form. "menu" opens and closes it. #}
+                    <div class="menu avatar-menu" {{ stimulus_controller('menu') }} data-action="focusout->menu#closeOnFocusLeave">
+                        <button type="button" class="avatar-menu__trigger" aria-expanded="false" aria-controls="avatar-menu-list"
+                            {{ stimulus_target('menu', 'trigger') }} data-action="menu#toggle keydown->menu#triggerKey click@window->menu#closeOnOutsideClick">
+                            <twig:Avatar name="{{ app.user.name }}" :isInHeader="true" title="{{ app.user.name }}"/>
+                        </button>
+                        <div id="avatar-menu-list" class="menu__list avatar-menu__list" hidden
+                            {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#closeOnEscape">
+                            <a class="menu__item" href="{{ path('identity_profile') }}" {{ stimulus_target('menu', 'item') }}>Profile</a>
+                            <a class="menu__item" href="{{ path('identity_security') }}" {{ stimulus_target('menu', 'item') }}>Security</a>
+                            <form class="avatar-menu__theme" method="post" action="{{ path('identity_theme') }}" {{ stimulus_controller('theme-switch') }} data-action="click->theme-switch#choose">
+                                <span class="avatar-menu__label" aria-hidden="true">Theme</span>
+                                <twig:SegmentedControl label="Theme" :options="{system: 'System', light: 'Light', dark: 'Dark'}" selected="{{ app.user.theme }}"/>
+                                <input type="hidden" name="theme" value="{{ app.user.theme }}" {{ stimulus_target('theme-switch', 'choice') }}>
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token('identity_theme') }}">
+                            </form>
+                            <form method="post" action="{{ path('identity_logout') }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+                                <button type="submit" class="menu__item avatar-menu__log-out" {{ stimulus_target('menu', 'item') }}>Log out</button>
+                            </form>
+                        </div>
+                    </div>
                 {% else %}
                     {# No user: a page open without a login, which is only the component gallery in dev and test. #}
                     <span class="site-header__avatar" aria-hidden="true"></span>

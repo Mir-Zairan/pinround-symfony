@@ -7,10 +7,11 @@ namespace App\Identity\Infrastructure\Security;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
- * The keyed hash (HMAC-SHA256 under the app secret) of what identifies a login try: the login counters in Valkey and
- * the idn_login_attempt rows hold it instead of the email or IP, which a leaked store would otherwise show.
+ * The keyed hash (HMAC-SHA256 under the app secret) of what identifies a login try, a password reset request or a
+ * password change try (the user id, for password_change_per_user): the counters in Valkey and the idn_login_attempt
+ * rows hold it instead of the email, IP or user id, which a leaked store would otherwise show.
  */
-final readonly class LoginKeyHasher
+final readonly class ThrottleKeyHasher
 {
     public function __construct(
         #[Autowire(param: 'kernel.secret')]

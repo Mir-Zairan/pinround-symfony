@@ -32,13 +32,14 @@ final class LoginConfigTest extends TestCase
     }
 
     #[Test]
-    public function everyRouteButTheLoginPageAndTheDevAndTestRoutesNeedsALogin(): void
+    public function everyRouteButTheLoginAndPasswordResetPagesAndTheDevAndTestRoutesNeedsALogin(): void
     {
         $security = self::config('packages/security.yaml');
 
         self::assertSame(
             [
                 ['route' => '^identity_login$', 'roles' => 'PUBLIC_ACCESS'],
+                ['route' => '^identity_password_(forgot|reset_token|reset)$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^web_component_gallery$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^test_', 'roles' => 'PUBLIC_ACCESS'],
                 ['path' => '^/', 'roles' => 'IS_AUTHENTICATED_FULLY'],
@@ -80,7 +81,7 @@ final class LoginConfigTest extends TestCase
             self::at($framework, 'framework', 'session'),
         );
         self::assertSame(
-            ['arguments' => ['@state_valkey.connection', ['prefix' => 'session:']]],
+            ['arguments' => ['@state_valkey.connection', ['prefix' => 'session:', 'ttl' => '%identity.session_idle_seconds%']]],
             self::at($services, 'services', RedisSessionHandler::class),
         );
         self::assertSame(
@@ -91,6 +92,17 @@ final class LoginConfigTest extends TestCase
             ],
             self::at($services, 'services', 'state_valkey.connection'),
         );
+    }
+
+    #[Test]
+    public function sessionsEndAfterEightIdleHoursOrThirtyDays(): void
+    {
+        $services = self::config('services.yaml');
+
+        self::assertSame(28800, self::at($services, 'parameters', 'identity.session_idle_seconds'));
+        self::assertSame(30, self::at($services, 'parameters', 'identity.session_absolute_days'));
+        self::assertSame([], self::environmentsRedefining($services, 'parameters', 'identity.session_idle_seconds'));
+        self::assertSame([], self::environmentsRedefining($services, 'parameters', 'identity.session_absolute_days'));
     }
 
     #[Test]
@@ -107,7 +119,7 @@ final class LoginConfigTest extends TestCase
     }
 
     #[Test]
-    public function theLoginCountersLiveOnTheStateValkeyInEveryEnvironment(): void
+    public function theLoginPasswordResetAndPasswordChangeCountersLiveOnTheStateValkeyInEveryEnvironment(): void
     {
         $rateLimiter = self::config('packages/rate_limiter.yaml');
 
@@ -115,10 +127,22 @@ final class LoginConfigTest extends TestCase
             [
                 'login_per_email_and_ip' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.login_per_email_and_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'login_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '%identity.login_per_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'password_reset_per_email_and_ip' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.password_reset_per_email_and_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'password_reset_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '%identity.password_reset_per_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'password_change_per_user' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.password_change_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
             ],
             self::at($rateLimiter, 'framework', 'rate_limiter'),
         );
-        self::assertSame(['identity.login_per_email_and_ip_minutes' => 15, 'identity.login_per_ip_minutes' => 60], self::at($rateLimiter, 'parameters'));
+        self::assertSame(
+            [
+                'identity.login_per_email_and_ip_minutes' => 15,
+                'identity.login_per_ip_minutes' => 60,
+                'identity.password_reset_per_email_and_ip_minutes' => 15,
+                'identity.password_reset_per_ip_minutes' => 60,
+                'identity.password_change_per_user_minutes' => 15,
+            ],
+            self::at($rateLimiter, 'parameters'),
+        );
         self::assertSame(['parameters', 'framework'], array_keys($rateLimiter));
         self::assertSame(['framework' => ['lock' => 'state_valkey.connection']], self::config('packages/lock.yaml'));
     }

@@ -3,10 +3,18 @@
 # (FixedWindowTryRefund), so only wrong tries fill login_per_ip. The counters live on the state Valkey, which never
 # evicts (ADR-0010), through ValkeyLimiterStorage, which fails the login when Valkey cannot be reached. A lock on the
 # same Valkey (lock.yaml) makes each read-add-write of a counter whole, refunds included, so parallel tries all count.
+# Password reset requests get the same two limits (ADR-0012) through SymfonyPasswordResetRequestLimiter, without
+# refunds: every request counts, whether or not a user has the email.
+# Password changes on /me/security get password_change_per_user through SymfonyPasswordChangeLimiter: every check of
+# the current password counts, right or wrong, so a stolen session cannot guess the password.
 parameters:
-    # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter).
+    # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter,
+    # SymfonyPasswordResetRequestLimiter, SymfonyPasswordChangeLimiter).
     identity.login_per_email_and_ip_minutes: 15
     identity.login_per_ip_minutes: 60
+    identity.password_reset_per_email_and_ip_minutes: 15
+    identity.password_reset_per_ip_minutes: 60
+    identity.password_change_per_user_minutes: 15
 
 framework:
     rate_limiter:
@@ -22,5 +30,26 @@ framework:
             policy: fixed_window
             limit: 50
             interval: '%identity.login_per_ip_minutes% minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # POST /password/forgot, keyed like login_per_email_and_ip: bounds the emails one inbox gets.
+        password_reset_per_email_and_ip:
+            policy: fixed_window
+            limit: 5
+            interval: '%identity.password_reset_per_email_and_ip_minutes% minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # POST /password/forgot, keyed by the client IP: bounds how many addresses one client may probe.
+        password_reset_per_ip:
+            policy: fixed_window
+            limit: 50
+            interval: '%identity.password_reset_per_ip_minutes% minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # POST /me/security/password, keyed by the user id: bounds the guesses at the current password.
+        password_change_per_user:
+            policy: fixed_window
+            limit: 5
+            interval: '%identity.password_change_per_user_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory

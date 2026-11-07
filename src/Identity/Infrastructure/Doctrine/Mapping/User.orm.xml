@@ -16,5 +16,11 @@
         <field name="locale" type="text" column="locale"/>
         <field name="timeZone" type="text" column="time_zone"/>
         <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+        <field name="theme" type="text" column="theme" enum-type="App\Identity\Domain\Theme">
+            <options>
+                <option name="default">system</option>
+            </options>
+        </field>
+        <field name="sessionStamp" type="text" column="session_stamp"/>
     </entity>
 </doctrine-mapping>

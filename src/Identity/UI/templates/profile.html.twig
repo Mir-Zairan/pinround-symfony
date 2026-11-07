@@ -1,0 +1,66 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Profile · pinround{% endblock %}
+
+{# The form fields, errors and notices of the logged-out pages; profile.css lays out the page and the field errors. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="profile">
+        <h1 class="profile__title">Profile</h1>
+        {% for notice in app.flashes('notice') %}
+            <p class="login__notice" role="status">{{ notice }}</p>
+        {% endfor %}
+        {% if formError %}
+            <p class="login__error" role="alert">{{ formError }}</p>
+        {% endif %}
+
+        <twig:Card>
+            <form class="login__form" method="post" action="{{ path('identity_profile') }}">
+                <div class="profile__field">
+                    <label class="login__field">
+                        Display name
+                        <input class="login__input" type="text" name="name" value="{{ profile.name }}" autocomplete="name" maxlength="{{ maximumNameLength }}" required
+                            {%- if nameError %} aria-invalid="true" aria-describedby="profile-name-error"{% endif %}>
+                    </label>
+                    {% if nameError %}
+                        <p class="profile__error" id="profile-name-error">{{ nameError }}</p>
+                    {% endif %}
+                </div>
+                <div class="profile__field">
+                    <label class="login__field">
+                        Time zone
+                        <select class="login__input" name="time_zone" required
+                            {%- if timeZoneError %} aria-invalid="true" aria-describedby="profile-time-zone-error"{% endif %}>
+                            {% for timeZone in timeZones %}
+                                <option value="{{ timeZone }}"{% if timeZone == profile.timeZone %} selected{% endif %}>{{ timeZone }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    {% if timeZoneError %}
+                        <p class="profile__error" id="profile-time-zone-error">{{ timeZoneError }}</p>
+                    {% endif %}
+                </div>
+                <fieldset class="profile__themes"{% if themeError %} aria-describedby="profile-theme-error"{% endif %}>
+                    <legend class="profile__legend">Theme</legend>
+                    {% for value, themeLabel in themeOptions %}
+                        <label class="profile__theme">
+                            <input type="radio" name="theme" value="{{ value }}"{% if value == profile.theme %} checked{% endif %} required>
+                            {{ themeLabel }}
+                        </label>
+                    {% endfor %}
+                    {% if themeError %}
+                        <p class="profile__error" id="profile-theme-error">{{ themeError }}</p>
+                    {% endif %}
+                </fieldset>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('identity_profile') }}">
+                <div>
+                    <twig:Button type="submit">Save</twig:Button>
+                </div>
+            </form>
+        </twig:Card>
+    </div>
+{% endblock %}

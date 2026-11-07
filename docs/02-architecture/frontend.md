@@ -47,7 +47,7 @@ Verify the exact bundle names and Twig function names against the Symfony UX doc
   - "Report a problem" (tonal button, for every team member);
   - the "Local AI" status chip (only when the org's AI runs on laptops);
   - the bell with a count;
-  - the user's avatar menu (Security, Personal access tokens, Theme, Log out).
+  - the user's avatar menu (Profile, Security, Personal access tokens, Theme, Log out). Profile is not in the prototype; FR-ID-07 needs the page reachable. Personal access tokens come with P09. Theme is a System | Light | Dark switch that applies at once and is saved on the user.
 - **Main:** one `<main>` per page.
 - **Overlays:** the toast area (an `aria-live="polite"` region) and the dialog root.
 
@@ -123,7 +123,8 @@ Every controller is small, stays under about 150 lines, and has a test (Playwrig
 | `person-picker` | Opens the dialog, keyboard navigation in the list, returns the chosen id |
 | `focus-chips` | Shows and hides Home sections without a reload and saves the choice |
 | `local-ai` | Laptop AI ([ADR-0019](../03-adr/0019-browser-local-ai.md)): on the user's click it checks `GET http://localhost:11434/api/tags`; it fetches a prompt package from the server; it calls `POST /api/generate` (non-streaming, `format: "json"` when JSON is expected); it posts the result back. It never runs on page load (browsers may show a local-network permission prompt). |
-| `menu` | The "⋯" menus and the bell popover: open/close, Escape, click outside, roving focus |
+| `menu` | The "⋯" menus, the avatar menu and the bell popover: open/close, Escape, click outside, roving focus (the avatar menu is a disclosure and keeps its items in the Tab order) |
+| `theme-switch` | The avatar menu's System / Light / Dark switch: sets or removes `data-theme` on `<html>` at once and posts the choice to `/me/theme` |
 | `dialog` | Opens a `<dialog>`, keeps focus inside, gives focus back on close |
 | `clipboard` | "Copy link" |
 | `queue` | Keyboard shortcuts in a queue: J/K for next/previous (phase 12 adds more shortcuts) |
@@ -243,8 +244,9 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Admin tabs | `GET /admin/{tab}`, tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data | Web (+ owning module per tab) | Admin layout with tab list |
 | Manager "Teams at a glance" | part of `/` for managers | Insight | GroupBar per team |
 | Local AI sheet | dialog from the header chip; `POST /ai/laptop/status`, `POST /ai/laptop/package`, `POST /ai/laptop/result` | Assist | `local-ai` controller |
+| Profile (name, time zone, theme) | `GET/POST /me/profile` (`identity_profile`); the avatar menu's theme switch `POST /me/theme` (`identity_theme`) | Identity | `profile.html.twig` |
 | Personal access tokens | `GET/POST /me/tokens` | Identity | for MCP and the plugin |
-| Security (password, two-factor) | `GET/POST /me/security` | Identity | |
+| Security (password, two-factor) | `GET /me/security` (`identity_security`), `POST /me/security/password`, `POST /me/security/log-out-everywhere` | Identity | |
 | Login, invite accept, SSO callback | `/login`, `/invite/{token}`, `/login/sso/{provider}/callback` | Identity | |
 | MCP endpoint | `POST /mcp` | AgentApi | no HTML |
 | REST for the plugin | `/api/v1/…` | AgentApi | no HTML |

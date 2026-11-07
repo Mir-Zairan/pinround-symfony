@@ -10,11 +10,11 @@ use App\SharedKernel\Domain\UserId;
  * The password of a user, as a hash. The mapping makes the user its id, so user_id is both the primary key and the
  * foreign key to idn_user.
  */
-final readonly class Credential
+final class Credential
 {
     private string $passwordHash;
 
-    public function __construct(private User $user, PasswordHash $passwordHash, private \DateTimeImmutable $changedAt)
+    public function __construct(private readonly User $user, PasswordHash $passwordHash, private \DateTimeImmutable $changedAt)
     {
         $this->passwordHash = $passwordHash->encoded();
     }
@@ -32,5 +32,15 @@ final readonly class Credential
     public function changedAt(): \DateTimeImmutable
     {
         return $this->changedAt;
+    }
+
+    /**
+     * Replaces the password once the change is saved. It does not end the user's sessions by itself: the caller
+     * rotates the session stamp when it should.
+     */
+    public function changePassword(PasswordHash $passwordHash, \DateTimeImmutable $changedAt): void
+    {
+        $this->passwordHash = $passwordHash->encoded();
+        $this->changedAt = $changedAt;
     }
 }

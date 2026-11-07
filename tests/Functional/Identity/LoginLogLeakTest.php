@@ -45,9 +45,9 @@ final class LoginLogLeakTest extends WebTestCase
 
     /**
      * Every string a record holds: its message, and the strings, stringables and exception messages in its context
-     * and extra, at any depth.
+     * and extra, at any depth. PasswordResetLogLeakTest reads records the same way.
      */
-    private static function textOf(LogRecord $record): string
+    public static function textOf(LogRecord $record): string
     {
         $strings = [$record->message];
         $fields = [$record->context, $record->extra];

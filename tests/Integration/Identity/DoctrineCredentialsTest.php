@@ -25,6 +25,8 @@ final class DoctrineCredentialsTest extends KernelTestCase
 
     private const string ARGON2ID_HASH = '$argon2id$v=19$m=65536,t=4,p=1$NUkxU2sxQlFxbXpDaUZUQQ$suVp+0jzKZuqeONGVmUghGQxxI2vd02CMokdMtaQcfA';
 
+    private const string OTHER_ARGON2ID_HASH = '$argon2id$v=19$m=65536,t=4,p=1$c29tZXNhbHRzb21lc2FsdA$4Mw0TAkJ7pBzGS3B1/t1d0I0ww3hCgwdlBBVCZhfKHg';
+
     private EntityManagerInterface $entityManager;
 
     protected function setUp(): void
@@ -67,6 +69,28 @@ final class DoctrineCredentialsTest extends KernelTestCase
         self::assertSame(
             [['user_id' => $user->id()->toString(), 'password_hash' => self::ARGON2ID_HASH, 'changed_at' => '2026-11-03 14:00:00']],
             $this->connection()->fetchAllAssociative("SELECT user_id, password_hash, to_char(changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS changed_at FROM idn_credential"),
+        );
+    }
+
+    #[Test]
+    public function aChangedPasswordSavedTwiceLeavesOneRowWithTheNewHashAndChangeTime(): void
+    {
+        $user = UserFactory::createOne();
+        $this->credentials()->add(new Credential($user, new PasswordHash(self::ARGON2ID_HASH), new \DateTimeImmutable('2026-11-03 14:00:00 UTC')));
+        $this->entityManager->clear();
+        $credential = $this->credentials()->byUserId($user->id());
+        self::assertNotNull($credential);
+
+        $credential->changePassword(new PasswordHash(self::OTHER_ARGON2ID_HASH), new \DateTimeImmutable('2027-03-15 10:30:00 UTC'));
+        $this->credentials()->save($credential);
+        $this->credentials()->save($credential);
+
+        self::assertSame(
+            [['user_id' => $user->id()->toString(), 'password_hash' => self::OTHER_ARGON2ID_HASH, 'changed_at' => '2027-03-15 10:30:00']],
+            $this->connection()->fetchAllAssociative(
+                "SELECT user_id, password_hash, to_char(changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS changed_at FROM idn_credential WHERE user_id = ?",
+                [$user->id()->toString()],
+            ),
         );
     }
 

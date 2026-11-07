@@ -29,6 +29,18 @@ final class SymfonyPasswordHashingTest extends KernelTestCase
     }
 
     #[Test]
+    public function aHashMatchesOnlyThePasswordItWasMadeFrom(): void
+    {
+        $hashing = new SymfonyPasswordHashing(self::getContainer()->get('security.password_hasher_factory'));
+
+        $hash = $hashing->hash(new NewPassword('correct horse battery staple'));
+
+        self::assertTrue($hashing->matches($hash, 'correct horse battery staple'));
+        self::assertFalse($hashing->matches($hash, 'correct horse battery stapler'));
+        self::assertFalse($hashing->matches($hash, ''));
+    }
+
+    #[Test]
     public function theSamePasswordGetsADifferentSaltEachTime(): void
     {
         $hasherFactory = self::getContainer()->get('security.password_hasher_factory');

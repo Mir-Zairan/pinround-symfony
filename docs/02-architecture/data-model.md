@@ -37,7 +37,7 @@ These needs give the model its shape:
 - **Tenant column:** `organization_id uuid NOT NULL` on every tenant table ([ADR-0005](../03-adr/0005-multi-tenancy.md)).
   - Every index and unique constraint starts with it.
   - Foreign keys that point inside the tenant are composite where useful: `(organization_id, ticket_id)`. A child can then never point to another tenant's parent.
-- **Global tables (no tenant):** `idn_user`, `idn_credential`, `idn_mfa_secret`, `idn_sso_identity`, `idn_login_attempt`. One person can belong to several organizations through `org_membership`. These tables are reached only through Identity, never joined from tenant modules.
+- **Global tables (no tenant):** `idn_user`, `idn_credential`, `idn_password_reset`, `idn_mfa_secret`, `idn_sso_identity`, `idn_login_attempt`. One person can belong to several organizations through `org_membership`. These tables are reached only through Identity, never joined from tenant modules.
 - **Time:** `timestamptz` everywhere, stored in UTC. `created_at` and `updated_at` are set by the application `Clock`.
 - **Optimistic locking:** `version int NOT NULL DEFAULT 1` on aggregates that people edit at the same time: tickets, rounds, settings.
 - **Enums:** stored as `text` with a `CHECK` constraint, not as PostgreSQL enum types (adding a value then needs no migration lock).
@@ -52,6 +52,7 @@ The Identity and Organization tables. `idn_*` tables are global; `org_*` tables 
 ```mermaid
 erDiagram
   idn_user ||--o{ idn_credential : has
+  idn_user ||--o{ idn_password_reset : requests
   idn_user ||--o| idn_mfa_secret : has
   idn_user ||--o{ idn_sso_identity : links
   idn_user ||--o{ idn_api_token : owns
@@ -158,12 +159,13 @@ Only the important columns are listed. Every tenant table also has `organization
 
 | Table | Columns | Constraints / indexes |
 |---|---|---|
-| idn_user | id, email `citext`, name, status (`active`/`blocked`), locale, time_zone, created_at | `UNIQUE (email)` (`idn_user_email_key`, so any letter case counts); `CHECK` on status. Created by `Version20261107190000`, like the two below; `pinround_app` has `SELECT, INSERT, UPDATE`, `pinround_readonly` nothing (a global table has no tenant policy to limit it) |
+| idn_user | id, email `citext`, name, status (`active`/`blocked`), locale, time_zone, created_at, session_stamp `text` (32 random hex digits; a new one ends every session of the user), theme `text` default `system` (`system`/`light`/`dark`) | `UNIQUE (email)` (`idn_user_email_key`, so any letter case counts); `CHECK` on status and on theme (`idn_user_theme_check`). Created by `Version20261107190000`, like the two below; session_stamp and theme added by `Version20261108100000` (each existing row got its own random stamp); `pinround_app` has `SELECT, INSERT, UPDATE`, `pinround_readonly` nothing (a global table has no tenant policy to limit it) |
 | idn_credential | user_id PK, password_hash (argon2id), changed_at | FK user (`idn_credential_user_id_fkey`); `pinround_app` has `SELECT, INSERT, UPDATE` |
 | idn_mfa_secret | user_id PK, secret_enc `bytea` (sodium, key id), confirmed_at, recovery_codes_hash `text[]` | — |
 | idn_sso_identity | id, user_id, provider_config_id (the org's IdP config), issuer (`iss`), subject (`sub`), linked_at | `UNIQUE (provider_config_id, issuer, subject)`. Never matched by email; linking to an existing account needs the account password + MFA ([ADR-0012](../03-adr/0012-authentication.md)) |
 | idn_sso_provider | id, organization_id, issuer, client_id, secret_enc, allowed_domains `text[]` (each proven by a DNS TXT record), verified_at | `UNIQUE (organization_id, issuer)`. Read before login through a resolver function (see [Row-level security](#row-level-security)) |
 | idn_api_token | id, organization_id, user_id, name, token_hash (SHA-256 of a 32-byte random value plus a server pepper; tokens look like `pr_…`), prefix (8 characters, for display), scopes `text[]`, expires_at, last_used_at, revoked_at | `UNIQUE (token_hash)`; `(organization_id, user_id)` |
+| idn_password_reset | id, user_id, token_hash `bytea` (SHA-256 of a 32-byte random token; the link carries the token base64url), created_at, expires_at (created_at + 1 hour), used_at | FK user (`idn_password_reset_user_id_fkey`), `(user_id)` (`idn_password_reset_user_id_idx`); `UNIQUE (token_hash)` (`idn_password_reset_token_hash_key`). Used once: one `UPDATE … WHERE used_at IS NULL AND expires_at > now RETURNING user_id`. Created by `Version20261108120000`; `pinround_app` has `SELECT, INSERT, UPDATE` (no DELETE: the retention job purges, P11), `pinround_readonly` nothing |
 | idn_login_attempt | id, email_hash, ip_hash, success, at | `(email_hash, at)`; purged after 30 days; `pinround_app` has `SELECT, INSERT`. No entity maps it (hidden by `schema_filter`) |
 
 ### Organization

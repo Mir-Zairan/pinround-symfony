@@ -94,7 +94,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 ### Identity (`idn_`)
 
 - **Story:** Sara invites Omar. Omar sets a password and turns on two-factor login. Later the company switches to Microsoft login, and Omar's account is linked, not duplicated.
-- **Owns:** `idn_user`, `idn_credential`, `idn_mfa_secret`, `idn_sso_identity`, `idn_api_token`, `idn_login_attempt`. Sessions live in Valkey.
+- **Owns:** `idn_user`, `idn_credential`, `idn_password_reset`, `idn_mfa_secret`, `idn_sso_identity`, `idn_api_token`, `idn_login_attempt`. Sessions live in Valkey.
 - **Api:**
   - `UserQueries::byId(UserId): ?UserView`
   - `UserQueries::byIds(list<UserId>): array<string, UserView>`

@@ -1,0 +1,564 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Functional\Identity;
+
+use App\Identity\Application\EmailPasswordResetLink;
+use App\Identity\Infrastructure\Mail\SymfonyPasswordResetMailer;
+use App\Identity\UI\Controller\LoginController;
+use App\Identity\UI\Controller\PasswordResetController;
+use App\Tests\Factory\Identity\UserFactory;
+use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bundle\FrameworkBundle\KernelBrowser;
+use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Mailer\Event\MessageEvent;
+use Symfony\Component\Mailer\Exception\TransportException;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Exception\HandlerFailedException;
+use Symfony\Component\Messenger\Stamp\ReceivedStamp;
+use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
+use Symfony\Component\Mime\Email;
+use Zenstruck\Foundry\Test\Factories;
+
+/**
+ * "Forgot password" and the reset form through the real firewall, over HTTPS. The forgot request only queues a
+ * EmailPasswordResetLink on async_notify (in memory in tests); the tests hand it to the bus as worker-notify would.
+ * The request counters live on the state Valkey and outlast a test run, so every client asks from its own random IP.
+ */
+final class PasswordResetTest extends WebTestCase
+{
+    use Factories;
+    use LogsInUsers;
+
+    private const string NEW_PASSWORD = 'a much longer new passphrase';
+
+    /** @var list<Envelope> what the last submitForgot() queued */
+    private array $queuedRequests = [];
+
+    #[Test]
+    public function everyEmailGetsTheSameAnswerAndQueuesOneRequestButOnlyAnActiveUserWithAPasswordGetsMail(): void
+    {
+        $client = self::httpsClient();
+        $known = $this->createUserWithPassword('Lena Berg');
+        $blocked = $this->createUserWithPassword('Mia Lund');
+        $this->blockUser($blocked);
+        $withoutPassword = UserFactory::createOne(['name' => 'Raj Patel']);
+        $this->createdUserIds[] = $withoutPassword->id()->toString();
+
+        $pages = [];
+        foreach ([
+            'known' => [$known->email()->toString(), 1],
+            'unknown' => ['nobody.'.bin2hex(random_bytes(4)).'@acme-foods.example', 0],
+            'blocked' => [$blocked->email()->toString(), 0],
+            'without password' => [$withoutPassword->email()->toString(), 0],
+            'not an email' => ['not an email', 0],
+        ] as $case => [$email, $sentEmails]) {
+            $this->askForLink($client, $email);
+            self::assertResponseStatusCodeSame(200, $case);
+            self::assertSame('/password/forgot', $client->getRequest()->getPathInfo(), $case);
+            self::assertCount(1, $this->queuedRequests, $case);
+            self::assertInstanceOf(EmailPasswordResetLink::class, $this->queuedRequests[0]->getMessage(), $case);
+            self::assertQueuedEmailCount(0, message: $case);
+            $pages[$case] = $client->getCrawler()->filter('main')->text();
+
+            self::assertCount($sentEmails, $this->deliverQueuedRequests(), $case);
+        }
+
+        self::assertSame(PasswordResetController::LINK_SENT, $this->lastCrawlerText($client, 'main [role="status"]'));
+        self::assertCount(1, array_unique($pages));
+        self::assertCount(0, $client->getCrawler()->filter('main input[name="email"]'));
+    }
+
+    #[Test]
+    public function aRequestDeliveredTwiceSavesOneResetAndSendsOneEmail(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Omar Haddad');
+        $this->askForLink($client, $user->email()->toString());
+        self::assertCount(1, $this->queuedRequests);
+        $this->queuedRequests[] = $this->queuedRequests[0];
+
+        $sent = $this->deliverQueuedRequests();
+
+        self::assertCount(1, $sent);
+        self::assertSame(1, $this->migrator()->fetchOne('SELECT count(*) FROM idn_password_reset WHERE user_id = ?', [$user->id()->toString()]));
+    }
+
+    #[Test]
+    public function aSendThatFailsOnceIsRetriedWithOneResetAndOneEmail(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Sara Holm');
+        $this->askForLink($client, $user->email()->toString());
+        self::assertCount(1, $this->queuedRequests);
+        $envelope = $this->queuedRequests[0]->with(new ReceivedStamp('async_notify'));
+        $isMailServerDown = true;
+        // Fails the first real send. The failed try is left out of the count below because services_resetter->reset()
+        // clears the mailer's message log, so the count covers only the sends after it.
+        self::getContainer()->get('event_dispatcher')->addListener(MessageEvent::class, static function (MessageEvent $event) use (&$isMailServerDown): void {
+            if (!$event->isQueued() && $isMailServerDown) {
+                $isMailServerDown = false;
+
+                throw new TransportException('The mail server cannot be reached.');
+            }
+        }, 1024);
+
+        try {
+            self::getContainer()->get('command.bus')->dispatch($envelope);
+            self::fail('The first send did not fail.');
+        } catch (HandlerFailedException $failure) {
+            self::assertInstanceOf(TransportException::class, $failure->getPrevious());
+        }
+        // What the worker does after a failed message; the rollback left the entity manager closed.
+        self::getContainer()->get('services_resetter')->reset();
+        self::assertSame(0, $this->migrator()->fetchOne('SELECT count(*) FROM idn_password_reset WHERE user_id = ?', [$user->id()->toString()]));
+        self::getContainer()->get('command.bus')->dispatch($envelope);
+        self::getContainer()->get('command.bus')->dispatch($envelope);
+
+        self::assertCount(1, array_filter(self::getMailerEvents(), static fn (MessageEvent $event): bool => !$event->isQueued()));
+        self::assertSame(1, $this->migrator()->fetchOne('SELECT count(*) FROM idn_password_reset WHERE user_id = ?', [$user->id()->toString()]));
+    }
+
+    #[Test]
+    public function reloadingTheLinkSentPageQueuesNothingMore(): void
+    {
+        $client = self::httpsClient();
+        $this->askForLink($client, 'nobody.'.bin2hex(random_bytes(4)).'@acme-foods.example');
+        self::assertResponseStatusCodeSame(200);
+
+        $client->request('GET', '/password/forgot');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([], self::takeQueuedRequests());
+        self::assertCount(1, $client->getCrawler()->filter('main input[name="email"]'));
+        self::assertCount(0, $client->getCrawler()->filter('main [role="status"]'));
+    }
+
+    #[Test]
+    public function theEmailHasATextAndAnHtmlPartWithTheLinkOnTheDefaultUriEvenForAnotherHost(): void
+    {
+        $client = self::httpsClient();
+        $client->setServerParameter('HTTP_HOST', 'evil.example');
+        $user = $this->createUserWithPassword('Omar Haddad');
+        $this->askForLink($client, $user->email()->toString());
+
+        $sent = $this->deliverQueuedRequests();
+
+        self::assertCount(1, $sent);
+        $link = self::linkIn($sent[0]);
+        self::assertMatchesRegularExpression('~^http://localhost/password/reset/[A-Za-z0-9_-]{43}$~', $link);
+        self::assertSame([$user->email()->toString()], array_map(static fn ($address): string => $address->getAddress(), $sent[0]->getTo()));
+        self::assertSame('no-reply@pinround.localhost', $sent[0]->getFrom()[0]->getAddress());
+        self::assertSame(SymfonyPasswordResetMailer::SUBJECT, $sent[0]->getSubject());
+        self::assertStringContainsString('href="'.$link.'"', (string) $sent[0]->getHtmlBody());
+        self::assertStringContainsString('60 minutes', (string) $sent[0]->getTextBody());
+    }
+
+    #[Test]
+    public function aLinkWorksOnceAndTheNewPasswordReplacesTheOldOne(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Sara Holm');
+        $link = $this->linkFor($client, $user->email()->toString());
+
+        $this->openLink($client, $link);
+        $client->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD]);
+
+        self::assertResponseRedirects('/login', 302);
+        $loginPage = $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(PasswordResetController::PASSWORD_CHANGED, $loginPage->filter('[role="status"]')->text());
+        self::assertSame(302, $this->statusAfterGettingHome($client), 'not logged in automatically');
+
+        $this->openLink($client, $link);
+        self::assertSame(PasswordResetController::LINK_NO_LONGER_WORKS, $this->lastCrawlerText($client, '[role="alert"]'));
+        self::assertSame('/password/forgot', $client->getCrawler()->filter('main a[href="/password/forgot"]')->attr('href'));
+
+        $this->submitLogin($client, $user->email()->toString(), self::PASSWORD);
+        self::assertResponseRedirects('/login', 302);
+        $client->followRedirect();
+        self::assertSame(LoginController::WRONG_CREDENTIALS, $this->lastCrawlerText($client, '[role="alert"]'));
+        $this->submitLogin($client, $user->email()->toString(), self::NEW_PASSWORD);
+        self::assertResponseRedirects('/', 302);
+    }
+
+    #[Test]
+    public function aLinkStillWorksAfterFiftyNineMinutes(): void
+    {
+        [$client, $clock] = self::httpsClientWithMockClock();
+        $user = $this->createUserWithPassword('Lena Berg');
+        $link = $this->linkFor($client, $user->email()->toString());
+
+        $clock->modify('+59 minutes');
+        $this->openLink($client, $link);
+        $client->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD]);
+
+        self::assertResponseRedirects('/login', 302);
+    }
+
+    #[Test]
+    public function aLinkIsRefusedOneHourAndOneSecondAfterItWasSent(): void
+    {
+        [$client, $clock] = self::httpsClientWithMockClock();
+        $user = $this->createUserWithPassword('Omar Haddad');
+        $link = $this->linkFor($client, $user->email()->toString());
+
+        $clock->modify('+1 hour +1 second');
+        $this->openLink($client, $link);
+
+        self::assertSame(PasswordResetController::LINK_NO_LONGER_WORKS, $this->lastCrawlerText($client, '[role="alert"]'));
+        self::assertCount(0, $client->getCrawler()->filter('input[name="password"]'));
+    }
+
+    #[Test]
+    public function aFormOpenedBeforeTheHourEndedIsRefusedWhenSentAfterIt(): void
+    {
+        [$client, $clock] = self::httpsClientWithMockClock();
+        $user = $this->createUserWithPassword('Mia Lund');
+        $link = $this->linkFor($client, $user->email()->toString());
+        $this->openLink($client, $link);
+        self::assertCount(1, $client->getCrawler()->filter('input[name="password"]'));
+
+        $clock->modify('+1 hour +1 second');
+        $client->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(PasswordResetController::LINK_NO_LONGER_WORKS, $this->lastCrawlerText($client, '[role="alert"]'));
+    }
+
+    #[Test]
+    public function aWrongTokenGetsTheSameAnswerAsAUsedOrExpiredOne(): void
+    {
+        $client = self::httpsClient();
+
+        $client->request('GET', '/password/reset/'.rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='));
+        self::assertResponseRedirects('/password/reset', 302);
+        $client->followRedirect();
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(PasswordResetController::LINK_NO_LONGER_WORKS, $this->lastCrawlerText($client, '[role="alert"]'));
+    }
+
+    #[Test]
+    public function theResetPageWithoutATokenInTheSessionSaysTheLinkNoLongerWorks(): void
+    {
+        $client = self::httpsClient();
+
+        $client->request('GET', '/password/reset');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(PasswordResetController::LINK_NO_LONGER_WORKS, $this->lastCrawlerText($client, '[role="alert"]'));
+    }
+
+    #[Test]
+    public function theLinkMovesItsTokenIntoTheSessionAndRedirectsToAnAddressWithoutIt(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Raj Patel');
+        $link = $this->linkFor($client, $user->email()->toString());
+        $token = basename($link);
+
+        $client->request('GET', (string) parse_url($link, \PHP_URL_PATH));
+
+        self::assertResponseRedirects('/password/reset', 302);
+        $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('https://localhost/password/reset', $client->getRequest()->getUri());
+        self::assertStringNotContainsString($token, (string) $client->getResponse()->getContent());
+        self::assertCount(1, $client->getCrawler()->filter('input[name="password"][type="password"][minlength="12"]'));
+    }
+
+    #[Test]
+    public function aResetEndsTheSessionOfTheUserInAnotherBrowser(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Lena Berg');
+        $otherBrowser = self::getContainer()->get('test.client');
+        self::assertInstanceOf(KernelBrowser::class, $otherBrowser);
+        $otherBrowser->setServerParameters(['HTTPS' => 'on']);
+        $this->logIn($otherBrowser, $user);
+        $otherBrowser->request('GET', '/');
+        self::assertSame(200, $otherBrowser->getResponse()->getStatusCode());
+        $link = $this->linkFor($client, $user->email()->toString());
+
+        $this->openLink($client, $link);
+        $client->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD]);
+        self::assertResponseRedirects('/login', 302);
+
+        $otherBrowser->request('GET', '/');
+        self::assertSame(302, $otherBrowser->getResponse()->getStatusCode());
+        self::assertSame('/login', parse_url((string) $otherBrowser->getResponse()->headers->get('Location'), \PHP_URL_PATH));
+    }
+
+    #[Test]
+    public function aUserBlockedAfterTheLinkWasSentCannotUseIt(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Mia Lund');
+        $link = $this->linkFor($client, $user->email()->toString());
+        $this->openLink($client, $link);
+        $this->blockUser($user);
+        $hashQuery = 'SELECT password_hash FROM idn_credential WHERE user_id = ?';
+        $hashBefore = $this->migrator()->fetchOne($hashQuery, [$user->id()->toString()]);
+
+        $client->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(PasswordResetController::LINK_NO_LONGER_WORKS, $this->lastCrawlerText($client, '[role="alert"]'));
+        self::assertSame($hashBefore, $this->migrator()->fetchOne($hashQuery, [$user->id()->toString()]));
+    }
+
+    #[Test]
+    public function aShortOrMismatchedPasswordIsRefusedAndLeavesTheLinkWorking(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Omar Haddad');
+        $link = $this->linkFor($client, $user->email()->toString());
+        $this->openLink($client, $link);
+
+        $client->submitForm('Save password', ['password' => 'eleven char', 'password_repeat' => 'eleven char']);
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('A password needs at least 12 characters.', $this->lastCrawlerText($client, '[role="alert"]'));
+
+        $client->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD.'!']);
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(PasswordResetController::PASSWORDS_DIFFER, $this->lastCrawlerText($client, '[role="alert"]'));
+
+        $client->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD]);
+        self::assertResponseRedirects('/login', 302);
+    }
+
+    #[Test]
+    public function aResetFormWithAWrongCsrfTokenChangesNothing(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Sara Holm');
+        $link = $this->linkFor($client, $user->email()->toString());
+        $this->openLink($client, $link);
+
+        $client->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD, '_csrf_token' => 'forged']);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(LoginController::FORM_EXPIRED, $this->lastCrawlerText($client, '[role="alert"]'));
+        $this->submitLogin($client, $user->email()->toString(), self::PASSWORD);
+        self::assertResponseRedirects('/', 302);
+    }
+
+    #[Test]
+    public function aForgotFormWithAWrongCsrfTokenSendsNothing(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Mia Lund');
+        $client->request('GET', '/password/forgot');
+        self::assertResponseStatusCodeSame(200);
+
+        $client->submitForm('Send link', ['email' => $user->email()->toString(), '_csrf_token' => 'forged']);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(LoginController::FORM_EXPIRED, $this->lastCrawlerText($client, '[role="alert"]'));
+        self::assertSame([], self::takeQueuedRequests());
+    }
+
+    #[Test]
+    public function theSixthRequestWithinFifteenMinutesFromOneEmailAndIpIsThrottledAndSendsNothing(): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Raj Patel');
+        $email = $user->email()->toString();
+        foreach ([$email, strtoupper($email), $email, ucfirst($email), $email] as $typedEmail) {
+            $this->askForLink($client, $typedEmail);
+            self::assertResponseStatusCodeSame(200);
+            self::assertCount(1, $this->queuedRequests);
+        }
+
+        $this->submitForgot($client, $email);
+
+        self::assertResponseStatusCodeSame(429);
+        self::assertSame('Too many tries. Wait 15 minutes.', $this->lastCrawlerText($client, '[role="alert"]'));
+        self::assertSame([], $this->queuedRequests);
+        self::assertCount(0, $client->getCrawler()->filter('main [role="status"]'));
+    }
+
+    #[Test]
+    public function anUnknownEmailIsThrottledWithTheSameAnswer(): void
+    {
+        $client = self::httpsClient();
+        $email = 'nobody.'.bin2hex(random_bytes(4)).'@acme-foods.example';
+        for ($request = 1; $request <= 5; ++$request) {
+            $this->askForLink($client, $email);
+            self::assertResponseStatusCodeSame(200);
+        }
+
+        $this->submitForgot($client, $email);
+
+        self::assertResponseStatusCodeSame(429);
+        self::assertSame('Too many tries. Wait 15 minutes.', $this->lastCrawlerText($client, '[role="alert"]'));
+    }
+
+    #[Test]
+    public function fiftyRequestsFromOneIpRefuseAnyEmailForTheRestOfTheHour(): void
+    {
+        $client = self::httpsClient();
+        for ($request = 1; $request <= 50; ++$request) {
+            $this->askForLink($client, 'nobody'.$request.'.'.bin2hex(random_bytes(4)).'@acme-foods.example');
+            self::assertResponseStatusCodeSame(200);
+        }
+
+        $this->submitForgot($client, 'nobody51.'.bin2hex(random_bytes(4)).'@acme-foods.example');
+
+        self::assertResponseStatusCodeSame(429);
+        self::assertSame('Too many tries. Wait 60 minutes.', $this->lastCrawlerText($client, '[role="alert"]'));
+    }
+
+    #[Test]
+    public function aLoggedInUserOpeningForgotPasswordGoesHome(): void
+    {
+        $client = self::httpsClient();
+        $this->logIn($client, $this->createUserWithPassword('Lena Berg'));
+
+        $client->request('GET', '/password/forgot');
+        self::assertResponseRedirects('/', 302);
+        $client->request('POST', '/password/forgot', ['email' => 'lena@acme-foods.example']);
+        self::assertResponseRedirects('/', 302);
+        self::assertSame([], self::takeQueuedRequests());
+    }
+
+    #[Test]
+    public function theLoginPageLinksToForgotPassword(): void
+    {
+        $client = self::httpsClient();
+
+        $page = $client->request('GET', '/login');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Forgot password?', $page->filter('main a[href="/password/forgot"]')->text());
+    }
+
+    /**
+     * An accepted request: redirected back to the form (post/redirect/get), which then shows the notice.
+     */
+    private function askForLink(KernelBrowser $client, string $email): void
+    {
+        $this->submitForgot($client, $email);
+        self::assertResponseRedirects('/password/forgot', 302);
+        $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+    }
+
+    /**
+     * Submits the form and keeps what the request queued before anything else runs: the client's next request boots a
+     * new kernel, whose in-memory transport is empty.
+     */
+    private function submitForgot(KernelBrowser $client, string $email): void
+    {
+        $client->request('GET', '/password/forgot');
+        self::assertResponseStatusCodeSame(200);
+        $client->submitForm('Send link', ['email' => $email]);
+        $this->queuedRequests = self::takeQueuedRequests();
+    }
+
+    /**
+     * @return list<Envelope>
+     */
+    private static function takeQueuedRequests(): array
+    {
+        $transport = self::getContainer()->get('messenger.transport.async_notify');
+        self::assertInstanceOf(InMemoryTransport::class, $transport);
+        $sent = array_values([...$transport->getSent()]);
+        $transport->reset();
+
+        return $sent;
+    }
+
+    /**
+     * Hands the queued requests to the bus as worker-notify receiving them from async_notify would; the test env's
+     * null mailer transport then renders and "sends" the emails.
+     *
+     * @return list<Email> every email sent since the current kernel booted
+     */
+    private function deliverQueuedRequests(): array
+    {
+        foreach ($this->queuedRequests as $envelope) {
+            self::getContainer()->get('command.bus')->dispatch($envelope->with(new ReceivedStamp('async_notify')));
+        }
+        $this->queuedRequests = [];
+
+        $sent = [];
+        foreach (self::getMailerEvents() as $event) {
+            $message = $event->getMessage();
+            if (!$event->isQueued() && $message instanceof Email) {
+                $sent[] = $message;
+            }
+        }
+
+        return $sent;
+    }
+
+    private function linkFor(KernelBrowser $client, string $email): string
+    {
+        $this->askForLink($client, $email);
+        self::assertResponseStatusCodeSame(200);
+        $sent = $this->deliverQueuedRequests();
+        self::assertCount(1, $sent);
+
+        return self::linkIn($sent[0]);
+    }
+
+    private static function linkIn(Email $email): string
+    {
+        self::assertSame(1, preg_match('~https?://\S+/password/reset/[A-Za-z0-9_-]+~', (string) $email->getTextBody(), $match));
+
+        return $match[0];
+    }
+
+    private function openLink(KernelBrowser $client, string $link): void
+    {
+        $client->request('GET', (string) parse_url($link, \PHP_URL_PATH));
+        self::assertResponseRedirects('/password/reset', 302);
+        $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+    }
+
+    private function submitLogin(KernelBrowser $client, string $email, string $password): void
+    {
+        $client->request('GET', '/login');
+        self::assertResponseStatusCodeSame(200);
+        $client->submitForm('Log in', ['email' => $email, 'password' => $password]);
+    }
+
+    private function statusAfterGettingHome(KernelBrowser $client): int
+    {
+        $client->request('GET', '/');
+
+        return $client->getResponse()->getStatusCode();
+    }
+
+    private function lastCrawlerText(KernelBrowser $client, string $selector): string
+    {
+        return $client->getCrawler()->filter($selector)->text();
+    }
+
+    private static function httpsClient(): KernelBrowser
+    {
+        return self::createClient([], ['HTTPS' => 'on', 'REMOTE_ADDR' => \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254))]);
+    }
+
+    /**
+     * A client that keeps its kernel, so the clock it is given stays in every service across requests, the handler
+     * of the queued request included. The clock starts at the real time: the session's own timestamps come from PHP's
+     * time().
+     *
+     * @return array{KernelBrowser, MockClock}
+     */
+    private static function httpsClientWithMockClock(): array
+    {
+        $client = self::httpsClient();
+        $client->disableReboot();
+        $clock = new MockClock();
+        self::getContainer()->set('clock', $clock);
+
+        return [$client, $clock];
+    }
+}

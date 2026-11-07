@@ -25,4 +25,9 @@ interface Users
      * unique index refuses it and the save throws.
      */
     public function add(User $user): void;
+
+    /**
+     * Saves the changes to a user already added, at once.
+     */
+    public function save(User $user): void;
 }
