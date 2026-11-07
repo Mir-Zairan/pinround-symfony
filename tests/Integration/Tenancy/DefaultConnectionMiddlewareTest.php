@@ -13,6 +13,7 @@ use Doctrine\DBAL\Driver\Middleware\AbstractDriverMiddleware;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Filesystem\Filesystem;
 
 /**
  * Boots each environment's own compiled container, not only the test one: the test container keeps every private
@@ -23,22 +24,27 @@ use PHPUnit\Framework\TestCase;
 final class DefaultConnectionMiddlewareTest extends TestCase
 {
     /**
-     * @return iterable<string, array{string}>
+     * Each environment with the debug mode it runs in: DoctrineBundle adds its logging and profiling middlewares only
+     * with debug on, so prod is checked with debug off, as it runs.
+     *
+     * @return iterable<string, array{string, bool}>
      */
     public static function environments(): iterable
     {
-        yield 'dev' => ['dev'];
-        yield 'prod' => ['prod'];
-        yield 'test' => ['test'];
+        yield 'dev' => ['dev', true];
+        yield 'prod' => ['prod', false];
+        yield 'test' => ['test', true];
     }
 
     #[Test]
     #[DataProvider('environments')]
-    public function theDefaultConnectionRunsThroughTheTenantFilterAndTracingMiddlewares(string $environment): void
+    public function theDefaultConnectionRunsThroughTheTenantFilterAndTracingMiddlewares(string $environment, bool $isDebug): void
     {
-        // Debug on, so the container is rebuilt whenever config or a service class changed since the last build.
-        $kernel = new Kernel($environment, true);
-        $kernel->boot();
+        $kernel = new Kernel($environment, $isDebug);
+        // With debug on, the kernel rebuilds a container that is older than the config or a service class. With debug
+        // off it never checks, so it builds into a new directory of its own instead of trusting var/cache/prod.
+        $freshBuildDir = $isDebug ? null : sys_get_temp_dir().'/pinround-'.$environment.'-container-'.bin2hex(random_bytes(6));
+        $kernel->reboot($freshBuildDir);
 
         try {
             $connection = $kernel->getContainer()->get('doctrine.dbal.default_connection');
@@ -51,6 +57,9 @@ final class DefaultConnectionMiddlewareTest extends TestCase
             );
         } finally {
             $kernel->shutdown();
+            if (null !== $freshBuildDir) {
+                new Filesystem()->remove($freshBuildDir);
+            }
         }
     }
 

@@ -19,8 +19,9 @@ use Symfony\Component\Routing\Attribute\Route;
  * The organization picker, /org/choose. It runs without the request transaction: the resolver gives ids only, so
  * OrganizationNames reads each name in a short transaction of its own with that organization as the tenant
  * (data-model.md, lookups before the tenant is known). Every action asks OrganizationMemberVoter first (ADR-0013). A
- * choice is accepted only for an organization of the logged-in user (OrganizationPermission::ENTER), stored in the
- * session for EnterChosenOrganization and gives the session a new id, as a login does.
+ * choice is accepted only for an organization of the logged-in user (OrganizationPermission::ENTER) and stored in the
+ * session for EnterChosenOrganization. It keeps the session id: a choice grants nothing the memberships do not, and a
+ * migration would restamp the session's created time, so switching would push back the 30-day limit (ADR-0012).
  */
 final class OrganizationChoiceController extends AbstractController
 {
@@ -53,9 +54,7 @@ final class OrganizationChoiceController extends AbstractController
         }
         $this->denyAccessUnlessGranted(OrganizationPermission::ENTER, $organizationId);
 
-        $session = $request->getSession();
-        $session->set(EnterChosenOrganization::SESSION_KEY, $organizationId->toString());
-        $session->migrate(true);
+        $request->getSession()->set(EnterChosenOrganization::SESSION_KEY, $organizationId->toString());
 
         return $this->redirectToRoute('web_home');
     }

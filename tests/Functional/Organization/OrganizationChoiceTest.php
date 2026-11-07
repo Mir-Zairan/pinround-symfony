@@ -9,9 +9,11 @@ use App\Organization\UI\OrganizationChoiceController;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Tests\Functional\Identity\ReadsSessionMetadata;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\HttpKernel\KernelEvents;
 use Zenstruck\Foundry\Test\Factories;
@@ -25,6 +27,7 @@ final class OrganizationChoiceTest extends WebTestCase
 {
     use Factories;
     use LogsInUsers;
+    use ReadsSessionMetadata;
 
     private const string SESSION_COOKIE = '__Host-pinround';
     private const string NOT_IN_ANY_ORGANIZATION = 'You are not in any organization yet. Ask your admin to invite you.';
@@ -73,7 +76,6 @@ final class OrganizationChoiceTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Acme Foods', $home->filter('.avatar-menu__organization-name')->text());
         self::assertSame('Switch organization', $home->filter('#avatar-menu-list a[href="/org/choose"]')->text());
-        $sessionIdInAcmeFoods = $this->sessionId($client);
 
         $picker = $client->request('GET', '/org/choose');
         self::assertResponseStatusCodeSame(200);
@@ -84,7 +86,39 @@ final class OrganizationChoiceTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Beta Bakery', $home->filter('.avatar-menu__organization-name')->text());
-        self::assertNotSame($sessionIdInAcmeFoods, $this->sessionId($client));
+    }
+
+    #[Test]
+    public function switchingOrganizationsKeepsTheSessionAndDoesNotExtendItsThirtyDays(): void
+    {
+        $client = self::httpsClient();
+        // The client keeps its kernel, so the clock stays in every service across requests. It starts at the real time:
+        // the session's own timestamps come from PHP's time().
+        $client->disableReboot();
+        $clock = new MockClock();
+        self::getContainer()->set('clock', $clock);
+        $user = $this->createUserWithoutOrganization('Raj Patel');
+        $acmeFoods = $this->createOrganization('Acme Foods');
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($user, $acmeFoods);
+        $this->addMembership($user, $betaBakery);
+        $this->logIn($client, $user);
+        $this->choose($client, $acmeFoods);
+        $created = time() - 30 * 86400 + 3600;
+        self::writeSessionCreatedTime($client, $created);
+        $sessionIdInAcmeFoods = $this->sessionId($client);
+
+        $this->choose($client, $betaBakery);
+
+        self::assertSame($created, self::sessionMetadata($client)['c']);
+        self::assertSame($sessionIdInAcmeFoods, $this->sessionId($client));
+        $home = $client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Beta Bakery', $home->filter('.avatar-menu__organization-name')->text());
+        // Two hours on, the login is past 30 days and the idle limit (8 h) is not reached.
+        $clock->modify('+2 hours');
+        $client->request('GET', '/');
+        self::assertResponseRedirects('/login', 302);
     }
 
     #[Test]
