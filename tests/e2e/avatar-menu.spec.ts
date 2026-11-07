@@ -109,7 +109,14 @@ test('a redirect to the login page counts as a failed save and puts the previous
   await page.route('**/me/theme', (route) => route.fulfill({ status: 302, headers: { location: '/login' }, body: '' }));
   await avatar(page).click();
 
-  await pickTheme(page, 'Dark');
+  // fetch does not follow the redirect (redirect: 'manual'), so Playwright reports no response to wait for; the
+  // controller's warning comes at the end of its catch block, after the roll-back.
+  const saveRefused = page.waitForEvent(
+    'console',
+    (message) => message.type() === 'warning' && message.text().includes('The theme was not saved'),
+  );
+  await themeOption(page, 'Dark').click();
+  await saveRefused;
 
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/);
   await expect(themeOption(page, 'System')).toHaveAttribute('aria-pressed', 'true');
