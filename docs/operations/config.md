@@ -133,12 +133,14 @@ These are read by `docker compose` or `make`, not by PHP. The ports, `JAEGER_*`,
 | `DB_MIGRATOR_PASSWORD` | dev placeholder | Makefile only | yes | Password for `pinround_migrator`. Must match `MIGRATOR_DATABASE_URL`. |
 | `DB_RETENTION_PASSWORD` | dev placeholder | Makefile only | yes | Password for `pinround_retention`. No service uses it yet. |
 | `DB_READONLY_PASSWORD` | dev placeholder | Makefile only | yes | Password for `pinround_readonly`. Must match `READONLY_DATABASE_URL`. |
+| `DEMO_PASSWORD` | none; no committed file sets it | app (`app:demo:seed`, dev and test only), Makefile | yes | The password of the five demo people (Lena, Omar, Mia, Raj, Sara at `@acme-foods.example`). `app:demo:seed` refuses to run when it is empty or shorter than 12 characters. Set it in `.env.dev.local` (git-ignored, plain `KEY=value`, no quotes, no `$`), which the app container's dotenv and `make` both read, or in your shell. A re-run of the seed never changes an existing person's password. CI generates one per run. |
 
 ## Test-only
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
 | `TEST_STATE_VALKEY_DSN` | `redis://valkey-state:6379` in `.env.test` | test only | no | The state Valkey that `/health/ready` checks in tests, because the test messenger transport is in-memory. The test env also points the state Valkey connection (`STATE_VALKEY_DSN` elsewhere) at it, for the login counters and the session handler test. |
 | `E2E_BASE_URL` | `https://localhost` | test only (Playwright) | no | The address the end-to-end tests open. |
+| `E2E_PASSWORD` | none; `make e2e` takes `DEMO_PASSWORD`; CI passes the run's `DEMO_PASSWORD` | test only (Playwright) | yes | The password the specs log in as Lena with. It must be the `DEMO_PASSWORD` the seed used. No file in the repo sets it, and the specs fail with a clear message when it is empty. |
 
 `APP_ENV`, `APP_SECRET`, `DEFAULT_URI`, `MERCURE_PUBLIC_URL`, `OBJECT_STORAGE_PUBLIC_URL`, `OBJECT_STORAGE_ENDPOINT`, `REDIS_CACHE_DSN`, the database URLs, `MAILER_DSN` and `MESSENGER_TRANSPORT_DSN` also have test values in `.env.test`. They are listed in the sections above.
 

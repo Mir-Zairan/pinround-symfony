@@ -3,6 +3,9 @@
 
 # .env.dev holds the dev Mercure keys; .env.local is git-ignored and overrides both (for example HTTP_PORT); later files win.
 ENV_FILES := --env-file .env --env-file .env.dev $(if $(wildcard .env.local),--env-file .env.local)
+# .env.dev.local is git-ignored and may hold DEMO_PASSWORD (plain KEY=value lines, no quotes). Reading it here lets the
+# seed and e2e targets below see it, because the app container's own dotenv does not reach the host shell.
+-include .env.dev.local
 # The image user must match the host user, or the bind-mounted /app is not writable on Linux.
 export APP_UID ?= $(shell id -u)
 export APP_GID ?= $(shell id -g)
@@ -52,7 +55,11 @@ test: migrate-test ## Run the PHPUnit tests in the app container
 qa: ## Run every quality gate in the app container
 	$(COMPOSE) exec app composer qa
 
-e2e: ## Run the Playwright tests (shell, components, gallery) against the running stack (E2E_BASE_URL, default https://localhost)
+# The tests log in as Lena with the password the seed gave her.
+e2e: export E2E_PASSWORD ?= $(DEMO_PASSWORD)
+e2e-update: export E2E_PASSWORD ?= $(DEMO_PASSWORD)
+
+e2e: ## Run the Playwright tests (login, shell, components, gallery) against the seeded stack (E2E_BASE_URL, E2E_PASSWORD or DEMO_PASSWORD)
 	npm ci --prefix tests/e2e
 	npm exec --prefix tests/e2e -- playwright install chromium
 	npm exec --prefix tests/e2e -- playwright test --config tests/e2e/playwright.config.ts
@@ -78,5 +85,5 @@ migrate-test: ## Run the database migrations on the test database (as pinround_m
 check-compose: ## Validate compose.yaml and the service list
 	sh tests/shell/compose-config-check.sh
 
-seed: ## Load demo data into the dev database (a stub until P01)
-	$(COMPOSE) exec app bin/console app:demo:seed
+seed: ## Load the demo people into the dev database (needs DEMO_PASSWORD, 12+ characters; safe to re-run)
+	$(COMPOSE) exec $(if $(DEMO_PASSWORD),-e DEMO_PASSWORD) app bin/console app:demo:seed
