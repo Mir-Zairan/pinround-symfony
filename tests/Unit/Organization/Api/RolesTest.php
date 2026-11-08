@@ -73,7 +73,7 @@ final class RolesTest extends TestCase
     public function aTeamCannotHaveTwoRoles(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A user has one team role per team.');
+        $this->expectExceptionMessageIsOrContains('A user has one team role per team.');
 
         new Roles(false, false, [new TeamId(self::TEAM_A)], [], [new TeamId(self::TEAM_A)]);
     }

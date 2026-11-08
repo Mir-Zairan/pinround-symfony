@@ -89,12 +89,6 @@ final readonly class Roles
      */
     private static function contains(array $teamIds, TeamId $teamId): bool
     {
-        foreach ($teamIds as $candidate) {
-            if ($candidate->equals($teamId)) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($teamIds, static fn ($candidate) => $candidate->equals($teamId));
     }
 }
