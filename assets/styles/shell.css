@@ -94,7 +94,7 @@
 }
 
 .nav[aria-current="page"],
-.nav--current {
+.nav.nav--current {
   background: var(--secondary-container);
   color: var(--on-secondary-container);
 }
@@ -117,7 +117,8 @@
   background: transparent;
 }
 
-.nav-menu__list {
+/* Two classes for these, because components.css loads after this file and its single-class .menu__ rules would win. */
+.menu__list.nav-menu__list {
   left: 0;
   right: auto;
   max-width: calc(100vw - 32px);
@@ -135,12 +136,12 @@
   color: var(--on-secondary-container);
 }
 
-.menu__item--not-built {
+.menu__item.menu__item--not-built {
   cursor: default;
   color: var(--on-surface-var);
 }
 
-.menu__item--not-built:hover {
+.menu__item.menu__item--not-built:hover {
   background: transparent;
 }
 
