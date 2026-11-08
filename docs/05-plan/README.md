@@ -139,7 +139,7 @@ Every step names the 🏁 tasks it needs.
 8. Stretch, only if done: Sara switches AI to "Each person's laptop" and Omar's summary comes from Ollama on his laptop. (P08.T8–T9)
 
 ## After the hackathon
-Order after 22 Nov: first remove the hackathon shortcuts (do P01.T6 and delete the MFA flag; replace any upload shortcut), then finish the non-🏁 tasks of P00–P03 → P04 → P05 → P06 → P07 → P08 → P09 → P10 → P11 → P12. P08 and P09 can run in parallel with P06/P07 when two developers are free. Move to Symfony 8.2 in the first week after its release ([ADR-0003](../03-adr/0003-php-and-symfony-versions.md)).
+Order after 22 Nov: first remove the hackathon shortcuts (replace any upload shortcut; the admin MFA flag is already gone with P01.T6), then finish the non-🏁 tasks of P00–P03 → P04 → P05 → P06 → P07 → P08 → P09 → P10 → P11 → P12. P08 and P09 can run in parallel with P06/P07 when two developers are free. Move to Symfony 8.2 in the first week after its release ([ADR-0003](../03-adr/0003-php-and-symfony-versions.md)).
 
 ## Definition of done for every task
 - [ ] All acceptance criteria of the task are ticked in the phase file.

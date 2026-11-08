@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\UI\Controller;
 
+use App\Identity\Api\TwoStepProofPages;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Session\FlashBagAwareSessionInterface;
@@ -13,10 +14,10 @@ use Symfony\Component\Routing\RouterInterface;
 
 /**
  * Where a person goes when an action needs a recent proof (RequiresRecentAuth), and the way back. A return path comes
- * from the request, so it is used only when it is a path of this app: never a URL that leaves the site. Holds no state,
- * so it is safe in worker mode (ADR-0008).
+ * from the request, so it is used only when it is a path of this app: never a URL that leaves the site. Other modules
+ * reach the same pages through TwoStepProofPages. Holds no state, so it is safe in worker mode (ADR-0008).
  */
-final readonly class RecentAuthRedirects
+final readonly class RecentAuthRedirects implements TwoStepProofPages
 {
     public const string AFTER_TWO_STEP_SETUP_KEY = 'identity.after_two_step_setup';
     public const string TURN_ON_TWO_STEP_LOGIN_FIRST = 'To do this, turn on two-step login first.';
@@ -84,15 +85,27 @@ final readonly class RecentAuthRedirects
     /**
      * To the setup page with a message, keeping the return path for the "Continue" link after setup.
      */
-    public function toTwoStepSetup(Request $request, string $returnPath): RedirectResponse
+    public function toTwoStepSetup(Request $request, string $returnPath, string $notice = self::TURN_ON_TWO_STEP_LOGIN_FIRST): RedirectResponse
     {
         $session = $request->getSession();
         $session->set(self::AFTER_TWO_STEP_SETUP_KEY, $returnPath);
         if ($session instanceof FlashBagAwareSessionInterface) {
-            $session->getFlashBag()->add('notice', self::TURN_ON_TWO_STEP_LOGIN_FIRST);
+            $session->getFlashBag()->add('notice', $notice);
         }
 
         return new RedirectResponse($this->router->generate('identity_two_step'));
+    }
+
+    public function confirmItsYouPathFor(mixed $request): string
+    {
+        return $this->toConfirm($this->returnPathOf(self::requestOf($request)))->getTargetUrl();
+    }
+
+    public function twoStepSetupPathFor(mixed $request, string $notice): string
+    {
+        $request = self::requestOf($request);
+
+        return $this->toTwoStepSetup($request, $this->returnPathOf($request), $notice)->getTargetUrl();
     }
 
     /**
@@ -110,5 +123,10 @@ final readonly class RecentAuthRedirects
     public function homePath(): string
     {
         return $this->router->generate('web_home');
+    }
+
+    private static function requestOf(mixed $request): Request
+    {
+        return $request instanceof Request ? $request : throw new \InvalidArgumentException('A TwoStepProofPages path needs the HttpFoundation Request.');
     }
 }

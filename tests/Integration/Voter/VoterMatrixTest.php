@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Voter;
 
+use App\Identity\Application\SessionConfirmations;
 use App\Identity\Domain\Credential;
 use App\Identity\Domain\Email;
 use App\Identity\Domain\PasswordHash;
+use App\Identity\Domain\TwoStepLogin;
 use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Security\SecurityUser;
 use App\Organization\Api\TeamPermission;
@@ -14,7 +16,6 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
-use App\Tests\Fixtures\Security\HackathonFlagEnvironment;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use Doctrine\DBAL\Connection;
@@ -22,6 +23,11 @@ use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Session\Session;
+use Symfony\Component\HttpFoundation\Session\Storage\MockArraySessionStorage;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Symfony\Component\Security\Core\Authorization\AccessDecision;
@@ -34,7 +40,9 @@ use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
  * logged-in person in their own organization as tenant and inside a transaction, as a request would. Each row names
  * the text of personas-and-roles.md it comes from, and the doc must still have it.
  *
- * Every token is a password session, as the login form leaves it, with no confirmed two-step login.
+ * Every token is a password session, as the login form leaves it. A row with twoStepProof also has, in its rolled-back
+ * transaction, the person's user and two-step login rows, and a request whose session holds their code proof; other
+ * rows have neither, so no session.
  *
  * Acme Foods: Lena is an Admin and leads Shop and Mobile (as the demo seed has it); Omar is a member of both; Mia is a
  * member (tester) of Shop and a viewer of Support; Raj is a Manager and a viewer of Shop; Sara is an Admin with no team
@@ -66,6 +74,9 @@ final class VoterMatrixTest extends KernelTestCase
     private const array TEAMS = ['Shop' => self::SHOP, 'Mobile' => self::MOBILE, 'Support' => self::SUPPORT, 'Checkout' => self::CHECKOUT];
 
     private const string ROLES_DOC = __DIR__.'/../../../docs/00-product/personas-and-roles.md';
+
+    /** Not the wall clock's time, so a check that ignores the app clock decides differently. */
+    private const string NOW = '2027-03-15 10:00:00 UTC';
 
     public static function setUpBeforeClass(): void
     {
@@ -105,41 +116,38 @@ final class VoterMatrixTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{source: string, attribute: string, actor: string, subject: string, expected: string, skipAdminMfa?: bool}>
+     * @return iterable<string, array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool}>
      */
     public static function matrixRows(): iterable
     {
-        /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string, skipAdminMfa?: bool}> $rows */
+        /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool}> $rows */
         $rows = require __DIR__.'/voter_matrix_rows.php';
         foreach ($rows as $row) {
-            $flag = ($row['skipAdminMfa'] ?? false) ? ' (admin MFA skipped)' : '';
-            yield \sprintf('%s %s %s%s', $row['actor'], $row['attribute'], $row['subject'], $flag) => $row;
+            $proof = ($row['twoStepProof'] ?? false) ? ' (with a code proof)' : '';
+            yield \sprintf('%s %s %s%s', $row['actor'], $row['attribute'], $row['subject'], $proof) => $row;
         }
     }
 
-    /**
-     * The container reads the hackathon flag once, at the first access check on its kernel, so it is set before this
-     * test boots one and put back after.
-     */
     #[Test]
     #[DataProvider('matrixRows')]
-    public function theAppDecidesTheRowAsTheRolesDocSays(string $source, string $attribute, string $actor, string $subject, string $expected, bool $skipAdminMfa = false): void
+    public function theAppDecidesTheRowAsTheRolesDocSays(string $source, string $attribute, string $actor, string $subject, string $expected, bool $twoStepProof = false): void
     {
         self::assertContains($expected, ['granted', 'denied'], 'A row expects granted or denied.');
         self::assertArrayHasKey($actor, self::PEOPLE, 'The actor is one of VoterMatrixTest::PEOPLE.');
         [, $organizationId] = self::PEOPLE[$actor];
 
         self::ensureKernelShutdown();
-        $flagBefore = HackathonFlagEnvironment::set($skipAdminMfa ? '1' : null);
-        try {
-            $accessDecision = new AccessDecision();
-            $isGranted = self::transactions()->rolledBackAs(
-                $organizationId,
-                fn (): bool => $this->accessDecisionManager()->decide(self::tokenOf($actor), [$attribute], self::subjectNamed($subject), $accessDecision),
-            );
-        } finally {
-            $flagBefore->restore();
-        }
+        $clock = new MockClock(self::NOW);
+        self::getContainer()->set('clock', $clock);
+        $accessDecision = new AccessDecision();
+        $isGranted = self::transactions()->rolledBackAs($organizationId, function () use ($actor, $attribute, $subject, $accessDecision, $twoStepProof, $clock): bool {
+            $requestStack = $twoStepProof ? self::requestWithCodeProofOf($actor, $clock) : null;
+            try {
+                return $this->accessDecisionManager()->decide(self::tokenOf($actor), [$attribute], self::subjectNamed($subject), $accessDecision);
+            } finally {
+                $requestStack?->pop();
+            }
+        });
 
         self::assertNotSame([], self::votersThatDecided($accessDecision), \sprintf('No voter decides %s on %s; is the attribute or subject wrong?', $attribute, $subject));
         self::assertSame($expected, $isGranted ? 'granted' : 'denied', \sprintf('%s %s %s, from "%s"', $actor, $attribute, $subject, $source));
@@ -147,7 +155,7 @@ final class VoterMatrixTest extends KernelTestCase
 
     #[Test]
     #[DataProvider('matrixRows')]
-    public function theRolesDocHasTheTextTheRowComesFrom(string $source, string $attribute, string $actor, string $subject, string $expected, bool $skipAdminMfa = false): void
+    public function theRolesDocHasTheTextTheRowComesFrom(string $source, string $attribute, string $actor, string $subject, string $expected, bool $twoStepProof = false): void
     {
         self::assertStringContainsString($source, (string) file_get_contents(self::ROLES_DOC), \sprintf('The row "%s %s %s" names text the roles doc does not have.', $actor, $attribute, $subject));
     }
@@ -212,22 +220,52 @@ final class VoterMatrixTest extends KernelTestCase
     }
 
     /**
-     * A token as the login form leaves it; the person needs no idn_user row, as no voter reads one.
+     * A token as the login form leaves it; the person needs no idn_user row unless the row asks for a code proof.
      */
     private static function tokenOf(string $person): TokenInterface
     {
-        $user = new User(
+        $user = self::userOf($person);
+        $hash = new PasswordHash('$argon2id$v=19$m=65536,t=4,p=1$NUkxU2sxQlFxbXpDaUZUQQ$suVp+0jzKZuqeONGVmUghGQxxI2vd02CMokdMtaQcfA');
+        $securityUser = SecurityUser::of($user, new Credential($user, $hash, new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
+
+        return new UsernamePasswordToken($securityUser, 'main', $securityUser->getRoles());
+    }
+
+    private static function userOf(string $person): User
+    {
+        return new User(
             new UserId(self::PEOPLE[$person][0]),
-            new Email(strtolower($person).'@acme-foods.example'),
+            new Email('voter-matrix-'.strtolower($person).'@acme-foods.example'),
             $person,
             'en',
             'Europe/Berlin',
             new \DateTimeImmutable('2026-11-02 09:30:00 UTC'),
         );
-        $hash = new PasswordHash('$argon2id$v=19$m=65536,t=4,p=1$NUkxU2sxQlFxbXpDaUZUQQ$suVp+0jzKZuqeONGVmUghGQxxI2vd02CMokdMtaQcfA');
-        $securityUser = SecurityUser::of($user, new Credential($user, $hash, new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
+    }
 
-        return new UsernamePasswordToken($securityUser, 'main', $securityUser->getRoles());
+    /**
+     * In the row's transaction: the person's user row and their two-step login, turned on 2 hours before the clock's
+     * now; then a request whose session holds their code proof of 30 minutes ago, inside the 1 hour of the admin pages.
+     *
+     * @return RequestStack the stack the request is pushed on, for the caller to pop it
+     */
+    private static function requestWithCodeProofOf(string $person, MockClock $clock): RequestStack
+    {
+        $user = self::userOf($person);
+        $twoStepLogin = new TwoStepLogin($user, 'never decrypted here', $clock->now()->modify('-2 hours'));
+        $twoStepLogin->confirm(1, $clock->now()->modify('-2 hours'), ['$argon2id$never-checked-here']);
+        $entityManager = self::entityManager();
+        $entityManager->persist($user);
+        $entityManager->persist($twoStepLogin);
+        $entityManager->flush();
+
+        $request = new Request();
+        $request->setSession(new Session(new MockArraySessionStorage()));
+        $requestStack = self::getContainer()->get('request_stack');
+        $requestStack->push($request);
+        self::getContainer()->get(SessionConfirmations::class)->recordTwoStepConfirmation($user->id(), $clock->now()->modify('-30 minutes'));
+
+        return $requestStack;
     }
 
     private static function addMembership(string $organizationId, string $person, string $orgRoles): void

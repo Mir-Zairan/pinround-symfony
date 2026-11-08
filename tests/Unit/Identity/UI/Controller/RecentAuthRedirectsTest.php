@@ -121,6 +121,37 @@ final class RecentAuthRedirectsTest extends TestCase
         self::assertFalse($request->getSession()->has(RecentAuthRedirects::AFTER_TWO_STEP_SETUP_KEY));
     }
 
+    #[Test]
+    public function anotherModuleGetsTheConfirmPathWithTheWayBack(): void
+    {
+        $redirects = $this->redirects();
+
+        self::assertSame('/me/confirm?return=/me/tokens?tab%3Dnew', $redirects->confirmItsYouPathFor(Request::create('https://pinround.example/me/tokens?tab=new')));
+        self::assertSame('/me/confirm?return=/', $redirects->confirmItsYouPathFor(Request::create('https://pinround.example/me/tokens/create', 'POST')));
+    }
+
+    #[Test]
+    public function anotherModuleGetsTheSetupPathWithItsOwnNoticeAndTheWayBackKept(): void
+    {
+        $redirects = $this->redirects();
+        $request = Request::create('https://pinround.example/me/tokens');
+        $session = new Session(new MockArraySessionStorage());
+        $request->setSession($session);
+
+        self::assertSame('/me/security/two-step', $redirects->twoStepSetupPathFor($request, 'Admin pages need two-step login. Turn it on to continue.'));
+
+        self::assertSame(['notice' => ['Admin pages need two-step login. Turn it on to continue.']], $session->getFlashBag()->peekAll());
+        self::assertSame('/me/tokens', $redirects->takeAfterTwoStepSetup($request));
+    }
+
+    #[Test]
+    public function anythingButARequestIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->redirects()->confirmItsYouPathFor('/me/tokens');
+    }
+
     private function redirects(): RecentAuthRedirects
     {
         $routes = new RouteCollection();

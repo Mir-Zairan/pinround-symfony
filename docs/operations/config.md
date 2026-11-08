@@ -50,7 +50,6 @@ Real secrets never enter the repo ([ADR-0027](../03-adr/0027-secrets-and-encrypt
 | `APP_SHARE_DIR` | `var/share` | app, all workers, migrate | no | Folder for data shared between app versions. |
 | `DEFAULT_URI` | `http://localhost` in `.env.dev` and `.env.test`; none, required in prod | app, all workers, migrate | no | The public base URL, used to build links in commands, workers and mail. |
 | `KERNEL_CLASS` | `App\Kernel` in `.env.test` | test only | no | The kernel class the Symfony test cases boot. |
-| `APP_HACKATHON_SKIP_ADMIN_MFA` | empty (off) in `.env` | app, all workers, migrate | no | Hackathon exception of [ADR-0012](../03-adr/0012-authentication.md), until P01.T6: a true value (`1`, `true`, `on`, `yes`) lets an Admin with a password session open the admin pages without two-step login (`AdminAreaVoter`); it waives nothing else. The kernel refuses to boot with it on when `APP_ENV` is `prod`. Set it in `.env.local` for the demo; it is deleted with P01.T6. |
 
 ## Database
 Dev and test use the app role for the web and workers, and the migrator role for migrations through the `migrator` Doctrine connection. The passwords in the URLs must match the ones `make db-roles` sets ([Docker and compose host settings](#docker-and-compose-host-settings)).
