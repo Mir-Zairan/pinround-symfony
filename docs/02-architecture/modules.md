@@ -289,6 +289,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 
 - **Purpose:** the layout, the navigation (built from the user's roles), Home composition with focus chips, and the design-system Twig components.
 - **Rule:** no business logic. Web only puts the other modules' UI pieces together.
+- **Owns:** `web_home_focus` (each user's Home focus chip per organization, saved by `POST /home/focus`; see [data-model.md](data-model.md#web)).
 - **Health:** `UI\Controller\HealthController` serves `/health/live` and `/health/ready`, which runs every tagged `ReadinessCheck` ([operations.md](operations.md#observability)).
 - **Depends on:** Api of Insight, Organization, Notification and Ticketing (read only).
 - **More:** [frontend.md](frontend.md).

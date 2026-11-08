@@ -318,6 +318,29 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * The Web tenant table: the app reads, adds and changes each user's Home focus and never removes one; support reads
+     * under the tenant policy; the primary key is its only index and starts with organization_id (Version20261108160000).
+     */
+    #[Test]
+    public function theHomeFocusTableGrantsTheAppNoDeleteAndIsKeyedByTheOrganization(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'web_home_focus'),
+        );
+        self::assertSame('pinround_migrator', $connection->fetchOne("SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass('public.web_home_focus')"));
+        self::assertSame(
+            ['CREATE UNIQUE INDEX web_home_focus_pkey ON public.web_home_focus USING btree (organization_id, user_id)'],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'web_home_focus'"),
+        );
+        self::assertSame([], $connection->fetchFirstColumn(
+            "SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = 'public.web_home_focus'::regclass",
+        ));
+    }
+
+    /**
      * Every index of an org_ table starts with organization_id but the two data-model.md names as exceptions: the
      * global slug key and the user_id index of resolve_user_orgs, which runs before the tenant is known.
      */
@@ -355,8 +378,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);
