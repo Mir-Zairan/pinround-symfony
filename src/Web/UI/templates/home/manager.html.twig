@@ -1,0 +1,31 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/home.css') }}">
+{% endblock %}
+
+{# TODO(P07): the five-group bar, the flag and each team's own steps; until then every card says its counts come later. #}
+{% block main %}
+    <div class="home">
+        <header class="home__header">
+            <p class="home__date">{{ today|date('l, j F') }}</p>
+            <h1 class="home__title">Teams at a glance</h1>
+            <p class="home__subline">Every team uses the same five groups, even when its own steps differ. Open a team to see its steps.</p>
+        </header>
+
+        {% if teams is empty %}
+            <twig:EmptyState message="No teams yet. An admin creates teams under Admin → Teams."/>
+        {% else %}
+            <ul class="home__teams">
+                {% for team in teams %}
+                    <li>
+                        <twig:Card tag="article" class="home__team" aria-labelledby="home-team-{{ team.id.toString }}">
+                            <h2 class="home__team-name" id="home-team-{{ team.id.toString }}">{{ team.name }}</h2>
+                            <twig:EmptyState message="Ticket counts for this team come later."/>
+                        </twig:Card>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    </div>
+{% endblock %}

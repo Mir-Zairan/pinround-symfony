@@ -1,0 +1,30 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/home.css') }}">
+{% endblock %}
+
+{# TODO(P07/P11): People, AI help and Jira get their real values; only the team count is real now. #}
+{% block main %}
+    <div class="home home--admin">
+        <h1 class="home__title">Your organization</h1>
+
+        <ul class="home__stats">
+            <li><twig:Card class="home__stat"><span class="home__stat-label">People</span><span class="home__stat-value">—<span class="visually-hidden"> (not available yet)</span></span></twig:Card></li>
+            <li><twig:Card class="home__stat"><span class="home__stat-label">Teams</span><span class="home__stat-value">{{ teamCount }}</span></twig:Card></li>
+            <li><twig:Card class="home__stat"><span class="home__stat-label">AI help</span><span class="home__stat-value">—<span class="visually-hidden"> (not available yet)</span></span></twig:Card></li>
+            <li><twig:Card class="home__stat"><span class="home__stat-label">Jira</span><span class="home__stat-value">—<span class="visually-hidden"> (not available yet)</span></span></twig:Card></li>
+        </ul>
+
+        <p>Admins do not work on tickets. Everything you set is under Admin.</p>
+
+        <div>
+            {% if adminSettingsUrl %}
+                <twig:Button href="{{ adminSettingsUrl }}">Open admin settings</twig:Button>
+            {% else %}
+                {# Inert until the Admin page exists, as the menu's Admin item is. #}
+                <twig:Button :disabled="true">Open admin settings<span class="visually-hidden"> (not built yet)</span></twig:Button>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

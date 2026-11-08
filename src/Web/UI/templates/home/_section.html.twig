@@ -1,0 +1,6 @@
+{#- One Home section. `group` is the focus chip that shows it; every section shows under All. -#}
+<section class="home__section" aria-labelledby="home-{{ id }}" data-focus-group="{{ group }}" data-focus-chips-target="section"
+    {%- if focus != 'all' and focus != group %} hidden{% endif %}>
+    <h2 class="home__section-title" id="home-{{ id }}">{{ title }}</h2>
+    <twig:EmptyState message="{{ message }}"/>
+</section>

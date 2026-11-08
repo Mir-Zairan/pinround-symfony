@@ -26,7 +26,7 @@ final class HomePageShellTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $page->filter('main'));
         self::assertCount(1, $page->filter('h1'));
-        self::assertSame('Home', $page->filter('h1')->text());
+        self::assertSame('All clear, Lena', $page->filter('h1')->text());
         self::assertSelectorTextSame('title', 'pinround');
         self::assertSame('en', $page->filter('html')->attr('lang'));
         self::assertNull($page->filter('html')->attr('data-theme'));
@@ -100,8 +100,8 @@ final class HomePageShellTest extends WebTestCase
         $page = $this->openHome();
 
         $stylesheets = $page->filter('link[rel="stylesheet"]')->each(static fn (Crawler $link): string => (string) $link->attr('href'));
-        self::assertCount(5, $stylesheets);
-        foreach (['tokens', 'fonts', 'base', 'shell', 'components'] as $position => $name) {
+        self::assertCount(6, $stylesheets);
+        foreach (['tokens', 'fonts', 'base', 'shell', 'components', 'home'] as $position => $name) {
             self::assertMatchesRegularExpression('#^/assets/styles/'.$name.'-[0-9A-Za-z_-]+\.css$#', $stylesheets[$position]);
         }
 
@@ -161,7 +161,7 @@ final class HomePageShellTest extends WebTestCase
         $this->client(); // boots the kernel so the container exists; no request is needed
         $twig = static::getContainer()->get('twig');
 
-        return new Crawler($twig->render('@Web/home.html.twig', ['theme' => $theme]));
+        return new Crawler($twig->render('@Web/base.html.twig', ['theme' => $theme]));
     }
 
     private function client(): KernelBrowser

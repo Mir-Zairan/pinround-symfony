@@ -59,8 +59,8 @@ final class DatabaseSpanTest extends WebTestCase
         self::assertCount(1, $roots);
         $children = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => $span !== $roots[0]));
         // The user and their password, the user's organizations (resolve_user_orgs), then BEGIN with the tenant's set_config,
-        // then the user's org roles and team roles for the header's menu (MainMenu).
-        self::assertSame(['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
+        // then the user's org roles and team roles for the header's menu (MainMenu), then the saved Home focus chip.
+        self::assertSame(['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
         foreach ($children as $child) {
             self::assertSame($roots[0]->getTraceId(), $child->getTraceId());
             self::assertSame($roots[0]->getSpanId(), $child->getParentSpanId());

@@ -1,0 +1,122 @@
+/* Home (src/Web/UI/templates/home/*): the work page, "Teams at a glance" and "Your organization". */
+
+.home {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.home--admin {
+  max-width: 900px;
+}
+
+.home__header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home__date {
+  font-size: 14px;
+  color: var(--on-surface-var);
+}
+
+.home__title {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  line-height: 1.2;
+}
+
+.home__subline {
+  max-width: 680px;
+  font-size: 16px;
+  color: var(--on-surface-var);
+}
+
+.home__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.home__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+.home__column {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.home__column--main {
+  flex: 999 1 560px;
+  min-width: 0;
+}
+
+.home__column--aside {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+/* A chip that hides every section of a column leaves no empty gap behind. */
+.home__column:not(:has(> .home__section:not([hidden]))) {
+  display: none;
+}
+
+.home__section > * + * {
+  margin-top: 12px;
+}
+
+.home__section-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.home__teams,
+.home__stats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home__teams {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.home__team > * + * {
+  margin-top: 12px;
+}
+
+.home__team-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.home__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.home__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.home__stat-label {
+  font-size: 14px;
+  color: var(--on-surface-var);
+}
+
+.home__stat-value {
+  font-size: 20px;
+  font-weight: 700;
+}
