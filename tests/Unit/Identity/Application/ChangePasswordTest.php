@@ -6,9 +6,9 @@ namespace App\Tests\Unit\Identity\Application;
 
 use App\Identity\Application\ChangePassword;
 use App\Identity\Application\CurrentPasswordCheck;
-use App\Identity\Application\PasswordChangeLimiter;
+use App\Identity\Application\CurrentPasswordLimiter;
 use App\Identity\Application\PasswordChangeOutcome;
-use App\Identity\Application\TooManyPasswordChangeTries;
+use App\Identity\Application\TooManyCurrentPasswordTries;
 use App\Identity\Domain\Credential;
 use App\Identity\Domain\Credentials;
 use App\Identity\Domain\Email;
@@ -92,7 +92,7 @@ final class ChangePasswordTest extends TestCase
         try {
             ($this->changePassword())(new UserId(self::ID), self::CURRENT, self::NEW, new \DateTimeImmutable('2026-11-08 10:00:00 UTC'));
             self::fail('The try was not refused.');
-        } catch (TooManyPasswordChangeTries $refusal) {
+        } catch (TooManyCurrentPasswordTries $refusal) {
             self::assertSame(15, $refusal->minutesToWait);
         }
 
@@ -131,7 +131,7 @@ final class ChangePasswordTest extends TestCase
         };
         $takeTry = function (): void {
             if ($this->isThrottled) {
-                throw new TooManyPasswordChangeTries(15);
+                throw new TooManyCurrentPasswordTries(15);
             }
             ++$this->triesTaken;
         };
@@ -205,7 +205,7 @@ final class ChangePasswordTest extends TestCase
                 return $hash->encoded() === '$plain$'.$typedPassword;
             }
         };
-        $limiter = new readonly class($takeTry) implements PasswordChangeLimiter {
+        $limiter = new readonly class($takeTry) implements CurrentPasswordLimiter {
             /**
              * @param \Closure(): void $takeTry
              */

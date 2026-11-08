@@ -27,10 +27,10 @@ final readonly class ConfirmItsYou
      *
      * @return bool true when the password and the code were right; false when either was wrong or two-step login is off
      *
-     * @throws TooManyPasswordChangeTries when this user's password was checked too often
-     * @throws TooManyTwoStepCodeTries    when codes were typed for this user too often
-     * @throws UndecryptableField         when the stored seed cannot be read back
-     * @throws \LogicException            when no transaction is open
+     * @throws TooManyCurrentPasswordTries when this user's password was checked too often
+     * @throws TooManyTwoStepCodeTries     when codes were typed for this user too often
+     * @throws UndecryptableField          when the stored seed cannot be read back
+     * @throws \LogicException             when no transaction is open
      */
     public function __invoke(
         UserId $userId,

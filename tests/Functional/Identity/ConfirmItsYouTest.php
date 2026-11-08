@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Identity;
 
+use App\Identity\Application\RecentAuth;
 use App\Identity\Domain\User;
 use App\Identity\UI\Controller\ConfirmItsYouController;
 use App\Identity\UI\Controller\LoginController;
 use App\Identity\UI\Controller\RecentAuthRedirects;
+use App\Tests\Fixtures\Http\RecentAuthClassProbeController;
 use App\Tests\Fixtures\Http\RecentAuthProbeController;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -84,6 +86,41 @@ final class ConfirmItsYouTest extends WebTestCase
         $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         self::assertSame(RecentAuthProbeController::OPENED, $this->client->getResponse()->getContent());
+    }
+
+    #[Test]
+    public function theMarkOnAControllerClassGuardsItsActions(): void
+    {
+        $user = $this->createUserWithPassword('Omar Haddad');
+        $seed = $this->logInWithACode($user);
+        $this->client->request('GET', '/_test/recent-auth/class');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(RecentAuthClassProbeController::OPENED, $this->client->getResponse()->getContent());
+        $this->clock->sleep(RecentAuth::WINDOW_SECONDS + 1);
+
+        $this->client->request('GET', '/_test/recent-auth/class');
+
+        self::assertResponseRedirects('/me/confirm?return=/_test/recent-auth/class', 302);
+        $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $this->client->submitForm('Confirm', ['password' => self::PASSWORD, 'code' => self::codeOf($seed, $this->clock)]);
+        self::assertResponseRedirects('/_test/recent-auth/class', 302);
+    }
+
+    #[Test]
+    public function aSubRequestToAMarkedActionGetsTheRedirectInsteadOfTheAction(): void
+    {
+        $user = $this->createUserWithPassword('Sara Holm');
+        $this->logInWithACode($user);
+        $this->client->request('GET', '/_test/recent-auth/forward');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(RecentAuthProbeController::OPENED, $this->client->getResponse()->getContent());
+        $this->clock->sleep(RecentAuth::WINDOW_SECONDS + 1);
+
+        $this->client->request('GET', '/_test/recent-auth/forward');
+
+        self::assertResponseRedirects('/me/confirm?return=/_test/recent-auth/forward', 302);
+        self::assertStringNotContainsString(RecentAuthProbeController::OPENED, (string) $this->client->getResponse()->getContent());
     }
 
     #[Test]

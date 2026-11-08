@@ -31,7 +31,7 @@ final readonly class ChangePassword
     /**
      * A too-short new password is refused before the current one is checked, so it takes no try.
      *
-     * @throws TooManyPasswordChangeTries before the current password is checked
+     * @throws TooManyCurrentPasswordTries before the current password is checked
      */
     public function __invoke(
         UserId $userId,

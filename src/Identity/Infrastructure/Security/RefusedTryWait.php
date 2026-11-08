@@ -8,7 +8,7 @@ use Symfony\Component\RateLimiter\RateLimit;
 
 /**
  * The wait a refused password reset request, password change or two-step login code is told
- * (SymfonyPasswordResetRequestLimiter, SymfonyPasswordChangeLimiter, SymfonyTwoStepCodeLimiter).
+ * (SymfonyPasswordResetRequestLimiter, SymfonyCurrentPasswordLimiter, SymfonyTwoStepCodeLimiter).
  */
 final class RefusedTryWait
 {

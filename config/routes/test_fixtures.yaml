@@ -65,6 +65,16 @@ when@test:
         controller: App\Tests\Fixtures\Http\RecentAuthProbeController::openSensitiveAction
         methods: [GET, POST]
 
+    test_recent_auth_forward:
+        path: /_test/recent-auth/forward
+        controller: App\Tests\Fixtures\Http\RecentAuthProbeController::forwardToSensitiveAction
+        methods: [GET]
+
+    test_recent_auth_class:
+        path: /_test/recent-auth/class
+        controller: App\Tests\Fixtures\Http\RecentAuthClassProbeController::openAction
+        methods: [GET]
+
     test_log_leak:
         path: /_test/log-leak/{organizationId}
         controller: App\Tests\Fixtures\Http\LogLeakProbeController::logTheSummaryThenFail

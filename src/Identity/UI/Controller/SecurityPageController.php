@@ -10,7 +10,7 @@ use App\Identity\Application\CurrentSession;
 use App\Identity\Application\LogOutEverywhere;
 use App\Identity\Application\PasswordChangeOutcome;
 use App\Identity\Application\ShowTwoStepSetup;
-use App\Identity\Application\TooManyPasswordChangeTries;
+use App\Identity\Application\TooManyCurrentPasswordTries;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -62,7 +62,7 @@ final class SecurityPageController extends AbstractController
 
         try {
             $outcome = ($this->changePassword)($this->currentSession->userId(), $request->request->getString('current_password'), $newPassword, $this->clock->now());
-        } catch (TooManyPasswordChangeTries $refusal) {
+        } catch (TooManyCurrentPasswordTries $refusal) {
             return $this->renderPage(passwordError: LoginController::tooManyTriesFor($refusal->minutesToWait), status: Response::HTTP_TOO_MANY_REQUESTS);
         }
         if (PasswordChangeOutcome::PasswordTooShort === $outcome) {

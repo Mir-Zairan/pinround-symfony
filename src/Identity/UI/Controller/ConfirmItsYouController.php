@@ -8,7 +8,7 @@ use App\Identity\Application\AccountPermission;
 use App\Identity\Application\ConfirmItsYou;
 use App\Identity\Application\CurrentSession;
 use App\Identity\Application\ShowTwoStepSetup;
-use App\Identity\Application\TooManyPasswordChangeTries;
+use App\Identity\Application\TooManyCurrentPasswordTries;
 use App\Identity\Application\TooManyTwoStepCodeTries;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -56,7 +56,7 @@ final class ConfirmItsYouController extends AbstractController
 
         try {
             $isConfirmed = ($this->confirmItsYou)($userId, $request->request->getString('password'), $request->request->getString('code'), $this->clock->now());
-        } catch (TooManyPasswordChangeTries|TooManyTwoStepCodeTries $refusal) {
+        } catch (TooManyCurrentPasswordTries|TooManyTwoStepCodeTries $refusal) {
             return $this->renderPage($returnPath, LoginController::tooManyTriesFor($refusal->minutesToWait), Response::HTTP_TOO_MANY_REQUESTS);
         }
         if (!$isConfirmed) {

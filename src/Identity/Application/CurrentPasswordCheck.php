@@ -17,7 +17,7 @@ final readonly class CurrentPasswordCheck
     public function __construct(
         private Credentials $credentials,
         private PasswordHashing $passwordHashing,
-        private PasswordChangeLimiter $limiter,
+        private CurrentPasswordLimiter $limiter,
     ) {
     }
 
@@ -26,7 +26,7 @@ final readonly class CurrentPasswordCheck
      *
      * @return bool false also for a user without a password
      *
-     * @throws TooManyPasswordChangeTries when this user's password was checked too often
+     * @throws TooManyCurrentPasswordTries when this user's password was checked too often
      */
     public function matches(UserId $userId, #[\SensitiveParameter] string $password): bool
     {
