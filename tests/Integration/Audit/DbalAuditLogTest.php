@@ -105,6 +105,35 @@ final class DbalAuditLogTest extends KernelTestCase
         self::assertSame(0, $this->countVisibleEvents());
     }
 
+    /**
+     * An entry recorded from an event keeps the event's time, also across a month boundary from the clock's now: the
+     * row goes to the month of the action.
+     */
+    #[Test]
+    public function anEntryWithItsOwnTimeIsRecordedAtThatTimeNotTheClocks(): void
+    {
+        $this->tenantContext()->set(new OrganizationId(self::ORG_A));
+        $this->connection()->transactional(fn () => $this->auditLog()->record(AuditEntry::bySystem(
+            new OrganizationId(self::ORG_A),
+            'member.joined',
+            'user',
+            self::USER,
+            occurredAt: new \DateTimeImmutable('2027-02-28 23:59:58.250 UTC'),
+        )));
+
+        $row = $this->connection()->transactional(static fn (Connection $connection): array|false => $connection->fetchAssociative(
+            "SELECT id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS') AS at, tableoid::regclass::text AS partition FROM aud_event",
+        ));
+
+        self::assertIsArray($row);
+        self::assertSame('2027-02-28 23:59:58.250', $row['at']);
+        self::assertSame('aud_event_202702', $row['partition']);
+        self::assertIsString($row['id']);
+        $id = Uuid::fromString($row['id']);
+        self::assertInstanceOf(UuidV7::class, $id);
+        self::assertSame('2027-02-28 23:59:58.250', $id->getDateTime()->format('Y-m-d H:i:s.v'));
+    }
+
     #[Test]
     public function aTokenEntryKeepsTheTokenAndItsUserAndASystemEntryNeither(): void
     {

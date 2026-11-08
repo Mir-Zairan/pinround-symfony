@@ -18,6 +18,10 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class DatabaseRolesTest extends KernelTestCase
 {
+    private const array DOCUMENTED_ORGANIZATION_INDEXES_NOT_LED_BY_THE_ORGANIZATION = [
+        'CREATE UNIQUE INDEX org_organization_slug_key ON public.org_organization USING btree (slug)',
+        'CREATE INDEX org_membership_user_id_idx ON public.org_membership USING btree (user_id)',
+    ];
     private const array ROLES = ['pinround_app', 'pinround_migrator', 'pinround_retention', 'pinround_readonly'];
     private const array MESSENGER_TABLES = ['messenger_outbox', 'messenger_failed'];
 
@@ -281,6 +285,72 @@ final class DatabaseRolesTest extends KernelTestCase
         self::assertFalse($connection->fetchOne("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.idn_password_reset'::regclass"));
     }
 
+    /**
+     * Tenant tables of Organization: the app reads, adds and changes all of them and removes only memberships and team
+     * members; support reads under the tenant policy; resolve_user_orgs reads two columns of org_membership
+     * (Version20261108140000).
+     */
+    #[Test]
+    public function theOrganizationTablesGrantTheAppNoDeleteButOnMembershipsAndTeamMembers(): void
+    {
+        $connection = $this->connection();
+        $readAddChange = ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'];
+        $expectedGrants = [
+            'org_organization' => $readAddChange,
+            'org_membership' => [...$readAddChange, 'pinround_app DELETE'],
+            'org_team' => $readAddChange,
+            'org_team_member' => [...$readAddChange, 'pinround_app DELETE'],
+            'org_settings' => $readAddChange,
+        ];
+
+        foreach ($expectedGrants as $table => $grants) {
+            self::assertEqualsCanonicalizing($grants, $this->grantsToOthersThanTheOwner($connection, $table), $table);
+            self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
+        }
+        self::assertEqualsCanonicalizing(
+            ['org_membership.organization_id SELECT', 'org_membership.user_id SELECT'],
+            $connection->fetchFirstColumn(
+                "SELECT a.attrelid::regclass::text || '.' || a.attname || ' ' || acl.privilege_type
+                 FROM pg_attribute a, aclexplode(a.attacl) acl
+                 WHERE acl.grantee = 'pinround_resolver'::regrole AND a.attrelid::regclass::text LIKE 'org\\_%'",
+            ),
+        );
+    }
+
+    /**
+     * Every index of an org_ table starts with organization_id but the two data-model.md names as exceptions: the
+     * global slug key and the user_id index of resolve_user_orgs, which runs before the tenant is known.
+     */
+    #[Test]
+    public function onlyTheDocumentedOrganizationIndexesDoNotStartWithTheOrganization(): void
+    {
+        self::assertEqualsCanonicalizing(self::DOCUMENTED_ORGANIZATION_INDEXES_NOT_LED_BY_THE_ORGANIZATION, self::organizationIndexesNotLedByTheOrganization($this->connection()));
+    }
+
+    /**
+     * An index whose first key is an expression has no column there (indkey[0] = 0), so an inner join would drop it;
+     * one on an expression of organization_id does not start with the column either.
+     */
+    #[Test]
+    public function anOrganizationIndexLedByAnExpressionIsReported(): void
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $migrator->beginTransaction();
+        try {
+            $migrator->executeStatement('CREATE INDEX org_membership_expression_probe_idx ON org_membership ((organization_id::text), user_id)');
+
+            self::assertEqualsCanonicalizing(
+                [
+                    ...self::DOCUMENTED_ORGANIZATION_INDEXES_NOT_LED_BY_THE_ORGANIZATION,
+                    'CREATE INDEX org_membership_expression_probe_idx ON public.org_membership USING btree (((organization_id)::text), user_id)',
+                ],
+                self::organizationIndexesNotLedByTheOrganization($migrator),
+            );
+        } finally {
+            $migrator->rollBack();
+        }
+    }
+
     /** The tables no entity maps; the diff must neither drop them nor hide a table that is mapped. */
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
@@ -370,6 +440,27 @@ final class DatabaseRolesTest extends KernelTestCase
 
         self::assertSame('pinround_migrator', $migrations->getConnection()->fetchOne('SELECT current_user'));
         self::assertInstanceOf(OrmSchemaProvider::class, $migrations->getSchemaProvider());
+    }
+
+    /**
+     * @return list<string> the definition of every index of an org_ table whose first key is not the organization_id
+     *                      column, expressions included
+     */
+    private static function organizationIndexesNotLedByTheOrganization(Connection $connection): array
+    {
+        $definitions = $connection->fetchFirstColumn(
+            "SELECT pg_get_indexdef(i.indexrelid)
+             FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+             LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = i.indkey[0]
+             WHERE c.relnamespace = 'public'::regnamespace AND c.relname LIKE 'org\\_%'
+             AND a.attname IS DISTINCT FROM 'organization_id'",
+        );
+
+        return array_map(static function (mixed $definition): string {
+            self::assertIsString($definition);
+
+            return $definition;
+        }, $definitions);
     }
 
     private function connection(): Connection

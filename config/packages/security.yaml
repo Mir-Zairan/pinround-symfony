@@ -20,7 +20,8 @@ security:
             pattern: ^/health/
             security: false
         main:
-            # Not lazy: RequestTransaction begins at priority 7 and needs the firewall (8) to have run first.
+            # Not lazy: EnterChosenOrganization (priority 7) sets the tenant from the authenticated user before
+            # RequestTransaction begins (6), so the firewall (8) must have run first.
             lazy: false
             provider: identity_users
             user_checker: App\Identity\Infrastructure\Security\BlockedUserChecker

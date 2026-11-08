@@ -1,0 +1,29 @@
+/* The organization picker (src/Organization/UI/templates/choose.html.twig); its card and messages come from login.css. */
+
+.organization-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.organization-choice__form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* .btn is one 40px line that never wraps; a long organization name wraps here instead of widening the card. */
+.organization-choice__button {
+  flex: 1;
+  justify-content: flex-start;
+  min-width: 0;
+  height: auto;
+  min-height: 40px;
+  padding-block: 8px;
+  white-space: normal;
+  text-align: start;
+  overflow-wrap: anywhere;
+}

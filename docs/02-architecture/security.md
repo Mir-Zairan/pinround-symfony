@@ -129,7 +129,7 @@ ASVS 5.0 Level 2 is our baseline for every release. The chapter names below are 
 Design (see [ADR-0005](../03-adr/0005-multi-tenancy.md)):
 
 1. Every tenant table has `organization_id NOT NULL`, and every index starts with it.
-2. `TenantContext` (SharedKernel) is set once per request from the authenticated membership. It is never taken from a URL parameter alone.
+2. `TenantContext` (SharedKernel) is set once per request from the authenticated membership: `EnterChosenOrganization` takes the organization chosen in the session (`/org/choose`) only while `resolve_user_orgs` still lists it for the user, so a removed member leaves it at the next request ([data-model.md › Row-level security](data-model.md#row-level-security)). It is never taken from a URL parameter alone.
 3. Doctrine SQL filter adds `organization_id = :org` to entity queries.
 4. Each transaction starts with `SELECT set_config('app.org_id', $1, true)` (transaction-local, bound parameter). RLS policies on every tenant table compare `organization_id` with `NULLIF(current_setting('app.org_id', true), '')::uuid`, which fails closed when nothing is set (also on a pooled connection, where an old setting reads as `''`). This is safe with PgBouncer in transaction mode (see [performance-and-scale.md](performance-and-scale.md#connection-pooling)).
 5. The application DB role (`pinround_app`) is not the table owner and has no `BYPASSRLS`. Migrations run as `pinround_migrator` (owner, no `BYPASSRLS`). Only the retention job's role `pinround_retention` has `BYPASSRLS`.

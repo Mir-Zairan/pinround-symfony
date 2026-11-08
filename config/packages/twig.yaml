@@ -3,6 +3,7 @@ twig:
     paths:
         '%kernel.project_dir%/src/Web/UI/templates': Web
         '%kernel.project_dir%/src/Identity/UI/templates': Identity
+        '%kernel.project_dir%/src/Organization/UI/templates': Organization
 
 when@test:
     twig:

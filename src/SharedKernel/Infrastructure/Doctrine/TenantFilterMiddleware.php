@@ -12,7 +12,7 @@ use Doctrine\DBAL\Driver\Middleware;
 use Doctrine\DBAL\Driver\Middleware\AbstractConnectionMiddleware;
 use Doctrine\DBAL\Driver\Middleware\AbstractDriverMiddleware;
 use Doctrine\ORM\EntityManagerInterface;
-use Symfony\Component\DependencyInjection\Attribute\AutowireServiceClosure;
+use Symfony\Component\DependencyInjection\Attribute\AutowireCallable;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
@@ -30,11 +30,14 @@ use Symfony\Contracts\Service\ResetInterface;
 final readonly class TenantFilterMiddleware implements Middleware, ResetInterface
 {
     /**
-     * @param \Closure(): EntityManagerInterface $entityManager a closure, because the entity manager is built on this connection
+     * The entity manager is built on this connection, so it is taken from the registry, never as a service
+     * reference: see DoctrineTenantSwitchGuard's constructor for why not even a lazy one.
+     *
+     * @param \Closure(): EntityManagerInterface $entityManager
      */
     public function __construct(
         private TenantContext $tenantContext,
-        #[AutowireServiceClosure('doctrine.orm.default_entity_manager')]
+        #[AutowireCallable(service: 'doctrine', method: 'getManager')]
         private \Closure $entityManager,
     ) {
     }

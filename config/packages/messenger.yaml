@@ -1,7 +1,10 @@
 parameters:
     # Where RelayOutboxMessageMiddleware moves a message it reads from the outbox: message class, parent class or
     # interface => one of the async_* transports. A message with no entry goes to the failed transport, never lost.
-    outbox_relay.target_transports: {}
+    # when@test replaces the whole map, so an entry here is repeated there.
+    outbox_relay.target_transports:
+        # Short jobs for worker-notify (ADR-0033), today the audit entry of each (RecordOrganizationAuditEntry).
+        App\Organization\Api\Event\OrganizationEvent: async_notify
 
 framework:
     messenger:
@@ -122,10 +125,13 @@ framework:
             # Mail sent through MailerInterface goes out from worker-notify (ADR-0033). Symfony's handler of it is not
             # once-only: a redelivered message can send the email twice.
             Symfony\Component\Mailer\Messenger\SendEmailMessage: async_notify
+            # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
+            App\Organization\Api\Event\OrganizationEvent: outbox
 
 when@test:
     parameters:
         outbox_relay.target_transports:
+            App\Organization\Api\Event\OrganizationEvent: async_notify
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey
             App\Tests\Fixtures\Messaging\OutageProbeRecorded: valkey_with_outage

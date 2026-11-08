@@ -208,9 +208,9 @@ jobs:
         run: docker compose --env-file .env --env-file .env.dev up -d --wait app
       - name: Apply the database roles and migrate
         run: make --no-print-directory db-roles migrate
-      # A password made for this run only, never stored in the repo: the seed gives it to the five demo people and
+      # A password made for this run only, never stored in the repo: the seed gives it to the six demo people and
       # Playwright logs in as Lena with it. The mask keeps it out of the job log.
-      - name: Seed the demo people with a password made for this run
+      - name: Seed the demo people, organizations and teams with a password made for this run
         run: |
           demo_password="$(openssl rand -hex 16)"
           echo "::add-mask::$demo_password"

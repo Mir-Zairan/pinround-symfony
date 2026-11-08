@@ -82,6 +82,7 @@
         "symfony/css-selector": "8.1.*",
         "symfony/dom-crawler": "8.1.*",
         "symfony/error-handler": "8.1.*",
+        "symfony/filesystem": "8.1.*",
         "symfony/process": "8.1.*",
         "zenstruck/foundry": "^2.15"
     },

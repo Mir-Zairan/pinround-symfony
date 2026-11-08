@@ -170,8 +170,8 @@ sequenceDiagram
   participant O as Outbox relay (worker)
   participant H as Mercure hub
   B->>F: POST /t/SHOP-412/check (CSRF token)
-  F->>T: user known, active org from session
-  X->>M: begin the request transaction (priority 7)
+  F->>T: user known; EnterChosenOrganization (priority 7) sets the active org from the session
+  X->>M: begin the request transaction (priority 6)
   M->>T: read the active organization
   M->>DB: BEGIN, then SELECT set_config('app.org_id', $1, true)
   F->>C: authenticated request
@@ -192,7 +192,7 @@ sequenceDiagram
 Rules shown in this flow:
 
 1. **Authentication** comes first. Every route except login, invite accept, health and webhooks needs a session or a token ([ADR-0012](../03-adr/0012-authentication.md)).
-2. **The tenant is set before any query.** The firewall (priority 8) fills `TenantContext`; then `RequestTransaction` (kernel.request, priority 7) begins the transaction, and the DBAL middleware `TenantMiddleware` sends `BEGIN` and `SELECT set_config('app.org_id', $1, true)` (transaction-local). RLS then rejects rows from other organizations, even if a query forgets its filter ([ADR-0005](../03-adr/0005-multi-tenancy.md)).
+2. **The tenant is set before any query.** The firewall (priority 8) authenticates the user, `EnterChosenOrganization` (priority 7) fills `TenantContext` with the organization chosen in the session if the user is still its member; then `RequestTransaction` (kernel.request, priority 6) begins the transaction, and the DBAL middleware `TenantMiddleware` sends `BEGIN` and `SELECT set_config('app.org_id', $1, true)` (transaction-local). RLS then rejects rows from other organizations, even if a query forgets its filter ([ADR-0005](../03-adr/0005-multi-tenancy.md)).
 3. **Every action asks a Voter**, and the voter denies by default ([ADR-0013](../03-adr/0013-authorization.md)).
 4. **Domain objects enforce the rules.** Controllers stay thin.
 5. **One transaction covers** the state change, the read model update ([ADR-0015](../03-adr/0015-turn-read-model.md)) and the outbox row. Either all of them happen, or none.

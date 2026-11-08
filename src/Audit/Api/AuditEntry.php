@@ -31,6 +31,7 @@ final readonly class AuditEntry
         public array $data,
         public ?string $ipHash,
         public ?string $userAgentHash,
+        public ?\DateTimeImmutable $occurredAt,
     ) {
     }
 
@@ -38,6 +39,8 @@ final readonly class AuditEntry
      * @param array<string, mixed> $data          ids and setting values only
      * @param ?string              $ipHash        the HMAC of the client IP, raw bytes
      * @param ?string              $userAgentHash the HMAC of the user agent, raw bytes
+     * @param ?\DateTimeImmutable  $occurredAt    when the action happened, for an entry recorded later from an event;
+     *                                            null for now
      *
      * @throws \InvalidArgumentException when a code, an id or a hash is malformed
      */
@@ -50,8 +53,9 @@ final readonly class AuditEntry
         array $data = [],
         ?string $ipHash = null,
         ?string $userAgentHash = null,
+        ?\DateTimeImmutable $occurredAt = null,
     ): self {
-        return self::build($organizationId, ActorKind::User, self::uuid($userId, 'user id'), null, $action, $targetType, $targetId, $data, $ipHash, $userAgentHash);
+        return self::build($organizationId, ActorKind::User, self::uuid($userId, 'user id'), null, $action, $targetType, $targetId, $data, $ipHash, $userAgentHash, $occurredAt);
     }
 
     /**
@@ -72,17 +76,19 @@ final readonly class AuditEntry
         ?string $ipHash = null,
         ?string $userAgentHash = null,
     ): self {
-        return self::build($organizationId, ActorKind::Token, self::uuid($userId, 'user id'), self::uuid($tokenId, 'token id'), $action, $targetType, $targetId, $data, $ipHash, $userAgentHash);
+        return self::build($organizationId, ActorKind::Token, self::uuid($userId, 'user id'), self::uuid($tokenId, 'token id'), $action, $targetType, $targetId, $data, $ipHash, $userAgentHash, null);
     }
 
     /**
-     * @param array<string, mixed> $data ids and setting values only
+     * @param array<string, mixed> $data       ids and setting values only
+     * @param ?\DateTimeImmutable  $occurredAt when the action happened, for an entry recorded later from an event; null
+     *                                         for now
      *
      * @throws \InvalidArgumentException when a code or an id is malformed
      */
-    public static function bySystem(OrganizationId $organizationId, string $action, string $targetType, ?string $targetId, array $data = []): self
+    public static function bySystem(OrganizationId $organizationId, string $action, string $targetType, ?string $targetId, array $data = [], ?\DateTimeImmutable $occurredAt = null): self
     {
-        return self::build($organizationId, ActorKind::System, null, null, $action, $targetType, $targetId, $data, null, null);
+        return self::build($organizationId, ActorKind::System, null, null, $action, $targetType, $targetId, $data, null, null, $occurredAt);
     }
 
     /**
@@ -99,6 +105,7 @@ final readonly class AuditEntry
         array $data,
         ?string $ipHash,
         ?string $userAgentHash,
+        ?\DateTimeImmutable $occurredAt,
     ): self {
         return new self(
             $organizationId,
@@ -111,6 +118,7 @@ final readonly class AuditEntry
             $data,
             self::requireNonEmptyHash($ipHash, 'IP hash'),
             self::requireNonEmptyHash($userAgentHash, 'user agent hash'),
+            $occurredAt,
         );
     }
 
