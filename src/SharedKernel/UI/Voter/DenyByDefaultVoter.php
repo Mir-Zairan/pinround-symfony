@@ -9,8 +9,8 @@ use Symfony\Component\Security\Core\Authorization\Voter\Vote;
 use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 
 /**
- * The base that new voters on a subject extend (ADR-0013); OrganizationMemberVoter does not, as its CHOOSE has a null
- * subject. It abstains only for an attribute it does not own or a subject that is not an instance of its subject class;
+ * The base that new voters on a subject extend (ADR-0013); the voters whose subject is null (OrganizationMemberVoter
+ * for CHOOSE, OwnAccountVoter for EDIT_OWN) keep Symfony's Voter. It abstains only for an attribute it does not own or a subject that is not an instance of its subject class;
  * for its own attribute and subject it denies unless grants() says yes. supports() and voteOnAttribute() are final, so a subclass cannot turn a refusal into an abstention, which
  * the unanimous strategy would let another voter's grant overrule.
  *
