@@ -24,7 +24,7 @@ Every module has the same five folders:
 
 ```text
 src/
-  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep
+  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep, FieldEncryption
   Ticketing/
     Api/                        # PUBLIC: interfaces + DTOs other modules may use
       TicketQueries.php
@@ -86,6 +86,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - the `DomainEvent` base (event id, occurred at, organization id, actor id);
   - `Result`/`Problem` types for expected failures;
   - `DenyByDefaultVoter` (`UI\Voter`): the base that new voters on a subject extend. It abstains only for an attribute it does not own or a subject of another class, and denies its own unless the subclass's rule grants ([ADR-0013](../03-adr/0013-authorization.md)). The voters whose subject is null are the exceptions, because the base cannot own a null subject, so they keep Symfony's `Voter`: Organization's `OrganizationMemberVoter` (`ORGANIZATION_CHOOSE`) and Identity's `OwnAccountVoter` (`ACCOUNT_EDIT_OWN`); `AdminAreaVoter` extends the base;
+  - `FieldEncryption` (Application, with `UndecryptableField` for a value that is altered, cut short or written with a key no longer in the ring) and its libsodium secretbox implementation `SodiumFieldEncryption` in `Infrastructure/Encryption`, with the key ring `FieldEncryptionKeys` ([ADR-0027](../03-adr/0027-secrets-and-encryption.md), [config.md](../operations/config.md#field-encryption)): encrypts secrets stored in the database. Identity's MFA seeds use it first; Integration's Jira and webhook secrets, OIDC client secrets and AI provider credentials follow;
   - `CitextType` (`Infrastructure/Doctrine`): the Doctrine type of PostgreSQL `citext` columns. Doctrine registers a type once for the whole app, so it cannot belong to one module;
   - `OnceOnlyHandling` (Application: run an async handler's effect once per message), with `MessageIdStamp`, `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in `Infrastructure/Messenger` ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key));
   - `ReadinessCheck` (`Infrastructure/Health`): one thing `/health/ready` proves. The module that owns what is checked implements it (Audit: `NextAuditPartitionExists`; Media: `ObjectStorageIsReachable`), and autoconfiguration tags it. SharedKernel holds the platform checks `DatabaseAnswers`, `MigrationsAreCurrent` and `ValkeyAnswers` (one service per Valkey), and `ReadinessCheckFailed` for a dependency that answered in the wrong state ([operations.md](operations.md#observability));

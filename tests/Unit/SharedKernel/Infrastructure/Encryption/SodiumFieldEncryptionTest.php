@@ -172,6 +172,45 @@ final class SodiumFieldEncryptionTest extends TestCase
         new SodiumFieldEncryption('', '')->decrypt($stored);
     }
 
+    #[Test]
+    public function aStackTraceOfAFailedEncryptShowsNeitherThePlaintextNorTheKeys(): void
+    {
+        $tooShortKey = base64_encode('sixteen-byte-key');
+        // Production ini (CI's too) drops every argument from traces, which would make this pass without the attribute.
+        $ignoreArgs = ini_set('zend.exception_ignore_args', '0');
+
+        try {
+            new SodiumFieldEncryption('a:'.$tooShortKey, 'a')->encrypt(self::SECRET);
+            self::fail('A 16-byte key was accepted.');
+        } catch (\InvalidArgumentException $refusal) {
+            $trace = $refusal->getTraceAsString();
+            self::assertStringContainsString('SodiumFieldEncryption->encrypt(Object(SensitiveParameterValue))', $trace);
+            self::assertStringContainsString('FieldEncryptionKeys::fromConfiguration(Object(SensitiveParameterValue), ', $trace);
+            // Traces cut string arguments to 15 characters, so a shorter piece is what would leak.
+            self::assertStringNotContainsString(substr(self::SECRET, 0, 10), $trace);
+            self::assertStringNotContainsString(substr($tooShortKey, 0, 10), $trace);
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $ignoreArgs);
+        }
+    }
+
+    #[Test]
+    public function aStackTraceOfAFailedDecryptShowsNotTheStoredValue(): void
+    {
+        $encryption = new SodiumFieldEncryption('a:'.self::KEY_A, 'a');
+        $altered = self::flipByteAt($encryption->encrypt(self::SECRET), 2);
+        $ignoreArgs = ini_set('zend.exception_ignore_args', '0');
+
+        try {
+            $encryption->decrypt($altered);
+            self::fail('An altered value was decrypted.');
+        } catch (UndecryptableField $refusal) {
+            self::assertStringContainsString('SodiumFieldEncryption->decrypt(Object(SensitiveParameterValue))', $refusal->getTraceAsString());
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $ignoreArgs);
+        }
+    }
+
     private static function flipByteAt(string $stored, int $offset): string
     {
         $stored[$offset] = \chr(\ord($stored[$offset]) ^ 0x01);

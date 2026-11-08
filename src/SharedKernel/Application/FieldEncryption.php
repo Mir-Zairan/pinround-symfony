@@ -20,7 +20,7 @@ interface FieldEncryption
      *
      * @throws \InvalidArgumentException when the key configuration is missing or broken
      */
-    public function encrypt(string $plaintext): string;
+    public function encrypt(#[\SensitiveParameter] string $plaintext): string;
 
     /**
      * @param string $stored a value encrypt() returned
@@ -28,5 +28,5 @@ interface FieldEncryption
      * @throws UndecryptableField        when the value is too short, its key id is not in the ring, or it was altered
      * @throws \InvalidArgumentException when the key configuration is missing or broken
      */
-    public function decrypt(string $stored): string;
+    public function decrypt(#[\SensitiveParameter] string $stored): string;
 }

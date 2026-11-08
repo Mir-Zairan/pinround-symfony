@@ -15,7 +15,7 @@ final readonly class FieldEncryptionKeys
     /**
      * @param array<string, string> $keysById raw 32-byte keys
      */
-    private function __construct(public string $currentKeyId, private array $keysById)
+    private function __construct(public string $currentKeyId, #[\SensitiveParameter] private array $keysById)
     {
     }
 

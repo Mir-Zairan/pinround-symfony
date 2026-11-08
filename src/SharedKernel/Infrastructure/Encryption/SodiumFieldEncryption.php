@@ -30,7 +30,7 @@ final class SodiumFieldEncryption implements FieldEncryption
     ) {
     }
 
-    public function encrypt(string $plaintext): string
+    public function encrypt(#[\SensitiveParameter] string $plaintext): string
     {
         $keys = $this->keys();
         $nonce = random_bytes(\SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
@@ -41,7 +41,7 @@ final class SodiumFieldEncryption implements FieldEncryption
             .sodium_crypto_secretbox($plaintext, $nonce, $keys->currentKey());
     }
 
-    public function decrypt(string $stored): string
+    public function decrypt(#[\SensitiveParameter] string $stored): string
     {
         $keys = $this->keys();
         if ('' === $stored) {
