@@ -33,6 +33,8 @@ use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
  * logged-in person in their own organization as tenant and inside a transaction, as a request would. Each row names
  * the text of personas-and-roles.md it comes from, and the doc must still have it.
  *
+ * Every token is a password session, as the login form leaves it, with no confirmed two-step login.
+ *
  * Acme Foods: Lena is an Admin and leads Shop and Mobile (as the demo seed has it); Omar is a member of both; Mia is a
  * member (tester) of Shop and a viewer of Support; Raj is a Manager and a viewer of Shop; Sara is an Admin with no team
  * role; Noor has no org role and leads Support. Beta Bakery: Ben is its Admin and leads its one team, Checkout.
@@ -102,30 +104,40 @@ final class VoterMatrixTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{source: string, attribute: string, actor: string, subject: string, expected: string}>
+     * @return iterable<string, array{source: string, attribute: string, actor: string, subject: string, expected: string, skipAdminMfa?: bool}>
      */
     public static function matrixRows(): iterable
     {
-        /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string}> $rows */
+        /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string, skipAdminMfa?: bool}> $rows */
         $rows = require __DIR__.'/voter_matrix_rows.php';
         foreach ($rows as $row) {
-            yield \sprintf('%s %s %s', $row['actor'], $row['attribute'], $row['subject']) => $row;
+            $flag = ($row['skipAdminMfa'] ?? false) ? ' (admin MFA skipped)' : '';
+            yield \sprintf('%s %s %s%s', $row['actor'], $row['attribute'], $row['subject'], $flag) => $row;
         }
     }
 
+    /**
+     * The hackathon flag is read when the kernel boots, so it is set before this test boots one and put back after.
+     */
     #[Test]
     #[DataProvider('matrixRows')]
-    public function theAppDecidesTheRowAsTheRolesDocSays(string $source, string $attribute, string $actor, string $subject, string $expected): void
+    public function theAppDecidesTheRowAsTheRolesDocSays(string $source, string $attribute, string $actor, string $subject, string $expected, bool $skipAdminMfa = false): void
     {
         self::assertContains($expected, ['granted', 'denied'], 'A row expects granted or denied.');
         self::assertArrayHasKey($actor, self::PEOPLE, 'The actor is one of VoterMatrixTest::PEOPLE.');
         [, $organizationId] = self::PEOPLE[$actor];
 
-        $accessDecision = new AccessDecision();
-        $isGranted = self::transactions()->rolledBackAs(
-            $organizationId,
-            fn (): bool => $this->accessDecisionManager()->decide(self::tokenOf($actor), [$attribute], self::subjectNamed($subject), $accessDecision),
-        );
+        self::ensureKernelShutdown();
+        $flagBefore = HackathonFlagEnvironment::set($skipAdminMfa ? '1' : null);
+        try {
+            $accessDecision = new AccessDecision();
+            $isGranted = self::transactions()->rolledBackAs(
+                $organizationId,
+                fn (): bool => $this->accessDecisionManager()->decide(self::tokenOf($actor), [$attribute], self::subjectNamed($subject), $accessDecision),
+            );
+        } finally {
+            $flagBefore->restore();
+        }
 
         self::assertNotSame([], self::votersThatDecided($accessDecision), \sprintf('No voter decides %s on %s; is the attribute or subject wrong?', $attribute, $subject));
         self::assertSame($expected, $isGranted ? 'granted' : 'denied', \sprintf('%s %s %s, from "%s"', $actor, $attribute, $subject, $source));
@@ -133,7 +145,7 @@ final class VoterMatrixTest extends KernelTestCase
 
     #[Test]
     #[DataProvider('matrixRows')]
-    public function theRolesDocHasTheTextTheRowComesFrom(string $source, string $attribute, string $actor, string $subject, string $expected): void
+    public function theRolesDocHasTheTextTheRowComesFrom(string $source, string $attribute, string $actor, string $subject, string $expected, bool $skipAdminMfa = false): void
     {
         self::assertStringContainsString($source, (string) file_get_contents(self::ROLES_DOC), \sprintf('The row "%s %s %s" names text the roles doc does not have.', $actor, $attribute, $subject));
     }

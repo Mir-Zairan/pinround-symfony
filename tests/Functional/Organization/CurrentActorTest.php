@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Organization;
 
-use App\Identity\Domain\User;
-use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
-use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -71,17 +68,6 @@ final class CurrentActorTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['actor' => null], $this->responseJson());
-    }
-
-    /**
-     * @param string $orgRoles a PostgreSQL text[] literal, such as '{admin}'
-     */
-    private function setOrgRoles(User $user, OrganizationId $organizationId, string $orgRoles): void
-    {
-        $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            'UPDATE org_membership SET org_roles = ? WHERE organization_id = ? AND user_id = ?',
-            [$orgRoles, $organizationId->toString(), $user->id()->toString()],
-        ));
     }
 
     private function responseJson(): mixed

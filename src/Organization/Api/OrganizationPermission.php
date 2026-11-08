@@ -19,6 +19,9 @@ final class OrganizationPermission
     /** See the organization the request works in. Its subject is the OrganizationId. */
     public const string VIEW = 'ORG_VIEW';
 
-    /** Do the work of an Admin of the organization. Its subject is the OrganizationId. */
+    /**
+     * Be an Admin of the organization. Its subject is the OrganizationId. It checks the role only, not how the person
+     * logged in, so admin pages and admin actions ask AdminPermission::AREA instead.
+     */
     public const string ADMIN = 'ORG_ADMIN';
 }

@@ -94,6 +94,17 @@ trait LogsInUsers
         ));
     }
 
+    /**
+     * @param string $orgRoles a PostgreSQL text[] literal, such as '{admin}'
+     */
+    private function setOrgRoles(User $user, OrganizationId $organizationId, string $orgRoles): void
+    {
+        $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE org_membership SET org_roles = ? WHERE organization_id = ? AND user_id = ?',
+            [$orgRoles, $organizationId->toString(), $user->id()->toString()],
+        ));
+    }
+
     private function removeMembership(User $user, OrganizationId $organizationId): void
     {
         $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
