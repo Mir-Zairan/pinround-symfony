@@ -85,7 +85,7 @@ final class DbalTeamQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function underAnotherTenantTheTeamsOfAnOrganizationAreInvisible(): void
+    public function summariesOfFindsNothingUnderAnotherTenantOrNone(): void
     {
         $asked = new OrganizationId(self::BETA_BAKERY);
         $teamIds = [new TeamId(self::BETA_CHECKOUT)];
@@ -114,7 +114,7 @@ final class DbalTeamQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function underAnotherTenantTeamsOfAnOrganizationAreInvisible(): void
+    public function teamsOfFindsNothingUnderAnotherTenant(): void
     {
         $betaTeams = fn (): array => self::teamIdStrings($this->queries()->teamsOf(new OrganizationId(self::BETA_BAKERY)));
 
@@ -124,7 +124,7 @@ final class DbalTeamQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function withNoTenantTeamsAreInvisible(): void
+    public function teamsOfFindsNothingWithNoTenant(): void
     {
         self::assertSame([], $this->queries()->teamsOf(new OrganizationId(self::ACME_FOODS)));
     }
