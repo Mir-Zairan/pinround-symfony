@@ -53,9 +53,9 @@ final class HomeFocusTest extends WebTestCase
     {
         $client = self::httpsClient();
         $client->disableReboot();
-        // Frozen at the real time with a fraction of a second: the session's own timestamps come from PHP's time(), and
-        // the column keeps whole seconds.
-        $clock = new MockClock(new \DateTimeImmutable('@'.time().'.750000'));
+        // An hour behind the real time, so a save stamped by the wall clock fails, yet within the session limits, whose
+        // own timestamps come from PHP's time(); the fraction of a second shows the column keeps whole seconds.
+        $clock = new MockClock(new \DateTimeImmutable('@'.(time() - 3600).'.750000'));
         self::getContainer()->set('clock', $clock);
         $user = $this->createUserWithPassword('Omar Haddad');
         $this->logIn($client, $user);

@@ -51,6 +51,21 @@ final class DbalHomeFocusPreferencesTest extends KernelTestCase
         );
     }
 
+    /** The table's CHECK list and the enum must name the same chips. */
+    #[Test]
+    public function everyFocusIsStoredAndReadBackAndTheCheckAllowsNoOther(): void
+    {
+        foreach (HomeFocus::cases() as $focus) {
+            $this->rememberAs(self::ACME_FOODS, self::LENA, $focus, '2027-03-15 10:00:00 UTC');
+
+            self::assertSame($focus, $this->focusAs(self::ACME_FOODS, self::LENA), $focus->value);
+        }
+        $check = $this->connection()->fetchOne("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'web_home_focus_focus_check'");
+        self::assertIsString($check);
+        preg_match_all("/'([a-z_]+)'::text/", $check, $allowedFocuses);
+        self::assertEqualsCanonicalizing(array_column(HomeFocus::cases(), 'value'), $allowedFocuses[1]);
+    }
+
     #[Test]
     public function aSecondChoiceReplacesTheFirstInOneRow(): void
     {

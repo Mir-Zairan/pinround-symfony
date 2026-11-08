@@ -2,10 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Web\Application;
+namespace App\Web\Domain;
 
 use App\SharedKernel\Domain\UserId;
-use App\Web\Domain\HomeFocus;
 
 /**
  * Each user's saved Home focus chip in the current organization (the tenant). Both methods run in the caller's

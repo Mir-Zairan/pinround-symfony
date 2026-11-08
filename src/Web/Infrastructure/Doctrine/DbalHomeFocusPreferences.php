@@ -6,8 +6,8 @@ namespace App\Web\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\UserId;
-use App\Web\Application\HomeFocusPreferences;
 use App\Web\Domain\HomeFocus;
+use App\Web\Domain\HomeFocusPreferences;
 use Doctrine\DBAL\Connection;
 
 /**

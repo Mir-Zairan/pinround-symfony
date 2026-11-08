@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Web\Application;
 
 use App\SharedKernel\Domain\UserId;
-use App\Web\Application\HomeFocusPreferences;
 use App\Web\Domain\HomeFocus;
+use App\Web\Domain\HomeFocusPreferences;
 
 /**
  * HomeFocusPreferences of one organization, in memory.

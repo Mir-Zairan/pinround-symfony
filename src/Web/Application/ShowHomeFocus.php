@@ -6,6 +6,7 @@ namespace App\Web\Application;
 
 use App\Organization\Api\ActorContext;
 use App\Web\Domain\HomeFocus;
+use App\Web\Domain\HomeFocusPreferences;
 
 /**
  * The chip Home opens with: the actor's saved one while they still get it, else All. A role lost since the choice

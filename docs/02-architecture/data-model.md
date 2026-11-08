@@ -243,7 +243,7 @@ Ticket numbers come from `tkt_project.next_number`. The app runs `UPDATE … SET
 
 | Table | Columns | Constraints / indexes |
 |---|---|---|
-| web_home_focus | organization_id, user_id, focus `text` (`all`/`my_work`/`my_team`/`all_teams`/`admin`, the Home focus chip of FR-HOME-08), updated_at | `PRIMARY KEY (organization_id, user_id)`, its only index; `CHECK` on focus (`web_home_focus_focus_check`). Created by `Version20261108160000`; a tenant table with `TenantTable::enableRls`, no foreign key to `idn_user`; `pinround_app` has `SELECT, INSERT, UPDATE` (no DELETE: a choice is replaced, never removed), `pinround_readonly` has `SELECT`. One row per user per organization, written by one upsert (`DbalHomeFocusPreferences`), so the choice follows the user to every device. No entity maps it (hidden by `schema_filter`) |
+| web_home_focus | organization_id, user_id, focus `text` (`all`/`my_work`/`my_team`/`all_teams`/`admin`, the Home focus chip of FR-HOME-08), updated_at | `PRIMARY KEY (organization_id, user_id)`, its only index; `CHECK` on focus (`web_home_focus_focus_check`). Created by `Version20261108160000`; a tenant table with `TenantTable::enableRls`, no foreign key to `idn_user`; `pinround_app` has `SELECT, INSERT, UPDATE` (no DELETE: a choice is replaced, never removed), `pinround_readonly` has `SELECT`. One row per user per organization, written by one upsert (`DbalHomeFocusPreferences`), so the choice follows the user to every device. No entity maps it (hidden by `schema_filter`). Web's `web_` prefix: [ADR-0035](../03-adr/0035-web-owns-its-ui-preferences.md) |
 
 ## Read models
 

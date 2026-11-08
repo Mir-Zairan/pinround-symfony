@@ -6,6 +6,7 @@ namespace App\Web\Application;
 
 use App\Organization\Api\ActorContext;
 use App\Web\Domain\HomeFocus;
+use App\Web\Domain\HomeFocusPreferences;
 
 /**
  * A person picks a Home focus chip (FR-HOME-08); it is saved for them in the actor's organization, so the next visit
