@@ -30,6 +30,7 @@ final class TwoStepLoginSetupTest extends WebTestCase
 {
     use Factories;
     use LogsInUsers;
+    use ReadsSessionMetadata;
 
     private const string PAGE = '/me/security/two-step';
     private const string RECOVERY_CODE_FORMAT = '/^[0-9a-hjkmnp-tv-z]{5}-[0-9a-hjkmnp-tv-z]{5}$/';
@@ -130,6 +131,7 @@ final class TwoStepLoginSetupTest extends WebTestCase
         self::assertIsArray($row);
         self::assertNull($row['confirmed_at']);
         self::assertSame('{}', $row['recovery_code_hashes']);
+        self::assertNull(self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
     }
 
     #[Test]
@@ -139,10 +141,14 @@ final class TwoStepLoginSetupTest extends WebTestCase
         $awaitingPage = $this->turnOn($client);
         $seed = self::seedOn($awaitingPage);
         $code = self::codeOf($seed, $clock);
+        $sessionIdBefore = $client->getCookieJar()->get('__Host-pinround', '/', 'localhost')?->getValue();
+        self::assertNull(self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
 
         $client->submitForm('Turn on', ['code' => $code]);
 
         self::assertResponseStatusCodeSame(200);
+        self::assertSame($clock->now()->getTimestamp(), self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
+        self::assertSame($sessionIdBefore, $client->getCookieJar()->get('__Host-pinround', '/', 'localhost')?->getValue(), 'the session got a new id');
         self::assertStringContainsString('no-store', (string) $client->getResponse()->headers->get('Cache-Control'));
         $codesPage = $client->getCrawler();
         self::assertSame('Two-step login is on', $codesPage->filter('main h1')->text());
@@ -170,13 +176,16 @@ final class TwoStepLoginSetupTest extends WebTestCase
         self::assertCount(0, $page->filter('main form'));
         self::assertNoneOfThe($recoveryCodes, $seed, (string) $client->getResponse()->getContent());
 
-        // Sending the form again, as a reload of the codes page would, shows neither codes nor key.
-        $client->request('POST', self::PAGE.'/confirm', ['code' => $code, '_csrf_token' => self::csrfTokenOf($awaitingPage, self::PAGE.'/confirm')]);
+        // Sending the form again, as a reload of the codes page would, shows neither codes nor key, and proves nothing.
+        $confirmedAt = $clock->now()->getTimestamp();
+        $clock->sleep(40);
+        $client->request('POST', self::PAGE.'/confirm', ['code' => self::codeOf($seed, $clock), '_csrf_token' => self::csrfTokenOf($awaitingPage, self::PAGE.'/confirm')]);
         self::assertResponseRedirects(self::PAGE, 302);
         $client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         self::assertNoneOfThe($recoveryCodes, $seed, (string) $client->getResponse()->getContent());
         self::assertSame($row['recovery_code_hashes'], $this->rowOf($user)['recovery_code_hashes'] ?? null);
+        self::assertSame($confirmedAt, self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
 
         $security = $client->request('GET', '/me/security');
         self::assertResponseStatusCodeSame(200);
@@ -296,6 +305,15 @@ final class TwoStepLoginSetupTest extends WebTestCase
         );
 
         return $row;
+    }
+
+    private static function sessionAttribute(KernelBrowser $client, string $key): mixed
+    {
+        $data = unserialize((string) file_get_contents(self::sessionFileOf($client)));
+        self::assertIsArray($data);
+        self::assertIsArray($data['_sf2_attributes'] ?? null);
+
+        return $data['_sf2_attributes'][$key] ?? null;
     }
 
     private static function manualKeyOn(Crawler $page): string

@@ -107,6 +107,32 @@ final class DoctrineTwoStepLoginsTest extends KernelTestCase
     }
 
     #[Test]
+    public function aSpentRecoveryCodesHashIsGoneFromTheRowAndTheOthersStayInOrder(): void
+    {
+        $user = UserFactory::createOne();
+        $twoStepLogin = new TwoStepLogin($user, self::getContainer()->get(FieldEncryption::class)->encrypt(self::SEED), new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+        $twoStepLogin->confirm(58_000_000, new \DateTimeImmutable('2027-03-15 10:01:00 UTC'), ['$argon2id$first', '$argon2id$second', '$argon2id$third']);
+        $twoStepLogins = $this->twoStepLogins();
+        $twoStepLogins->save($twoStepLogin);
+        $this->entityManager()->clear();
+
+        $forChange = $twoStepLogins->byUserIdForChange($user->id());
+        self::assertNotNull($forChange);
+        $forChange->spendRecoveryCode('$argon2id$second');
+        $twoStepLogins->save($forChange);
+        $this->entityManager()->clear();
+
+        self::assertSame(
+            ['{$argon2id$first,$argon2id$third}', 2],
+            array_values((array) $this->connection()->fetchAssociative(
+                'SELECT recovery_code_hashes::text, cardinality(recovery_code_hashes) FROM idn_mfa_secret WHERE user_id = ?',
+                [$user->id()->toString()],
+            )),
+        );
+        self::assertSame(['$argon2id$first', '$argon2id$third'], $twoStepLogins->byUserId($user->id())?->recoveryCodeHashes());
+    }
+
+    #[Test]
     public function aUserWithoutOneHasNone(): void
     {
         $user = UserFactory::createOne();
