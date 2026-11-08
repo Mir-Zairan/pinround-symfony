@@ -13,6 +13,7 @@ Credentials are encrypted inside the database. Every connection uses TLS. Logs n
 - [Confirmation](#confirmation): tests and CI checks.
 - [Pros and cons of the options](#pros-and-cons-of-the-options): details per option.
 - [More information](#more-information): links and when to revisit.
+- [Clarifications (2026-11-08)](#clarifications-2026-11-08): stored format, key variables, errors, what is not built yet.
 
 ## Status and people
 
@@ -112,3 +113,12 @@ Chosen option: **2**.
 - Related: [ADR-0011](0011-screenshot-storage-and-processing.md), [ADR-0012](0012-authentication.md), [ADR-0019](0019-browser-local-ai.md), [ADR-0021](0021-mcp-server.md), [ADR-0025](0025-jira-integration.md), [ADR-0026](0026-audit-log.md), [ADR-0029](0029-observability.md).
 - Architecture: [security.md](../02-architecture/security.md), [operations.md](../02-architecture/operations.md).
 - Revisit when a customer requires customer-managed keys (BYOK) or per-org encryption of content. That needs a new ADR with a search strategy.
+
+## Clarifications (2026-11-08)
+
+The decision is unchanged; these lines record how P01.T6 built field encryption.
+
+- **Stored format.** `key_id || nonce || ciphertext` is one byte with the key id's length (1 to 32), the key id (letters, digits, `-`, `_`), the 24-byte random nonce, then the secretbox output (the plaintext plus a 16-byte tag). The code is SharedKernel's `FieldEncryption` interface and `SodiumFieldEncryption`.
+- **Keys.** The key ring comes from two environment variables, `FIELD_ENCRYPTION_KEYS` (a comma list of `<id>:<base64 32-byte key>`) and `FIELD_ENCRYPTION_CURRENT_KEY_ID`, which prod fills from the secrets vault or the platform's secret store ([config.md](../operations/config.md#field-encryption)). They are read on the first encrypt or decrypt, so the prod cache warm-up needs no key. Dev and test use throwaway `change-me` keys in `.env.dev` and `.env.test`; prod never loads those files.
+- **Errors.** A value cut short, a key id not in the ring, or a failed tag check throws `UndecryptableField`; nothing returns partial or wrong plaintext. Its message names at most a valid key id.
+- **Not built yet:** the background job that re-encrypts old rows, so the "wrong key id → error" and round-trip unit tests exist, and the "rotation re-encrypt job" test is owed by that job.
