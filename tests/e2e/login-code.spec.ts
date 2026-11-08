@@ -1,16 +1,18 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { createHmac } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { demoPassword } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // As Mia, whom no other spec logs in as: the first run turns her two-step login on, and it stays on, because turning
-// it off is not built yet. Her key goes to a git-ignored file, so a person can still log in as her in dev. The
-// functional LoginCodeTest covers the codes, the refusals and the throttle.
+// it off is not built yet. Her key goes to the git-ignored tests/e2e/.auth/, not test-results/, which Playwright empties
+// at every run, so a person can still log in as her in dev. The functional LoginCodeTest covers the codes, the
+// refusals and the throttle.
 const MIA_EMAIL = 'mia@acme-foods.example';
-const MIA_KEY_FILE = path.join(__dirname, 'test-results', '.auth', 'mia-two-step-key.txt');
+const MIA_KEY_FILE = path.join(__dirname, '.auth', 'mia-two-step-key.txt');
 
 test.use({ storageState: { cookies: [], origins: [] } });
 // One at a time, so two first runs never both turn two-step login on.
@@ -67,6 +69,9 @@ async function openCodePage(page: Page): Promise<void> {
     await turnOnTwoStepLogin(page);
     await page.context().clearCookies();
     await typePassword(page);
+  } else if (!existsSync(MIA_KEY_FILE)) {
+    // The code page needs no key, so the spec still runs; only a person logging in as Mia does.
+    test.info().annotations.push({ type: 'warning', description: `Mia's two-step login is on, but ${MIA_KEY_FILE} is missing: a person cannot log in as her in dev until the database is rebuilt.` });
   }
   await expect(codePageHeading).toBeVisible();
   await expect(page).toHaveURL(/\/login\/code$/);
