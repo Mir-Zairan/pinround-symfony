@@ -78,6 +78,13 @@ final class EntrypointProdGuardTest extends TestCase
         self::assertRefused('FIELD_ENCRYPTION_CURRENT_KEY_ID', ['FIELD_ENCRYPTION_CURRENT_KEY_ID' => $committed['FIELD_ENCRYPTION_CURRENT_KEY_ID']] + self::realProdEnvironment());
     }
 
+    #[Test]
+    #[DataProvider('committedEnvFiles')]
+    public function prodRefusesTheCommittedAppSecret(string $envFile): void
+    {
+        self::assertRefused('APP_SECRET', ['APP_SECRET' => self::committedValueOf($envFile, 'APP_SECRET')] + self::realProdEnvironment());
+    }
+
     /**
      * @return iterable<string, array{string}>
      */
@@ -90,6 +97,29 @@ final class EntrypointProdGuardTest extends TestCase
     #[Test]
     #[DataProvider('keyListsWithAPlaceholderEntry')]
     public function prodRefusesAKeyListThatStillHoldsAPlaceholderEntry(string $keyList): void
+    {
+        self::assertRefused('FIELD_ENCRYPTION_KEYS', ['FIELD_ENCRYPTION_KEYS' => $keyList] + self::realProdEnvironment());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function committedKeysUnderARenamedId(): iterable
+    {
+        foreach (self::committedEnvFiles() as $envFile => [$file]) {
+            $committedKey = explode(':', self::fieldEncryptionValuesOf($file)['FIELD_ENCRYPTION_KEYS'], 2)[1];
+
+            yield $envFile.' key alone' => ['prod-1:'.$committedKey];
+            yield $envFile.' key after a space' => ['prod-1: '.$committedKey];
+            yield $envFile.' key after a real entry' => [self::REAL_FIELD_KEYS.',prod-1:'.$committedKey];
+            // The ids the dev and test keys had before they were renamed to change-me ones.
+            yield $envFile.' key under its old id' => [('.env.dev' === $file ? 'dev-1:' : 'test-1:').$committedKey];
+        }
+    }
+
+    #[Test]
+    #[DataProvider('committedKeysUnderARenamedId')]
+    public function prodRefusesACommittedKeyUnderAnyId(string $keyList): void
     {
         self::assertRefused('FIELD_ENCRYPTION_KEYS', ['FIELD_ENCRYPTION_KEYS' => $keyList] + self::realProdEnvironment());
     }
@@ -172,11 +202,21 @@ final class EntrypointProdGuardTest extends TestCase
      */
     private static function fieldEncryptionValuesOf(string $envFile): array
     {
+        return [
+            'FIELD_ENCRYPTION_KEYS' => self::committedValueOf($envFile, 'FIELD_ENCRYPTION_KEYS'),
+            'FIELD_ENCRYPTION_CURRENT_KEY_ID' => self::committedValueOf($envFile, 'FIELD_ENCRYPTION_CURRENT_KEY_ID'),
+        ];
+    }
+
+    /**
+     * @return string the value of the NAME= line, without the quotes dotenv strips
+     */
+    private static function committedValueOf(string $envFile, string $name): string
+    {
         $contents = file_get_contents(\dirname(__DIR__, 3).'/'.$envFile);
         self::assertIsString($contents);
-        self::assertSame(1, preg_match('/^FIELD_ENCRYPTION_KEYS=(.+)$/m', $contents, $keys));
-        self::assertSame(1, preg_match('/^FIELD_ENCRYPTION_CURRENT_KEY_ID=(.+)$/m', $contents, $currentKeyId));
+        self::assertSame(1, preg_match('/^'.$name.'=(.+)$/m', $contents, $match), \sprintf('%s sets no %s.', $envFile, $name));
 
-        return ['FIELD_ENCRYPTION_KEYS' => $keys[1], 'FIELD_ENCRYPTION_CURRENT_KEY_ID' => $currentKeyId[1]];
+        return trim($match[1], '\'"');
     }
 }
