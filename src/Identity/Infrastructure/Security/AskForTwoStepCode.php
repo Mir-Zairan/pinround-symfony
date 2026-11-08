@@ -72,7 +72,7 @@ final readonly class AskForTwoStepCode
         }
 
         $this->tokenStorage->setToken(null);
-        $this->pendingLogin->begin($userId, $now);
+        $this->pendingLogin->begin($userId, $user->sessionStamp(), $now);
         // The success handler took the saved target path out of the session to build its redirect; put it back, so
         // the login with the code still lands on the page the person asked for.
         $response = $event->getResponse();

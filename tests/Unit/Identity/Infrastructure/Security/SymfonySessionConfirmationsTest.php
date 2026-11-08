@@ -153,8 +153,7 @@ final class SymfonySessionConfirmationsTest extends TestCase
         $session = new Session(new MockArraySessionStorage());
         $request = new Request();
         $request->setSession($session);
-        $requestStack = new RequestStack();
-        $requestStack->push($request);
+        $requestStack = new RequestStack([$request]);
 
         return [new SymfonySessionConfirmations($requestStack), $session];
     }

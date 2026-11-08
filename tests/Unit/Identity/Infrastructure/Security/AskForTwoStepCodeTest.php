@@ -52,6 +52,7 @@ final class AskForTwoStepCodeTest extends TestCase
         'identity.recent_auth_at' => ['user_id' => self::OMAR, 'at' => 1_805_100_000],
         'identity.two_step_confirmed_at' => ['user_id' => self::OMAR, 'at' => 1_805_100_000],
         'identity.pending_login_user_id' => self::OMAR,
+        'identity.pending_login_session_stamp' => 'omars stamp',
         'identity.pending_login_at' => 1_805_104_800,
     ];
     private const int NOW = 1_805_104_875;
@@ -67,8 +68,7 @@ final class AskForTwoStepCodeTest extends TestCase
         $this->session = new Session(new MockArraySessionStorage());
         $this->request = new Request();
         $this->request->setSession($this->session);
-        $requestStack = new RequestStack();
-        $requestStack->push($this->request);
+        $requestStack = new RequestStack([$this->request]);
         $this->tokenStorage = new TokenStorage();
         $this->twoStepLogins = new InMemoryTwoStepLogins();
         $urlGenerator = self::createStub(UrlGeneratorInterface::class);
@@ -78,6 +78,7 @@ final class AskForTwoStepCodeTest extends TestCase
             new SymfonyPendingLogin(
                 $requestStack,
                 new SecurityUserProvider(self::createStub(Users::class), self::createStub(Credentials::class)),
+                $this->twoStepLogins,
                 new Security(new Container()),
                 $urlGenerator,
             ),
@@ -126,6 +127,7 @@ final class AskForTwoStepCodeTest extends TestCase
         self::assertSame('/login/code', self::targetOf($event->getResponse()));
         self::assertSame([
             'identity.pending_login_user_id' => self::LENA,
+            'identity.pending_login_session_stamp' => self::stampOf($event),
             'identity.pending_login_at' => self::NOW,
             '_security.main.target_path' => 'https://localhost/me/security',
         ], $this->session->all());
@@ -141,7 +143,11 @@ final class AskForTwoStepCodeTest extends TestCase
 
         self::assertNull($this->tokenStorage->getToken());
         self::assertSame('/login/code', self::targetOf($event->getResponse()));
-        self::assertSame(['identity.pending_login_user_id' => self::LENA, 'identity.pending_login_at' => self::NOW], $this->session->all());
+        self::assertSame([
+            'identity.pending_login_user_id' => self::LENA,
+            'identity.pending_login_session_stamp' => self::stampOf($event),
+            'identity.pending_login_at' => self::NOW,
+        ], $this->session->all());
     }
 
     #[Test]
@@ -204,6 +210,14 @@ final class AskForTwoStepCodeTest extends TestCase
     private static function lena(): User
     {
         return new User(new UserId(self::LENA), new Email('lena@acme-foods.example'), 'Lena Berg', 'en', 'Europe/Berlin', new \DateTimeImmutable('2026-11-01 08:00:00 UTC'));
+    }
+
+    private static function stampOf(LoginSuccessEvent $event): string
+    {
+        $user = $event->getUser();
+        self::assertInstanceOf(SecurityUser::class, $user);
+
+        return $user->sessionStamp();
     }
 
     private static function targetOf(?Response $response): ?string

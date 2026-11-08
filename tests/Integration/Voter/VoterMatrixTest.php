@@ -124,11 +124,13 @@ final class VoterMatrixTest extends KernelTestCase
         /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool|int|string}> $rows */
         $rows = require __DIR__.'/voter_matrix_rows.php';
         foreach ($rows as $row) {
-            $proof = match ($row['twoStepProof'] ?? false) {
-                false => '',
-                true => ' (with a code proof)',
-                'noCode' => ' (two-step login on, no code in the session)',
-                default => \sprintf(' (code proof %d seconds old)', $row['twoStepProof']),
+            $twoStepProof = $row['twoStepProof'] ?? false;
+            $proof = match (true) {
+                false === $twoStepProof => '',
+                true === $twoStepProof => ' (with a code proof)',
+                'noCode' === $twoStepProof => ' (two-step login on, no code in the session)',
+                \is_int($twoStepProof) => \sprintf(' (code proof %d seconds old)', $twoStepProof),
+                default => throw new \InvalidArgumentException(\sprintf('A row\'s twoStepProof is true, a number of seconds or "noCode", not %s.', var_export($twoStepProof, true))),
             };
             yield \sprintf('%s %s %s%s', $row['actor'], $row['attribute'], $row['subject'], $proof) => $row;
         }
@@ -270,8 +272,13 @@ final class VoterMatrixTest extends KernelTestCase
         $request->setSession(new Session(new MockArraySessionStorage()));
         $requestStack = self::getContainer()->get('request_stack');
         $requestStack->push($request);
-        if ('noCode' !== $proof) {
-            $proofAgeSeconds = \is_int($proof) ? $proof : 1800;
+        $proofAgeSeconds = match (true) {
+            'noCode' === $proof => null,
+            true === $proof => 1800,
+            \is_int($proof) => $proof,
+            default => throw new \InvalidArgumentException(\sprintf('A row\'s twoStepProof is true, a number of seconds or "noCode", not %s.', var_export($proof, true))),
+        };
+        if (null !== $proofAgeSeconds) {
             self::getContainer()->get(SessionConfirmations::class)->recordTwoStepConfirmation($user->id(), $clock->now()->modify('-'.$proofAgeSeconds.' seconds'));
         }
 

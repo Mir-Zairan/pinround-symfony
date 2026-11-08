@@ -13,6 +13,9 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Messenger\Stamp\ReceivedStamp;
+use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
+use Symfony\Component\Mime\Email;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -31,6 +34,7 @@ final class LoginCodeTest extends WebTestCase
 
     private const string PAGE = '/login/code';
     private const string SESSION_COOKIE = '__Host-pinround';
+    private const string NEW_PASSWORD = 'a much longer new passphrase';
 
     private KernelBrowser $client;
     private MockClock $clock;
@@ -334,6 +338,147 @@ final class LoginCodeTest extends WebTestCase
         $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         self::assertSame('OH', $this->client->getCrawler()->filter('header.site-header [role="img"]')->text());
+    }
+
+    #[Test]
+    public function aPasswordChangeInAnotherBrowserEndsThePendingLogin(): void
+    {
+        [$user, $seed] = $this->pendingLoginOf('Lena Berg');
+        $otherBrowser = $this->anotherBrowserLoggedInAs($user);
+        $otherBrowser->request('GET', '/me/security');
+        self::assertSame(200, $otherBrowser->getResponse()->getStatusCode());
+
+        $otherBrowser->submitForm('Change password', ['current_password' => self::PASSWORD, 'new_password' => self::NEW_PASSWORD, 'new_password_repeat' => self::NEW_PASSWORD]);
+        self::assertSame(302, $otherBrowser->getResponse()->getStatusCode());
+
+        $this->assertTheRightCodeLeadsBackToTheLoginPage($seed);
+    }
+
+    #[Test]
+    public function aPasswordResetAfterThePasswordEndsThePendingLogin(): void
+    {
+        [$user, $seed] = $this->pendingLoginOf('Omar Haddad');
+        $otherBrowser = $this->anotherBrowser();
+        $otherBrowser->request('GET', '/password/forgot');
+        self::assertSame(200, $otherBrowser->getResponse()->getStatusCode());
+        $otherBrowser->submitForm('Send link', ['email' => $user->email()->toString()]);
+        self::assertSame(302, $otherBrowser->getResponse()->getStatusCode());
+        $otherBrowser->request('GET', (string) parse_url($this->deliveredResetLink(), \PHP_URL_PATH));
+        self::assertSame(302, $otherBrowser->getResponse()->getStatusCode());
+        $otherBrowser->followRedirect();
+        self::assertSame(200, $otherBrowser->getResponse()->getStatusCode());
+
+        $otherBrowser->submitForm('Save password', ['password' => self::NEW_PASSWORD, 'password_repeat' => self::NEW_PASSWORD]);
+        self::assertSame('/login', $otherBrowser->getResponse()->headers->get('Location'));
+
+        $this->assertTheRightCodeLeadsBackToTheLoginPage($seed);
+    }
+
+    #[Test]
+    public function logOutOfAllDevicesEndsThePendingLogin(): void
+    {
+        [$user, $seed] = $this->pendingLoginOf('Mia Lund');
+        $otherBrowser = $this->anotherBrowserLoggedInAs($user);
+        $otherBrowser->request('GET', '/me/security');
+        self::assertSame(200, $otherBrowser->getResponse()->getStatusCode());
+
+        $otherBrowser->submitForm('Log out of all devices');
+        self::assertSame(302, $otherBrowser->getResponse()->getStatusCode());
+
+        $this->assertTheRightCodeLeadsBackToTheLoginPage($seed);
+    }
+
+    #[Test]
+    public function turningTwoStepLoginOffInAnotherBrowserEndsThePendingLogin(): void
+    {
+        $user = $this->createUserWithPassword('Raj Patel');
+        [, $recoveryCodes] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
+        $this->openCodePage($this->client, $user);
+        $otherBrowser = $this->anotherBrowserLoggedInAs($user);
+        $otherBrowser->request('GET', '/me/security');
+        self::assertSame(200, $otherBrowser->getResponse()->getStatusCode());
+
+        $otherBrowser->submitForm('Turn off two-step login', ['password' => self::PASSWORD, 'code' => $recoveryCodes[0]]);
+        self::assertSame(302, $otherBrowser->getResponse()->getStatusCode());
+        self::assertFalse($this->migrator()->fetchOne('SELECT user_id FROM idn_mfa_secret WHERE user_id = ?', [$user->id()->toString()]), 'two-step login is still on');
+
+        $this->client->submitForm('Log in', ['code' => $recoveryCodes[1]]);
+
+        self::assertResponseRedirects('/login', 302);
+        self::assertNull(self::sessionAttribute($this->client, 'identity.pending_login_user_id'));
+        $loginPage = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Log in again, then type your code within 5 minutes.', $loginPage->filter('main [role="status"]')->text());
+        self::assertIsNotLoggedIn();
+    }
+
+    /**
+     * @return array{User, string} the user, waiting on the code page, and their two-step login seed
+     */
+    private function pendingLoginOf(string $name): array
+    {
+        $user = $this->createUserWithPassword($name);
+        [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
+        $this->clock->sleep(30);
+        $this->openCodePage($this->client, $user);
+
+        return [$user, $seed];
+    }
+
+    private function assertTheRightCodeLeadsBackToTheLoginPage(string $seed): void
+    {
+        $this->client->submitForm('Log in', ['code' => self::codeOf($seed, $this->clock)]);
+
+        self::assertResponseRedirects('/login', 302);
+        self::assertNull(self::sessionAttribute($this->client, 'identity.pending_login_user_id'));
+        $loginPage = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Log in again, then type your code within 5 minutes.', $loginPage->filter('main [role="status"]')->text());
+        self::assertIsNotLoggedIn();
+    }
+
+    /**
+     * The same kernel and clock as $this->client, with a session of its own.
+     */
+    private function anotherBrowser(): KernelBrowser
+    {
+        $otherBrowser = self::getContainer()->get('test.client');
+        self::assertInstanceOf(KernelBrowser::class, $otherBrowser);
+        $otherBrowser->setServerParameters(['HTTPS' => 'on', 'REMOTE_ADDR' => \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254))]);
+
+        return $otherBrowser;
+    }
+
+    private function anotherBrowserLoggedInAs(User $user): KernelBrowser
+    {
+        $otherBrowser = $this->anotherBrowser();
+        $this->logIn($otherBrowser, $user);
+
+        return $otherBrowser;
+    }
+
+    /**
+     * Hands the queued reset request to the bus as worker-notify would; the test mailer then "sends" the email.
+     */
+    private function deliveredResetLink(): string
+    {
+        $transport = self::getContainer()->get('messenger.transport.async_notify');
+        self::assertInstanceOf(InMemoryTransport::class, $transport);
+        $queued = [...$transport->getSent()];
+        $transport->reset();
+        self::assertCount(1, $queued);
+        self::getContainer()->get('command.bus')->dispatch($queued[0]->with(new ReceivedStamp('async_notify')));
+        $sent = [];
+        foreach (self::getMailerEvents() as $event) {
+            $message = $event->getMessage();
+            if (!$event->isQueued() && $message instanceof Email) {
+                $sent[] = $message;
+            }
+        }
+        self::assertCount(1, $sent);
+        self::assertSame(1, preg_match('~https?://\S+/password/reset/[A-Za-z0-9_-]+~', (string) $sent[0]->getTextBody(), $match));
+
+        return $match[0];
     }
 
     /**

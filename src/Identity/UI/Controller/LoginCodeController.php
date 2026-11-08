@@ -17,7 +17,9 @@ use Symfony\Component\Routing\Attribute\Route;
 /**
  * Login step two (FR-ID-03, ADR-0012): after the right password of a user whose two-step login is on, a code from the
  * authenticator app or one recovery code logs them in. The page is public, like the login page; the pending login in
- * the session is the proof, and without it the page sends the visitor to log in. Every response says no-store.
+ * the session is the proof, and without it the page sends the visitor to log in. A pending login also ends when the
+ * user's sessions end (password changed or reset, logged out of all devices) or their two-step login is turned off.
+ * Every response says no-store.
  */
 final class LoginCodeController extends AbstractController
 {
