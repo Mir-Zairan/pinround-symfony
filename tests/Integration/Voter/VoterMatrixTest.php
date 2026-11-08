@@ -14,6 +14,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Fixtures\Security\HackathonFlagEnvironment;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use Doctrine\DBAL\Connection;
@@ -117,7 +118,8 @@ final class VoterMatrixTest extends KernelTestCase
     }
 
     /**
-     * The hackathon flag is read when the kernel boots, so it is set before this test boots one and put back after.
+     * The container reads the hackathon flag once, at the first access check on its kernel, so it is set before this
+     * test boots one and put back after.
      */
     #[Test]
     #[DataProvider('matrixRows')]

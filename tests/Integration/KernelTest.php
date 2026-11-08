@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration;
 
 use App\Kernel;
-use App\Tests\Integration\Voter\HackathonFlagEnvironment;
+use App\Tests\Fixtures\Security\HackathonFlagEnvironment;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -13,8 +13,8 @@ use Symfony\Component\Filesystem\Filesystem;
 
 /**
  * The boot refusal of the hackathon flag (ADR-0012, Hackathon exception). Prod boots with debug off, as it runs, into a
- * build directory of this class's own, as DefaultConnectionMiddlewareTest explains; the flag is read when the kernel
- * boots, so one prod container serves every case.
+ * build directory of this class's own, as DefaultConnectionMiddlewareTest explains; the flag is an env
+ * parameter that each new container reads at runtime (prod in Kernel::boot()), so one prod build serves every case.
  */
 final class KernelTest extends TestCase
 {

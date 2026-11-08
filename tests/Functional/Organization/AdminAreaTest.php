@@ -6,8 +6,8 @@ namespace App\Tests\Functional\Organization;
 
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
+use App\Tests\Fixtures\Security\HackathonFlagEnvironment;
 use App\Tests\Functional\Identity\LogsInUsers;
-use App\Tests\Integration\Voter\HackathonFlagEnvironment;
 use PHPUnit\Framework\Attributes\After;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -16,8 +16,8 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * ADMIN_AREA end to end, through the test-only admin page /_test/admin-area (config/routes/test_fixtures.yaml), the
- * real login form and the real firewall. The hackathon flag is read when the kernel boots, so each test sets it before
- * it creates the client and puts it back after. Each login comes from a random IP, so the login counters never refuse.
+ * real login form and the real firewall. The container reads the hackathon flag once, at the first access check on its
+ * kernel, so each test sets it before it creates the client and puts it back after. Each login comes from a random IP, so the login counters never refuse.
  */
 final class AdminAreaTest extends WebTestCase
 {
