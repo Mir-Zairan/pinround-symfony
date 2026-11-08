@@ -6,8 +6,8 @@ namespace App\Organization\UI;
 
 use App\Identity\Api\CurrentUser;
 use App\Organization\Api\MembershipQueries;
+use App\Organization\Api\OrganizationPermission;
 use App\Organization\Application\OrganizationNames;
-use App\Organization\Application\OrganizationPermission;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
