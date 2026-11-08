@@ -40,7 +40,8 @@
                         {% if item.isGroup %}
                             {# A disclosure of links, as the avatar menu is. #}
                             <div class="menu nav-menu" {{ stimulus_controller('menu') }} data-action="focusout->menu#closeOnFocusLeave">
-                                <button type="button" class="nav" aria-expanded="false" aria-controls="main-menu-{{ loop.index }}"
+                                {#- aria-current is not allowed on a button, so the current team's group says it with a class; the link inside carries aria-current. #}
+                                <button type="button" class="nav{% if item.isCurrent %} nav--current{% endif %}" aria-expanded="false" aria-controls="main-menu-{{ loop.index }}"
                                     {{ stimulus_target('menu', 'trigger') }} data-action="menu#toggle keydown->menu#triggerKey click@window->menu#closeOnOutsideClick">
                                     {{- item.label -}}
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

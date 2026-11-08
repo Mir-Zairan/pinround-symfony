@@ -134,6 +134,7 @@ final class MainMenuTest extends TestCase
         self::assertSame(['Home', 'Tickets', 'My reports', 'Teams', 'Admin'], self::labelsOf($items));
         $teams = $items[3];
         self::assertTrue($teams->isGroup());
+        self::assertFalse($teams->isCurrent());
         self::assertNull($teams->url());
         self::assertSame(['Mobile', 'Shop'], self::labelsOf($teams->children()));
         self::assertSame(['/teams/'.self::MOBILE, '/teams/'.self::SHOP], array_map(static fn (MenuItem $team): ?string => $team->url(), $teams->children()));
@@ -180,6 +181,18 @@ final class MainMenuTest extends TestCase
     }
 
     #[Test]
+    public function adminLinksThePeopleTabAndIsCurrentOnEveryAdminTab(): void
+    {
+        $this->routes->add(MainMenu::ADMIN_ROUTE, new Route('/admin/{tab}'));
+        $this->requestStack->push(new Request(attributes: ['_route' => MainMenu::ADMIN_ROUTE, '_route_params' => ['tab' => 'teams']]));
+
+        $admin = $this->menuFor(new Roles(true, false, [], [], []))->items()[1];
+
+        self::assertSame('/admin/people', $admin->url());
+        self::assertTrue($admin->isCurrent());
+    }
+
+    #[Test]
     public function withoutAnActorTheMenuIsHomeAloneAndThereIsNoReportButton(): void
     {
         $menu = $this->menuWithoutActor();
@@ -208,6 +221,7 @@ final class MainMenuTest extends TestCase
         $items = $this->menuFor(new Roles(false, false, [], [new TeamId(self::SHOP), new TeamId(self::MOBILE)], []))->items();
 
         self::assertFalse($items[0]->isCurrent());
+        self::assertTrue($items[3]->isCurrent(), 'the Teams group is current while one of its teams is');
         self::assertSame(['Mobile' => false, 'Shop' => true], array_combine(
             self::labelsOf($items[3]->children()),
             array_map(static fn (MenuItem $team): bool => $team->isCurrent(), $items[3]->children()),

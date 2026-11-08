@@ -38,7 +38,7 @@ final readonly class MenuItem
      */
     public static function group(string $label, array $children): self
     {
-        return new self($label, null, [], null, false, $children);
+        return new self($label, null, [], null, array_any($children, static fn (MenuItem $child): bool => $child->isCurrent()), $children);
     }
 
     public function label(): string
@@ -76,7 +76,7 @@ final readonly class MenuItem
     }
 
     /**
-     * True when the request is on this page, with the same route parameters.
+     * True when the request is on this page, with the same route parameters; for a group, on one of its pages.
      */
     public function isCurrent(): bool
     {

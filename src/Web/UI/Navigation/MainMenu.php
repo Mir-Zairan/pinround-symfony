@@ -19,18 +19,23 @@ use Twig\Attribute\AsTwigFunction;
  * The header's main menu and its "Report a problem" button and bell, from the current user's roles in the current
  * organization (frontend.md, Layout and navigation). Showing an item grants nothing: each page asks its own voter.
  *
- * The route names below are the ones the later phases give their pages. Until a phase adds its route, the item renders
- * inert; once the route exists it becomes a link with no change here. Holds no state, so it is safe in worker mode.
+ * The route names below are the ones the later phase plans give their pages. Until a phase adds its route, the item
+ * renders inert; once the route exists it becomes a link with no change here. A route that exists but refuses the
+ * parameters passed here throws, so the phase that adds it finds the mismatch in its tests. Holds no state, so it is
+ * safe in worker mode.
  */
 final readonly class MainMenu
 {
     public const string HOME_ROUTE = 'web_home';
+    /** P03.T3 (`/tickets`). */
     public const string TICKETS_ROUTE = 'ticketing_tickets';
-    public const string MY_REPORTS_ROUTE = 'ticketing_my_reports';
-    /** Takes the team's id as the route parameter "teamId". */
-    public const string TEAM_ROUTE = 'organization_team';
-    /** The admin home is its People tab. */
-    public const string ADMIN_ROUTE = 'organization_admin_people';
+    /** P07 (`/my-reports`). */
+    public const string MY_REPORTS_ROUTE = 'my_reports';
+    /** P02.T8 (`/teams/{slug}`); teams have no slug yet, so it gets the team's id as "teamId". */
+    public const string TEAM_ROUTE = 'team_show';
+    /** P11 (`/admin/{tab}`); the admin home is its People tab. */
+    public const string ADMIN_ROUTE = 'web_admin';
+    private const array ADMIN_HOME_PARAMETERS = ['tab' => 'people'];
 
     public function __construct(
         private TokenStorageInterface $tokenStorage,
@@ -70,7 +75,7 @@ final readonly class MainMenu
             }
         }
         if ($roles->isAdmin()) {
-            $items[] = $this->pageItem('Admin', self::ADMIN_ROUTE);
+            $items[] = $this->pageItem('Admin', self::ADMIN_ROUTE, self::ADMIN_HOME_PARAMETERS, pageParameters: []);
         }
 
         return $items;
@@ -110,9 +115,12 @@ final readonly class MainMenu
     }
 
     /**
-     * @param array<string, string> $routeParameters
+     * @param array<string, string>      $routeParameters
+     * @param array<string, string>|null $pageParameters  the route parameters that must match for the item to be
+     *                                                    current: the team, but not the admin tab; null for all of
+     *                                                    $routeParameters
      */
-    private function pageItem(string $label, string $routeName, array $routeParameters = []): MenuItem
+    private function pageItem(string $label, string $routeName, array $routeParameters = [], ?array $pageParameters = null): MenuItem
     {
         try {
             $url = $this->urlGenerator->generate($routeName, $routeParameters);
@@ -120,13 +128,13 @@ final readonly class MainMenu
             $url = null;
         }
 
-        return MenuItem::page($label, $routeName, $routeParameters, $url, $this->isCurrentPage($routeName, $routeParameters));
+        return MenuItem::page($label, $routeName, $routeParameters, $url, $this->isCurrentPage($routeName, $pageParameters ?? $routeParameters));
     }
 
     /**
-     * @param array<string, string> $routeParameters
+     * @param array<string, string> $pageParameters
      */
-    private function isCurrentPage(string $routeName, array $routeParameters): bool
+    private function isCurrentPage(string $routeName, array $pageParameters): bool
     {
         $request = $this->requestStack->getMainRequest();
         if (null === $request || $request->attributes->get('_route') !== $routeName) {
@@ -135,6 +143,6 @@ final readonly class MainMenu
 
         $currentParameters = $request->attributes->all('_route_params');
 
-        return array_all($routeParameters, static fn (string $value, string $name): bool => ($currentParameters[$name] ?? null) === $value);
+        return array_all($pageParameters, static fn (string $value, string $name): bool => ($currentParameters[$name] ?? null) === $value);
     }
 }

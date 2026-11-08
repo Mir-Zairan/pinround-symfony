@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
+use App\SharedKernel\Domain\TeamId;
+use App\Tests\Fixtures\Http\MenuPageStandInController;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Web\UI\Navigation\MainMenu;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -15,8 +18,8 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The header's main menu, "Report a problem" and the bell for each person of Acme Foods, which has the teams Shop and
- * Mobile, both led by Lena. No phase has built the pages behind Tickets, My reports, Team and Admin yet, so those items
- * are inert; tests/Unit/Web/UI/Navigation/MainMenuTest covers them as links.
+ * Mobile, both led by Lena. In the test environment, Tickets and Team have stand-in routes (MenuPageStandInController),
+ * so they are links; My reports and Admin have no route yet, so they are inert.
  */
 final class MainMenuTest extends WebTestCase
 {
@@ -25,6 +28,10 @@ final class MainMenuTest extends WebTestCase
     use LogsInUsers;
 
     private KernelBrowser $client;
+
+    private TeamId $shop;
+
+    private TeamId $mobile;
 
     protected function setUp(): void
     {
@@ -67,7 +74,7 @@ final class MainMenuTest extends WebTestCase
     }
 
     #[Test]
-    public function anItemWhosePageIsNotBuiltIsInertTextThatSaysSo(): void
+    public function anItemWithARouteIsALinkAndOneWithoutIsInertTextThatSaysSo(): void
     {
         $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
 
@@ -75,23 +82,59 @@ final class MainMenuTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         $menu = $page->filter('header nav[aria-label="Main"]');
-        $home = $menu->filter('a.nav');
-        self::assertSame(['Home'], $home->each(static fn (Crawler $link): string => $link->text()));
-        self::assertSame('/', $home->attr('href'));
-        self::assertSame('page', $home->attr('aria-current'));
+        self::assertSame(
+            ['Home → / (current)', 'Tickets → /_test/menu/tickets', 'Mobile → /_test/menu/teams/'.$this->mobile->toString(), 'Shop → /_test/menu/teams/'.$this->shop->toString()],
+            $menu->filter('a')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href').('page' === $link->attr('aria-current') ? ' (current)' : '')),
+        );
+        self::assertCount(2, $menu->filter('.nav-menu__list > a.menu__item[data-menu-target="item"]'), 'the team links are the disclosure\'s items');
 
         $notBuilt = $menu->filter('span.nav--not-built, span.menu__item--not-built');
-        self::assertSame(
-            ['Tickets (not built yet)', 'My reports (not built yet)', 'Mobile (not built yet)', 'Shop (not built yet)', 'Admin (not built yet)'],
-            $notBuilt->each(static fn (Crawler $item): string => $item->text()),
-        );
+        self::assertSame(['My reports (not built yet)', 'Admin (not built yet)'], $notBuilt->each(static fn (Crawler $item): string => $item->text()));
         self::assertSame([' (not built yet)'], array_unique($notBuilt->filter('.visually-hidden')->each(static fn (Crawler $hidden): string => $hidden->text(normalizeWhitespace: false))));
-        self::assertCount(0, $menu->filter('[href]:not(a.nav), [tabindex]'));
+        self::assertCount(0, $menu->filter('span[href], [tabindex]'));
 
         $teamsButton = $menu->filter('div.nav-menu > button.nav[aria-expanded="false"]');
         self::assertCount(1, $teamsButton);
+        self::assertSame('nav', $teamsButton->attr('class'));
         self::assertCount(1, $menu->filter('#'.$teamsButton->attr('aria-controls').'.nav-menu__list[hidden]'));
         self::assertCount(0, $page->filterXPath('//header//*[@style or @*[starts-with(name(), "on")]]'), 'the CSP blocks inline styles and handlers');
+    }
+
+    #[Test]
+    public function onATeamPageThatTeamIsTheCurrentPageAndTheTeamsButtonLooksCurrent(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+
+        $page = $this->client->request('GET', '/_test/menu/teams/'.$this->shop->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        $menu = $page->filter('header nav[aria-label="Main"]');
+        self::assertSame(['Shop'], $menu->filter('a[aria-current="page"]')->each(static fn (Crawler $link): string => $link->text()));
+        self::assertSame('nav nav--current', $menu->filter('div.nav-menu > button')->attr('class'));
+    }
+
+    #[Test]
+    public function theOnlyTeamOfAPersonIsLinkedAsTeam(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Mia']);
+
+        $page = $this->client->request('GET', '/');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('/_test/menu/teams/'.$this->shop->toString(), $page->filter('header nav[aria-label="Main"] > a.nav')->reduce(static fn (Crawler $link): bool => 'Team' === $link->text())->attr('href'));
+    }
+
+    #[Test]
+    public function theMenuStandInRoutesAreTheTestOnes(): void
+    {
+        $routes = self::getContainer()->get('router')->getRouteCollection();
+
+        foreach ([MainMenu::TICKETS_ROUTE, MainMenu::TEAM_ROUTE] as $routeName) {
+            self::assertSame(MenuPageStandInController::class.'::openPage', $routes->get($routeName)?->getDefault('_controller'), $routeName.' has a real page now: delete its stand-in in config/routes/test_fixtures.yaml');
+        }
+        foreach ([MainMenu::MY_REPORTS_ROUTE, MainMenu::ADMIN_ROUTE] as $routeName) {
+            self::assertNull($routes->get($routeName), $routeName.' has a page now: MainMenuTest expects it inert');
+        }
     }
 
     #[Test]
@@ -134,12 +177,12 @@ final class MainMenuTest extends WebTestCase
             $this->setOrgRoles($people[$name], $acmeFoods, $orgRoles);
         }
 
-        $shop = $this->createTeam($acmeFoods, 'Shop', $people['Lena']);
-        $mobile = $this->createTeam($acmeFoods, 'Mobile', $people['Lena']);
-        $this->addTeamRole($people['Omar'], $acmeFoods, $shop, 'member');
-        $this->addTeamRole($people['Omar'], $acmeFoods, $mobile, 'member');
-        $this->addTeamRole($people['Mia'], $acmeFoods, $shop, 'member');
-        $this->addTeamRole($people['Raj'], $acmeFoods, $shop, 'viewer');
+        $this->shop = $this->createTeam($acmeFoods, 'Shop', $people['Lena']);
+        $this->mobile = $this->createTeam($acmeFoods, 'Mobile', $people['Lena']);
+        $this->addTeamRole($people['Omar'], $acmeFoods, $this->shop, 'member');
+        $this->addTeamRole($people['Omar'], $acmeFoods, $this->mobile, 'member');
+        $this->addTeamRole($people['Mia'], $acmeFoods, $this->shop, 'member');
+        $this->addTeamRole($people['Raj'], $acmeFoods, $this->shop, 'viewer');
 
         return $people;
     }

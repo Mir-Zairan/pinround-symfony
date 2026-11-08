@@ -57,6 +57,8 @@ final class RequestTransactionTest extends WebTestCase
         'test_tracing_dispatch',
         'test_tracing_query',
     ];
+    /** Stand-ins under the real names of pages a later phase builds (MainMenuTest), so they carry no test_ prefix. */
+    private const array MENU_STAND_IN_ROUTE_NAMES = ['ticketing_tickets', 'team_show'];
 
     private KernelBrowser $client;
 
@@ -116,7 +118,7 @@ final class RequestTransactionTest extends WebTestCase
             self::assertSame([], $loader->load('test_fixtures.yaml')->all(), $environment);
         }
         $testLoader = new YamlFileLoader(new FileLocator(self::$kernel?->getProjectDir().'/config/routes'), 'test');
-        self::assertEqualsCanonicalizing(self::TEST_ROUTE_NAMES, array_keys($testLoader->load('test_fixtures.yaml')->all()));
+        self::assertEqualsCanonicalizing([...self::TEST_ROUTE_NAMES, ...self::MENU_STAND_IN_ROUTE_NAMES], array_keys($testLoader->load('test_fixtures.yaml')->all()));
     }
 
     #[Test]

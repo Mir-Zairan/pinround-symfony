@@ -95,6 +95,19 @@ when@test:
         controller: App\Tests\Fixtures\Http\TracingProbeController::dispatchAnEvent
         methods: [GET]
 
+    # Stand-ins under the names MainMenu links, until P03.T3 and P02.T8 build the pages. Delete each one in the commit
+    # that adds the real route: two routes of one name do not clash, one silently replaces the other. If the real one
+    # wins, MainMenuTest::theMenuStandInRoutesAreTheTestOnes fails; if this one wins, the real page's tests do.
+    ticketing_tickets:
+        path: /_test/menu/tickets
+        controller: App\Tests\Fixtures\Http\MenuPageStandInController::openPage
+        methods: [GET]
+
+    team_show:
+        path: /_test/menu/teams/{teamId}
+        controller: App\Tests\Fixtures\Http\MenuPageStandInController::openPage
+        methods: [GET]
+
     test_tracing_query:
         path: /_test/tracing/query
         controller: App\Tests\Fixtures\Http\TracingProbeController::runAQuery

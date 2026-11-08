@@ -93,7 +93,8 @@
   background: var(--s-high);
 }
 
-.nav[aria-current="page"] {
+.nav[aria-current="page"],
+.nav--current {
   background: var(--secondary-container);
   color: var(--on-secondary-container);
 }

@@ -57,9 +57,9 @@ Menu items come from the user's roles. There is no mode switch: a person with se
 |---|---|---|
 | Home | everyone | `web_home` |
 | Tickets | everyone with a team role, and managers | `ticketing_tickets` (`/tickets`) |
-| My reports (with a count of questions waiting on me) | everyone with a team role | `ticketing_my_reports` (`/my-reports`) |
-| Team | everyone with a team role: "Team" for one team; a "Teams ▾" disclosure listing the teams by name when there are several | `organization_team` (`/teams/{teamId}`) |
-| Admin | org admins | `organization_admin_people` (`/admin/people`; the admin home is its People tab) |
+| My reports (with a count of questions waiting on me) | everyone with a team role | `my_reports` (`/my-reports`) |
+| Team | everyone with a team role: "Team" for one team; a "Teams ▾" disclosure listing the teams by name when there are several | `team_show` (`/teams/{slug}`; until teams have a slug, MainMenu passes the team's id as `teamId`) |
+| Admin | org admins | `web_admin` with `tab: people` (`/admin/people`; the admin home is its People tab; current on every tab) |
 
 A team role is lead, member or viewer. Without an organization (the picker, a page without a login) the menu is Home alone, and there is no "Report a problem" or bell. `App\Web\UI\Navigation\MainMenu` builds the items (Twig `main_menu()`) and decides "Report a problem" and the bell (`can_report_problems()`); the route names above live there. Showing an item grants nothing: each page asks its own voter.
 
@@ -230,7 +230,7 @@ The prototype's single page becomes these routes. The `Module` column says who o
 
 | Prototype screen | Route (name) | Module | Template / main components |
 |---|---|---|---|
-| Home (lead, tester, developer, manager, admin, mixed roles) | `GET /` (`home`) | Web | `home/index.html.twig`: FocusChips, NeedItem ×5, GroupedList, PingCard, release GroupBar, AvatarStack, Admin card, All teams |
+| Home (lead, tester, developer, manager, admin, mixed roles) | `GET /` (`web_home`) | Web | `home/index.html.twig`: FocusChips, NeedItem ×5, GroupedList, PingCard, release GroupBar, AvatarStack, Admin card, All teams |
 | Tickets · List | `GET /tickets?project=&person=&q=&done=&check=` (`ticketing_tickets`) | Ticketing | `ticket/list.html.twig` + `TicketFilters` |
 | Tickets · Whose turn? | `GET /tickets/turn?project=` (`ticket_turn`) | Insight | `insight/whose_turn.html.twig` |
 | Ticket page | `GET /t/{key}` (`ticket_show`) | Ticketing | `ticket/show.html.twig`: QueueBar, StatusPill, NextStepBox, Thread, rounds, people, activity |
@@ -240,12 +240,12 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Ping dialog | `POST /t/{key}/ping/{userId}` | Notification | Dialog |
 | Explain it to me / summarize | `POST /t/{key}/ai/explain`, `POST /t/{key}/ai/summary` | Assist | `ExplainBox` |
 | Report a problem | `GET/POST /report` (`report_new`) | Ticketing | `ReportForm` |
-| My reports | `GET /my-reports` (`ticketing_my_reports`) | Insight | Tracker cards grouped Needs you / Stuck / Moving / Done |
+| My reports | `GET /my-reports` (`my_reports`) | Insight | Tracker cards grouped Needs you / Stuck / Moving / Done |
 | Round view (prototype "Review round" board) | `GET /t/{key}/rounds/{number}` | Review | Screenshot + PinLayer, before/after, verdicts |
 | Full-screen review (prototype "Review in full screen" board) | `GET /t/{key}/rounds/{number}/focus` | Review | Full-screen pin walker |
 | Draft round | part of the ticket page; `POST /t/{key}/draft…` | Review | `DraftRoundEditor` |
-| Team page | `GET /teams/{teamId}` (`organization_team`) | Organization + Workflow | Projects, "How work moves here", people with WorkloadBar |
-| Admin tabs | `GET /admin/{tab}`, tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data; People is `organization_admin_people`, the menu's Admin item | Web (+ owning module per tab) | Admin layout with tab list |
+| Team page | `GET /teams/{slug}` (`team_show`) | Organization + Workflow | Projects, "How work moves here", people with WorkloadBar |
+| Admin tabs | `GET /admin/{tab}` (`web_admin`), tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data; the menu's Admin item opens people | Web (+ owning module per tab) | Admin layout with tab list |
 | Manager "Teams at a glance" | part of `/` for managers | Insight | GroupBar per team |
 | Local AI sheet | dialog from the header chip; `POST /ai/laptop/status`, `POST /ai/laptop/package`, `POST /ai/laptop/result` | Assist | `local-ai` controller |
 | Profile (name, time zone, theme) | `GET/POST /me/profile` (`identity_profile`); the avatar menu's theme switch `POST /me/theme` (`identity_theme`) | Identity | `profile.html.twig` |
