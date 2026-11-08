@@ -41,7 +41,8 @@ use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
  * the text of personas-and-roles.md it comes from, and the doc must still have it.
  *
  * Every token is a password session, as the login form leaves it. A row with twoStepProof also has, in its rolled-back
- * transaction, the person's user and two-step login rows, and a request whose session holds their code proof; other
+ * transaction, the person's user and two-step login rows, and a request whose session holds their code proof (see
+ * voter_matrix_rows.php for its ages); other
  * rows have neither, so no session.
  *
  * Acme Foods: Lena is an Admin and leads Shop and Mobile (as the demo seed has it); Omar is a member of both; Mia is a
@@ -116,21 +117,26 @@ final class VoterMatrixTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool}>
+     * @return iterable<string, array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool|int|string}>
      */
     public static function matrixRows(): iterable
     {
-        /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool}> $rows */
+        /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool|int|string}> $rows */
         $rows = require __DIR__.'/voter_matrix_rows.php';
         foreach ($rows as $row) {
-            $proof = ($row['twoStepProof'] ?? false) ? ' (with a code proof)' : '';
+            $proof = match ($row['twoStepProof'] ?? false) {
+                false => '',
+                true => ' (with a code proof)',
+                'noCode' => ' (two-step login on, no code in the session)',
+                default => \sprintf(' (code proof %d seconds old)', $row['twoStepProof']),
+            };
             yield \sprintf('%s %s %s%s', $row['actor'], $row['attribute'], $row['subject'], $proof) => $row;
         }
     }
 
     #[Test]
     #[DataProvider('matrixRows')]
-    public function theAppDecidesTheRowAsTheRolesDocSays(string $source, string $attribute, string $actor, string $subject, string $expected, bool $twoStepProof = false): void
+    public function theAppDecidesTheRowAsTheRolesDocSays(string $source, string $attribute, string $actor, string $subject, string $expected, bool|int|string $twoStepProof = false): void
     {
         self::assertContains($expected, ['granted', 'denied'], 'A row expects granted or denied.');
         self::assertArrayHasKey($actor, self::PEOPLE, 'The actor is one of VoterMatrixTest::PEOPLE.');
@@ -141,7 +147,7 @@ final class VoterMatrixTest extends KernelTestCase
         self::getContainer()->set('clock', $clock);
         $accessDecision = new AccessDecision();
         $isGranted = self::transactions()->rolledBackAs($organizationId, function () use ($actor, $attribute, $subject, $accessDecision, $twoStepProof, $clock): bool {
-            $requestStack = $twoStepProof ? self::requestWithCodeProofOf($actor, $clock) : null;
+            $requestStack = false !== $twoStepProof ? self::requestWithCodeProofOf($actor, $clock, $twoStepProof) : null;
             try {
                 return $this->accessDecisionManager()->decide(self::tokenOf($actor), [$attribute], self::subjectNamed($subject), $accessDecision);
             } finally {
@@ -155,7 +161,7 @@ final class VoterMatrixTest extends KernelTestCase
 
     #[Test]
     #[DataProvider('matrixRows')]
-    public function theRolesDocHasTheTextTheRowComesFrom(string $source, string $attribute, string $actor, string $subject, string $expected, bool $twoStepProof = false): void
+    public function theRolesDocHasTheTextTheRowComesFrom(string $source, string $attribute, string $actor, string $subject, string $expected, bool|int|string $twoStepProof = false): void
     {
         self::assertStringContainsString($source, (string) file_get_contents(self::ROLES_DOC), \sprintf('The row "%s %s %s" names text the roles doc does not have.', $actor, $attribute, $subject));
     }
@@ -245,11 +251,12 @@ final class VoterMatrixTest extends KernelTestCase
 
     /**
      * In the row's transaction: the person's user row and their two-step login, turned on 2 hours before the clock's
-     * now; then a request whose session holds their code proof of 30 minutes ago, inside the 1 hour of the admin pages.
+     * now; then a request whose session holds their code proof: of 30 minutes ago for true, of that many seconds for an
+     * int, none for 'noCode'.
      *
      * @return RequestStack the stack the request is pushed on, for the caller to pop it
      */
-    private static function requestWithCodeProofOf(string $person, MockClock $clock): RequestStack
+    private static function requestWithCodeProofOf(string $person, MockClock $clock, bool|int|string $proof): RequestStack
     {
         $user = self::userOf($person);
         $twoStepLogin = new TwoStepLogin($user, 'never decrypted here', $clock->now()->modify('-2 hours'));
@@ -263,7 +270,10 @@ final class VoterMatrixTest extends KernelTestCase
         $request->setSession(new Session(new MockArraySessionStorage()));
         $requestStack = self::getContainer()->get('request_stack');
         $requestStack->push($request);
-        self::getContainer()->get(SessionConfirmations::class)->recordTwoStepConfirmation($user->id(), $clock->now()->modify('-30 minutes'));
+        if ('noCode' !== $proof) {
+            $proofAgeSeconds = \is_int($proof) ? $proof : 1800;
+            self::getContainer()->get(SessionConfirmations::class)->recordTwoStepConfirmation($user->id(), $clock->now()->modify('-'.$proofAgeSeconds.' seconds'));
+        }
 
         return $requestStack;
     }

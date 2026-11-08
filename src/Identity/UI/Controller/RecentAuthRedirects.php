@@ -101,7 +101,7 @@ final readonly class RecentAuthRedirects implements TwoStepProofPages
         return $this->toConfirm($this->returnPathOf(self::requestOf($request)))->getTargetUrl();
     }
 
-    public function twoStepSetupPathFor(mixed $request, string $notice): string
+    public function sendToTwoStepSetup(mixed $request, string $notice): string
     {
         $request = self::requestOf($request);
 

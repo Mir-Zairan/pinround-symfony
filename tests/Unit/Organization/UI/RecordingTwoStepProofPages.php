@@ -21,7 +21,7 @@ final class RecordingTwoStepProofPages implements TwoStepProofPages
         return '/confirm';
     }
 
-    public function twoStepSetupPathFor(mixed $request, string $notice): string
+    public function sendToTwoStepSetup(mixed $request, string $notice): string
     {
         $this->calls[] = ['setup', $notice];
 

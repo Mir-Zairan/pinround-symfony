@@ -138,7 +138,7 @@ final class RecentAuthRedirectsTest extends TestCase
         $session = new Session(new MockArraySessionStorage());
         $request->setSession($session);
 
-        self::assertSame('/me/security/two-step', $redirects->twoStepSetupPathFor($request, 'Admin pages need two-step login. Turn it on to continue.'));
+        self::assertSame('/me/security/two-step', $redirects->sendToTwoStepSetup($request, 'Admin pages need two-step login. Turn it on to continue.'));
 
         self::assertSame(['notice' => ['Admin pages need two-step login. Turn it on to continue.']], $session->getFlashBag()->peekAll());
         self::assertSame('/me/tokens', $redirects->takeAfterTwoStepSetup($request));

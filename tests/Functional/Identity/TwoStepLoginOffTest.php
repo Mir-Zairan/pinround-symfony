@@ -196,12 +196,19 @@ final class TwoStepLoginOffTest extends WebTestCase
         $csrfToken = (string) $page->filter('main form[action="'.self::ACTION.'"] input[name="_csrf_token"]')->attr('value');
         $this->client->submitForm(self::TURN_OFF, ['password' => self::PASSWORD, 'code' => self::codeOf($seed, $this->clock)]);
         self::assertResponseRedirects('/me/security', 302);
+        $firstNotice = $this->openSecurityPage()->filter('main [role="status"]');
+        self::assertSame(SecurityPageController::TWO_STEP_LOGIN_OFF, $firstNotice->text(), 'The first post left the notice, which this visit uses up.');
 
         // Five wrong passwords would use up the password limiter if this one took a try.
         for ($try = 1; $try <= 6; ++$try) {
             $this->client->request('POST', self::ACTION, ['password' => 'wrong password number '.$try, 'code' => '123456', '_csrf_token' => $csrfToken]);
             self::assertResponseRedirects('/me/security', 302);
             self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
+            if (1 === $try) {
+                $this->client->followRedirect();
+                self::assertResponseStatusCodeSame(200);
+                self::assertCount(0, $this->client->getCrawler()->filter('main [role="status"]'), 'A repeated post adds no second notice.');
+            }
         }
         // An expired form posted after it went off still says why nothing happened.
         $this->client->request('POST', self::ACTION, ['password' => self::PASSWORD, 'code' => '123456', '_csrf_token' => 'expired']);

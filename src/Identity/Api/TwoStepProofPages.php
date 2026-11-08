@@ -31,5 +31,5 @@ interface TwoStepProofPages
      *
      * @throws \InvalidArgumentException when $request is no HttpFoundation Request
      */
-    public function twoStepSetupPathFor(mixed $request, string $notice): string;
+    public function sendToTwoStepSetup(mixed $request, string $notice): string;
 }

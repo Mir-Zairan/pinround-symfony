@@ -15,9 +15,10 @@ use App\Organization\Api\TeamPermission;
  * subject:   an organization (Acme Foods, Beta Bakery) or a team (Shop, Mobile, Support of Acme Foods; Checkout of Beta
  *            Bakery).
  * expected:  granted or denied.
- * twoStepProof: optional, true to decide for a person whose two-step login is on and who typed a code in this session
- *            30 minutes ago, within the 1 hour admin pages allow; without it the session holds no code proof. Every
- *            person's token is a password session.
+ * twoStepProof: optional; decides for a person whose two-step login is on. true: they typed a code in this session 30
+ *            minutes ago, within the 1 hour admin pages allow; an int: the code is that many seconds old; 'noCode': no
+ *            code in this session. Without the option the person has no two-step login and no session. Every person's
+ *            token is a password session.
  *
  * A row proves a team-role rule only when its actor has no org role that grants the same: Lena and Ben are Admins and
  * Raj is a Manager, so their TEAM_VIEW rows cite the org-role text; Noor (Lead) and Mia (Member, Viewer) carry the
@@ -72,6 +73,11 @@ return [
     ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Noor', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AREA, 'actor' => 'Lena', 'subject' => 'Beta Bakery', 'expected' => 'denied', 'twoStepProof' => true],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AREA, 'actor' => 'Ben', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => 3600],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => 3601],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => 3601],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => 'noCode'],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => 'noCode'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AREA, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AREA, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AREA, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'denied'],

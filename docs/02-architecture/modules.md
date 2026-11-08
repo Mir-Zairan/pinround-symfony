@@ -102,7 +102,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Api:**
   - `CurrentUser::id(): ?UserId` and `CurrentUser::idOf(mixed $tokenUser): ?UserId` (built in P01.T3: the logged-in user of the request, or of the token a voter is given; null when nobody is; `Infrastructure\Security\SymfonyCurrentUser`)
   - `LoginAssurance::isPasswordSession(mixed $token): bool`, `LoginAssurance::isTwoStepLoginOn(mixed $token): bool` and `LoginAssurance::hasConfirmedTwoStepLoginWithin(mixed $token, int $seconds): bool` (built in P01.T4 and P01.T6 for `AdminAreaVoter` and `SendAdminToTwoStepProof`; true only for the form login's `UsernamePasswordToken` of an Identity user, any other token kind is refused; the last needs two-step login on and a code typed in this session within `$seconds` and not before it was last turned on, the rule `RecentAuth` applies to `RequiresRecentAuth` too; `Infrastructure\Security\SymfonyLoginAssurance`)
-  - `TwoStepProofPages::confirmItsYouPathFor(mixed $request): string` and `::twoStepSetupPathFor(mixed $request, string $notice): string` (built in P01.T6 for `SendAdminToTwoStepProof`: the paths of "Confirm it's you" and of the setup page, each with the way back; `UI\Controller\RecentAuthRedirects`)
+  - `TwoStepProofPages::confirmItsYouPathFor(mixed $request): string` and `::sendToTwoStepSetup(mixed $request, string $notice): string` (built in P01.T6 for `SendAdminToTwoStepProof`: the paths of "Confirm it's you" and of the setup page, each with the way back; `UI\Controller\RecentAuthRedirects`)
   - `UserQueries::byId(UserId): ?UserView`
   - `UserQueries::byIds(list<UserId>): array<string, UserView>`
   - `UserQueries::byEmail(string): ?UserView`

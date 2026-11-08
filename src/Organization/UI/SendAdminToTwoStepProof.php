@@ -54,7 +54,7 @@ final readonly class SendAdminToTwoStepProof
 
         $request = $event->getRequest();
         if (!$this->loginAssurance->isTwoStepLoginOn($token)) {
-            $event->setResponse(new RedirectResponse($this->twoStepProofPages->twoStepSetupPathFor($request, self::ADMIN_PAGES_NEED_TWO_STEP_LOGIN)));
+            $event->setResponse(new RedirectResponse($this->twoStepProofPages->sendToTwoStepSetup($request, self::ADMIN_PAGES_NEED_TWO_STEP_LOGIN)));
 
             return;
         }
