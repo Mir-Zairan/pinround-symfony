@@ -203,6 +203,22 @@ final class MainMenuTest extends TestCase
     }
 
     #[Test]
+    public function theAdminHomeUrlIsNullWhileTheAdminRouteDoesNotExist(): void
+    {
+        self::assertNull($this->menuFor(new Roles(true, false, [], [], []))->adminHomeUrl());
+    }
+
+    #[Test]
+    public function theAdminHomeUrlIsTheSameAsTheAdminItemsOnceTheRouteExists(): void
+    {
+        $this->routes->add(MainMenu::ADMIN_ROUTE, new Route('/admin/{tab}'));
+        $menu = $this->menuFor(new Roles(true, false, [], [], []));
+
+        self::assertSame('/admin/people', $menu->adminHomeUrl());
+        self::assertSame($menu->items()[1]->url(), $menu->adminHomeUrl());
+    }
+
+    #[Test]
     public function withoutAnActorTheMenuIsHomeAloneAndThereIsNoReportButton(): void
     {
         $menu = $this->menuWithoutActor();

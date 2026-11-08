@@ -68,8 +68,8 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
     }
 
     /**
-     * The IANA zone the person saved on their profile, for printing dates through `app.user.timeZone`; null for a
-     * session saved before it was stored, which prints in the app zone.
+     * The IANA zone the person saved on their profile, for printing dates through `app.user.timeZone`; null only on a
+     * user read back from a session saved before it was stored, until refreshUser reloads it on the same request.
      */
     public function timeZone(): ?string
     {

@@ -152,7 +152,7 @@ final class HomePageTest extends WebTestCase
     }
 
     #[Test]
-    public function theDateLineIsTodayInTheAppTimeZone(): void
+    public function theDateLineComesFromTheInjectedClock(): void
     {
         $this->client->disableReboot();
         // A fixed day well before today, so only the injected clock can give this date.
