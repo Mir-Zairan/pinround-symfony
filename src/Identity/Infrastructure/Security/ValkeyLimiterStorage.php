@@ -14,9 +14,11 @@ use Symfony\Component\RateLimiter\Policy\Window;
 use Symfony\Component\RateLimiter\Storage\StorageInterface;
 
 /**
- * Keeps the counters of the login, password reset and password change (password_change_per_user) limiters on the state
- * Valkey, which never evicts (ADR-0010), and fails closed: a read or write that does not reach Valkey throws, so the
- * login, reset or password change request fails instead of running unthrottled. Not a cache pool on purpose: a cache adapter turns a failed read into a miss, and a peek (which never writes) would then let every try
+ * Keeps the counters of the login, password reset, password change (password_change_per_user) and two-step login code
+ * (two_step_code_per_user) limiters on the state Valkey, which never evicts (ADR-0010), and fails closed: a read or
+ * write that does not reach Valkey throws, so the login, reset, password change or code request fails instead of
+ * running unthrottled. Not a cache pool on purpose: a cache adapter turns a failed read into a miss, and a peek (which
+ * never writes) would then let every try
  * through with a fresh window.
  */
 final readonly class ValkeyLimiterStorage implements StorageInterface

@@ -307,15 +307,6 @@ final class TwoStepLoginSetupTest extends WebTestCase
         return $row;
     }
 
-    private static function sessionAttribute(KernelBrowser $client, string $key): mixed
-    {
-        $data = unserialize((string) file_get_contents(self::sessionFileOf($client)));
-        self::assertIsArray($data);
-        self::assertIsArray($data['_sf2_attributes'] ?? null);
-
-        return $data['_sf2_attributes'][$key] ?? null;
-    }
-
     private static function manualKeyOn(Crawler $page): string
     {
         return $page->filter('main .two-step__key')->text();

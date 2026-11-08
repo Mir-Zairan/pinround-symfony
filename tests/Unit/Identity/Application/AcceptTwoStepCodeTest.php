@@ -70,9 +70,11 @@ final class AcceptTwoStepCodeTest extends TestCase
     public function aWrongCodeIsRefusedAndNothingIsSpent(): void
     {
         $twoStepLogins = $this->turnedOn();
-        $now = new \DateTimeImmutable('2027-03-15 10:01:15 UTC');
-        // The code of two minutes earlier: right seed, outside the window of one step either side.
-        $staleCode = self::codeAt(self::SEED, $now->modify('-2 minutes'));
+        // A code of two minutes after the confirmation, so its step is later than the one used and replay cannot be
+        // what refuses it; typed eight minutes later, it is outside the window of one step either side.
+        $staleCodeAt = self::confirmedAt()->modify('+2 minutes');
+        $staleCode = self::codeAt(self::SEED, $staleCodeAt);
+        $now = self::confirmedAt()->modify('+10 minutes');
         self::assertNotSame($staleCode, self::codeAt(self::SEED, $now));
 
         foreach ([$staleCode, '12345', '1234567', 'abcdef', '', 'q7m2q-x9p4t', 'k7m2q-x9p4'] as $typedCode) {
@@ -83,15 +85,16 @@ final class AcceptTwoStepCodeTest extends TestCase
         self::assertSame(intdiv(self::confirmedAt()->getTimestamp(), 30), $twoStepLogin?->lastUsedStep());
         self::assertSame(self::hashesOf(self::RECOVERY_CODES), $twoStepLogin->recoveryCodeHashes());
         self::assertCount(1, $twoStepLogins->saved);
+        self::assertTrue($this->accept($twoStepLogins, $staleCode, $staleCodeAt), 'the stale code was not a code of the seed');
     }
 
     #[Test]
     public function onlyInputInTheShapeOfARecoveryCodeIsCheckedAgainstTheHashes(): void
     {
         $twoStepLogins = $this->turnedOn();
-        $now = new \DateTimeImmutable('2027-03-15 10:01:15 UTC');
+        $now = self::confirmedAt()->modify('+10 minutes');
 
-        foreach ([self::codeAt(self::SEED, $now->modify('-2 minutes')), '12345', 'abcdef', 'k7m2q-x9p4', 'k7m2q-x9p4t1', 'k7m2q_x9p4t', ''] as $typedCode) {
+        foreach ([self::codeAt(self::SEED, self::confirmedAt()->modify('+2 minutes')), '12345', 'abcdef', 'k7m2q-x9p4', 'k7m2q-x9p4t1', 'k7m2q_x9p4t', ''] as $typedCode) {
             $this->accept($twoStepLogins, $typedCode, $now);
         }
         self::assertSame([], $this->checkedRecoveryCodes);

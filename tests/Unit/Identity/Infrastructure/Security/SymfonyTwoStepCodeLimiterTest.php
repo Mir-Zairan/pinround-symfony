@@ -48,13 +48,12 @@ final class SymfonyTwoStepCodeLimiterTest extends TestCase
     }
 
     #[Test]
-    public function theCounterIsKeyedByAnHmacOfTheUserIdApartFromThePasswordChangeOne(): void
+    public function theCounterIsKeyedByAnHmacOfTheUserIdNotTheIdItself(): void
     {
         $this->limiter->consume(new UserId(self::OMAR));
 
-        $keyHasher = new ThrottleKeyHasher('the-app-secret');
-        self::assertNotNull($this->storage->fetch('two_step_code_per_user-'.$keyHasher->hexOf('two-step-code-'.self::OMAR)));
-        self::assertNotSame($keyHasher->hexOf('two-step-code-'.self::OMAR), $keyHasher->hexOf('password-change-'.self::OMAR));
+        $expectedKey = 'two_step_code_per_user-'.new ThrottleKeyHasher('the-app-secret')->hexOf('two-step-code-'.self::OMAR);
+        self::assertNotNull($this->storage->fetch($expectedKey));
     }
 
     private function minutesToWaitAfter(string $userId): int
