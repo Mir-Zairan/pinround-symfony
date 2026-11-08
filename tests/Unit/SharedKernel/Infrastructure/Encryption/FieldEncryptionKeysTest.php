@@ -71,7 +71,7 @@ final class FieldEncryptionKeysTest extends TestCase
     public function itRefusesABrokenConfigurationWithAClearMessage(string $keyList, string $currentKeyId, string $message): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage($message);
+        $this->expectExceptionMessageIsOrContains($message);
 
         FieldEncryptionKeys::fromConfiguration($keyList, $currentKeyId);
     }

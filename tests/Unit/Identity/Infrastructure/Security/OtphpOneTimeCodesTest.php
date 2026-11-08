@@ -88,6 +88,7 @@ final class OtphpOneTimeCodesTest extends TestCase
     }
 
     #[Test]
+    #[\PHPUnit\Framework\Attributes\DoesNotPerformAssertions]
     public function anEmptySeedOrAccountNameIsRefused(): void
     {
         foreach ([
@@ -99,7 +100,6 @@ final class OtphpOneTimeCodesTest extends TestCase
                 $call();
                 self::fail('Accepted: '.$case);
             } catch (\InvalidArgumentException) {
-                $this->addToAssertionCount(1);
             }
         }
     }

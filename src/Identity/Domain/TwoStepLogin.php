@@ -13,21 +13,21 @@ use App\SharedKernel\Domain\UserId;
  */
 final class TwoStepLogin
 {
-    private string $encryptedSeed;
     private ?\DateTimeImmutable $confirmedAt = null;
     /** @var list<string> */
     private array $recoveryCodeHashes = [];
     // The time step of the last code taken, so the same code (or an older one) never counts twice.
     private ?int $lastUsedStep = null;
-    private \DateTimeImmutable $createdAt;
 
     /**
      * @param string $encryptedSeed the seed as FieldEncryption stored it, never the seed itself
      */
-    public function __construct(private readonly User $user, #[\SensitiveParameter] string $encryptedSeed, \DateTimeImmutable $now)
-    {
-        $this->encryptedSeed = $encryptedSeed;
-        $this->createdAt = $now;
+    public function __construct(
+        private readonly User $user,
+        #[\SensitiveParameter]
+        private string $encryptedSeed,
+        private \DateTimeImmutable $createdAt
+    ) {
     }
 
     public function userId(): UserId

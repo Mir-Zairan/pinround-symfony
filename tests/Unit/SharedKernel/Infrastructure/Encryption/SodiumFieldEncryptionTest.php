@@ -85,7 +85,7 @@ final class SodiumFieldEncryptionTest extends TestCase
         $stored = new SodiumFieldEncryption('a:'.self::KEY_A, 'a')->encrypt(self::SECRET);
 
         $this->expectException(UndecryptableField::class);
-        $this->expectExceptionMessage('No field encryption key has the id "a".');
+        $this->expectExceptionMessageIsOrContains('No field encryption key has the id "a".');
 
         new SodiumFieldEncryption('b:'.self::KEY_B, 'b')->decrypt($stored);
     }
@@ -97,7 +97,7 @@ final class SodiumFieldEncryptionTest extends TestCase
         $stored = "\x03\x00\xff\n".str_repeat("\x00", \SODIUM_CRYPTO_SECRETBOX_NONCEBYTES + \SODIUM_CRYPTO_SECRETBOX_MACBYTES);
 
         $this->expectException(UndecryptableField::class);
-        $this->expectExceptionMessage('No field encryption key has the stored key id, which is not a valid id.');
+        $this->expectExceptionMessageIsOrContains('No field encryption key has the stored key id, which is not a valid id.');
 
         $encryption->decrypt($stored);
     }
@@ -108,7 +108,7 @@ final class SodiumFieldEncryptionTest extends TestCase
         $storedUnderB = new SodiumFieldEncryption('a:'.self::KEY_B, 'a')->encrypt(self::SECRET);
 
         $this->expectException(UndecryptableField::class);
-        $this->expectExceptionMessage('The field encrypted with key "a" is altered or was written with another key.');
+        $this->expectExceptionMessageIsOrContains('The field encrypted with key "a" is altered or was written with another key.');
 
         new SodiumFieldEncryption('a:'.self::KEY_A, 'a')->decrypt($storedUnderB);
     }
@@ -145,7 +145,7 @@ final class SodiumFieldEncryptionTest extends TestCase
         $stored = $encryption->encrypt(self::SECRET);
 
         $this->expectException(UndecryptableField::class);
-        $this->expectExceptionMessage($message);
+        $this->expectExceptionMessageIsOrContains($message);
 
         $encryption->decrypt($alter($stored));
     }
@@ -156,7 +156,7 @@ final class SodiumFieldEncryptionTest extends TestCase
         $encryption = new SodiumFieldEncryption('', '');
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('FIELD_ENCRYPTION_KEYS is empty');
+        $this->expectExceptionMessageIsOrContains('FIELD_ENCRYPTION_KEYS is empty');
 
         $encryption->encrypt(self::SECRET);
     }
@@ -167,7 +167,7 @@ final class SodiumFieldEncryptionTest extends TestCase
         $stored = new SodiumFieldEncryption('a:'.self::KEY_A, 'a')->encrypt(self::SECRET);
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('FIELD_ENCRYPTION_KEYS is empty');
+        $this->expectExceptionMessageIsOrContains('FIELD_ENCRYPTION_KEYS is empty');
 
         new SodiumFieldEncryption('', '')->decrypt($stored);
     }
