@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Organization\UI\Voter;
 
 use App\Organization\Api\CurrentActor;
-use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPermission;
+use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\UI\Voter\DenyByDefaultVoter;
@@ -30,7 +30,7 @@ final class TeamVoter extends DenyByDefaultVoter implements ResetInterface
     /** @var array<string, list<TeamId>> by organization id */
     private array $teamsOfThisRequest = [];
 
-    public function __construct(private readonly CurrentActor $currentActor, private readonly MembershipQueries $membershipQueries)
+    public function __construct(private readonly CurrentActor $currentActor, private readonly TeamQueries $teamQueries)
     {
     }
 
@@ -67,7 +67,7 @@ final class TeamVoter extends DenyByDefaultVoter implements ResetInterface
 
     private function isTeamOf(OrganizationId $organizationId, TeamId $teamId): bool
     {
-        $teamIds = $this->teamsOfThisRequest[$organizationId->toString()] ??= $this->membershipQueries->teamsOf($organizationId);
+        $teamIds = $this->teamsOfThisRequest[$organizationId->toString()] ??= $this->teamQueries->teamsOf($organizationId);
 
         return array_any($teamIds, static fn (TeamId $candidate): bool => $candidate->equals($teamId));
     }

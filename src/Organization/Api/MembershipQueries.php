@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Organization\Api;
 
 use App\SharedKernel\Domain\OrganizationId;
-use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 
 /**
@@ -28,12 +27,4 @@ interface MembershipQueries
      * @throws \LogicException when a stored role is not one this module knows
      */
     public function rolesOf(UserId $userId, OrganizationId $organizationId): Roles;
-
-    /**
-     * Read under row-level security, so it needs an open transaction whose tenant is $organizationId; under any other
-     * tenant, or none, it is empty.
-     *
-     * @return list<TeamId> every team of the organization, in id order
-     */
-    public function teamsOf(OrganizationId $organizationId): array;
 }

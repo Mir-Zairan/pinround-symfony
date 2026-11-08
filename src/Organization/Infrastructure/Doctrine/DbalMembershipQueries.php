@@ -68,14 +68,6 @@ final readonly class DbalMembershipQueries implements MembershipQueries
         );
     }
 
-    public function teamsOf(OrganizationId $organizationId): array
-    {
-        return array_map(
-            self::teamId(...),
-            $this->connection->fetchFirstColumn('SELECT id FROM org_team WHERE organization_id = ? ORDER BY id', [$organizationId->toString()]),
-        );
-    }
-
     /**
      * @return list<string>
      */

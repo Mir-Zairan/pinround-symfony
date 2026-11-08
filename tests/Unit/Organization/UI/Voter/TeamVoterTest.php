@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Organization\UI\Voter;
 
 use App\Organization\Api\ActorContext;
-use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\Roles;
 use App\Organization\Api\TeamPermission;
+use App\Organization\Api\TeamQueries;
 use App\Organization\UI\Voter\TeamVoter;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -39,11 +39,11 @@ final class TeamVoterTest extends TestCase
     private const string CHECKOUT = '0197a3c0-0000-7000-8000-0000000000d3';
     private const string SUPPORT = '0197a3c0-0000-7000-8000-0000000000d4';
 
-    private MembershipQueries&\Countable $membershipQueries;
+    private TeamQueries&\Countable $teamQueries;
 
     protected function setUp(): void
     {
-        $this->membershipQueries = new class([self::ACME_FOODS => [self::SHOP, self::MOBILE, self::SUPPORT], self::BETA_BAKERY => [self::CHECKOUT]]) implements MembershipQueries, \Countable {
+        $this->teamQueries = new class([self::ACME_FOODS => [self::SHOP, self::MOBILE, self::SUPPORT], self::BETA_BAKERY => [self::CHECKOUT]]) implements TeamQueries, \Countable {
             /** @var list<string> the organization id of each teamsOf call */
             private array $teamsOfCalls = [];
 
@@ -54,14 +54,9 @@ final class TeamVoterTest extends TestCase
             {
             }
 
-            public function organizationsOf(UserId $userId): array
+            public function summariesOf(OrganizationId $organizationId, array $teamIds): array
             {
                 throw new \LogicException('Only teamsOf is expected.');
-            }
-
-            public function rolesOf(UserId $userId, OrganizationId $organizationId): Roles
-            {
-                throw new \LogicException('Only teamsOf is expected: the roles come with the actor.');
             }
 
             public function teamsOf(OrganizationId $organizationId): array
@@ -90,7 +85,7 @@ final class TeamVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::MIA, TeamPermission::LEAD, self::SHOP));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::MIA, TeamPermission::VIEW, self::MOBILE));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::MIA, TeamPermission::LEAD, self::MOBILE));
-        self::assertCount(0, $this->membershipQueries);
+        self::assertCount(0, $this->teamQueries);
     }
 
     #[Test]
@@ -120,7 +115,7 @@ final class TeamVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::NOOR, TeamPermission::LEAD, self::SUPPORT));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::NOOR, TeamPermission::VIEW, self::SHOP));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::NOOR, TeamPermission::LEAD, self::SHOP));
-        self::assertCount(0, $this->membershipQueries);
+        self::assertCount(0, $this->teamQueries);
     }
 
     #[Test]
@@ -131,7 +126,7 @@ final class TeamVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::MIA, TeamPermission::VIEW, self::SUPPORT));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::MIA, TeamPermission::LEAD, self::SUPPORT));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::MIA, TeamPermission::VIEW, self::MOBILE));
-        self::assertCount(0, $this->membershipQueries);
+        self::assertCount(0, $this->teamQueries);
     }
 
     #[Test]
@@ -172,12 +167,12 @@ final class TeamVoterTest extends TestCase
         $this->decide($voter, self::SARA, TeamPermission::VIEW, self::SHOP);
         $this->decide($voter, self::RAJ, TeamPermission::VIEW, self::MOBILE);
         $this->decide($voter, self::SARA, TeamPermission::VIEW, self::CHECKOUT);
-        self::assertCount(1, $this->membershipQueries);
+        self::assertCount(1, $this->teamQueries);
 
         $voter->reset();
         $this->decide($voter, self::SARA, TeamPermission::VIEW, self::SHOP);
 
-        self::assertCount(2, $this->membershipQueries);
+        self::assertCount(2, $this->teamQueries);
     }
 
     #[Test]
@@ -224,6 +219,6 @@ final class TeamVoterTest extends TestCase
             $actors[$userId] = new ActorContext(new UserId($userId), new OrganizationId(self::ACME_FOODS), $roles);
         }
 
-        return new TeamVoter(new FixedCurrentActor($actors), $this->membershipQueries);
+        return new TeamVoter(new FixedCurrentActor($actors), $this->teamQueries);
     }
 }

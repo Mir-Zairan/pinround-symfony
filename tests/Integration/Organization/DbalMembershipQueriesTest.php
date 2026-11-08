@@ -17,7 +17,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * DbalMembershipQueries as pinround_app on committed org_ rows: organizationsOf with no tenant set, as before a
- * request has one; rolesOf and teamsOf in a transaction under a tenant, as inside a request.
+ * request has one; rolesOf in a transaction under a tenant, as inside a request.
  */
 final class DbalMembershipQueriesTest extends KernelTestCase
 {
@@ -130,35 +130,19 @@ final class DbalMembershipQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function teamsOfGivesExactlyTheOrganizationsTeamsInIdOrder(): void
-    {
-        self::assertSame(
-            [self::ACME_TEAM_B, self::ACME_TEAM_A],
-            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => self::teamIdStrings($this->queries()->teamsOf(new OrganizationId(self::ACME_FOODS)))),
-        );
-        self::assertSame(
-            [self::BETA_TEAM],
-            $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => self::teamIdStrings($this->queries()->teamsOf(new OrganizationId(self::BETA_BAKERY)))),
-        );
-    }
-
-    #[Test]
-    public function underAnotherTenantRolesAndTeamsOfAnOrganizationAreInvisible(): void
+    public function underAnotherTenantRolesOfAnOrganizationAreInvisible(): void
     {
         $lenaInBeta = fn (): array => self::describe($this->queries()->rolesOf(new UserId(self::LENA), new OrganizationId(self::BETA_BAKERY)));
-        $betaTeams = fn (): array => self::teamIdStrings($this->queries()->teamsOf(new OrganizationId(self::BETA_BAKERY)));
 
-        // Under Beta Bakery itself the rows are there, so the empty answers below come from row-level security.
+        // Under Beta Bakery itself the rows are there, so the empty answer below comes from row-level security.
         self::assertSame(['isAdmin' => true, 'isManager' => false, 'teamIds' => [self::BETA_TEAM], 'leadTeamIds' => [self::BETA_TEAM], 'memberTeamIds' => [], 'viewerTeamIds' => []], $this->transactions()->rolledBackAs(self::BETA_BAKERY, $lenaInBeta));
         self::assertSame(self::describe(Roles::none()), $this->transactions()->rolledBackAs(self::ACME_FOODS, $lenaInBeta));
-        self::assertSame([], $this->transactions()->rolledBackAs(self::ACME_FOODS, $betaTeams));
     }
 
     #[Test]
-    public function withNoTenantRolesAndTeamsAreInvisible(): void
+    public function withNoTenantRolesAreInvisible(): void
     {
         self::assertSame(self::describe(Roles::none()), self::describe($this->queries()->rolesOf(new UserId(self::SARA), new OrganizationId(self::ACME_FOODS))));
-        self::assertSame([], $this->queries()->teamsOf(new OrganizationId(self::ACME_FOODS)));
     }
 
     #[Test]
