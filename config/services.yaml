@@ -30,6 +30,9 @@ parameters:
         - health_live
         - health_ready
         - web_component_gallery
+    # Hackathon exception of ADR-0012, until P01.T6: AdminAreaVoter skips the two-step login check while it is true.
+    # The Kernel reads this same parameter and refuses to boot with it true outside dev and test (KernelTest).
+    app.hackathon_skip_admin_mfa: '%env(bool:default::APP_HACKATHON_SKIP_ADMIN_MFA)%'
 
 services:
     # default configuration for services in *this* file

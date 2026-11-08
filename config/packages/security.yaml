@@ -39,6 +39,12 @@ security:
                 target: identity_login
                 enable_csrf: true
 
+    # Deny by default (ADR-0013): one voter's deny outweighs every grant, and an attribute no voter decides is denied.
+    # VoterMatrixTest pins both.
+    access_decision_manager:
+        strategy: unanimous
+        allow_if_all_abstain: false
+
     # Deny by default (ADR-0013): only the first matching rule applies, and the last one asks for a login everywhere.
     # Routes match by name, so the dev and test routes match nothing in prod, where they do not exist.
     # Every route under /me (identity_security, identity_security_password, identity_security_log_out_everywhere,

@@ -6,14 +6,14 @@ namespace App\Organization\UI\Voter;
 
 use App\Identity\Api\CurrentUser;
 use App\Organization\Api\MembershipQueries;
-use App\Organization\Application\OrganizationPermission;
+use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Domain\OrganizationId;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authorization\Voter\Vote;
 use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 
 /**
- * Decides the OrganizationPermission attributes (ADR-0013): any logged-in user may open the picker of their own
+ * Decides OrganizationPermission CHOOSE and ENTER (ADR-0013): any logged-in user may open the picker of their own
  * organizations (CHOOSE), and only a member may enter an organization (ENTER). It decides for the user of the token it
  * is given (CurrentUser::idOf), not for the request's. Membership comes from the resolver,
  * never from the request, so an id sent in a form proves nothing by itself.

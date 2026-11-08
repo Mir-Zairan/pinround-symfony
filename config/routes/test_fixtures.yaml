@@ -50,6 +50,16 @@ when@test:
         controller: App\Tests\Fixtures\Http\WorkerResetProbeController::enterOrganizationThenFail
         methods: [POST]
 
+    test_current_actor_report:
+        path: /_test/actor
+        controller: App\Tests\Fixtures\Http\CurrentActorProbeController::reportActor
+        methods: [GET]
+
+    test_admin_area:
+        path: /_test/admin-area
+        controller: App\Tests\Fixtures\Http\AdminAreaProbeController::openAdminArea
+        methods: [GET]
+
     test_log_leak:
         path: /_test/log-leak/{organizationId}
         controller: App\Tests\Fixtures\Http\LogLeakProbeController::logTheSummaryThenFail

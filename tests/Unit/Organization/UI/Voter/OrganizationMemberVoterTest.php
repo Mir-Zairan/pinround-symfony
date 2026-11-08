@@ -6,7 +6,8 @@ namespace App\Tests\Unit\Organization\UI\Voter;
 
 use App\Identity\Api\CurrentUser;
 use App\Organization\Api\MembershipQueries;
-use App\Organization\Application\OrganizationPermission;
+use App\Organization\Api\OrganizationPermission;
+use App\Organization\Api\Roles;
 use App\Organization\UI\Voter\OrganizationMemberVoter;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -106,6 +107,16 @@ final class OrganizationMemberVoterTest extends TestCase
                     static fn (string $organizationId): OrganizationId => new OrganizationId($organizationId),
                     $this->organizationIdsByUser[$userId->toString()] ?? [],
                 );
+            }
+
+            public function rolesOf(UserId $userId, OrganizationId $organizationId): Roles
+            {
+                throw new \LogicException('The voter decides on memberships only.');
+            }
+
+            public function teamsOf(OrganizationId $organizationId): array
+            {
+                throw new \LogicException('The voter decides on memberships only.');
             }
         };
 
