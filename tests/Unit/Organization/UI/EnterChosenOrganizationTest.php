@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Organization\UI;
 
 use App\Identity\Api\CurrentUser;
 use App\Organization\Api\MembershipQueries;
+use App\Organization\Api\Roles;
 use App\Organization\UI\EnterChosenOrganization;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchGuard;
@@ -126,6 +127,16 @@ final class EnterChosenOrganizationTest extends TestCase
             public function organizationsOf(UserId $userId): array
             {
                 return array_map(static fn (string $organizationId): OrganizationId => new OrganizationId($organizationId), $this->organizationIds);
+            }
+
+            public function rolesOf(UserId $userId, OrganizationId $organizationId): Roles
+            {
+                throw new \LogicException('The listener checks memberships only.');
+            }
+
+            public function teamsOf(OrganizationId $organizationId): array
+            {
+                throw new \LogicException('The listener checks memberships only.');
             }
         };
         $urlGenerator = new class implements UrlGeneratorInterface {

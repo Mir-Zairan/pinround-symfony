@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Organization\Api;
 
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 
 /**
@@ -18,4 +19,21 @@ interface MembershipQueries
      * @return list<OrganizationId> in id order; empty when the user is in no organization
      */
     public function organizationsOf(UserId $userId): array;
+
+    /**
+     * Read under row-level security on every call, uncached, so it needs an open transaction whose tenant is
+     * $organizationId; under any other tenant, or none, it finds nothing. A user with no membership there has no
+     * roles, whatever team rows remain. The team ids come in id order.
+     *
+     * @throws \LogicException when a stored role is not one this module knows
+     */
+    public function rolesOf(UserId $userId, OrganizationId $organizationId): Roles;
+
+    /**
+     * Read under row-level security, so it needs an open transaction whose tenant is $organizationId; under any other
+     * tenant, or none, it is empty.
+     *
+     * @return list<TeamId> every team of the organization, in id order
+     */
+    public function teamsOf(OrganizationId $organizationId): array;
 }
