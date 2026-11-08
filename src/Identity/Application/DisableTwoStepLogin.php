@@ -29,8 +29,6 @@ final readonly class DisableTwoStepLogin
      * at, so the code stays unspent and takes no try of the code limiter. Both right: removes both session times, so
      * admin pages and actions marked RequiresRecentAuth ask again.
      *
-     * @return bool true when it is now off; false when the password or the code was wrong, or it was off already
-     *
      * @throws TooManyCurrentPasswordTries when this user's password was checked too often
      * @throws TooManyTwoStepCodeTries     when codes were typed for this user too often
      * @throws UndecryptableField          when the stored seed cannot be read back
@@ -43,18 +41,18 @@ final readonly class DisableTwoStepLogin
         #[\SensitiveParameter]
         string $typedCode,
         \DateTimeImmutable $now,
-    ): bool {
+    ): TwoStepLoginOffOutcome {
         $twoStepLogin = $this->twoStepLogins->byUserIdForChange($userId);
         if (null === $twoStepLogin || !$twoStepLogin->isOn()) {
-            return false;
+            return TwoStepLoginOffOutcome::AlreadyOff;
         }
         if (!$this->currentPasswordCheck->matches($userId, $password) || !($this->acceptTwoStepCode)($userId, $typedCode, $now)) {
-            return false;
+            return TwoStepLoginOffOutcome::WrongPasswordOrCode;
         }
 
         $this->twoStepLogins->remove($twoStepLogin);
         $this->sessionConfirmations->forget();
 
-        return true;
+        return TwoStepLoginOffOutcome::TurnedOff;
     }
 }

@@ -1,4 +1,7 @@
+import { expect, type Page } from '@playwright/test';
 import { createHmac } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export const LENA_EMAIL = 'lena@acme-foods.example';
@@ -19,13 +22,90 @@ export function demoPassword(): string {
   return password;
 }
 
-// Mia is the one demo person with two-step login on: login-code.spec.ts turns it on at its first run. Her key sits in the
-// git-ignored tests/e2e/.auth/, not test-results/, which Playwright empties at every run, so a person can still log in
-// as her in dev.
+// Each spec that needs two-step login on has a demo person of its own, so specs running at the same time never change
+// each other's state: login-code.spec.ts has Mia, confirm-its-you.spec.ts has Raj. Each turns it on in beforeAll and
+// off in afterAll, so every run starts from the demo seed's state, with it off.
 export const MIA_EMAIL = 'mia@acme-foods.example';
-export const MIA_TWO_STEP_KEY_FILE = path.join(__dirname, '.auth', 'mia-two-step-key.txt');
+export const RAJ_EMAIL = 'raj@acme-foods.example';
 
 export const TWO_STEP_CODE_STEP_MS = 30_000;
+
+/** The key and the recovery codes not typed yet of a person whose two-step login a spec turned on. */
+interface TwoStepLoginCodes {
+  key: string;
+  recoveryCodes: string[];
+}
+
+/**
+ * Where a spec keeps the codes while it has two-step login on: the git-ignored tests/e2e/.auth/, not test-results/,
+ * which Playwright empties at every run, so a later run can still log in and turn it off after a crash.
+ */
+export function twoStepCodesFile(email: string): string {
+  return path.join(__dirname, '.auth', `${email.split('@')[0]}-two-step.json`);
+}
+
+/**
+ * Takes one recovery code and saves the others, so no code is typed twice. A recovery code needs no wait for a new
+ * 30-second step, and it takes one of the person's 5 code tries in 15 minutes like any code.
+ */
+async function takeRecoveryCode(email: string): Promise<string> {
+  const file = twoStepCodesFile(email);
+  if (!existsSync(file)) {
+    throw new Error(`${email} has two-step login on, but ${file} is missing: turn it off by hand or rebuild the dev database.`);
+  }
+  const codes = JSON.parse(await readFile(file, 'utf8')) as TwoStepLoginCodes;
+  const recoveryCode = codes.recoveryCodes.shift();
+  if (undefined === recoveryCode) {
+    throw new Error(`${file} has no recovery code left.`);
+  }
+  await writeFile(file, JSON.stringify(codes));
+  return recoveryCode;
+}
+
+/** On a logged-in page: turns two-step login off on /me/security with the password and a recovery code. */
+export async function turnOffTwoStepLogin(page: Page, email: string): Promise<void> {
+  await page.goto('/me/security');
+  await page.getByLabel('Password', { exact: true }).fill(demoPassword());
+  await page.getByLabel('Code from your app').fill(await takeRecoveryCode(email));
+  await page.getByRole('button', { name: 'Turn off two-step login' }).click();
+  await expect(page.getByText('Two-step login is off.')).toBeVisible();
+  await rm(twoStepCodesFile(email), { force: true });
+}
+
+/**
+ * Logs the person in with the password and turns two-step login on, keeping the key and the recovery codes in
+ * twoStepCodesFile. The page stays logged in, in a session that never typed a code. When an earlier run stopped with it
+ * on, this logs in with a saved recovery code and turns it off first.
+ */
+export async function logInAndTurnOnTwoStepLogin(page: Page, email: string, firstName: string): Promise<void> {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Password').fill(demoPassword());
+  await page.getByRole('button', { name: 'Log in' }).click();
+  const codePageHeading = page.getByRole('heading', { name: 'Type your code', level: 1 });
+  const avatar = page.getByRole('button', { name: firstName, exact: true });
+  await expect(codePageHeading.or(avatar)).toBeVisible();
+  if (await codePageHeading.isVisible()) {
+    await page.getByLabel('Code from your app').fill(await takeRecoveryCode(email));
+    await page.getByRole('button', { name: 'Log in' }).click();
+    await expect(avatar).toBeVisible();
+    await turnOffTwoStepLogin(page, email);
+  }
+
+  await page.goto('/me/security/two-step');
+  const setUp = page.getByRole('button', { name: 'Set up two-step login' });
+  const getNewQrCode = page.getByRole('button', { name: 'Get a new QR code' });
+  await expect(setUp.or(getNewQrCode)).toBeVisible();
+  await ((await setUp.isVisible()) ? setUp : getNewQrCode).click();
+  const key = (await page.locator('main .two-step__key').innerText()).replace(/\s/g, '');
+  await page.getByLabel('Code from the app').fill(codeOf(key, Date.now()));
+  await page.getByRole('button', { name: 'Turn on' }).click();
+  await expect(page.getByRole('heading', { name: 'Two-step login is on', level: 1 })).toBeVisible();
+  const recoveryCodes = await page.locator('main .two-step__codes li').allInnerTexts();
+  expect(recoveryCodes).toHaveLength(10);
+  await mkdir(path.dirname(twoStepCodesFile(email)), { recursive: true });
+  await writeFile(twoStepCodesFile(email), JSON.stringify({ key, recoveryCodes } satisfies TwoStepLoginCodes));
+}
 
 /** The RFC 6238 code of a base32 key at a time in milliseconds: SHA-1, 6 digits, 30-second steps, as the server checks it. */
 export function codeOf(key: string, at: number): string {

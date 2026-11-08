@@ -43,11 +43,12 @@
 
         <twig:Card tag="section" class="security__section" aria-labelledby="two-step-login-title">
             <h2 class="security__heading" id="two-step-login-title">Two-step login</h2>
+            {# Outside the "on" branch: an expired form posted after it went off still shows its message. #}
+            {% if twoStepOffError %}
+                <p class="login__error" role="alert" id="two-step-off-error">{{ twoStepOffError }}</p>
+            {% endif %}
             {% if twoStepLoginState.isOn %}
                 <p class="login__hint" data-two-step-state="on">On. Each login asks for a code from your authenticator app.</p>
-                {% if twoStepOffError %}
-                    <p class="login__error" role="alert" id="two-step-off-error">{{ twoStepOffError }}</p>
-                {% endif %}
                 <form class="login__form" method="post" action="{{ path('identity_two_step_off') }}">
                     <p class="login__hint">To turn it off, type your password and a code. Admin pages need two-step login.</p>
                     <label class="login__field">

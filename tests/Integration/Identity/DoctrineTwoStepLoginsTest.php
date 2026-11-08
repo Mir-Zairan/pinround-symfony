@@ -162,6 +162,51 @@ final class DoctrineTwoStepLoginsTest extends KernelTestCase
         self::assertTrue($twoStepLogins->byUserId($otherUser->id())?->isOn());
     }
 
+    /**
+     * Another request's change, made after this one read the state: a later code step and a spent recovery code.
+     */
+    #[Test]
+    public function readingForAChangeReadsAnEntityLoadedEarlierAgain(): void
+    {
+        $user = UserFactory::createOne();
+        $twoStepLogin = new TwoStepLogin($user, self::getContainer()->get(FieldEncryption::class)->encrypt(self::SEED), new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+        $twoStepLogin->confirm(58_000_000, new \DateTimeImmutable('2027-03-15 10:01:00 UTC'), ['$argon2id$first', '$argon2id$second']);
+        $twoStepLogins = $this->twoStepLogins();
+        $twoStepLogins->save($twoStepLogin);
+        $this->entityManager()->clear();
+        $readFirst = $twoStepLogins->byUserId($user->id());
+        self::assertNotNull($readFirst);
+        self::assertSame(58_000_000, $readFirst->lastUsedStep());
+
+        $this->connection()->executeStatement(
+            "UPDATE idn_mfa_secret SET last_used_step = 58000007, recovery_code_hashes = '{\$argon2id\$second}' WHERE user_id = ?",
+            [$user->id()->toString()],
+        );
+        $forChange = $twoStepLogins->byUserIdForChange($user->id());
+
+        self::assertSame($readFirst, $forChange);
+        self::assertSame(58_000_007, $forChange->lastUsedStep());
+        self::assertSame(['$argon2id$second'], $forChange->recoveryCodeHashes());
+        self::assertFalse($forChange->acceptCode(58_000_007), 'the step another request took counted again');
+    }
+
+    #[Test]
+    public function readingForAChangeFindsNoneWhenAnotherRequestRemovedTheOneLoadedEarlier(): void
+    {
+        $user = UserFactory::createOne();
+        $twoStepLogin = new TwoStepLogin($user, self::getContainer()->get(FieldEncryption::class)->encrypt(self::SEED), new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+        $twoStepLogin->confirm(58_000_000, new \DateTimeImmutable('2027-03-15 10:01:00 UTC'), ['$argon2id$first']);
+        $twoStepLogins = $this->twoStepLogins();
+        $twoStepLogins->save($twoStepLogin);
+        $this->entityManager()->clear();
+        self::assertTrue($twoStepLogins->byUserId($user->id())?->isOn());
+
+        $this->connection()->executeStatement('DELETE FROM idn_mfa_secret WHERE user_id = ?', [$user->id()->toString()]);
+
+        self::assertNull($twoStepLogins->byUserIdForChange($user->id()));
+        self::assertNull($twoStepLogins->byUserId($user->id()));
+    }
+
     #[Test]
     public function aUserWithoutOneHasNone(): void
     {

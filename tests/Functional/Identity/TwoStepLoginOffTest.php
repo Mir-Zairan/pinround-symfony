@@ -76,6 +76,9 @@ final class TwoStepLoginOffTest extends WebTestCase
         self::assertSame('off', $page->filter('main [data-two-step-state]')->attr('data-two-step-state'));
         self::assertCount(0, $page->filter('main form[action="'.self::ACTION.'"]'));
         self::assertCount(1, $page->selectLink('Set up two-step login'));
+        // The login's proofs are gone and it is off, so a sensitive action sends the person to set it up again.
+        $this->client->request('GET', '/_test/recent-auth');
+        self::assertResponseRedirects('/me/security/two-step', 302);
 
         $this->client->request('GET', '/me/security/two-step');
         self::assertResponseStatusCodeSame(200);
@@ -200,6 +203,10 @@ final class TwoStepLoginOffTest extends WebTestCase
             self::assertResponseRedirects('/me/security', 302);
             self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
         }
+        // An expired form posted after it went off still says why nothing happened.
+        $this->client->request('POST', self::ACTION, ['password' => self::PASSWORD, 'code' => '123456', '_csrf_token' => 'expired']);
+        $this->assertRefusedWith(LoginController::FORM_EXPIRED);
+        self::assertSame('off', $this->client->getCrawler()->filter('main [data-two-step-state]')->attr('data-two-step-state'));
         $this->client->request('GET', '/me/security');
         self::assertResponseStatusCodeSame(200);
         $this->client->submitForm('Change password', ['current_password' => self::PASSWORD, 'new_password' => 'a much longer new passphrase', 'new_password_repeat' => 'a much longer new passphrase']);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Architecture;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
@@ -18,6 +19,9 @@ final class CopyLintTest extends TestCase
     private const string FIXTURES = 'tests/Fixtures/CopyLint/';
 
     private ?string $temporaryFile = null;
+
+    /** @var list<string> absolute paths, parents first */
+    private array $createdFolders = [];
 
     #[Test]
     public function everyBannedPhraseIsReportedAtItsLine(): void
@@ -124,6 +128,38 @@ final class CopyLintTest extends TestCase
         self::assertStringNotContainsString('watcher"', $process->getOutput());
     }
 
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function generatedFolders(): iterable
+    {
+        yield 'Playwright output' => ['tests/e2e/test-results'];
+        yield 'e2e logins and keys' => ['tests/e2e/.auth'];
+    }
+
+    #[Test]
+    #[DataProvider('generatedFolders')]
+    public function aStrayTemplateInAGeneratedFolderIsSkipped(string $generatedFolder): void
+    {
+        $folder = '';
+        foreach (explode('/', $generatedFolder.'/copy-lint-'.bin2hex(random_bytes(6))) as $segment) {
+            $folder = '' === $folder ? $segment : $folder.'/'.$segment;
+            if (!is_dir(self::repositoryRoot().'/'.$folder)) {
+                mkdir(self::repositoryRoot().'/'.$folder);
+                $this->createdFolders[] = self::repositoryRoot().'/'.$folder;
+            }
+        }
+        $strayTemplate = $folder.'/page.html.twig';
+        $this->temporaryFile = self::repositoryRoot().'/'.$strayTemplate;
+        file_put_contents($this->temporaryFile, "<p>Pick a transition.</p>\n");
+        self::assertSame([$strayTemplate.':1'], self::reportedLocations(self::runLint($strayTemplate)), 'the stray template has no hit to skip');
+
+        $process = self::runLint($folder);
+
+        self::assertSame(0, $process->getExitCode(), self::outputOf($process));
+        self::assertSame([], self::reportedLocations($process));
+    }
+
     #[Test]
     public function theRepositoryPassesAndSkipsItsOwnFixtures(): void
     {
@@ -137,6 +173,11 @@ final class CopyLintTest extends TestCase
     {
         if (null !== $this->temporaryFile && is_file($this->temporaryFile)) {
             unlink($this->temporaryFile);
+        }
+        foreach (array_reverse($this->createdFolders) as $folder) {
+            if (is_dir($folder)) {
+                rmdir($folder);
+            }
         }
     }
 

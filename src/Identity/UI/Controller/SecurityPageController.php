@@ -13,6 +13,7 @@ use App\Identity\Application\PasswordChangeOutcome;
 use App\Identity\Application\ShowTwoStepSetup;
 use App\Identity\Application\TooManyCurrentPasswordTries;
 use App\Identity\Application\TooManyTwoStepCodeTries;
+use App\Identity\Application\TwoStepLoginOffOutcome;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -93,22 +94,19 @@ final class SecurityPageController extends AbstractController
         if (!$this->isCsrfTokenValid(self::TWO_STEP_OFF_CSRF_ID, $request->request->getString('_csrf_token'))) {
             return self::notStored($this->renderPage(twoStepOffError: LoginController::FORM_EXPIRED));
         }
-        $userId = $this->currentSession->userId();
-        if (!$this->showTwoStepSetup->stateOf($userId)->isOn()) {
-            // Off already, as after a double click: the page shows it.
-            return self::notStored($this->redirectToRoute('identity_security'));
-        }
 
         try {
-            $isOff = ($this->disableTwoStepLogin)($userId, $request->request->getString('password'), $request->request->getString('code'), $this->clock->now());
+            $outcome = ($this->disableTwoStepLogin)($this->currentSession->userId(), $request->request->getString('password'), $request->request->getString('code'), $this->clock->now());
         } catch (TooManyCurrentPasswordTries|TooManyTwoStepCodeTries $refusal) {
             return self::notStored($this->renderPage(twoStepOffError: LoginController::tooManyTriesFor($refusal->minutesToWait), status: Response::HTTP_TOO_MANY_REQUESTS));
         }
-        if (!$isOff) {
+        if (TwoStepLoginOffOutcome::WrongPasswordOrCode === $outcome) {
             return self::notStored($this->renderPage(twoStepOffError: ConfirmItsYouController::WRONG_PASSWORD_OR_CODE));
         }
-
-        $this->addFlash('notice', self::TWO_STEP_LOGIN_OFF);
+        // AlreadyOff, as after a double click, says nothing: the page shows that it is off.
+        if (TwoStepLoginOffOutcome::TurnedOff === $outcome) {
+            $this->addFlash('notice', self::TWO_STEP_LOGIN_OFF);
+        }
 
         return self::notStored($this->redirectToRoute('identity_security'));
     }

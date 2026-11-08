@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\Application;
 
+use App\Identity\Domain\TwoStepLogins;
 use App\SharedKernel\Application\UndecryptableField;
 use App\SharedKernel\Domain\UserId;
 
@@ -14,6 +15,7 @@ use App\SharedKernel\Domain\UserId;
 final readonly class ConfirmItsYou
 {
     public function __construct(
+        private TwoStepLogins $twoStepLogins,
         private CurrentPasswordCheck $currentPasswordCheck,
         private AcceptTwoStepCode $acceptTwoStepCode,
         private SessionConfirmations $sessionConfirmations,
@@ -21,11 +23,10 @@ final readonly class ConfirmItsYou
     }
 
     /**
-     * The password is checked first, and a wrong one returns before the code is looked at, so the code stays unspent
-     * and takes no try of the code limiter. Both right: records both session times at $now, so RecentAuth counts from
-     * here, and keeps the session id.
-     *
-     * @return bool true when the password and the code were right; false when either was wrong or two-step login is off
+     * Holds the user's row lock from the first read to the end of the transaction. While two-step login is off,
+     * nothing is checked and no try is taken. The password is checked first, and a wrong one returns before the code
+     * is looked at, so the code stays unspent and takes no try of the code limiter. Both right: records both session
+     * times at $now, so RecentAuth counts from here, and keeps the session id.
      *
      * @throws TooManyCurrentPasswordTries when this user's password was checked too often
      * @throws TooManyTwoStepCodeTries     when codes were typed for this user too often
@@ -39,14 +40,17 @@ final readonly class ConfirmItsYou
         #[\SensitiveParameter]
         string $typedCode,
         \DateTimeImmutable $now,
-    ): bool {
+    ): ConfirmItsYouOutcome {
+        if (true !== $this->twoStepLogins->byUserIdForChange($userId)?->isOn()) {
+            return ConfirmItsYouOutcome::TwoStepLoginOff;
+        }
         if (!$this->currentPasswordCheck->matches($userId, $password) || !($this->acceptTwoStepCode)($userId, $typedCode, $now)) {
-            return false;
+            return ConfirmItsYouOutcome::WrongPasswordOrCode;
         }
 
         $this->sessionConfirmations->recordRecentAuth($userId, $now);
         $this->sessionConfirmations->recordTwoStepConfirmation($userId, $now);
 
-        return true;
+        return ConfirmItsYouOutcome::Confirmed;
     }
 }

@@ -6,6 +6,7 @@ namespace App\Identity\UI\Controller;
 
 use App\Identity\Application\AccountPermission;
 use App\Identity\Application\ConfirmItsYou;
+use App\Identity\Application\ConfirmItsYouOutcome;
 use App\Identity\Application\CurrentSession;
 use App\Identity\Application\ShowTwoStepSetup;
 use App\Identity\Application\TooManyCurrentPasswordTries;
@@ -55,15 +56,17 @@ final class ConfirmItsYouController extends AbstractController
         }
 
         try {
-            $isConfirmed = ($this->confirmItsYou)($userId, $request->request->getString('password'), $request->request->getString('code'), $this->clock->now());
+            $outcome = ($this->confirmItsYou)($userId, $request->request->getString('password'), $request->request->getString('code'), $this->clock->now());
         } catch (TooManyCurrentPasswordTries|TooManyTwoStepCodeTries $refusal) {
             return $this->renderPage($returnPath, LoginController::tooManyTriesFor($refusal->minutesToWait), Response::HTTP_TOO_MANY_REQUESTS);
         }
-        if (!$isConfirmed) {
-            return $this->renderPage($returnPath, self::WRONG_PASSWORD_OR_CODE);
-        }
 
-        return self::notStored($this->redirect($returnPath));
+        return match ($outcome) {
+            ConfirmItsYouOutcome::Confirmed => self::notStored($this->redirect($returnPath)),
+            ConfirmItsYouOutcome::WrongPasswordOrCode => $this->renderPage($returnPath, self::WRONG_PASSWORD_OR_CODE),
+            // Turned off since the check above, by another request of this person.
+            ConfirmItsYouOutcome::TwoStepLoginOff => self::notStored($this->recentAuthRedirects->toTwoStepSetup($request, $returnPath)),
+        };
     }
 
     private function renderPage(string $returnPath, ?string $error = null, int $status = Response::HTTP_UNPROCESSABLE_ENTITY): Response
