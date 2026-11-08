@@ -99,6 +99,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Owns:** `idn_user`, `idn_credential`, `idn_password_reset`, `idn_mfa_secret`, `idn_sso_identity`, `idn_api_token`, `idn_login_attempt`. Sessions live in Valkey.
 - **Api:**
   - `CurrentUser::id(): ?UserId` and `CurrentUser::idOf(mixed $tokenUser): ?UserId` (built in P01.T3: the logged-in user of the request, or of the token a voter is given; null when nobody is; `Infrastructure\Security\SymfonyCurrentUser`)
+  - `LoginAssurance::isPasswordSession(mixed $token): bool` and `LoginAssurance::hasConfirmedTwoStepLogin(mixed $token): bool` (built in P01.T4 for `AdminAreaVoter`; true only for the form login's `UsernamePasswordToken` of an Identity user, any other token kind is refused; the second is always false until P01.T6; `Infrastructure\Security\SymfonyLoginAssurance`)
   - `UserQueries::byId(UserId): ?UserView`
   - `UserQueries::byIds(list<UserId>): array<string, UserView>`
   - `UserQueries::byEmail(string): ?UserView`
@@ -121,6 +122,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - Both read under row-level security with no cache, so they need an open transaction whose tenant is that organization; under any other tenant, or none, they find nothing.
   - `CurrentActor::actorFor(mixed $tokenUser): ?ActorContext` (built in P01.T4; for voters in any module, which pass `$token->getUser()`; `ActorContext` offers `userId()`, `organizationId()` and `roles(): Roles`; null when the token has no logged-in user or the request has no tenant, so the voter denies). Built once per request for each user and organization from one `rolesOf` call and reset between requests (`Infrastructure\Security\RequestScopedCurrentActor`), so role changes take effect at the next request; ask it inside the request transaction, outside one it reads no roles.
   - `OrganizationPermission` and `TeamPermission` (built in P01.T4): the voter attributes, so the UI of any module may ask them. `ORG_VIEW` and `ORG_ADMIN` take an `OrganizationId` (`UI\Voter\OrganizationVoter`: the organization the request works in; Admin for `ORG_ADMIN`); `TEAM_VIEW` and `TEAM_LEAD` take a `TeamId` (`UI\Voter\TeamVoter`: any team role, or Admin or Manager of the team's organization, for `TEAM_VIEW`; only the team's Lead for `TEAM_LEAD`). `CHOOSE` and `ENTER` are the organization picker's (`UI\Voter\OrganizationMemberVoter`).
+  - `AdminPermission` (built in P01.T4): `ADMIN_AREA` takes the request's `OrganizationId` (`UI\Voter\AdminAreaVoter`: an Admin there, with a password session and a confirmed two-step login, both from Identity's `LoginAssurance`; `APP_HACKATHON_SKIP_ADMIN_MFA` waives only the two-step login until P01.T6).
   - `TeamQueries::team(TeamId): TeamView`
   - `TeamQueries::leadOf(TeamId): UserId`
   - `TeamQueries::testersOf(TeamId): list<UserId>`

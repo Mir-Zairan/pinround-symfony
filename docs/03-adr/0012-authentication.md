@@ -143,6 +143,7 @@ For the hackathon demo (deadline 2026-11-22) TOTP is not built yet (P01.T6), but
 - The kernel **refuses to boot** when this flag is set and `APP_ENV=prod`. A test proves it.
 - Every admin action taken under the flag writes an audit event with `mfa_skipped: true`.
 - This exception ends when P01.T6 (TOTP) is done; the flag and its code are then deleted. It is not an exception to NFR-SEC-05 for any real deployment.
+- Clarification (2026-11-08, P01.T4): "set" means any value Symfony's `bool` env processor reads as true (`1`, `true`, `on`, `yes`); empty or unset is off. The kernel refuses it in every environment but dev and test, which with the allowed environments prod, dev and test means prod (`tests/Integration/KernelTest`). The flag never waives the Admin role or the password-session rule. The `mfa_skipped: true` audit event is not built yet, because no admin action exists; the first ones (P08.T3, P11) owe it.
 
 ## More information
 
