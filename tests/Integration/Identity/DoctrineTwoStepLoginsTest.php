@@ -132,6 +132,36 @@ final class DoctrineTwoStepLoginsTest extends KernelTestCase
         self::assertSame(['$argon2id$first', '$argon2id$third'], $twoStepLogins->byUserId($user->id())?->recoveryCodeHashes());
     }
 
+    /**
+     * As pinround_app, so this also proves its DELETE grant; another user's row stays.
+     */
+    #[Test]
+    public function aRemovedOneLeavesNoRowAndAnotherUsersRowStays(): void
+    {
+        $user = UserFactory::createOne();
+        $otherUser = UserFactory::createOne();
+        $encryption = self::getContainer()->get(FieldEncryption::class);
+        $twoStepLogins = $this->twoStepLogins();
+        foreach ([$user, $otherUser] as $owner) {
+            $twoStepLogin = new TwoStepLogin($owner, $encryption->encrypt(self::SEED), new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+            $twoStepLogin->confirm(58_000_000, new \DateTimeImmutable('2027-03-15 10:01:00 UTC'), ['$argon2id$first']);
+            $twoStepLogins->save($twoStepLogin);
+        }
+        $this->entityManager()->clear();
+
+        $forChange = $twoStepLogins->byUserIdForChange($user->id());
+        self::assertNotNull($forChange);
+        $twoStepLogins->remove($forChange);
+        $this->entityManager()->clear();
+
+        self::assertSame(
+            [$otherUser->id()->toString()],
+            $this->connection()->fetchFirstColumn('SELECT user_id FROM idn_mfa_secret WHERE user_id IN (?, ?)', [$user->id()->toString(), $otherUser->id()->toString()]),
+        );
+        self::assertNull($twoStepLogins->byUserId($user->id()));
+        self::assertTrue($twoStepLogins->byUserId($otherUser->id())?->isOn());
+    }
+
     #[Test]
     public function aUserWithoutOneHasNone(): void
     {

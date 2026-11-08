@@ -14,9 +14,9 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * Turning two-step login on, with a wrong try first, logging in with codes, right and wrong, and "Confirm it's you"
- * with passwords and codes, right and wrong, log neither the seed, a password, a typed code nor a recovery code
- * (security.md "Logging without leaking", ADR-0027). CapturedLogRecords keeps each record before RedactionProcessor
- * runs, so none of them may be in what the code logs at all.
+ * and turning it off with passwords and codes, right and wrong, log neither the seed, a password, a typed code nor a
+ * recovery code (security.md "Logging without leaking", ADR-0027). CapturedLogRecords keeps each record before
+ * RedactionProcessor runs, so none of them may be in what the code logs at all.
  */
 final class TwoStepLoginLogLeakTest extends WebTestCase
 {
@@ -131,6 +131,46 @@ final class TwoStepLoginLogLeakTest extends WebTestCase
         self::assertResponseStatusCodeSame(422);
         $client->submitForm('Confirm', ['password' => self::PASSWORD, 'code' => $recoveryCodes[1]]);
         self::assertResponseRedirects('/_test/recent-auth', 302);
+
+        $records = $capturedLogRecords->all();
+        self::assertContains('Matched route "{route}".', array_map(static fn (LogRecord $record): string => $record->message, $records), 'the requests were not logged, so nothing was checked');
+        $logged = implode("\n", array_map(LoginLogLeakTest::textOf(...), $records));
+        $secrets = [
+            'wrong password' => $wrongPasswordMarker,
+            'password' => self::PASSWORD,
+            'wrong code' => $wrongCodeMarker,
+            'recovery code typed with the wrong password' => $recoveryCodes[0],
+            'used recovery code' => $recoveryCodes[1],
+        ];
+        foreach ($secrets as $what => $secret) {
+            self::assertStringNotContainsString($secret, $logged, 'a log record holds the '.$what);
+        }
+    }
+
+    #[Test]
+    public function turningItOffLogsNoPasswordAndNoCode(): void
+    {
+        $client = self::createClient([], ['HTTPS' => 'on', 'REMOTE_ADDR' => \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254))]);
+        $client->disableReboot();
+        $clock = new MockClock();
+        self::getContainer()->set('clock', $clock);
+        $capturedLogRecords = self::getContainer()->get(CapturedLogRecords::class);
+        self::assertInstanceOf(CapturedLogRecords::class, $capturedLogRecords);
+        $user = $this->createUserWithPassword('Sara Holm');
+        [, $recoveryCodes] = $this->turnOnTwoStepLogin($client, $clock, $user);
+        $this->logIn($client, $user);
+        $capturedLogRecords->clear();
+        $wrongPasswordMarker = 'leak-marker-password-'.bin2hex(random_bytes(8));
+        $wrongCodeMarker = 'leak-marker-code-'.bin2hex(random_bytes(8));
+
+        $client->request('GET', '/me/security');
+        self::assertResponseStatusCodeSame(200);
+        $client->submitForm('Turn off two-step login', ['password' => $wrongPasswordMarker, 'code' => $recoveryCodes[0]]);
+        self::assertResponseStatusCodeSame(422);
+        $client->submitForm('Turn off two-step login', ['password' => self::PASSWORD, 'code' => $wrongCodeMarker]);
+        self::assertResponseStatusCodeSame(422);
+        $client->submitForm('Turn off two-step login', ['password' => self::PASSWORD, 'code' => $recoveryCodes[1]]);
+        self::assertResponseRedirects('/me/security', 302);
 
         $records = $capturedLogRecords->all();
         self::assertContains('Matched route "{route}".', array_map(static fn (LogRecord $record): string => $record->message, $records), 'the requests were not logged, so nothing was checked');

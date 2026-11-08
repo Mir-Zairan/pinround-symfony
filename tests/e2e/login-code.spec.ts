@@ -1,14 +1,15 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
-import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { codeOf, demoPassword, MIA_EMAIL, MIA_TWO_STEP_KEY_FILE } from './auth';
+import { codeOf, demoPassword, MIA_EMAIL, MIA_TWO_STEP_KEY_FILE, TWO_STEP_CODE_STEP_MS } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
-// As Mia, whom only confirm-its-you.spec.ts also logs in as: the first run turns her two-step login on and writes her
-// key to MIA_TWO_STEP_KEY_FILE (auth.ts), and it stays on, because turning it off is not built yet. The functional
-// LoginCodeTest covers the codes, the refusals and the throttle.
+// As Mia, whom only confirm-its-you.spec.ts also logs in as: the first test turns her two-step login on and writes her
+// key to MIA_TWO_STEP_KEY_FILE (auth.ts), and the last one turns it off on the security page and deletes the file, so
+// the next run starts as the demo seed left her. The functional LoginCodeTest and TwoStepLoginOffTest cover the codes,
+// the refusals and the throttle.
 
 test.use({ storageState: { cookies: [], origins: [] } });
 // One at a time, so two first runs never both turn two-step login on.
@@ -88,4 +89,53 @@ test.describe('narrow viewport', () => {
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   });
+});
+
+async function waitForTheNextStep(page: Page): Promise<void> {
+  await page.waitForTimeout(TWO_STEP_CODE_STEP_MS - (Date.now() % TWO_STEP_CODE_STEP_MS) + 1_000);
+}
+
+/**
+ * Types the code of the step at(), and the password when the form asks for one. A code counts once, so when another
+ * spec just used it, this waits for the next step and tries once more. Every try counts against Mia's 5 code tries in
+ * 15 minutes, so a run takes two when nothing else logs her in.
+ */
+async function typeCode(page: Page, key: string, at: () => number, submit: string, done: Locator, withPassword = false): Promise<void> {
+  const send = async (): Promise<void> => {
+    if (withPassword) {
+      await page.getByLabel('Password', { exact: true }).fill(demoPassword());
+    }
+    await page.getByLabel('Code from your app').fill(codeOf(key, at()));
+    await page.getByRole('button', { name: submit }).click();
+  };
+  await send();
+  const refusal = page.getByRole('alert');
+  await expect(done.or(refusal)).toBeVisible();
+  if (await refusal.isVisible()) {
+    await expect(refusal, 'Mia used up her code tries: wait 15 minutes before the next run.').not.toContainText('Too many tries');
+    await waitForTheNextStep(page);
+    await send();
+    await expect(done).toBeVisible();
+  }
+}
+
+test('the security page turns two-step login off with the password and a code', async ({ page }) => {
+  test.skip(!existsSync(MIA_TWO_STEP_KEY_FILE), `${MIA_TWO_STEP_KEY_FILE} is missing, so Mia's two-step login cannot be turned off here.`);
+  // Up to two waits for a new 30-second step.
+  test.setTimeout(100_000);
+  const key = readFileSync(MIA_TWO_STEP_KEY_FILE, 'utf8').trim();
+  await openCodePage(page);
+  // The key file is written when the setup spends its code, so a login in that same step would be refused.
+  if (Math.floor(statSync(MIA_TWO_STEP_KEY_FILE).mtimeMs / TWO_STEP_CODE_STEP_MS) === Math.floor(Date.now() / TWO_STEP_CODE_STEP_MS)) {
+    await waitForTheNextStep(page);
+  }
+  await typeCode(page, key, () => Date.now(), 'Log in', page.getByRole('button', { name: 'Mia', exact: true }));
+
+  await page.goto('/me/security');
+  await expect(page.getByText('Admin pages need two-step login.')).toBeVisible();
+  // The login spent the code of this step; the server also takes the next step's code, which is not spent yet.
+  await typeCode(page, key, () => Date.now() + TWO_STEP_CODE_STEP_MS, 'Turn off two-step login', page.getByText('Two-step login is off.'), true);
+
+  await expect(page.getByRole('link', { name: 'Set up two-step login' })).toBeVisible();
+  await rm(MIA_TWO_STEP_KEY_FILE, { force: true });
 });

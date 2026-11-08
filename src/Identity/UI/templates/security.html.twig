@@ -45,6 +45,28 @@
             <h2 class="security__heading" id="two-step-login-title">Two-step login</h2>
             {% if twoStepLoginState.isOn %}
                 <p class="login__hint" data-two-step-state="on">On. Each login asks for a code from your authenticator app.</p>
+                {% if twoStepOffError %}
+                    <p class="login__error" role="alert" id="two-step-off-error">{{ twoStepOffError }}</p>
+                {% endif %}
+                <form class="login__form" method="post" action="{{ path('identity_two_step_off') }}">
+                    <p class="login__hint">To turn it off, type your password and a code. Admin pages need two-step login.</p>
+                    <label class="login__field">
+                        Password
+                        <input class="login__input" type="password" name="password" autocomplete="current-password" required
+                            {%- if twoStepOffError %} aria-invalid="true" aria-describedby="two-step-off-error"{% endif %}>
+                    </label>
+                    {# Not inputmode="numeric": a recovery code has letters. #}
+                    <label class="login__field">
+                        Code from your app
+                        <input class="login__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required
+                            {%- if twoStepOffError %} aria-invalid="true" aria-describedby="two-step-off-error two-step-off-code-hint"{% else %} aria-describedby="two-step-off-code-hint"{% endif %}>
+                    </label>
+                    <p class="login__hint" id="two-step-off-code-hint">6 digits. No phone with you? Type one of your recovery codes instead.</p>
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('two_step_off') }}">
+                    <div>
+                        <twig:Button type="submit" variant="outline">Turn off two-step login</twig:Button>
+                    </div>
+                </form>
             {% else %}
                 <p class="login__hint" data-two-step-state="off">Off. Turn it on, and each login also asks for a code from your phone.</p>
                 <div>

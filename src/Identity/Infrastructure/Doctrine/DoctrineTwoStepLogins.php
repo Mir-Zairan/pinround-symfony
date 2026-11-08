@@ -43,4 +43,10 @@ final readonly class DoctrineTwoStepLogins implements TwoStepLogins
         $this->entityManager->persist($twoStepLogin);
         $this->entityManager->flush();
     }
+
+    public function remove(TwoStepLogin $twoStepLogin): void
+    {
+        $this->entityManager->remove($twoStepLogin);
+        $this->entityManager->flush();
+    }
 }

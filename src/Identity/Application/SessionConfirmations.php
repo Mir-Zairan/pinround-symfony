@@ -34,7 +34,8 @@ interface SessionConfirmations
     public function twoStepConfirmedAt(UserId $userId): ?\DateTimeImmutable;
 
     /**
-     * At the right password of a new login: removes both times, whoever they were recorded for.
+     * At the right password of a new login, and when two-step login is turned off: removes both times, whoever they
+     * were recorded for.
      */
     public function forget(): void;
 }

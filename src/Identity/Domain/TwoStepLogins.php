@@ -26,4 +26,10 @@ interface TwoStepLogins
      * Saves a new or changed two-step login at once.
      */
     public function save(TwoStepLogin $twoStepLogin): void;
+
+    /**
+     * Deletes it at once, so the user has none and a new setup starts from a new seed. Read it with
+     * byUserIdForChange in the same transaction first.
+     */
+    public function remove(TwoStepLogin $twoStepLogin): void;
 }

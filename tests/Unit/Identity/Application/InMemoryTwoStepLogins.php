@@ -9,7 +9,7 @@ use App\Identity\Domain\TwoStepLogins;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * Two-step logins by user id, recording which reads were for a change and every save.
+ * Two-step logins by user id, recording which reads were for a change, every save and every removal.
  */
 final class InMemoryTwoStepLogins implements TwoStepLogins
 {
@@ -21,6 +21,9 @@ final class InMemoryTwoStepLogins implements TwoStepLogins
 
     /** @var list<TwoStepLogin> */
     public array $saved = [];
+
+    /** @var list<TwoStepLogin> */
+    public array $removed = [];
 
     public function byUserId(UserId $userId): ?TwoStepLogin
     {
@@ -38,5 +41,11 @@ final class InMemoryTwoStepLogins implements TwoStepLogins
     {
         $this->byUserId[$twoStepLogin->userId()->toString()] = $twoStepLogin;
         $this->saved[] = $twoStepLogin;
+    }
+
+    public function remove(TwoStepLogin $twoStepLogin): void
+    {
+        unset($this->byUserId[$twoStepLogin->userId()->toString()]);
+        $this->removed[] = $twoStepLogin;
     }
 }
