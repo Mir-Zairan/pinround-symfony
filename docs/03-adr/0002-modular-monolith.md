@@ -20,6 +20,8 @@ Accepted · 2026-11-06 · Deciders: Zairan Mir (lead) with the team.
 
 Superseded in part by [ADR-0032](0032-module-call-edges-follow-modules-catalogue.md): the "Allowed dependencies" diagram under "Rules" is replaced by the "Depends on" lines in `modules.md`. Everything else here still stands.
 
+Superseded in part by [ADR-0035](0035-web-owns-its-ui-preferences.md): the Web row of the module table; Web has the prefix `web_` and owns its UI preference tables.
+
 ## Context and problem statement
 
 Lena's team builds pinround: tickets, rounds with screenshots and pins, pings, AI help,

@@ -1,0 +1,56 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block head %}
+    {# Turbo must not show a cached copy of Home (frontend.md, Turbo and real-time updates). #}
+    <meta name="turbo-cache-control" content="no-cache">
+{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/home.css') }}">
+{% endblock %}
+
+{#- The chips narrow the page: a section whose group is not the pressed chip carries `hidden` from the server, so the
+    page opens on the saved chip with no flash. Without the script, each chip submits its form and Home reloads. -#}
+{% block main %}
+    {%- set chipLabels = {all: 'All', my_work: 'My work', my_team: 'My team', all_teams: 'All teams', admin: 'Admin'} -%}
+    {%- set firstName = app.user.name|split(' ')|first -%}
+    <div class="home" {{ stimulus_controller('focus-chips') }}>
+        <header class="home__header">
+            <p class="home__date">{{ today|date('l, j F', app.user.timeZone) }}</p>
+            <h1 class="home__title">All clear, {{ firstName }}</h1>
+            {% if isLead %}
+                <p class="home__subline">You lead the team, so reviews, decisions and unclear new tickets come to you.</p>
+            {% endif %}
+        </header>
+
+        <form method="post" action="{{ path('web_home_focus') }}" data-action="click->focus-chips#choose" {{ stimulus_target('focus-chips', 'form') }}>
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('web_home_focus') }}">
+            <div class="home__chips" role="group" aria-label="Show on Home">
+                {% for choice in choices %}
+                    <twig:Chip type="submit" name="focus" value="{{ choice.value }}" :pressed="choice == focus" data-focus-chips-target="chip">{{ chipLabels[choice.value] }}</twig:Chip>
+                {% endfor %}
+            </div>
+        </form>
+
+        <div class="home__row">
+            <div class="home__column home__column--main">
+                {% include '@Web/home/_section.html.twig' with {id: 'needs-you-now', title: 'Needs you now', group: 'my_work', focus: focus.value, message: 'Nothing waits on you right now.'} only %}
+                {% include '@Web/home/_section.html.twig' with {id: 'also-waiting', title: 'Also waiting on you', group: 'my_work', focus: focus.value, message: 'Nothing else waits on you.'} only %}
+            </div>
+            <aside class="home__column home__column--aside" aria-label="More for you">
+                {% if isAdmin %}
+                    {% include '@Web/home/_section.html.twig' with {id: 'admin', title: 'Admin', group: 'admin', focus: focus.value, message: 'Nothing needs you as admin.', adminSettingsUrl: adminSettingsUrl} only %}
+                {% endif %}
+                {% include '@Web/home/_section.html.twig' with {id: 'pings', title: 'Pings for you', group: 'my_work', focus: focus.value, message: 'No open pings. Nice.'} only %}
+                {% if isLead %}
+                    {% include '@Web/home/_section.html.twig' with {id: 'release', title: 'Release', group: 'my_team', focus: focus.value, message: 'Your team has no release yet.'} only %}
+                {% endif %}
+                {% include '@Web/home/_section.html.twig' with {id: 'your-team', title: 'Your team', group: 'my_team', focus: focus.value, message: 'The people of your team will show here.'} only %}
+            </aside>
+        </div>
+
+        {% if isManager %}
+            {% include '@Web/home/_section.html.twig' with {id: 'all-teams', title: 'All teams · you are also a manager', group: 'all_teams', focus: focus.value, message: 'Every team\'s progress will show here.'} only %}
+        {% endif %}
+    </div>
+{% endblock %}

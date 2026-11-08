@@ -1,0 +1,7 @@
+{#- The button to the admin home; `url` is null while no phase has built the Admin page, as for the menu's Admin item.
+    TODO(P11): when `web_admin` exists, add the positive test: Sara's and Lena's Home link to its People tab. -#}
+{% if url %}
+    <twig:Button variant="{{ variant }}" size="{{ size }}" href="{{ url }}">{{ label }}</twig:Button>
+{% else %}
+    <twig:Button variant="{{ variant }}" size="{{ size }}" :disabled="true">{{ label }}<span class="visually-hidden"> (not built yet)</span></twig:Button>
+{% endif %}

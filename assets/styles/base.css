@@ -5,8 +5,10 @@
 }
 
 html {
-  /* Tallest sticky header: two wrapped rows at 360px or 200% zoom (8 + 40 + 8 + 40 + 8 + 1 = 105px). The extra ~10px is headroom, so a focused item does not sit flush against the sticky header (WCAG 2.4.11). */
-  --header-height-max: 116px;
+  /* Tallest sticky header: the fullest menu (an admin who leads two teams) at 320-360px wraps to the logo, two rows of menu
+     and a row of actions (8 + 27 + 8 + 40 + 4 + 40 + 8 + 40 + 8 + 1 = 184px, as measured). The extra ~12px is headroom, so a
+     focused item does not sit flush against the sticky header (WCAG 2.4.11). */
+  --header-height-max: 196px;
   scroll-padding-top: var(--header-height-max);
 }
 

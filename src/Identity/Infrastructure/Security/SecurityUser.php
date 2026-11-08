@@ -28,6 +28,7 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
         private string $passwordHash,
         private string $sessionStamp,
         private Theme $theme,
+        private ?string $timeZone,
     ) {
     }
 
@@ -41,6 +42,7 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
             $credential->passwordHash()->encoded(),
             $user->sessionStamp(),
             $user->theme(),
+            $user->timeZone(),
         );
     }
 
@@ -63,6 +65,15 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
     public function theme(): string
     {
         return $this->theme->value;
+    }
+
+    /**
+     * The IANA zone the person saved on their profile, for printing dates through `app.user.timeZone`; null only on a
+     * user read back from a session saved before it was stored, until refreshUser reloads it on the same request.
+     */
+    public function timeZone(): ?string
+    {
+        return $this->timeZone;
     }
 
     public function sessionStamp(): string
@@ -117,7 +128,7 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
     }
 
     /**
-     * @return array{id: string, email: string, name: string, isBlocked: bool, passwordHash: string, sessionStamp: string, theme: string}
+     * @return array{id: string, email: string, name: string, isBlocked: bool, passwordHash: string, sessionStamp: string, theme: string, timeZone: string|null}
      */
     public function __serialize(): array
     {
@@ -129,6 +140,7 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
             'passwordHash' => hash('crc32c', $this->passwordHash),
             'sessionStamp' => $this->sessionStamp,
             'theme' => $this->theme->value,
+            'timeZone' => $this->timeZone,
         ];
     }
 
@@ -136,7 +148,7 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
      * A session saved before the stamp existed comes back with an empty one, which equals no user, so it is logged out.
      * A missing or unknown theme comes back as System.
      *
-     * @param array{id: string, email: string, name: string, isBlocked: bool, passwordHash: string, sessionStamp?: string, theme?: string} $data
+     * @param array{id: string, email: string, name: string, isBlocked: bool, passwordHash: string, sessionStamp?: string, theme?: string, timeZone?: string|null} $data
      */
     public function __unserialize(array $data): void
     {
@@ -147,5 +159,6 @@ final class SecurityUser implements UserInterface, PasswordAuthenticatedUserInte
         $this->passwordHash = $data['passwordHash'];
         $this->sessionStamp = $data['sessionStamp'] ?? '';
         $this->theme = Theme::tryFrom($data['theme'] ?? '') ?? Theme::System;
+        $this->timeZone = $data['timeZone'] ?? null;
     }
 }

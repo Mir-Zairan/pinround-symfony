@@ -33,7 +33,8 @@ for (const scheme of ['light', 'dark'] as const) {
     test(`shell looks the same as the ${scheme} baseline`, async ({ page }) => {
       test.skip(!!process.env.CI, 'Baselines come from a developer machine and CI fonts render differently; run make e2e locally.');
       await openShell(page);
-      await expect(page).toHaveScreenshot(`shell-${scheme}.png`);
+      // Home's date line changes every day.
+      await expect(page).toHaveScreenshot(`shell-${scheme}.png`, { mask: [page.locator('.home__date')] });
     });
   });
 }

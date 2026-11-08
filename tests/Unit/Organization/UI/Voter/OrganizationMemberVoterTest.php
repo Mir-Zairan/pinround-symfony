@@ -113,11 +113,6 @@ final class OrganizationMemberVoterTest extends TestCase
             {
                 throw new \LogicException('The voter decides on memberships only.');
             }
-
-            public function teamsOf(OrganizationId $organizationId): array
-            {
-                throw new \LogicException('The voter decides on memberships only.');
-            }
         };
 
         return new OrganizationMemberVoter($currentUser, $membershipQueries);

@@ -9,7 +9,7 @@ This folder holds every important architecture decision for pinround, why we mad
 - [Status lifecycle](#status-lifecycle) — Proposed, Accepted, Deprecated, Superseded.
 - [Naming and format](#naming-and-format) — file names, numbering, the template.
 - [How to change a decision](#how-to-change-a-decision) — superseding instead of editing.
-- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0034.
+- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0035.
 
 ## What an ADR is
 
@@ -65,7 +65,7 @@ stateDiagram-v2
 
 ## All decisions
 
-All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07) (deciders: Zairan Mir, lead, with the team).
+All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08) (deciders: Zairan Mir, lead, with the team).
 
 | ADR | Title | Decision in one line |
 |---|---|---|
@@ -103,3 +103,4 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026
 | [0032](0032-module-call-edges-follow-modules-catalogue.md) | Module call edges follow the modules catalogue | Api calls follow the "Depends on" lines in `modules.md`; any module may listen to any module's events. Supersedes only the ADR-0002 dependency diagram. |
 | [0033](0033-valkey-transports-workers-and-outbox-relay.md) | Valkey transports, workers and the outbox relay | Four `async_*` Valkey streams, three workers (outbox, short, heavy), an at-least-once relay polled every 0.5 s, longer retries for AI and Jira. Supersedes part of ADR-0009. |
 | [0034](0034-allow-list-log-redaction.md) | Keep only allow-listed ids in log records | Log records keep only allow-listed id and shape keys; exception messages are withheld; the org id is `organization_id`. Supersedes part of ADR-0027 and ADR-0029. |
+| [0035](0035-web-owns-its-ui-preferences.md) | Web owns its UI preferences | Web gets the `web_` prefix for per-user, per-organization UI preference tables under RLS, first `web_home_focus`. Supersedes the Web row of ADR-0002's module table. |
