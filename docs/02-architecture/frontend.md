@@ -6,7 +6,7 @@ How pinround's pages are built: Twig, Symfony UX (Turbo, Stimulus, Live Componen
 
 - [Why server-rendered](#why-server-rendered) — the reason we do not build a single-page app.
 - [Building blocks](#building-blocks) — Twig, Turbo, Stimulus, Live Components, AssetMapper: who does what.
-- [Layout and navigation](#layout-and-navigation) — the app shell, menus per role, header items.
+- [Layout and navigation](#layout-and-navigation) — the app shell, menus per role and their route names, header items.
 - [Design system: Twig components](#design-system-twig-components) — the reusable components and their prototype source.
 - [Live Components](#live-components) — the few places where the server re-renders as you type or click.
 - [Stimulus controllers](#stimulus-controllers) — the small JavaScript pieces, including pins, uploads and local AI.
@@ -44,22 +44,26 @@ Verify the exact bundle names and Twig function names against the Symfony UX doc
 - **Header:**
   - logo "pinround";
   - main menu (built from roles, see below);
-  - "Report a problem" (tonal button, for every team member);
+  - "Report a problem" (tonal button, for everyone with a team role: lead, member or viewer; FR-ORG-05 keeps this label where the prototype says "New report");
   - the "Local AI" status chip (only when the org's AI runs on laptops);
-  - the bell with a count;
+  - the bell with a count (for the same people as "Report a problem");
   - the user's avatar menu (for a user in two or more organizations, the current one's name and "Switch organization" first; then Profile, Security, Personal access tokens, Theme, Log out). Profile is not in the prototype; FR-ID-07 needs the page reachable. Personal access tokens come with P09. Theme is a System | Light | Dark switch that applies at once and is saved on the user.
 - **Main:** one `<main>` per page.
 - **Overlays:** the toast area (an `aria-live="polite"` region) and the dialog root.
 
 Menu items come from the user's roles. There is no mode switch: a person with several roles sees the union ([ADR-0013](../03-adr/0013-authorization.md)).
 
-| Item | Shown to |
-|---|---|
-| Home | everyone |
-| Tickets | everyone with a team role, and managers |
-| My reports (with a count of questions waiting on me) | everyone with a team role |
-| Team | team members (one entry per team; a "Teams ▾" menu when there are several) |
-| Admin | org admins |
+| Item | Shown to | Route (name) |
+|---|---|---|
+| Home | everyone | `web_home` |
+| Tickets | everyone with a team role, and managers | `ticketing_tickets` (`/tickets`) |
+| My reports (with a count of questions waiting on me) | everyone with a team role | `ticketing_my_reports` (`/my-reports`) |
+| Team | everyone with a team role: "Team" for one team; a "Teams ▾" disclosure listing the teams by name when there are several | `organization_team` (`/teams/{teamId}`) |
+| Admin | org admins | `organization_admin_people` (`/admin/people`; the admin home is its People tab) |
+
+A team role is lead, member or viewer. Without an organization (the picker, a page without a login) the menu is Home alone, and there is no "Report a problem" or bell. `App\Web\UI\Navigation\MainMenu` builds the items (Twig `main_menu()`) and decides "Report a problem" and the bell (`can_report_problems()`); the route names above live there. Showing an item grants nothing: each page asks its own voter.
+
+An item whose route does not exist yet is inert: muted text with no link and no focus, which tells screen readers "(not built yet)". When a phase adds the route under that name, the item becomes a link with no menu change.
 
 **Home** is one page. It has sections per role (My work, My team, All teams, Admin card) and focus chips that only narrow the page. The chosen chip is saved per user (a small preference) so the page opens the same way next time. A chip shows a red count when the section it hides needs the user.
 
@@ -227,7 +231,7 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Prototype screen | Route (name) | Module | Template / main components |
 |---|---|---|---|
 | Home (lead, tester, developer, manager, admin, mixed roles) | `GET /` (`home`) | Web | `home/index.html.twig`: FocusChips, NeedItem ×5, GroupedList, PingCard, release GroupBar, AvatarStack, Admin card, All teams |
-| Tickets · List | `GET /tickets?project=&person=&q=&done=&check=` (`ticket_list`) | Ticketing | `ticket/list.html.twig` + `TicketFilters` |
+| Tickets · List | `GET /tickets?project=&person=&q=&done=&check=` (`ticketing_tickets`) | Ticketing | `ticket/list.html.twig` + `TicketFilters` |
 | Tickets · Whose turn? | `GET /tickets/turn?project=` (`ticket_turn`) | Insight | `insight/whose_turn.html.twig` |
 | Ticket page | `GET /t/{key}` (`ticket_show`) | Ticketing | `ticket/show.html.twig`: QueueBar, StatusPill, NextStepBox, Thread, rounds, people, activity |
 | Verb buttons | `POST /t/{key}/move/{verb}` (`ticket_move`) | Ticketing | Turbo Stream |
@@ -236,12 +240,12 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Ping dialog | `POST /t/{key}/ping/{userId}` | Notification | Dialog |
 | Explain it to me / summarize | `POST /t/{key}/ai/explain`, `POST /t/{key}/ai/summary` | Assist | `ExplainBox` |
 | Report a problem | `GET/POST /report` (`report_new`) | Ticketing | `ReportForm` |
-| My reports | `GET /my-reports` (`my_reports`) | Insight | Tracker cards grouped Needs you / Stuck / Moving / Done |
+| My reports | `GET /my-reports` (`ticketing_my_reports`) | Insight | Tracker cards grouped Needs you / Stuck / Moving / Done |
 | Round view (prototype "Review round" board) | `GET /t/{key}/rounds/{number}` | Review | Screenshot + PinLayer, before/after, verdicts |
 | Full-screen review (prototype "Review in full screen" board) | `GET /t/{key}/rounds/{number}/focus` | Review | Full-screen pin walker |
 | Draft round | part of the ticket page; `POST /t/{key}/draft…` | Review | `DraftRoundEditor` |
-| Team page | `GET /teams/{slug}` (`team_show`) | Organization + Workflow | Projects, "How work moves here", people with WorkloadBar |
-| Admin tabs | `GET /admin/{tab}`, tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data | Web (+ owning module per tab) | Admin layout with tab list |
+| Team page | `GET /teams/{teamId}` (`organization_team`) | Organization + Workflow | Projects, "How work moves here", people with WorkloadBar |
+| Admin tabs | `GET /admin/{tab}`, tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data; People is `organization_admin_people`, the menu's Admin item | Web (+ owning module per tab) | Admin layout with tab list |
 | Manager "Teams at a glance" | part of `/` for managers | Insight | GroupBar per team |
 | Local AI sheet | dialog from the header chip; `POST /ai/laptop/status`, `POST /ai/laptop/package`, `POST /ai/laptop/result` | Assist | `local-ai` controller |
 | Profile (name, time zone, theme) | `GET/POST /me/profile` (`identity_profile`); the avatar menu's theme switch `POST /me/theme` (`identity_theme`) | Identity | `profile.html.twig` |

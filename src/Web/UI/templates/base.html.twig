@@ -34,18 +34,49 @@
                     pinround
                     {% endblock -%}
                 </a>
+                {# An item whose page no phase has built yet is inert text, not a dead link (MainMenu). #}
                 <nav class="site-header__nav" aria-label="Main">
-                    <a class="nav" href="{{ path('web_home') }}"{% if app.current_route == 'web_home' %} aria-current="page"{% endif %}>Home</a>
+                    {% for item in main_menu() %}
+                        {% if item.isGroup %}
+                            {# A disclosure of links, as the avatar menu is. #}
+                            <div class="menu nav-menu" {{ stimulus_controller('menu') }} data-action="focusout->menu#closeOnFocusLeave">
+                                <button type="button" class="nav" aria-expanded="false" aria-controls="main-menu-{{ loop.index }}"
+                                    {{ stimulus_target('menu', 'trigger') }} data-action="menu#toggle keydown->menu#triggerKey click@window->menu#closeOnOutsideClick">
+                                    {{- item.label -}}
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="m6 9 6 6 6-6"/>
+                                    </svg>
+                                </button>
+                                <div id="main-menu-{{ loop.index }}" class="menu__list nav-menu__list" hidden
+                                    {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#closeOnEscape">
+                                    {% for page in item.children %}
+                                        {% if page.isPageBuilt %}
+                                            <a class="menu__item" href="{{ page.url }}"{% if page.isCurrent %} aria-current="page"{% endif %} {{ stimulus_target('menu', 'item') }}>{{ page.label }}</a>
+                                        {% else %}
+                                            <span class="menu__item menu__item--not-built">{{ page.label }}<span class="visually-hidden"> (not built yet)</span></span>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% elseif item.isPageBuilt %}
+                            <a class="nav" href="{{ item.url }}"{% if item.isCurrent %} aria-current="page"{% endif %}>{{ item.label }}</a>
+                        {% else %}
+                            <span class="nav nav--not-built">{{ item.label }}<span class="visually-hidden"> (not built yet)</span></span>
+                        {% endif %}
+                    {% endfor %}
                 </nav>
                 <div class="site-header__spacer"></div>
-                {# TODO(P01.T5): wire the report button and the bell once pings exist. #}
-                <button type="button" class="btn btn-tonal btn-sm">Report a problem</button>
-                <button type="button" class="icon-btn" aria-label="Pings">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                    </svg>
-                </button>
+                {% if can_report_problems() %}
+                    {# TODO(P03/P06): open the report form once its route exists. #}
+                    {# TODO(P04.T5): open the pings popover and show the count of open pings. #}
+                    <button type="button" class="btn btn-tonal btn-sm">Report a problem</button>
+                    <button type="button" class="icon-btn" aria-label="Pings">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                        </svg>
+                    </button>
+                {% endif %}
                 {% if app.user %}
                     {# A disclosure, not an ARIA menu: it holds links, a switch and a form. "menu" opens and closes it. #}
                     <div class="menu avatar-menu" {{ stimulus_controller('menu') }} data-action="focusout->menu#closeOnFocusLeave">

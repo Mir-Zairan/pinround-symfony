@@ -34,20 +34,21 @@ final class HomePageShellTest extends WebTestCase
     }
 
     #[Test]
-    public function theHeaderHoldsTheLogoNavigationReportButtonAndBell(): void
+    public function theHeaderOfAPersonWithoutRolesHoldsTheLogoAndHomeButNoReportButtonOrBell(): void
     {
         $page = $this->openHome();
 
+        self::assertResponseStatusCodeSame(200);
         self::assertSame('/', $page->filter('header.site-header a.logo')->attr('href'));
         self::assertSame('pinround', trim($page->filter('header.site-header a.logo')->text()));
         self::assertCount(1, $page->filter('nav[aria-label="Main"]'));
-        $home = $page->filter('nav[aria-label="Main"] a.nav');
-        self::assertCount(1, $home);
+        self::assertCount(1, $page->filter('nav[aria-label="Main"] > *'));
+        $home = $page->filter('nav[aria-label="Main"] > a.nav');
         self::assertSame('Home', $home->text());
         self::assertSame('/', $home->attr('href'));
         self::assertSame('page', $home->attr('aria-current'));
-        self::assertSame('Report a problem', $page->filter('header button.btn-tonal')->text());
-        self::assertSame('Pings', $page->filter('header button.icon-btn')->attr('aria-label'));
+        self::assertCount(0, $page->filter('header button.btn-tonal'));
+        self::assertCount(0, $page->filter('header button.icon-btn'));
         self::assertSame('Skip to main content', $page->filter('a.skip-link')->text());
         self::assertSame('#main', $page->filter('a.skip-link')->attr('href'));
         self::assertCount(1, $page->filter('main#main'));
