@@ -49,6 +49,7 @@ final class RequestTransactionTest extends WebTestCase
         'test_current_actor_report',
         'test_admin_area',
         'test_log_leak',
+        'test_recent_auth',
         'test_tracing_respond',
         'test_tracing_fail',
         'test_tracing_forbid',

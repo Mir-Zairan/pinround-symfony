@@ -60,6 +60,11 @@ when@test:
         controller: App\Tests\Fixtures\Http\AdminAreaProbeController::openAdminArea
         methods: [GET]
 
+    test_recent_auth:
+        path: /_test/recent-auth
+        controller: App\Tests\Fixtures\Http\RecentAuthProbeController::openSensitiveAction
+        methods: [GET, POST]
+
     test_log_leak:
         path: /_test/log-leak/{organizationId}
         controller: App\Tests\Fixtures\Http\LogLeakProbeController::logTheSummaryThenFail

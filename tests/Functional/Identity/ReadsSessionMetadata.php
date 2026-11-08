@@ -22,6 +22,16 @@ trait ReadsSessionMetadata
         file_put_contents($file, serialize($data));
     }
 
+    private static function writeSessionAttribute(KernelBrowser $client, string $key, mixed $value): void
+    {
+        $file = self::sessionFileOf($client);
+        $data = unserialize((string) file_get_contents($file));
+        self::assertIsArray($data);
+        self::assertIsArray($data['_sf2_attributes'] ?? null);
+        $data['_sf2_attributes'][$key] = $value;
+        file_put_contents($file, serialize($data));
+    }
+
     /**
      * @return array{c: int, u: int, l: int}
      */

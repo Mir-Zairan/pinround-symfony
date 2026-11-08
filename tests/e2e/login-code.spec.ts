@@ -7,7 +7,7 @@ import path from 'node:path';
 import { demoPassword } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
-// As Mia, whom no other spec logs in as: the first run turns her two-step login on, and it stays on, because turning
+// As Mia, whom only confirm-its-you.spec.ts also logs in as: the first run turns her two-step login on, and it stays on, because turning
 // it off is not built yet. Her key goes to the git-ignored tests/e2e/.auth/, not test-results/, which Playwright empties
 // at every run, so a person can still log in as her in dev. The functional LoginCodeTest covers the codes, the
 // refusals and the throttle.

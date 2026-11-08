@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Identity\Application;
 
 use App\Identity\Application\ChangePassword;
+use App\Identity\Application\CurrentPasswordCheck;
 use App\Identity\Application\PasswordChangeLimiter;
 use App\Identity\Application\PasswordChangeOutcome;
 use App\Identity\Application\TooManyPasswordChangeTries;
@@ -218,6 +219,6 @@ final class ChangePasswordTest extends TestCase
             }
         };
 
-        return new ChangePassword($users, $credentials, $hashing, $limiter);
+        return new ChangePassword($users, $credentials, $hashing, new CurrentPasswordCheck($credentials, $hashing, $limiter));
     }
 }

@@ -38,6 +38,7 @@ final class TwoStepLoginController extends AbstractController
         private readonly QrCodeImages $qrCodeImages,
         private readonly CurrentSession $currentSession,
         private readonly SessionConfirmations $sessionConfirmations,
+        private readonly RecentAuthRedirects $recentAuthRedirects,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -87,6 +88,8 @@ final class TwoStepLoginController extends AbstractController
         // Rendered in this response and never stored anywhere in plain text, so a reload cannot show them again.
         return $this->render('@Identity/two_step_recovery_codes.html.twig', [
             'recoveryCodes' => $outcome->reveal(),
+            // Set when an action needing a recent proof sent the person here (AskToConfirmItsYou).
+            'continuePath' => $this->recentAuthRedirects->takeAfterTwoStepSetup($request),
         ], self::notStored(new Response()));
     }
 

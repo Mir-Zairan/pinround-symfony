@@ -11,6 +11,9 @@
 {% block main %}
     <div class="security">
         <h1 class="security__title">Two-step login</h1>
+        {% for notice in app.flashes('notice') %}
+            <p class="login__notice" role="status">{{ notice }}</p>
+        {% endfor %}
         {% if error and not setup.state.isAwaitingCode %}
             <p class="login__error" role="alert">{{ error }}</p>
         {% endif %}
