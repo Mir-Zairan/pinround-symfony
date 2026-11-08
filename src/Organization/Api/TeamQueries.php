@@ -27,4 +27,16 @@ interface TeamQueries
      * @return list<TeamSummary> the asked teams, ordered by name (case-insensitive), then by id
      */
     public function summariesOf(OrganizationId $organizationId, array $teamIds): array;
+
+    /**
+     * One query, for a page that lists every team of the organization.
+     *
+     * @return list<TeamSummary> every team, ordered like summariesOf
+     */
+    public function allSummariesOf(OrganizationId $organizationId): array;
+
+    /**
+     * One `count(*)`, for a page that needs only how many teams there are.
+     */
+    public function countOf(OrganizationId $organizationId): int;
 }

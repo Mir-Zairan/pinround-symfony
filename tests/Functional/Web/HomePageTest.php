@@ -54,7 +54,7 @@ final class HomePageTest extends WebTestCase
     }
 
     #[Test]
-    public function leaOpensTheWorkHomeWithAllFourChipsAndAllSectionsShown(): void
+    public function lenaOpensTheWorkHomeWithHerFourChipsAndAllSectionsShown(): void
     {
         $page = $this->openHomeAs('Lena');
 
@@ -64,7 +64,7 @@ final class HomePageTest extends WebTestCase
         self::assertSame(['All'], $this->pressedChipLabels($page));
         self::assertSame(
             ['Needs you now', 'Also waiting on you', 'Admin', 'Pings for you', 'Release', 'Your team'],
-            $page->filter('section.home__section > h2')->each(static fn (Crawler $title): string => $title->text()),
+            $page->filter('section.home__section h2')->each(static fn (Crawler $title): string => $title->text()),
         );
         self::assertCount(0, $page->filter('section.home__section[hidden]'));
         self::assertSame('Nothing needs you as admin.', $page->filter('section[data-focus-group="admin"] .empty-state')->text());
@@ -95,7 +95,7 @@ final class HomePageTest extends WebTestCase
         self::assertSame(['All', 'My work', 'My team'], $this->chipLabels($page));
         self::assertSame(
             ['Needs you now', 'Also waiting on you', 'Pings for you', 'Your team'],
-            $page->filter('section.home__section > h2')->each(static fn (Crawler $title): string => $title->text()),
+            $page->filter('section.home__section h2')->each(static fn (Crawler $title): string => $title->text()),
         );
         self::assertCount(0, $page->filter('.home__subline'), 'the job of a member is not known to Home yet');
     }
@@ -154,16 +154,16 @@ final class HomePageTest extends WebTestCase
     public function theDateLineIsTodayInTheAppTimeZone(): void
     {
         $this->client->disableReboot();
-        // An hour behind the real time stays within the session limits, which PHP's time() stamps. Home cannot read the
+        // A fixed day well before today, so only the injected clock can give this date. Home cannot read the
         // user's own time zone yet (SecurityUser does not carry it), so the app's default zone applies.
-        $clock = new MockClock(new \DateTimeImmutable('@'.(time() - 3600)));
+        $clock = new MockClock(new \DateTimeImmutable('2026-11-05 12:00:00 UTC'));
         self::getContainer()->set('clock', $clock);
         $this->logIn($this->client, $this->person('Lena'));
 
         $page = $this->client->request('GET', '/');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame($clock->now()->setTimezone(new \DateTimeZone(date_default_timezone_get()))->format('l, j F'), $page->filter('.home__date')->text());
+        self::assertSame('Thursday, 5 November', $page->filter('.home__date')->text());
     }
 
     #[Test]
@@ -247,6 +247,57 @@ final class HomePageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('All clear, Lena', $page->filter('h1')->text());
         self::assertSame(['All', 'My work', 'My team'], $this->chipLabels($page));
+    }
+
+    #[Test]
+    public function everyHomeAsksTurboNotToCacheIt(): void
+    {
+        foreach (['Lena', 'Raj', 'Sara'] as $person) {
+            self::ensureKernelShutdown();
+            $this->client = self::httpsClient();
+            $page = $this->openHomeAs($person);
+
+            self::assertSame(['no-cache'], $page->filter('head meta[name="turbo-cache-control"]')->each(static fn (Crawler $meta): string => (string) $meta->attr('content')), $person);
+        }
+    }
+
+    #[Test]
+    public function theAdminSectionOfTheWorkHomeHasAnInertOpenSettingsButtonWhileTheAdminPageIsNotBuilt(): void
+    {
+        $page = $this->openHomeAs('Lena');
+
+        $button = $page->filter('section[data-focus-group="admin"] .home__section-header button.btn-text');
+        self::assertCount(1, $button);
+        self::assertSame('Open settings (not built yet)', $button->text());
+        self::assertNotNull($button->attr('disabled'));
+        self::assertCount(0, $page->filter('section:not([data-focus-group="admin"]) .btn'), 'only the Admin section has the button');
+    }
+
+    #[Test]
+    public function theManagerSectionOfTheWorkHomeSaysYouAreAlsoAManager(): void
+    {
+        $this->setOrgRoles($this->person('Mia'), $this->acmeFoods(), '{manager}');
+
+        $page = $this->openHomeAs('Mia');
+
+        self::assertSame('All teams · you are also a manager', $page->filter('section[data-focus-group="all_teams"] h2')->text());
+    }
+
+    #[Test]
+    public function theAsideIsLabelledNeutrallySoItNeverNamesAdminToAMember(): void
+    {
+        $page = $this->openHomeAs('Omar');
+
+        self::assertSame('More for you', $page->filter('aside')->attr('aria-label'));
+    }
+
+    #[Test]
+    public function teamsAtAGlanceShowsTheLegendOfTheFiveGroups(): void
+    {
+        $page = $this->openHomeAs('Raj');
+
+        self::assertSame(['To do', 'Doing', 'Checking', 'Waiting', 'Done'], $page->filter('.home__legend li')->each(static fn (Crawler $group): string => $group->text()));
+        self::assertCount(5, $page->filter('.home__legend .home__swatch[aria-hidden="true"]'));
     }
 
     #[Test]

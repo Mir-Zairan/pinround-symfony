@@ -85,6 +85,39 @@ test('a failed save puts the previous chip and its sections back', async ({ page
   await page.unroute('**/home/focus');
 });
 
+test('two quick picks are saved one at a time and a failed older save keeps the newer pick', async ({ page }) => {
+  await openHome(page);
+  let saves = 0;
+  let releaseFirstSave!: () => void;
+  const firstSaveHeld = new Promise<void>((resolve) => (releaseFirstSave = resolve));
+  await page.route('**/home/focus', async (route) => {
+    if (++saves === 1) {
+      await firstSaveHeld;
+      await route.fulfill({ status: 500 });
+    } else {
+      await route.continue();
+    }
+  });
+
+  await chip(page, 'My team').click();
+  await chip(page, 'My work').click();
+  await page.waitForTimeout(300);
+
+  expect(saves, 'the second pick waits for the first save').toBe(1);
+  const secondSaved = page.waitForResponse((response) => response.url().endsWith('/home/focus') && response.status() === 204);
+  releaseFirstSave();
+  await secondSaved;
+  expect(saves).toBe(2);
+  await expect(chip(page, 'My work')).toHaveAttribute('aria-pressed', 'true');
+  await expect(chip(page, 'My team')).toHaveAttribute('aria-pressed', 'false');
+  await expect(section(page, 'Needs you now')).toBeVisible();
+  await expect(section(page, 'Your team')).toBeHidden();
+
+  await page.unroute('**/home/focus');
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(chip(page, 'My work')).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('the choice survives a reload and a fresh login', async ({ page, browser }) => {
   await openHome(page);
   await pressChip(page, 'My team');

@@ -129,6 +129,41 @@ final class DbalTeamQueriesTest extends KernelTestCase
         self::assertSame([], $this->queries()->teamsOf(new OrganizationId(self::ACME_FOODS)));
     }
 
+    #[Test]
+    public function allSummariesOfGivesEveryTeamOfTheOrganizationOrderedByNameIgnoringCase(): void
+    {
+        $summariesOf = fn (string $tenantId): array => $this->transactions()->rolledBackAs($tenantId, fn (): array => array_map(
+            static fn ($summary): array => [$summary->id()->toString(), $summary->name()],
+            $this->queries()->allSummariesOf(new OrganizationId($tenantId)),
+        ));
+
+        self::assertSame(
+            [[self::ACME_ANALYTICS, 'Analytics'], [self::ACME_MOBILE, 'mobile'], [self::ACME_PAYMENTS, 'Payments'], [self::ACME_SHOP, 'Shop']],
+            $summariesOf(self::ACME_FOODS),
+        );
+        self::assertSame([[self::BETA_CHECKOUT, 'Checkout']], $summariesOf(self::BETA_BAKERY));
+    }
+
+    #[Test]
+    public function allSummariesOfFindsNothingUnderAnotherTenantOrNone(): void
+    {
+        $asked = new OrganizationId(self::BETA_BAKERY);
+
+        self::assertSame([], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->allSummariesOf($asked)));
+        self::assertSame([], $this->queries()->allSummariesOf($asked));
+    }
+
+    #[Test]
+    public function countOfCountsTheOrganizationsTeamsOnly(): void
+    {
+        $countOf = fn (string $tenantId, string $askedId): int => $this->transactions()->rolledBackAs($tenantId, fn (): int => $this->queries()->countOf(new OrganizationId($askedId)));
+
+        self::assertSame(4, $countOf(self::ACME_FOODS, self::ACME_FOODS));
+        self::assertSame(1, $countOf(self::BETA_BAKERY, self::BETA_BAKERY));
+        self::assertSame(0, $countOf(self::ACME_FOODS, self::BETA_BAKERY), 'another tenant sees nothing');
+        self::assertSame(0, $this->queries()->countOf(new OrganizationId(self::ACME_FOODS)), 'no tenant sees nothing');
+    }
+
     /**
      * @param list<string> $teamIds
      *

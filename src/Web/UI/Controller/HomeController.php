@@ -58,23 +58,22 @@ final class HomeController extends AbstractController
             'isLead' => array_any($roles->teamIds(), $roles->isLeadOf(...)),
             'isManager' => $roles->isManager(),
             'isAdmin' => $roles->isAdmin(),
+            'adminSettingsUrl' => $roles->isAdmin() ? $this->adminSettingsUrl() : null,
         ]);
     }
 
     private function managerHome(ActorContext $actor): Response
     {
-        $organizationId = $actor->organizationId();
-
         return $this->render('@Web/home/manager.html.twig', [
             'today' => $this->clock->now(),
-            'teams' => $this->teamQueries->summariesOf($organizationId, $this->teamQueries->teamsOf($organizationId)),
+            'teams' => $this->teamQueries->allSummariesOf($actor->organizationId()),
         ]);
     }
 
     private function adminHome(ActorContext $actor): Response
     {
         return $this->render('@Web/home/admin.html.twig', [
-            'teamCount' => \count($this->teamQueries->teamsOf($actor->organizationId())),
+            'teamCount' => $this->teamQueries->countOf($actor->organizationId()),
             'adminSettingsUrl' => $this->adminSettingsUrl(),
         ]);
     }

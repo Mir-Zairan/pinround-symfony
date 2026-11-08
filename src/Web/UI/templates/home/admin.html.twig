@@ -1,5 +1,10 @@
 {% extends '@Web/base.html.twig' %}
 
+{% block head %}
+    {# Turbo must not show a cached copy of Home (frontend.md, Turbo and real-time updates). #}
+    <meta name="turbo-cache-control" content="no-cache">
+{% endblock %}
+
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/home.css') }}">
 {% endblock %}
@@ -19,12 +24,7 @@
         <p>Admins do not work on tickets. Everything you set is under Admin.</p>
 
         <div>
-            {% if adminSettingsUrl %}
-                <twig:Button href="{{ adminSettingsUrl }}">Open admin settings</twig:Button>
-            {% else %}
-                {# Inert until the Admin page exists, as the menu's Admin item is. #}
-                <twig:Button :disabled="true">Open admin settings<span class="visually-hidden"> (not built yet)</span></twig:Button>
-            {% endif %}
+            {% include '@Web/home/_admin_settings_button.html.twig' with {url: adminSettingsUrl, variant: 'filled', size: 'md', label: 'Open admin settings'} only %}
         </div>
     </div>
 {% endblock %}

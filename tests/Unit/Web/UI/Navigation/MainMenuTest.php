@@ -63,6 +63,16 @@ final class MainMenuTest extends TestCase
                 throw new \LogicException('Only summariesOf is expected.');
             }
 
+            public function allSummariesOf(OrganizationId $organizationId): array
+            {
+                throw new \LogicException('Only summariesOf is expected.');
+            }
+
+            public function countOf(OrganizationId $organizationId): int
+            {
+                throw new \LogicException('Only summariesOf is expected.');
+            }
+
             public function summariesOf(OrganizationId $organizationId, array $teamIds): array
             {
                 ++$this->summariesOfCalls;

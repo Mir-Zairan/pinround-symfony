@@ -37,6 +37,31 @@ final readonly class DbalTeamQueries implements TeamQueries
             [$organizationId->toString(), '{'.implode(',', array_map(static fn (TeamId $teamId): string => $teamId->toString(), $teamIds)).'}'],
         );
 
+        return self::summaries($rows);
+    }
+
+    public function allSummariesOf(OrganizationId $organizationId): array
+    {
+        return self::summaries($this->connection->fetchAllAssociative(
+            'SELECT id, name FROM org_team WHERE organization_id = ? ORDER BY lower(name), id',
+            [$organizationId->toString()],
+        ));
+    }
+
+    public function countOf(OrganizationId $organizationId): int
+    {
+        $count = $this->connection->fetchOne('SELECT count(*) FROM org_team WHERE organization_id = ?', [$organizationId->toString()]);
+
+        return \is_int($count) ? $count : throw new \LogicException('A team count from the database is not an integer.');
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     *
+     * @return list<TeamSummary>
+     */
+    private static function summaries(array $rows): array
+    {
         return array_map(
             static fn (array $row): TeamSummary => new TeamSummary(
                 self::teamId($row['id']),

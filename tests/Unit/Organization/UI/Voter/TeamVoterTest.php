@@ -59,6 +59,16 @@ final class TeamVoterTest extends TestCase
                 throw new \LogicException('Only teamsOf is expected.');
             }
 
+            public function allSummariesOf(OrganizationId $organizationId): array
+            {
+                throw new \LogicException('Only teamsOf is expected.');
+            }
+
+            public function countOf(OrganizationId $organizationId): int
+            {
+                throw new \LogicException('Only teamsOf is expected.');
+            }
+
             public function teamsOf(OrganizationId $organizationId): array
             {
                 $this->teamsOfCalls[] = $organizationId->toString();

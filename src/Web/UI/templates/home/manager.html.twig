@@ -1,5 +1,10 @@
 {% extends '@Web/base.html.twig' %}
 
+{% block head %}
+    {# Turbo must not show a cached copy of Home (frontend.md, Turbo and real-time updates). #}
+    <meta name="turbo-cache-control" content="no-cache">
+{% endblock %}
+
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/home.css') }}">
 {% endblock %}
@@ -12,6 +17,14 @@
             <h1 class="home__title">Teams at a glance</h1>
             <p class="home__subline">Every team uses the same five groups, even when its own steps differ. Open a team to see its steps.</p>
         </header>
+
+        <ul class="home__legend" aria-label="The five groups">
+            <li><span class="home__swatch home__swatch--todo" aria-hidden="true"></span>To do</li>
+            <li><span class="home__swatch home__swatch--doing" aria-hidden="true"></span>Doing</li>
+            <li><span class="home__swatch home__swatch--check" aria-hidden="true"></span>Checking</li>
+            <li><span class="home__swatch home__swatch--wait" aria-hidden="true"></span>Waiting</li>
+            <li><span class="home__swatch home__swatch--done" aria-hidden="true"></span>Done</li>
+        </ul>
 
         {% if teams is empty %}
             <twig:EmptyState message="No teams yet. An admin creates teams under Admin → Teams."/>

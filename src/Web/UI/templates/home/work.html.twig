@@ -1,5 +1,10 @@
 {% extends '@Web/base.html.twig' %}
 
+{% block head %}
+    {# Turbo must not show a cached copy of Home (frontend.md, Turbo and real-time updates). #}
+    <meta name="turbo-cache-control" content="no-cache">
+{% endblock %}
+
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/home.css') }}">
 {% endblock %}
@@ -32,9 +37,9 @@
                 {% include '@Web/home/_section.html.twig' with {id: 'needs-you-now', title: 'Needs you now', group: 'my_work', focus: focus.value, message: 'Nothing waits on you right now.'} only %}
                 {% include '@Web/home/_section.html.twig' with {id: 'also-waiting', title: 'Also waiting on you', group: 'my_work', focus: focus.value, message: 'Nothing else waits on you.'} only %}
             </div>
-            <aside class="home__column home__column--aside" aria-label="Admin, pings and team">
+            <aside class="home__column home__column--aside" aria-label="More for you">
                 {% if isAdmin %}
-                    {% include '@Web/home/_section.html.twig' with {id: 'admin', title: 'Admin', group: 'admin', focus: focus.value, message: 'Nothing needs you as admin.'} only %}
+                    {% include '@Web/home/_section.html.twig' with {id: 'admin', title: 'Admin', group: 'admin', focus: focus.value, message: 'Nothing needs you as admin.', adminSettingsUrl: adminSettingsUrl} only %}
                 {% endif %}
                 {% include '@Web/home/_section.html.twig' with {id: 'pings', title: 'Pings for you', group: 'my_work', focus: focus.value, message: 'No open pings. Nice.'} only %}
                 {% if isLead %}
@@ -45,7 +50,7 @@
         </div>
 
         {% if isManager %}
-            {% include '@Web/home/_section.html.twig' with {id: 'all-teams', title: 'All teams', group: 'all_teams', focus: focus.value, message: 'Every team\'s progress will show here.'} only %}
+            {% include '@Web/home/_section.html.twig' with {id: 'all-teams', title: 'All teams · you are also a manager', group: 'all_teams', focus: focus.value, message: 'Every team\'s progress will show here.'} only %}
         {% endif %}
     </div>
 {% endblock %}
