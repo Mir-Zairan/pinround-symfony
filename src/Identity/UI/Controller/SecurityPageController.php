@@ -102,7 +102,7 @@ final class SecurityPageController extends AbstractController
             'passwordError' => $passwordError,
             'logOutError' => $logOutError,
             'minimumPasswordLength' => ChangePassword::MINIMUM_PASSWORD_LENGTH,
-            'twoStepLoginState' => $this->showTwoStepSetup->stateOf($this->currentSession->userId())->name,
+            'twoStepLoginState' => $this->showTwoStepSetup->stateOf($this->currentSession->userId()),
         ], new Response(status: $status ?? ($hasError ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK)));
     }
 }

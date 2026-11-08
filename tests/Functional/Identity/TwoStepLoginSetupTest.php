@@ -75,6 +75,8 @@ final class TwoStepLoginSetupTest extends WebTestCase
         self::assertSame('QR code for your authenticator app', $page->filter('main img.two-step__qr')->attr('alt'));
         self::assertMatchesRegularExpression('/^[A-Z2-7]{4}( [A-Z2-7]{4}){7}$/', self::manualKeyOn($page));
         self::assertSame(0, $page->filter('main [role="alert"]')->count());
+        self::assertNull($page->filter('main input[name="code"]')->attr('aria-invalid'));
+        self::assertSame('two-step-code-hint', $page->filter('main input[name="code"]')->attr('aria-describedby'));
         $row = $this->rowOf($user);
         self::assertIsArray($row);
         self::assertNull($row['confirmed_at']);
@@ -116,7 +118,11 @@ final class TwoStepLoginSetupTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(422);
         $page = $client->getCrawler();
-        self::assertSame(TwoStepLoginController::WRONG_CODE, $page->filter('main [role="alert"]')->text());
+        self::assertSame(TwoStepLoginController::WRONG_CODE, $page->filter('main form[action="/me/security/two-step/confirm"] [role="alert"]#two-step-code-error')->text());
+        self::assertCount(1, $page->filter('main [role="alert"]'));
+        $codeField = $page->filter('main input[name="code"]');
+        self::assertSame('true', $codeField->attr('aria-invalid'));
+        self::assertSame('two-step-code-error two-step-code-hint', $codeField->attr('aria-describedby'));
         self::assertSame($seed, self::seedOn($page), 'the key changed after a wrong code');
         self::assertCount(1, $page->filter('main img.two-step__qr'));
         self::assertCount(0, $page->filter('main .two-step__codes'));

@@ -8,8 +8,11 @@ use App\Identity\Domain\RecoveryCodeHashing;
 use App\Identity\Domain\TwoStepLogin;
 use App\Identity\Infrastructure\Doctrine\DoctrineTwoStepLogins;
 use App\SharedKernel\Application\FieldEncryption;
+use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
 use App\Tests\Factory\Identity\UserFactory;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -124,6 +127,41 @@ final class DoctrineTwoStepLoginsTest extends KernelTestCase
         } catch (\LogicException $refusal) {
             self::assertSame('Changing a two-step login needs an open transaction to hold the lock.', $refusal->getMessage());
         } finally {
+            $this->connection()->beginTransaction();
+        }
+    }
+
+    #[Test]
+    public function readingForAChangeHoldsTheUsersRowUntilTheTransactionEnds(): void
+    {
+        // The other session must see the user, so it is committed here and removed through the migrator at the end.
+        $this->connection()->rollBack();
+        $userId = UserFactory::createOne()->id();
+        $otherSession = new CloseOnFailedBeginConnection($this->connection()->getParams(), new PgSQLDriver());
+        $lockUserRowNowait = static fn (): array => $otherSession->transactional(static fn (Connection $session): array => $session->fetchFirstColumn(
+            'SELECT id FROM idn_user WHERE id = ? FOR NO KEY UPDATE NOWAIT',
+            [$userId->toString()],
+        ));
+
+        try {
+            $this->connection()->beginTransaction();
+            try {
+                self::assertNull($this->twoStepLogins()->byUserIdForChange($userId));
+                try {
+                    $lockUserRowNowait();
+                    self::fail('The user row was not locked.');
+                } catch (DriverException $exception) {
+                    self::assertSame('55P03', $exception->getSQLState());
+                }
+            } finally {
+                $this->connection()->rollBack();
+            }
+
+            self::assertSame([$userId->toString()], $lockUserRowNowait());
+        } finally {
+            $otherSession->close();
+            $this->entityManager()->clear();
+            self::getContainer()->get('doctrine.dbal.migrator_connection')->executeStatement('DELETE FROM idn_user WHERE id = ?', [$userId->toString()]);
             $this->connection()->beginTransaction();
         }
     }

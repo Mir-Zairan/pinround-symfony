@@ -9,21 +9,20 @@
 {% endblock %}
 
 {% block main %}
-    {% set state = setup.state.name %}
     <div class="security">
         <h1 class="security__title">Two-step login</h1>
-        {% if error %}
+        {% if error and not setup.state.isAwaitingCode %}
             <p class="login__error" role="alert">{{ error }}</p>
         {% endif %}
 
         <twig:Card tag="section" class="security__section">
-            {% if state == 'On' %}
+            {% if setup.state.isOn %}
                 <p class="login__notice" role="status">Two-step login is on.</p>
                 <p class="login__hint">Each login asks for a code from your authenticator app.</p>
                 <div>
                     <twig:Button href="{{ path('identity_security') }}" variant="outline">Back to security</twig:Button>
                 </div>
-            {% elseif state == 'AwaitingCode' %}
+            {% elseif setup.state.isAwaitingCode %}
                 <h2 class="security__heading">1. Scan the QR code</h2>
                 <p class="login__hint">Open your authenticator app and scan this code.</p>
                 <img class="two-step__qr" src="{{ qrCodeSource }}" width="200" height="200" alt="QR code for your authenticator app">
@@ -32,9 +31,13 @@
 
                 <h2 class="security__heading">2. Type the code</h2>
                 <form class="login__form" method="post" action="{{ path('identity_two_step_confirm') }}">
+                    {% if error %}
+                        <p class="login__error" role="alert" id="two-step-code-error">{{ error }}</p>
+                    {% endif %}
                     <label class="login__field">
                         Code from the app
-                        <input class="login__input" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" aria-describedby="two-step-code-hint" required>
+                        <input class="login__input" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required
+                            {%- if error %} aria-invalid="true" aria-describedby="two-step-code-error two-step-code-hint"{% else %} aria-describedby="two-step-code-hint"{% endif %}>
                     </label>
                     <p class="login__hint" id="two-step-code-hint">6 digits. Two-step login stays off until the code is right.</p>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token('two_step_confirm') }}">
