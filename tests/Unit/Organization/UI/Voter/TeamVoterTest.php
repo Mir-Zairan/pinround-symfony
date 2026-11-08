@@ -22,7 +22,7 @@ use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 
 /**
- * Acme Foods (the organization of the request) has the teams Shop and Mobile; Beta Bakery has Checkout.
+ * Acme Foods (the organization of the request) has the teams Shop, Mobile and Support; Beta Bakery has Checkout.
  */
 final class TeamVoterTest extends TestCase
 {
@@ -31,17 +31,19 @@ final class TeamVoterTest extends TestCase
     private const string MIA = '0197a3c0-0000-7000-8000-0000000000a3';
     private const string RAJ = '0197a3c0-0000-7000-8000-0000000000a4';
     private const string SARA = '0197a3c0-0000-7000-8000-0000000000a5';
+    private const string NOOR = '0197a3c0-0000-7000-8000-0000000000a6';
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000000a';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000000b';
     private const string SHOP = '0197a3c0-0000-7000-8000-0000000000d1';
     private const string MOBILE = '0197a3c0-0000-7000-8000-0000000000d2';
     private const string CHECKOUT = '0197a3c0-0000-7000-8000-0000000000d3';
+    private const string SUPPORT = '0197a3c0-0000-7000-8000-0000000000d4';
 
     private MembershipQueries&\Countable $membershipQueries;
 
     protected function setUp(): void
     {
-        $this->membershipQueries = new class([self::ACME_FOODS => [self::SHOP, self::MOBILE], self::BETA_BAKERY => [self::CHECKOUT]]) implements MembershipQueries, \Countable {
+        $this->membershipQueries = new class([self::ACME_FOODS => [self::SHOP, self::MOBILE, self::SUPPORT], self::BETA_BAKERY => [self::CHECKOUT]]) implements MembershipQueries, \Countable {
             /** @var list<string> the organization id of each teamsOf call */
             private array $teamsOfCalls = [];
 
@@ -107,6 +109,29 @@ final class TeamVoterTest extends TestCase
 
         self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::LENA, TeamPermission::LEAD, self::SHOP));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::LENA, TeamPermission::LEAD, self::MOBILE));
+    }
+
+    #[Test]
+    public function aLeadWithNoOrgRoleViewsAndLeadsOnlyTheirOwnTeam(): void
+    {
+        $voter = $this->voter();
+
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::NOOR, TeamPermission::VIEW, self::SUPPORT));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::NOOR, TeamPermission::LEAD, self::SUPPORT));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::NOOR, TeamPermission::VIEW, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::NOOR, TeamPermission::LEAD, self::SHOP));
+        self::assertCount(0, $this->membershipQueries);
+    }
+
+    #[Test]
+    public function aViewerWithNoOrgRoleViewsTheirTeamButLeadsNothingAndSeesNoOtherTeam(): void
+    {
+        $voter = $this->voter();
+
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::MIA, TeamPermission::VIEW, self::SUPPORT));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::MIA, TeamPermission::LEAD, self::SUPPORT));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::MIA, TeamPermission::VIEW, self::MOBILE));
+        self::assertCount(0, $this->membershipQueries);
     }
 
     #[Test]
@@ -177,19 +202,22 @@ final class TeamVoterTest extends TestCase
     }
 
     /**
-     * Lena leads Shop; Omar is a member of Shop and Mobile; Mia of Shop only; Raj is a Manager and a viewer of Shop;
-     * Sara is an Admin with no team role.
+     * Lena is an Admin and leads Shop; Omar is a member of Shop and Mobile; Mia is a member of Shop and a viewer of
+     * Support; Raj is a Manager and a viewer of Shop; Sara is an Admin with no team role; Noor has no org role and leads
+     * Support.
      */
     private function voter(): TeamVoter
     {
         $shop = new TeamId(self::SHOP);
         $mobile = new TeamId(self::MOBILE);
+        $support = new TeamId(self::SUPPORT);
         $rolesByUser = [
             self::LENA => new Roles(true, false, [$shop], [], []),
             self::OMAR => new Roles(false, false, [], [$shop, $mobile], []),
-            self::MIA => new Roles(false, false, [], [$shop], []),
+            self::MIA => new Roles(false, false, [], [$shop], [$support]),
             self::RAJ => new Roles(false, true, [], [], [$shop]),
             self::SARA => new Roles(true, false, [], [], []),
+            self::NOOR => new Roles(false, false, [$support], [], []),
         ];
         $actors = [];
         foreach ($rolesByUser as $userId => $roles) {

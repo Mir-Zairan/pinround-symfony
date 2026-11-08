@@ -11,8 +11,13 @@ use App\Organization\Api\TeamPermission;
  * source:    text of docs/00-product/personas-and-roles.md the row comes from (a Permission matrix action, a heading
  *            or a sentence), copied exactly; VoterMatrixTest fails when the doc no longer has it.
  * actor:     a person of VoterMatrixTest::PEOPLE, deciding in their own organization.
- * subject:   an organization (Acme Foods, Beta Bakery) or a team (Shop, Mobile of Acme Foods; Checkout of Beta Bakery).
+ * subject:   an organization (Acme Foods, Beta Bakery) or a team (Shop, Mobile, Support of Acme Foods; Checkout of Beta
+ *            Bakery).
  * expected:  granted or denied.
+ *
+ * A row proves a team-role rule only when its actor has no org role that grants the same: Lena and Ben are Admins and
+ * Raj is a Manager, so their TEAM_VIEW rows cite the org-role text; Noor (Lead) and Mia (Member, Viewer) carry the
+ * team-role rules.
  */
 
 $isAUser = 'Every person in an organization is a **user** of it.';
@@ -54,19 +59,23 @@ return [
     ['source' => $deniedUnlessARuleAllows, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Sara', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Ben', 'subject' => 'Acme Foods', 'expected' => 'denied'],
 
-    ['source' => $leadRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
-    ['source' => $leadRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Mobile', 'expected' => 'granted'],
+    ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Mobile', 'expected' => 'granted'],
+    ['source' => $leadRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $teamRoles, 'attribute' => TeamPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $teamRoles, 'attribute' => TeamPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Mobile', 'expected' => 'denied'],
     ['source' => $memberRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'granted'],
     ['source' => $memberRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Mobile', 'expected' => 'granted'],
     ['source' => $memberRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Shop', 'expected' => 'granted'],
     ['source' => $teamRoles, 'attribute' => TeamPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Mobile', 'expected' => 'denied'],
-    ['source' => $viewerRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $viewerRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $teamRoles, 'attribute' => TeamPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $managerSeesAllTeams, 'attribute' => TeamPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $managerSeesAllTeams, 'attribute' => TeamPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Support', 'expected' => 'granted'],
     ['source' => $managerSeesAllTeams, 'attribute' => TeamPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Mobile', 'expected' => 'granted'],
     ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'granted'],
     ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Sara', 'subject' => 'Mobile', 'expected' => 'granted'],
-    ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'denied'],
-    ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Mobile', 'expected' => 'denied'],
-    ['source' => $leadRights, 'attribute' => TeamPermission::VIEW, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
+    ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TeamPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Checkout', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TeamPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Checkout', 'expected' => 'denied'],
@@ -81,11 +90,14 @@ return [
     ['source' => $teamRoles, 'attribute' => TeamPermission::LEAD, 'actor' => 'Omar', 'subject' => 'Mobile', 'expected' => 'denied'],
     ['source' => $teamRoles, 'attribute' => TeamPermission::LEAD, 'actor' => 'Mia', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $teamRoles, 'attribute' => TeamPermission::LEAD, 'actor' => 'Mia', 'subject' => 'Mobile', 'expected' => 'denied'],
+    ['source' => $teamRoles, 'attribute' => TeamPermission::LEAD, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $leadRights, 'attribute' => TeamPermission::LEAD, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'granted'],
     ['source' => $managerAssigns, 'attribute' => TeamPermission::LEAD, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $managerAssigns, 'attribute' => TeamPermission::LEAD, 'actor' => 'Raj', 'subject' => 'Mobile', 'expected' => 'denied'],
     ['source' => $adminWithoutTeamRole, 'attribute' => TeamPermission::LEAD, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $adminWithoutTeamRole, 'attribute' => TeamPermission::LEAD, 'actor' => 'Sara', 'subject' => 'Mobile', 'expected' => 'denied'],
     ['source' => $teamRoles, 'attribute' => TeamPermission::LEAD, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $teamRoles, 'attribute' => TeamPermission::LEAD, 'actor' => 'Noor', 'subject' => 'Mobile', 'expected' => 'denied'],
     ['source' => $leadRights, 'attribute' => TeamPermission::LEAD, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TeamPermission::LEAD, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TeamPermission::LEAD, 'actor' => 'Sara', 'subject' => 'Checkout', 'expected' => 'denied'],

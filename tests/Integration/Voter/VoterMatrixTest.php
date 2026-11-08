@@ -34,8 +34,8 @@ use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
  * the text of personas-and-roles.md it comes from, and the doc must still have it.
  *
  * Acme Foods: Lena is an Admin and leads Shop and Mobile (as the demo seed has it); Omar is a member of both; Mia is a
- * member (tester) of Shop only; Raj is a Manager and a viewer of Shop; Sara is an Admin with no team role; Noor is a
- * member with no role at all. Beta Bakery: Ben is its Admin and leads its one team, Checkout.
+ * member (tester) of Shop and a viewer of Support; Raj is a Manager and a viewer of Shop; Sara is an Admin with no team
+ * role; Noor has no org role and leads Support. Beta Bakery: Ben is its Admin and leads its one team, Checkout.
  */
 final class VoterMatrixTest extends KernelTestCase
 {
@@ -45,6 +45,7 @@ final class VoterMatrixTest extends KernelTestCase
     private const string MOBILE = '0197a3c0-0000-7000-8000-0000000009d2';
     private const string CHECKOUT = '0197a3c0-0000-7000-8000-0000000009d3';
     private const string LATER_TEAM = '0197a3c0-0000-7000-8000-0000000009d4';
+    private const string SUPPORT = '0197a3c0-0000-7000-8000-0000000009d5';
 
     /** Each person's user id and the organization they decide in. */
     private const array PEOPLE = [
@@ -59,7 +60,7 @@ final class VoterMatrixTest extends KernelTestCase
 
     private const array ORGANIZATIONS = ['Acme Foods' => self::ACME_FOODS, 'Beta Bakery' => self::BETA_BAKERY];
 
-    private const array TEAMS = ['Shop' => self::SHOP, 'Mobile' => self::MOBILE, 'Checkout' => self::CHECKOUT];
+    private const array TEAMS = ['Shop' => self::SHOP, 'Mobile' => self::MOBILE, 'Support' => self::SUPPORT, 'Checkout' => self::CHECKOUT];
 
     private const string ROLES_DOC = __DIR__.'/../../../docs/00-product/personas-and-roles.md';
 
@@ -75,12 +76,15 @@ final class VoterMatrixTest extends KernelTestCase
             self::addMembership(self::ACME_FOODS, 'Noor', '{}');
             self::addTeam(self::ACME_FOODS, self::SHOP, 'Shop', 'Lena');
             self::addTeam(self::ACME_FOODS, self::MOBILE, 'Mobile', 'Lena');
+            self::addTeam(self::ACME_FOODS, self::SUPPORT, 'Support', 'Noor');
             self::addTeamMember(self::ACME_FOODS, self::SHOP, 'Lena', 'lead', 'developer');
             self::addTeamMember(self::ACME_FOODS, self::SHOP, 'Omar', 'member', 'developer');
             self::addTeamMember(self::ACME_FOODS, self::SHOP, 'Mia', 'member', 'tester');
             self::addTeamMember(self::ACME_FOODS, self::SHOP, 'Raj', 'viewer', 'other');
             self::addTeamMember(self::ACME_FOODS, self::MOBILE, 'Lena', 'lead', 'developer');
             self::addTeamMember(self::ACME_FOODS, self::MOBILE, 'Omar', 'member', 'developer');
+            self::addTeamMember(self::ACME_FOODS, self::SUPPORT, 'Noor', 'lead', 'developer');
+            self::addTeamMember(self::ACME_FOODS, self::SUPPORT, 'Mia', 'viewer', 'tester');
         });
         self::transactions()->committedAs(self::BETA_BAKERY, static function (): void {
             self::addMembership(self::BETA_BAKERY, 'Ben', '{admin}');
