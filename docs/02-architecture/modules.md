@@ -115,7 +115,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Owns:** `org_organization`, `org_membership` (org roles: admin, manager), `org_team`, `org_team_member` (team role: lead, member, viewer; job: tester, developer, other), `org_invitation`, `org_settings` (ping limits, quiet hours, lead-check switch, triager, step policy, AI policy, retention).
 - **Api:**
   - `MembershipQueries::organizationsOf(UserId): list<OrganizationId>` (built in P01.T3, through `resolve_user_orgs`, so it needs no tenant)
-  - `MembershipQueries::rolesOf(UserId, OrganizationId): Roles` (built in P01.T4; `Roles` offers `isAdmin()`, `isManager()`, `isLeadOf(TeamId)`, `isInTeam(TeamId)` for any team role, `teamIds()` in id order, and `Roles::none()`, which a user with no membership gets)
+  - `MembershipQueries::rolesOf(UserId, OrganizationId): Roles` (built in P01.T4; `Roles` offers `isAdmin()`, `isManager()`, `isLeadOf(TeamId)`, `isMemberOf(TeamId)` and `isViewerOf(TeamId)` for exactly that team role, `isInTeam(TeamId)` for any team role, `teamIds()` in id order, and `Roles::none()`, which a user with no membership gets)
   - `MembershipQueries::teamsOf(OrganizationId): list<TeamId>` (built in P01.T4; every team of the organization, in id order)
   - Both read under row-level security with no cache, so they need an open transaction whose tenant is that organization; under any other tenant, or none, they find nothing.
   - `TeamQueries::team(TeamId): TeamView`

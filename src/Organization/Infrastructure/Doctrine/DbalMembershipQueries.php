@@ -43,25 +43,28 @@ final readonly class DbalMembershipQueries implements MembershipQueries
         }
         $orgRoles = array_map(self::orgRole(...), self::stringList($orgRoleNames));
 
-        $teamIds = [];
         $leadTeamIds = [];
+        $memberTeamIds = [];
+        $viewerTeamIds = [];
         $teamRows = $this->connection->fetchAllAssociative(
             'SELECT team_id, team_role FROM org_team_member WHERE organization_id = ? AND user_id = ? ORDER BY team_id',
             [$organizationId->toString(), $userId->toString()],
         );
         foreach ($teamRows as $teamRow) {
             $teamId = self::teamId($teamRow['team_id']);
-            $teamIds[] = $teamId;
-            if (TeamRole::Lead === self::teamRole($teamRow['team_role'])) {
-                $leadTeamIds[] = $teamId;
-            }
+            match (self::teamRole($teamRow['team_role'])) {
+                TeamRole::Lead => $leadTeamIds[] = $teamId,
+                TeamRole::Member => $memberTeamIds[] = $teamId,
+                TeamRole::Viewer => $viewerTeamIds[] = $teamId,
+            };
         }
 
         return new Roles(
             \in_array(OrgRole::Admin, $orgRoles, true),
             \in_array(OrgRole::Manager, $orgRoles, true),
-            $teamIds,
             $leadTeamIds,
+            $memberTeamIds,
+            $viewerTeamIds,
         );
     }
 

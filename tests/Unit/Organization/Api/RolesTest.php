@@ -14,6 +14,7 @@ final class RolesTest extends TestCase
     private const string TEAM_A = '0197a3c0-0000-7000-8000-0000000007a1';
     private const string TEAM_B = '0197a3c0-0000-7000-8000-0000000007a2';
     private const string TEAM_C = '0197a3c0-0000-7000-8000-0000000007a3';
+    private const string TEAM_D = '0197a3c0-0000-7000-8000-0000000007a4';
 
     #[Test]
     public function noRolesIsNeitherAdminNorManagerAndInNoTeam(): void
@@ -22,16 +23,15 @@ final class RolesTest extends TestCase
 
         self::assertFalse($roles->isAdmin());
         self::assertFalse($roles->isManager());
-        self::assertFalse($roles->isInTeam(new TeamId(self::TEAM_A)));
-        self::assertFalse($roles->isLeadOf(new TeamId(self::TEAM_A)));
+        self::assertSame(['lead' => false, 'member' => false, 'viewer' => false, 'inTeam' => false], self::teamRoleOf($roles, self::TEAM_A));
         self::assertSame([], $roles->teamIds());
     }
 
     #[Test]
     public function orgRolesAreReportedEachOnTheirOwn(): void
     {
-        $adminOnly = new Roles(true, false, [], []);
-        $managerOnly = new Roles(false, true, [], []);
+        $adminOnly = new Roles(true, false, [], [], []);
+        $managerOnly = new Roles(false, true, [], [], []);
 
         self::assertTrue($adminOnly->isAdmin());
         self::assertFalse($adminOnly->isManager());
@@ -40,25 +40,23 @@ final class RolesTest extends TestCase
     }
 
     #[Test]
-    public function aLeadIsInTheTeamAndAnyOtherTeamRoleIsInTheTeamWithoutLeadingIt(): void
+    public function eachTeamRoleIsToldApartAndEachIsInTheTeam(): void
     {
-        $roles = new Roles(false, false, [new TeamId(self::TEAM_A), new TeamId(self::TEAM_B)], [new TeamId(self::TEAM_A)]);
+        $roles = new Roles(false, false, [new TeamId(self::TEAM_A)], [new TeamId(self::TEAM_B)], [new TeamId(self::TEAM_C)]);
 
-        self::assertTrue($roles->isLeadOf(new TeamId(self::TEAM_A)));
-        self::assertTrue($roles->isInTeam(new TeamId(self::TEAM_A)));
-        self::assertFalse($roles->isLeadOf(new TeamId(self::TEAM_B)));
-        self::assertTrue($roles->isInTeam(new TeamId(self::TEAM_B)));
-        self::assertFalse($roles->isLeadOf(new TeamId(self::TEAM_C)));
-        self::assertFalse($roles->isInTeam(new TeamId(self::TEAM_C)));
+        self::assertSame(['lead' => true, 'member' => false, 'viewer' => false, 'inTeam' => true], self::teamRoleOf($roles, self::TEAM_A));
+        self::assertSame(['lead' => false, 'member' => true, 'viewer' => false, 'inTeam' => true], self::teamRoleOf($roles, self::TEAM_B));
+        self::assertSame(['lead' => false, 'member' => false, 'viewer' => true, 'inTeam' => true], self::teamRoleOf($roles, self::TEAM_C));
+        self::assertSame(['lead' => false, 'member' => false, 'viewer' => false, 'inTeam' => false], self::teamRoleOf($roles, self::TEAM_D));
     }
 
     #[Test]
-    public function teamIdsKeepTheGivenOrder(): void
+    public function teamIdsAreEveryTeamWithARoleInIdOrder(): void
     {
-        $roles = new Roles(false, false, [new TeamId(self::TEAM_B), new TeamId(self::TEAM_A)], []);
+        $roles = new Roles(false, false, [new TeamId(self::TEAM_D)], [new TeamId(self::TEAM_C), new TeamId(self::TEAM_A)], [new TeamId(self::TEAM_B)]);
 
         self::assertSame(
-            [self::TEAM_B, self::TEAM_A],
+            [self::TEAM_A, self::TEAM_B, self::TEAM_C, self::TEAM_D],
             array_map(static fn (TeamId $teamId): string => $teamId->toString(), $roles->teamIds()),
         );
     }
@@ -66,17 +64,35 @@ final class RolesTest extends TestCase
     #[Test]
     public function aTeamIdComparesByValueNotByInstance(): void
     {
-        $roles = new Roles(false, false, [new TeamId(strtoupper(self::TEAM_A))], [new TeamId(self::TEAM_A)]);
+        $roles = new Roles(false, false, [new TeamId(strtoupper(self::TEAM_A))], [], []);
 
         self::assertTrue($roles->isLeadOf(new TeamId(self::TEAM_A)));
     }
 
     #[Test]
-    public function aLedTeamMustBeOneOfTheUsersTeams(): void
+    public function aTeamCannotHaveTwoRoles(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A team the user leads must be one of their teams.');
+        $this->expectExceptionMessage('A user has one team role per team.');
 
-        new Roles(false, false, [new TeamId(self::TEAM_A)], [new TeamId(self::TEAM_B)]);
+        new Roles(false, false, [new TeamId(self::TEAM_A)], [], [new TeamId(self::TEAM_A)]);
+    }
+
+    #[Test]
+    public function aTeamCannotBeGivenTwiceInOneRole(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new Roles(false, false, [], [new TeamId(self::TEAM_A), new TeamId(self::TEAM_A)], []);
+    }
+
+    /**
+     * @return array{lead: bool, member: bool, viewer: bool, inTeam: bool}
+     */
+    private static function teamRoleOf(Roles $roles, string $teamId): array
+    {
+        $team = new TeamId($teamId);
+
+        return ['lead' => $roles->isLeadOf($team), 'member' => $roles->isMemberOf($team), 'viewer' => $roles->isViewerOf($team), 'inTeam' => $roles->isInTeam($team)];
     }
 }

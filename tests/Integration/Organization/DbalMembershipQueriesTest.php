@@ -85,7 +85,7 @@ final class DbalMembershipQueriesTest extends KernelTestCase
     public function anAdminWithNoTeamRoleIsAdminAndInNoTeam(): void
     {
         self::assertSame(
-            ['isAdmin' => true, 'isManager' => false, 'teamIds' => [], 'leadTeamIds' => []],
+            ['isAdmin' => true, 'isManager' => false, 'teamIds' => [], 'leadTeamIds' => [], 'memberTeamIds' => [], 'viewerTeamIds' => []],
             $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => self::describe($this->queries()->rolesOf(new UserId(self::SARA), new OrganizationId(self::ACME_FOODS)))),
         );
     }
@@ -94,7 +94,7 @@ final class DbalMembershipQueriesTest extends KernelTestCase
     public function aLeadOfOneTeamAndMemberOfAnotherLeadsOnlyTheFirstAndIsInBothInIdOrder(): void
     {
         self::assertSame(
-            ['isAdmin' => false, 'isManager' => false, 'teamIds' => [self::ACME_TEAM_B, self::ACME_TEAM_A], 'leadTeamIds' => [self::ACME_TEAM_A]],
+            ['isAdmin' => false, 'isManager' => false, 'teamIds' => [self::ACME_TEAM_B, self::ACME_TEAM_A], 'leadTeamIds' => [self::ACME_TEAM_A], 'memberTeamIds' => [self::ACME_TEAM_B], 'viewerTeamIds' => []],
             $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => self::describe($this->queries()->rolesOf(new UserId(self::LENA), new OrganizationId(self::ACME_FOODS)))),
         );
     }
@@ -103,7 +103,7 @@ final class DbalMembershipQueriesTest extends KernelTestCase
     public function aManagerWhoViewsOneTeamAndLeadsAnotherHasAllThree(): void
     {
         self::assertSame(
-            ['isAdmin' => false, 'isManager' => true, 'teamIds' => [self::ACME_TEAM_B, self::ACME_TEAM_A], 'leadTeamIds' => [self::ACME_TEAM_B]],
+            ['isAdmin' => false, 'isManager' => true, 'teamIds' => [self::ACME_TEAM_B, self::ACME_TEAM_A], 'leadTeamIds' => [self::ACME_TEAM_B], 'memberTeamIds' => [], 'viewerTeamIds' => [self::ACME_TEAM_A]],
             $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => self::describe($this->queries()->rolesOf(new UserId(self::RAJ), new OrganizationId(self::ACME_FOODS)))),
         );
     }
@@ -149,7 +149,7 @@ final class DbalMembershipQueriesTest extends KernelTestCase
         $betaTeams = fn (): array => self::teamIdStrings($this->queries()->teamsOf(new OrganizationId(self::BETA_BAKERY)));
 
         // Under Beta Bakery itself the rows are there, so the empty answers below come from row-level security.
-        self::assertSame(['isAdmin' => true, 'isManager' => false, 'teamIds' => [self::BETA_TEAM], 'leadTeamIds' => [self::BETA_TEAM]], $this->transactions()->rolledBackAs(self::BETA_BAKERY, $lenaInBeta));
+        self::assertSame(['isAdmin' => true, 'isManager' => false, 'teamIds' => [self::BETA_TEAM], 'leadTeamIds' => [self::BETA_TEAM], 'memberTeamIds' => [], 'viewerTeamIds' => []], $this->transactions()->rolledBackAs(self::BETA_BAKERY, $lenaInBeta));
         self::assertSame(self::describe(Roles::none()), $this->transactions()->rolledBackAs(self::ACME_FOODS, $lenaInBeta));
         self::assertSame([], $this->transactions()->rolledBackAs(self::ACME_FOODS, $betaTeams));
     }
@@ -171,20 +171,20 @@ final class DbalMembershipQueriesTest extends KernelTestCase
 
         [$saraAfter, $lenaAfter] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($queries, $sara, $lena, $acmeFoods): array {
             self::assertTrue($queries->rolesOf($sara, $acmeFoods)->isAdmin());
-            self::assertTrue($queries->rolesOf($lena, $acmeFoods)->isInTeam(new TeamId(self::ACME_TEAM_B)));
+            self::assertTrue($queries->rolesOf($lena, $acmeFoods)->isMemberOf(new TeamId(self::ACME_TEAM_B)));
 
             $this->connection()->executeStatement("UPDATE org_membership SET org_roles = '{manager}' WHERE organization_id = ? AND user_id = ?", [self::ACME_FOODS, self::SARA]);
-            $this->connection()->executeStatement('DELETE FROM org_team_member WHERE organization_id = ? AND team_id = ? AND user_id = ?', [self::ACME_FOODS, self::ACME_TEAM_B, self::LENA]);
+            $this->connection()->executeStatement("UPDATE org_team_member SET team_role = 'viewer' WHERE organization_id = ? AND team_id = ? AND user_id = ?", [self::ACME_FOODS, self::ACME_TEAM_B, self::LENA]);
 
             return [self::describe($queries->rolesOf($sara, $acmeFoods)), self::describe($queries->rolesOf($lena, $acmeFoods))];
         });
 
-        self::assertSame(['isAdmin' => false, 'isManager' => true, 'teamIds' => [], 'leadTeamIds' => []], $saraAfter);
-        self::assertSame(['isAdmin' => false, 'isManager' => false, 'teamIds' => [self::ACME_TEAM_A], 'leadTeamIds' => [self::ACME_TEAM_A]], $lenaAfter);
+        self::assertSame(['isAdmin' => false, 'isManager' => true, 'teamIds' => [], 'leadTeamIds' => [], 'memberTeamIds' => [], 'viewerTeamIds' => []], $saraAfter);
+        self::assertSame(['isAdmin' => false, 'isManager' => false, 'teamIds' => [self::ACME_TEAM_B, self::ACME_TEAM_A], 'leadTeamIds' => [self::ACME_TEAM_A], 'memberTeamIds' => [], 'viewerTeamIds' => [self::ACME_TEAM_B]], $lenaAfter);
     }
 
     /**
-     * @return array{isAdmin: bool, isManager: bool, teamIds: list<string>, leadTeamIds: list<string>}
+     * @return array{isAdmin: bool, isManager: bool, teamIds: list<string>, leadTeamIds: list<string>, memberTeamIds: list<string>, viewerTeamIds: list<string>}
      */
     private static function describe(Roles $roles): array
     {
@@ -193,6 +193,8 @@ final class DbalMembershipQueriesTest extends KernelTestCase
             'isManager' => $roles->isManager(),
             'teamIds' => self::teamIdStrings($roles->teamIds()),
             'leadTeamIds' => self::teamIdStrings(array_values(array_filter($roles->teamIds(), $roles->isLeadOf(...)))),
+            'memberTeamIds' => self::teamIdStrings(array_values(array_filter($roles->teamIds(), $roles->isMemberOf(...)))),
+            'viewerTeamIds' => self::teamIdStrings(array_values(array_filter($roles->teamIds(), $roles->isViewerOf(...)))),
         ];
     }
 
