@@ -253,7 +253,7 @@ final class OrganizationChoiceTest extends WebTestCase
         self::assertSame(self::NOT_IN_ANY_ORGANIZATION, $picker->filter('main .empty-state p')->text());
         self::assertCount(0, $picker->filter('main form'));
 
-        foreach (['/me/profile', '/me/security'] as $accountPage) {
+        foreach (['/me/profile', '/me/security', '/me/security/two-step'] as $accountPage) {
             $client->request('GET', $accountPage);
             self::assertResponseStatusCodeSame(200, $accountPage);
         }
@@ -277,6 +277,9 @@ final class OrganizationChoiceTest extends WebTestCase
             'identity_security',
             'identity_security_password',
             'identity_security_log_out_everywhere',
+            'identity_two_step',
+            'identity_two_step_start',
+            'identity_two_step_confirm',
             'health_live',
             'health_ready',
             'web_component_gallery',

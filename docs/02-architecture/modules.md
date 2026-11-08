@@ -107,7 +107,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `UserQueries::idByEmail(string): ?UserId` (built in P01.T3 for the demo seed: plain SQL on `idn_user`, null when no one has the address; `Infrastructure\Doctrine\DbalUserQueries`; the others above are not built yet)
   - `TokenAuthenticator::authenticate(string $bearer): ?TokenPrincipal` (scopes included)
   - `ApiTokens::issue(UserId, OrganizationId, string $name, list<Scope>, \DateTimeImmutable $expires): IssuedToken` (the plain token is returned once)
-- **Commands:** RegisterFromInvite, ChangePassword, EnableTotp, DisableTotp, LinkSsoIdentity, IssueApiToken, RevokeApiToken.
+- **Commands:** RegisterFromInvite, ChangePassword, StartTwoStepSetup and ConfirmTwoStepSetup (built in P01.T6 step 1: a new seed in `idn_mfa_secret` through `FieldEncryption`, then a code of it turns two-step login on and returns the 10 `RecoveryCodes` once; ports `OneTimeCodes` (`OtphpOneTimeCodes`), `QrCodeImages` (`BaconQrCodeImages`, SVG drawn on the server) and `RecoveryCodeHashing` (`SymfonyRecoveryCodeHashing`, Argon2id)), DisableTotp, LinkSsoIdentity, IssueApiToken, RevokeApiToken.
 - **Events:** `UserRegistered`, `UserLoggedIn`, `LoginFailed`, `MfaEnabled`, `ApiTokenIssued`, `ApiTokenRevoked`.
 - **Depends on:** SharedKernel only.
 - **ADRs:** [0012](../03-adr/0012-authentication.md), [0027](../03-adr/0027-secrets-and-encryption.md).

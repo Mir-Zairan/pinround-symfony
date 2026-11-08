@@ -48,7 +48,8 @@ security:
     # Deny by default (ADR-0013): only the first matching rule applies, and the last one asks for a login everywhere.
     # Routes match by name, so the dev and test routes match nothing in prod, where they do not exist.
     # Every route under /me (identity_security, identity_security_password, identity_security_log_out_everywhere,
-    # identity_profile, identity_theme) needs the full login of the last rule here, and each action then asks
+    # identity_two_step, identity_two_step_start, identity_two_step_confirm, identity_profile, identity_theme) needs the
+    # full login of the last rule here, and each action then asks
     # OwnAccountVoter for ACCOUNT_EDIT_OWN (ADR-0013); they act only on the logged-in user, never on an id from the request.
     access_control:
         - { route: ^identity_login$, roles: PUBLIC_ACCESS }

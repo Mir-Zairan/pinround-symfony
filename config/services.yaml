@@ -27,6 +27,9 @@ parameters:
         - identity_security
         - identity_security_password
         - identity_security_log_out_everywhere
+        - identity_two_step
+        - identity_two_step_start
+        - identity_two_step_confirm
         - health_live
         - health_ready
         - web_component_gallery

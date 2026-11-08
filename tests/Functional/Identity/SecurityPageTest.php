@@ -292,7 +292,7 @@ final class SecurityPageTest extends WebTestCase
     }
 
     #[Test]
-    public function thePageShowsBothSectionsWithTheMinimumLength(): void
+    public function thePageShowsItsThreeSectionsWithTheMinimumLength(): void
     {
         $client = self::httpsClient();
         $this->logIn($client, $this->createUserWithPassword('Mia Lund'));
@@ -300,7 +300,7 @@ final class SecurityPageTest extends WebTestCase
         $page = $client->request('GET', '/me/security');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(['Change password', 'Log out of all devices'], $page->filter('main h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(['Change password', 'Two-step login', 'Log out of all devices'], $page->filter('main h2')->each(static fn ($heading): string => $heading->text()));
         self::assertCount(2, $page->filter('main input[type="password"][minlength="12"]'));
         self::assertCount(1, $page->filter('main input[name="current_password"][type="password"]'));
         self::assertCount(0, $page->filter('main [role="alert"]'));
