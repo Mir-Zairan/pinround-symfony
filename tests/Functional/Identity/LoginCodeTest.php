@@ -12,6 +12,7 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -49,15 +50,12 @@ final class LoginCodeTest extends WebTestCase
         $user = $this->createUserWithPassword('Lena Berg');
         $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
 
-        $this->submitPassword($user);
+        $page = $this->openCodePage($this->client, $user);
 
-        self::assertResponseRedirects(self::PAGE, 302);
         self::assertNull(self::sessionAttribute($this->client, '_security_main'), 'the session holds a security token');
         self::assertNull(self::sessionAttribute($this->client, 'identity.recent_auth_at'));
         self::assertSame($user->id()->toString(), self::sessionAttribute($this->client, 'identity.pending_login_user_id'));
         self::assertSame($this->clock->now()->getTimestamp(), self::sessionAttribute($this->client, 'identity.pending_login_at'));
-        $page = $this->client->followRedirect();
-        self::assertResponseStatusCodeSame(200);
         self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
         self::assertSelectorTextSame('title', 'Type your code · pinround');
         self::assertCount(0, $page->filter('header.site-header'));
@@ -80,7 +78,7 @@ final class LoginCodeTest extends WebTestCase
         $user = $this->createUserWithPassword('Omar Haddad');
         [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
         $this->clock->sleep(30);
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $sessionIdBefore = $this->sessionId();
 
         $this->client->submitForm('Log in', ['code' => self::codeOf($seed, $this->clock)]);
@@ -88,9 +86,9 @@ final class LoginCodeTest extends WebTestCase
         self::assertResponseRedirects('/', 302);
         self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
         self::assertNotSame($sessionIdBefore, $this->sessionId(), 'the session kept its id');
-        $now = $this->clock->now()->getTimestamp();
-        self::assertSame($now, self::sessionAttribute($this->client, 'identity.recent_auth_at'));
-        self::assertSame($now, self::sessionAttribute($this->client, 'identity.two_step_confirmed_at'));
+        $omarNow = ['user_id' => $user->id()->toString(), 'at' => $this->clock->now()->getTimestamp()];
+        self::assertSame($omarNow, self::sessionAttribute($this->client, 'identity.recent_auth_at'));
+        self::assertSame($omarNow, self::sessionAttribute($this->client, 'identity.two_step_confirmed_at'));
         self::assertNull(self::sessionAttribute($this->client, 'identity.pending_login_user_id'));
         self::assertNull(self::sessionAttribute($this->client, 'identity.pending_login_at'));
         $serializedToken = self::sessionAttribute($this->client, '_security_main');
@@ -110,12 +108,12 @@ final class LoginCodeTest extends WebTestCase
         [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
         $this->clock->sleep(30);
         $code = self::codeOf($seed, $this->clock);
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $this->client->submitForm('Log in', ['code' => $code]);
         self::assertResponseRedirects('/', 302);
         $this->client->getCookieJar()->clear();
 
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $this->client->submitForm('Log in', ['code' => $code]);
 
         self::assertResponseStatusCodeSame(422);
@@ -128,16 +126,16 @@ final class LoginCodeTest extends WebTestCase
     {
         $user = $this->createUserWithPassword('Raj Patel');
         [, $recoveryCodes] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $this->client->submitForm('Log in', ['code' => $recoveryCodes[3]]);
         self::assertResponseRedirects('/', 302);
-        self::assertSame($this->clock->now()->getTimestamp(), self::sessionAttribute($this->client, 'identity.two_step_confirmed_at'));
+        self::assertSame(['user_id' => $user->id()->toString(), 'at' => $this->clock->now()->getTimestamp()], self::sessionAttribute($this->client, 'identity.two_step_confirmed_at'));
         $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         $this->client->submitForm('Log out');
         self::assertResponseRedirects('/login', 302);
 
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $this->client->submitForm('Log in', ['code' => $recoveryCodes[3]]);
 
         self::assertResponseStatusCodeSame(422);
@@ -155,7 +153,7 @@ final class LoginCodeTest extends WebTestCase
         $user = $this->createUserWithPassword('Sara Holm');
         [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
         $this->clock->sleep(30);
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
 
         foreach ([self::wrongCodeFor($seed, $this->clock), 'k7m2q-x9p4t', self::wrongCodeFor($seed, $this->clock), 'not a code', '123'] as $try => $wrongCode) {
             $this->client->submitForm('Log in', ['code' => $wrongCode]);
@@ -179,7 +177,7 @@ final class LoginCodeTest extends WebTestCase
     {
         $user = $this->createUserWithPassword('Lena Berg');
         [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $this->clock->sleep(301);
 
         $this->client->submitForm('Log in', ['code' => self::codeOf($seed, $this->clock)]);
@@ -199,7 +197,7 @@ final class LoginCodeTest extends WebTestCase
     {
         $user = $this->createUserWithPassword('Omar Haddad');
         [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $this->clock->sleep(300);
 
         $this->client->submitForm('Log in', ['code' => self::codeOf($seed, $this->clock)]);
@@ -222,9 +220,11 @@ final class LoginCodeTest extends WebTestCase
     }
 
     #[Test]
-    public function aLoggedInUserIsSentHome(): void
+    public function aLoggedInUserIsSentHomeAlsoBeforeChoosingOneOfTwoOrganizations(): void
     {
-        $this->logIn($this->client, $this->createUserWithPassword('Mia Lund'));
+        $user = $this->createUserWithPassword('Mia Lund');
+        $this->addMembership($user, $this->createOrganization('Beta Bakery'));
+        $this->logIn($this->client, $user);
 
         foreach (['GET', 'POST'] as $method) {
             $this->client->request($method, self::PAGE, ['code' => '123456']);
@@ -240,7 +240,7 @@ final class LoginCodeTest extends WebTestCase
         $user = $this->createUserWithPassword('Raj Patel');
         [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
         $this->clock->sleep(30);
-        $codePage = $this->openCodePage($user);
+        $codePage = $this->openCodePage($this->client, $user);
         $code = self::codeOf($seed, $this->clock);
 
         foreach ([[], ['_csrf_token' => 'forged'], ['cancel' => '1'], ['cancel' => '1', '_csrf_token' => 'forged']] as $fields) {
@@ -261,7 +261,7 @@ final class LoginCodeTest extends WebTestCase
         $user = $this->createUserWithPassword('Sara Holm');
         [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
         $this->clock->sleep(30);
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $this->blockUser($user);
 
         $this->client->submitForm('Log in', ['code' => self::codeOf($seed, $this->clock)]);
@@ -278,7 +278,7 @@ final class LoginCodeTest extends WebTestCase
     {
         $user = $this->createUserWithPassword('Lena Berg');
         $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
 
         $this->client->submitForm('Cancel');
 
@@ -301,7 +301,7 @@ final class LoginCodeTest extends WebTestCase
         $this->client->request('GET', '/me/security');
         self::assertResponseRedirects('/login', 302);
 
-        $this->openCodePage($user);
+        $this->openCodePage($this->client, $user);
         $this->client->submitForm('Log in', ['code' => self::codeOf($seed, $this->clock)]);
 
         self::assertResponseRedirects('https://localhost/me/security', 302);
@@ -309,21 +309,53 @@ final class LoginCodeTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
     }
 
-    private function submitPassword(User $user): void
+    /**
+     * Someone else's password typed in a browser where a person logged in with a code, say from a login page open in
+     * another tab: the session keeps its attributes through the new id, but no time of the first person may count.
+     */
+    #[Test]
+    public function anotherPersonsPasswordLoginInTheSameSessionLeavesNoTimeOfTheFirstPerson(): void
     {
-        $this->client->request('GET', '/login');
+        $lena = $this->createUserWithPassword('Lena Berg');
+        [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $lena);
+        $this->clock->sleep(30);
+        $this->openCodePage($this->client, $lena);
+        $this->client->submitForm('Log in', ['code' => self::codeOf($seed, $this->clock)]);
+        self::assertResponseRedirects('/', 302);
+        self::assertSame(['user_id' => $lena->id()->toString(), 'at' => $this->clock->now()->getTimestamp()], self::sessionAttribute($this->client, 'identity.two_step_confirmed_at'));
+        $omar = $this->createUserWithPassword('Omar Haddad');
+        $this->clock->sleep(60);
+
+        $this->client->request('POST', '/login', ['email' => $omar->email()->toString(), 'password' => self::PASSWORD, '_csrf_token' => $this->loginFormCsrfToken()]);
+
+        self::assertResponseRedirects('/', 302);
+        self::assertNull(self::sessionAttribute($this->client, 'identity.two_step_confirmed_at'));
+        self::assertSame(['user_id' => $omar->id()->toString(), 'at' => $this->clock->now()->getTimestamp()], self::sessionAttribute($this->client, 'identity.recent_auth_at'));
+        $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-        $this->client->submitForm('Log in', ['email' => $user->email()->toString(), 'password' => self::PASSWORD]);
+        self::assertSame('OH', $this->client->getCrawler()->filter('header.site-header [role="img"]')->text());
     }
 
-    private function openCodePage(User $user): Crawler
+    /**
+     * A token for the login form, stored in the client's session as rendering the form would store it: a logged-in
+     * person who opens the login page is sent home, so no page renders it.
+     */
+    private function loginFormCsrfToken(): string
     {
-        $this->submitPassword($user);
-        self::assertResponseRedirects(self::PAGE, 302);
-        $page = $this->client->followRedirect();
-        self::assertResponseStatusCodeSame(200);
+        $session = $this->client->getSession();
+        self::assertNotNull($session);
+        $request = Request::create('https://localhost/login');
+        $request->setSession($session);
+        $requestStack = self::getContainer()->get('request_stack');
+        $requestStack->push($request);
+        try {
+            $token = self::getContainer()->get('security.csrf.token_manager')->getToken('authenticate')->getValue();
+        } finally {
+            $requestStack->pop();
+        }
+        $session->save();
 
-        return $page;
+        return $token;
     }
 
     private function sessionId(): ?string

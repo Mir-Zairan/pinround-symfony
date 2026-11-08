@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Identity;
 
-use App\Identity\Domain\User;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
@@ -104,15 +102,5 @@ final class TwoStepLoginLogLeakTest extends WebTestCase
         foreach ($secrets as $what => $secret) {
             self::assertStringNotContainsString($secret, $logged, 'a log record holds the '.$what);
         }
-    }
-
-    private function openCodePage(KernelBrowser $client, User $user): void
-    {
-        $client->request('GET', '/login');
-        self::assertResponseStatusCodeSame(200);
-        $client->submitForm('Log in', ['email' => $user->email()->toString(), 'password' => self::PASSWORD]);
-        self::assertResponseRedirects('/login/code', 302);
-        $client->followRedirect();
-        self::assertResponseStatusCodeSame(200);
     }
 }

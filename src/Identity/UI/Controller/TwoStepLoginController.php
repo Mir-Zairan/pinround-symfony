@@ -72,7 +72,8 @@ final class TwoStepLoginController extends AbstractController
         }
 
         $now = $this->clock->now();
-        $outcome = ($this->confirmTwoStepSetup)($this->currentSession->userId(), $request->request->getString('code'), $now);
+        $userId = $this->currentSession->userId();
+        $outcome = ($this->confirmTwoStepSetup)($userId, $request->request->getString('code'), $now);
         if (TwoStepConfirmRefusal::WrongCode === $outcome) {
             return $this->renderSetup(self::WRONG_CODE);
         }
@@ -81,7 +82,7 @@ final class TwoStepLoginController extends AbstractController
             return $this->redirectToRoute('identity_two_step');
         }
         // The right code is proof of two-step login, as at a login with a code.
-        $this->sessionConfirmations->recordTwoStepConfirmation($now);
+        $this->sessionConfirmations->recordTwoStepConfirmation($userId, $now);
 
         // Rendered in this response and never stored anywhere in plain text, so a reload cannot show them again.
         return $this->render('@Identity/two_step_recovery_codes.html.twig', [

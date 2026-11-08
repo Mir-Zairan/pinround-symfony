@@ -41,6 +41,21 @@ trait TurnsOnTwoStepLogin
         return [$seed, $recoveryCodes];
     }
 
+    /**
+     * Types the user's password on the login form, which for a user with two-step login on leads to the code page.
+     */
+    private function openCodePage(KernelBrowser $client, User $user): Crawler
+    {
+        $client->request('GET', '/login');
+        self::assertResponseStatusCodeSame(200);
+        $client->submitForm('Log in', ['email' => $user->email()->toString(), 'password' => self::PASSWORD]);
+        self::assertResponseRedirects('/login/code', 302);
+        $page = $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+
+        return $page;
+    }
+
     private static function codeOf(string $seed, MockClock $clock): string
     {
         $now = $clock->now()->getTimestamp();

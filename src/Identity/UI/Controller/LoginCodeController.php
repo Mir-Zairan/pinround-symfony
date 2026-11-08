@@ -73,8 +73,8 @@ final class LoginCodeController extends AbstractController
             return $this->logInAgain();
         }
         // After the login: its new session id keeps the attributes.
-        $this->sessionConfirmations->recordRecentAuth($now);
-        $this->sessionConfirmations->recordTwoStepConfirmation($now);
+        $this->sessionConfirmations->recordRecentAuth($userId, $now);
+        $this->sessionConfirmations->recordTwoStepConfirmation($userId, $now);
 
         return self::notStored($this->redirect($targetUrl));
     }

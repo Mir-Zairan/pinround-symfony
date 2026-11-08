@@ -147,7 +147,7 @@ final class TwoStepLoginSetupTest extends WebTestCase
         $client->submitForm('Turn on', ['code' => $code]);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame($clock->now()->getTimestamp(), self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
+        self::assertSame(['user_id' => $user->id()->toString(), 'at' => $clock->now()->getTimestamp()], self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
         self::assertSame($sessionIdBefore, $client->getCookieJar()->get('__Host-pinround', '/', 'localhost')?->getValue(), 'the session got a new id');
         self::assertStringContainsString('no-store', (string) $client->getResponse()->headers->get('Cache-Control'));
         $codesPage = $client->getCrawler();
@@ -185,7 +185,7 @@ final class TwoStepLoginSetupTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertNoneOfThe($recoveryCodes, $seed, (string) $client->getResponse()->getContent());
         self::assertSame($row['recovery_code_hashes'], $this->rowOf($user)['recovery_code_hashes'] ?? null);
-        self::assertSame($confirmedAt, self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
+        self::assertSame(['user_id' => $user->id()->toString(), 'at' => $confirmedAt], self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
 
         $security = $client->request('GET', '/me/security');
         self::assertResponseStatusCodeSame(200);

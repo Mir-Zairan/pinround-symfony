@@ -20,6 +20,7 @@ use Symfony\Component\Security\Http\Util\TargetPathTrait;
  * Login step one (ADR-0012). For a user whose two-step login is on, the right password logs nobody in: the token is
  * cleared, so the session never stores it, the pending login starts and the response becomes a redirect to the code
  * page. For a user without two-step login the login stands, and its time is recorded as the session's recent login.
+ * Either way the times and the pending login of an earlier login in the same session are removed first.
  *
  * It runs on every login of the main firewall, not only on the password form's route, so a login method added later
  * asks for the code too unless it says it had one. Only the passport attribute that SymfonyPendingLogin::finish sets
@@ -33,9 +34,10 @@ final readonly class AskForTwoStepCode
     public const string CODE_ACCEPTED_ATTRIBUTE = 'identity.two_step_code_accepted';
 
     private const string FIREWALL = 'main';
-    // After Symfony's own listeners (0, remember-me -32) and LoginAttemptRecorder (0), which still treat step one as
-    // the login it is for them: the session gets a new id, the right password gives its throttle tries back, and the
-    // try is recorded as a success.
+    // After SessionStrategyListener, LoginThrottlingListener, PasswordMigratingListener and LoginAttemptRecorder (all 0),
+    // which still treat step one as the login it is for them: the session gets a new id, the right password gives its
+    // throttle tries back, and the try is recorded as a success. The remember-me listeners are not registered: the main
+    // firewall has no remember_me.
     private const int PRIORITY = -64;
 
     public function __construct(
@@ -60,8 +62,11 @@ final readonly class AskForTwoStepCode
         }
         $userId = new UserId($user->id());
         $now = $this->clock->now();
+        // The session keeps its attributes through the new id, also when another person logs in with it.
+        $this->sessionConfirmations->forget();
+        $this->pendingLogin->forget();
         if (true !== $this->twoStepLogins->byUserId($userId)?->isOn()) {
-            $this->sessionConfirmations->recordRecentAuth($now);
+            $this->sessionConfirmations->recordRecentAuth($userId, $now);
 
             return;
         }

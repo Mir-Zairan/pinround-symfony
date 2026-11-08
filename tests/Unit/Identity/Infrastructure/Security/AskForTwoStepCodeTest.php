@@ -46,6 +46,14 @@ use Symfony\Component\Security\Http\Event\LoginSuccessEvent;
 final class AskForTwoStepCodeTest extends TestCase
 {
     private const string LENA = '0195a1b2-0000-7000-8000-0000000000aa';
+    private const string OMAR = '0195a1b2-0000-7000-8000-0000000000bb';
+    /** What Omar's login with a code, and then a password typed for him that waits for a code, left in the session. */
+    private const array OMARS_SESSION = [
+        'identity.recent_auth_at' => ['user_id' => self::OMAR, 'at' => 1_805_100_000],
+        'identity.two_step_confirmed_at' => ['user_id' => self::OMAR, 'at' => 1_805_100_000],
+        'identity.pending_login_user_id' => self::OMAR,
+        'identity.pending_login_at' => 1_805_104_800,
+    ];
     private const int NOW = 1_805_104_875;
 
     private Session $session;
@@ -81,13 +89,14 @@ final class AskForTwoStepCodeTest extends TestCase
     }
 
     #[Test]
-    public function withoutTwoStepLoginTheLoginStandsAndItsTimeIsRecorded(): void
+    public function withoutTwoStepLoginTheLoginStandsAndOnlyItsOwnTimeIsLeft(): void
     {
+        $this->session->replace(self::OMARS_SESSION);
         $event = $this->loginOf(self::lena(), new RedirectResponse('/'));
 
         ($this->listener)($event);
 
-        self::assertSame(['identity.recent_auth_at' => self::NOW], $this->session->all());
+        self::assertSame(['identity.recent_auth_at' => ['user_id' => self::LENA, 'at' => self::NOW]], $this->session->all());
         self::assertNotNull($this->tokenStorage->getToken());
         self::assertSame('/', self::targetOf($event->getResponse()));
     }
@@ -100,7 +109,7 @@ final class AskForTwoStepCodeTest extends TestCase
 
         ($this->listener)($event);
 
-        self::assertSame(['identity.recent_auth_at' => self::NOW], $this->session->all());
+        self::assertSame(['identity.recent_auth_at' => ['user_id' => self::LENA, 'at' => self::NOW]], $this->session->all());
         self::assertNotNull($this->tokenStorage->getToken());
     }
 
@@ -108,6 +117,7 @@ final class AskForTwoStepCodeTest extends TestCase
     public function withTwoStepLoginOnNobodyIsLoggedInAndThePersonIsSentToTheCodePage(): void
     {
         $this->turnOnTwoStepLogin();
+        $this->session->replace(self::OMARS_SESSION);
         $event = $this->loginOf(self::lena(), new RedirectResponse('https://localhost/me/security'));
 
         ($this->listener)($event);
@@ -138,11 +148,12 @@ final class AskForTwoStepCodeTest extends TestCase
     public function theLoginThatFinishesWithACodeIsLeftAlone(): void
     {
         $this->turnOnTwoStepLogin();
+        $this->session->replace(self::OMARS_SESSION);
         $event = $this->loginOf(self::lena(), new RedirectResponse('/'), codeAccepted: true);
 
         ($this->listener)($event);
 
-        self::assertSame([], $this->session->all());
+        self::assertSame(self::OMARS_SESSION, $this->session->all());
         self::assertNotNull($this->tokenStorage->getToken());
         self::assertSame('/', self::targetOf($event->getResponse()));
     }
@@ -151,11 +162,12 @@ final class AskForTwoStepCodeTest extends TestCase
     public function aLoginOnAnotherFirewallIsLeftAlone(): void
     {
         $this->turnOnTwoStepLogin();
+        $this->session->replace(self::OMARS_SESSION);
         $event = $this->loginOf(self::lena(), new RedirectResponse('/'), firewallName: 'api');
 
         ($this->listener)($event);
 
-        self::assertSame([], $this->session->all());
+        self::assertSame(self::OMARS_SESSION, $this->session->all());
         self::assertNotNull($this->tokenStorage->getToken());
     }
 

@@ -61,7 +61,7 @@ final class LoginTest extends WebTestCase
         $this->submitLogin($client, $user->email()->toString(), self::PASSWORD);
 
         self::assertResponseRedirects('/', 302);
-        self::assertSame($clock->now()->getTimestamp(), self::sessionAttribute($client, 'identity.recent_auth_at'));
+        self::assertSame(['user_id' => $user->id()->toString(), 'at' => $clock->now()->getTimestamp()], self::sessionAttribute($client, 'identity.recent_auth_at'));
         self::assertNull(self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
         self::assertNull(self::sessionAttribute($client, 'identity.pending_login_user_id'));
         $client->followRedirect();
