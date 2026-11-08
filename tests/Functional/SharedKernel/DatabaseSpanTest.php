@@ -8,6 +8,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Tracing\SpanAttributes;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Tests\Functional\Web\CreatesTeams;
 use OpenTelemetry\API\Trace\SpanContextValidator;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
@@ -20,6 +21,7 @@ use Zenstruck\Foundry\Test\Factories;
  */
 final class DatabaseSpanTest extends WebTestCase
 {
+    use CreatesTeams;
     use Factories;
     use LogsInUsers;
 
@@ -71,7 +73,13 @@ final class DatabaseSpanTest extends WebTestCase
     {
         $client = self::createClient();
         $user = $this->createUserWithPassword('Raj Patel');
-        $this->setOrgRoles($user, new OrganizationId($this->createdOrganizationIds[0]), $orgRoles);
+        $organizationId = new OrganizationId($this->createdOrganizationIds[0]);
+        $this->setOrgRoles($user, $organizationId, $orgRoles);
+        // Three teams, so a query per team would add spans.
+        $lead = $this->createUserWithoutOrganization('Lena Berg');
+        foreach (['Shop', 'Mobile', 'Support'] as $teamName) {
+            $this->createTeam($organizationId, $teamName, $lead);
+        }
         $this->logIn($client, $user);
         self::getContainer()->get('doctrine.orm.entity_manager')->clear();
         $exporter = self::getContainer()->get('tracing.in_memory_exporter');

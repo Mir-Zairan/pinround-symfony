@@ -29,6 +29,7 @@ final class SecurityUserTest extends TestCase
         self::assertSame('lena@acme-foods.example', $securityUser->getUserIdentifier());
         self::assertSame('Lena Berg', $securityUser->name());
         self::assertSame('system', $securityUser->theme());
+        self::assertSame('Europe/Berlin', $securityUser->timeZone());
         self::assertSame($user->sessionStamp(), $securityUser->sessionStamp());
         self::assertSame(self::HASH, $securityUser->getPassword());
         self::assertSame(['ROLE_USER'], $securityUser->getRoles());
@@ -49,6 +50,7 @@ final class SecurityUserTest extends TestCase
         self::assertSame('lena@acme-foods.example', $restored->getUserIdentifier());
         self::assertSame('Lena Berg', $restored->name());
         self::assertSame('system', $restored->theme());
+        self::assertSame('Europe/Berlin', $restored->timeZone());
         self::assertFalse($restored->isBlocked());
     }
 
@@ -130,6 +132,7 @@ final class SecurityUserTest extends TestCase
 
         self::assertSame('', $fromOldSession->sessionStamp());
         self::assertSame('system', $fromOldSession->theme());
+        self::assertNull($fromOldSession->timeZone());
         self::assertFalse($fromOldSession->isEqualTo(self::securityUser($user)));
     }
 

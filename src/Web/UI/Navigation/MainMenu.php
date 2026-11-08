@@ -122,13 +122,29 @@ final readonly class MainMenu
      */
     private function pageItem(string $label, string $routeName, array $routeParameters = [], ?array $pageParameters = null): MenuItem
     {
-        try {
-            $url = $this->urlGenerator->generate($routeName, $routeParameters);
-        } catch (RouteNotFoundException) {
-            $url = null;
-        }
+        $url = $this->urlOf($routeName, $routeParameters);
 
         return MenuItem::page($label, $routeName, $routeParameters, $url, $this->isCurrentPage($routeName, $pageParameters ?? $routeParameters));
+    }
+
+    /**
+     * The admin home's address without building the menu; null while no phase has built the page.
+     */
+    public function adminHomeUrl(): ?string
+    {
+        return $this->urlOf(self::ADMIN_ROUTE, self::ADMIN_HOME_PARAMETERS);
+    }
+
+    /**
+     * @param array<string, string> $routeParameters
+     */
+    private function urlOf(string $routeName, array $routeParameters): ?string
+    {
+        try {
+            return $this->urlGenerator->generate($routeName, $routeParameters);
+        } catch (RouteNotFoundException) {
+            return null;
+        }
     }
 
     /**

@@ -9,6 +9,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Web\UI\Navigation\MainMenu;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -154,8 +155,7 @@ final class HomePageTest extends WebTestCase
     public function theDateLineIsTodayInTheAppTimeZone(): void
     {
         $this->client->disableReboot();
-        // A fixed day well before today, so only the injected clock can give this date. Home cannot read the
-        // user's own time zone yet (SecurityUser does not carry it), so the app's default zone applies.
+        // A fixed day well before today, so only the injected clock can give this date.
         $clock = new MockClock(new \DateTimeImmutable('2026-11-05 12:00:00 UTC'));
         self::getContainer()->set('clock', $clock);
         $this->logIn($this->client, $this->person('Lena'));
@@ -164,6 +164,33 @@ final class HomePageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Thursday, 5 November', $page->filter('.home__date')->text());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function homesWithADateLine(): iterable
+    {
+        yield 'the work Home' => ['Lena'];
+        yield 'Teams at a glance' => ['Noor'];
+    }
+
+    #[Test]
+    #[DataProvider('homesWithADateLine')]
+    public function theDateLineIsTodayInTheTimeZoneTheUserSaved(string $person): void
+    {
+        $this->client->disableReboot();
+        // 22:00 UTC on the 5th is already the 6th in Tokyo.
+        self::getContainer()->set('clock', new MockClock(new \DateTimeImmutable('2026-11-05 22:00:00 UTC')));
+        $user = $this->person($person);
+        $this->migrator()->executeStatement("UPDATE idn_user SET time_zone = 'Asia/Tokyo' WHERE id = ?", [$user->id()->toString()]);
+        self::getContainer()->get('doctrine.orm.default_entity_manager')->clear();
+        $this->logIn($this->client, $user);
+
+        $page = $this->client->request('GET', '/');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Friday, 6 November', $page->filter('.home__date')->text());
     }
 
     #[Test]

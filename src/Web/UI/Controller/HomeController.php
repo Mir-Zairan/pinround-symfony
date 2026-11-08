@@ -58,7 +58,7 @@ final class HomeController extends AbstractController
             'isLead' => array_any($roles->teamIds(), $roles->isLeadOf(...)),
             'isManager' => $roles->isManager(),
             'isAdmin' => $roles->isAdmin(),
-            'adminSettingsUrl' => $roles->isAdmin() ? $this->adminSettingsUrl() : null,
+            'adminSettingsUrl' => $roles->isAdmin() ? $this->mainMenu->adminHomeUrl() : null,
         ]);
     }
 
@@ -74,22 +74,7 @@ final class HomeController extends AbstractController
     {
         return $this->render('@Web/home/admin.html.twig', [
             'teamCount' => $this->teamQueries->countOf($actor->organizationId()),
-            'adminSettingsUrl' => $this->adminSettingsUrl(),
+            'adminSettingsUrl' => $this->mainMenu->adminHomeUrl(),
         ]);
-    }
-
-    /**
-     * The menu's own link to the admin home, so the button and the menu item become links together; null while no
-     * phase has built the page.
-     */
-    private function adminSettingsUrl(): ?string
-    {
-        foreach ($this->mainMenu->items() as $item) {
-            if (MainMenu::ADMIN_ROUTE === $item->routeName()) {
-                return $item->url();
-            }
-        }
-
-        return null;
     }
 }
