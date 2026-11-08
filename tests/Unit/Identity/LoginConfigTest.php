@@ -32,13 +32,14 @@ final class LoginConfigTest extends TestCase
     }
 
     #[Test]
-    public function everyRouteButTheLoginAndPasswordResetPagesAndTheDevAndTestRoutesNeedsALogin(): void
+    public function everyRouteButTheLoginLoginCodeAndPasswordResetPagesAndTheDevAndTestRoutesNeedsALogin(): void
     {
         $security = self::config('packages/security.yaml');
 
         self::assertSame(
             [
                 ['route' => '^identity_login$', 'roles' => 'PUBLIC_ACCESS'],
+                ['route' => '^identity_login_code$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^identity_password_(forgot|reset_token|reset)$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^web_component_gallery$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^test_', 'roles' => 'PUBLIC_ACCESS'],

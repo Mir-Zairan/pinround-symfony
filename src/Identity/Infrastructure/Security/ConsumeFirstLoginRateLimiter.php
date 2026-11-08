@@ -63,10 +63,16 @@ final readonly class ConsumeFirstLoginRateLimiter implements RequestRateLimiterI
 
     /**
      * After a successful login: clears the email and IP counter, and gives back the one try this login took from the IP
-     * counter. The IP counter bounds how many emails one client may try, so its earlier wrong tries stay.
+     * counter. The IP counter bounds how many emails one client may try, so its earlier wrong tries stay. A login that
+     * took no try, such as the finish of a login with a code (Security::login()), gives nothing back: only a try sets
+     * the last username on the request.
      */
     public function reset(Request $request): void
     {
+        if (!$request->attributes->has(SecurityRequestAttributes::LAST_USERNAME)) {
+            return;
+        }
+
         $this->perEmailAndIpLimiter($request)->reset();
         $this->perIpRefund->refundOneTry(self::PER_IP_LIMITER_NAME.'-'.$this->perIpKey($request));
     }

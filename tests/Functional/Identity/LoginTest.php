@@ -9,6 +9,7 @@ use App\Tests\Factory\Identity\UserFactory;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\HttpFoundation\Cookie;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -20,6 +21,7 @@ final class LoginTest extends WebTestCase
 {
     use Factories;
     use LogsInUsers;
+    use ReadsSessionMetadata;
 
     private const string SESSION_COOKIE = '__Host-pinround';
 
@@ -41,6 +43,29 @@ final class LoginTest extends WebTestCase
         self::assertSame('Lena Berg', $avatar->attr('title'));
         self::assertSame('site-header__avatar', $avatar->attr('class'));
         self::assertSame('Log out', $home->filter('header form[action="/logout"][method="post"] button[type="submit"]')->text());
+    }
+
+    /**
+     * The clock runs 7 minutes ahead of the wall clock, so a time taken from PHP's time() would differ.
+     */
+    #[Test]
+    public function theRightPasswordOfAUserWithoutTwoStepLoginLogsInAtOnceAndRecordsTheLoginTime(): void
+    {
+        $client = self::httpsClient();
+        $client->disableReboot();
+        $clock = new MockClock();
+        $clock->modify('+7 minutes');
+        self::getContainer()->set('clock', $clock);
+        $user = $this->createUserWithPassword('Omar Haddad');
+
+        $this->submitLogin($client, $user->email()->toString(), self::PASSWORD);
+
+        self::assertResponseRedirects('/', 302);
+        self::assertSame($clock->now()->getTimestamp(), self::sessionAttribute($client, 'identity.recent_auth_at'));
+        self::assertNull(self::sessionAttribute($client, 'identity.two_step_confirmed_at'));
+        self::assertNull(self::sessionAttribute($client, 'identity.pending_login_user_id'));
+        $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
     }
 
     #[Test]

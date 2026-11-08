@@ -9,7 +9,6 @@ use App\Identity\Domain\User;
 use App\Identity\UI\Controller\LoginController;
 use App\Identity\UI\Controller\TwoStepLoginController;
 use App\Identity\UI\Voter\OwnAccountVoter;
-use OTPHP\TOTP;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -31,6 +30,7 @@ final class TwoStepLoginSetupTest extends WebTestCase
     use Factories;
     use LogsInUsers;
     use ReadsSessionMetadata;
+    use TurnsOnTwoStepLogin;
 
     private const string PAGE = '/me/security/two-step';
     private const string RECOVERY_CODE_FORMAT = '/^[0-9a-hjkmnp-tv-z]{5}-[0-9a-hjkmnp-tv-z]{5}$/';
@@ -315,32 +315,6 @@ final class TwoStepLoginSetupTest extends WebTestCase
     private static function seedOn(Crawler $page): string
     {
         return str_replace(' ', '', self::manualKeyOn($page));
-    }
-
-    private static function codeOf(string $seed, MockClock $clock): string
-    {
-        $now = $clock->now()->getTimestamp();
-        \assert('' !== $seed && $now >= 0);
-
-        return TOTP::createFromSecret($seed, $clock)->at($now);
-    }
-
-    /**
-     * Six digits that are the code of none of the three steps the server accepts now.
-     */
-    private static function wrongCodeFor(string $seed, MockClock $clock): string
-    {
-        $now = $clock->now()->getTimestamp();
-        \assert('' !== $seed && $now >= 30);
-        $totp = TOTP::createFromSecret($seed, $clock);
-        $accepted = [$totp->at($now - 30), $totp->at($now), $totp->at($now + 30)];
-        $candidate = (int) $accepted[1];
-        do {
-            $candidate = ($candidate + 1) % 1_000_000;
-            $code = str_pad((string) $candidate, 6, '0', \STR_PAD_LEFT);
-        } while (\in_array($code, $accepted, true));
-
-        return $code;
     }
 
     /**
