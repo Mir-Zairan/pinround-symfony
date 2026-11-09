@@ -6,7 +6,7 @@ The catalogue of pinround's modules: what each one owns, what it offers to other
 
 - [Why modules](#why-modules) — the problem modules solve, as a short story.
 - [Directory layout and namespaces](#directory-layout-and-namespaces) — folders inside a module, with an example.
-- [How modules talk](#how-modules-talk) — calls through `Api`, events through the outbox, and nothing else.
+- [How modules talk](#how-modules-talk) — calls through `Api`, events through the outbox, instant read models, organization setup steps, and nothing else.
 - [Module catalogue](#module-catalogue) — every module: purpose, owned tables, Api, commands, events, dependencies.
 - [Event catalogue](#event-catalogue) — every domain event: producer, consumers, payload, delivery.
 - [Deptrac rules](#deptrac-rules) — the layers, the allowed edges and the tests behind `composer deptrac`.
@@ -24,7 +24,7 @@ Every module has the same five folders:
 
 ```text
 src/
-  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep, OrganizationSetupStep, FieldEncryption, RequiresRecentAuth
+  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep, FieldEncryption, RequiresRecentAuth
   Ticketing/
     Api/                        # PUBLIC: interfaces + DTOs other modules may use
       TicketQueries.php
@@ -67,7 +67,14 @@ Namespaces follow the folders: `App\Ticketing\Domain\Ticket`, `App\Ticketing\Api
 3. **Read model updates that must be instant** run synchronously, in the same transaction.
    - Example: the `ins_ticket_turn` row ([ADR-0015](../03-adr/0015-turn-read-model.md)).
    - The producing module calls `Insight\Api\TurnProjector` directly, so Home is correct right after the click.
-4. **Never:**
+4. **Setup steps in the transaction that creates an organization** ([ADR-0036](../03-adr/0036-organization-setup-steps-in-the-creating-transaction.md)).
+   - Example: Workflow's `SetUpOrganizationWorkflow` gives every new organization the eight core steps and the default rule set.
+   - A module implements `Organization\Api\OrganizationSetupStep`; the `_instanceof` rule in `config/services.yaml` tags it, and Organization's `CreateOrganization` runs every tagged step once the organization row exists, highest tag priority first.
+   - The step runs inside the caller's open transaction, whose tenant is already the new organization. It never begins, commits or rolls back a transaction.
+   - It records no events of its own, except through the outbox in that same transaction.
+   - Anything it throws rolls back the whole organization.
+   - Use it only for data an organization cannot exist without. Anything that may arrive a few seconds later reacts to an Organization event instead.
+5. **Never:**
    - a join across another module's tables (one named exception: Insight's query service may join `ins_ticket_turn` with Ticketing's read-only view `tkt_ticket_list_v`, [ADR-0015](../03-adr/0015-turn-read-model.md));
    - a Doctrine relation to another module's entity (store the id as a value object instead);
    - using another module's repository or `Domain` class.
@@ -92,7 +99,6 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `OnceOnlyHandling` (Application: run an async handler's effect once per message), with `MessageIdStamp`, `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in `Infrastructure/Messenger` ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key));
   - `ReadinessCheck` (`Infrastructure/Health`): one thing `/health/ready` proves. The module that owns what is checked implements it (Audit: `NextAuditPartitionExists`; Media: `ObjectStorageIsReachable`), and autoconfiguration tags it. SharedKernel holds the platform checks `DatabaseAnswers`, `MigrationsAreCurrent` and `ValkeyAnswers` (one service per Valkey), and `ReadinessCheckFailed` for a dependency that answered in the wrong state ([operations.md](operations.md#observability));
   - `DemoSeedStep` (`Infrastructure/Console`, with `DemoSeedRefused`): one part of the demo data that `app:demo:seed` runs, dev and test only. The module that owns the tables implements it (Identity: `SeedDemoPeople`; Organization from P01.T3: `SeedDemoOrganizations`, priority 50; Ticketing from P02.T1: `SeedDemoProjects`, priority 40), autoconfiguration tags it, and `#[AsTaggedItem(priority: …)]` sets the order, highest first. It lives in SharedKernel because the seed command must not import modules, the same reason as `ReadinessCheck`;
-  - `OrganizationSetupStep` (`Application`): something every new organization needs from another module, made in the transaction that creates the organization, so no organization exists without it. Organization's `CreateOrganization` runs each step once the organization row exists, under that organization as tenant, highest `#[AsTaggedItem(priority: …)]` first; a step must not begin, commit or roll back a transaction, and anything it throws rolls the organization back too. Workflow implements it from P02.T2 (`SetUpOrganizationWorkflow`: the eight core steps and the default rule set); organizations made before that got them from the backfill migration `Version20261110140000`.
 - **Owns tables:** `processed_message` (global plumbing, no `organization_id`; see [data-model.md](data-model.md)).
 - **Rule:** keep it tiny. A type joins SharedKernel only when three or more modules need it.
 
@@ -126,6 +132,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `TeamQueries::teamsOf(OrganizationId): list<TeamId>` (moved from `MembershipQueries` in P01.T5; every team of the organization, in id order) and `TeamQueries::summariesOf(OrganizationId, list<TeamId>): list<TeamSummary>` (`TeamSummary` offers `id()` and `name()`; the asked teams of that organization ordered by name ignoring case, then id, in one query; unknown ids and ids of another organization are not returned)
   - `InvitationQueries::pendingOf(OrganizationId, int $limit, ?PendingInvitation $after): list<PendingInvitation>` (built in P01.T7: the invitations not accepted and not expired, one keyset page, newest first by `created_at` then id; `MAX_LIMIT` is 100 and a limit outside 1..100 throws `InvalidArgumentException`; `after` is read for its `id()` and `invitedAt()` only; `PendingInvitation` offers `id()` as a string, `email()`, `invitedAt()` and `expiresAt()`; `Infrastructure\Doctrine\DbalInvitationQueries`)
   - `DemoOrganizations::idBySlug(string): ?OrganizationId` (built in P02.T1; dev and test demo data only, for the demo seed steps of other modules: the demo organization the seed made with that slug, null when it does not exist; `Infrastructure\Demo\FirstAdminDemoOrganizations` looks among the organizations of its first admin, reading each through `OrganizationTransactions::runAs`, so it clears the EntityManager, puts the tenant back and throws `TenantSwitchRefused` when a transaction is open)
+  - `OrganizationSetupStep::setUp(OrganizationId): void` (built in P02.T2; implemented by other modules, not by Organization: what every new organization needs from them, made by `CreateOrganization` in the creating transaction, see [How modules talk](#how-modules-talk) and [ADR-0036](../03-adr/0036-organization-setup-steps-in-the-creating-transaction.md); Workflow's `SetUpOrganizationWorkflow` is the first)
   - `rolesOf`, `teamsOf`, `summariesOf` and `pendingOf` read under row-level security with no cache, so they need an open transaction whose tenant is that organization; under any other tenant, or none, they find nothing (`summariesOf` with no ids runs no query).
   - `CurrentActor::actorFor(mixed $tokenUser): ?ActorContext` (built in P01.T4; for voters in any module, which pass `$token->getUser()`; `ActorContext` offers `userId()`, `organizationId()` and `roles(): Roles`; null when the token has no logged-in user or the request has no tenant, so the voter denies). Built once per request for each user and organization from one `rolesOf` call and reset between requests (`Infrastructure\Security\RequestScopedCurrentActor`), so role changes take effect at the next request; ask it inside the request transaction, outside one it reads no roles.
   - `OrganizationPermission` and `TeamPermission` (built in P01.T4): the voter attributes, so the UI of any module may ask them. `ORG_VIEW` and `ORG_ADMIN` take an `OrganizationId` (`UI\Voter\OrganizationVoter`: the organization the request works in; Admin for `ORG_ADMIN`); `TEAM_VIEW` and `TEAM_LEAD` take a `TeamId` (`UI\Voter\TeamVoter`: any team role, or Admin or Manager of the team's organization, for `TEAM_VIEW`; only the team's Lead for `TEAM_LEAD`). `ORG_INVITE` (built in P01.T7) takes an `OrganizationId` and is decided by `OrganizationVoter` for an Admin only; admin pages also ask `ADMIN_AREA`. `ORG_ACCEPT_INVITATION` (built in P01.T7) takes an `Application\OpenInvitationLink` (`UI\Voter\InvitationVoter`: the logged-in account with the invited email, or nobody logged in when no account has that email yet; anyone else is denied). `CHOOSE` and `ENTER` are the organization picker's (`UI\Voter\OrganizationMemberVoter`).
@@ -156,7 +163,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Events:** `StepAdded`, `StepRemoved`, `RulesChanged`.
 - **Depends on:** Organization Api.
 - **Note:** Workflow does not store tickets. Ticketing owns the ticket's current step and asks Workflow before every move.
-- **New organizations:** `SetUpOrganizationWorkflow`, an `OrganizationSetupStep`, adds the eight core steps and the default rule set in the transaction that creates the organization.
+- **New organizations:** `Application\SetUpOrganizationWorkflow`, an `Organization\Api\OrganizationSetupStep`, adds the eight core steps and the default rule set in the transaction that creates the organization ([ADR-0036](../03-adr/0036-organization-setup-steps-in-the-creating-transaction.md)); organizations made before that got them from the backfill migration `Version20261110140000`.
 - **More:** [workflow-engine.md](workflow-engine.md), [ADR-0014](../03-adr/0014-status-model-five-groups.md).
 
 ### Ticketing (`tkt_`)

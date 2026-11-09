@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Organization\Application;
 
 use App\Organization\Api\Event\MemberJoined;
+use App\Organization\Api\OrganizationSetupStep;
 use App\Organization\Domain\BlankOrganizationName;
 use App\Organization\Domain\InvalidOrganizationSlug;
 use App\Organization\Domain\Membership;
@@ -15,7 +16,6 @@ use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\OrgSettings;
 use App\Organization\Domain\OrgSettingsStore;
-use App\SharedKernel\Application\OrganizationSetupStep;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 

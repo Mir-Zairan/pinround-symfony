@@ -4,23 +4,23 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Workflow;
 
+use App\Organization\Api\OrganizationSetupStep;
 use App\Organization\Application\CreateOrganization;
 use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrgSettingsStore;
 use App\Organization\Infrastructure\Messenger\MessengerOrganizationEvents;
-use App\SharedKernel\Application\OrganizationSetupStep;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Unit\Organization\Application\CallbackOrganizationSetupStep;
+use App\Workflow\Application\SetUpOrganizationWorkflow;
 use App\Workflow\Domain\RuleSet;
 use App\Workflow\Domain\StepId;
 use App\Workflow\Infrastructure\Doctrine\DbalRuleSets;
 use App\Workflow\Infrastructure\Doctrine\DoctrineSteps;
-use App\Workflow\Infrastructure\SetUpOrganizationWorkflow;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;

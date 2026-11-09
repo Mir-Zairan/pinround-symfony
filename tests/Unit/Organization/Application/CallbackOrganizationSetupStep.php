@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Organization\Application;
 
-use App\SharedKernel\Application\OrganizationSetupStep;
+use App\Organization\Api\OrganizationSetupStep;
 use App\SharedKernel\Domain\OrganizationId;
 
 final readonly class CallbackOrganizationSetupStep implements OrganizationSetupStep

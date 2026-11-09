@@ -2,18 +2,16 @@
 
 declare(strict_types=1);
 
-namespace App\SharedKernel\Application;
+namespace App\Organization\Api;
 
 use App\SharedKernel\Domain\OrganizationId;
-use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 
 /**
  * Something every new organization needs from another module, such as Workflow's core steps, made in the same
- * transaction as the organization so no organization exists without it. Organization's CreateOrganization runs every
- * step, highest `#[AsTaggedItem(priority: ...)]` first, once the organization row exists. The module that owns the
- * rows implements it and autoconfiguration tags it; it lives here because Organization may not import that module.
+ * transaction as the organization so no organization exists without it (ADR-0036). Organization's CreateOrganization
+ * runs every step once the organization row exists, highest tag priority first. The module that owns the rows
+ * implements it; the `_instanceof` rule in config/services.yaml tags it, as an Api may not use a vendor attribute.
  */
-#[AutoconfigureTag('app.organization_setup_step')]
 interface OrganizationSetupStep
 {
     /**

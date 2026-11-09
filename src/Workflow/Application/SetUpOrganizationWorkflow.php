@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Workflow\Infrastructure;
+namespace App\Workflow\Application;
 
-use App\SharedKernel\Application\OrganizationSetupStep;
+use App\Organization\Api\OrganizationSetupStep;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\RuleSet;

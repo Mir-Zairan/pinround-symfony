@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Organization\Application;
 
 use App\Organization\Api\Event\MemberJoined;
+use App\Organization\Api\OrganizationSetupStep;
 use App\Organization\Application\CreateOrganization;
 use App\Organization\Domain\Organization;
 use App\Organization\Domain\Organizations;
 use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgSettings;
 use App\Organization\Domain\OrgSettingsStore;
-use App\SharedKernel\Application\OrganizationSetupStep;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;

@@ -192,7 +192,7 @@ final class LoginConfigTest extends TestCase
      */
     private static function config(string $file): array
     {
-        $config = Yaml::parseFile(\dirname(__DIR__, 3).'/config/'.$file);
+        $config = Yaml::parseFile(\dirname(__DIR__, 3).'/config/'.$file, Yaml::PARSE_CUSTOM_TAGS);
         self::assertIsArray($config);
 
         return $config;
