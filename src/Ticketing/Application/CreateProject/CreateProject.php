@@ -26,8 +26,8 @@ final readonly class CreateProject
     }
 
     /**
-     * @throws InvalidProjectKey   when the key does not follow the format; nothing is saved
-     * @throws BlankProjectName    when nothing is left of the name after trimming; nothing is saved
+     * @throws ProjectKeyNotValid  when the key does not follow the format; nothing is saved
+     * @throws ProjectNameMissing  when nothing is left of the name after trimming; nothing is saved
      * @throws ProjectTeamNotFound when the owning team is not a team of the organization; nothing is saved
      * @throws ProjectKeyTaken     when another project of the organization has the key. When another transaction saved
      *                             it after the check here, the transaction is failed and the EntityManager closed: the
@@ -35,7 +35,11 @@ final readonly class CreateProject
      */
     public function __invoke(OrganizationId $organizationId, TeamId $owningTeam, string $key, string $name): ProjectId
     {
-        $projectKey = new ProjectKey($key);
+        try {
+            $projectKey = new ProjectKey($key);
+        } catch (InvalidProjectKey $invalidKey) {
+            throw new ProjectKeyNotValid($invalidKey->getMessage(), 0, $invalidKey);
+        }
         $isTeamOfTheOrganization = array_any(
             $this->teamQueries->teamsOf($organizationId),
             static fn (TeamId $teamId): bool => $teamId->equals($owningTeam),
@@ -47,7 +51,11 @@ final readonly class CreateProject
             throw self::keyTaken($projectKey);
         }
 
-        $project = new Project($this->projects->nextIdentity(), $organizationId, $owningTeam, $projectKey, $name);
+        try {
+            $project = new Project($this->projects->nextIdentity(), $organizationId, $owningTeam, $projectKey, $name);
+        } catch (BlankProjectName $blankName) {
+            throw new ProjectNameMissing($blankName->getMessage(), 0, $blankName);
+        }
         try {
             $this->projects->add($project);
         } catch (ProjectKeyInUse $keyInUse) {

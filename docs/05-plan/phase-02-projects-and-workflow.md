@@ -56,10 +56,10 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 **Steps:**
 1. `Ticketing\Domain\Project`, `ProjectKey` (2–10 capital letters/digits, starts with a letter, unique per org).
 2. Migration `tkt_project` with RLS and `UNIQUE (organization_id, key)`.
-3. `NextTicketNumber` service: `UPDATE tkt_project SET next_number = next_number + 1 … RETURNING` inside the caller's transaction.
+3. `NextTicketNumber` service: `UPDATE tkt_project SET next_number = next_number + 1 … RETURNING next_number - 1` (`next_number` is the number the next ticket gets, from 1) inside the caller's transaction.
 4. Command CreateProject (lead of the owning team or admin; voter `PROJECT_CREATE`).
 5. Seed SHOP for the Shop team in `app:demo:seed`.
-**Files:** `src/Ticketing/Domain/{Project*,BlankProjectName,InvalidProjectKey,UnknownProject}.php`, `src/Ticketing/Application/NextTicketNumber.php`, `src/Ticketing/Application/CreateProject/*`, `src/Ticketing/Infrastructure/Doctrine/{DoctrineProjects,DbalNextTicketNumber}.php`, `src/Ticketing/Api/ProjectPermission.php`, `src/Ticketing/UI/Voter/ProjectVoter.php`, `src/Ticketing/Infrastructure/Demo/SeedDemoProjects.php`, `migrations/Version20261110100000.php`.
+**Files:** `src/Ticketing/Domain/{Project*,BlankProjectName,InvalidProjectKey,UnknownProject}.php`, `src/Ticketing/Application/NextTicketNumber.php`, `src/Ticketing/Application/CreateProject/*`, `src/Ticketing/Infrastructure/Doctrine/{DoctrineProjects,DbalNextTicketNumber}.php`, `src/Ticketing/Api/ProjectPermission.php`, `src/Ticketing/UI/Voter/ProjectVoter.php`, `src/Ticketing/Infrastructure/Demo/SeedDemoProjects.php`, `src/Organization/Api/DemoOrganizations.php`, `src/Organization/Infrastructure/Demo/FirstAdminDemoOrganizations.php`, `migrations/Version20261110100000.php`.
 **Acceptance criteria:**
 - [x] 50 number requests on one project from sessions taking turns give the numbers 1 to 50, each once: a second session waits on the holder's row lock, and a number a holder rolls back goes to the next taker (`NextTicketNumberConcurrencyTest::fiftyCommittedTicketsFromTakingTurnSessionsGetTheNumbersOneToFiftyEachOnce`). PHP cannot wait in two places, so the sessions take turns instead of running in parallel.
 - [x] Key "shop", "1SHOP" and "SHOPPINGCART1" are rejected with a plain message (`ProjectKeyTest::itRejectsAnyOtherKeyWithAPlainMessage`, `CreateProjectTest::aKeyOutsideTheFormatIsRefusedAndNothingIsSaved`, `ProjectTableTest::theDatabaseRefusesABadKeyOrNextNumber`).
@@ -196,5 +196,5 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 - The step-removal check uses a Ticketing count that returns 0 until P03 implements it.
 - 2026-11-10 (P02.T1): ProjectCreated is not built yet; add it with its outbox route, and CreateProject's acting user and time, when a consumer needs it.
 - 2026-11-10 (P02.T1): P01.T3 "A user in two orgs picks one" and the P01 Definition of done are still open; phase 2 does not depend on them.
-- 2026-11-10 (P02.T1): the demo seed finds Acme Foods as the organization of Sara that has the team Shop, as Organization's Api offers no lookup by slug; `SeedDemoProjects` reads Identity's `UserQueries` through a `skip_violations` entry in `deptrac.yaml` (dev and test only). A lost race for a project key is proven by `CreateProjectRaceTest`.
+- 2026-11-10 (P02.T1): the demo seed finds Acme Foods through Organization's `DemoOrganizations::idBySlug('acme-foods')` (dev and test only), so no Ticketing class reads Identity. A lost race for a project key is proven by `CreateProjectRaceTest`.
 - (add dated notes here)

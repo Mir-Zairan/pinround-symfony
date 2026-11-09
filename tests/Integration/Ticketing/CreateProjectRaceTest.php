@@ -30,9 +30,9 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class CreateProjectRaceTest extends KernelTestCase
 {
-    public const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000012a1';
-    public const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000012c1';
-    public const string WINNING_PROJECT = '0197a3c0-0000-7000-8000-0000000012d1';
+    public const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000014a1';
+    public const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000014c1';
+    public const string WINNING_PROJECT = '0197a3c0-0000-7000-8000-0000000014d1';
 
     private ?EntityManagerInterface $secondSession = null;
 

@@ -7,7 +7,9 @@ namespace App\Tests\Unit\Ticketing\Application;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Ticketing\Application\CreateProject\CreateProject;
+use App\Ticketing\Application\CreateProject\ProjectKeyNotValid;
 use App\Ticketing\Application\CreateProject\ProjectKeyTaken;
+use App\Ticketing\Application\CreateProject\ProjectNameMissing;
 use App\Ticketing\Application\CreateProject\ProjectTeamNotFound;
 use App\Ticketing\Domain\BlankProjectName;
 use App\Ticketing\Domain\InvalidProjectKey;
@@ -108,7 +110,9 @@ final class CreateProjectTest extends TestCase
         try {
             self::createProject($projects)(self::acmeFoods(), new TeamId(self::SHOP_TEAM), 'shop', 'Online shop');
             self::fail('A project was created with a lowercase key.');
-        } catch (InvalidProjectKey) {
+        } catch (ProjectKeyNotValid $notValid) {
+            self::assertSame('A project key is 2 to 10 capital letters or digits and starts with a letter.', $notValid->getMessage());
+            self::assertInstanceOf(InvalidProjectKey::class, $notValid->getPrevious());
         }
 
         self::assertSame([], $projects->saved);
@@ -122,7 +126,9 @@ final class CreateProjectTest extends TestCase
         try {
             self::createProject($projects)(self::acmeFoods(), new TeamId(self::SHOP_TEAM), 'SHOP', '   ');
             self::fail('A project was created without a name.');
-        } catch (BlankProjectName) {
+        } catch (ProjectNameMissing $missing) {
+            self::assertSame('A project needs a name.', $missing->getMessage());
+            self::assertInstanceOf(BlankProjectName::class, $missing->getPrevious());
         }
 
         self::assertSame([], $projects->saved);

@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Demo;
 
-use App\Identity\Api\UserQueries;
-use App\Organization\Api\MembershipQueries;
+use App\Organization\Api\DemoOrganizations;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Application\TenantContext;
@@ -21,19 +20,18 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 
 /**
  * The demo project SHOP of Acme Foods, owned by its team Shop. It runs after SeedDemoOrganizations and finds Acme
- * Foods as the one organization of Sara whose team Shop exists. A project found by its key stays as it is.
+ * Foods through Organization's DemoOrganizations. A project found by its key stays as it is.
  */
 #[AsTaggedItem(priority: 40)]
 final readonly class SeedDemoProjects implements DemoSeedStep
 {
-    private const string SARA = 'sara@acme-foods.example';
+    private const string ORGANIZATION = 'acme-foods';
     private const string TEAM = 'Shop';
     private const string KEY = 'SHOP';
     private const string NAME = 'Shop';
 
     public function __construct(
-        private UserQueries $users,
-        private MembershipQueries $membershipQueries,
+        private DemoOrganizations $demoOrganizations,
         private TeamQueries $teamQueries,
         private Projects $projects,
         private CreateProject $createProject,
@@ -44,28 +42,21 @@ final readonly class SeedDemoProjects implements DemoSeedStep
 
     public function seed(): string
     {
-        $sara = $this->users->idByEmail(self::SARA)
-            ?? throw new DemoSeedRefused(\sprintf('The demo person %s does not exist yet, so the projects cannot be made. Seed the people first.', self::SARA));
+        $organizationId = $this->demoOrganizations->idBySlug(self::ORGANIZATION)
+            ?? throw new DemoSeedRefused(\sprintf('The demo organization %s does not exist yet, so the projects cannot be made. Seed the organizations first.', self::ORGANIZATION));
 
-        foreach ($this->membershipQueries->organizationsOf($sara) as $organizationId) {
-            $isCreated = $this->inTransactionOf($organizationId, function () use ($organizationId): ?bool {
-                $shopTeam = $this->findTeamByName($organizationId, self::TEAM);
-                if (null === $shopTeam) {
-                    return null;
-                }
-                if (null !== $this->projects->byKey(new ProjectKey(self::KEY))) {
-                    return false;
-                }
-                ($this->createProject)($organizationId, $shopTeam, self::KEY, self::NAME);
-
-                return true;
-            });
-            if (null !== $isCreated) {
-                return \sprintf('Projects: created %d, kept %d.', $isCreated ? 1 : 0, $isCreated ? 0 : 1);
+        $isCreated = $this->inTransactionOf($organizationId, function () use ($organizationId): bool {
+            $shopTeam = $this->findTeamByName($organizationId, self::TEAM)
+                ?? throw new DemoSeedRefused(\sprintf('The demo organization %s has no team %s yet, so the projects cannot be made. Seed the organizations first.', self::ORGANIZATION, self::TEAM));
+            if (null !== $this->projects->byKey(new ProjectKey(self::KEY))) {
+                return false;
             }
-        }
+            ($this->createProject)($organizationId, $shopTeam, self::KEY, self::NAME);
 
-        throw new DemoSeedRefused(\sprintf('No organization of %s has the team %s yet, so the projects cannot be made. Seed the organizations first.', self::SARA, self::TEAM));
+            return true;
+        });
+
+        return \sprintf('Projects: created %d, kept %d.', $isCreated ? 1 : 0, $isCreated ? 0 : 1);
     }
 
     /**

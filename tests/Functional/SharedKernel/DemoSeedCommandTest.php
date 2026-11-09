@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\SharedKernel;
 
 use App\Identity\Domain\Email;
+use App\Organization\Api\DemoOrganizations;
 use App\Organization\Infrastructure\Demo\SeedDemoOrganizations;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Infrastructure\Console\DemoSeedCommand;
@@ -278,21 +279,34 @@ final class DemoSeedCommandTest extends KernelTestCase
         $step = self::getContainer()->get(SeedDemoProjects::class);
 
         $this->expectException(DemoSeedRefused::class);
-        $this->expectExceptionMessageIsOrContains('has the team Shop yet');
+        $this->expectExceptionMessageIsOrContains('acme-foods has no team Shop yet');
 
         $step->seed();
     }
 
     #[Test]
-    public function theProjectStepRefusesWhenSaraIsMissing(): void
+    public function theProjectStepRefusesWhenAcmeFoodsIsMissing(): void
     {
         $this->startWithPassword(self::PASSWORD);
         $step = self::getContainer()->get(SeedDemoProjects::class);
 
         $this->expectException(DemoSeedRefused::class);
-        $this->expectExceptionMessageIsOrContains('sara@acme-foods.example does not exist yet');
+        $this->expectExceptionMessageIsOrContains('The demo organization acme-foods does not exist yet');
 
         $step->seed();
+    }
+
+    #[Test]
+    public function demoOrganizationsFindsEachSeededOrganizationBySlugAndNothingElse(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $demoOrganizations = self::getContainer()->get(DemoOrganizations::class);
+        self::assertNull($demoOrganizations->idBySlug('acme-foods'));
+        $this->runSeed();
+
+        self::assertSame($this->organizationIdOf('sara@acme-foods.example'), $demoOrganizations->idBySlug('acme-foods')?->toString());
+        self::assertSame($this->organizationIdOf('ben@beta-bakery.example'), $demoOrganizations->idBySlug('beta-bakery')?->toString());
+        self::assertNull($demoOrganizations->idBySlug('gamma-grocers'));
     }
 
     #[Test]
