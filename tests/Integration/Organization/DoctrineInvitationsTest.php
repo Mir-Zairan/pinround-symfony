@@ -131,12 +131,12 @@ final class DoctrineInvitationsTest extends KernelTestCase
     }
 
     #[Test]
-    public function removeOpenForRemovesAnExpiredInvitationOfTheEmailInAnyLetterCaseSoANewOneCanBeAdded(): void
+    public function removeNotAcceptedForRemovesAnExpiredInvitationOfTheEmailInAnyLetterCaseSoANewOneCanBeAdded(): void
     {
         $this->addInvitationsOfBothOrganizations();
 
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
-            $this->invitations()->removeOpenFor(new OrganizationId(self::ACME_FOODS), 'OMAR@acme-foods.example');
+            $this->invitations()->removeNotAcceptedFor(new OrganizationId(self::ACME_FOODS), 'OMAR@acme-foods.example');
             $this->invitations()->add($this->invitationOf(self::NEW_FOR_ACME, self::ACME_FOODS, 'omar@acme-foods.example', new \DateTimeImmutable('2027-03-16 10:00:00 UTC')));
         });
 
@@ -145,21 +145,21 @@ final class DoctrineInvitationsTest extends KernelTestCase
     }
 
     #[Test]
-    public function removeOpenForRemovesAnOpenInvitationOfThatEmailOnly(): void
+    public function removeNotAcceptedForRemovesAnOpenInvitationOfThatEmailOnly(): void
     {
         $this->addInvitationsOfBothOrganizations();
 
-        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->invitations()->removeOpenFor(new OrganizationId(self::ACME_FOODS), 'mia@acme-foods.example'));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->invitations()->removeNotAcceptedFor(new OrganizationId(self::ACME_FOODS), 'mia@acme-foods.example'));
 
         self::assertSame([self::OMAR_EXPIRED, self::OMAR_ACCEPTED], $this->idsOf(self::ACME_FOODS));
     }
 
     #[Test]
-    public function removeOpenForLeavesTheInvitationsOfAnotherOrganizationAlone(): void
+    public function removeNotAcceptedForLeavesTheInvitationsOfAnotherOrganizationAlone(): void
     {
         $this->addInvitationsOfBothOrganizations();
 
-        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->invitations()->removeOpenFor(new OrganizationId(self::BETA_BAKERY), 'omar@acme-foods.example'));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->invitations()->removeNotAcceptedFor(new OrganizationId(self::BETA_BAKERY), 'omar@acme-foods.example'));
 
         self::assertSame([self::OMAR_AT_BETA], $this->idsOf(self::BETA_BAKERY));
         self::assertSame([self::OMAR_EXPIRED, self::OMAR_ACCEPTED, self::MIA_AT_ACME], $this->idsOf(self::ACME_FOODS));

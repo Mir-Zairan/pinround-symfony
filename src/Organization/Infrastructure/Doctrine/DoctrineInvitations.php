@@ -39,7 +39,7 @@ final readonly class DoctrineInvitations implements Invitations
     /**
      * email is citext, so the comparison ignores letter case.
      */
-    public function removeOpenFor(OrganizationId $organizationId, string $email): void
+    public function removeNotAcceptedFor(OrganizationId $organizationId, string $email): void
     {
         $this->entityManager->createQuery(
             'DELETE FROM '.Invitation::class.' i WHERE i.organizationId = :organizationId AND i.email = :email AND i.acceptedAt IS NULL',

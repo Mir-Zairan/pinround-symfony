@@ -18,7 +18,7 @@ interface Invitations
 
     /**
      * Saves the invitation at once, so a second invitation of the same email that is not yet accepted fails here: the
-     * unique index refuses it and the save throws. Call removeOpenFor() first to replace one.
+     * unique index refuses it and the save throws. Call removeNotAcceptedFor() first to replace one.
      */
     public function add(Invitation $invitation): void;
 
@@ -30,5 +30,5 @@ interface Invitations
      *
      * @param string $email compared without regard to letter case
      */
-    public function removeOpenFor(OrganizationId $organizationId, string $email): void;
+    public function removeNotAcceptedFor(OrganizationId $organizationId, string $email): void;
 }
