@@ -16,7 +16,7 @@ use Doctrine\DBAL\Connection;
 final readonly class OrganizationRows
 {
     /** Every org_ table, children first. */
-    public const array TABLES = ['org_team_member', 'org_team', 'org_settings', 'org_membership', 'org_organization'];
+    public const array TABLES = ['org_invitation', 'org_team_member', 'org_team', 'org_settings', 'org_membership', 'org_organization'];
 
     public function __construct(private Connection $migrator, private TenantContext $tenantContext)
     {

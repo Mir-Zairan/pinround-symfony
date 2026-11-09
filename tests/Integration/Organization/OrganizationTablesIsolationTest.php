@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Organization;
 
+use App\Organization\Domain\Invitation;
 use App\Organization\Domain\Job;
 use App\Organization\Domain\Membership;
 use App\Organization\Domain\Organization;
@@ -13,6 +14,7 @@ use App\Organization\Domain\OrgSettings;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamMember;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrgSettingsStore;
@@ -55,6 +57,7 @@ final class OrganizationTablesIsolationTest extends KernelTestCase
         'org_team' => [Team::class, 'organizationId', "INSERT INTO org_team (id, organization_id, name, lead_user_id, created_at) VALUES ('0197a3c0-0000-7000-8000-0000000006d3', '".self::THIRD_ORG."', 'Smuggled', '".self::SARA."', now())", 'name = name', false],
         'org_team_member' => [TeamMember::class, 'organizationId', "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES ('".self::THIRD_ORG."', '".self::BETA_TEAM."', '".self::SARA."', 'lead', 'other', now())", 'job = job', true],
         'org_settings' => [OrgSettings::class, 'organizationId', "INSERT INTO org_settings (organization_id, data, created_at) VALUES ('".self::THIRD_ORG."', '{}', now())", 'data = data', false],
+        'org_invitation' => [Invitation::class, 'organizationId', "INSERT INTO org_invitation (organization_id, id, email, org_roles, invited_by, created_at, expires_at) VALUES ('".self::THIRD_ORG."', '0197a3c0-0000-7000-8000-0000000006e3', 'omar@acme-foods.example', '{}', '".self::SARA."', now(), now() + interval '72 hours')", 'email = email', true],
     ];
 
     protected function setUp(): void
@@ -200,6 +203,8 @@ final class OrganizationTablesIsolationTest extends KernelTestCase
             $team->addMember(new UserId(self::MIA), TeamRole::Member, Job::Tester, $at);
             new DoctrineTeams($entityManager)->add($team);
             new DoctrineOrgSettingsStore($entityManager)->add(new OrgSettings($organization, new UserId(self::SARA), $at));
+            $invitations = new DoctrineInvitations($entityManager);
+            $invitations->add(Invitation::issue($invitations->nextIdentity(), $organization, 'omar@'.$slug.'.example', new OrgRoles(), new TeamId($teamId), TeamRole::Viewer, new UserId(self::SARA), $at));
         });
     }
 
