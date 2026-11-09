@@ -6,6 +6,10 @@ deptrac:
 
   ignore_uncovered_internal_classes: true
 
+  skip_violations:
+    # Demo data for dev and test only: the seed step finds the demo organization through Sara's user id.
+    App\Ticketing\Infrastructure\Demo\SeedDemoProjects: [App\Identity\Api\UserQueries]
+
   layers:
     - name: SharedKernel
       collectors:

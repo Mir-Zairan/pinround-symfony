@@ -59,11 +59,11 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 3. `NextTicketNumber` service: `UPDATE tkt_project SET next_number = next_number + 1 … RETURNING` inside the caller's transaction.
 4. Command CreateProject (lead of the owning team or admin; voter `PROJECT_CREATE`).
 5. Seed SHOP for the Shop team in `app:demo:seed`.
-**Files:** `src/Ticketing/Domain/Project*.php`, `src/Ticketing/Application/CreateProject/*`, migration.
+**Files:** `src/Ticketing/Domain/{Project*,BlankProjectName,InvalidProjectKey,UnknownProject}.php`, `src/Ticketing/Application/NextTicketNumber.php`, `src/Ticketing/Application/CreateProject/*`, `src/Ticketing/Infrastructure/Doctrine/{DoctrineProjects,DbalNextTicketNumber}.php`, `src/Ticketing/Api/ProjectPermission.php`, `src/Ticketing/UI/Voter/ProjectVoter.php`, `src/Ticketing/Infrastructure/Demo/SeedDemoProjects.php`, `migrations/Version20261110100000.php`.
 **Acceptance criteria:**
-- [ ] 50 parallel number requests on one project give 50 distinct numbers with no gaps.
-- [ ] Key "shop", "1SHOP" and "SHOPPINGCART1" are rejected with a plain message.
-- [ ] Org B cannot see or use org A's project (isolation test).
+- [x] 50 number requests on one project from sessions taking turns give the numbers 1 to 50, each once: a second session waits on the holder's row lock, and a number a holder rolls back goes to the next taker (`NextTicketNumberConcurrencyTest::fiftyCommittedTicketsFromTakingTurnSessionsGetTheNumbersOneToFiftyEachOnce`). PHP cannot wait in two places, so the sessions take turns instead of running in parallel.
+- [x] Key "shop", "1SHOP" and "SHOPPINGCART1" are rejected with a plain message (`ProjectKeyTest::itRejectsAnyOtherKeyWithAPlainMessage`, `CreateProjectTest::aKeyOutsideTheFormatIsRefusedAndNothingIsSaved`, `ProjectTableTest::theDatabaseRefusesABadKeyOrNextNumber`).
+- [x] Org B cannot see or use org A's project (`ProjectIsolationTest::anotherOrganizationFindsTheProjectNeitherByKeyNorById`, `::anotherOrganizationCannotTakeANumberOfTheProject`, `CreateProjectTest::aTeamOfAnotherOrganizationCannotOwnTheProject`).
 **Tests:** unit tests for `ProjectKey`; integration concurrency test (parallel connections); isolation and voter tests.
 **Prototype check:** project key style in [Team: projects](../04-prototype/screens/team.md#projects) (key in mono font, name, count).
 **Size:** S
@@ -194,4 +194,7 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 - P03 must call `TransitionPolicy::check` before every move and `TurnProjector::project` in the same transaction.
 - P03.T1 adds the foreign key `ins_ticket_turn.ticket_id → tkt_ticket.id` (P02.T6 tests ran without it).
 - The step-removal check uses a Ticketing count that returns 0 until P03 implements it.
+- 2026-11-10 (P02.T1): ProjectCreated is not built yet; add it with its outbox route, and CreateProject's acting user and time, when a consumer needs it.
+- 2026-11-10 (P02.T1): P01.T3 "A user in two orgs picks one" and the P01 Definition of done are still open; phase 2 does not depend on them.
+- 2026-11-10 (P02.T1): the demo seed finds Acme Foods as the organization of Sara that has the team Shop, as Organization's Api offers no lookup by slug; `SeedDemoProjects` reads Identity's `UserQueries` through a `skip_violations` entry in `deptrac.yaml` (dev and test only). A lost race for a project key is proven by `CreateProjectRaceTest`.
 - (add dated notes here)

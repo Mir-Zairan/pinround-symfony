@@ -12,6 +12,8 @@ use App\SharedKernel\Infrastructure\Console\DemoSeedRefused;
 use App\Tests\Factory\Identity\UserFactory;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Ticketing\ProjectRows;
+use App\Ticketing\Infrastructure\Demo\SeedDemoProjects;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
@@ -237,6 +239,63 @@ final class DemoSeedCommandTest extends KernelTestCase
     }
 
     #[Test]
+    public function itCreatesProjectShopOwnedByTheShopTeamOfAcmeFoodsOnce(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $first = $this->runSeed();
+        $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
+        $projectsAfterFirstRun = $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT p.id, p.key, p.name, t.name AS team FROM tkt_project p JOIN org_team t ON t.organization_id = p.organization_id AND t.id = p.team_id',
+        ));
+
+        $second = $this->runSeed();
+
+        self::assertStringContainsString('Projects: created 1, kept 0.', $first->getDisplay());
+        self::assertCount(1, $projectsAfterFirstRun);
+        self::assertSame(['SHOP', 'Shop', 'Shop'], [$projectsAfterFirstRun[0]['key'], $projectsAfterFirstRun[0]['name'], $projectsAfterFirstRun[0]['team']]);
+        self::assertSame(Command::SUCCESS, $second->getStatusCode());
+        self::assertStringContainsString('Projects: created 0, kept 1.', $second->getDisplay());
+        self::assertSame($projectsAfterFirstRun, $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT p.id, p.key, p.name, t.name AS team FROM tkt_project p JOIN org_team t ON t.organization_id = p.organization_id AND t.id = p.team_id',
+        )));
+        self::assertSame(
+            0,
+            $this->underTenant($this->organizationIdOf('ben@beta-bakery.example'), fn (): mixed => $this->connection()->fetchOne('SELECT count(*) FROM tkt_project')),
+        );
+    }
+
+    #[Test]
+    public function theProjectStepRefusesWhenTheShopTeamIsMissing(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $this->runSeed();
+        $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
+        self::getContainer()->get('doctrine')->resetManager();
+        $this->projectRows()->removeAllOf($acmeFoods);
+        $this->committedUnderTenant($acmeFoods, function (): void {
+            $this->connection()->executeStatement("UPDATE org_team SET name = 'Webshop' WHERE name = 'Shop'");
+        });
+        $step = self::getContainer()->get(SeedDemoProjects::class);
+
+        $this->expectException(DemoSeedRefused::class);
+        $this->expectExceptionMessageIsOrContains('has the team Shop yet');
+
+        $step->seed();
+    }
+
+    #[Test]
+    public function theProjectStepRefusesWhenSaraIsMissing(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $step = self::getContainer()->get(SeedDemoProjects::class);
+
+        $this->expectException(DemoSeedRefused::class);
+        $this->expectExceptionMessageIsOrContains('sara@acme-foods.example does not exist yet');
+
+        $step->seed();
+    }
+
+    #[Test]
     public function theOrganizationStepRefusesWhenAPersonIsMissing(): void
     {
         $this->startWithPassword(self::PASSWORD);
@@ -432,12 +491,18 @@ final class DemoSeedCommandTest extends KernelTestCase
                 $organizationIds[$organizationId] = $organizationId;
             }
         }
+        $this->projectRows()->removeAllOf(...array_values($organizationIds));
         $this->rows()->removeAllOf(...array_values($organizationIds));
         $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
         if ([] !== $userIds) {
             $migrator->executeStatement('DELETE FROM idn_credential WHERE user_id IN (?)', [$userIds], [ArrayParameterType::STRING]);
             $migrator->executeStatement('DELETE FROM idn_user WHERE id IN (?)', [$userIds], [ArrayParameterType::STRING]);
         }
+    }
+
+    private function projectRows(): ProjectRows
+    {
+        return new ProjectRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function rows(): OrganizationRows
