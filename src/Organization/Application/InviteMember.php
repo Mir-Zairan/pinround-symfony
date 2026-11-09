@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Organization\Application;
 
+use App\Identity\Api\InvitedPersonRegistration;
 use App\Identity\Api\UserQueries;
 use App\Organization\Api\Event\MemberInvited;
 use App\Organization\Domain\Invitation;
@@ -33,6 +34,7 @@ final readonly class InviteMember
         private Memberships $memberships,
         private Teams $teams,
         private UserQueries $userQueries,
+        private InvitedPersonRegistration $registration,
         private OrganizationEvents $events,
     ) {
     }
@@ -54,8 +56,8 @@ final readonly class InviteMember
      *
      * @param TeamRole|null $teamRole Member or Viewer, given exactly when $teamId is
      *
-     * @throws InvalidEmailAddress       when the trimmed email is blank or no valid address, by the rule an account's
-     *                                   email follows, so accepting never refuses the address
+     * @throws InvalidEmailAddress       when the trimmed email is blank or no valid address, by Identity's rule for
+     *                                   an account's email, so accepting never refuses the address
      * @throws TeamHasOneLead            when $teamRole is Lead
      * @throws \InvalidArgumentException when only one of $teamId and $teamRole is given
      * @throws UnknownTeam               when no team of the organization has $teamId
@@ -67,7 +69,7 @@ final readonly class InviteMember
      */
     public function __invoke(OrganizationId $organizationId, string $email, OrgRoles $orgRoles, ?TeamId $teamId, ?TeamRole $teamRole, UserId $actingUser, \DateTimeImmutable $now): InvitationId
     {
-        if (false === filter_var(mb_strtolower(trim($email), 'UTF-8'), \FILTER_VALIDATE_EMAIL, \FILTER_FLAG_EMAIL_UNICODE)) {
+        if (!$this->registration->isValidEmail($email)) {
             throw new InvalidEmailAddress('This is not a valid email address.');
         }
         $invitation = Invitation::issue($this->invitations->nextIdentity(), $organizationId, $email, $orgRoles, $teamId, $teamRole, $actingUser, $now);

@@ -7,11 +7,13 @@ namespace App\Tests\Unit\Organization\Application;
 use App\Identity\Api\InvitedPersonRegistration;
 use App\Identity\Api\RegistrationRefusal;
 use App\Identity\Api\RegistrationRefused;
+use App\Identity\Domain\Email;
+use App\Identity\Domain\InvalidEmail;
 use App\SharedKernel\Domain\UserId;
 
 /**
  * Registers every person as NEW_USER and records the email and name. Refuses a taken email or a password shorter than
- * the minimum, as RegisterInvitedPerson does, before recording anything.
+ * the minimum, as RegisterInvitedPerson does, before recording anything. Checks an email by Identity's own rule.
  */
 final class RecordingInvitedPersonRegistration implements InvitedPersonRegistration
 {
@@ -35,6 +37,17 @@ final class RecordingInvitedPersonRegistration implements InvitedPersonRegistrat
     public function maximumNameLength(): int
     {
         return 100;
+    }
+
+    public function isValidEmail(string $email): bool
+    {
+        try {
+            new Email($email);
+
+            return true;
+        } catch (InvalidEmail) {
+            return false;
+        }
     }
 
     public function register(string $email, string $name, #[\SensitiveParameter] string $password, \DateTimeImmutable $now): UserId

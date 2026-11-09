@@ -22,6 +22,14 @@ interface InvitedPersonRegistration
     public function maximumNameLength(): int;
 
     /**
+     * Whether register() takes this address, so an invitation is only sent to an address it can accept. Saves nothing
+     * and reads nothing; whether the address is taken is not checked.
+     *
+     * @param string $email checked trimmed and in lowercase, as register() stores it
+     */
+    public function isValidEmail(string $email): bool;
+
+    /**
      * Creates an active user who can log in with this email and password. Its writes share the caller's transaction,
      * so the invitation is used up and the membership added together with the account, or none of them.
      *

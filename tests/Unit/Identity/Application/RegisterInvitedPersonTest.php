@@ -83,6 +83,30 @@ final class RegisterInvitedPersonTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function emailValidity(): iterable
+    {
+        yield 'plain address' => ['omar@acme-foods.example', true];
+        yield 'spaces and capitals' => ['  Omar@Acme-Foods.Example ', true];
+        yield 'unicode' => ['mía@acme-foods.example', true];
+        yield 'taken address' => ['lena@acme-foods.example', true];
+        yield 'blank' => ['', false];
+        yield 'only spaces' => ['   ', false];
+        yield 'no at sign' => ['omar-at-acme-foods.example', false];
+        yield 'no domain' => ['omar@', false];
+        yield 'two at signs' => ['omar@@acme-foods.example', false];
+    }
+
+    #[Test]
+    #[DataProvider('emailValidity')]
+    public function itSaysWhetherItTakesAnEmailAddressWithoutSavingAnything(string $email, bool $expected): void
+    {
+        self::assertSame($expected, $this->registration()->isValidEmail($email));
+        self::assertSame([[], []], [$this->users->added, $this->credentials->added]);
+    }
+
+    /**
      * @return iterable<string, array{string, string, string, list<RegistrationRefusal>}>
      */
     public static function refusedInputs(): iterable

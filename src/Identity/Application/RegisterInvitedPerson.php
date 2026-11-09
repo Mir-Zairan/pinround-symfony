@@ -47,6 +47,17 @@ final readonly class RegisterInvitedPerson implements InvitedPersonRegistration
         return User::MAXIMUM_NAME_LENGTH;
     }
 
+    public function isValidEmail(string $email): bool
+    {
+        try {
+            new Email($email);
+
+            return true;
+        } catch (InvalidEmail) {
+            return false;
+        }
+    }
+
     public function register(string $email, string $name, #[\SensitiveParameter] string $password, \DateTimeImmutable $now): UserId
     {
         $refusals = [];

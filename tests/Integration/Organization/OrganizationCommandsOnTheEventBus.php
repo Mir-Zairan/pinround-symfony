@@ -23,6 +23,7 @@ use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
 use App\Organization\Infrastructure\Messenger\MessengerOrganizationEvents;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Unit\Organization\Application\RecordingInvitedPersonRegistration;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
 
@@ -84,6 +85,7 @@ final readonly class OrganizationCommandsOnTheEventBus
             new DoctrineMemberships($this->entityManager),
             new DoctrineTeams($this->entityManager),
             new DbalUserQueries($connection),
+            new RecordingInvitedPersonRegistration(),
             new MessengerOrganizationEvents($this->eventBus, $connection),
         );
 

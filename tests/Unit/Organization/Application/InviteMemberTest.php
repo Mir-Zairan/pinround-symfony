@@ -244,7 +244,7 @@ final class InviteMemberTest extends TestCase
             new Team(new TeamId(self::CHECKOUT_TEAM), new OrganizationId(self::BETA_BAKERY), 'Checkout', new UserId(self::BEN), Job::Developer, self::now()),
         );
 
-        return new InviteMember($this->invitations, $this->memberships, $teams, $userQueries ?? new FixedUserQueries(), $this->events);
+        return new InviteMember($this->invitations, $this->memberships, $teams, $userQueries ?? new FixedUserQueries(), new RecordingInvitedPersonRegistration(), $this->events);
     }
 
     private static function now(): \DateTimeImmutable
