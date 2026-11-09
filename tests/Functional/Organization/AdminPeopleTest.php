@@ -6,11 +6,11 @@ namespace App\Tests\Functional\Organization;
 
 use App\Identity\Domain\User;
 use App\Organization\Domain\Invitation;
-use App\Organization\Domain\InvitationAlreadyOpen;
 use App\Organization\Domain\InvitationId;
 use App\Organization\Domain\Invitations;
 use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\UI\Admin\PeopleController;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Identity\TurnsOnTwoStepLogin;
@@ -71,7 +71,7 @@ final class AdminPeopleTest extends WebTestCase
         self::assertSame('Invite', $page->filter('main form button[type="submit"]')->text());
         self::assertSame(['omar@acme.test', 'lena@acme.test'], $this->pendingEmailsOn($page));
         self::assertSame([self::NOT_JOINED_YET, self::NOT_JOINED_YET], $page->filter('main .people__row .people__sub')->each(static fn (Crawler $row): string => $row->text()));
-        self::assertCount(0, $page->filter('.toast-region .toast'));
+        self::assertCount(0, $page->filter('.toast-region .toast, noscript'));
     }
 
     #[Test]
@@ -99,7 +99,7 @@ final class AdminPeopleTest extends WebTestCase
         self::assertResponseRedirects(self::PEOPLE_PAGE, 302);
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(\sprintf(PeopleController::INVITE_SENT, 'Mia@Acme.test'), $page->filter('.toast-region .toast')->text());
+        self::assertSame(\sprintf(PeopleController::INVITE_SENT, 'Mia@Acme.test'), $this->toastMessageOn($page));
         self::assertSame(['mia@acme.test'], $this->pendingEmailsOn($page));
         self::assertSame(
             [['email' => 'mia@acme.test', 'org_roles' => '{}', 'team_id' => null, 'invited_by' => $sara->id()->toString(), 'created_at' => $this->clock->now()->getTimestamp()]],
@@ -108,50 +108,64 @@ final class AdminPeopleTest extends WebTestCase
 
         $page = $this->client->request('GET', self::PEOPLE_PAGE);
         self::assertResponseStatusCodeSame(200);
-        self::assertCount(0, $page->filter('.toast-region .toast'));
+        self::assertCount(0, $page->filter('.toast-region .toast, noscript'));
     }
 
+    /**
+     * Two invites of Mia while an older one is open: the other request's DELETE of the older one commits before this
+     * request's DELETE runs, so this one deletes nothing, and the other request's INSERT commits before this one's
+     * INSERT, which the real unique index then refuses. Committed in that order on the migrator connection, it leaves
+     * what the real race leaves: the other request's invite only. Staging the other request's DELETE after this one's
+     * would wait on this request's row lock, in this same thread, for ever.
+     */
     #[Test]
-    public function anInviteThatLostTheRaceToTheSameInviteShowsTheToastAndOnePendingRow(): void
+    public function anInviteThatLostTheRaceToTheSameInviteShowsTheToastAndLeavesTheOtherRequestsInvite(): void
     {
+        [$sara, $acmeFoods] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
+        $this->storeInvitation($acmeFoods, 'mia@acme.test', '1 hour', false);
+        $otherRequestDeletes = fn () => $this->duringTheRequest(fn () => $this->committedAs($acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'DELETE FROM org_invitation WHERE organization_id = ? AND email = ? AND accepted_at IS NULL',
+            [$acmeFoods->toString(), 'mia@acme.test'],
+        )));
+        $otherRequestInserts = fn () => $this->duringTheRequest(fn () => $this->storeInvitation($acmeFoods, 'mia@acme.test', '1 minute', false));
         // Set before the first request builds InviteMember, which keeps the repository it is given.
-        $otherRequestCommits = fn (OrganizationId $organizationId) => $this->storeInvitation($organizationId, 'mia@acme.test', '1 minute', false);
-        self::getContainer()->set(DoctrineInvitations::class, new readonly class($otherRequestCommits) implements Invitations {
-            public function __construct(private \Closure $otherRequestCommits)
+        self::getContainer()->set(DoctrineInvitations::class, new readonly class(new DoctrineInvitations(self::getContainer()->get('doctrine.orm.entity_manager')), $otherRequestDeletes, $otherRequestInserts) implements Invitations {
+            public function __construct(private Invitations $invitations, private \Closure $otherRequestDeletes, private \Closure $otherRequestInserts)
             {
             }
 
             public function nextIdentity(): InvitationId
             {
-                return new InvitationId(Uuid::v7()->toRfc4122());
+                return $this->invitations->nextIdentity();
             }
 
             public function add(Invitation $invitation): void
             {
-                ($this->otherRequestCommits)($invitation->organizationId());
-
-                throw new InvitationAlreadyOpen('Another invitation of this email was saved first.');
+                ($this->otherRequestInserts)();
+                $this->invitations->add($invitation);
             }
 
             public function save(Invitation $invitation): void
             {
+                $this->invitations->save($invitation);
             }
 
             public function byId(InvitationId $id): ?Invitation
             {
-                return null;
+                return $this->invitations->byId($id);
             }
 
             public function lockById(InvitationId $id): ?Invitation
             {
-                return null;
+                return $this->invitations->lockById($id);
             }
 
             public function removeNotAcceptedFor(OrganizationId $organizationId, string $email): void
             {
+                ($this->otherRequestDeletes)();
+                $this->invitations->removeNotAcceptedFor($organizationId, $email);
             }
         });
-        [$sara, $acmeFoods] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
         $this->logInWithACode($this->client, $this->clock, $sara);
         $this->client->request('GET', self::PEOPLE_PAGE);
         self::assertResponseStatusCodeSame(200);
@@ -161,9 +175,16 @@ final class AdminPeopleTest extends WebTestCase
         self::assertResponseRedirects(self::PEOPLE_PAGE, 302);
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(\sprintf(PeopleController::INVITE_SENT, 'mia@acme.test'), $page->filter('.toast-region .toast')->text());
+        self::assertSame(\sprintf(PeopleController::INVITE_SENT, 'mia@acme.test'), $this->toastMessageOn($page));
         self::assertSame(['mia@acme.test'], $this->pendingEmailsOn($page));
-        self::assertCount(1, $this->storedInvitationsOf($acmeFoods));
+        self::assertSame(
+            [['email' => 'mia@acme.test', 'created_at' => $this->clock->now()->modify('-1 minute')->getTimestamp()]],
+            array_map(static fn (array $stored): array => ['email' => $stored['email'], 'created_at' => $stored['created_at']], $this->storedInvitationsOf($acmeFoods)),
+        );
+
+        $page = $this->client->request('GET', self::PEOPLE_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['mia@acme.test'], $this->pendingEmailsOn($page));
     }
 
     #[Test]
@@ -339,6 +360,37 @@ final class AdminPeopleTest extends WebTestCase
         self::assertSame('people-email-error', $field->attr('aria-describedby'));
         self::assertSame($message, $page->filter('main #people-email-error')->text());
         self::assertSame($typed, $field->attr('value'));
+    }
+
+    /**
+     * Runs $work in the middle of a request and gives the request its organization back: committedAs leaves none.
+     */
+    private function duringTheRequest(\Closure $work): void
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $requestOrganization = $tenantContext->get();
+        try {
+            $work();
+        } finally {
+            if (null !== $requestOrganization) {
+                $tenantContext->reset();
+                $tenantContext->set($requestOrganization);
+            }
+        }
+    }
+
+    /**
+     * The toast arrives empty and the toast controller writes this message in, so screen readers announce it.
+     */
+    private function toastMessageOn(Crawler $page): string
+    {
+        $toast = $page->filter('.toast-region .toast[data-controller="toast"]');
+        self::assertCount(1, $toast);
+        self::assertSame('', $toast->text());
+        self::assertNotNull($toast->attr('data-turbo-temporary'));
+        self::assertSame($toast->attr('data-toast-message-value'), $page->filter('noscript .toast')->text());
+
+        return $toast->attr('data-toast-message-value');
     }
 
     /**

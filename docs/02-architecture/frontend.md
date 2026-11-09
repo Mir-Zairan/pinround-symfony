@@ -100,7 +100,7 @@ The gallery at `/_gallery` shows every built component. It exists in dev and tes
 | `PinList` | pin notes under a screenshot | The text equivalent of the pins (accessibility) |
 | `Thread`, `Message`, `Reply`, `Composer` | ticket conversation | Comment / Question switch; answering a question resolves it |
 | `Dialog` | dialogs (ping, picker, share draft, local AI) | Native `<dialog>` with focus trap |
-| `Toast` | toast | One at a time, 3.6 s, `role="status"`. The `toast` controller removes it after 3.6 s; the gallery's toast has no controller and stays |
+| `Toast` | toast | One at a time, 3.6 s, `role="status"`. A flashed toast arrives empty with its text in `data-toast-message-value` and `data-turbo-temporary` (no re-show on Back); the `toast` controller writes the text in 150 ms after connect, so the region announces it, and removes the toast 3.6 s later. Without JavaScript a `<noscript>` copy shows and stays. The gallery's toast has no controller and stays |
 | `Switch` | admin switches | `role="switch"`, `aria-checked` |
 | `EmptyState` | dashed boxes | One plain sentence + one action |
 
