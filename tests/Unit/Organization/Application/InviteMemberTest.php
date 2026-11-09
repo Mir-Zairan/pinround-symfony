@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Organization\Application;
 
 use App\Organization\Api\Event\MemberInvited;
+use App\Organization\Application\AlreadyInTheOrganization;
+use App\Organization\Application\InvalidEmailAddress;
+use App\Organization\Application\InvitationSentMeanwhile;
 use App\Organization\Application\InviteMember;
-use App\Organization\Domain\AlreadyAnOrganizationMember;
 use App\Organization\Domain\Invitation;
 use App\Organization\Domain\InvitationAlreadyOpen;
 use App\Organization\Domain\InvitationId;
@@ -21,6 +23,7 @@ use App\Organization\Domain\UnknownTeam;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -97,7 +100,7 @@ final class InviteMemberTest extends TestCase
         try {
             $this->inviteMember($userQueries)(new OrganizationId(self::ACME_FOODS), ' LENA@acme-foods.example', new OrgRoles(), null, null, new UserId(self::SARA), self::now());
             self::fail('A member was invited.');
-        } catch (AlreadyAnOrganizationMember) {
+        } catch (AlreadyInTheOrganization) {
         }
 
         self::assertSame([[], [], []], [$this->invitations->all(), $this->invitations->calls, $this->events->published]);
@@ -115,6 +118,39 @@ final class InviteMemberTest extends TestCase
             ['ben@beta-bakery.example', 'omar@acme-foods.example'],
             array_map(static fn (Invitation $invitation): string => $invitation->email(), $this->invitations->all()),
         );
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function notAnEmailAddress(): iterable
+    {
+        yield 'blank' => [''];
+        yield 'only spaces' => ['   '];
+        yield 'no at sign' => ['mia.acme-foods.example'];
+        yield 'no domain' => ['mia@'];
+        yield 'two at signs' => ['mia@@acme-foods.example'];
+    }
+
+    #[Test]
+    #[DataProvider('notAnEmailAddress')]
+    public function aValueThatIsNoEmailAddressIsRefusedAndNothingIsSaved(string $email): void
+    {
+        try {
+            $this->inviteMember()(new OrganizationId(self::ACME_FOODS), $email, new OrgRoles(), null, null, new UserId(self::SARA), self::now());
+            self::fail('Something that is no email address was invited.');
+        } catch (InvalidEmailAddress) {
+        }
+
+        self::assertSame([[], [], []], [$this->invitations->all(), $this->invitations->calls, $this->events->published]);
+    }
+
+    #[Test]
+    public function anEmailAddressWithUnicodeIsInvitedAsAnAccountWouldTakeIt(): void
+    {
+        $this->inviteMember()(new OrganizationId(self::ACME_FOODS), ' Mía@Acme-Foods.example ', new OrgRoles(), null, null, new UserId(self::SARA), self::now());
+
+        self::assertSame(['mía@acme-foods.example'], array_map(static fn (Invitation $invitation): string => $invitation->email(), $this->invitations->all()));
     }
 
     #[Test]
@@ -169,7 +205,8 @@ final class InviteMemberTest extends TestCase
         try {
             $this->inviteMember()(new OrganizationId(self::ACME_FOODS), 'Mia@acme-foods.example', new OrgRoles(), null, null, new UserId(self::SARA), self::now());
             self::fail('A second open invitation of Mia was saved.');
-        } catch (InvitationAlreadyOpen) {
+        } catch (InvitationSentMeanwhile $refused) {
+            self::assertInstanceOf(InvitationAlreadyOpen::class, $refused->getPrevious());
         }
 
         self::assertSame([self::OLD_INVITATION], array_map(static fn (Invitation $invitation): string => $invitation->id()->toString(), $this->invitations->all()));
