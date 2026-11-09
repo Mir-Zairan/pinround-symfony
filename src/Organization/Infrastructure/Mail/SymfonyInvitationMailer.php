@@ -14,7 +14,7 @@ use Symfony\Component\Mime\Address;
 
 /**
  * The invitation email, plain text and HTML, sent straight to the mailer transport: it runs in worker-notify already
- * (EmailInvitationLinkHandler), so it is not queued again. The From address comes from mailer.yaml. The link is built
+ * (EmailInvitationLinkHandler, for a queued EmailInvitationLink), so it is not queued again. The From address comes from mailer.yaml. The link is built
  * on DEFAULT_URI, never on a request context, whose Host a visitor controls.
  */
 final readonly class SymfonyInvitationMailer implements InvitationMailer
