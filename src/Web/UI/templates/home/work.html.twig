@@ -18,6 +18,9 @@
         <header class="home__header">
             <p class="home__date">{{ today|date('l, j F', app.user.timeZone) }}</p>
             <h1 class="home__title">All clear, {{ firstName }}</h1>
+            {% for notice in app.flashes('notice') %}
+                <p class="home__subline" role="status">{{ notice }}</p>
+            {% endfor %}
             {% if isLead %}
                 <p class="home__subline">You lead the team, so reviews, decisions and unclear new tickets come to you.</p>
             {% endif %}

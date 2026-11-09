@@ -18,6 +18,11 @@ use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\TransportInterface;
 use Symfony\Component\Mime\RawMessage;
+use Symfony\Component\Routing\Loader\ClosureLoader;
+use Symfony\Component\Routing\RequestContext;
+use Symfony\Component\Routing\Route;
+use Symfony\Component\Routing\RouteCollection;
+use Symfony\Component\Routing\Router;
 
 final class SymfonyInvitationMailerTest extends TestCase
 {
@@ -27,7 +32,7 @@ final class SymfonyInvitationMailerTest extends TestCase
         $transport = self::recordingTransport();
         $token = InvitationLinkToken::generate();
 
-        new SymfonyInvitationMailer($transport, 'https://pinround.example')->sendLink(self::miasInvitation(), 'Acme Foods', $token);
+        new SymfonyInvitationMailer($transport, self::router(), 'https://pinround.example')->sendLink(self::miasInvitation(), 'Acme Foods', $token);
 
         self::assertCount(1, $transport->sent);
         $email = $transport->sent[0];
@@ -46,11 +51,39 @@ final class SymfonyInvitationMailerTest extends TestCase
         $transport = self::recordingTransport();
         $token = InvitationLinkToken::generate();
 
-        new SymfonyInvitationMailer($transport, 'https://pinround.example/')->sendLink(self::miasInvitation(), 'Acme Foods', $token);
+        new SymfonyInvitationMailer($transport, self::router(), 'https://pinround.example/')->sendLink(self::miasInvitation(), 'Acme Foods', $token);
 
         $email = $transport->sent[0];
         self::assertInstanceOf(TemplatedEmail::class, $email);
         self::assertSame('https://pinround.example/invite/'.$token->reveal(), $email->getContext()['link']);
+    }
+
+    #[Test]
+    public function theLinkIsOnTheDefaultUriEvenWhileTheRouterHoldsAnotherHostAndThatHostIsPutBack(): void
+    {
+        $transport = self::recordingTransport();
+        $router = self::router();
+        $router->setContext(RequestContext::fromUri('http://visitor-controlled.example:8080'));
+        $token = InvitationLinkToken::generate();
+
+        new SymfonyInvitationMailer($transport, $router, 'https://pinround.example')->sendLink(self::miasInvitation(), 'Acme Foods', $token);
+
+        $email = $transport->sent[0];
+        self::assertInstanceOf(TemplatedEmail::class, $email);
+        self::assertSame('https://pinround.example/invite/'.$token->reveal(), $email->getContext()['link']);
+        self::assertSame('visitor-controlled.example', $router->getContext()->getHost());
+        self::assertSame(8080, $router->getContext()->getHttpPort());
+    }
+
+    /**
+     * The accept page's link route as the app names it, with the router's real URL generation.
+     */
+    private static function router(): Router
+    {
+        $routes = new RouteCollection();
+        $routes->add('organization_invitation_token', new Route('/invite/{token}'));
+
+        return new Router(new ClosureLoader(), static fn (): RouteCollection => $routes);
     }
 
     private static function miasInvitation(): Invitation

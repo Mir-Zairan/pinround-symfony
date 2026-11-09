@@ -23,6 +23,8 @@ parameters:
         - identity_password_forgot
         - identity_password_reset_token
         - identity_password_reset
+        - organization_invitation_token
+        - organization_invitation
         - identity_profile
         - identity_theme
         - identity_security

@@ -1,0 +1,54 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Join {{ organizationName ?? 'an organization' }} · pinround{% endblock %}
+
+{# Often logged out, like the login page: its card and stylesheet, no app header. #}
+{% block site_header %}{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="login">
+        <twig:Card tag="section" class="login__card" aria-labelledby="invitation-title">
+            <p class="logo">{{ block('logo', '@Web/base.html.twig') }}</p>
+            <h1 class="login__title" id="invitation-title">
+                {%- if organizationName %}Join {{ organizationName }}{% else %}Join an organization{% endif -%}
+            </h1>
+            {% for error in errors %}
+                <p class="login__error" role="alert">{{ error }}</p>
+            {% endfor %}
+            {% if view == 'for_another_email' %}
+                <form method="post" action="{{ path('identity_logout') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+                    <twig:Button type="submit">Log out</twig:Button>
+                </form>
+            {% elseif view == 'log_in_to_join' %}
+                <p>You have an account. Log in, and you join {{ organizationName }} next.</p>
+                <p><a class="login__link" href="{{ path('identity_login') }}">Log in to join</a></p>
+            {% elseif view == 'new_person' %}
+                <p>You are invited as {{ invitedEmail }}. Choose your name and a password.</p>
+                <form class="login__form" method="post" action="{{ path('organization_invitation') }}">
+                    <label class="login__field">
+                        Your name
+                        <input class="login__input" type="text" name="name" autocomplete="name" maxlength="{{ maximumNameLength }}" required autofocus>
+                    </label>
+                    <label class="login__field">
+                        Password
+                        <input class="login__input" type="password" name="password" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" aria-describedby="invitation-password-hint" required>
+                    </label>
+                    <p class="login__hint" id="invitation-password-hint">At least {{ minimumPasswordLength }} characters.</p>
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_invitation_accept') }}">
+                    <twig:Button type="submit">Join</twig:Button>
+                </form>
+            {% elseif view == 'join' %}
+                <p>You are invited as {{ invitedEmail }}.</p>
+                <form class="login__form" method="post" action="{{ path('organization_invitation') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_invitation_accept') }}">
+                    <twig:Button type="submit">Join</twig:Button>
+                </form>
+            {% endif %}
+        </twig:Card>
+    </div>
+{% endblock %}
