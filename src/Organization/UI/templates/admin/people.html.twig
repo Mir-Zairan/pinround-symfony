@@ -20,11 +20,12 @@
 
         <twig:Card tag="section" aria-labelledby="people-invite-title">
             <h2 class="people__heading" id="people-invite-title">Invite</h2>
-            <form class="people__invite" method="post" action="{{ path('organization_admin_people_invite') }}">
+            <form class="people__invite" method="post" action="{{ path('organization_admin_people_invite') }}" {{ stimulus_controller('invite-email') }}>
                 <div class="profile__field people__email">
                     <label class="login__field">
                         Email
                         <input class="login__input" type="email" name="email" value="{{ typedEmail }}" placeholder="name@company.com" autocomplete="off" required
+                            {{ stimulus_target('invite-email', 'field') }} data-action="input->invite-email#update"
                             {%- if emailError %} aria-invalid="true" aria-describedby="people-email-error"{% endif %}>
                     </label>
                     {% if emailError %}
@@ -32,7 +33,7 @@
                     {% endif %}
                 </div>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_people_invite') }}">
-                <twig:Button type="submit">Invite</twig:Button>
+                <twig:Button type="submit" data-invite-email-target="submit">Invite</twig:Button>
             </form>
         </twig:Card>
 

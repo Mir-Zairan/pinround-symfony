@@ -124,7 +124,7 @@
         <div class="toast-region" role="status" aria-live="polite">
             {#- One toast at a time (frontend.md): the last one flashed by the action that redirected here. -#}
             {%- set toasts = app.flashes('toast') -%}
-            {%- if toasts is not empty %}<twig:Toast>{{ toasts|last }}</twig:Toast>{% endif -%}
+            {%- if toasts is not empty %}<twig:Toast data-controller="toast">{{ toasts|last }}</twig:Toast>{% endif -%}
         </div>
         <div id="dialog-root"></div>
     </div>

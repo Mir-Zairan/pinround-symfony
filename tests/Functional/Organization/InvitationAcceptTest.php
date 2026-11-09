@@ -4,8 +4,13 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Organization;
 
+use App\Identity\Api\InvitedPersonRegistration;
+use App\Identity\Api\RegistrationRefusal;
+use App\Identity\Api\RegistrationRefused;
+use App\Identity\Application\RegisterInvitedPerson;
 use App\Organization\UI\InvitationController;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -288,6 +293,42 @@ final class InvitationAcceptTest extends WebTestCase
         $client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $client->getCrawler()->filter('main form[action="/invite"]'));
+    }
+
+    #[Test]
+    public function anEmailTakenAtTheSameMomentAsTheJoinIsAskedToLogInAndJoinsNothing(): void
+    {
+        $client = self::httpsClient();
+        $client->disableReboot();
+        $organizationId = $this->createOrganization('Acme Foods');
+        $email = self::newEmail('mia');
+        $link = $this->invite($organizationId, $email);
+        $refusingRegistration = new class implements InvitedPersonRegistration {
+            public function minimumPasswordLength(): int
+            {
+                return 12;
+            }
+
+            public function maximumNameLength(): int
+            {
+                return 100;
+            }
+
+            public function register(string $email, string $name, #[\SensitiveParameter] string $password, \DateTimeImmutable $now): UserId
+            {
+                throw new RegistrationRefused([RegistrationRefusal::EmailTaken]);
+            }
+        };
+        self::getContainer()->set(RegisterInvitedPerson::class, $refusingRegistration);
+        $this->openLink($client, $link);
+
+        $client->submitForm('Join', ['name' => 'Mia Lund', 'password' => self::NEW_PASSWORD]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(InvitationController::EMAIL_TAKEN, $client->getCrawler()->filter('main [role="alert"]')->text());
+        self::assertSame('/login', $client->getCrawler()->selectLink('Log in to join')->attr('href'));
+        self::assertNull($this->userIdWithEmail($email));
+        self::assertSame(0, $this->acceptedInvitationCount($organizationId));
     }
 
     /**
