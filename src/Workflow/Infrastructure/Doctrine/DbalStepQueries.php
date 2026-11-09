@@ -9,6 +9,7 @@ use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
 use App\Workflow\Domain\Group;
 use App\Workflow\Domain\StepId;
+use App\Workflow\Domain\StepOrigin;
 use Doctrine\DBAL\Connection;
 
 final readonly class DbalStepQueries implements StepQueries
@@ -22,7 +23,7 @@ final readonly class DbalStepQueries implements StepQueries
         $rows = $this->connection->fetchAllAssociative(
             'SELECT id, name, grp, position, origin, core_code FROM wf_step'
             .' WHERE archived_at IS NULL AND (team_id IS NULL OR team_id = ?)'
-            .' ORDER BY '.self::groupListPositionSql().', position, id',
+            .' ORDER BY '.self::orderSql('grp', Group::inListOrder()).', '.self::orderSql('origin', StepOrigin::cases()).', position, id',
             [$teamId->toString()],
         );
 
@@ -40,17 +41,21 @@ final readonly class DbalStepQueries implements StepQueries
     }
 
     /**
-     * Built from Group::inListOrder(), so the SQL order cannot drift from the order lists show; the codes are enum
-     * constants, never input.
+     * A CASE that gives each enum value its index in $inOrder, built from the enums so the SQL order cannot drift from
+     * the order lists show (groups) or team.md names (core, company, team steps); the values are enum constants, never
+     * input.
+     *
+     * @param list<Group>|list<StepOrigin> $inOrder
      */
-    private static function groupListPositionSql(): string
+    private static function orderSql(string $column, array $inOrder): string
     {
         $whens = array_map(
-            static fn (Group $group): string => \sprintf("WHEN '%s' THEN %d", $group->value, $group->listPosition()),
-            Group::inListOrder(),
+            static fn (Group|StepOrigin $value, int $index): string => \sprintf("WHEN '%s' THEN %d", $value->value, $index),
+            $inOrder,
+            array_keys($inOrder),
         );
 
-        return 'CASE grp '.implode(' ', $whens).' END';
+        return \sprintf('CASE %s %s END', $column, implode(' ', $whens));
     }
 
     /**

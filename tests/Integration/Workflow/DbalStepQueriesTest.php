@@ -79,16 +79,16 @@ final class DbalStepQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function stepsForGivesTheCoreCompanyAndOwnTeamStepsInListOrderThenPositionThenId(): void
+    public function stepsForGivesTheCoreCompanyAndOwnTeamStepsInListOrderThenOriginThenPositionThenId(): void
     {
         self::assertSame(
             [
-                [self::SHOP_READY_TO_SHIP, 'Ready to ship', 'wait', 'Waiting', 0, 'team', null],
                 [self::NEEDS_INPUT, 'Needs input', 'wait', 'Waiting', 5, 'core', 'input'],
                 [self::ON_HOLD, 'On hold', 'wait', 'Waiting', 6, 'core', 'hold'],
+                [self::SHOP_READY_TO_SHIP, 'Ready to ship', 'wait', 'Waiting', 0, 'team', null],
                 [self::CODE_REVIEW, 'Code review', 'check', 'Checking', 3, 'core', 'review'],
-                [self::DESIGN_CHECK, 'Design check', 'check', 'Checking', 3, 'company', null],
                 [self::TESTING, 'Testing', 'check', 'Checking', 4, 'core', 'test'],
+                [self::DESIGN_CHECK, 'Design check', 'check', 'Checking', 3, 'company', null],
                 [self::IN_PROGRESS, 'In progress', 'doing', 'Doing', 2, 'core', 'progress'],
                 [self::BACKLOG, 'Backlog', 'todo', 'To do', 0, 'core', 'backlog'],
                 [self::TODO, 'To do', 'todo', 'To do', 1, 'core', 'todo'],

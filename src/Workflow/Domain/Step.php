@@ -115,11 +115,31 @@ final class Step implements TenantOwned
         return $this->position;
     }
 
+    public function archivedAt(): ?\DateTimeImmutable
+    {
+        return $this->archivedAt;
+    }
+
     /**
      * Core steps are never removed; whether a team step is empty of open tickets is checked elsewhere.
      */
     public function isRemovable(): bool
     {
         return StepOrigin::Core !== $this->origin;
+    }
+
+    /**
+     * Removes the step from new moves; the row stays, as tickets may still name it. A step removed before keeps its
+     * first time.
+     *
+     * @throws \LogicException when the step is a core step (see isRemovable)
+     */
+    public function archive(\DateTimeImmutable $at): void
+    {
+        if (!$this->isRemovable()) {
+            throw new \LogicException('A core step is never removed.');
+        }
+
+        $this->archivedAt ??= $at;
     }
 }

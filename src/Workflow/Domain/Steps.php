@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Workflow\Domain;
 
+use App\SharedKernel\Domain\TeamId;
+
 /**
  * Steps of the organization of the current transaction.
  */
@@ -14,6 +16,9 @@ interface Steps
      */
     public function nextIdentity(): StepId;
 
+    /**
+     * Removed steps are found too.
+     */
     public function byId(StepId $id): ?Step;
 
     /**
@@ -22,4 +27,18 @@ interface Steps
      * roll back.
      */
     public function add(Step ...$steps): void;
+
+    /**
+     * Saves the changes to a step found through byId at once. It flushes, so any other pending change of the
+     * EntityManager is written in the same flush.
+     *
+     * @throws \LogicException when the step was neither found through byId nor added in this unit of work
+     */
+    public function save(Step $step): void;
+
+    /**
+     * The highest position among the steps in the group that are listed with $teamId: the core and company steps,
+     * plus that team's own steps when a team is given. Removed steps are left out. Null when there are none.
+     */
+    public function highestPositionIn(Group $group, ?TeamId $teamId): ?int;
 }

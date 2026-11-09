@@ -58,6 +58,32 @@ final class StepTest extends TestCase
     }
 
     #[Test]
+    public function aTeamStepIsArchivedAtTheGivenTimeAndKeepsTheFirstTime(): void
+    {
+        $step = $this->step(StepOrigin::Team, null, 'Ready to merge', Group::Check, new TeamId(self::TEAM_ID));
+        self::assertNull($step->archivedAt());
+
+        $step->archive(new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+        $step->archive(new \DateTimeImmutable('2027-03-16 08:00:00 UTC'));
+
+        self::assertEquals(new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), $step->archivedAt());
+    }
+
+    #[Test]
+    public function aCoreStepIsNeverArchived(): void
+    {
+        $step = $this->step(StepOrigin::Core, CoreStep::Review, 'Code review', Group::Check, null);
+
+        try {
+            $step->archive(new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+            self::fail('A core step was archived.');
+        } catch (\LogicException) {
+        }
+
+        self::assertNull($step->archivedAt());
+    }
+
+    #[Test]
     public function theCoreDoneStepMayBeInTheDoneGroup(): void
     {
         $step = $this->step(StepOrigin::Core, CoreStep::Done, 'Done', Group::Done, null);
