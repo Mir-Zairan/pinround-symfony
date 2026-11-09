@@ -1,0 +1,28 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Recovery codes · pinround{% endblock %}
+
+{# The messages come from login.css, the page layout from security.css. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="security">
+        <h1 class="security__title">Two-step login is on</h1>
+
+        <twig:Card tag="section" class="security__section" aria-labelledby="recovery-codes-title">
+            <h2 class="security__heading" id="recovery-codes-title">Save your recovery codes</h2>
+            <p class="login__hint">Each code logs you in once when you don't have your phone. Save them now in a safe place: you will not see them again.</p>
+            <ol class="two-step__codes">
+                {% for recoveryCode in recoveryCodes %}
+                    <li><code class="mono">{{ recoveryCode }}</code></li>
+                {% endfor %}
+            </ol>
+            <div>
+                <twig:Button href="{{ path('identity_security') }}">I saved them</twig:Button>
+            </div>
+        </twig:Card>
+    </div>
+{% endblock %}

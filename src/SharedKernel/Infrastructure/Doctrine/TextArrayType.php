@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Organization\Infrastructure\Doctrine;
+namespace App\SharedKernel\Infrastructure\Doctrine;
 
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Types\Type;

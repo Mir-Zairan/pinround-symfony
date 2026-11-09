@@ -1,0 +1,61 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Two-step login · pinround{% endblock %}
+
+{# The form fields and messages come from login.css, the page layout from security.css. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="security">
+        <h1 class="security__title">Two-step login</h1>
+        {% if error and not setup.state.isAwaitingCode %}
+            <p class="login__error" role="alert">{{ error }}</p>
+        {% endif %}
+
+        <twig:Card tag="section" class="security__section">
+            {% if setup.state.isOn %}
+                <p class="login__notice" role="status">Two-step login is on.</p>
+                <p class="login__hint">Each login asks for a code from your authenticator app.</p>
+                <div>
+                    <twig:Button href="{{ path('identity_security') }}" variant="outline">Back to security</twig:Button>
+                </div>
+            {% elseif setup.state.isAwaitingCode %}
+                <h2 class="security__heading">1. Scan the QR code</h2>
+                <p class="login__hint">Open your authenticator app and scan this code.</p>
+                <img class="two-step__qr" src="{{ qrCodeSource }}" width="200" height="200" alt="QR code for your authenticator app">
+                <p class="login__hint">Can't scan it? Type this key in the app:</p>
+                <p><code class="mono two-step__key">{{ setup.manualKey }}</code></p>
+
+                <h2 class="security__heading">2. Type the code</h2>
+                <form class="login__form" method="post" action="{{ path('identity_two_step_confirm') }}">
+                    {% if error %}
+                        <p class="login__error" role="alert" id="two-step-code-error">{{ error }}</p>
+                    {% endif %}
+                    <label class="login__field">
+                        Code from the app
+                        <input class="login__input" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required
+                            {%- if error %} aria-invalid="true" aria-describedby="two-step-code-error two-step-code-hint"{% else %} aria-describedby="two-step-code-hint"{% endif %}>
+                    </label>
+                    <p class="login__hint" id="two-step-code-hint">6 digits. Two-step login stays off until the code is right.</p>
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('two_step_confirm') }}">
+                    <div>
+                        <twig:Button type="submit">Turn on</twig:Button>
+                    </div>
+                </form>
+                <form method="post" action="{{ path('identity_two_step_start') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('two_step_start') }}">
+                    <twig:Button type="submit" variant="text">Get a new QR code</twig:Button>
+                </form>
+            {% else %}
+                <p class="login__hint">Each login then also asks for a 6-digit code from an authenticator app on your phone. Someone who knows your password still cannot log in.</p>
+                <form method="post" action="{{ path('identity_two_step_start') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('two_step_start') }}">
+                    <twig:Button type="submit">Set up two-step login</twig:Button>
+                </form>
+            {% endif %}
+        </twig:Card>
+    </div>
+{% endblock %}

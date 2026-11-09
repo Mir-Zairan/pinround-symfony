@@ -24,7 +24,7 @@ Every module has the same five folders:
 
 ```text
 src/
-  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep
+  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep, FieldEncryption
   Ticketing/
     Api/                        # PUBLIC: interfaces + DTOs other modules may use
       TicketQueries.php
@@ -86,7 +86,8 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - the `DomainEvent` base (event id, occurred at, organization id, actor id);
   - `Result`/`Problem` types for expected failures;
   - `DenyByDefaultVoter` (`UI\Voter`): the base that new voters on a subject extend. It abstains only for an attribute it does not own or a subject of another class, and denies its own unless the subclass's rule grants ([ADR-0013](../03-adr/0013-authorization.md)). The voters whose subject is null are the exceptions, because the base cannot own a null subject, so they keep Symfony's `Voter`: Organization's `OrganizationMemberVoter` (`ORGANIZATION_CHOOSE`) and Identity's `OwnAccountVoter` (`ACCOUNT_EDIT_OWN`); `AdminAreaVoter` extends the base;
-  - `CitextType` (`Infrastructure/Doctrine`): the Doctrine type of PostgreSQL `citext` columns. Doctrine registers a type once for the whole app, so it cannot belong to one module;
+  - `FieldEncryption` (Application, with `UndecryptableField` for a value that is altered, cut short or written with a key no longer in the ring) and its libsodium secretbox implementation `SodiumFieldEncryption` in `Infrastructure/Encryption`, with the key ring `FieldEncryptionKeys` ([ADR-0027](../03-adr/0027-secrets-and-encryption.md), [config.md](../operations/config.md#field-encryption)): encrypts secrets stored in the database. Identity's MFA seeds use it first; Integration's Jira and webhook secrets, OIDC client secrets and AI provider credentials follow;
+  - `CitextType` and `TextArrayType` (`Infrastructure/Doctrine`): the Doctrine types of PostgreSQL `citext` and one-dimensional `text[]` columns (`text_array`: Organization's `org_roles`, Identity's `recovery_code_hashes`). Doctrine registers a type once for the whole app, so it cannot belong to one module;
   - `OnceOnlyHandling` (Application: run an async handler's effect once per message), with `MessageIdStamp`, `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in `Infrastructure/Messenger` ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key));
   - `ReadinessCheck` (`Infrastructure/Health`): one thing `/health/ready` proves. The module that owns what is checked implements it (Audit: `NextAuditPartitionExists`; Media: `ObjectStorageIsReachable`), and autoconfiguration tags it. SharedKernel holds the platform checks `DatabaseAnswers`, `MigrationsAreCurrent` and `ValkeyAnswers` (one service per Valkey), and `ReadinessCheckFailed` for a dependency that answered in the wrong state ([operations.md](operations.md#observability));
   - `DemoSeedStep` (`Infrastructure/Console`, with `DemoSeedRefused`): one part of the demo data that `app:demo:seed` runs, dev and test only. The module that owns the tables implements it (Identity: `SeedDemoPeople`; Organization from P01.T3), autoconfiguration tags it, and `#[AsTaggedItem(priority: …)]` sets the order, highest first. It lives in SharedKernel because the seed command must not import modules, the same reason as `ReadinessCheck`, although only Identity and, from P01.T3, Organization use it.
@@ -106,8 +107,8 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `UserQueries::idByEmail(string): ?UserId` (built in P01.T3 for the demo seed: plain SQL on `idn_user`, null when no one has the address; `Infrastructure\Doctrine\DbalUserQueries`; the others above are not built yet)
   - `TokenAuthenticator::authenticate(string $bearer): ?TokenPrincipal` (scopes included)
   - `ApiTokens::issue(UserId, OrganizationId, string $name, list<Scope>, \DateTimeImmutable $expires): IssuedToken` (the plain token is returned once)
-- **Commands:** RegisterFromInvite, ChangePassword, EnableTotp, DisableTotp, LinkSsoIdentity, IssueApiToken, RevokeApiToken.
-- **Events:** `UserRegistered`, `UserLoggedIn`, `LoginFailed`, `MfaEnabled`, `ApiTokenIssued`, `ApiTokenRevoked`.
+- **Commands:** RegisterFromInvite, ChangePassword, StartTwoStepSetup and ConfirmTwoStepSetup (built in P01.T6 step 1: a new seed in `idn_mfa_secret` through `FieldEncryption`, then a code of it turns two-step login on and returns the 10 `RecoveryCodes` once; ports `OneTimeCodes` (`OtphpOneTimeCodes`), `QrCodeImages` (`BaconQrCodeImages`, SVG drawn on the server) and `RecoveryCodeHashing` (`SymfonyRecoveryCodeHashing`, Argon2id)), DisableTwoStepLogin, LinkSsoIdentity, IssueApiToken, RevokeApiToken.
+- **Events (planned, none built yet):** `UserRegistered`, `UserLoggedIn`, `LoginFailed`, `MfaEnabled`, `ApiTokenIssued`, `ApiTokenRevoked`. `ConfirmTwoStepSetup` raises no `MfaEnabled` yet: an `aud_event` row needs an organization and Identity is global, so it waits for the Audit consumer of P11 (the same gap as the P01.T2 password-reset audit note).
 - **Depends on:** SharedKernel only.
 - **ADRs:** [0012](../03-adr/0012-authentication.md), [0027](../03-adr/0027-secrets-and-encryption.md).
 

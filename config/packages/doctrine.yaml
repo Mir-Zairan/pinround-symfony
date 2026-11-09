@@ -20,7 +20,7 @@ doctrine:
         profiling_collect_backtrace: '%kernel.debug%'
         types:
             citext: App\SharedKernel\Infrastructure\Doctrine\CitextType
-            text_array: App\Organization\Infrastructure\Doctrine\TextArrayType
+            text_array: App\SharedKernel\Infrastructure\Doctrine\TextArrayType
     orm:
         validate_xml_mapping: true
         naming_strategy: doctrine.orm.naming_strategy.underscore

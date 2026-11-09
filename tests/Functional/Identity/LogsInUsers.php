@@ -148,6 +148,7 @@ trait LogsInUsers
         if ([] !== $this->createdUserIds) {
             $migrator = $this->migrator();
             $migrator->executeStatement('DELETE FROM idn_password_reset WHERE user_id IN (?)', [$this->createdUserIds], [ArrayParameterType::STRING]);
+            $migrator->executeStatement('DELETE FROM idn_mfa_secret WHERE user_id IN (?)', [$this->createdUserIds], [ArrayParameterType::STRING]);
             $migrator->executeStatement('DELETE FROM idn_credential WHERE user_id IN (?)', [$this->createdUserIds], [ArrayParameterType::STRING]);
             $migrator->executeStatement('DELETE FROM idn_user WHERE id IN (?)', [$this->createdUserIds], [ArrayParameterType::STRING]);
             $this->createdUserIds = [];

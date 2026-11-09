@@ -22,3 +22,24 @@
   font-size: 20px;
   font-weight: 700;
 }
+
+/* The two-step login pages (two_step.html.twig, two_step_recovery_codes.html.twig). */
+
+/* The QR code keeps its own white background in the dark theme too, so phone cameras read it. */
+.two-step__qr {
+  align-self: flex-start;
+  border-radius: 6px;
+}
+
+.two-step__key {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.two-step__codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px 24px;
+  padding-left: 24px;
+  font-size: 18px;
+}

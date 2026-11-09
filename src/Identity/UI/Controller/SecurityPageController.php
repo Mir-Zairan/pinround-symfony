@@ -9,6 +9,7 @@ use App\Identity\Application\ChangePassword;
 use App\Identity\Application\CurrentSession;
 use App\Identity\Application\LogOutEverywhere;
 use App\Identity\Application\PasswordChangeOutcome;
+use App\Identity\Application\ShowTwoStepSetup;
 use App\Identity\Application\TooManyPasswordChangeTries;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -17,8 +18,9 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * The security page (FR-ID-06): change password and "Log out of all devices". It acts only on the logged-in user, never
- * on an id from the request; every action asks OwnAccountVoter for AccountPermission::EDIT_OWN first (ADR-0013).
+ * The security page (FR-ID-06): change password, "Log out of all devices" and whether two-step login is on. It acts
+ * only on the logged-in user, never on an id from the request; every action asks OwnAccountVoter for
+ * AccountPermission::EDIT_OWN first (ADR-0013).
  */
 final class SecurityPageController extends AbstractController
 {
@@ -34,6 +36,7 @@ final class SecurityPageController extends AbstractController
         private readonly LogOutEverywhere $logOutEverywhere,
         private readonly CurrentSession $currentSession,
         private readonly ClockInterface $clock,
+        private readonly ShowTwoStepSetup $showTwoStepSetup,
     ) {
     }
 
@@ -99,6 +102,7 @@ final class SecurityPageController extends AbstractController
             'passwordError' => $passwordError,
             'logOutError' => $logOutError,
             'minimumPasswordLength' => ChangePassword::MINIMUM_PASSWORD_LENGTH,
+            'twoStepLoginState' => $this->showTwoStepSetup->stateOf($this->currentSession->userId()),
         ], new Response(status: $status ?? ($hasError ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK)));
     }
 }

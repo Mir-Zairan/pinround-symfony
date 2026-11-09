@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Organization\Infrastructure\Doctrine;
+namespace App\Tests\Unit\SharedKernel\Infrastructure\Doctrine;
 
-use App\Organization\Infrastructure\Doctrine\TextArrayType;
+use App\SharedKernel\Infrastructure\Doctrine\TextArrayType;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;

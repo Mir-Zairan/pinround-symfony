@@ -41,6 +41,20 @@
             </form>
         </twig:Card>
 
+        <twig:Card tag="section" class="security__section" aria-labelledby="two-step-login-title">
+            <h2 class="security__heading" id="two-step-login-title">Two-step login</h2>
+            {% if twoStepLoginState.isOn %}
+                <p class="login__hint" data-two-step-state="on">On. Each login asks for a code from your authenticator app.</p>
+            {% else %}
+                <p class="login__hint" data-two-step-state="off">Off. Turn it on, and each login also asks for a code from your phone.</p>
+                <div>
+                    <twig:Button href="{{ path('identity_two_step') }}" variant="outline">
+                        {{- twoStepLoginState.isAwaitingCode ? 'Finish setting up two-step login' : 'Set up two-step login' -}}
+                    </twig:Button>
+                </div>
+            {% endif %}
+        </twig:Card>
+
         <twig:Card tag="section" class="security__section" aria-labelledby="log-out-everywhere-title">
             <h2 class="security__heading" id="log-out-everywhere-title">Log out of all devices</h2>
             {% if logOutError %}

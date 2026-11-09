@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="App\Identity\Domain\TwoStepLogin" table="idn_mfa_secret">
+        <id name="user" association-key="true"/>
+
+        <field name="encryptedSeed" type="binary" column="secret_enc"/>
+        <field name="confirmedAt" type="datetimetz_immutable" column="confirmed_at" nullable="true"/>
+        <field name="recoveryCodeHashes" type="text_array" column="recovery_code_hashes"/>
+        <field name="lastUsedStep" type="bigint" column="last_used_step" nullable="true"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+
+        <one-to-one field="user" target-entity="App\Identity\Domain\User">
+            <join-column name="user_id" referenced-column-name="id" nullable="false"/>
+        </one-to-one>
+    </entity>
+</doctrine-mapping>
