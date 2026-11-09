@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Identity;
 
 use App\Identity\Domain\Email;
+use App\Identity\Domain\EmailTaken;
 use App\Identity\Domain\Theme;
 use App\Identity\Domain\User;
 use App\Identity\Domain\UserStatus;
@@ -217,13 +218,25 @@ final class DoctrineUsersTest extends KernelTestCase
     }
 
     #[Test]
-    public function aSecondUserWithTheSameEmailIsRefused(): void
+    public function aSecondUserWithTheSameEmailIsRefusedAsEmailTaken(): void
     {
         UserFactory::createOne(['email' => new Email('lena@acme-foods.example')]);
 
-        $this->expectException(UniqueConstraintViolationException::class);
+        $this->expectException(EmailTaken::class);
 
         $this->users()->add(UserFactory::new()->withoutPersisting()->create(['email' => new Email(' LENA@acme-foods.example')]));
+    }
+
+    #[Test]
+    public function aUniqueViolationOtherThanTheEmailIsNotTurnedIntoEmailTaken(): void
+    {
+        $this->users()->add(new User(new UserId('0197a3c0-0000-7000-8000-0000000000cb'), new Email('raj@acme-foods.example'), 'Raj', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
+        $this->entityManager->clear();
+
+        $this->expectException(UniqueConstraintViolationException::class);
+        $this->expectExceptionMessageMatches('/idn_user_pkey/');
+
+        $this->users()->add(new User(new UserId('0197a3c0-0000-7000-8000-0000000000cb'), new Email('sara@acme-foods.example'), 'Sara', 'en', 'UTC', new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
     }
 
     #[Test]

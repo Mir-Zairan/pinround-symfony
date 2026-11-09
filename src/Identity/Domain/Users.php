@@ -22,7 +22,10 @@ interface Users
 
     /**
      * Saves the user at once, so an email another user already has, in any letter case, fails here: the database's
-     * unique index refuses it and the save throws.
+     * unique index refuses it.
+     *
+     * @throws EmailTaken when another user has the email, also one another transaction saved after a byEmail() check;
+     *                    the transaction is then failed and must be rolled back
      */
     public function add(User $user): void;
 
