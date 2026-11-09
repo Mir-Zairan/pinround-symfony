@@ -32,10 +32,12 @@ final class ProjectIsolationTest extends KernelTestCase
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000012c1';
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000012d1';
     private const string SMUGGLED_PROJECT = '0197a3c0-0000-7000-8000-0000000012d2';
+    private const string OTHER_TEAM = '0197a3c0-0000-7000-8000-0000000012c2';
+    private const string OTHER_PROJECT = '0197a3c0-0000-7000-8000-0000000012d3';
 
     protected function setUp(): void
     {
-        $this->rows()->removeAllOf(self::ACME_FOODS);
+        $this->rows()->removeAllOf(self::ACME_FOODS, self::OTHER_ORGANIZATION);
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => new DoctrineProjects($this->entityManager())->add(
             new Project(new ProjectId(self::SHOP_PROJECT), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), new ProjectKey('SHOP'), 'Shop'),
         ));
@@ -45,7 +47,7 @@ final class ProjectIsolationTest extends KernelTestCase
     {
         self::getContainer()->get('doctrine')->resetManager();
         self::getContainer()->get(TenantContext::class)->reset();
-        $this->rows()->removeAllOf(self::ACME_FOODS);
+        $this->rows()->removeAllOf(self::ACME_FOODS, self::OTHER_ORGANIZATION);
         parent::tearDown();
     }
 
@@ -92,7 +94,7 @@ final class ProjectIsolationTest extends KernelTestCase
     public function anotherOrganizationCannotAddAProjectInTheNameOfTheOrganization(): void
     {
         try {
-            $this->asOtherOrganization(\sprintf(
+            $this->committedAsOtherOrganization(\sprintf(
                 "INSERT INTO tkt_project (organization_id, id, team_id, key, name, next_number) VALUES ('%s', '%s', '%s', 'SMUG', 'Smuggled', 1)",
                 self::ACME_FOODS,
                 self::SMUGGLED_PROJECT,
@@ -110,7 +112,7 @@ final class ProjectIsolationTest extends KernelTestCase
     #[Test]
     public function anotherOrganizationChangesNoRowOfTheProject(): void
     {
-        $changedRows = $this->asOtherOrganization(\sprintf(
+        $changedRows = $this->committedAsOtherOrganization(\sprintf(
             "UPDATE tkt_project SET next_number = next_number + 100, name = 'Taken' WHERE organization_id = '%s'",
             self::ACME_FOODS,
         ));
@@ -123,12 +125,35 @@ final class ProjectIsolationTest extends KernelTestCase
     }
 
     #[Test]
+    public function anotherOrganizationCannotMoveItsOwnProjectIntoTheOrganization(): void
+    {
+        $this->transactions()->committedAs(self::OTHER_ORGANIZATION, fn () => new DoctrineProjects($this->entityManager())->add(
+            new Project(new ProjectId(self::OTHER_PROJECT), new OrganizationId(self::OTHER_ORGANIZATION), new TeamId(self::OTHER_TEAM), new ProjectKey('MOVE'), 'Move'),
+        ));
+
+        try {
+            $this->committedAsOtherOrganization(\sprintf(
+                "UPDATE tkt_project SET organization_id = '%s' WHERE id = '%s'",
+                self::ACME_FOODS,
+                self::OTHER_PROJECT,
+            ));
+            self::fail('Another organization moved its project into Acme Foods.');
+        } catch (DriverException $refusal) {
+            self::assertSame('42501', $refusal->getSQLState());
+            self::assertStringContainsString('new row violates row-level security policy for table "tkt_project"', $refusal->getMessage());
+        }
+
+        self::assertSame(['SHOP'], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn('SELECT key FROM tkt_project')));
+        self::assertSame(['MOVE'], $this->transactions()->rolledBackAs(self::OTHER_ORGANIZATION, fn (): array => $this->connection()->fetchFirstColumn('SELECT key FROM tkt_project')));
+    }
+
+    #[Test]
     public function anotherOrganizationCannotTakeANumberOfTheProject(): void
     {
         $numbers = new DbalNextTicketNumber($this->connection());
 
         try {
-            $this->transactions()->rolledBackAs(self::OTHER_ORGANIZATION, static fn (): int => $numbers->takeFor(new ProjectId(self::SHOP_PROJECT)));
+            $this->transactions()->committedAs(self::OTHER_ORGANIZATION, static fn (): int => $numbers->takeFor(new ProjectId(self::SHOP_PROJECT)));
             self::fail('Another organization took a number of the project.');
         } catch (UnknownProject) {
         }
@@ -152,9 +177,12 @@ final class ProjectIsolationTest extends KernelTestCase
         self::assertSame(1, $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): int => $numbers->takeFor(new ProjectId(self::SHOP_PROJECT))));
     }
 
-    private function asOtherOrganization(string $sql): int
+    /**
+     * Commits, so a write that row-level security fails to stop stays for the follow-up read to find.
+     */
+    private function committedAsOtherOrganization(string $sql): int
     {
-        return (int) $this->transactions()->rolledBackAs(self::OTHER_ORGANIZATION, fn (): int|string => $this->connection()->executeStatement($sql));
+        return (int) $this->transactions()->committedAs(self::OTHER_ORGANIZATION, fn (): int|string => $this->connection()->executeStatement($sql));
     }
 
     private function connection(): Connection
