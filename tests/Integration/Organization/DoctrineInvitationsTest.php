@@ -217,6 +217,7 @@ final class DoctrineInvitationsTest extends KernelTestCase
             self::assertStringContainsString('org_invitation_organization_id_email_key', $previous->getMessage());
         }
 
+        self::assertFalse(self::getContainer()->get('doctrine.orm.default_entity_manager')->isOpen());
         self::getContainer()->get('doctrine')->resetManager();
         self::assertSame([self::OMAR_EXPIRED, self::OMAR_ACCEPTED, self::MIA_AT_ACME], $this->idsOf(self::ACME_FOODS));
     }

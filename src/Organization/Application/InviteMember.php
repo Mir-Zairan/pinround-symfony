@@ -48,8 +48,9 @@ final readonly class InviteMember
      * @throws UnknownTeam                 when no team of the organization has $teamId
      * @throws AlreadyAnOrganizationMember when the email belongs to a member of the organization
      * @throws InvitationAlreadyOpen       when another invitation of the email was saved at the same time, as by a
-     *                                     double click; nothing is recorded and the caller's transaction must be
-     *                                     rolled back
+     *                                     double click; nothing is recorded, the EntityManager is closed and the
+     *                                     caller's transaction must be rolled back, with no more ORM use in that
+     *                                     request
      * @throws \LogicException             when no transaction is open
      */
     public function __invoke(OrganizationId $organizationId, string $email, OrgRoles $orgRoles, ?TeamId $teamId, ?TeamRole $teamRole, UserId $actingUser, \DateTimeImmutable $now): InvitationId

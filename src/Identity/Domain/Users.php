@@ -25,7 +25,8 @@ interface Users
      * unique index refuses it.
      *
      * @throws EmailTaken when another user has the email, also one another transaction saved after a byEmail() check;
-     *                    the transaction is then failed and must be rolled back
+     *                    the transaction is then failed and the EntityManager closed, so the caller must roll back and
+     *                    must not use the ORM again in that request
      */
     public function add(User $user): void;
 

@@ -21,8 +21,9 @@ interface Invitations
      * unique index refuses it. Call removeNotAcceptedFor() first to replace one.
      *
      * @throws InvitationAlreadyOpen when an invitation of the email is not yet accepted, also one another transaction
-     *                               saved after removeNotAcceptedFor(); the transaction is then failed and must be
-     *                               rolled back
+     *                               saved after removeNotAcceptedFor(); the transaction is then failed and the
+     *                               EntityManager closed, so the caller must roll back and must not use the ORM again
+     *                               in that request
      */
     public function add(Invitation $invitation): void;
 

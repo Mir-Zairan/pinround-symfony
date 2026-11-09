@@ -218,13 +218,17 @@ final class DoctrineUsersTest extends KernelTestCase
     }
 
     #[Test]
-    public function aSecondUserWithTheSameEmailIsRefusedAsEmailTaken(): void
+    public function aSecondUserWithTheSameEmailIsRefusedAsEmailTakenAndClosesTheEntityManager(): void
     {
         UserFactory::createOne(['email' => new Email('lena@acme-foods.example')]);
 
-        $this->expectException(EmailTaken::class);
+        try {
+            $this->users()->add(UserFactory::new()->withoutPersisting()->create(['email' => new Email(' LENA@acme-foods.example')]));
+            self::fail('EmailTaken expected.');
+        } catch (EmailTaken) {
+        }
 
-        $this->users()->add(UserFactory::new()->withoutPersisting()->create(['email' => new Email(' LENA@acme-foods.example')]));
+        self::assertFalse($this->entityManager->isOpen());
     }
 
     #[Test]

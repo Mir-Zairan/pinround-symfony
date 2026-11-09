@@ -11,8 +11,11 @@ use App\Identity\Application\RegisterInvitedPerson;
 use App\Identity\Domain\Email;
 use App\Identity\Domain\PasswordHash;
 use App\Identity\Domain\PasswordHashing;
+use App\Identity\Domain\User;
+use App\Identity\Domain\Users;
 use App\Identity\Infrastructure\Doctrine\DoctrineCredentials;
 use App\Identity\Infrastructure\Doctrine\DoctrineUsers;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Factory\Identity\UserFactory;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -80,6 +83,53 @@ final class RegisterInvitedPersonTest extends KernelTestCase
         }
 
         self::assertSame([$lena->id()->toString()], $this->connection()->fetchFirstColumn('SELECT id FROM idn_user'));
+        self::assertSame([], $this->connection()->fetchFirstColumn('SELECT user_id FROM idn_credential'));
+    }
+
+    #[Test]
+    public function anEmailAnotherTransactionTookAfterTheCheckIsRefusedAsTakenWithTheEntityManagerClosed(): void
+    {
+        UserFactory::createOne(['email' => new Email('mia@acme-foods.example')]);
+        $usersMissingTheOtherTransactionsRow = new readonly class(new DoctrineUsers($this->entityManager)) implements Users {
+            public function __construct(private DoctrineUsers $users)
+            {
+            }
+
+            public function nextIdentity(): UserId
+            {
+                return $this->users->nextIdentity();
+            }
+
+            public function byId(UserId $id): ?User
+            {
+                return $this->users->byId($id);
+            }
+
+            public function byEmail(Email $email): ?User
+            {
+                return null;
+            }
+
+            public function add(User $user): void
+            {
+                $this->users->add($user);
+            }
+
+            public function save(User $user): void
+            {
+                $this->users->save($user);
+            }
+        };
+        $registration = new RegisterInvitedPerson($usersMissingTheOtherTransactionsRow, new DoctrineCredentials($this->entityManager), self::getContainer()->get(PasswordHashing::class));
+
+        try {
+            $registration->register('Mia@Acme-Foods.Example', 'Mia', self::PASSWORD, new \DateTimeImmutable('2026-11-09 14:15:16 UTC'));
+            self::fail('RegistrationRefused expected.');
+        } catch (RegistrationRefused $refused) {
+            self::assertSame([RegistrationRefusal::EmailTaken], $refused->refusals);
+        }
+
+        self::assertFalse($this->entityManager->isOpen());
         self::assertSame([], $this->connection()->fetchFirstColumn('SELECT user_id FROM idn_credential'));
     }
 

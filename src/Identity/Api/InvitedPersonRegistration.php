@@ -30,8 +30,9 @@ interface InvitedPersonRegistration
      *
      * @throws RegistrationRefused before anything is saved, listing every refused input; when the email is invalid the
      *                             name is not checked. Also, with EmailTaken alone, when another transaction added an
-     *                             account with this email at the same moment: the transaction is then failed and must
-     *                             be rolled back
+     *                             account with this email at the same moment: the transaction is then failed and the
+     *                             shared EntityManager closed, so the caller must roll back and must not use the ORM
+     *                             again in that request (redirect, or show the refusal without Doctrine reads)
      */
     public function register(string $email, string $name, #[\SensitiveParameter] string $password, \DateTimeImmutable $now): UserId;
 }
