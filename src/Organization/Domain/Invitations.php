@@ -18,7 +18,11 @@ interface Invitations
 
     /**
      * Saves the invitation at once, so a second invitation of the same email that is not yet accepted fails here: the
-     * unique index refuses it and the save throws. Call removeNotAcceptedFor() first to replace one.
+     * unique index refuses it. Call removeNotAcceptedFor() first to replace one.
+     *
+     * @throws InvitationAlreadyOpen when an invitation of the email is not yet accepted, also one another transaction
+     *                               saved after removeNotAcceptedFor(); the transaction is then failed and must be
+     *                               rolled back
      */
     public function add(Invitation $invitation): void;
 

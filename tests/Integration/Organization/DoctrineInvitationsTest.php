@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Organization;
 
 use App\Organization\Domain\Invitation;
+use App\Organization\Domain\InvitationAlreadyOpen;
 use App\Organization\Domain\InvitationId;
 use App\Organization\Domain\Job;
 use App\Organization\Domain\OrgRole;
@@ -155,9 +156,36 @@ final class DoctrineInvitationsTest extends KernelTestCase
                 $this->invitationOf(self::NEW_FOR_ACME, self::ACME_FOODS, 'Mia@Acme-Foods.example', new \DateTimeImmutable('2027-03-16 10:00:00 UTC')),
             ));
             self::fail('A second open invitation of Mia was saved.');
+        } catch (InvitationAlreadyOpen $exception) {
+            $previous = $exception->getPrevious();
+            self::assertInstanceOf(UniqueConstraintViolationException::class, $previous);
+            self::assertStringContainsString('org_invitation_organization_id_email_key', $previous->getMessage());
+        }
+
+        self::getContainer()->get('doctrine')->resetManager();
+        self::assertSame([self::OMAR_EXPIRED, self::OMAR_ACCEPTED, self::MIA_AT_ACME], $this->idsOf(self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function aUniqueViolationOfAnotherKeyIsNotTakenForAnOpenInvitation(): void
+    {
+        $this->addInvitationsOfBothOrganizations();
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $mia = $this->invitations()->byId(new InvitationId(self::MIA_AT_ACME));
+            self::assertNotNull($mia);
+            $mia->attachLinkTokenHash(hash('sha256', 'one link token', true));
+            $this->invitations()->add($mia);
+        });
+
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+                $raj = $this->invitationOf(self::NEW_FOR_ACME, self::ACME_FOODS, 'raj@acme-foods.example', new \DateTimeImmutable('2027-03-16 10:00:00 UTC'));
+                $raj->attachLinkTokenHash(hash('sha256', 'one link token', true));
+                $this->invitations()->add($raj);
+            });
+            self::fail('Two invitations were saved with the same token hash.');
         } catch (UniqueConstraintViolationException $exception) {
-            self::assertSame('23505', $exception->getSQLState());
-            self::assertStringContainsString('org_invitation_organization_id_email_key', $exception->getMessage());
+            self::assertStringContainsString('org_invitation_token_hash_key', $exception->getMessage());
         }
 
         self::getContainer()->get('doctrine')->resetManager();

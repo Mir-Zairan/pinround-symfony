@@ -34,6 +34,9 @@ final class DbalInvitationQueriesTest extends KernelTestCase
     private const string EXPIRED = '0197a3c0-0000-7000-8000-000000000ec6';
     private const string EXPIRES_NOW = '0197a3c0-0000-7000-8000-000000000ec7';
     private const string AT_BETA = '0197a3c0-0000-7000-8000-000000000ec8';
+    // created_at keeps whole seconds, so these two, invited 0.3 seconds apart, are ordered by id.
+    private const string SUB_SECOND_EARLIER = '0197a3c0-0000-7000-8000-000000000ec9';
+    private const string SUB_SECOND_LATER = '0197a3c0-0000-7000-8000-000000000eca';
 
     protected function setUp(): void
     {
@@ -107,6 +110,28 @@ final class DbalInvitationQueriesTest extends KernelTestCase
 
         self::assertSame([self::SAME_SECOND_LOWER_ID, self::OLDEST], self::idsOf($secondPage));
         self::assertSame([], $this->pendingOf(self::ACME_FOODS, self::ACME_FOODS, 2, $secondPage[1]));
+    }
+
+    #[Test]
+    public function pagingOneByOneGivesInvitationsOfTheSameSecondEachExactlyOnce(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->addInvitation(self::ACME_FOODS, self::SUB_SECOND_EARLIER, 'noor@acme-foods.example', '2027-03-16 08:00:00.100000', '2027-03-23 08:00:00');
+            $this->addInvitation(self::ACME_FOODS, self::SUB_SECOND_LATER, 'mia.tester@acme-foods.example', '2027-03-16 08:00:00.400000', '2027-03-23 08:00:00');
+        });
+
+        $seen = [];
+        $after = null;
+        do {
+            $page = $this->pendingOf(self::ACME_FOODS, self::ACME_FOODS, 1, $after);
+            $seen = [...$seen, ...self::idsOf($page)];
+            $after = $page[0] ?? null;
+        } while (null !== $after && \count($seen) < 20);
+
+        self::assertSame(
+            [self::NEWEST, self::SAME_SECOND_HIGHER_ID, self::SAME_SECOND_LOWER_ID, self::OLDEST, self::SUB_SECOND_LATER, self::SUB_SECOND_EARLIER],
+            $seen,
+        );
     }
 
     #[Test]

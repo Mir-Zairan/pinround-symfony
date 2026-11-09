@@ -8,6 +8,7 @@ use App\Organization\Api\Event\MemberInvited;
 use App\Organization\Application\InviteMember;
 use App\Organization\Domain\AlreadyAnOrganizationMember;
 use App\Organization\Domain\Invitation;
+use App\Organization\Domain\InvitationAlreadyOpen;
 use App\Organization\Domain\InvitationId;
 use App\Organization\Domain\Job;
 use App\Organization\Domain\Membership;
@@ -157,6 +158,22 @@ final class InviteMemberTest extends TestCase
             array_map(static fn (Invitation $invitation): string => $invitation->id()->toString(), $this->invitations->all()),
         );
         self::assertSame(['manager'], $this->invitations->byId(new InvitationId(InMemoryInvitations::NEXT_ID))?->orgRoles()->values());
+    }
+
+    #[Test]
+    public function anInvitationOfTheSameEmailSavedAtTheSameTimeIsRefusedAndNothingIsRecorded(): void
+    {
+        $otherRequests = Invitation::issue(new InvitationId(self::OLD_INVITATION), new OrganizationId(self::ACME_FOODS), 'mia@acme-foods.example', new OrgRoles(), null, null, new UserId(self::SARA), self::now());
+        $this->invitations->letAnotherRequestAddFirst($otherRequests);
+
+        try {
+            $this->inviteMember()(new OrganizationId(self::ACME_FOODS), 'Mia@acme-foods.example', new OrgRoles(), null, null, new UserId(self::SARA), self::now());
+            self::fail('A second open invitation of Mia was saved.');
+        } catch (InvitationAlreadyOpen) {
+        }
+
+        self::assertSame([self::OLD_INVITATION], array_map(static fn (Invitation $invitation): string => $invitation->id()->toString(), $this->invitations->all()));
+        self::assertSame([], $this->events->published);
     }
 
     #[Test]

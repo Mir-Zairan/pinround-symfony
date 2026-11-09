@@ -8,6 +8,7 @@ use App\Identity\Api\UserQueries;
 use App\Organization\Api\Event\MemberInvited;
 use App\Organization\Domain\AlreadyAnOrganizationMember;
 use App\Organization\Domain\Invitation;
+use App\Organization\Domain\InvitationAlreadyOpen;
 use App\Organization\Domain\InvitationId;
 use App\Organization\Domain\Invitations;
 use App\Organization\Domain\Memberships;
@@ -38,7 +39,7 @@ final readonly class InviteMember
     }
 
     /**
-     * Every refusal comes before anything is saved.
+     * Every refusal but InvitationAlreadyOpen comes before anything is saved.
      *
      * @param TeamRole|null $teamRole Member or Viewer, given exactly when $teamId is
      *
@@ -46,6 +47,9 @@ final readonly class InviteMember
      * @throws \InvalidArgumentException   when the email is blank, or only one of $teamId and $teamRole is given
      * @throws UnknownTeam                 when no team of the organization has $teamId
      * @throws AlreadyAnOrganizationMember when the email belongs to a member of the organization
+     * @throws InvitationAlreadyOpen       when another invitation of the email was saved at the same time, as by a
+     *                                     double click; nothing is recorded and the caller's transaction must be
+     *                                     rolled back
      * @throws \LogicException             when no transaction is open
      */
     public function __invoke(OrganizationId $organizationId, string $email, OrgRoles $orgRoles, ?TeamId $teamId, ?TeamRole $teamRole, UserId $actingUser, \DateTimeImmutable $now): InvitationId
