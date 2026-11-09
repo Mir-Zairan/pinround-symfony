@@ -559,6 +559,7 @@ final class DemoSeedCommandTest extends KernelTestCase
     private function removeOrganizationOf(string $email): void
     {
         $organizationIds = $this->organizationIdsOf($email);
+        $this->projectRows()->removeAllOf(...$organizationIds);
         $this->workflowRows()->removeAllOf(...$organizationIds);
         $this->rows()->removeAllOf(...$organizationIds);
     }
