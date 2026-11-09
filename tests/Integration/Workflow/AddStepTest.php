@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Workflow;
 
 use App\Organization\Api\StepPolicy;
+use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -16,6 +17,7 @@ use App\Workflow\Application\SetUpOrganizationWorkflow;
 use App\Workflow\Application\StepGroupUnknown;
 use App\Workflow\Application\StepInDoneRefused;
 use App\Workflow\Application\StepNameMissing;
+use App\Workflow\Application\StepTeamNotFound;
 use App\Workflow\Application\TeamStepsLocked;
 use App\Workflow\Infrastructure\Doctrine\DbalRuleSets;
 use App\Workflow\Infrastructure\Doctrine\DbalStepQueries;
@@ -26,8 +28,8 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * AddStep on the real wf_step table as pinround_app, after the organization got its core steps, each test in one
- * rolled-back transaction under Acme Foods.
+ * AddStep on the real wf_step and org_team tables as pinround_app, after the organization got its core steps and its
+ * SHOP and Mobile teams, each test in one rolled-back transaction under Acme Foods.
  */
 final class AddStepTest extends KernelTestCase
 {
@@ -36,6 +38,8 @@ final class AddStepTest extends KernelTestCase
     private const string MOBILE_TEAM = '0197a3c0-0000-7000-8000-000000001ec2';
     private const string MOBILE_DEVICE_CHECK = '0197a3c0-0000-7000-8000-000000001ed1';
     private const string REMOVED_TRIAGE = '0197a3c0-0000-7000-8000-000000001ed2';
+    private const string UNKNOWN_TEAM = '0197a3c0-0000-7000-8000-000000001ec3';
+    private const string LENA = '0197a3c0-0000-7000-8000-000000001eb1';
 
     protected function tearDown(): void
     {
@@ -133,6 +137,24 @@ final class AddStepTest extends KernelTestCase
     }
 
     #[Test]
+    public function aTeamStepForATeamThatIsNotTheOrganizationsIsRefusedAndNothingIsSaved(): void
+    {
+        [$refusal, $stepCount] = $this->inAcmeFoods(function (): array {
+            try {
+                $this->addStep(StepPolicy::Team)(new OrganizationId(self::ACME_FOODS), new TeamId(self::UNKNOWN_TEAM), 'Ready to merge', 'check');
+                $refusal = null;
+            } catch (StepTeamNotFound $notFound) {
+                $refusal = $notFound->getMessage();
+            }
+
+            return [$refusal, $this->connection()->fetchOne('SELECT count(*) FROM wf_step')];
+        });
+
+        self::assertSame('That team is not in this organization.', $refusal);
+        self::assertSame(8, $stepCount, 'Only the core steps are saved.');
+    }
+
+    #[Test]
     public function aBlankNameAnUnknownGroupAndTheDoneGroupAreRefusedAndNothingIsSaved(): void
     {
         foreach ([
@@ -168,6 +190,12 @@ final class AddStepTest extends KernelTestCase
     {
         return $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($work): mixed {
             new SetUpOrganizationWorkflow(new DoctrineSteps($this->entityManager()), new DbalRuleSets($this->connection()))->setUp(new OrganizationId(self::ACME_FOODS));
+            foreach ([self::SHOP_TEAM => 'SHOP', self::MOBILE_TEAM => 'Mobile'] as $teamId => $teamName) {
+                $this->connection()->executeStatement(
+                    'INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?)',
+                    [self::ACME_FOODS, $teamId, $teamName, self::LENA, '2027-03-01 09:00:00+00'],
+                );
+            }
 
             return $work();
         });
@@ -175,7 +203,7 @@ final class AddStepTest extends KernelTestCase
 
     private function addStep(StepPolicy $stepPolicy): AddStep
     {
-        return new AddStep(new DoctrineSteps($this->entityManager()), new FixedStepPolicy($stepPolicy));
+        return new AddStep(new DoctrineSteps($this->entityManager()), new FixedStepPolicy($stepPolicy), new DbalTeamQueries($this->connection()));
     }
 
     /**

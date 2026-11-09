@@ -60,12 +60,13 @@ final class WorkflowVoterTest extends TestCase
     }
 
     #[Test]
-    public function underExtendTheLeadChangesTheTeamStepsButNotTheRules(): void
+    public function underExtendTheLeadChangesTheStepsOfTheirOwnTeamOnlyAndNoRules(): void
     {
         $voter = $this->voter(StepPolicy::Extend, StepPolicy::Team);
 
         self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::LENA, self::SHOP, WorkflowPermission::STEP_CHANGE_TEAM));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::LENA, self::SHOP, WorkflowPermission::RULES_CHANGE_TEAM));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::LENA, self::MOBILE, WorkflowPermission::STEP_CHANGE_TEAM));
     }
 
     #[Test]

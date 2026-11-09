@@ -6,6 +6,7 @@ namespace App\Workflow\Application;
 
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
+use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Workflow\Domain\BlankStepName;
@@ -23,7 +24,7 @@ use App\Workflow\Domain\Steps;
  */
 final readonly class AddStep
 {
-    public function __construct(private Steps $steps, private SettingsQueries $settingsQueries)
+    public function __construct(private Steps $steps, private SettingsQueries $settingsQueries, private TeamQueries $teamQueries)
     {
     }
 
@@ -34,6 +35,7 @@ final readonly class AddStep
      * @param string $groupCode one of todo, doing, check, wait (done is refused)
      *
      * @throws StepGroupUnknown  when the group code is not one of the five; nothing is saved
+     * @throws StepTeamNotFound  when the team is not a team of the organization; nothing is saved
      * @throws TeamStepsLocked   when a team step is added under the step policy locked; nothing is saved
      * @throws StepNameMissing   when nothing is left of the name after trimming; nothing is saved
      * @throws StepInDoneRefused when the group is done; nothing is saved
@@ -41,8 +43,17 @@ final readonly class AddStep
     public function __invoke(OrganizationId $organizationId, ?TeamId $teamId, string $name, string $groupCode): StepId
     {
         $group = Group::tryFrom($groupCode) ?? throw new StepGroupUnknown(\sprintf('There is no group "%s".', $groupCode));
-        if (null !== $teamId && StepPolicy::Locked === $this->settingsQueries->stepPolicyOf($organizationId)) {
-            throw new TeamStepsLocked('Your admin has locked the steps, so teams cannot add their own.');
+        if (null !== $teamId) {
+            $isTeamOfTheOrganization = array_any(
+                $this->teamQueries->teamsOf($organizationId),
+                static fn (TeamId $organizationTeam): bool => $organizationTeam->equals($teamId),
+            );
+            if (!$isTeamOfTheOrganization) {
+                throw new StepTeamNotFound('That team is not in this organization.');
+            }
+            if (StepPolicy::Locked === $this->settingsQueries->stepPolicyOf($organizationId)) {
+                throw new TeamStepsLocked('Your admin has locked the steps, so teams cannot add their own.');
+            }
         }
 
         try {
