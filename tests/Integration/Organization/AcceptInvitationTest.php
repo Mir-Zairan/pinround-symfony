@@ -35,7 +35,8 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * AcceptInvitation on the real tables as pinround_app: the accepted_at of the locked row stops a second use.
+ * AcceptInvitation on the real tables as pinround_app: the accepted_at of the locked row stops a second use, also one
+ * that runs at the same time in another session.
  */
 final class AcceptInvitationTest extends KernelTestCase
 {
@@ -48,6 +49,7 @@ final class AcceptInvitationTest extends KernelTestCase
     private const string OMARS_EMAIL = 'omar@acme-foods.example';
 
     private InvitationLinkToken $linkToken;
+    private ?EntityManagerInterface $secondSession = null;
 
     protected function setUp(): void
     {
@@ -73,6 +75,8 @@ final class AcceptInvitationTest extends KernelTestCase
 
     protected function tearDown(): void
     {
+        $this->secondSession?->getConnection()->close();
+        $this->secondSession = null;
         self::getContainer()->get('doctrine')->resetManager();
         $this->tenantContext()->reset();
         $this->rows()->removeAllOf(self::ACME_FOODS);
@@ -116,17 +120,47 @@ final class AcceptInvitationTest extends KernelTestCase
         self::assertSame([0, true], $counts);
     }
 
-    private function acceptInvitation(): AcceptInvitation
+    #[Test]
+    public function anAcceptWhileTheLinkIsBeingUsedWaitsAndIsThenRefused(): void
     {
-        $memberships = new DoctrineMemberships($this->entityManager());
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $secondSession = SecondSession::besideTheApp($this->entityManager(), $this->tenantContext());
+        $this->secondSession = $secondSession->entityManager;
+        $acceptInTheSecondSession = fn () => $this->acceptInvitation($secondSession->entityManager)->acceptAs(self::link(), $this->linkToken->reveal(), new UserId(self::OMAR), self::now());
+
+        $this->entityManager()->getConnection()->beginTransaction();
+        $this->acceptInvitation()->acceptAs(self::link(), $this->linkToken->reveal(), new UserId(self::OMAR), self::now());
+
+        self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $secondSession->sqlStateOfFailedAttempt($acceptInTheSecondSession), 'The second accept did not wait for the first.');
+
+        $this->entityManager()->getConnection()->commit();
+        $secondSession->entityManager->getConnection()->beginTransaction();
+        try {
+            $acceptInTheSecondSession();
+            self::fail('The invitation was accepted twice.');
+        } catch (InvitationNoLongerValid) {
+        } finally {
+            $secondSession->entityManager->getConnection()->rollBack();
+        }
+
+        self::assertSame(1, $this->entityManager()->getConnection()->transactional(static fn (Connection $connection): mixed => $connection->fetchOne(
+            'SELECT count(*) FROM org_membership WHERE organization_id = ? AND user_id = ?',
+            [self::ACME_FOODS, self::OMAR],
+        )));
+    }
+
+    private function acceptInvitation(?EntityManagerInterface $session = null): AcceptInvitation
+    {
+        $entityManager = $session ?? $this->entityManager();
+        $memberships = new DoctrineMemberships($entityManager);
         $events = new RecordingOrganizationEvents();
 
         return new AcceptInvitation(
-            new DoctrineInvitations($this->entityManager()),
+            new DoctrineInvitations($entityManager),
             new FixedUserQueries([self::OMARS_EMAIL => self::OMAR]),
             new RecordingInvitedPersonRegistration(),
             new AddMember($memberships, $events),
-            new SetTeamRole(new DoctrineTeams($this->entityManager()), $memberships, $events),
+            new SetTeamRole(new DoctrineTeams($entityManager), $memberships, $events),
         );
     }
 

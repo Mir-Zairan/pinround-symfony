@@ -12,6 +12,7 @@ use App\Organization\Domain\OrgRoles;
 use App\Organization\Infrastructure\Doctrine\DbalInvitationLinks;
 use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
+use App\Organization\Infrastructure\Doctrine\TenantSwitchingReads;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
@@ -155,7 +156,7 @@ final class DbalInvitationLinksTest extends KernelTestCase
      */
     private function links(array $userIdsByEmail = []): DbalInvitationLinks
     {
-        return new DbalInvitationLinks($this->connection(), $this->entityManager(), $this->tenantContext(), new FixedUserQueries($userIdsByEmail));
+        return new DbalInvitationLinks($this->connection(), new TenantSwitchingReads($this->connection(), $this->entityManager(), $this->tenantContext()), new FixedUserQueries($userIdsByEmail));
     }
 
     private function invitations(): DoctrineInvitations

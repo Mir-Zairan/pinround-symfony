@@ -8,12 +8,9 @@ use App\Identity\Api\UserQueries;
 use App\Organization\Application\InvitationLinks;
 use App\Organization\Application\OpenInvitationLink;
 use App\Organization\Domain\InvitationLinkToken;
-use App\SharedKernel\Application\TenantContext;
-use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
-use Doctrine\ORM\EntityManagerInterface;
 
 final readonly class DbalInvitationLinks implements InvitationLinks
 {
@@ -24,18 +21,14 @@ final readonly class DbalInvitationLinks implements InvitationLinks
 
     public function __construct(
         private Connection $connection,
-        private EntityManagerInterface $entityManager,
-        private TenantContext $tenantContext,
+        private TenantSwitchingReads $tenantSwitchingReads,
         private UserQueries $userQueries,
     ) {
     }
 
     public function find(#[\SensitiveParameter] string $token): ?OpenInvitationLink
     {
-        // A transaction already open would keep its own tenant (or none) for the read under the invitation's organization.
-        if ($this->connection->isTransactionActive()) {
-            throw new TenantSwitchRefused();
-        }
+        $this->tenantSwitchingReads->refuseInsideATransaction();
         $linkToken = InvitationLinkToken::fromLink($token);
         if (null === $linkToken) {
             return null;
@@ -50,17 +43,10 @@ final readonly class DbalInvitationLinks implements InvitationLinks
         }
         $organizationId = new OrganizationId($resolved['organization_id']);
 
-        $tenantBefore = $this->tenantContext->get();
-        // The switch guard refuses a switch while the entity manager holds an entity, such as the logged-in user.
-        $this->entityManager->clear();
-        try {
-            $this->tenantContext->set($organizationId);
-            $invitation = $this->connection->transactional(
-                static fn (Connection $connection): array|false => $connection->fetchAssociative(self::OPEN_INVITATION, [$organizationId->toString(), $resolved['invitation_id']]),
-            );
-        } finally {
-            null === $tenantBefore ? $this->tenantContext->clear() : $this->tenantContext->set($tenantBefore);
-        }
+        $invitation = $this->tenantSwitchingReads->readAs(
+            $organizationId,
+            static fn (Connection $connection): array|false => $connection->fetchAssociative(self::OPEN_INVITATION, [$organizationId->toString(), $resolved['invitation_id']]),
+        );
         if (false === $invitation || !\is_string($invitation['email']) || !\is_string($invitation['name'])) {
             return null;
         }
