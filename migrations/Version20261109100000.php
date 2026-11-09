@@ -10,7 +10,7 @@ use Doctrine\Migrations\AbstractMigration;
 
 /**
  * org_invitation, a tenant table with row-level security: who was invited to an organization, with which org roles
- * and optionally which team. The app deletes an invitation when the same email is invited again. token_hash stays
+ * and optionally which team of that organization. The app deletes an invitation when the same email is invited again. token_hash stays
  * NULL until the email worker attaches the link's token. Then resolve_invitation gets its body: the ids of the open
  * invitation with that token hash, read through resolver_read.
  */
@@ -37,8 +37,11 @@ final class Version20261109100000 extends AbstractMigration
             ." CONSTRAINT org_invitation_org_roles_check CHECK (org_roles <@ ARRAY['admin', 'manager']::text[]),"
             // A team has exactly one lead, so an invitation never makes one.
             ." CONSTRAINT org_invitation_team_role_check CHECK (team_role IN ('member', 'viewer')),"
-            .' CONSTRAINT org_invitation_team_check CHECK ((team_id IS NULL) = (team_role IS NULL)))',
+            .' CONSTRAINT org_invitation_team_check CHECK ((team_id IS NULL) = (team_role IS NULL)),'
+            // InvitationTeamKeyInSchema adds this key to the ORM schema, which does not map team_id as an association.
+            .' CONSTRAINT org_invitation_team_fkey FOREIGN KEY (organization_id, team_id) REFERENCES org_team (organization_id, id))',
         );
+        $this->addSql('CREATE INDEX org_invitation_organization_id_team_id_idx ON org_invitation (organization_id, team_id)');
         // resolve_invitation runs before any tenant is known, so this index does not start with organization_id.
         $this->addSql('CREATE UNIQUE INDEX org_invitation_token_hash_key ON org_invitation (token_hash)');
         // One invitation not yet accepted per email; an expired one counts until a new invitation removes it.

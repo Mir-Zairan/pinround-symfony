@@ -6,10 +6,13 @@ namespace App\Tests\Integration\Organization;
 
 use App\Organization\Domain\Invitation;
 use App\Organization\Domain\InvitationId;
+use App\Organization\Domain\Job;
 use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgRoles;
+use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamRole;
 use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
+use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -30,6 +33,7 @@ final class DoctrineInvitationsTest extends KernelTestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000000bb1';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-000000000bd1';
     private const string SARA = '0197a3c0-0000-7000-8000-000000000b51';
+    private const string LENA = '0197a3c0-0000-7000-8000-000000000b52';
     // Ids rise in the order the fixture adds them, so idsOf() lists them in that order.
     private const string OMAR_EXPIRED = '0197a3c0-0000-7000-8000-000000000bc1';
     private const string OMAR_ACCEPTED = '0197a3c0-0000-7000-8000-000000000bc2';
@@ -55,6 +59,7 @@ final class DoctrineInvitationsTest extends KernelTestCase
         $createdAt = new \DateTimeImmutable('2027-03-15 10:00:00 UTC');
 
         [$found, $storedHash, $storedRoles] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($createdAt): array {
+            new DoctrineTeams($this->entityManager())->add(new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, $createdAt));
             $invitation = Invitation::issue(new InvitationId(self::NEW_FOR_ACME), new OrganizationId(self::ACME_FOODS), 'omar@acme-foods.example', new OrgRoles(OrgRole::Manager), new TeamId(self::SHOP_TEAM), TeamRole::Member, new UserId(self::SARA), $createdAt);
             $invitation->attachLinkTokenHash(hash('sha256', 'the link token', true));
             $this->invitations()->add($invitation);
@@ -79,6 +84,35 @@ final class DoctrineInvitationsTest extends KernelTestCase
         self::assertTrue($found->hasLinkToken());
         self::assertSame(hash('sha256', 'the link token'), $storedHash);
         self::assertSame('{manager}', $storedRoles);
+    }
+
+    /**
+     * A loaded token_hash comes back as a stream; a new hash attached to the loaded invitation must still be written,
+     * so only the newest link resolves. 2099 keeps the invitation open for resolve_invitation's now().
+     */
+    #[Test]
+    public function aNewLinkTokenHashAttachedToALoadedInvitationReplacesTheOldOne(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $invitation = $this->invitationOf(self::NEW_FOR_ACME, self::ACME_FOODS, 'omar@acme-foods.example', new \DateTimeImmutable('2099-03-15 10:00:00 UTC'));
+            $invitation->attachLinkTokenHash(hash('sha256', 'the first link token', true));
+            $this->invitations()->add($invitation);
+        });
+        $this->entityManager()->clear();
+
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $loaded = $this->invitations()->byId(new InvitationId(self::NEW_FOR_ACME));
+            self::assertNotNull($loaded);
+            $loaded->attachLinkTokenHash(hash('sha256', 'the second link token', true));
+            $this->invitations()->add($loaded);
+        });
+
+        $resolve = fn (string $token): array => $this->entityManager()->getConnection()->fetchFirstColumn(
+            'SELECT invitation_id FROM resolve_invitation(sha256(?::bytea))',
+            [$token],
+        );
+        self::assertSame([self::NEW_FOR_ACME], $resolve('the second link token'));
+        self::assertSame([], $resolve('the first link token'));
     }
 
     #[Test]

@@ -172,6 +172,36 @@ final class OrganizationTablesIsolationTest extends KernelTestCase
         )));
     }
 
+    /**
+     * As for a team member row: only the composite key (organization_id, team_id) stops an invitation into another
+     * organization's team.
+     */
+    #[Test]
+    public function anInvitationCannotNameATeamOfAnotherOrganization(): void
+    {
+        try {
+            $this->asAcmeFoods(\sprintf(
+                "INSERT INTO org_invitation (organization_id, id, email, org_roles, team_id, team_role, invited_by, created_at, expires_at) VALUES ('%s', '0197a3c0-0000-7000-8000-0000000006e4', 'raj@acme-foods.example', '{}', '%s', 'member', '%s', now(), now() + interval '72 hours')",
+                self::ACME_FOODS,
+                self::BETA_TEAM,
+                self::SARA,
+            ));
+            self::fail('An Acme Foods invitation named a Beta Bakery team.');
+        } catch (DriverException $exception) {
+            self::assertSame('23503', $exception->getSQLState());
+            self::assertStringContainsString('org_invitation_team_fkey', $exception->getMessage());
+        }
+
+        self::assertSame([], $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => $this->connection()->fetchFirstColumn(
+            'SELECT id FROM org_invitation WHERE team_id = ? AND email = ?',
+            [self::BETA_TEAM, 'raj@acme-foods.example'],
+        )));
+        self::assertSame([], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn(
+            'SELECT id FROM org_invitation WHERE email = ?',
+            ['raj@acme-foods.example'],
+        )));
+    }
+
     private function assertRefusedByRowLevelSecurity(string $table, string $sql): void
     {
         try {

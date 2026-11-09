@@ -330,7 +330,7 @@ final class DatabaseRolesTest extends KernelTestCase
 
     /**
      * One invitation not yet accepted per email of an organization, and each link token at most once across all
-     * organizations, for resolve_invitation (Version20261109100000).
+     * organizations, for resolve_invitation; the team foreign key has its index (Version20261109100000).
      */
     #[Test]
     public function theInvitationTableIsKeyedByTheOrganizationAndHasOneOpenInvitationPerEmail(): void
@@ -340,6 +340,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX org_invitation_pkey ON public.org_invitation USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX org_invitation_token_hash_key ON public.org_invitation USING btree (token_hash)',
                 'CREATE UNIQUE INDEX org_invitation_organization_id_email_key ON public.org_invitation USING btree (organization_id, email) WHERE (accepted_at IS NULL)',
+                'CREATE INDEX org_invitation_organization_id_team_id_idx ON public.org_invitation USING btree (organization_id, team_id)',
             ],
             $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'org_invitation'"),
         );
