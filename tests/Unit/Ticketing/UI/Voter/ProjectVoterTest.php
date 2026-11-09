@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Ticketing\UI\Voter;
 
 use App\Organization\Api\ActorContext;
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\Roles;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Api\TeamQueries;
@@ -61,6 +62,11 @@ final class ProjectVoterTest extends TestCase
             }
 
             public function countOf(OrganizationId $organizationId): int
+            {
+                throw new \LogicException('Only teamsOf is expected.');
+            }
+
+            public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob
             {
                 throw new \LogicException('Only teamsOf is expected.');
             }

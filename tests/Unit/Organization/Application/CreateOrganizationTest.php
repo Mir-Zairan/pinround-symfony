@@ -139,6 +139,11 @@ final class CreateOrganizationTest extends TestCase
             {
                 $this->added[] = $settings;
             }
+
+            public function save(OrgSettings $settings): void
+            {
+                throw new \LogicException('Not used.');
+            }
         };
     }
 }

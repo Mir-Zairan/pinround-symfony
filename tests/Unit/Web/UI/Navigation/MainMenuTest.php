@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Web\UI\Navigation;
 
 use App\Organization\Api\ActorContext;
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\Roles;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
@@ -69,6 +70,11 @@ final class MainMenuTest extends TestCase
             }
 
             public function countOf(OrganizationId $organizationId): int
+            {
+                throw new \LogicException('Only summariesOf is expected.');
+            }
+
+            public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob
             {
                 throw new \LogicException('Only summariesOf is expected.');
             }

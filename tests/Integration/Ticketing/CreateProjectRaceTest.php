@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Ticketing;
 
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Application\CreateProject\CreateProject;
@@ -148,6 +150,11 @@ final class CreateProjectRaceTest extends KernelTestCase
             public function countOf(OrganizationId $organizationId): int
             {
                 return 1;
+            }
+
+            public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob
+            {
+                throw new \LogicException('CreateProject reads no jobs.');
             }
         };
     }

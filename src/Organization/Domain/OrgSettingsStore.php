@@ -17,4 +17,10 @@ interface OrgSettingsStore
      * Saves the settings at once; a second row for the same organization fails here.
      */
     public function add(OrgSettings $settings): void;
+
+    /**
+     * Writes the changes to settings loaded with of() at once. The update checks the version they were loaded with, so
+     * it fails when another transaction changed them meanwhile; the caller must then roll back.
+     */
+    public function save(OrgSettings $settings): void;
 }

@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Organization\Infrastructure\Doctrine;
 
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use Doctrine\DBAL\Connection;
 
 final readonly class DbalTeamQueries implements TeamQueries
@@ -53,6 +55,23 @@ final readonly class DbalTeamQueries implements TeamQueries
         $count = $this->connection->fetchOne('SELECT count(*) FROM org_team WHERE organization_id = ?', [$organizationId->toString()]);
 
         return \is_int($count) ? $count : throw new \LogicException('A team count from the database is not an integer.');
+    }
+
+    /**
+     * The key is (organization_id, team_id, user_id); row-level security supplies the organization, so a team of
+     * another organization finds no row.
+     */
+    public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob
+    {
+        $job = $this->connection->fetchOne(
+            'SELECT job FROM org_team_member WHERE team_id = ? AND user_id = ?',
+            [$teamId->toString(), $userId->toString()],
+        );
+        if (false === $job) {
+            return null;
+        }
+
+        return (\is_string($job) ? MemberJob::tryFrom($job) : null) ?? throw new \LogicException('org_team_member holds an unknown job.');
     }
 
     /**

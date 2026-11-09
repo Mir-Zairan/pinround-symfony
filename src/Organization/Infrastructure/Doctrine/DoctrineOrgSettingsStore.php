@@ -8,6 +8,7 @@ use App\Organization\Domain\OrgSettings;
 use App\Organization\Domain\OrgSettingsStore;
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\OptimisticLockException;
 
 final readonly class DoctrineOrgSettingsStore implements OrgSettingsStore
 {
@@ -24,5 +25,13 @@ final readonly class DoctrineOrgSettingsStore implements OrgSettingsStore
     {
         $this->entityManager->persist($settings);
         $this->entityManager->flush();
+    }
+
+    /**
+     * @throws OptimisticLockException when the row's version is no longer the one the settings were loaded with
+     */
+    public function save(OrgSettings $settings): void
+    {
+        $this->add($settings);
     }
 }

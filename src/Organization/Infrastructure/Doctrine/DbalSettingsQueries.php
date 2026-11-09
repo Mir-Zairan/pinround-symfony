@@ -1,0 +1,31 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Organization\Infrastructure\Doctrine;
+
+use App\Organization\Api\SettingsQueries;
+use App\Organization\Api\StepPolicy;
+use App\SharedKernel\Domain\OrganizationId;
+use Doctrine\DBAL\Connection;
+
+final readonly class DbalSettingsQueries implements SettingsQueries
+{
+    public function __construct(private Connection $connection)
+    {
+    }
+
+    public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
+    {
+        // false: no row; null: no step_policy key (or a JSON null).
+        $stepPolicy = $this->connection->fetchOne(
+            "SELECT data->>'step_policy' FROM org_settings WHERE organization_id = ?",
+            [$organizationId->toString()],
+        );
+        if (false === $stepPolicy || null === $stepPolicy) {
+            return StepPolicy::Extend;
+        }
+
+        return (\is_string($stepPolicy) ? StepPolicy::tryFrom($stepPolicy) : null) ?? throw new \LogicException('org_settings holds an unknown step policy.');
+    }
+}
