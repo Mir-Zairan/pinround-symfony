@@ -64,6 +64,12 @@ final class InMemoryInvitations implements Invitations
         $this->invitations[$invitation->id()->toString()] = $invitation;
     }
 
+    public function save(Invitation $invitation): void
+    {
+        $this->calls[] = 'save';
+        $this->invitations[$invitation->id()->toString()] = $invitation;
+    }
+
     public function byId(InvitationId $id): ?Invitation
     {
         return $this->invitations[$id->toString()] ?? null;

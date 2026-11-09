@@ -43,6 +43,12 @@ final readonly class DoctrineInvitations implements Invitations
         }
     }
 
+    public function save(Invitation $invitation): void
+    {
+        $this->entityManager->persist($invitation);
+        $this->entityManager->flush();
+    }
+
     /**
      * The key is (organization_id, id); the tenant filter supplies the organization.
      */

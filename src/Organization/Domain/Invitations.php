@@ -27,6 +27,11 @@ interface Invitations
      */
     public function add(Invitation $invitation): void;
 
+    /**
+     * Saves the changes to an invitation already added, such as its acceptance, at once.
+     */
+    public function save(Invitation $invitation): void;
+
     public function byId(InvitationId $id): ?Invitation;
 
     /**
