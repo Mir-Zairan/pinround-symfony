@@ -112,7 +112,7 @@ final class WorkflowTablesTest extends KernelTestCase
     public function theDatabaseRefusesAStepWhoseOriginTeamOrCodesDoNotFit(array $step, string $violatedCheck): void
     {
         try {
-            $this->asTheApp(fn (Connection $connection): int|string => $this->insertStep($connection, self::FIRST_STEP, ...$step));
+            $this->asTheApp(fn (Connection $connection): int => $this->insertStep($connection, self::FIRST_STEP, ...$step));
             self::fail('The database accepted the step.');
         } catch (DriverException $refusal) {
             // DBAL has no own exception for a check violation; PostgreSQL names the check only in the message.

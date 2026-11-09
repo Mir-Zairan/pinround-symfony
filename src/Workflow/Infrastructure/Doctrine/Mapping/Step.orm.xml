@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="App\Workflow\Domain\Step" table="wf_step">
+        <indexes>
+            <index name="wf_step_organization_id_team_id_grp_position_idx" columns="organization_id,team_id,grp,position"/>
+        </indexes>
+        <unique-constraints>
+            <!-- NULLS NOT DISTINCT in the migration, which DBAL can neither express nor read back. -->
+            <unique-constraint name="wf_step_organization_id_team_id_core_code_key" columns="organization_id,team_id,core_code">
+                <options>
+                    <option name="where">(core_code IS NOT NULL)</option>
+                </options>
+            </unique-constraint>
+        </unique-constraints>
+
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
+
+        <field name="teamId" type="guid" column="team_id" nullable="true"/>
+        <field name="name" type="text" column="name"/>
+        <field name="group" type="text" column="grp" enum-type="App\Workflow\Domain\Group"/>
+        <field name="coreCode" type="text" column="core_code" nullable="true" enum-type="App\Workflow\Domain\CoreStep"/>
+        <field name="origin" type="text" column="origin" enum-type="App\Workflow\Domain\StepOrigin"/>
+        <field name="position" type="integer" column="position"/>
+        <field name="archivedAt" type="datetimetz_immutable" column="archived_at" nullable="true"/>
+    </entity>
+</doctrine-mapping>

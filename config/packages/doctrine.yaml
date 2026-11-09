@@ -13,9 +13,10 @@ doctrine:
         # A failed nested savepoint is not covered: DBAL's nesting level stays one too high (DBAL's own behaviour).
         wrapper_class: &connection_class App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection
         # Tables no entity maps, built by hand-written migrations, that doctrine:migrations:diff would otherwise drop:
-        # processed_message, idn_login_attempt, web_home_focus, and aud_event with its monthly partitions aud_event_YYYYMM
+        # processed_message, idn_login_attempt, web_home_focus, wf_rule_set (DbalRuleSets; no primary key, so no entity),
+        # and aud_event with its monthly partitions aud_event_YYYYMM
         # (data-model.md, Partitions and retention). The Messenger tables stay visible: Messenger adds them to the expected schema, so diff checks them.
-        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|web_home_focus|aud_event(?:_\d{6})?)$)~'
+        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|web_home_focus|wf_rule_set|aud_event(?:_\d{6})?)$)~'
 
         profiling_collect_backtrace: '%kernel.debug%'
         types:
@@ -42,6 +43,11 @@ doctrine:
                 type: xml
                 dir: '%kernel.project_dir%/src/Ticketing/Infrastructure/Doctrine/Mapping'
                 prefix: 'App\Ticketing\Domain'
+                is_bundle: false
+            Workflow:
+                type: xml
+                dir: '%kernel.project_dir%/src/Workflow/Infrastructure/Doctrine/Mapping'
+                prefix: 'App\Workflow\Domain'
                 is_bundle: false
         # A result cache that never stores anything, in every environment: TenantFilter's SQL holds no organization
         # id, so a result cache key would not tell organizations apart and could serve one organization's rows to

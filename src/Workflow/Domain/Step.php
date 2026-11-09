@@ -22,6 +22,8 @@ final class Step implements TenantOwned
     private readonly string $name;
     private readonly Group $group;
     private readonly int $position;
+    /** When the step was removed; null while it is in use. */
+    private ?\DateTimeImmutable $archivedAt = null;
 
     /**
      * @throws BlankStepName          when nothing is left of the name after trimming
