@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Organization\Application;
 
-use App\Organization\Api\Event\MemberInvited;
+use App\Organization\Application\EmailInvitationLink;
 use App\Organization\Application\SendInvitationLink;
 use App\Organization\Domain\Invitation;
 use App\Organization\Domain\InvitationId;
@@ -32,12 +32,12 @@ final class SendInvitationLinkTest extends TestCase
         $invitations = new InMemoryInvitations($invitation);
         $mailer = new RecordingInvitationMailer($invitations);
 
-        $this->sendInvitationLink($invitations, $mailer)(self::memberInvited(), new \DateTimeImmutable(self::SOON_AFTER));
+        $this->sendInvitationLink($invitations, $mailer)(self::request(), new \DateTimeImmutable(self::SOON_AFTER));
 
         self::assertSame(
-            [['email' => 'mia@acme-foods.example', 'organizationName' => 'Acme Foods', 'hadLinkToken' => true, 'savedBefore' => ['add']]],
+            [['email' => 'mia@acme-foods.example', 'organizationName' => 'Acme Foods', 'hadLinkToken' => true, 'savedBefore' => ['lockById', 'add']]],
             $mailer->sentLinks,
-            'The hash is attached and saved before the email is sent, so a failed send rolls it back.',
+            'The invitation is locked before its link token is checked, and the hash is saved before the email is sent, so a failed send rolls it back.',
         );
     }
 
@@ -47,10 +47,10 @@ final class SendInvitationLinkTest extends TestCase
         $invitations = new InMemoryInvitations();
         $mailer = new RecordingInvitationMailer($invitations);
 
-        $this->sendInvitationLink($invitations, $mailer)(self::memberInvited(), new \DateTimeImmutable(self::SOON_AFTER));
+        $this->sendInvitationLink($invitations, $mailer)(self::request(), new \DateTimeImmutable(self::SOON_AFTER));
 
         self::assertSame([], $mailer->sentLinks);
-        self::assertSame([], $invitations->calls);
+        self::assertSame(['lockById'], $invitations->calls);
     }
 
     #[Test]
@@ -61,7 +61,7 @@ final class SendInvitationLinkTest extends TestCase
         $invitations = new InMemoryInvitations($invitation);
         $mailer = new RecordingInvitationMailer($invitations);
 
-        $this->sendInvitationLink($invitations, $mailer)(self::memberInvited(), new \DateTimeImmutable('2027-03-15 12:00:00 UTC'));
+        $this->sendInvitationLink($invitations, $mailer)(self::request(), new \DateTimeImmutable('2027-03-15 12:00:00 UTC'));
 
         self::assertSame([], $mailer->sentLinks);
         self::assertFalse($invitation->hasLinkToken());
@@ -74,7 +74,7 @@ final class SendInvitationLinkTest extends TestCase
         $invitations = new InMemoryInvitations($invitation);
         $mailer = new RecordingInvitationMailer($invitations);
 
-        $this->sendInvitationLink($invitations, $mailer)(self::memberInvited(), $invitation->expiresAt());
+        $this->sendInvitationLink($invitations, $mailer)(self::request(), $invitation->expiresAt());
 
         self::assertSame([], $mailer->sentLinks);
         self::assertFalse($invitation->hasLinkToken());
@@ -87,7 +87,7 @@ final class SendInvitationLinkTest extends TestCase
         $invitations = new InMemoryInvitations($invitation);
         $mailer = new RecordingInvitationMailer($invitations);
 
-        $this->sendInvitationLink($invitations, $mailer)(self::memberInvited(), $invitation->expiresAt()->modify('-1 second'));
+        $this->sendInvitationLink($invitations, $mailer)(self::request(), $invitation->expiresAt()->modify('-1 second'));
 
         self::assertCount(1, $mailer->sentLinks);
     }
@@ -100,10 +100,10 @@ final class SendInvitationLinkTest extends TestCase
         $invitations = new InMemoryInvitations($invitation);
         $mailer = new RecordingInvitationMailer($invitations);
 
-        $this->sendInvitationLink($invitations, $mailer)(self::memberInvited(), new \DateTimeImmutable(self::SOON_AFTER));
+        $this->sendInvitationLink($invitations, $mailer)(self::request(), new \DateTimeImmutable(self::SOON_AFTER));
 
         self::assertSame([], $mailer->sentLinks);
-        self::assertSame([], $invitations->calls);
+        self::assertSame(['lockById'], $invitations->calls, 'The link token is checked on the locked invitation.');
     }
 
     #[Test]
@@ -124,7 +124,7 @@ final class SendInvitationLinkTest extends TestCase
             }
         };
 
-        new SendInvitationLink($skippingOnceOnlyHandling, $invitations, self::organizations(self::acmeFoods()), $mailer)(self::memberInvited(), new \DateTimeImmutable(self::SOON_AFTER));
+        new SendInvitationLink($skippingOnceOnlyHandling, $invitations, self::organizations(self::acmeFoods()), $mailer)(self::request(), new \DateTimeImmutable(self::SOON_AFTER));
 
         self::assertSame(['organization.send_invitation_link'], $skippingOnceOnlyHandling->handlerNames);
         self::assertSame([], $mailer->sentLinks);
@@ -138,7 +138,7 @@ final class SendInvitationLinkTest extends TestCase
         $mailer = new RecordingInvitationMailer($invitations);
 
         try {
-            new SendInvitationLink(self::runningOnceOnlyHandling(), $invitations, self::organizations(null), $mailer)(self::memberInvited(), new \DateTimeImmutable(self::SOON_AFTER));
+            new SendInvitationLink(self::runningOnceOnlyHandling(), $invitations, self::organizations(null), $mailer)(self::request(), new \DateTimeImmutable(self::SOON_AFTER));
             self::fail('An invitation was emailed without its organization.');
         } catch (\LogicException $refused) {
             self::assertSame('The organization of the invitation is not found.', $refused->getMessage());
@@ -156,9 +156,9 @@ final class SendInvitationLinkTest extends TestCase
         return Invitation::issue(new InvitationId(self::MIAS_INVITATION), new OrganizationId(self::ACME_FOODS), 'mia@acme-foods.example', new OrgRoles(), null, null, new UserId(self::SARA), new \DateTimeImmutable(self::ISSUED_AT));
     }
 
-    private static function memberInvited(): MemberInvited
+    private static function request(): EmailInvitationLink
     {
-        return new MemberInvited(self::ACME_FOODS, self::MIAS_INVITATION, self::SARA, new \DateTimeImmutable(self::ISSUED_AT));
+        return new EmailInvitationLink(self::ACME_FOODS, self::MIAS_INVITATION);
     }
 
     private static function acmeFoods(): Organization

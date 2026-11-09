@@ -10,7 +10,9 @@ use App\Organization\Domain\InvitationId;
 use App\Organization\Domain\Invitations;
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Query;
 use Symfony\Component\Uid\Uuid;
 
 final readonly class DoctrineInvitations implements Invitations
@@ -47,6 +49,21 @@ final readonly class DoctrineInvitations implements Invitations
     public function byId(InvitationId $id): ?Invitation
     {
         return $this->entityManager->getRepository(Invitation::class)->findOneBy(['id' => $id->toString()]);
+    }
+
+    public function lockById(InvitationId $id): ?Invitation
+    {
+        if (!$this->entityManager->getConnection()->isTransactionActive()) {
+            throw new \LogicException('Locking an invitation needs an open transaction.');
+        }
+
+        $invitation = $this->entityManager->createQuery('SELECT i FROM '.Invitation::class.' i WHERE i.id = :id')
+            ->setParameter('id', $id->toString())
+            ->setLockMode(LockMode::PESSIMISTIC_WRITE)
+            ->setHint(Query::HINT_REFRESH, true)
+            ->getOneOrNullResult();
+
+        return $invitation instanceof Invitation ? $invitation : null;
     }
 
     /**

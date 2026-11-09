@@ -185,3 +185,7 @@ when@test:
         App\Tests\Fixtures\Messaging\DispatchSightingAfterCurrentMessageHandler:
             autowire: true
             autoconfigure: true
+        # Used by EmailInvitationLinkHandlerTest; does nothing until a test arms it.
+        App\Tests\Fixtures\Messaging\FailOnceOnMemberInvitedHandler:
+            autoconfigure: true
+            public: true

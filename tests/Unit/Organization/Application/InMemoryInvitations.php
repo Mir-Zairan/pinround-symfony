@@ -69,6 +69,13 @@ final class InMemoryInvitations implements Invitations
         return $this->invitations[$id->toString()] ?? null;
     }
 
+    public function lockById(InvitationId $id): ?Invitation
+    {
+        $this->calls[] = 'lockById';
+
+        return $this->byId($id);
+    }
+
     public function removeNotAcceptedFor(OrganizationId $organizationId, string $email): void
     {
         $this->calls[] = 'removeNotAcceptedFor';

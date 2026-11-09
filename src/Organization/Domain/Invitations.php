@@ -29,6 +29,15 @@ interface Invitations
     public function byId(InvitationId $id): ?Invitation;
 
     /**
+     * The invitation, its row locked for update until the transaction ends, so two workers emailing its link run one
+     * after the other and the second sees the first one's link token. It reloads the invitation's fields and drops
+     * their unsaved changes.
+     *
+     * @throws \LogicException when no transaction is open, as the lock would end with the statement
+     */
+    public function lockById(InvitationId $id): ?Invitation;
+
+    /**
      * Deletes every invitation of the email that is not accepted, expired ones included, so a new one can be added.
      * It runs in the database at once; an invitation already loaded stays in memory and must not be saved again.
      *

@@ -18,6 +18,10 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
+use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -149,6 +153,52 @@ final class DoctrineInvitationsTest extends KernelTestCase
         ]);
 
         self::assertSame(['mia@acme-foods.example', null, null], $found);
+    }
+
+    #[Test]
+    public function lockByIdHoldsTheInvitationRowUntilTheTransactionEnds(): void
+    {
+        $this->addInvitationsOfBothOrganizations();
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $connection = $this->entityManager()->getConnection();
+        $otherSession = new CloseOnFailedBeginConnection(
+            $connection->getParams(),
+            new TenantMiddleware($tenantContext)->wrap(new PgSQLDriver()),
+        );
+        $lockInvitationRowNowait = static fn (): array => $otherSession->transactional(static fn (Connection $session): array => $session->fetchFirstColumn(
+            'SELECT id FROM org_invitation WHERE id = ? FOR UPDATE NOWAIT',
+            [self::MIA_AT_ACME],
+        ));
+
+        $connection->beginTransaction();
+        try {
+            self::assertSame('mia@acme-foods.example', $this->invitations()->lockById(new InvitationId(self::MIA_AT_ACME))?->email());
+            self::assertNull($this->invitations()->lockById(new InvitationId(self::OMAR_AT_BETA)), 'The invitation of another organization is not found.');
+            try {
+                $lockInvitationRowNowait();
+                self::fail('The invitation row was not locked.');
+            } catch (DriverException $exception) {
+                self::assertSame('55P03', $exception->getSQLState());
+            }
+        } finally {
+            $connection->rollBack();
+        }
+
+        self::assertSame([self::MIA_AT_ACME], $lockInvitationRowNowait());
+        $otherSession->close();
+        $this->entityManager()->clear();
+        $tenantContext->clear();
+    }
+
+    #[Test]
+    public function lockByIdRefusesToRunOutsideATransaction(): void
+    {
+        self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageIsOrContains('Locking an invitation needs an open transaction.');
+        $this->invitations()->lockById(new InvitationId(self::MIA_AT_ACME));
     }
 
     #[Test]
