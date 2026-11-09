@@ -16,7 +16,6 @@ use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 use Doctrine\ORM\EntityManagerInterface;
-use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bridge\Twig\Mime\TemplatedEmail;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -100,7 +99,7 @@ final class EmailInvitationLinkHandlerTest extends KernelTestCase
         self::assertSame([], $this->resolve(hash('sha256', $token, true)), 'The stored value is the hash of the token, not the token.');
 
         self::assertNotSame([], $workerLogRecords, 'the worker logged nothing, so nothing was checked');
-        self::assertStringNotContainsString($token, implode("\n", array_map(static fn (LogRecord $record): string => LoginLogLeakTest::textOf($record), $workerLogRecords)));
+        self::assertStringNotContainsString($token, implode("\n", array_map(LoginLogLeakTest::textOf(...), $workerLogRecords)));
         $queued = $this->asyncNotify()->getSent();
         self::assertEquals(new EmailInvitationLink(self::ACME_FOODS, $invitationId), $this->sentEnvelopeOf(EmailInvitationLink::class)->getMessage());
         foreach ($queued as $envelope) {

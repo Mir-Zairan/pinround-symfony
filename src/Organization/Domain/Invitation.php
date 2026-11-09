@@ -21,11 +21,9 @@ final class Invitation implements TenantOwned
     // Kept as strings and wrapped on the way out, like Membership: the mapping stays free of value-object types.
     private readonly string $organizationId;
     private readonly string $id;
-    private readonly string $email;
     /** @var list<string> */
     private readonly array $orgRoles;
     private readonly ?string $teamId;
-    private readonly ?TeamRole $teamRole;
     /**
      * Doctrine's binary type loads a stream, so a loaded invitation holds a resource here.
      *
@@ -33,21 +31,17 @@ final class Invitation implements TenantOwned
      */
     private mixed $tokenHash = null;
     private readonly string $invitedBy;
-    private readonly \DateTimeImmutable $createdAt;
     private readonly \DateTimeImmutable $expiresAt;
     private ?\DateTimeImmutable $acceptedAt = null;
 
-    private function __construct(InvitationId $id, OrganizationId $organizationId, string $email, OrgRoles $orgRoles, ?TeamId $teamId, ?TeamRole $teamRole, UserId $invitedBy, \DateTimeImmutable $createdAt)
+    private function __construct(InvitationId $id, OrganizationId $organizationId, private readonly string $email, OrgRoles $orgRoles, ?TeamId $teamId, private readonly ?TeamRole $teamRole, UserId $invitedBy, private readonly \DateTimeImmutable $createdAt)
     {
         $this->id = $id->toString();
         $this->organizationId = $organizationId->toString();
-        $this->email = $email;
         $this->orgRoles = $orgRoles->values();
         $this->teamId = $teamId?->toString();
-        $this->teamRole = $teamRole;
         $this->invitedBy = $invitedBy->toString();
-        $this->createdAt = $createdAt;
-        $this->expiresAt = $createdAt->add(new \DateInterval('PT'.self::LIFETIME_HOURS.'H'));
+        $this->expiresAt = $this->createdAt->add(new \DateInterval('PT'.self::LIFETIME_HOURS.'H'));
     }
 
     /**
