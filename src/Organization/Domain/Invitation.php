@@ -130,17 +130,21 @@ final class Invitation implements TenantOwned
     }
 
     /**
-     * Stores the SHA-256 of the token in the emailed link, which resolve_invitation looks up; a second call replaces
-     * the first, so only the newest link works.
+     * Stores the SHA-256 of the token in the emailed link, which resolve_invitation looks up. Only once: the link
+     * already emailed stays the only one, so a redelivered email message cannot send a second, different link.
      *
      * @param string $sha256 the 32 raw bytes of the token's SHA-256, never the token itself
      *
      * @throws \InvalidArgumentException when $sha256 is not 32 bytes long
+     * @throws \LogicException           when the invitation has a link token already
      */
     public function attachLinkTokenHash(string $sha256): void
     {
         if (32 !== \strlen($sha256)) {
             throw new \InvalidArgumentException('A link token hash is the 32 raw bytes of a SHA-256.');
+        }
+        if ($this->hasLinkToken()) {
+            throw new \LogicException('An invitation keeps the link token it was emailed with.');
         }
 
         $this->tokenHash = $sha256;

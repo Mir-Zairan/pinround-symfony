@@ -88,11 +88,11 @@ final class DoctrineInvitationsTest extends KernelTestCase
     }
 
     /**
-     * A loaded token_hash comes back as a stream; a new hash attached to the loaded invitation must still be written,
-     * so only the newest link resolves. 2099 keeps the invitation open for resolve_invitation's now().
+     * A loaded token_hash comes back as a stream, which must still count as a link token, so the emailed link stays
+     * the only one. 2099 keeps the invitation open for resolve_invitation's now().
      */
     #[Test]
-    public function aNewLinkTokenHashAttachedToALoadedInvitationReplacesTheOldOne(): void
+    public function aLoadedInvitationWithALinkTokenRefusesASecondOneAndKeepsTheFirstLink(): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $invitation = $this->invitationOf(self::NEW_FOR_ACME, self::ACME_FOODS, 'omar@acme-foods.example', new \DateTimeImmutable('2099-03-15 10:00:00 UTC'));
@@ -104,7 +104,12 @@ final class DoctrineInvitationsTest extends KernelTestCase
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $loaded = $this->invitations()->byId(new InvitationId(self::NEW_FOR_ACME));
             self::assertNotNull($loaded);
-            $loaded->attachLinkTokenHash(hash('sha256', 'the second link token', true));
+            try {
+                $loaded->attachLinkTokenHash(hash('sha256', 'the second link token', true));
+                self::fail('A second link token hash was attached.');
+            } catch (\LogicException $refused) {
+                self::assertSame('An invitation keeps the link token it was emailed with.', $refused->getMessage());
+            }
             $this->invitations()->add($loaded);
         });
 
@@ -112,8 +117,8 @@ final class DoctrineInvitationsTest extends KernelTestCase
             'SELECT invitation_id FROM resolve_invitation(sha256(?::bytea))',
             [$token],
         );
-        self::assertSame([self::NEW_FOR_ACME], $resolve('the second link token'));
-        self::assertSame([], $resolve('the first link token'));
+        self::assertSame([self::NEW_FOR_ACME], $resolve('the first link token'));
+        self::assertSame([], $resolve('the second link token'));
     }
 
     #[Test]

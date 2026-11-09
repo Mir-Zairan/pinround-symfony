@@ -12,7 +12,7 @@ use App\SharedKernel\Domain\OrganizationId;
 
 /**
  * Invitations in memory. add() refuses a second not-accepted invitation of the same organization and email, as the
- * unique index does; the calls are logged in order.
+ * unique index does, and saves a stored one again as Doctrine does; the calls are logged in order.
  */
 final class InMemoryInvitations implements Invitations
 {
@@ -57,7 +57,7 @@ final class InMemoryInvitations implements Invitations
             $this->addedByAnotherRequest = null;
         }
         foreach ($this->invitations as $stored) {
-            if (null === $stored->acceptedAt() && $stored->organizationId()->equals($invitation->organizationId()) && $stored->email() === $invitation->email()) {
+            if (!$stored->id()->equals($invitation->id()) && null === $stored->acceptedAt() && $stored->organizationId()->equals($invitation->organizationId()) && $stored->email() === $invitation->email()) {
                 throw new InvitationAlreadyOpen('The unique index refuses a second invitation of this email.');
             }
         }

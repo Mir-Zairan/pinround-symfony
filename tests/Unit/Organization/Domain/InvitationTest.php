@@ -135,6 +135,16 @@ final class InvitationTest extends TestCase
     }
 
     #[Test]
+    public function aSecondLinkTokenHashIsRefused(): void
+    {
+        $invitation = $this->issue(new \DateTimeImmutable('2027-03-15 10:30:00 UTC'));
+        $invitation->attachLinkTokenHash(hash('sha256', 'the first link token', true));
+
+        $this->expectExceptionObject(new \LogicException('An invitation keeps the link token it was emailed with.'));
+        $invitation->attachLinkTokenHash(hash('sha256', 'the second link token', true));
+    }
+
+    #[Test]
     public function aHashThatIsNotThirtyTwoBytesIsRefused(): void
     {
         $invitation = $this->issue(new \DateTimeImmutable('2027-03-15 10:30:00 UTC'));
