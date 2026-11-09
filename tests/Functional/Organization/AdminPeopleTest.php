@@ -5,6 +5,11 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Organization;
 
 use App\Identity\Domain\User;
+use App\Organization\Domain\Invitation;
+use App\Organization\Domain\InvitationAlreadyOpen;
+use App\Organization\Domain\InvitationId;
+use App\Organization\Domain\Invitations;
+use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\UI\Admin\PeopleController;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -104,6 +109,61 @@ final class AdminPeopleTest extends WebTestCase
         $page = $this->client->request('GET', self::PEOPLE_PAGE);
         self::assertResponseStatusCodeSame(200);
         self::assertCount(0, $page->filter('.toast-region .toast'));
+    }
+
+    #[Test]
+    public function anInviteThatLostTheRaceToTheSameInviteShowsTheToastAndOnePendingRow(): void
+    {
+        // Set before the first request builds InviteMember, which keeps the repository it is given.
+        $otherRequestCommits = fn (OrganizationId $organizationId) => $this->storeInvitation($organizationId, 'mia@acme.test', '1 minute', false);
+        self::getContainer()->set(DoctrineInvitations::class, new readonly class($otherRequestCommits) implements Invitations {
+            public function __construct(private \Closure $otherRequestCommits)
+            {
+            }
+
+            public function nextIdentity(): InvitationId
+            {
+                return new InvitationId(Uuid::v7()->toRfc4122());
+            }
+
+            public function add(Invitation $invitation): void
+            {
+                ($this->otherRequestCommits)($invitation->organizationId());
+
+                throw new InvitationAlreadyOpen('Another invitation of this email was saved first.');
+            }
+
+            public function save(Invitation $invitation): void
+            {
+            }
+
+            public function byId(InvitationId $id): ?Invitation
+            {
+                return null;
+            }
+
+            public function lockById(InvitationId $id): ?Invitation
+            {
+                return null;
+            }
+
+            public function removeNotAcceptedFor(OrganizationId $organizationId, string $email): void
+            {
+            }
+        });
+        [$sara, $acmeFoods] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
+        $this->logInWithACode($this->client, $this->clock, $sara);
+        $this->client->request('GET', self::PEOPLE_PAGE);
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submitForm('Invite', ['email' => 'mia@acme.test']);
+
+        self::assertResponseRedirects(self::PEOPLE_PAGE, 302);
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(\sprintf(PeopleController::INVITE_SENT, 'mia@acme.test'), $page->filter('.toast-region .toast')->text());
+        self::assertSame(['mia@acme.test'], $this->pendingEmailsOn($page));
+        self::assertCount(1, $this->storedInvitationsOf($acmeFoods));
     }
 
     #[Test]

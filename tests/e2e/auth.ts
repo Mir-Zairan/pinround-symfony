@@ -27,6 +27,7 @@ export function demoPassword(): string {
 // off in afterAll, so every run starts from the demo seed's state, with it off.
 export const MIA_EMAIL = 'mia@acme-foods.example';
 export const RAJ_EMAIL = 'raj@acme-foods.example';
+export const SARA_EMAIL = 'sara@acme-foods.example';
 
 export const TWO_STEP_CODE_STEP_MS = 30_000;
 
