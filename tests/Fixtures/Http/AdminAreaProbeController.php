@@ -27,7 +27,12 @@ final readonly class AdminAreaProbeController
     {
         $organizationId = $this->tenantContext->get();
         if (!$this->authorizationChecker->isGranted(AdminPermission::AREA, $organizationId)) {
-            throw new AccessDeniedException();
+            // As AbstractController::denyAccessUnlessGranted and #[IsGranted] throw it, so SendAdminToTwoStepProof sees it.
+            $refusal = new AccessDeniedException();
+            $refusal->setAttributes([AdminPermission::AREA]);
+            $refusal->setSubject($organizationId);
+
+            throw $refusal;
         }
 
         return new JsonResponse(['organizationId' => $organizationId?->toString()]);

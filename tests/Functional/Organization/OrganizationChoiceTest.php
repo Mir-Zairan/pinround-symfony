@@ -268,6 +268,7 @@ final class OrganizationChoiceTest extends WebTestCase
         self::assertEqualsCanonicalizing([
             'organization_choose',
             'identity_login',
+            'identity_login_code',
             'identity_logout',
             'identity_password_forgot',
             'identity_password_reset_token',
@@ -280,6 +281,8 @@ final class OrganizationChoiceTest extends WebTestCase
             'identity_two_step',
             'identity_two_step_start',
             'identity_two_step_confirm',
+            'identity_two_step_off',
+            'identity_confirm',
             'health_live',
             'health_ready',
             'web_component_gallery',

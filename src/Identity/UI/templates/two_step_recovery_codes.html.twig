@@ -21,7 +21,11 @@
                 {% endfor %}
             </ol>
             <div>
-                <twig:Button href="{{ path('identity_security') }}">I saved them</twig:Button>
+                {% if continuePath %}
+                    <twig:Button href="{{ continuePath }}">Continue</twig:Button>
+                {% else %}
+                    <twig:Button href="{{ path('identity_security') }}">I saved them</twig:Button>
+                {% endif %}
             </div>
         </twig:Card>
     </div>

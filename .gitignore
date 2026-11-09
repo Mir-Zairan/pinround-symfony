@@ -28,4 +28,6 @@
 /tests/e2e/node_modules/
 /tests/e2e/test-results/
 /tests/e2e/playwright-report/
+# Keys the specs keep across runs (login-code.spec.ts); Playwright empties test-results/ at every run.
+/tests/e2e/.auth/
 ###< playwright (tests/e2e) ###

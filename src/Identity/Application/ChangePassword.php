@@ -24,14 +24,14 @@ final readonly class ChangePassword
         private Users $users,
         private Credentials $credentials,
         private PasswordHashing $passwordHashing,
-        private PasswordChangeLimiter $limiter,
+        private CurrentPasswordCheck $currentPasswordCheck,
     ) {
     }
 
     /**
      * A too-short new password is refused before the current one is checked, so it takes no try.
      *
-     * @throws TooManyPasswordChangeTries before the current password is checked
+     * @throws TooManyCurrentPasswordTries before the current password is checked
      */
     public function __invoke(
         UserId $userId,
@@ -47,10 +47,12 @@ final readonly class ChangePassword
             return PasswordChangeOutcome::PasswordTooShort;
         }
 
-        $this->limiter->consume($userId);
+        if (!$this->currentPasswordCheck->matches($userId, $currentPassword)) {
+            return PasswordChangeOutcome::WrongCurrentPassword;
+        }
         $user = $this->users->byId($userId);
         $credential = $this->credentials->byUserId($userId);
-        if (null === $user || null === $credential || !$this->passwordHashing->matches($credential->passwordHash(), $currentPassword)) {
+        if (null === $user || null === $credential) {
             return PasswordChangeOutcome::WrongCurrentPassword;
         }
 

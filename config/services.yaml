@@ -18,6 +18,7 @@ parameters:
     organization.routes_without_organization:
         - organization_choose
         - identity_login
+        - identity_login_code
         - identity_logout
         - identity_password_forgot
         - identity_password_reset_token
@@ -30,12 +31,11 @@ parameters:
         - identity_two_step
         - identity_two_step_start
         - identity_two_step_confirm
+        - identity_two_step_off
+        - identity_confirm
         - health_live
         - health_ready
         - web_component_gallery
-    # Hackathon exception of ADR-0012, until P01.T6: AdminAreaVoter skips the two-step login check while it is true.
-    # The Kernel reads this same parameter and refuses to boot with it true outside dev and test (KernelTest).
-    app.hackathon_skip_admin_mfa: '%env(bool:default::APP_HACKATHON_SKIP_ADMIN_MFA)%'
 
 services:
     # default configuration for services in *this* file

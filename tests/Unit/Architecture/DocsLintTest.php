@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Architecture;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
@@ -19,6 +20,12 @@ final class DocsLintTest extends TestCase
     private const string LONG_REAL_DOC = 'docs/05-plan/phase-00-foundation.md';
 
     private ?string $temporaryFolder = null;
+
+    /** @var list<string> */
+    private array $createdFiles = [];
+
+    /** @var list<string> absolute paths, parents first */
+    private array $createdFolders = [];
 
     #[Test]
     public function everyProblemIsReportedAtItsLine(): void
@@ -81,6 +88,33 @@ final class DocsLintTest extends TestCase
         self::assertSame('', $process->getOutput());
     }
 
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function generatedFolders(): iterable
+    {
+        yield 'Playwright output' => ['tests/e2e/test-results'];
+        yield 'e2e logins and keys' => ['tests/e2e/.auth'];
+    }
+
+    /**
+     * Playwright writes an error-context.md of more than 100 lines without an index for every failed test.
+     */
+    #[Test]
+    #[DataProvider('generatedFolders')]
+    public function aStrayDocInAGeneratedFolderIsSkipped(string $generatedFolder): void
+    {
+        $strayDoc = $this->strayDocIn($generatedFolder);
+        self::assertContains($strayDoc.':1', self::reportedLocations(self::runLint($strayDoc)), 'the stray doc has no problem to skip');
+
+        $wholeRepository = self::runLint();
+        $folder = self::runLint(\dirname($strayDoc));
+
+        self::assertSame(0, $wholeRepository->getExitCode(), self::outputOf($wholeRepository));
+        self::assertSame(0, $folder->getExitCode(), self::outputOf($folder));
+        self::assertSame([], self::reportedLocations($folder));
+    }
+
     #[Test]
     public function aRealLongDocLosingItsIndexFails(): void
     {
@@ -108,6 +142,16 @@ final class DocsLintTest extends TestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->createdFiles as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+        foreach (array_reverse($this->createdFolders) as $folder) {
+            if (is_dir($folder)) {
+                rmdir($folder);
+            }
+        }
         if (null === $this->temporaryFolder) {
             return;
         }
@@ -118,6 +162,30 @@ final class DocsLintTest extends TestCase
             }
         }
         rmdir($this->temporaryFolder);
+    }
+
+    /**
+     * A doc of 101 lines without an index in a new folder under $generatedFolder of the repository, removed again
+     * with every folder this created.
+     *
+     * @return string its path from the repository root
+     */
+    private function strayDocIn(string $generatedFolder): string
+    {
+        $folder = '';
+        foreach (explode('/', $generatedFolder.'/docs-lint-'.bin2hex(random_bytes(6))) as $segment) {
+            $folder = '' === $folder ? $segment : $folder.'/'.$segment;
+            $absolute = self::repositoryRoot().'/'.$folder;
+            if (!is_dir($absolute)) {
+                mkdir($absolute);
+                $this->createdFolders[] = $absolute;
+            }
+        }
+        $strayDoc = $folder.'/error-context.md';
+        file_put_contents(self::repositoryRoot().'/'.$strayDoc, "# Stray\n".str_repeat("line\n", 100));
+        $this->createdFiles[] = self::repositoryRoot().'/'.$strayDoc;
+
+        return $strayDoc;
     }
 
     private static function repositoryRoot(): string

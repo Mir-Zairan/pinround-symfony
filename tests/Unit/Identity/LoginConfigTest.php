@@ -32,13 +32,14 @@ final class LoginConfigTest extends TestCase
     }
 
     #[Test]
-    public function everyRouteButTheLoginAndPasswordResetPagesAndTheDevAndTestRoutesNeedsALogin(): void
+    public function everyRouteButTheLoginLoginCodeAndPasswordResetPagesAndTheDevAndTestRoutesNeedsALogin(): void
     {
         $security = self::config('packages/security.yaml');
 
         self::assertSame(
             [
                 ['route' => '^identity_login$', 'roles' => 'PUBLIC_ACCESS'],
+                ['route' => '^identity_login_code$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^identity_password_(forgot|reset_token|reset)$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^web_component_gallery$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^test_', 'roles' => 'PUBLIC_ACCESS'],
@@ -119,7 +120,7 @@ final class LoginConfigTest extends TestCase
     }
 
     #[Test]
-    public function theLoginPasswordResetAndPasswordChangeCountersLiveOnTheStateValkeyInEveryEnvironment(): void
+    public function theLoginPasswordResetPasswordChangeAndTwoStepCodeCountersLiveOnTheStateValkeyInEveryEnvironment(): void
     {
         $rateLimiter = self::config('packages/rate_limiter.yaml');
 
@@ -130,6 +131,7 @@ final class LoginConfigTest extends TestCase
                 'password_reset_per_email_and_ip' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.password_reset_per_email_and_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'password_reset_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '%identity.password_reset_per_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'password_change_per_user' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.password_change_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'two_step_code_per_user' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.two_step_code_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
             ],
             self::at($rateLimiter, 'framework', 'rate_limiter'),
         );
@@ -140,6 +142,7 @@ final class LoginConfigTest extends TestCase
                 'identity.password_reset_per_email_and_ip_minutes' => 15,
                 'identity.password_reset_per_ip_minutes' => 60,
                 'identity.password_change_per_user_minutes' => 15,
+                'identity.two_step_code_per_user_minutes' => 15,
             ],
             self::at($rateLimiter, 'parameters'),
         );

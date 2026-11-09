@@ -140,6 +140,21 @@ final class ConsumeFirstLoginRateLimiterTest extends TestCase
         self::assertFalse($this->limiter->consume(self::loginRequest('fresh@acme-foods.example'))->isAccepted());
     }
 
+    /**
+     * The finish of a login with a code (Security::login() on /login/code) is a login success too, but took no try.
+     */
+    #[Test]
+    public function aLoginThatTookNoTryGivesNothingBack(): void
+    {
+        for ($try = 1; $try <= 50; ++$try) {
+            $this->limiter->consume(self::loginRequest('person'.$try.'@acme-foods.example'));
+        }
+
+        $this->limiter->reset(Request::create('/login/code', 'POST', server: ['REMOTE_ADDR' => self::IP]));
+
+        self::assertFalse($this->limiter->consume(self::loginRequest('fresh@acme-foods.example'))->isAccepted());
+    }
+
     private static function minutesToWait(RateLimit $limit): int
     {
         return (int) ceil(($limit->getRetryAfter()->getTimestamp() - time()) / 60);

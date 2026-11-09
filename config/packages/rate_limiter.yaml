@@ -5,16 +5,20 @@
 # same Valkey (lock.yaml) makes each read-add-write of a counter whole, refunds included, so parallel tries all count.
 # Password reset requests get the same two limits (ADR-0012) through SymfonyPasswordResetRequestLimiter, without
 # refunds: every request counts, whether or not a user has the email.
-# Password changes on /me/security get password_change_per_user through SymfonyPasswordChangeLimiter: every check of
-# the current password counts, right or wrong, so a stolen session cannot guess the password.
+# Password checks of a logged-in person get password_change_per_user through SymfonyCurrentPasswordLimiter
+# (CurrentPasswordCheck, on /me/security and "Confirm it's you" alike): every check counts, right or wrong, so a stolen
+# session cannot guess the password.
+# Two-step login codes get two_step_code_per_user through SymfonyTwoStepCodeLimiter: every code typed for a user counts,
+# right or wrong, at login and wherever else a code is asked, so the 6 digits cannot be guessed.
 parameters:
     # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter,
-    # SymfonyPasswordResetRequestLimiter, SymfonyPasswordChangeLimiter).
+    # SymfonyPasswordResetRequestLimiter, SymfonyCurrentPasswordLimiter, SymfonyTwoStepCodeLimiter).
     identity.login_per_email_and_ip_minutes: 15
     identity.login_per_ip_minutes: 60
     identity.password_reset_per_email_and_ip_minutes: 15
     identity.password_reset_per_ip_minutes: 60
     identity.password_change_per_user_minutes: 15
+    identity.two_step_code_per_user_minutes: 15
 
 framework:
     rate_limiter:
@@ -46,10 +50,17 @@ framework:
             interval: '%identity.password_reset_per_ip_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
-        # POST /me/security/password, keyed by the user id: bounds the guesses at the current password.
+        # POST /me/security/password and /me/confirm, keyed by the user id: bounds the guesses at the current password.
         password_change_per_user:
             policy: fixed_window
             limit: 5
             interval: '%identity.password_change_per_user_minutes% minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # Every two-step login code check (AcceptTwoStepCode), keyed by the user id: bounds the guesses at the code.
+        two_step_code_per_user:
+            policy: fixed_window
+            limit: 5
+            interval: '%identity.two_step_code_per_user_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory

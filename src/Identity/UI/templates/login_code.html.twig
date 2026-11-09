@@ -1,0 +1,37 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Type your code · pinround{% endblock %}
+
+{# Nobody is logged in until the code is right, so the page has no app header, like the login page. #}
+{% block site_header %}{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="login">
+        <twig:Card tag="section" class="login__card" aria-labelledby="login-code-title">
+            <p class="logo">{{ block('logo', '@Web/base.html.twig') }}</p>
+            <h1 class="login__title" id="login-code-title">Type your code</h1>
+            {% if error %}
+                <p class="login__error" role="alert" id="login-code-error">{{ error }}</p>
+            {% endif %}
+            <form class="login__form" method="post" action="{{ path('identity_login_code') }}">
+                {# Not inputmode="numeric": a recovery code has letters. #}
+                <label class="login__field">
+                    Code from your app
+                    <input class="login__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required autofocus
+                        {%- if error %} aria-invalid="true" aria-describedby="login-code-error login-code-hint"{% else %} aria-describedby="login-code-hint"{% endif %}>
+                </label>
+                <p class="login__hint" id="login-code-hint">6 digits. No phone with you? Type one of your recovery codes instead.</p>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('login_code') }}">
+                <twig:Button type="submit">Log in</twig:Button>
+            </form>
+            <form method="post" action="{{ path('identity_login_code') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('login_code') }}">
+                <twig:Button type="submit" name="cancel" value="1" variant="text">Cancel</twig:Button>
+            </form>
+        </twig:Card>
+    </div>
+{% endblock %}

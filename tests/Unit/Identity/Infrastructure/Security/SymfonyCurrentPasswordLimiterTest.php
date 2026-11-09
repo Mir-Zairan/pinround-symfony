@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity\Infrastructure\Security;
 
-use App\Identity\Application\TooManyPasswordChangeTries;
-use App\Identity\Infrastructure\Security\SymfonyPasswordChangeLimiter;
+use App\Identity\Application\TooManyCurrentPasswordTries;
+use App\Identity\Infrastructure\Security\SymfonyCurrentPasswordLimiter;
 use App\Identity\Infrastructure\Security\ThrottleKeyHasher;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;
@@ -18,18 +18,18 @@ use Symfony\Component\RateLimiter\Storage\InMemoryStorage;
 /**
  * With the limit of rate_limiter.yaml (5 per 15 minutes per user) on an in-memory counter.
  */
-final class SymfonyPasswordChangeLimiterTest extends TestCase
+final class SymfonyCurrentPasswordLimiterTest extends TestCase
 {
     private const string OMAR = '019a5f00-0000-7000-8000-000000000001';
     private const string MIA = '019a5f00-0000-7000-8000-000000000002';
 
     private InMemoryStorage $storage;
-    private SymfonyPasswordChangeLimiter $limiter;
+    private SymfonyCurrentPasswordLimiter $limiter;
 
     protected function setUp(): void
     {
         $this->storage = new InMemoryStorage();
-        $this->limiter = new SymfonyPasswordChangeLimiter(
+        $this->limiter = new SymfonyCurrentPasswordLimiter(
             new RateLimiterFactory(['id' => 'password_change_per_user', 'policy' => 'fixed_window', 'limit' => 5, 'interval' => '15 minutes'], $this->storage, new LockFactory(new InMemoryStore())),
             15,
             new ThrottleKeyHasher('the-app-secret'),
@@ -60,7 +60,7 @@ final class SymfonyPasswordChangeLimiterTest extends TestCase
     {
         try {
             $this->limiter->consume(new UserId($userId));
-        } catch (TooManyPasswordChangeTries $refusal) {
+        } catch (TooManyCurrentPasswordTries $refusal) {
             return $refusal->minutesToWait;
         }
 

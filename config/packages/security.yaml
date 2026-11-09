@@ -48,11 +48,17 @@ security:
     # Deny by default (ADR-0013): only the first matching rule applies, and the last one asks for a login everywhere.
     # Routes match by name, so the dev and test routes match nothing in prod, where they do not exist.
     # Every route under /me (identity_security, identity_security_password, identity_security_log_out_everywhere,
-    # identity_two_step, identity_two_step_start, identity_two_step_confirm, identity_profile, identity_theme) needs the
-    # full login of the last rule here, and each action then asks
+    # identity_two_step, identity_two_step_start, identity_two_step_confirm, identity_two_step_off, identity_confirm,
+    # identity_profile, identity_theme) needs the full login of the last rule here, and each action then asks
     # OwnAccountVoter for ACCOUNT_EDIT_OWN (ADR-0013); they act only on the logged-in user, never on an id from the request.
+    # An action marked RequiresRecentAuth also needs a password and code proof of the last 10 minutes: AskToConfirmItsYou
+    # sends a person without one to identity_confirm ("Confirm it's you"), whose own access rule is the one above.
     access_control:
         - { route: ^identity_login$, roles: PUBLIC_ACCESS }
+        # Login step two (ADR-0012), public by design: the visitor is not logged in until the code is right, and the
+        # pending login a right password left in the session is the proof; LoginCodeController sends anyone without one
+        # to the login page.
+        - { route: ^identity_login_code$, roles: PUBLIC_ACCESS }
         # Password reset (FR-ID-08), public by design: the visitor is logged out and the emailed token is the proof.
         - { route: ^identity_password_(forgot|reset_token|reset)$, roles: PUBLIC_ACCESS }
         - { route: ^web_component_gallery$, roles: PUBLIC_ACCESS }

@@ -253,8 +253,9 @@ final class DatabaseRolesTest extends KernelTestCase
 
     /**
      * Global Identity tables: the app reads, adds and changes users, credentials, password resets and two-step logins,
-     * and only adds login attempts; the retention job purges attempts and resets. pinround_readonly gets nothing, as no
-     * tenant policy would limit it (Version20261107190000, Version20261108120000, Version20261108180000).
+     * deletes only two-step logins (turning it off), and only adds login attempts; the retention job purges attempts and
+     * resets. pinround_readonly gets nothing, as no tenant policy would limit it (Version20261107190000,
+     * Version20261108120000, Version20261108180000, Version20261108200000).
      */
     #[Test]
     public function theAppRoleAloneHasRightsOnTheIdentityTablesAndOnlyAddsLoginAttempts(): void
@@ -265,7 +266,7 @@ final class DatabaseRolesTest extends KernelTestCase
             'idn_credential' => ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
             'idn_login_attempt' => ['pinround_app INSERT', 'pinround_app SELECT'],
             'idn_password_reset' => ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
-            'idn_mfa_secret' => ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
+            'idn_mfa_secret' => ['pinround_app DELETE', 'pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
         ];
 
         foreach ($expectedGrants as $table => $grants) {
