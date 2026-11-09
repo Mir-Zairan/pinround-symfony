@@ -6,6 +6,7 @@ use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamPermission;
 use App\Ticketing\Api\ProjectPermission;
+use App\Workflow\Api\WorkflowPermission;
 
 /*
  * The rows VoterMatrixTest decides through the real access decision manager. Add rows here, not test code.
@@ -25,6 +26,9 @@ use App\Ticketing\Api\ProjectPermission;
  * A row proves a team-role rule only when its actor has no org role that grants the same: Lena and Ben are Admins and
  * Raj is a Manager, so their TEAM_VIEW rows cite the org-role text; Noor (Lead) and Mia (Member, Viewer) carry the
  * team-role rules.
+ *
+ * Neither organization has a settings row, so both have the default step policy, extend: the STEP_CHANGE_TEAM and
+ * RULES_CHANGE_TEAM rows hold under extend only. WorkflowVoterTest has the locked and team cases.
  */
 
 $isAUser = 'Every person in an organization is a **user** of it.';
@@ -39,6 +43,8 @@ $managerSeesAllTeams = '"Teams at a glance" for all teams';
 $managerAssigns = 'Give it to… (assign)';
 $adminWithoutTeamRole = 'An admin with no team role may see every ticket in the org';
 $leadLinksProjects = 'link projects.';
+$leadChangesTeamSteps = '| Add / remove team steps | — | — | ⚠️ policy extend or team | — | — | — |';
+$leadChangesTeamRules = '| Change team rules | — | — | ⚠️ policy team | — | — | — |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
 return [
@@ -159,4 +165,25 @@ return [
     ['source' => $deniedUnlessARuleAllows, 'attribute' => ProjectPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => ProjectPermission::CREATE, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => ProjectPermission::CREATE, 'actor' => 'Sara', 'subject' => 'Checkout', 'expected' => 'denied'],
+
+    ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Mia', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
+
+    ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Mia', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
 ];
