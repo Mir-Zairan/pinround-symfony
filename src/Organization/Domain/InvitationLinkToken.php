@@ -11,9 +11,20 @@ namespace App\Organization\Domain;
 final readonly class InvitationLinkToken
 {
     private const int RANDOM_BYTES = 32;
+    private const string BASE64URL_OF_32_BYTES = '/^[A-Za-z0-9_-]{43}\z/';
 
     private function __construct(#[\SensitiveParameter] private string $value)
     {
+    }
+
+    /**
+     * The token as an opened link carries it, so its hash can be looked up.
+     *
+     * @return self|null null when $fromLink cannot be a token generate() made, so no lookup is needed
+     */
+    public static function fromLink(#[\SensitiveParameter] string $fromLink): ?self
+    {
+        return 1 === preg_match(self::BASE64URL_OF_32_BYTES, $fromLink) ? new self($fromLink) : null;
     }
 
     /**
