@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Organization;
 use App\Organization\Domain\Organization;
 use App\Organization\Infrastructure\Doctrine\DbalOrganizationNames;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
+use App\Organization\Infrastructure\Doctrine\TenantSwitchingReads;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
@@ -93,7 +94,7 @@ final class DbalOrganizationNamesTest extends KernelTestCase
 
     private function names(): DbalOrganizationNames
     {
-        return new DbalOrganizationNames($this->connection(), $this->entityManager(), $this->tenantContext());
+        return new DbalOrganizationNames($this->connection(), $this->tenantContext(), new TenantSwitchingReads($this->connection(), $this->entityManager(), $this->tenantContext()));
     }
 
     private function organizations(): DoctrineOrganizations

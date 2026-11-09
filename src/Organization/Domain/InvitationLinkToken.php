@@ -1,0 +1,69 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Organization\Domain;
+
+/**
+ * The secret of an invitation link. Only its SHA-256 is stored, so a leaked table holds no usable link. It can be
+ * neither serialized nor dumped, so it never reaches a queue or a log by accident.
+ */
+final readonly class InvitationLinkToken
+{
+    private const int RANDOM_BYTES = 32;
+    private const string BASE64URL_OF_32_BYTES = '/^[A-Za-z0-9_-]{43}\z/';
+
+    private function __construct(#[\SensitiveParameter] private string $value)
+    {
+    }
+
+    /**
+     * The token as an opened link carries it, so its hash can be looked up.
+     *
+     * @return self|null null when $fromLink cannot be a token generate() made, so no lookup is needed
+     */
+    public static function fromLink(#[\SensitiveParameter] string $fromLink): ?self
+    {
+        return 1 === preg_match(self::BASE64URL_OF_32_BYTES, $fromLink) ? new self($fromLink) : null;
+    }
+
+    /**
+     * 32 random bytes, base64url without padding: 43 characters that need no escaping in a URL path.
+     */
+    public static function generate(): self
+    {
+        return new self(rtrim(strtr(base64_encode(random_bytes(self::RANDOM_BYTES)), '+/', '-_'), '='));
+    }
+
+    /**
+     * The token for the link, for the email only.
+     */
+    public function reveal(): string
+    {
+        return $this->value;
+    }
+
+    /**
+     * @return string the 32 raw bytes of the token's SHA-256, for the bytea column
+     */
+    public function hash(): string
+    {
+        return hash('sha256', $this->value, true);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function __debugInfo(): array
+    {
+        return ['value' => '[redacted]'];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function __serialize(): array
+    {
+        throw new \LogicException('An invitation link token is never serialized.');
+    }
+}

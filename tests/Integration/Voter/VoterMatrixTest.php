@@ -12,6 +12,7 @@ use App\Identity\Domain\TwoStepLogin;
 use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Security\SecurityUser;
 use App\Organization\Api\TeamPermission;
+use App\Organization\Application\OpenInvitationLink;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -71,6 +72,11 @@ final class VoterMatrixTest extends KernelTestCase
     ];
 
     private const array ORGANIZATIONS = ['Acme Foods' => self::ACME_FOODS, 'Beta Bakery' => self::BETA_BAKERY];
+
+    private const string INVITATION = '0197a3c0-0000-7000-8000-0000000009e1';
+
+    /** Each open invitation link to Acme Foods by the person who has an account with its email, null for nobody. */
+    private const array INVITATIONS = ['Invitation of Omar' => 'Omar', 'Invitation of a new email' => null];
 
     private const array TEAMS = ['Shop' => self::SHOP, 'Mobile' => self::MOBILE, 'Support' => self::SUPPORT, 'Checkout' => self::CHECKOUT];
 
@@ -217,12 +223,23 @@ final class VoterMatrixTest extends KernelTestCase
         ));
     }
 
-    private static function subjectNamed(string $name): OrganizationId|TeamId
+    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink
     {
         if (isset(self::ORGANIZATIONS[$name])) {
             return new OrganizationId(self::ORGANIZATIONS[$name]);
         }
-        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization or a team of VoterMatrixTest.');
+        if (\array_key_exists($name, self::INVITATIONS)) {
+            $invitee = self::INVITATIONS[$name];
+
+            return new OpenInvitationLink(
+                self::INVITATION,
+                new OrganizationId(self::ACME_FOODS),
+                null === $invitee ? 'new-joiner@acme-foods.example' : 'voter-matrix-'.strtolower($invitee).'@acme-foods.example',
+                'Acme Foods',
+                null === $invitee ? null : new UserId(self::PEOPLE[$invitee][0]),
+            );
+        }
+        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team or an invitation of VoterMatrixTest.');
 
         return new TeamId(self::TEAMS[$name]);
     }

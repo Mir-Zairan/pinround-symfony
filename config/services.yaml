@@ -23,6 +23,8 @@ parameters:
         - identity_password_forgot
         - identity_password_reset_token
         - identity_password_reset
+        - organization_invitation_token
+        - organization_invitation
         - identity_profile
         - identity_theme
         - identity_security
@@ -185,3 +187,7 @@ when@test:
         App\Tests\Fixtures\Messaging\DispatchSightingAfterCurrentMessageHandler:
             autowire: true
             autoconfigure: true
+        # Used by EmailInvitationLinkHandlerTest; does nothing until a test arms it.
+        App\Tests\Fixtures\Messaging\FailOnceOnMemberInvitedHandler:
+            autoconfigure: true
+            public: true

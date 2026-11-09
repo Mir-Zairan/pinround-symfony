@@ -1,0 +1,61 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}People and roles · pinround{% endblock %}
+
+{# The form fields and errors of the logged-out pages and the profile page; people.css lays out this page. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/people.css') }}">
+{% endblock %}
+
+{# TODO(P11): the role help cards and the list of people with their roles. #}
+{% block main %}
+    <div class="people">
+        <h1 class="people__title">People and roles</h1>
+        <p>A role says what someone may do. The job (tester, developer) is set by the team lead.</p>
+        {% if formError %}
+            <p class="login__error" role="alert">{{ formError }}</p>
+        {% endif %}
+
+        <twig:Card tag="section" aria-labelledby="people-invite-title">
+            <h2 class="people__heading" id="people-invite-title">Invite</h2>
+            <form class="people__invite" method="post" action="{{ path('organization_admin_people_invite') }}" {{ stimulus_controller('invite-email') }}>
+                <div class="profile__field people__email">
+                    <label class="login__field">
+                        Email
+                        <input class="login__input" type="email" name="email" value="{{ typedEmail }}" placeholder="name@company.com" autocomplete="off" required
+                            {{ stimulus_target('invite-email', 'field') }} data-action="input->invite-email#update"
+                            {%- if emailError %} aria-invalid="true" aria-describedby="people-email-error"{% endif %}>
+                    </label>
+                    {% if emailError %}
+                        <p class="profile__error" id="people-email-error">{{ emailError }}</p>
+                    {% endif %}
+                </div>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_people_invite') }}">
+                <twig:Button type="submit" data-invite-email-target="submit">Invite</twig:Button>
+            </form>
+        </twig:Card>
+
+        <section class="people__pending" aria-labelledby="people-pending-title">
+            <h2 class="people__heading" id="people-pending-title">Not joined yet</h2>
+            {% if pendingInvitations is empty %}
+                <twig:EmptyState message="No open invites."/>
+            {% else %}
+                <ul class="people__list">
+                    {% for invitation in pendingInvitations %}
+                        <li class="people__row">
+                            <span class="people__email-address">{{ invitation.email }}</span>
+                            <span class="people__sub">Invited · not joined yet</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+                {% if nextPage %}
+                    <div class="people__more">
+                        <twig:Button href="{{ path('organization_admin_people', nextPage) }}" variant="outline">Show more</twig:Button>
+                    </div>
+                {% endif %}
+            {% endif %}
+        </section>
+    </div>
+{% endblock %}

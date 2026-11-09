@@ -41,6 +41,7 @@ final class LoginConfigTest extends TestCase
                 ['route' => '^identity_login$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^identity_login_code$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^identity_password_(forgot|reset_token|reset)$', 'roles' => 'PUBLIC_ACCESS'],
+                ['route' => '^organization_invitation(_token)?$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^web_component_gallery$', 'roles' => 'PUBLIC_ACCESS'],
                 ['route' => '^test_', 'roles' => 'PUBLIC_ACCESS'],
                 ['path' => '^/', 'roles' => 'IS_AUTHENTICATED_FULLY'],

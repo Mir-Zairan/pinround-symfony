@@ -6,6 +6,7 @@ namespace App\Audit\Application;
 
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditLog;
+use App\Organization\Api\Event\MemberInvited;
 use App\Organization\Api\Event\MemberJoined;
 use App\Organization\Api\Event\OrganizationEvent;
 use App\Organization\Api\Event\OrgRolesChanged;
@@ -27,6 +28,8 @@ final readonly class RecordOrganizationAuditEntry
 
     /** Action => the keys its data may hold. */
     public const array DATA_KEYS = [
+        // No data: the invited email address stays out of the audit log; the target is the invitation.
+        'member.invited' => [],
         'member.joined' => ['org_roles'],
         'org_roles.changed' => ['from', 'to'],
         'team.created' => ['lead_user_id'],
@@ -52,6 +55,7 @@ final readonly class RecordOrganizationAuditEntry
     private function entryFor(OrganizationEvent $event): AuditEntry
     {
         [$action, $targetType, $targetId, $idsAndRoleValues] = match (true) {
+            $event instanceof MemberInvited => ['member.invited', 'invitation', $event->invitationId, []],
             $event instanceof MemberJoined => ['member.joined', 'user', $event->userId, ['org_roles' => $event->orgRoles]],
             $event instanceof OrgRolesChanged => ['org_roles.changed', 'user', $event->userId, ['from' => $event->orgRolesBefore, 'to' => $event->orgRolesAfter]],
             $event instanceof TeamCreated => ['team.created', 'team', $event->teamId, ['lead_user_id' => $event->leadUserId]],

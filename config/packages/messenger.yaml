@@ -3,7 +3,8 @@ parameters:
     # interface => one of the async_* transports. A message with no entry goes to the failed transport, never lost.
     # when@test replaces the whole map, so an entry here is repeated there.
     outbox_relay.target_transports:
-        # Short jobs for worker-notify (ADR-0033), today the audit entry of each (RecordOrganizationAuditEntry).
+        # Short jobs for worker-notify (ADR-0033), today the audit entry of each (RecordOrganizationAuditEntry) and
+        # queueing the invitation email of MemberInvited (QueueInvitationLinkEmailHandler).
         App\Organization\Api\Event\OrganizationEvent: async_notify
 
 framework:
@@ -44,7 +45,9 @@ framework:
                     - handle_message
             # Domain events. Sent to the outbox, doctrine_transaction joins the dispatcher's open transaction (a
             # savepoint), so the outbox row commits or rolls back with the change. Received from an async_* transport,
-            # it gives each event handler one transaction that begins under the event's organization.
+            # all handlers of the event share one transaction that begins under the event's organization: a failure in
+            # one rolls back the others, and the retry runs them all again (doctrine_transaction drops the HandledStamps),
+            # so an email or other call outside the database goes in a message of its own.
             event.bus:
                 default_middleware: false
                 middleware:
@@ -122,6 +125,8 @@ framework:
             # Sent straight from the request, not through the outbox: that request writes nothing to the database. It
             # is dispatched with no organization set, so it carries no TenantStamp and is handled with none set.
             App\Identity\Application\EmailPasswordResetLink: async_notify
+            # Sent at once by QueueInvitationLinkEmailHandler, so the email has a transaction of its own.
+            App\Organization\Application\EmailInvitationLink: async_notify
             # Mail sent through MailerInterface goes out from worker-notify (ADR-0033). Symfony's handler of it is not
             # once-only: a redelivered message can send the email twice.
             Symfony\Component\Mailer\Messenger\SendEmailMessage: async_notify

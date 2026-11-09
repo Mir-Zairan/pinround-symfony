@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Identity;
 
 use App\Identity\Domain\Credential;
+use App\Identity\Domain\Email;
 use App\Identity\Domain\NewPassword;
 use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Doctrine\DoctrineCredentials;
@@ -44,9 +45,12 @@ trait LogsInUsers
         return $user;
     }
 
-    private function createUserWithoutOrganization(string $name, string $password = self::PASSWORD): User
+    /**
+     * @param string|null $email null for the factory's own, unique one
+     */
+    private function createUserWithoutOrganization(string $name, string $password = self::PASSWORD, ?string $email = null): User
     {
-        $user = UserFactory::createOne(['name' => $name]);
+        $user = UserFactory::createOne(null === $email ? ['name' => $name] : ['name' => $name, 'email' => new Email($email)]);
         $this->createdUserIds[] = $user->id()->toString();
 
         $hasherFactory = self::getContainer()->get('security.password_hasher_factory');

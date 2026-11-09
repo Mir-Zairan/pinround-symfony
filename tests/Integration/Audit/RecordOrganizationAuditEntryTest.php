@@ -90,6 +90,28 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
     }
 
     #[Test]
+    public function anInvitationWritesOneMemberInvitedRowAboutTheInvitationWithNoData(): void
+    {
+        $occurredAt = new \DateTimeImmutable(self::OCCURRED_AT);
+        $invitationId = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($occurredAt): string {
+            $this->commands()->setUpShop(self::ACME_FOODS, self::SLUG, $occurredAt);
+
+            return $this->commands()->invite(self::ACME_FOODS, 'mia@acme-foods.example', $occurredAt);
+        });
+
+        self::runTheWorkerUntilIdle('outbox');
+        self::runTheWorkerUntilIdle('async_notify');
+
+        $invited = array_values(array_filter($this->auditRows(), static fn (array $row): bool => 'member.invited' === $row['action']));
+        self::assertSame(
+            [['user', OrganizationCommandsOnTheEventBus::SARA, 'member.invited', 'invitation', $invitationId, '2027-03-14 08:30:00', []]],
+            array_map(static fn (array $row): array => [$row['actor_kind'], $row['actor_user_id'], $row['action'], $row['target_type'], $row['target_id'], $row['at'], $row['data']], $invited),
+        );
+        self::assertCount(7, $this->auditRows());
+        self::assertSame('{}', $this->rawDataOf($invitationId));
+    }
+
+    #[Test]
     public function aRedeliveredEventWritesNoSecondRow(): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->setUpShop(self::ACME_FOODS, self::SLUG, new \DateTimeImmutable(self::OCCURRED_AT)));
@@ -134,6 +156,14 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
                 'data' => $data,
             ];
         }, $rows);
+    }
+
+    private function rawDataOf(string $targetId): mixed
+    {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): mixed => $this->entityManager()->getConnection()->fetchOne(
+            'SELECT data::text FROM aud_event WHERE organization_id = ? AND target_id = ?',
+            [self::ACME_FOODS, $targetId],
+        ));
     }
 
     private function commands(): OrganizationCommandsOnTheEventBus

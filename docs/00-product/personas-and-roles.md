@@ -150,6 +150,7 @@ Notes:
 - **Draft rounds:** only the owner sees them until shared. Admins and leads do not see unshared drafts. Claude Code sees them only with the owner's personal access token ([ADR-0017](../03-adr/0017-private-draft-rounds.md)).
 - **Private explanations ("Explain it to me"):** only the person who asked sees them until they share.
 - **Pings:** only sender and recipient see a ping.
+- **Invitation links:** an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.
 
 ## Multi-role behaviour
 

@@ -21,13 +21,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
-use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
-use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
-use Doctrine\Common\EventManager;
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
-use Doctrine\DBAL\Exception\DriverException;
-use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -46,7 +40,6 @@ final class ConcurrentRoleChangesTest extends KernelTestCase
     private const string OMAR = '0197a3c0-0000-7000-8000-000000000653';
     private const string MIA = '0197a3c0-0000-7000-8000-000000000654';
     private const string SARA = '0197a3c0-0000-7000-8000-000000000656';
-    private const string LOCK_NOT_AVAILABLE = '55P03';
 
     private ?EntityManagerInterface $otherSession = null;
 
@@ -82,14 +75,15 @@ final class ConcurrentRoleChangesTest extends KernelTestCase
     public function twoAdminsRemovingEachOthersAdminRoleAtOnceLeaveOneAdmin(): void
     {
         $setOrgRoles = new SetOrgRoles(new DoctrineMemberships($this->entityManager()), self::discardedEvents());
-        $otherSession = $this->otherSession();
+        $secondSession = $this->secondSession();
+        $otherSession = $secondSession->entityManager;
         $otherSetOrgRoles = new SetOrgRoles(new DoctrineMemberships($otherSession), self::discardedEvents());
         $saraRemovesLena = static fn () => $otherSetOrgRoles(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new OrgRoles(), new UserId(self::SARA), self::now());
 
         $this->connection()->beginTransaction();
         $setOrgRoles(new OrganizationId(self::ACME_FOODS), new UserId(self::SARA), new OrgRoles(), new UserId(self::LENA), self::now());
 
-        self::assertSame(self::LOCK_NOT_AVAILABLE, self::sqlStateOfFailedAttempt($otherSession, $saraRemovesLena), 'The second change did not wait for the first.');
+        self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $secondSession->sqlStateOfFailedAttempt($saraRemovesLena), 'The second change did not wait for the first.');
 
         $this->connection()->commit();
         $otherSession->getConnection()->beginTransaction();
@@ -110,14 +104,15 @@ final class ConcurrentRoleChangesTest extends KernelTestCase
     public function twoLeadAppointmentsAtOnceLeaveOneLead(): void
     {
         $setTeamRole = new SetTeamRole(new DoctrineTeams($this->entityManager()), new DoctrineMemberships($this->entityManager()), self::discardedEvents());
-        $otherSession = $this->otherSession();
+        $secondSession = $this->secondSession();
+        $otherSession = $secondSession->entityManager;
         $otherSetTeamRole = new SetTeamRole(new DoctrineTeams($otherSession), new DoctrineMemberships($otherSession), self::discardedEvents());
         $appointMia = static fn () => $otherSetTeamRole(new TeamId(self::SHOP_TEAM), new UserId(self::MIA), TeamRole::Lead, Job::Tester, new UserId(self::SARA), self::now());
 
         $this->connection()->beginTransaction();
         $setTeamRole(new TeamId(self::SHOP_TEAM), new UserId(self::OMAR), TeamRole::Lead, Job::Developer, new UserId(self::LENA), self::now());
 
-        self::assertSame(self::LOCK_NOT_AVAILABLE, self::sqlStateOfFailedAttempt($otherSession, $appointMia), 'The second appointment did not wait for the first.');
+        self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $secondSession->sqlStateOfFailedAttempt($appointMia), 'The second appointment did not wait for the first.');
 
         $this->connection()->commit();
         $otherSession->getConnection()->transactional(static fn () => $appointMia());
@@ -135,45 +130,12 @@ final class ConcurrentRoleChangesTest extends KernelTestCase
         )));
     }
 
-    /**
-     * Runs $change in its own transaction of $session, which gives up after lock_timeout, and rolls it back.
-     *
-     * @param \Closure(): void $change
-     *
-     * @return string the SQLSTATE $change failed with
-     */
-    private static function sqlStateOfFailedAttempt(EntityManagerInterface $session, \Closure $change): string
+    private function secondSession(): SecondSession
     {
-        $connection = $session->getConnection();
-        $connection->executeStatement("SET lock_timeout = '300ms'");
-        $connection->beginTransaction();
-        try {
-            $change();
-        } catch (DriverException $failure) {
-            return (string) $failure->getSQLState();
-        } finally {
-            $connection->rollBack();
-            $session->clear();
-            $connection->executeStatement('RESET lock_timeout');
-        }
+        $secondSession = SecondSession::besideTheApp($this->entityManager(), $this->tenantContext());
+        $this->otherSession = $secondSession->entityManager;
 
-        self::fail('The change ran although the rows were locked.');
-    }
-
-    /**
-     * A second entity manager on its own PostgreSQL session, which begins its transactions under the same tenant.
-     */
-    private function otherSession(): EntityManagerInterface
-    {
-        $connection = new CloseOnFailedBeginConnection(
-            $this->connection()->getParams(),
-            new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver()),
-        );
-
-        $eventManager = $this->entityManager()->getEventManager();
-        self::assertInstanceOf(EventManager::class, $eventManager);
-
-        return $this->otherSession = new EntityManager($connection, $this->entityManager()->getConfiguration(), $eventManager);
+        return $secondSession;
     }
 
     private static function discardedEvents(): OrganizationEvents

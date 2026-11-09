@@ -8,6 +8,7 @@ use App\Audit\Api\ActorKind;
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditLog;
 use App\Audit\Application\RecordOrganizationAuditEntry;
+use App\Organization\Api\Event\MemberInvited;
 use App\Organization\Api\Event\MemberJoined;
 use App\Organization\Api\Event\OrganizationEvent;
 use App\Organization\Api\Event\OrgRolesChanged;
@@ -21,6 +22,7 @@ use PHPUnit\Framework\TestCase;
 final class RecordOrganizationAuditEntryTest extends TestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000005a1';
+    private const string MIAS_INVITATION = '0197a3c0-0000-7000-8000-0000000005e1';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000005c1';
     private const string LENA = '0197a3c0-0000-7000-8000-000000000552';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000000553';
@@ -33,6 +35,7 @@ final class RecordOrganizationAuditEntryTest extends TestCase
     {
         $now = new \DateTimeImmutable('2027-03-15 10:00:00 UTC');
 
+        yield 'member invited' => [new MemberInvited(self::ACME_FOODS, self::MIAS_INVITATION, self::SARA, $now), 'member.invited', 'invitation', self::MIAS_INVITATION, []];
         yield 'member joined' => [new MemberJoined(self::ACME_FOODS, self::OMAR, ['manager'], self::SARA, $now), 'member.joined', 'user', self::OMAR, ['org_roles' => ['manager']]];
         yield 'org roles changed' => [new OrgRolesChanged(self::ACME_FOODS, self::LENA, ['admin'], ['admin', 'manager'], self::SARA, $now), 'org_roles.changed', 'user', self::LENA, ['from' => ['admin'], 'to' => ['admin', 'manager']]];
         yield 'team created' => [new TeamCreated(self::ACME_FOODS, self::SHOP_TEAM, self::LENA, self::SARA, $now), 'team.created', 'team', self::SHOP_TEAM, ['lead_user_id' => self::LENA]];

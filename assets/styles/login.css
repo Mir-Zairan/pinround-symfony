@@ -68,3 +68,8 @@
   font: inherit;
   font-weight: 400;
 }
+
+.login__input:read-only {
+  background: var(--s-c);
+  color: var(--on-surface-var);
+}

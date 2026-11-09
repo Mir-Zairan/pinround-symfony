@@ -283,6 +283,11 @@
   box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
 }
 
+/* The toast controller writes the text a moment after the page shows; no empty pill until then. */
+.toast:empty {
+  display: none;
+}
+
 .dialog {
   width: min(540px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);

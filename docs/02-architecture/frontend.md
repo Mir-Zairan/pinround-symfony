@@ -100,7 +100,7 @@ The gallery at `/_gallery` shows every built component. It exists in dev and tes
 | `PinList` | pin notes under a screenshot | The text equivalent of the pins (accessibility) |
 | `Thread`, `Message`, `Reply`, `Composer` | ticket conversation | Comment / Question switch; answering a question resolves it |
 | `Dialog` | dialogs (ping, picker, share draft, local AI) | Native `<dialog>` with focus trap |
-| `Toast` | toast | One at a time, 3.6 s, `role="status"`. The markup is built; the timer comes with the first real toast |
+| `Toast` | toast | One at a time, 3.6 s, `role="status"`. A flashed toast arrives empty with its text in `data-toast-message-value` and `data-turbo-temporary` (no re-show on Back); the `toast` controller writes the text in 150 ms after connect, so the region announces it, and removes the toast 3.6 s later. Without JavaScript a `<noscript>` copy shows and stays. The gallery's toast has no controller and stays |
 | `Switch` | admin switches | `role="switch"`, `aria-checked` |
 | `EmptyState` | dashed boxes | One plain sentence + one action |
 
@@ -253,7 +253,8 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Profile (name, time zone, theme) | `GET/POST /me/profile` (`identity_profile`); the avatar menu's theme switch `POST /me/theme` (`identity_theme`) | Identity | `profile.html.twig` |
 | Personal access tokens | `GET/POST /me/tokens` | Identity | for MCP and the plugin |
 | Security (password, two-factor) | `GET /me/security` (`identity_security`), `POST /me/security/password`, `POST /me/security/log-out-everywhere` | Identity | |
-| Login, invite accept, SSO callback | `/login`, `/invite/{token}`, `/login/sso/{provider}/callback` | Identity | |
+| Login, SSO callback | `/login`, `/login/sso/{provider}/callback` | Identity | |
+| Invite accept | `GET /invite/{token}` (`organization_invitation_token`) keeps the token in the session and redirects to `GET/POST /invite` (`organization_invitation`), the page itself | Organization | `invitation.html.twig` (`@Organization`), the login card |
 | Organization picker | `GET/POST /org/choose` (`organization_choose`); a logged-in user without a chosen organization is sent here, and the avatar menu links it as "Switch organization" for users in two or more (not on the picker itself) | Organization | `choose.html.twig` (`@Organization`), the login card |
 | MCP endpoint | `POST /mcp` | AgentApi | no HTML |
 | REST for the plugin | `/api/v1/…` | AgentApi | no HTML |

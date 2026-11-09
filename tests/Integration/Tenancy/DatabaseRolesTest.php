@@ -21,6 +21,7 @@ final class DatabaseRolesTest extends KernelTestCase
     private const array DOCUMENTED_ORGANIZATION_INDEXES_NOT_LED_BY_THE_ORGANIZATION = [
         'CREATE UNIQUE INDEX org_organization_slug_key ON public.org_organization USING btree (slug)',
         'CREATE INDEX org_membership_user_id_idx ON public.org_membership USING btree (user_id)',
+        'CREATE UNIQUE INDEX org_invitation_token_hash_key ON public.org_invitation USING btree (token_hash)',
     ];
     private const array ROLES = ['pinround_app', 'pinround_migrator', 'pinround_retention', 'pinround_readonly'];
     private const array MESSENGER_TABLES = ['messenger_outbox', 'messenger_failed'];
@@ -290,12 +291,13 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
-     * Tenant tables of Organization: the app reads, adds and changes all of them and removes only memberships and team
-     * members; support reads under the tenant policy; resolve_user_orgs reads two columns of org_membership
-     * (Version20261108140000).
+     * Tenant tables of Organization: the app reads, adds and changes all of them and removes only memberships, team
+     * members and invitations; support reads under the tenant policy; resolve_user_orgs reads two columns of
+     * org_membership (Version20261108140000) and resolve_invitation five of org_invitation, never the email
+     * (Version20261109100000).
      */
     #[Test]
-    public function theOrganizationTablesGrantTheAppNoDeleteButOnMembershipsAndTeamMembers(): void
+    public function theOrganizationTablesGrantTheAppNoDeleteButOnMembershipsTeamMembersAndInvitations(): void
     {
         $connection = $this->connection();
         $readAddChange = ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'];
@@ -305,6 +307,7 @@ final class DatabaseRolesTest extends KernelTestCase
             'org_team' => $readAddChange,
             'org_team_member' => [...$readAddChange, 'pinround_app DELETE'],
             'org_settings' => $readAddChange,
+            'org_invitation' => [...$readAddChange, 'pinround_app DELETE'],
         ];
 
         foreach ($expectedGrants as $table => $grants) {
@@ -312,12 +315,34 @@ final class DatabaseRolesTest extends KernelTestCase
             self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
         }
         self::assertEqualsCanonicalizing(
-            ['org_membership.organization_id SELECT', 'org_membership.user_id SELECT'],
+            [
+                'org_membership.organization_id SELECT', 'org_membership.user_id SELECT',
+                'org_invitation.id SELECT', 'org_invitation.organization_id SELECT', 'org_invitation.token_hash SELECT',
+                'org_invitation.accepted_at SELECT', 'org_invitation.expires_at SELECT',
+            ],
             $connection->fetchFirstColumn(
                 "SELECT a.attrelid::regclass::text || '.' || a.attname || ' ' || acl.privilege_type
                  FROM pg_attribute a, aclexplode(a.attacl) acl
                  WHERE acl.grantee = 'pinround_resolver'::regrole AND a.attrelid::regclass::text LIKE 'org\\_%'",
             ),
+        );
+    }
+
+    /**
+     * One invitation not yet accepted per email of an organization, and each link token at most once across all
+     * organizations, for resolve_invitation; the team foreign key has its index (Version20261109100000).
+     */
+    #[Test]
+    public function theInvitationTableIsKeyedByTheOrganizationAndHasOneOpenInvitationPerEmail(): void
+    {
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX org_invitation_pkey ON public.org_invitation USING btree (organization_id, id)',
+                'CREATE UNIQUE INDEX org_invitation_token_hash_key ON public.org_invitation USING btree (token_hash)',
+                'CREATE UNIQUE INDEX org_invitation_organization_id_email_key ON public.org_invitation USING btree (organization_id, email) WHERE (accepted_at IS NULL)',
+                'CREATE INDEX org_invitation_organization_id_team_id_idx ON public.org_invitation USING btree (organization_id, team_id)',
+            ],
+            $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'org_invitation'"),
         );
     }
 
@@ -345,8 +370,9 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
-     * Every index of an org_ table starts with organization_id but the two data-model.md names as exceptions: the
-     * global slug key and the user_id index of resolve_user_orgs, which runs before the tenant is known.
+     * Every index of an org_ table starts with organization_id but the documented exceptions: the global slug key, the
+     * user_id index of resolve_user_orgs and the token_hash key of resolve_invitation, which run before the tenant is
+     * known.
      */
     #[Test]
     public function onlyTheDocumentedOrganizationIndexesDoNotStartWithTheOrganization(): void

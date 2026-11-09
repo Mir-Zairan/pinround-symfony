@@ -1,0 +1,65 @@
+/* The admin page of people (src/Organization/UI/templates/admin/people.html.twig); its fields and errors come from
+   login.css and profile.css. */
+
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 720px;
+}
+
+.people__title {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.people__heading {
+  margin-bottom: 12px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.people__invite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.people__email {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.people__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--outline-var);
+  border-radius: 12px;
+}
+
+.people__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+}
+
+.people__row + .people__row {
+  border-top: 1px solid var(--outline-var);
+}
+
+.people__email-address {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.people__more {
+  margin-top: 12px;
+}
+
+.people__sub {
+  color: var(--on-surface-var);
+  font-size: 14px;
+}

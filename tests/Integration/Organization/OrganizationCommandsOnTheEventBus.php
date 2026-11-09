@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Organization;
 
+use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
 use App\Organization\Application\AddMember;
 use App\Organization\Application\CreateOrganization;
 use App\Organization\Application\CreateTeam;
+use App\Organization\Application\InviteMember;
 use App\Organization\Application\SetOrgRoles;
 use App\Organization\Application\SetTeamRole;
 use App\Organization\Domain\Job;
 use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrgSettingsStore;
@@ -20,6 +23,7 @@ use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
 use App\Organization\Infrastructure\Messenger\MessengerOrganizationEvents;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Unit\Organization\Application\RecordingInvitedPersonRegistration;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
 
@@ -65,5 +69,26 @@ final readonly class OrganizationCommandsOnTheEventBus
         $teamId = new CreateTeam($teams, $memberships, $events)($organization, 'Shop', new UserId(self::LENA), Job::Developer, $sara, $now);
         new SetTeamRole($teams, $memberships, $events)($teamId, new UserId(self::OMAR), TeamRole::Member, Job::Developer, $sara, $now);
         new SetOrgRoles($memberships, $events)($organization, new UserId(self::LENA), new OrgRoles(OrgRole::Admin, OrgRole::Manager), $sara, $now);
+    }
+
+    /**
+     * Sara invites the email with no roles and no team: one MemberInvited. Call it in a transaction begun under
+     * $organizationId.
+     *
+     * @return string the invitation id
+     */
+    public function invite(string $organizationId, string $email, \DateTimeImmutable $now): string
+    {
+        $connection = $this->entityManager->getConnection();
+        $inviteMember = new InviteMember(
+            new DoctrineInvitations($this->entityManager),
+            new DoctrineMemberships($this->entityManager),
+            new DoctrineTeams($this->entityManager),
+            new DbalUserQueries($connection),
+            new RecordingInvitedPersonRegistration(),
+            new MessengerOrganizationEvents($this->eventBus, $connection),
+        );
+
+        return $inviteMember(new OrganizationId($organizationId), $email, new OrgRoles(), null, null, new UserId(self::SARA), $now)->toString();
     }
 }
