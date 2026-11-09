@@ -8,6 +8,7 @@ use App\Organization\Api\DemoOrganizations;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Infrastructure\Console\DemoSeedRefused;
@@ -40,6 +41,9 @@ final readonly class SeedDemoProjects implements DemoSeedStep
     ) {
     }
 
+    /**
+     * @throws TenantSwitchRefused when a transaction is open, from DemoOrganizations, before anything is read here
+     */
     public function seed(): string
     {
         $organizationId = $this->demoOrganizations->idBySlug(self::ORGANIZATION)
@@ -81,13 +85,17 @@ final readonly class SeedDemoProjects implements DemoSeedStep
      */
     private function inTransactionOf(OrganizationId $organizationId, \Closure $work): mixed
     {
-        $this->tenantContext->set($organizationId);
+        $tenantBefore = $this->tenantContext->get();
+        // The switch guard refuses while the entity manager holds an entity such as the logged-in user.
+        $this->entityManager->clear();
         try {
+            $this->tenantContext->set($organizationId);
+
             return $this->entityManager->wrapInTransaction(static fn (): mixed => $work());
         } finally {
-            // The tenant may only change once nothing of the organization is loaded or open.
+            // Entities loaded under $organizationId must not outlive its tenant.
             $this->entityManager->clear();
-            $this->tenantContext->clear();
+            null === $tenantBefore ? $this->tenantContext->clear() : $this->tenantContext->set($tenantBefore);
         }
     }
 }

@@ -8,6 +8,8 @@ use App\Identity\Domain\Email;
 use App\Organization\Api\DemoOrganizations;
 use App\Organization\Infrastructure\Demo\SeedDemoOrganizations;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantSwitchRefused;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Console\DemoSeedCommand;
 use App\SharedKernel\Infrastructure\Console\DemoSeedRefused;
 use App\Tests\Factory\Identity\UserFactory;
@@ -307,6 +309,51 @@ final class DemoSeedCommandTest extends KernelTestCase
         self::assertSame($this->organizationIdOf('sara@acme-foods.example'), $demoOrganizations->idBySlug('acme-foods')?->toString());
         self::assertSame($this->organizationIdOf('ben@beta-bakery.example'), $demoOrganizations->idBySlug('beta-bakery')?->toString());
         self::assertNull($demoOrganizations->idBySlug('gamma-grocers'));
+    }
+
+    #[Test]
+    public function demoOrganizationsPutsTheTenantBackAsItWas(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $this->runSeed();
+        $betaBakery = new OrganizationId($this->organizationIdOf('ben@beta-bakery.example'));
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set($betaBakery);
+
+        try {
+            $acmeFoods = self::getContainer()->get(DemoOrganizations::class)->idBySlug('acme-foods');
+            self::assertSame($betaBakery->toString(), $tenantContext->get()?->toString());
+        } finally {
+            $tenantContext->clear();
+        }
+        self::assertSame($this->organizationIdOf('sara@acme-foods.example'), $acmeFoods?->toString());
+    }
+
+    #[Test]
+    public function demoOrganizationsAndTheProjectStepRefuseInsideAnOpenTransaction(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $this->runSeed();
+        $connection = $this->connection();
+        $refusals = [];
+
+        $connection->beginTransaction();
+        try {
+            foreach ([
+                'idBySlug' => static fn (): mixed => self::getContainer()->get(DemoOrganizations::class)->idBySlug('acme-foods'),
+                'seed' => static fn (): mixed => self::getContainer()->get(SeedDemoProjects::class)->seed(),
+            ] as $call => $work) {
+                try {
+                    $work();
+                } catch (TenantSwitchRefused) {
+                    $refusals[] = $call;
+                }
+            }
+        } finally {
+            $connection->rollBack();
+        }
+
+        self::assertSame(['idBySlug', 'seed'], $refusals);
     }
 
     #[Test]

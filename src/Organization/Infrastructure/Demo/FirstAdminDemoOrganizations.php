@@ -7,10 +7,9 @@ namespace App\Organization\Infrastructure\Demo;
 use App\Identity\Api\UserQueries;
 use App\Organization\Api\DemoOrganizations;
 use App\Organization\Api\MembershipQueries;
+use App\Organization\Application\OrganizationTransactions;
 use App\Organization\Domain\Organizations;
-use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
-use Doctrine\ORM\EntityManagerInterface;
 
 /**
  * Finds a demo organization by its slug among the organizations of its first admin, as SeedDemoOrganizations names
@@ -22,8 +21,7 @@ final readonly class FirstAdminDemoOrganizations implements DemoOrganizations
         private UserQueries $users,
         private MembershipQueries $membershipQueries,
         private Organizations $organizations,
-        private TenantContext $tenantContext,
-        private EntityManagerInterface $entityManager,
+        private OrganizationTransactions $organizationTransactions,
     ) {
     }
 
@@ -46,13 +44,6 @@ final readonly class FirstAdminDemoOrganizations implements DemoOrganizations
 
     private function slugOf(OrganizationId $organizationId): ?string
     {
-        $this->tenantContext->set($organizationId);
-        try {
-            return $this->entityManager->wrapInTransaction(fn (): ?string => $this->organizations->byId($organizationId)?->slug());
-        } finally {
-            // The tenant may only change once nothing of the organization is loaded or open.
-            $this->entityManager->clear();
-            $this->tenantContext->clear();
-        }
+        return $this->organizationTransactions->runAs($organizationId, fn (): ?string => $this->organizations->byId($organizationId)?->slug());
     }
 }
