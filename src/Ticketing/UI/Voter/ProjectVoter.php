@@ -1,0 +1,73 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Ticketing\UI\Voter;
+
+use App\Organization\Api\CurrentActor;
+use App\Organization\Api\TeamQueries;
+use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\UI\Voter\DenyByDefaultVoter;
+use App\Ticketing\Api\ProjectPermission;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Component\Security\Core\Authorization\Voter\Vote;
+use Symfony\Contracts\Service\ResetInterface;
+
+/**
+ * Decides ProjectPermission CREATE (ADR-0013, personas-and-roles.md) from the request's actor, for the team that is to
+ * own the project: its Lead ("link projects."), or an Admin of the organization the team belongs to ("Admin pages
+ * (all)"). A team of another organization is never granted: the actor's roles and teams are read under the request's
+ * tenant.
+ *
+ * The teams of an organization are read at most once per request and forgotten at the kernel's reset between
+ * requests (ADR-0008), so a team created later in the same request is unknown to an Admin until the next.
+ *
+ * @extends DenyByDefaultVoter<TeamId>
+ */
+final class ProjectVoter extends DenyByDefaultVoter implements ResetInterface
+{
+    /** @var array<string, list<TeamId>> by organization id */
+    private array $teamsOfThisRequest = [];
+
+    public function __construct(private readonly CurrentActor $currentActor, private readonly TeamQueries $teamQueries)
+    {
+    }
+
+    public function reset(): void
+    {
+        $this->teamsOfThisRequest = [];
+    }
+
+    protected function attributes(): array
+    {
+        return [ProjectPermission::CREATE];
+    }
+
+    protected function subjectClass(): string
+    {
+        return TeamId::class;
+    }
+
+    protected function grants(string $attribute, object $subject, TokenInterface $token, ?Vote $vote): bool
+    {
+        $actor = $this->currentActor->actorFor($token->getUser());
+        if (null === $actor) {
+            return false;
+        }
+        $roles = $actor->roles();
+
+        return match ($attribute) {
+            ProjectPermission::CREATE => $roles->isLeadOf($subject)
+                || ($roles->isAdmin() && $this->isTeamOf($actor->organizationId(), $subject)),
+            default => false,
+        };
+    }
+
+    private function isTeamOf(OrganizationId $organizationId, TeamId $teamId): bool
+    {
+        $teamIds = $this->teamsOfThisRequest[$organizationId->toString()] ??= $this->teamQueries->teamsOf($organizationId);
+
+        return array_any($teamIds, static fn (TeamId $candidate): bool => $candidate->equals($teamId));
+    }
+}
