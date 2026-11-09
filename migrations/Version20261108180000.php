@@ -10,8 +10,8 @@ use Doctrine\Migrations\AbstractMigration;
 /**
  * Two-step login (TOTP, ADR-0012), one row per user. Global like idn_user, so no organization_id and no row-level
  * security, and pinround_readonly gets nothing. The seed is stored only encrypted (FieldEncryption: key id, nonce,
- * secretbox), the recovery codes only as Argon2id hashes. Turning it off (a later step of P01.T6) is not built yet, so
- * the app gets no DELETE.
+ * secretbox), the recovery codes only as Argon2id hashes. The app gets DELETE in Version20261108200000, with turning
+ * it off.
  */
 final class Version20261108180000 extends AbstractMigration
 {

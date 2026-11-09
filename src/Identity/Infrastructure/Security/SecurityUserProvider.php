@@ -59,7 +59,18 @@ final readonly class SecurityUserProvider implements UserProviderInterface
             throw new UnsupportedUserException(\sprintf('Only %s is supported.', SecurityUser::class));
         }
 
-        $current = $this->users->byId(new UserId($user->id()));
+        return $this->loadUserById(new UserId($user->id()));
+    }
+
+    /**
+     * For a login that finishes without the password form (login step two): refuses what refreshUser refuses, so a
+     * user blocked after their password was checked does not get in.
+     *
+     * @throws UserNotFoundException when the user is gone, blocked or has no password any more
+     */
+    public function loadUserById(UserId $userId): SecurityUser
+    {
+        $current = $this->users->byId($userId);
         $credential = null === $current ? null : $this->credentials->byUserId($current->id());
         if (null === $current || null === $credential || UserStatus::Blocked === $current->status()) {
             throw new UserNotFoundException();

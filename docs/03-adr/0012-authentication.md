@@ -12,7 +12,7 @@ People sign in with email and password (with MFA) or with their company login; t
 - [Confirmation](#confirmation) — tests and checks.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — trade-offs.
 - [Clarifications (2026-11-06)](#clarifications-2026-11-06) — SSO account linking, token step-up.
-- [Hackathon exception (2026-11-06)](#hackathon-exception-2026-11-06) — admin MFA skipped in the demo build only.
+- [Hackathon exception (2026-11-06)](#hackathon-exception-2026-11-06) — admin MFA skipped in the demo build only; ended 2026-11-08 with P01.T6.
 - [More information](#more-information) — links and revisit triggers.
 
 ## Status
@@ -144,6 +144,7 @@ For the hackathon demo (deadline 2026-11-22) TOTP is not built yet (P01.T6), but
 - Every admin action taken under the flag writes an audit event with `mfa_skipped: true`.
 - This exception ends when P01.T6 (TOTP) is done; the flag and its code are then deleted. It is not an exception to NFR-SEC-05 for any real deployment.
 - Clarification (2026-11-08, P01.T4): "set" means any value Symfony's `bool` env processor reads as true (`1`, `true`, `on`, `yes`); empty or unset is off. The kernel refuses it in every environment but dev and test, which with the allowed environments prod, dev and test means prod (`tests/Integration/KernelTest`). The flag never waives the Admin role or the password-session rule. The `mfa_skipped: true` audit event is not built yet, because no admin action exists; the first ones (P08.T3, P11) owe it.
+- 2026-11-08: the hackathon exception ended with P01.T6; the flag and its code are deleted. Admin pages now need two-step login and a code typed within the last hour (`AdminAreaVoter`), and no admin action ever ran under the flag, so no `mfa_skipped` event is owed.
 
 ## More information
 

@@ -50,7 +50,6 @@ Real secrets never enter the repo ([ADR-0027](../03-adr/0027-secrets-and-encrypt
 | `APP_SHARE_DIR` | `var/share` | app, all workers, migrate | no | Folder for data shared between app versions. |
 | `DEFAULT_URI` | `http://localhost` in `.env.dev` and `.env.test`; none, required in prod | app, all workers, migrate | no | The public base URL, used to build links in commands, workers and mail. |
 | `KERNEL_CLASS` | `App\Kernel` in `.env.test` | test only | no | The kernel class the Symfony test cases boot. |
-| `APP_HACKATHON_SKIP_ADMIN_MFA` | empty (off) in `.env` | app, all workers, migrate | no | Hackathon exception of [ADR-0012](../03-adr/0012-authentication.md), until P01.T6: a true value (`1`, `true`, `on`, `yes`) lets an Admin with a password session open the admin pages without two-step login (`AdminAreaVoter`); it waives nothing else. The kernel refuses to boot with it on when `APP_ENV` is `prod`. Set it in `.env.local` for the demo; it is deleted with P01.T6. |
 
 ## Database
 Dev and test use the app role for the web and workers, and the migrator role for migrations through the `migrator` Doctrine connection. The passwords in the URLs must match the ones `make db-roles` sets ([Docker and compose host settings](#docker-and-compose-host-settings)).
@@ -69,7 +68,7 @@ Dev and test use the app role for the web and workers, and the migrator role for
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
 | `REDIS_CACHE_DSN` | empty on purpose in `.env`; `redis://valkey-cache:6379` in `.env.dev` and `.env.test`; none, required in prod | app, all workers, migrate | yes, when it holds a password | DSN of the cache Valkey, read by `cache.app`. |
-| `STATE_VALKEY_DSN` | empty on purpose in `.env`; `redis://valkey-state:6379` in `.env.dev`; not set in tests (they use `TEST_STATE_VALKEY_DSN`); none, required in prod | app, all workers, migrate | yes, when it holds a password | DSN of the state Valkey for sessions (key prefix `session:`) and the login, password reset and password change (`password_change_per_user`) counters (prefix `login_throttling:`). |
+| `STATE_VALKEY_DSN` | empty on purpose in `.env`; `redis://valkey-state:6379` in `.env.dev`; not set in tests (they use `TEST_STATE_VALKEY_DSN`); none, required in prod | app, all workers, migrate | yes, when it holds a password | DSN of the state Valkey for sessions (key prefix `session:`) and the login, password reset, password change (`password_change_per_user`) and two-step login code (`two_step_code_per_user`) counters (prefix `login_throttling:`). |
 | `MESSENGER_TRANSPORT_DSN` | `redis://valkey-state:6379` in `.env.dev`; `in-memory://` in `.env.test`; none, required in prod | app, all workers | yes, when it holds a password | DSN of the state Valkey that holds the queues. See [Rules for prod](#rules-for-prod) for the path, stream and comma rules. |
 
 ## Mail

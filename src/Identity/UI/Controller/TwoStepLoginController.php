@@ -9,6 +9,7 @@ use App\Identity\Application\ConfirmTwoStepSetup;
 use App\Identity\Application\CurrentSession;
 use App\Identity\Application\QrCodeImages;
 use App\Identity\Application\RecoveryCodes;
+use App\Identity\Application\SessionConfirmations;
 use App\Identity\Application\ShowTwoStepSetup;
 use App\Identity\Application\StartTwoStepSetup;
 use App\Identity\Application\TwoStepConfirmRefusal;
@@ -36,6 +37,8 @@ final class TwoStepLoginController extends AbstractController
         private readonly ConfirmTwoStepSetup $confirmTwoStepSetup,
         private readonly QrCodeImages $qrCodeImages,
         private readonly CurrentSession $currentSession,
+        private readonly SessionConfirmations $sessionConfirmations,
+        private readonly RecentAuthRedirects $recentAuthRedirects,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -69,7 +72,9 @@ final class TwoStepLoginController extends AbstractController
             return $this->renderSetup(LoginController::FORM_EXPIRED);
         }
 
-        $outcome = ($this->confirmTwoStepSetup)($this->currentSession->userId(), $request->request->getString('code'), $this->clock->now());
+        $now = $this->clock->now();
+        $userId = $this->currentSession->userId();
+        $outcome = ($this->confirmTwoStepSetup)($userId, $request->request->getString('code'), $now);
         if (TwoStepConfirmRefusal::WrongCode === $outcome) {
             return $this->renderSetup(self::WRONG_CODE);
         }
@@ -77,10 +82,14 @@ final class TwoStepLoginController extends AbstractController
             // Not started, or already on: the page shows what there is to do now.
             return $this->redirectToRoute('identity_two_step');
         }
+        // The right code is proof of two-step login, as at a login with a code.
+        $this->sessionConfirmations->recordTwoStepConfirmation($userId, $now);
 
         // Rendered in this response and never stored anywhere in plain text, so a reload cannot show them again.
         return $this->render('@Identity/two_step_recovery_codes.html.twig', [
             'recoveryCodes' => $outcome->reveal(),
+            // Set when an action needing a recent proof sent the person here (AskToConfirmItsYou).
+            'continuePath' => $this->recentAuthRedirects->takeAfterTwoStepSetup($request),
         ], self::notStored(new Response()));
     }
 

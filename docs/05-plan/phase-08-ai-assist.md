@@ -99,7 +99,7 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
 - **Files:** `src/Assist/Application/Policy/PolicyEvaluator.php`, `src/Organization/UI/Admin/AiSettingsController.php`, `templates/admin/ai.html.twig`.
 - **Acceptance:**
   - [ ] When AI is not allowed for the viewer, AI buttons are hidden and one line says why.
-  - [ ] Only admins can change the policy (voter `ADMIN_AI`), MFA re-check for credential changes. 🏁 Hackathon: TOTP is not built yet; the dev-only `APP_HACKATHON_SKIP_ADMIN_MFA=1` flag from P01.T4 applies (refused in prod).
+  - [ ] Only admins can change the policy (voter `ADMIN_AI`), MFA re-check for credential changes. The page asks `ADMIN_AREA`, which needs two-step login and a code of the last hour (P01.T6); mark the credential actions `RequiresRecentAuth`.
 - **Tests:** table test for the policy matrix (on/off × who × where × restricted × laptop ready); voter test; functional tab test.
 - **Prototype check:** [admin.md › AI](../04-prototype/screens/admin.md#ai) texts and notes.
 - **Size:** M

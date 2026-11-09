@@ -27,7 +27,8 @@ declare(strict_types=1);
  */
 const GLOSSARY_FILE = 'docs/00-product/glossary.md';
 const GLOSSARY_HEADING = '## Words we do not use';
-const SKIPPED_FOLDERS = ['.claude', '.git', 'vendor', 'var', 'node_modules'];
+// test-results holds Playwright's run output and tests/e2e/.auth the git-ignored e2e logins and keys.
+const SKIPPED_FOLDERS = ['.claude', '.git', 'vendor', 'var', 'node_modules', 'test-results', 'tests/e2e/.auth'];
 const OWN_FIXTURE_FOLDER = 'tests/Fixtures/CopyLint';
 const COPY_ATTRIBUTES = ['aria-label', 'aria-description', 'title', 'alt', 'placeholder', 'label'];
 const TEMPLATE_NAME_TAGS = ['extends', 'include', 'embed', 'import', 'from', 'use', 'form_theme', 'component'];

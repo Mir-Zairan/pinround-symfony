@@ -103,7 +103,7 @@ FR check (regression only): all FR IDs through the e2e suite.
 ### P12.T5 — Authentication and session pen-test
 - **Why:** a stolen session or token is as bad as a tenant leak.
 - **Steps:**
-  1. Add an auth section to `docs/security/tenant-isolation-pentest.md`: login throttling, session fixation, MFA bypass, `RecentAuth` bypass, invite reuse, token reuse after revoke, token on admin routes, OIDC state/nonce/PKCE and the cross-org SSO case, CSRF on every form, the hackathon MFA flag refused in prod.
+  1. Add an auth section to `docs/security/tenant-isolation-pentest.md`: login throttling, session fixation, MFA bypass, `RecentAuth` bypass, invite reuse, token reuse after revoke, token on admin routes, OIDC state/nonce/PKCE and the cross-org SSO case, CSRF on every form, admin pages without two-step login or with a code over an hour old.
   2. Run with a peer; fix and add regression tests.
 - **Files:** `docs/security/tenant-isolation-pentest.md`.
 - **Acceptance:**

@@ -97,6 +97,25 @@ final class TwoStepLogin
     }
 
     /**
+     * Uses up a recovery code at login, so it never logs in again.
+     *
+     * @param string $hash one of recoveryCodeHashes(), the one the typed recovery code matched
+     *
+     * @throws \InvalidArgumentException when it holds no such hash: the code is spent already, or it is off
+     */
+    public function spendRecoveryCode(#[\SensitiveParameter] string $hash): void
+    {
+        $position = array_search($hash, $this->recoveryCodeHashes, true);
+        if (false === $position) {
+            throw new \InvalidArgumentException('There is no such recovery code to spend.');
+        }
+
+        $remainingHashes = $this->recoveryCodeHashes;
+        unset($remainingHashes[$position]);
+        $this->recoveryCodeHashes = array_values($remainingHashes);
+    }
+
+    /**
      * @return string the seed as FieldEncryption stored it
      */
     public function encryptedSeed(): string

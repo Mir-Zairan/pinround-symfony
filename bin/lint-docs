@@ -22,7 +22,8 @@ declare(strict_types=1);
 const MAX_LINES_WITHOUT_INDEX = 100;
 const INDEX_WITHIN_LINES = 40;
 const INDEX_HEADING = '## Index';
-const SKIPPED_FOLDERS = ['.claude', '.git', 'vendor', 'var', 'node_modules'];
+// test-results holds Playwright's error-context.md files and tests/e2e/.auth the git-ignored e2e logins and keys.
+const SKIPPED_FOLDERS = ['.claude', '.git', 'vendor', 'var', 'node_modules', 'test-results', 'tests/e2e/.auth'];
 const OWN_FIXTURE_FOLDER = 'tests/Fixtures/DocsLint';
 
 /**

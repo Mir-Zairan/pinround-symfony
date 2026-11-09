@@ -26,6 +26,10 @@ final readonly class DoctrineTwoStepLogins implements TwoStepLogins
     /**
      * Locks the idn_user row, not the idn_mfa_secret one: a user who has none yet has no row to lock, and two first
      * starts would both insert. FOR NO KEY UPDATE still lets other requests add rows that point to the user.
+     *
+     * An entity this request loaded before the lock (a page reading the state first) is read again under the lock:
+     * find() would return it from the identity map as it was, so a code another request spent would count again, and
+     * a row another request deleted would still look on.
      */
     public function byUserIdForChange(UserId $userId): ?TwoStepLogin
     {
@@ -35,12 +39,29 @@ final readonly class DoctrineTwoStepLogins implements TwoStepLogins
         }
         $connection->executeStatement('SELECT 1 FROM idn_user WHERE id = ? FOR NO KEY UPDATE', [$userId->toString()]);
 
-        return $this->byUserId($userId);
+        $loadedBefore = $this->entityManager->getUnitOfWork()->tryGetById(['user' => $userId->toString()], TwoStepLogin::class);
+        if (!$loadedBefore instanceof TwoStepLogin) {
+            return $this->byUserId($userId);
+        }
+        if (false === $connection->fetchOne('SELECT 1 FROM idn_mfa_secret WHERE user_id = ?', [$userId->toString()])) {
+            $this->entityManager->detach($loadedBefore);
+
+            return null;
+        }
+        $this->entityManager->refresh($loadedBefore);
+
+        return $loadedBefore;
     }
 
     public function save(TwoStepLogin $twoStepLogin): void
     {
         $this->entityManager->persist($twoStepLogin);
+        $this->entityManager->flush();
+    }
+
+    public function remove(TwoStepLogin $twoStepLogin): void
+    {
+        $this->entityManager->remove($twoStepLogin);
         $this->entityManager->flush();
     }
 }

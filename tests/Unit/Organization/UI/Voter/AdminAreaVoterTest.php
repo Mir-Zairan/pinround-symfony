@@ -32,49 +32,64 @@ final class AdminAreaVoterTest extends TestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000000b';
 
     /**
-     * @return iterable<string, array{bool}>
+     * @return iterable<string, array{int}>
      */
-    public static function hackathonFlag(): iterable
+    public static function codeProofAgesWithinTheHour(): iterable
     {
-        yield 'flag on' => [true];
-        yield 'flag off' => [false];
+        yield 'just now' => [0];
+        yield '59 minutes' => [59 * 60];
+        yield 'exactly 1 hour' => [3600];
     }
 
     #[Test]
-    public function anAdminWithAPasswordSessionOpensTheAdminAreaWithoutTwoStepLoginOnlyWhileTheHackathonFlagIsOn(): void
+    #[DataProvider('codeProofAgesWithinTheHour')]
+    public function anAdminWithAPasswordSessionAndACodeProofOfTheLastHourOpensTheAdminArea(int $codeProofAgeSeconds): void
     {
-        $token = self::passwordSessionOf(self::SARA);
-
-        self::assertSame(VoterInterface::ACCESS_GRANTED, self::voter(isTwoStepLoginWaived: true, hasConfirmedTwoStepLogin: false)->vote($token, self::acmeFoods(), [AdminPermission::AREA]));
-        self::assertSame(VoterInterface::ACCESS_DENIED, self::voter(isTwoStepLoginWaived: false, hasConfirmedTwoStepLogin: false)->vote($token, self::acmeFoods(), [AdminPermission::AREA]));
-    }
-
-    #[Test]
-    public function anAdminWithAPasswordSessionAndAConfirmedTwoStepLoginNeedsNoFlag(): void
-    {
-        $voter = self::voter(isTwoStepLoginWaived: false, hasConfirmedTwoStepLogin: true);
+        $voter = self::voter(isTwoStepLoginOn: true, codeProofAgeSeconds: $codeProofAgeSeconds);
 
         self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::passwordSessionOf(self::SARA), self::acmeFoods(), [AdminPermission::AREA]));
+    }
+
+    #[Test]
+    public function anAdminWhoseLastCodeIsOverAnHourOldIsDenied(): void
+    {
+        $voter = self::voter(isTwoStepLoginOn: true, codeProofAgeSeconds: 3601);
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::passwordSessionOf(self::SARA), self::acmeFoods(), [AdminPermission::AREA]));
+    }
+
+    #[Test]
+    public function anAdminWithTwoStepLoginOnButNoCodeInThisSessionIsDenied(): void
+    {
+        $voter = self::voter(isTwoStepLoginOn: true, codeProofAgeSeconds: null);
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::passwordSessionOf(self::SARA), self::acmeFoods(), [AdminPermission::AREA]));
+    }
+
+    #[Test]
+    public function anAdminWhoseTwoStepLoginIsOffIsDenied(): void
+    {
+        $voter = self::voter(isTwoStepLoginOn: false, codeProofAgeSeconds: 0);
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::passwordSessionOf(self::SARA), self::acmeFoods(), [AdminPermission::AREA]));
     }
 
     /**
      * Remember-me stands for every token that is not a password session, the personal access token of P09 included.
      */
     #[Test]
-    #[DataProvider('hackathonFlag')]
-    public function anAdminWhoseLoginIsNotAPasswordSessionIsDeniedEvenWithTwoStepLogin(bool $isTwoStepLoginWaived): void
+    public function anAdminWhoseLoginIsNotAPasswordSessionIsDeniedEvenWithAFreshCode(): void
     {
-        $voter = self::voter($isTwoStepLoginWaived, hasConfirmedTwoStepLogin: true);
+        $voter = self::voter(isTwoStepLoginOn: true, codeProofAgeSeconds: 0);
         $rememberMe = new RememberMeToken(new InMemoryUser(self::SARA, null), 'main');
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($rememberMe, self::acmeFoods(), [AdminPermission::AREA]));
     }
 
     #[Test]
-    #[DataProvider('hackathonFlag')]
-    public function aManagerAMemberAnOutsiderAndAnAnonymousRequestAreDenied(bool $isTwoStepLoginWaived): void
+    public function aManagerAMemberAnOutsiderAndAnAnonymousRequestAreDeniedEvenWithAFreshCode(): void
     {
-        $voter = self::voter($isTwoStepLoginWaived, hasConfirmedTwoStepLogin: true);
+        $voter = self::voter(isTwoStepLoginOn: true, codeProofAgeSeconds: 0);
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::passwordSessionOf(self::RAJ), self::acmeFoods(), [AdminPermission::AREA]));
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::passwordSessionOf(self::OMAR), self::acmeFoods(), [AdminPermission::AREA]));
@@ -83,10 +98,9 @@ final class AdminAreaVoterTest extends TestCase
     }
 
     #[Test]
-    #[DataProvider('hackathonFlag')]
-    public function anAdminIsDeniedTheAdminAreaOfAnotherOrganization(bool $isTwoStepLoginWaived): void
+    public function anAdminIsDeniedTheAdminAreaOfAnotherOrganizationEvenWithAFreshCode(): void
     {
-        $voter = self::voter($isTwoStepLoginWaived, hasConfirmedTwoStepLogin: true);
+        $voter = self::voter(isTwoStepLoginOn: true, codeProofAgeSeconds: 0);
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::passwordSessionOf(self::SARA), new OrganizationId(self::BETA_BAKERY), [AdminPermission::AREA]));
     }
@@ -94,7 +108,7 @@ final class AdminAreaVoterTest extends TestCase
     #[Test]
     public function itAbstainsOnOtherAttributesAndOnASubjectThatIsNoOrganization(): void
     {
-        $voter = self::voter(isTwoStepLoginWaived: true, hasConfirmedTwoStepLogin: true);
+        $voter = self::voter(isTwoStepLoginOn: true, codeProofAgeSeconds: 0);
         $token = self::passwordSessionOf(self::SARA);
 
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, self::acmeFoods(), [OrganizationPermission::ADMIN]));
@@ -116,7 +130,7 @@ final class AdminAreaVoterTest extends TestCase
      * Sara is an Admin, Raj a Manager and Omar a member with no org role, all of Acme Foods, the organization of the
      * request; Nobody has no actor.
      */
-    private static function voter(bool $isTwoStepLoginWaived, bool $hasConfirmedTwoStepLogin): AdminAreaVoter
+    private static function voter(bool $isTwoStepLoginOn, ?int $codeProofAgeSeconds): AdminAreaVoter
     {
         $acmeFoods = self::acmeFoods();
         $currentActor = new FixedCurrentActor([
@@ -125,6 +139,6 @@ final class AdminAreaVoterTest extends TestCase
             self::OMAR => new ActorContext(new UserId(self::OMAR), $acmeFoods, Roles::none()),
         ]);
 
-        return new AdminAreaVoter($currentActor, new FixedLoginAssurance($hasConfirmedTwoStepLogin), $isTwoStepLoginWaived);
+        return new AdminAreaVoter($currentActor, new FixedLoginAssurance($isTwoStepLoginOn, $codeProofAgeSeconds));
     }
 }

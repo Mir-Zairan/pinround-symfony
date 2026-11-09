@@ -7,10 +7,13 @@ namespace App\Identity\UI\Controller;
 use App\Identity\Application\AccountPermission;
 use App\Identity\Application\ChangePassword;
 use App\Identity\Application\CurrentSession;
+use App\Identity\Application\DisableTwoStepLogin;
 use App\Identity\Application\LogOutEverywhere;
 use App\Identity\Application\PasswordChangeOutcome;
 use App\Identity\Application\ShowTwoStepSetup;
-use App\Identity\Application\TooManyPasswordChangeTries;
+use App\Identity\Application\TooManyCurrentPasswordTries;
+use App\Identity\Application\TooManyTwoStepCodeTries;
+use App\Identity\Application\TwoStepLoginOffOutcome;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -18,22 +21,25 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * The security page (FR-ID-06): change password, "Log out of all devices" and whether two-step login is on. It acts
- * only on the logged-in user, never on an id from the request; every action asks OwnAccountVoter for
- * AccountPermission::EDIT_OWN first (ADR-0013).
+ * The security page (FR-ID-06): change password, "Log out of all devices", whether two-step login is on and turning
+ * it off with the password and a code (ADR-0012). It acts only on the logged-in user, never on an id from the request;
+ * every action asks OwnAccountVoter for AccountPermission::EDIT_OWN first (ADR-0013).
  */
 final class SecurityPageController extends AbstractController
 {
     public const string PASSWORD_CHANGED = 'Your password is changed. Other devices are logged out.';
     public const string WRONG_CURRENT_PASSWORD = 'The current password is wrong.';
     public const string LOGGED_OUT_EVERYWHERE = 'You are logged out on all devices.';
+    public const string TWO_STEP_LOGIN_OFF = 'Two-step login is off.';
 
     private const string PASSWORD_CSRF_ID = 'security_password';
     private const string LOG_OUT_EVERYWHERE_CSRF_ID = 'security_log_out_everywhere';
+    private const string TWO_STEP_OFF_CSRF_ID = 'two_step_off';
 
     public function __construct(
         private readonly ChangePassword $changePassword,
         private readonly LogOutEverywhere $logOutEverywhere,
+        private readonly DisableTwoStepLogin $disableTwoStepLogin,
         private readonly CurrentSession $currentSession,
         private readonly ClockInterface $clock,
         private readonly ShowTwoStepSetup $showTwoStepSetup,
@@ -62,7 +68,7 @@ final class SecurityPageController extends AbstractController
 
         try {
             $outcome = ($this->changePassword)($this->currentSession->userId(), $request->request->getString('current_password'), $newPassword, $this->clock->now());
-        } catch (TooManyPasswordChangeTries $refusal) {
+        } catch (TooManyCurrentPasswordTries $refusal) {
             return $this->renderPage(passwordError: LoginController::tooManyTriesFor($refusal->minutesToWait), status: Response::HTTP_TOO_MANY_REQUESTS);
         }
         if (PasswordChangeOutcome::PasswordTooShort === $outcome) {
@@ -76,6 +82,33 @@ final class SecurityPageController extends AbstractController
         $this->addFlash('notice', self::PASSWORD_CHANGED);
 
         return $this->redirectToRoute('identity_security');
+    }
+
+    /**
+     * Every response says no-store, like the other two-step login pages.
+     */
+    #[Route('/me/security/two-step/off', name: 'identity_two_step_off', methods: ['POST'])]
+    public function turnOffTwoStepLogin(Request $request): Response
+    {
+        $this->denyAccessUnlessGranted(AccountPermission::EDIT_OWN);
+        if (!$this->isCsrfTokenValid(self::TWO_STEP_OFF_CSRF_ID, $request->request->getString('_csrf_token'))) {
+            return self::notStored($this->renderPage(twoStepOffError: LoginController::FORM_EXPIRED));
+        }
+
+        try {
+            $outcome = ($this->disableTwoStepLogin)($this->currentSession->userId(), $request->request->getString('password'), $request->request->getString('code'), $this->clock->now());
+        } catch (TooManyCurrentPasswordTries|TooManyTwoStepCodeTries $refusal) {
+            return self::notStored($this->renderPage(twoStepOffError: LoginController::tooManyTriesFor($refusal->minutesToWait), status: Response::HTTP_TOO_MANY_REQUESTS));
+        }
+        if (TwoStepLoginOffOutcome::WrongPasswordOrCode === $outcome) {
+            return self::notStored($this->renderPage(twoStepOffError: ConfirmItsYouController::WRONG_PASSWORD_OR_CODE));
+        }
+        // AlreadyOff, as after a double click, says nothing: the page shows that it is off.
+        if (TwoStepLoginOffOutcome::TurnedOff === $outcome) {
+            $this->addFlash('notice', self::TWO_STEP_LOGIN_OFF);
+        }
+
+        return self::notStored($this->redirectToRoute('identity_security'));
     }
 
     #[Route('/me/security/log-out-everywhere', name: 'identity_security_log_out_everywhere', methods: ['POST'])]
@@ -94,15 +127,23 @@ final class SecurityPageController extends AbstractController
         return $this->redirectToRoute('identity_login');
     }
 
-    private function renderPage(?string $passwordError = null, ?string $logOutError = null, ?int $status = null): Response
+    private function renderPage(?string $passwordError = null, ?string $logOutError = null, ?string $twoStepOffError = null, ?int $status = null): Response
     {
-        $hasError = null !== $passwordError || null !== $logOutError;
+        $hasError = null !== $passwordError || null !== $logOutError || null !== $twoStepOffError;
 
         return $this->render('@Identity/security.html.twig', [
             'passwordError' => $passwordError,
             'logOutError' => $logOutError,
+            'twoStepOffError' => $twoStepOffError,
             'minimumPasswordLength' => ChangePassword::MINIMUM_PASSWORD_LENGTH,
             'twoStepLoginState' => $this->showTwoStepSetup->stateOf($this->currentSession->userId()),
         ], new Response(status: $status ?? ($hasError ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK)));
+    }
+
+    private static function notStored(Response $response): Response
+    {
+        $response->headers->addCacheControlDirective('no-store');
+
+        return $response;
     }
 }
