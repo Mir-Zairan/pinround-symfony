@@ -104,3 +104,8 @@ Repo rules (ADR-0003, ADR-0007, ADR-0028, ADR-0031, NFR-SEC-11, testing-strategy
 - Images built locally (`minio`, `minio-init`, `app`, `worker-outbox`, `worker`, `worker-heavy`,
   `scheduler`) have no registry namespace and `pull_policy: never` (ADR-0031,
   `tests/shell/compose-config-check.sh`); a new such service without it is `"I"`.
+<!-- hygiene-machine-checked:start — managed by /hygiene-learn; do not hand-edit -->
+Machine-checked in this repo — the deterministic gate already catches these; do NOT
+spend review effort flagging instances of exactly these classes:
+- dependency: a GitHub Action in .github/ pinned by tag instead of a full commit hash
+<!-- hygiene-machine-checked:end -->

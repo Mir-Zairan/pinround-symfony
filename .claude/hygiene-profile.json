@@ -716,6 +716,31 @@
           "line": 324,
           "text": "It never grants `TRUNCATE`, `REFERENCES` or `TRIGGER`"
         }
+      },
+      {
+        "id": "learn-action-tag-pin",
+        "class": "dependency",
+        "lens": "hygiene-dependency-auditor",
+        "ext": [
+          "yml",
+          "yaml"
+        ],
+        "paths": [
+          ".github/"
+        ],
+        "pattern": "uses:[[:space:]]+[^[:space:]@#]+@([^0-9a-f[:space:]]|[0-9a-f]{0,39}([^0-9a-f]|$))",
+        "exclude": null,
+        "astPattern": null,
+        "astLang": null,
+        "message": "Pin a GitHub Action by its full 40-character commit hash, with the version as a comment (uses: owner/action@<sha> # v1.2.3); a tag like @v4 can be moved.",
+        "origin": "learned",
+        "confidence": "high",
+        "enabled": true,
+        "provenance": {
+          "file": ".claude/hygiene-findings.jsonl",
+          "line": null,
+          "text": "dependency findings: pin actions and images by hash"
+        }
       }
     ]
   },
