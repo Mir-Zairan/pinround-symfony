@@ -84,6 +84,21 @@ final class SetUpOrganizationWorkflowTest extends KernelTestCase
         self::assertEquals(new RuleSet(testerMovesDone: true, noSelfReview: true, reviewBeforeTest: true), $ruleSet);
     }
 
+    #[Test]
+    public function theEightCoreStepsAreSavedInOneFlush(): void
+    {
+        [$flushes, $stepCount] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $setUpWorkflow = new SetUpOrganizationWorkflow(new DoctrineSteps($this->entityManager()), new DbalRuleSets($this->connection()));
+
+            return [
+                FlushCounter::countDuring($this->entityManager(), static fn () => $setUpWorkflow->setUp(new OrganizationId(self::ACME_FOODS))),
+                $this->connection()->fetchOne('SELECT count(*) FROM wf_step'),
+            ];
+        });
+
+        self::assertSame([1, 8], [$flushes, $stepCount]);
+    }
+
     /**
      * The workflow step runs first and writes its rows; the failing step after it must take them back with the
      * organization, so the caller's rollback leaves nothing.

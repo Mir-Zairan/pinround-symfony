@@ -29,9 +29,11 @@ final readonly class DoctrineSteps implements Steps
         return $this->entityManager->getRepository(Step::class)->findOneBy(['id' => $id->toString()]);
     }
 
-    public function add(Step $step): void
+    public function add(Step ...$steps): void
     {
-        $this->entityManager->persist($step);
+        foreach ($steps as $step) {
+            $this->entityManager->persist($step);
+        }
         $this->entityManager->flush();
     }
 }

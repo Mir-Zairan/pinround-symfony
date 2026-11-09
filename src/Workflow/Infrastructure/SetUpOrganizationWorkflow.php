@@ -24,18 +24,16 @@ final readonly class SetUpOrganizationWorkflow implements OrganizationSetupStep
 
     public function setUp(OrganizationId $organizationId): void
     {
-        foreach (CoreStep::cases() as $coreStep) {
-            $this->steps->add(new Step(
-                $this->steps->nextIdentity(),
-                $organizationId,
-                null,
-                StepOrigin::Core,
-                $coreStep,
-                $coreStep->stepName(),
-                $coreStep->group(),
-                $coreStep->position(),
-            ));
-        }
+        $this->steps->add(...array_map(fn (CoreStep $coreStep): Step => new Step(
+            $this->steps->nextIdentity(),
+            $organizationId,
+            null,
+            StepOrigin::Core,
+            $coreStep,
+            $coreStep->stepName(),
+            $coreStep->group(),
+            $coreStep->position(),
+        ), CoreStep::cases()));
         $this->ruleSets->saveForOrganization($organizationId, RuleSet::defaults());
     }
 }

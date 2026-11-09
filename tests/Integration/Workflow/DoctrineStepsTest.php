@@ -45,16 +45,19 @@ final class DoctrineStepsTest extends KernelTestCase
     }
 
     #[Test]
-    public function aCoreACompanyAndATeamStepAreSavedAndFoundById(): void
+    public function aCoreACompanyAndATeamStepAreSavedInOneFlushAndFoundById(): void
     {
-        [$found, $storedCoreRow] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+        [$flushes, $found, $storedCoreRow] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
             $steps = $this->steps();
-            $steps->add(new Step(new StepId(self::CORE_STEP), new OrganizationId(self::ACME_FOODS), null, StepOrigin::Core, CoreStep::Review, 'Code review', Group::Check, 3));
-            $steps->add(new Step(new StepId(self::COMPANY_STEP), new OrganizationId(self::ACME_FOODS), null, StepOrigin::Company, null, 'Design check', Group::Check, 4));
-            $steps->add(new Step(new StepId(self::TEAM_STEP), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), StepOrigin::Team, null, '  Ready to ship  ', Group::Wait, 7));
+            $flushes = FlushCounter::countDuring($this->entityManager(), static fn () => $steps->add(
+                new Step(new StepId(self::CORE_STEP), new OrganizationId(self::ACME_FOODS), null, StepOrigin::Core, CoreStep::Review, 'Code review', Group::Check, 3),
+                new Step(new StepId(self::COMPANY_STEP), new OrganizationId(self::ACME_FOODS), null, StepOrigin::Company, null, 'Design check', Group::Check, 4),
+                new Step(new StepId(self::TEAM_STEP), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), StepOrigin::Team, null, '  Ready to ship  ', Group::Wait, 7),
+            ));
             $this->entityManager()->clear();
 
             return [
+                $flushes,
                 array_map(static function (string $id) use ($steps): array {
                     $step = $steps->byId(new StepId($id));
                     self::assertNotNull($step, $id);
@@ -65,6 +68,7 @@ final class DoctrineStepsTest extends KernelTestCase
             ];
         });
 
+        self::assertSame(1, $flushes);
         self::assertSame(
             [
                 [self::CORE_STEP, self::ACME_FOODS, null, StepOrigin::Core, CoreStep::Review, 'Code review', Group::Check, 3],
