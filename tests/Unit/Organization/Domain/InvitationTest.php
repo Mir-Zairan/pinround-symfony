@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Organization\Domain;
 
 use App\Organization\Domain\Invitation;
 use App\Organization\Domain\InvitationId;
+use App\Organization\Domain\InvitationLinkToken;
 use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\TeamHasOneLead;
@@ -155,6 +156,25 @@ final class InvitationTest extends TestCase
         } catch (\InvalidArgumentException) {
             self::assertFalse($invitation->hasLinkToken());
         }
+    }
+
+    #[Test]
+    public function itIsLinkedOnlyByTheTokenWhoseHashIsAttached(): void
+    {
+        $invitation = $this->issue(new \DateTimeImmutable('2027-03-15 10:30:00 UTC'));
+        $linkToken = InvitationLinkToken::generate();
+        $invitation->attachLinkTokenHash($linkToken->hash());
+
+        self::assertTrue($invitation->isLinkedBy($linkToken));
+        self::assertFalse($invitation->isLinkedBy(InvitationLinkToken::generate()));
+    }
+
+    #[Test]
+    public function anInvitationWithoutALinkTokenIsLinkedByNoToken(): void
+    {
+        $invitation = $this->issue(new \DateTimeImmutable('2027-03-15 10:30:00 UTC'));
+
+        self::assertFalse($invitation->isLinkedBy(InvitationLinkToken::generate()));
     }
 
     private function issue(\DateTimeImmutable $createdAt): Invitation

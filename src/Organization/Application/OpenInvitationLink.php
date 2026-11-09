@@ -9,7 +9,8 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * An invitation whose link was open when it was looked up, with what the accept page shows. It is also the subject of
- * OrganizationPermission::ACCEPT_INVITATION.
+ * OrganizationPermission::ACCEPT_INVITATION. Anyone can build one, so it proves nothing: AcceptInvitation takes the
+ * link token with it and checks that token against the locked invitation.
  */
 final readonly class OpenInvitationLink
 {

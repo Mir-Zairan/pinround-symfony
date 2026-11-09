@@ -11,6 +11,7 @@ use App\Organization\Application\OpenInvitationLink;
 use App\Organization\Application\SetTeamRole;
 use App\Organization\Domain\Invitation;
 use App\Organization\Domain\InvitationId;
+use App\Organization\Domain\InvitationLinkToken;
 use App\Organization\Domain\Job;
 use App\Organization\Domain\Organization;
 use App\Organization\Domain\OrgRole;
@@ -46,13 +47,16 @@ final class AcceptInvitationTest extends KernelTestCase
     private const string SARA = '0197a3c0-0000-7000-8000-000000000a56';
     private const string OMARS_EMAIL = 'omar@acme-foods.example';
 
+    private InvitationLinkToken $linkToken;
+
     protected function setUp(): void
     {
+        $this->linkToken = InvitationLinkToken::generate();
         $this->rows()->removeAllOf(self::ACME_FOODS);
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             new DoctrineOrganizations($this->entityManager())->add(new Organization(new OrganizationId(self::ACME_FOODS), 'Acme Foods', 'accept-'.self::ACME_FOODS, self::sentAt()));
             new DoctrineTeams($this->entityManager())->add(new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, self::sentAt()));
-            new DoctrineInvitations($this->entityManager())->add(Invitation::issue(
+            $invitation = Invitation::issue(
                 new InvitationId(self::INVITATION),
                 new OrganizationId(self::ACME_FOODS),
                 self::OMARS_EMAIL,
@@ -61,7 +65,9 @@ final class AcceptInvitationTest extends KernelTestCase
                 TeamRole::Member,
                 new UserId(self::SARA),
                 self::sentAt(),
-            ));
+            );
+            $invitation->attachLinkTokenHash($this->linkToken->hash());
+            new DoctrineInvitations($this->entityManager())->add($invitation);
         });
     }
 
@@ -76,10 +82,10 @@ final class AcceptInvitationTest extends KernelTestCase
     #[Test]
     public function aSecondAcceptOfTheSameInvitationIsRefusedAndThePersonJoinsOnce(): void
     {
-        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->acceptInvitation()->acceptAs(self::link(), new UserId(self::OMAR), self::now()));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->acceptInvitation()->acceptAs(self::link(), $this->linkToken->reveal(), new UserId(self::OMAR), self::now()));
 
         try {
-            $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->acceptInvitation()->acceptAs(self::link(), new UserId(self::OMAR), self::now()->modify('+1 minute')));
+            $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->acceptInvitation()->acceptAs(self::link(), $this->linkToken->reveal(), new UserId(self::OMAR), self::now()->modify('+1 minute')));
             self::fail('The invitation was accepted twice.');
         } catch (InvitationNoLongerValid) {
         }
@@ -91,6 +97,23 @@ final class AcceptInvitationTest extends KernelTestCase
             $this->connection()->fetchOne('SELECT accepted_at IS NOT NULL FROM org_invitation WHERE organization_id = ? AND id = ?', [self::ACME_FOODS, self::INVITATION]),
         ]);
         self::assertSame([1, 1, true], $counts);
+    }
+
+    #[Test]
+    public function theStoredHashRefusesATokenOfAnotherLink(): void
+    {
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->acceptInvitation()->acceptAs(self::link(), InvitationLinkToken::generate()->reveal(), new UserId(self::OMAR), self::now()));
+            self::fail('The invitation was accepted with another link token.');
+        } catch (InvitationNoLongerValid) {
+        }
+        self::getContainer()->get('doctrine')->resetManager();
+
+        $counts = $this->transactions()->committedAs(self::ACME_FOODS, fn (): array => [
+            $this->connection()->fetchOne('SELECT count(*) FROM org_membership WHERE organization_id = ? AND user_id = ?', [self::ACME_FOODS, self::OMAR]),
+            $this->connection()->fetchOne('SELECT accepted_at IS NULL FROM org_invitation WHERE organization_id = ? AND id = ?', [self::ACME_FOODS, self::INVITATION]),
+        ]);
+        self::assertSame([0, true], $counts);
     }
 
     private function acceptInvitation(): AcceptInvitation

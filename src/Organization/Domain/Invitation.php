@@ -151,6 +151,16 @@ final class Invitation implements TenantOwned
     }
 
     /**
+     * Whether $token is the one in the emailed link, compared in constant time. False while no token is attached.
+     */
+    public function isLinkedBy(InvitationLinkToken $token): bool
+    {
+        $storedHash = \is_resource($this->tokenHash) ? stream_get_contents($this->tokenHash, null, 0) : $this->tokenHash;
+
+        return \is_string($storedHash) && hash_equals($storedHash, $token->hash());
+    }
+
+    /**
      * Open: not accepted yet and $at is before the expiry; at the expiry itself it is closed, as in resolve_invitation.
      */
     public function isOpenAt(\DateTimeImmutable $at): bool
