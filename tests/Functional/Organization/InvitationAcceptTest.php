@@ -4,31 +4,24 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Organization;
 
-use App\Organization\Application\EmailInvitationLink;
 use App\Organization\UI\InvitationController;
-use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
-use App\Tests\Integration\Organization\OrganizationCommandsOnTheEventBus;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
-use Symfony\Component\Messenger\Envelope;
-use Symfony\Component\Messenger\Stamp\ReceivedStamp;
-use Symfony\Component\Mime\Email;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
- * The invite accept page through the real firewall, over HTTPS. Each invitation is made and its link emailed through
- * InviteMember and SendInvitationLink, as worker-notify would, so the link is the one the mailer builds.
+ * The invite accept page through the real firewall, over HTTPS, with links the mailer built (SendsInvitationLinks).
  */
 final class InvitationAcceptTest extends WebTestCase
 {
     use Factories;
     use LogsInUsers;
+    use SendsInvitationLinks;
 
     private const string NEW_PASSWORD = 'a long enough new passphrase';
     private const string INVITE_PAGE = 'https://localhost/invite';
@@ -44,6 +37,9 @@ final class InvitationAcceptTest extends WebTestCase
         $this->openLink($client, $link);
         self::assertCount(1, $client->getCrawler()->filter('main input[name="password"][type="password"][minlength="12"]'));
         self::assertSame('At least 12 characters.', $client->getCrawler()->filter('main #invitation-password-hint')->text());
+        $emailField = $client->getCrawler()->filter('main form input[type="email"][readonly][autocomplete="username"]:not([name])');
+        self::assertSame($email, $emailField->attr('value'));
+        self::assertCount(1, $client->getCrawler()->filterXPath('//main//form/label[input[@type="email"]]/following-sibling::label[1]/input[@name="password"]'), 'the email field comes right before the password');
         $client->submitForm('Join', ['name' => 'Mia Lund', 'password' => self::NEW_PASSWORD]);
 
         self::assertResponseRedirects('/login', 302);
@@ -241,6 +237,7 @@ final class InvitationAcceptTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(422);
         self::assertSame(InvitationController::FORM_EXPIRED, $client->getCrawler()->filter('main [role="alert"]')->text());
+        self::assertSame('Mia Lund', $client->getCrawler()->filter('main input[name="name"]')->attr('value'));
         self::assertNull($this->userIdWithEmail($email));
         self::assertSame(0, $this->acceptedInvitationCount($organizationId));
     }
@@ -258,6 +255,7 @@ final class InvitationAcceptTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(422);
         self::assertSame(\sprintf(InvitationController::PASSWORD_TOO_SHORT, 12), $client->getCrawler()->filter('main [role="alert"]')->text());
+        self::assertSame('Mia Lund', $client->getCrawler()->filter('main input[name="name"]')->attr('value'));
         self::assertNull($this->userIdWithEmail($email));
         self::assertSame(0, $this->acceptedInvitationCount($organizationId));
 
@@ -292,6 +290,32 @@ final class InvitationAcceptTest extends WebTestCase
         self::assertCount(1, $client->getCrawler()->filter('main form[action="/invite"]'));
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function refusedNames(): iterable
+    {
+        yield 'blank' => ['   ', InvitationController::NAME_BLANK];
+        yield 'one character too long' => [str_repeat('m', 101), \sprintf(InvitationController::NAME_TOO_LONG, 100)];
+    }
+
+    #[Test]
+    #[DataProvider('refusedNames')]
+    public function aRefusedNameShowsItsRuleAndCreatesNothing(string $name, string $message): void
+    {
+        $client = self::httpsClient();
+        $organizationId = $this->createOrganization('Acme Foods');
+        $email = self::newEmail('mia');
+        $this->openLink($client, $this->invite($organizationId, $email));
+
+        $client->submitForm('Join', ['name' => $name, 'password' => self::NEW_PASSWORD]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame($message, $client->getCrawler()->filter('main [role="alert"]')->text());
+        self::assertNull($this->userIdWithEmail($email));
+        self::assertSame(0, $this->acceptedInvitationCount($organizationId));
+    }
+
     #[Test]
     public function theInvitePageWithoutATokenInTheSessionSaysItIsNoLongerValid(): void
     {
@@ -301,37 +325,6 @@ final class InvitationAcceptTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(InvitationController::NO_LONGER_VALID, $client->getCrawler()->filter('main [role="alert"]')->text());
-    }
-
-    /**
-     * @return string the emailed link
-     */
-    private function invite(OrganizationId $organizationId, string $email): string
-    {
-        $container = self::getContainer();
-        $entityManager = $container->get('doctrine.orm.default_entity_manager');
-        $tenantContext = $container->get(TenantContext::class);
-        $commands = new OrganizationCommandsOnTheEventBus($entityManager, $container->get('event.bus'));
-        // The lookup and the link email compare with the real time, so the invitation is made now.
-        $invitedAt = $container->get(ClockInterface::class)->now();
-        $entityManager->clear();
-        $tenantContext->reset();
-        $tenantContext->set($organizationId);
-        try {
-            $invitationId = $entityManager->wrapInTransaction(static fn (): string => $commands->invite($organizationId->toString(), $email, $invitedAt));
-            $entityManager->clear();
-            $container->get('command.bus')->dispatch(new Envelope(new EmailInvitationLink($organizationId->toString(), $invitationId), [new ReceivedStamp('async_notify')]));
-        } finally {
-            $entityManager->clear();
-            $tenantContext->reset();
-        }
-
-        $messages = self::getMailerMessages();
-        $sentEmail = end($messages);
-        self::assertInstanceOf(Email::class, $sentEmail);
-        self::assertSame(1, preg_match('~https?://\S+/invite/[A-Za-z0-9_-]+~', (string) $sentEmail->getTextBody(), $match));
-
-        return $match[0];
     }
 
     private function openLink(KernelBrowser $client, string $link): void

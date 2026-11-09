@@ -92,15 +92,15 @@ final class InvitationController extends AbstractController
         if (!$request->isMethod('POST')) {
             return $this->renderAcceptForm($link);
         }
+        $name = $request->request->getString('name');
         if (!$this->isCsrfTokenValid(self::CSRF_ID, $request->request->getString('_csrf_token'))) {
-            return $this->renderAcceptForm($link, [self::FORM_EXPIRED]);
+            return $this->renderAcceptForm($link, [self::FORM_EXPIRED], $name);
         }
 
         $userId = $this->currentUser->id();
         $now = $this->clock->now();
         try {
             if (null === $userId) {
-                $name = $request->request->getString('name');
                 $password = $request->request->getString('password');
                 $this->organizationTransactions->runAs($link->organizationId, fn () => $this->acceptInvitation->acceptAsNewPerson($link, $token, $name, $password, $now));
             } else {
@@ -114,7 +114,7 @@ final class InvitationController extends AbstractController
             return $this->enterJoinedOrganization($session, $link, self::ALREADY_IN);
         } catch (RegistrationRefused $refused) {
             // The EntityManager may be closed now (InvitedPersonRegistration::register), so the page reads nothing.
-            return $this->renderRegistrationRefused($session, $link, $refused);
+            return $this->renderRegistrationRefused($session, $link, $refused, $name);
         }
         $session->remove(self::TOKEN_SESSION_KEY);
 
@@ -178,17 +178,17 @@ final class InvitationController extends AbstractController
     /**
      * @param list<string> $errors
      */
-    private function renderAcceptForm(OpenInvitationLink $link, array $errors = []): Response
+    private function renderAcceptForm(OpenInvitationLink $link, array $errors = [], string $typedName = ''): Response
     {
         $status = [] === $errors ? Response::HTTP_OK : Response::HTTP_UNPROCESSABLE_ENTITY;
         if (null === $this->currentUser->id()) {
-            return $this->renderPage('new_person', $link->organizationName, $errors, $status, $link->invitedEmail);
+            return $this->renderPage('new_person', $link->organizationName, $errors, $status, $link->invitedEmail, $typedName);
         }
 
         return $this->renderPage('join', $link->organizationName, $errors, $status, $link->invitedEmail);
     }
 
-    private function renderRegistrationRefused(SessionInterface $session, OpenInvitationLink $link, RegistrationRefused $refused): Response
+    private function renderRegistrationRefused(SessionInterface $session, OpenInvitationLink $link, RegistrationRefused $refused, string $typedName): Response
     {
         if (\in_array(RegistrationRefusal::EmailTaken, $refused->refusals, true)) {
             return $this->renderLogInToJoin($session, $link, [self::EMAIL_TAKEN]);
@@ -201,19 +201,20 @@ final class InvitationController extends AbstractController
             RegistrationRefusal::PasswordTooShort => \sprintf(self::PASSWORD_TOO_SHORT, $this->registration->minimumPasswordLength()),
         }, $refused->refusals);
 
-        return $this->renderAcceptForm($link, $errors);
+        return $this->renderAcceptForm($link, $errors, $typedName);
     }
 
     /**
      * @param 'no_longer_valid'|'for_another_email'|'log_in_to_join'|'new_person'|'join' $view
      * @param list<string>                                                               $errors
      */
-    private function renderPage(string $view, ?string $organizationName, array $errors, int $status = Response::HTTP_OK, ?string $invitedEmail = null): Response
+    private function renderPage(string $view, ?string $organizationName, array $errors, int $status = Response::HTTP_OK, ?string $invitedEmail = null, string $typedName = ''): Response
     {
         return $this->render('@Organization/invitation.html.twig', [
             'view' => $view,
             'organizationName' => $organizationName,
             'invitedEmail' => $invitedEmail,
+            'typedName' => $typedName,
             'errors' => $errors,
             'minimumPasswordLength' => $this->registration->minimumPasswordLength(),
             'maximumNameLength' => $this->registration->maximumNameLength(),

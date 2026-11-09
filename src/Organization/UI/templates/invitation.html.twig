@@ -32,7 +32,12 @@
                 <form class="login__form" method="post" action="{{ path('organization_invitation') }}">
                     <label class="login__field">
                         Your name
-                        <input class="login__input" type="text" name="name" autocomplete="name" maxlength="{{ maximumNameLength }}" required autofocus>
+                        <input class="login__input" type="text" name="name" value="{{ typedName }}" autocomplete="name" maxlength="{{ maximumNameLength }}" required autofocus>
+                    </label>
+                    {#- No name, so it is never sent: the account takes the invited email. It is here for password managers. #}
+                    <label class="login__field">
+                        Email
+                        <input class="login__input" type="email" value="{{ invitedEmail }}" autocomplete="username" readonly>
                     </label>
                     <label class="login__field">
                         Password

@@ -8,6 +8,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Tests\Functional\Organization\SendsInvitationLinks;
 use Doctrine\ORM\EntityManagerInterface;
 use OpenTelemetry\API\Trace\SpanContextValidator;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
@@ -26,6 +27,7 @@ final class WorkerResetTest extends WebTestCase
 {
     use Factories;
     use LogsInUsers;
+    use SendsInvitationLinks;
 
     private const string ORG_A = '0197a3c0-0000-7000-8000-00000000000a';
 
@@ -71,6 +73,27 @@ final class WorkerResetTest extends WebTestCase
         self::assertResponseStatusCodeSame(500);
         self::assertSame(self::ORG_A, $this->tenantContext()->get()?->toString());
         self::assertFalse($this->entityManager()->isOpen());
+
+        $this->client->request('GET', '/_test/worker-reset');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['organizationId' => null, 'isEntityManagerOpen' => true], $this->responseJson());
+    }
+
+    #[Test]
+    public function theNextRequestHasNoTenantAndAnOpenEntityManagerAfterARefusedInvitationJoin(): void
+    {
+        $this->client->setServerParameter('HTTPS', 'on');
+        $link = $this->invite($this->createOrganization('Acme Foods'), 'mia.'.bin2hex(random_bytes(4)).'@acme-foods.example');
+        $this->client->request('GET', (string) parse_url($link, \PHP_URL_PATH));
+        self::assertResponseRedirects('/invite', 302);
+        $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submitForm('Join', ['name' => 'Mia Lund', 'password' => 'elevenchars']);
+        self::assertResponseStatusCodeSame(422);
+        self::assertNull($this->tenantContext()->get());
+        self::assertFalse($this->entityManager()->isOpen(), 'the refused accept no longer closes the entity manager, so this test proves nothing');
 
         $this->client->request('GET', '/_test/worker-reset');
 
