@@ -96,6 +96,12 @@ services:
         tags:
             - { name: messenger.message_handler, bus: event.bus, handles: App\Organization\Api\Event\OrganizationEvent }
 
+    # Wired here, not with #[AutowireIterator]: the Application layer may not use a Vendor class (deptrac.yaml).
+    # The tag is the one OrganizationSetupStep autoconfigures.
+    App\Organization\Application\CreateOrganization:
+        arguments:
+            $setupSteps: !tagged_iterator app.organization_setup_step
+
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
