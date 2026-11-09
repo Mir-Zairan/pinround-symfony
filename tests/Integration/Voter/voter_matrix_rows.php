@@ -64,6 +64,17 @@ return [
     ['source' => $deniedUnlessARuleAllows, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Sara', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Ben', 'subject' => 'Acme Foods', 'expected' => 'denied'],
 
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted'],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'granted'],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Omar', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Mia', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Raj', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Noor', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'granted'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Lena', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Sara', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Ben', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+
     ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => true],
     ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => true],
     ['source' => $adminPages, 'attribute' => AdminPermission::AREA, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'granted', 'twoStepProof' => true],

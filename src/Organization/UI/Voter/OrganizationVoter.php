@@ -12,8 +12,8 @@ use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authorization\Voter\Vote;
 
 /**
- * Decides OrganizationPermission VIEW and ADMIN (ADR-0013) from the request's actor: VIEW for the organization the
- * request works in, ADMIN when the actor is also an Admin there. Being in that organization is the proof of
+ * Decides OrganizationPermission VIEW, ADMIN and INVITE (ADR-0013) from the request's actor: VIEW for the organization
+ * the request works in, ADMIN and INVITE when the actor is also an Admin there. Being in that organization is the proof of
  * membership: EnterChosenOrganization sets the request's tenant only to an organization of the logged-in user
  * (MembershipQueries::organizationsOf), and CurrentActor gives no actor without a tenant.
  *
@@ -27,7 +27,7 @@ final class OrganizationVoter extends DenyByDefaultVoter
 
     protected function attributes(): array
     {
-        return [OrganizationPermission::VIEW, OrganizationPermission::ADMIN];
+        return [OrganizationPermission::VIEW, OrganizationPermission::ADMIN, OrganizationPermission::INVITE];
     }
 
     protected function subjectClass(): string
@@ -45,6 +45,7 @@ final class OrganizationVoter extends DenyByDefaultVoter
         return match ($attribute) {
             OrganizationPermission::VIEW => true,
             OrganizationPermission::ADMIN => $actor->roles()->isAdmin(),
+            OrganizationPermission::INVITE => $actor->roles()->isAdmin(),
             default => false,
         };
     }
