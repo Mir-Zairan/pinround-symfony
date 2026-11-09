@@ -12,8 +12,9 @@ use App\Organization\Api\TeamPermission;
  * source:    text of docs/00-product/personas-and-roles.md the row comes from (a Permission matrix action, a heading
  *            or a sentence), copied exactly; VoterMatrixTest fails when the doc no longer has it.
  * actor:     a person of VoterMatrixTest::PEOPLE, deciding in their own organization.
- * subject:   an organization (Acme Foods, Beta Bakery) or a team (Shop, Mobile, Support of Acme Foods; Checkout of Beta
- *            Bakery).
+ * subject:   an organization (Acme Foods, Beta Bakery), a team (Shop, Mobile, Support of Acme Foods; Checkout of Beta
+ *            Bakery) or an open invitation link to Acme Foods ("Invitation of Omar" for Omar's email; "Invitation of a
+ *            new email" for an email nobody has an account with). Nobody-logged-in cases are in InvitationVoterTest.
  * expected:  granted or denied.
  * twoStepProof: optional; decides for a person whose two-step login is on. true: they typed a code in this session 30
  *            minutes ago, within the 1 hour admin pages allow; an int: the code is that many seconds old; 'noCode': no
@@ -36,6 +37,7 @@ $teamsAtAGlance = 'Teams at a glance';
 $managerSeesAllTeams = '"Teams at a glance" for all teams';
 $managerAssigns = 'Give it to… (assign)';
 $adminWithoutTeamRole = 'An admin with no team role may see every ticket in the org';
+$invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
 return [
     ['source' => $isAUser, 'attribute' => OrganizationPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted'],
@@ -137,4 +139,10 @@ return [
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TeamPermission::LEAD, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TeamPermission::LEAD, 'actor' => 'Sara', 'subject' => 'Checkout', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TeamPermission::LEAD, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $invitationLinks, 'attribute' => OrganizationPermission::ACCEPT_INVITATION, 'actor' => 'Omar', 'subject' => 'Invitation of Omar', 'expected' => 'granted'],
+    ['source' => $invitationLinks, 'attribute' => OrganizationPermission::ACCEPT_INVITATION, 'actor' => 'Mia', 'subject' => 'Invitation of Omar', 'expected' => 'denied'],
+    ['source' => $invitationLinks, 'attribute' => OrganizationPermission::ACCEPT_INVITATION, 'actor' => 'Sara', 'subject' => 'Invitation of Omar', 'expected' => 'denied'],
+    ['source' => $invitationLinks, 'attribute' => OrganizationPermission::ACCEPT_INVITATION, 'actor' => 'Ben', 'subject' => 'Invitation of Omar', 'expected' => 'denied'],
+    ['source' => $invitationLinks, 'attribute' => OrganizationPermission::ACCEPT_INVITATION, 'actor' => 'Lena', 'subject' => 'Invitation of a new email', 'expected' => 'denied'],
+    ['source' => $invitationLinks, 'attribute' => OrganizationPermission::ACCEPT_INVITATION, 'actor' => 'Sara', 'subject' => 'Invitation of a new email', 'expected' => 'denied'],
 ];

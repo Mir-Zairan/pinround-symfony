@@ -6,7 +6,8 @@ namespace App\Organization\Api;
 
 /**
  * The voter attributes for organizations (ADR-0013), in the Api so the UI of any module may ask them.
- * OrganizationMemberVoter decides CHOOSE and ENTER, OrganizationVoter decides VIEW, ADMIN and INVITE.
+ * OrganizationMemberVoter decides CHOOSE and ENTER, OrganizationVoter decides VIEW, ADMIN and INVITE, InvitationVoter
+ * decides ACCEPT_INVITATION.
  */
 final class OrganizationPermission
 {
@@ -30,4 +31,10 @@ final class OrganizationPermission
      * role only, so the admin pages that invite also ask AdminPermission::AREA.
      */
     public const string INVITE = 'ORG_INVITE';
+
+    /**
+     * Accept an invitation from its emailed link, logged in or not. Its subject is the Organization Application's
+     * OpenInvitationLink.
+     */
+    public const string ACCEPT_INVITATION = 'ORG_ACCEPT_INVITATION';
 }
