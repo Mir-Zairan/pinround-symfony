@@ -15,6 +15,7 @@
         <header class="home__header">
             <p class="home__date">{{ today|date('l, j F', app.user.timeZone) }}</p>
             <h1 class="home__title">Teams at a glance</h1>
+            {% include '@Web/home/_notices.html.twig' %}
             <p class="home__subline">Every team uses the same five groups, even when its own steps differ. Open a team to see its steps.</p>
         </header>
 

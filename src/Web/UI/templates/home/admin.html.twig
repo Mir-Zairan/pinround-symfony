@@ -13,6 +13,7 @@
 {% block main %}
     <div class="home home--admin">
         <h1 class="home__title">Your organization</h1>
+        {% include '@Web/home/_notices.html.twig' %}
 
         <ul class="home__stats">
             <li><twig:Card class="home__stat"><span class="home__stat-label">People</span><span class="home__stat-value">—<span class="visually-hidden"> (not available yet)</span></span></twig:Card></li>

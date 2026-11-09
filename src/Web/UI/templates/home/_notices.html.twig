@@ -1,0 +1,4 @@
+{#- Every Home includes this, so a notice such as "You joined …" shows on whichever Home the role gets, not later. -#}
+{% for notice in app.flashes('notice') %}
+    <p class="home__subline" role="status">{{ notice }}</p>
+{% endfor %}

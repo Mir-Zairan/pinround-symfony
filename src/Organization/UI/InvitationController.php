@@ -15,9 +15,8 @@ use App\Organization\Application\InvitationForAnotherPerson;
 use App\Organization\Application\InvitationLinks;
 use App\Organization\Application\InvitationNoLongerValid;
 use App\Organization\Application\OpenInvitationLink;
-use App\SharedKernel\Application\TenantContext;
+use App\Organization\Application\OrganizationTransactions;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
-use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -65,8 +64,7 @@ final class InvitationController extends AbstractController
         private readonly AcceptInvitation $acceptInvitation,
         private readonly InvitedPersonRegistration $registration,
         private readonly CurrentUser $currentUser,
-        private readonly TenantContext $tenantContext,
-        private readonly EntityManagerInterface $entityManager,
+        private readonly OrganizationTransactions $organizationTransactions,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -89,7 +87,7 @@ final class InvitationController extends AbstractController
             return $this->renderNoLongerValid($session);
         }
         if (!$this->isGranted(OrganizationPermission::ACCEPT_INVITATION, $link)) {
-            return $this->renderRefusal($session, $link);
+            return $this->renderRefusal($session, $link, $request->isMethod('POST'));
         }
         if (!$request->isMethod('POST')) {
             return $this->renderAcceptForm($link);
@@ -104,9 +102,9 @@ final class InvitationController extends AbstractController
             if (null === $userId) {
                 $name = $request->request->getString('name');
                 $password = $request->request->getString('password');
-                $this->inOwnTransaction($link, fn () => $this->acceptInvitation->acceptAsNewPerson($link, $token, $name, $password, $now));
+                $this->organizationTransactions->runAs($link->organizationId, fn () => $this->acceptInvitation->acceptAsNewPerson($link, $token, $name, $password, $now));
             } else {
-                $this->inOwnTransaction($link, fn () => $this->acceptInvitation->acceptAs($link, $token, $userId, $now));
+                $this->organizationTransactions->runAs($link->organizationId, fn () => $this->acceptInvitation->acceptAs($link, $token, $userId, $now));
             }
         } catch (InvitationNoLongerValid) {
             return $this->renderNoLongerValid($session);
@@ -130,26 +128,6 @@ final class InvitationController extends AbstractController
         return $this->enterJoinedOrganization($session, $link, self::JOINED);
     }
 
-    /**
-     * Runs $accept under the link's organization in a transaction of its own, then puts the tenant back. The entity
-     * manager is cleared before, as the tenant switch guard refuses while it holds the logged-in user, and after, as a
-     * failed transaction leaves it closed.
-     *
-     * @param \Closure(): mixed $accept
-     */
-    private function inOwnTransaction(OpenInvitationLink $link, \Closure $accept): void
-    {
-        $tenantBefore = $this->tenantContext->get();
-        $this->entityManager->clear();
-        $this->tenantContext->set($link->organizationId);
-        try {
-            $this->entityManager->wrapInTransaction($accept);
-        } finally {
-            $this->entityManager->clear();
-            null === $tenantBefore ? $this->tenantContext->clear() : $this->tenantContext->set($tenantBefore);
-        }
-    }
-
     private function enterJoinedOrganization(SessionInterface $session, OpenInvitationLink $link, string $notice): Response
     {
         $session->remove(self::TOKEN_SESSION_KEY);
@@ -160,13 +138,17 @@ final class InvitationController extends AbstractController
         return $this->redirectToRoute('web_home');
     }
 
-    private function renderRefusal(SessionInterface $session, OpenInvitationLink $link): Response
+    /**
+     * Logged out, the voter refuses only when an account has the invited email; one made since the form opened gets
+     * the same message as a registration that finds it.
+     */
+    private function renderRefusal(SessionInterface $session, OpenInvitationLink $link, bool $isJoinSubmitted): Response
     {
         if (null !== $this->currentUser->id()) {
             return $this->renderForAnotherEmail();
         }
 
-        return $this->renderLogInToJoin($session, $link);
+        return $this->renderLogInToJoin($session, $link, $isJoinSubmitted ? [self::EMAIL_TAKEN] : []);
     }
 
     /**

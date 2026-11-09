@@ -11,6 +11,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Integration\Organization\OrganizationCommandsOnTheEventBus;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -124,6 +125,37 @@ final class InvitationAcceptTest extends WebTestCase
         self::assertSame(1, $this->membershipCount($organizationId, $user->id()->toString()));
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function homesOfRolesWithoutATeam(): iterable
+    {
+        yield 'manager' => ['{manager}', 'Teams at a glance'];
+        yield 'admin' => ['{admin}', 'Your organization'];
+    }
+
+    #[Test]
+    #[DataProvider('homesOfRolesWithoutATeam')]
+    public function theNoticeShowsOnTheHomeOfTheJoinedRole(string $orgRoles, string $homeTitle): void
+    {
+        $client = self::httpsClient();
+        $user = $this->createUserWithPassword('Raj Patel');
+        $organizationId = $this->createOrganization('Beta Bakery');
+        $link = $this->invite($organizationId, $user->email()->toString());
+        $this->logIn($client, $user);
+        $this->openLink($client, $link);
+        $this->addMembership($user, $organizationId);
+        $this->setOrgRoles($user, $organizationId, $orgRoles);
+
+        $client->submitForm('Join');
+
+        self::assertResponseRedirects('/', 302);
+        $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($homeTitle, $client->getCrawler()->filter('main h1')->text());
+        self::assertSame(\sprintf(InvitationController::ALREADY_IN, 'Beta Bakery'), $client->getCrawler()->filter('main [role="status"]')->text());
+    }
+
     #[Test]
     public function aPersonLoggedInWithAnotherEmailIsRefusedAndJoinsNothing(): void
     {
@@ -232,6 +264,32 @@ final class InvitationAcceptTest extends WebTestCase
         $client->submitForm('Join', ['name' => 'Mia Lund', 'password' => self::NEW_PASSWORD]);
         self::assertResponseRedirects('/login', 302);
         self::assertNotNull($this->userIdWithEmail($email));
+    }
+
+    #[Test]
+    public function anAccountMadeWithTheInvitedEmailMeanwhileIsAskedToLogInAndJoinsNothingYet(): void
+    {
+        $client = self::httpsClient();
+        $organizationId = $this->createOrganization('Acme Foods');
+        $email = self::newEmail('mia');
+        $link = $this->invite($organizationId, $email);
+        $this->openLink($client, $link);
+        $user = $this->createUserWithoutOrganization('Mia Lund', self::PASSWORD, $email);
+
+        $client->submitForm('Join', ['name' => 'Mia Lund', 'password' => self::NEW_PASSWORD]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(InvitationController::EMAIL_TAKEN, $client->getCrawler()->filter('main [role="alert"]')->text());
+        self::assertSame('/login', $client->getCrawler()->selectLink('Log in to join')->attr('href'));
+        self::assertCount(0, $client->getCrawler()->filter('main input[name="password"]'));
+        self::assertSame(0, $this->membershipCount($organizationId, $user->id()->toString()));
+        self::assertSame(0, $this->acceptedInvitationCount($organizationId));
+
+        $this->submitLogin($client, $email, self::PASSWORD);
+        self::assertResponseRedirects(self::INVITE_PAGE, 302, 'the login brings the person back to the invite');
+        $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $client->getCrawler()->filter('main form[action="/invite"]'));
     }
 
     #[Test]
