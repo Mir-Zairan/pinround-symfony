@@ -16,7 +16,10 @@ use App\Tests\Factory\Identity\UserFactory;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ProjectRows;
+use App\Tests\Integration\Workflow\WorkflowRows;
 use App\Ticketing\Infrastructure\Demo\SeedDemoProjects;
+use App\Workflow\Domain\CoreStep;
+use App\Workflow\Domain\RuleSet;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
@@ -186,6 +189,29 @@ final class DemoSeedCommandTest extends KernelTestCase
             ['Acme Foods'],
             $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchFirstColumn('SELECT name FROM org_organization')),
         );
+    }
+
+    #[Test]
+    public function bothDemoOrganizationsGetTheCoreStepsAndTheDefaultRuleSet(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+
+        $this->runSeed();
+
+        $defaults = RuleSet::defaults();
+        foreach (['sara@acme-foods.example', 'ben@beta-bakery.example'] as $email) {
+            self::assertSame(
+                [
+                    array_map(static fn (CoreStep $coreStep): string => $coreStep->value, CoreStep::cases()),
+                    [['tester_moves_done' => $defaults->testerMovesDone, 'no_self_review' => $defaults->noSelfReview, 'review_before_test' => $defaults->reviewBeforeTest]],
+                ],
+                $this->underTenant($this->organizationIdOf($email), fn (): array => [
+                    $this->connection()->fetchFirstColumn("SELECT core_code FROM wf_step WHERE origin = 'core' AND team_id IS NULL ORDER BY position"),
+                    $this->connection()->fetchAllAssociative('SELECT tester_moves_done, no_self_review, review_before_test FROM wf_rule_set WHERE team_id IS NULL'),
+                ]),
+                $email,
+            );
+        }
     }
 
     #[Test]
@@ -532,13 +558,15 @@ final class DemoSeedCommandTest extends KernelTestCase
 
     private function removeOrganizationOf(string $email): void
     {
-        $this->rows()->removeAllOf(...$this->organizationIdsOf($email));
+        $organizationIds = $this->organizationIdsOf($email);
+        $this->workflowRows()->removeAllOf(...$organizationIds);
+        $this->rows()->removeAllOf(...$organizationIds);
     }
 
     /**
-     * Removes what the seed made, wherever an earlier run left it: the organizations of the demo people, their
-     * outbox messages, credentials and the people themselves. The entity manager is emptied first, as the tenant
-     * may only change once it holds nothing.
+     * Removes what the seed made, wherever an earlier run left it: the organizations of the demo people with their
+     * projects and workflow, their outbox messages, credentials and the people themselves. The entity manager is
+     * emptied first, as the tenant may only change once it holds nothing.
      */
     private function removeDemoRows(): void
     {
@@ -553,6 +581,7 @@ final class DemoSeedCommandTest extends KernelTestCase
             }
         }
         $this->projectRows()->removeAllOf(...array_values($organizationIds));
+        $this->workflowRows()->removeAllOf(...array_values($organizationIds));
         $this->rows()->removeAllOf(...array_values($organizationIds));
         $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
         if ([] !== $userIds) {
@@ -564,6 +593,11 @@ final class DemoSeedCommandTest extends KernelTestCase
     private function projectRows(): ProjectRows
     {
         return new ProjectRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
+    }
+
+    private function workflowRows(): WorkflowRows
+    {
+        return new WorkflowRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function rows(): OrganizationRows

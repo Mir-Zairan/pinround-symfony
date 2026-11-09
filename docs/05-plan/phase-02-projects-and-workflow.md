@@ -73,12 +73,12 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 **Steps:**
 1. `Workflow\Domain\Group` enum (`todo`, `doing`, `check`, `wait`, `done`) with label and list order (Waiting, Checking, Doing, To do, Done).
 2. `Step` entity; `CoreStep` codes (`backlog`, `todo`, `progress`, `review`, `test`, `input`, `hold`, `done`).
-3. Migration `wf_step`, `wf_rule_set` with RLS. On `OrganizationCreated` (or in the seed for existing orgs) insert the eight core steps and the default rule set (all three rules on).
+3. Migration `wf_step`, `wf_rule_set` with RLS. `SetUpOrganizationWorkflow`, an `OrganizationSetupStep` that `CreateOrganization` runs in the organization's own transaction, inserts the eight core steps and the default rule set (all three rules on); the migration `Version20261110140000` gives them to organizations that already exist.
 4. `StepQueries::stepsFor(TeamId)` ordered by group then position; `groupOf(StepId)`.
 5. Hint texts per group for lists: "Someone must answer first", "Being checked", "Being built", "Not started".
 **Files:** `src/Workflow/**`, migrations.
 **Acceptance criteria:**
-- [ ] A new org has exactly eight core steps in the right groups and cannot remove them.
+- [x] A new org has exactly eight core steps in the right groups and cannot remove them (`SetUpOrganizationWorkflowTest`: the eight rows, their groups and positions, none removable; `CoreStepBackfillTest` for organizations that already existed).
 - [ ] `stepsFor` returns steps in the list order above.
 **Tests:** unit tests for Group order and labels; integration test of seeding; isolation test.
 **Prototype check:** step names and group labels in [Team: how work moves here](../04-prototype/screens/team.md#how-work-moves-here).
@@ -197,4 +197,5 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 - 2026-11-10 (P02.T1): ProjectCreated is not built yet; add it with its outbox route, and CreateProject's acting user and time, when a consumer needs it.
 - 2026-11-10 (P02.T1): P01.T3 "A user in two orgs picks one" and the P01 Definition of done are still open; phase 2 does not depend on them.
 - 2026-11-10 (P02.T1): the demo seed finds Acme Foods through Organization's `DemoOrganizations::idBySlug('acme-foods')` (dev and test only), so no Ticketing class reads Identity. A lost race for a project key is proven by `CreateProjectRaceTest`.
+- 2026-11-10 (P02.T2): core steps and the default rule set are created through `OrganizationSetupStep` in the transaction that creates the organization, chosen over an `OrganizationCreated` handler so no organization is ever without steps; organizations made before it got them from the idempotent backfill migration `Version20261110140000`. `tests/Functional/Identity/LogsInUsers.php` inserts organizations by raw SQL, so those test organizations have no steps: use `CreateOrganization` there if a later test needs them.
 - (add dated notes here)

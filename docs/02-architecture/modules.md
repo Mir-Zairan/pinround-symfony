@@ -24,7 +24,7 @@ Every module has the same five folders:
 
 ```text
 src/
-  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep, FieldEncryption, RequiresRecentAuth
+  SharedKernel/                 # ids, Clock, TenantContext, DomainEvent base, Result, ReadinessCheck, DemoSeedStep, OrganizationSetupStep, FieldEncryption, RequiresRecentAuth
   Ticketing/
     Api/                        # PUBLIC: interfaces + DTOs other modules may use
       TicketQueries.php
@@ -91,7 +91,8 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `CitextType` and `TextArrayType` (`Infrastructure/Doctrine`): the Doctrine types of PostgreSQL `citext` and one-dimensional `text[]` columns (`text_array`: Organization's `org_roles`, Identity's `recovery_code_hashes`). Doctrine registers a type once for the whole app, so it cannot belong to one module;
   - `OnceOnlyHandling` (Application: run an async handler's effect once per message), with `MessageIdStamp`, `MessageIdStampMiddleware`, `MessageBeingHandled` and `ProcessedMessageLedger` in `Infrastructure/Messenger` ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md#idempotency-key));
   - `ReadinessCheck` (`Infrastructure/Health`): one thing `/health/ready` proves. The module that owns what is checked implements it (Audit: `NextAuditPartitionExists`; Media: `ObjectStorageIsReachable`), and autoconfiguration tags it. SharedKernel holds the platform checks `DatabaseAnswers`, `MigrationsAreCurrent` and `ValkeyAnswers` (one service per Valkey), and `ReadinessCheckFailed` for a dependency that answered in the wrong state ([operations.md](operations.md#observability));
-  - `DemoSeedStep` (`Infrastructure/Console`, with `DemoSeedRefused`): one part of the demo data that `app:demo:seed` runs, dev and test only. The module that owns the tables implements it (Identity: `SeedDemoPeople`; Organization from P01.T3: `SeedDemoOrganizations`, priority 50; Ticketing from P02.T1: `SeedDemoProjects`, priority 40), autoconfiguration tags it, and `#[AsTaggedItem(priority: …)]` sets the order, highest first. It lives in SharedKernel because the seed command must not import modules, the same reason as `ReadinessCheck`.
+  - `DemoSeedStep` (`Infrastructure/Console`, with `DemoSeedRefused`): one part of the demo data that `app:demo:seed` runs, dev and test only. The module that owns the tables implements it (Identity: `SeedDemoPeople`; Organization from P01.T3: `SeedDemoOrganizations`, priority 50; Ticketing from P02.T1: `SeedDemoProjects`, priority 40), autoconfiguration tags it, and `#[AsTaggedItem(priority: …)]` sets the order, highest first. It lives in SharedKernel because the seed command must not import modules, the same reason as `ReadinessCheck`;
+  - `OrganizationSetupStep` (`Application`): something every new organization needs from another module, made in the transaction that creates the organization, so no organization exists without it. Organization's `CreateOrganization` runs each step once the organization row exists, under that organization as tenant, highest `#[AsTaggedItem(priority: …)]` first; a step must not begin, commit or roll back a transaction, and anything it throws rolls the organization back too. Workflow implements it from P02.T2 (`SetUpOrganizationWorkflow`: the eight core steps and the default rule set); organizations made before that got them from the backfill migration `Version20261110140000`.
 - **Owns tables:** `processed_message` (global plumbing, no `organization_id`; see [data-model.md](data-model.md)).
 - **Rule:** keep it tiny. A type joins SharedKernel only when three or more modules need it.
 
@@ -154,6 +155,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Events:** `StepAdded`, `StepRemoved`, `RulesChanged`.
 - **Depends on:** Organization Api.
 - **Note:** Workflow does not store tickets. Ticketing owns the ticket's current step and asks Workflow before every move.
+- **New organizations:** `SetUpOrganizationWorkflow`, an `OrganizationSetupStep`, adds the eight core steps and the default rule set in the transaction that creates the organization.
 - **More:** [workflow-engine.md](workflow-engine.md), [ADR-0014](../03-adr/0014-status-model-five-groups.md).
 
 ### Ticketing (`tkt_`)
