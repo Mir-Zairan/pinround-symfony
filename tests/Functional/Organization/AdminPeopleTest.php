@@ -86,6 +86,80 @@ final class AdminPeopleTest extends WebTestCase
         self::assertCount(0, $page->filter('main .people__row'));
     }
 
+    /**
+     * The 20th and 21st invites share their time, so only the id in the cursor tells the second page where to start.
+     */
+    #[Test]
+    public function theOpenInvitesShowTwentyAtATimeWithShowMoreForTheNext(): void
+    {
+        $acmeFoods = $this->adminLoggedInWithACode();
+        $newestFirst = [];
+        for ($minutes = 1; $minutes <= 19; ++$minutes) {
+            $newestFirst[] = $email = \sprintf('mia+%d@acme.test', $minutes);
+            $this->storeInvitation($acmeFoods, $email, $minutes.' minutes', false);
+        }
+        $this->storeInvitation($acmeFoods, 'mia+21@acme.test', '20 minutes', false, '0198f000-0000-7000-8000-000000000001');
+        $this->storeInvitation($acmeFoods, 'mia+20@acme.test', '20 minutes', false, '0198f000-0000-7000-8000-000000000002');
+        $newestFirst[] = 'mia+20@acme.test';
+
+        $page = $this->client->request('GET', self::PEOPLE_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($newestFirst, $this->pendingEmailsOn($page));
+        $showMore = $page->filter('main .people__pending a.btn')->reduce(static fn (Crawler $link): bool => 'Show more' === $link->text());
+        self::assertCount(1, $showMore);
+
+        $page = $this->client->click($showMore->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['mia+21@acme.test'], $this->pendingEmailsOn($page));
+        self::assertCount(0, $page->filter('main .people__pending a'));
+    }
+
+    #[Test]
+    public function exactlyTwentyOpenInvitesShowNoShowMore(): void
+    {
+        $acmeFoods = $this->adminLoggedInWithACode();
+        for ($minutes = 1; $minutes <= PeopleController::PAGE_SIZE; ++$minutes) {
+            $this->storeInvitation($acmeFoods, \sprintf('mia+%d@acme.test', $minutes), $minutes.' minutes', false);
+        }
+
+        $page = $this->client->request('GET', self::PEOPLE_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(PeopleController::PAGE_SIZE, $page->filter('main .people__row'));
+        self::assertCount(0, $page->filter('main .people__pending a'));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>}>
+     */
+    public static function notAPageOfInvites(): iterable
+    {
+        $at = '2026-11-10T09:30:00.250000+00:00';
+        $id = '0198f000-0000-7000-8000-000000000001';
+        yield 'the time only' => [[PeopleController::AFTER_INVITED_AT => $at]];
+        yield 'the id only' => [[PeopleController::AFTER_ID => $id]];
+        yield 'both empty' => [[PeopleController::AFTER_INVITED_AT => '', PeopleController::AFTER_ID => '']];
+        yield 'an id that is no uuid' => [[PeopleController::AFTER_INVITED_AT => $at, PeopleController::AFTER_ID => 'not-a-uuid']];
+        yield 'a time without microseconds' => [[PeopleController::AFTER_INVITED_AT => '2026-11-10T09:30:00+00:00', PeopleController::AFTER_ID => $id]];
+        yield 'a day the month does not have' => [[PeopleController::AFTER_INVITED_AT => '2026-11-31T09:30:00.250000+00:00', PeopleController::AFTER_ID => $id]];
+    }
+
+    /**
+     * @param array<string, string> $query
+     */
+    #[Test]
+    #[DataProvider('notAPageOfInvites')]
+    public function aPartOrBadPageCursorIsRefused(array $query): void
+    {
+        $this->adminLoggedInWithACode();
+
+        $this->client->request('GET', self::PEOPLE_PAGE, $query);
+
+        self::assertResponseStatusCodeSame(400);
+    }
+
     #[Test]
     public function anInviteIsStoredWithNoRolesAndNoTeamAndShowsAToastOnce(): void
     {
@@ -312,6 +386,10 @@ final class AdminPeopleTest extends WebTestCase
         $this->client->request('GET', self::PEOPLE_PAGE);
         self::assertResponseStatusCodeSame(403);
 
+        // Refused before the cursor is read, so a bad one tells nothing either.
+        $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::AFTER_ID => 'not-a-uuid']);
+        self::assertResponseStatusCodeSame(403);
+
         $this->client->request('POST', self::INVITE, ['email' => 'mia@acme.test', '_csrf_token' => 'any']);
         self::assertResponseStatusCodeSame(403);
         self::assertSame([], $this->storedInvitationsOf($acmeFoods));
@@ -403,16 +481,16 @@ final class AdminPeopleTest extends WebTestCase
 
     /**
      * An invitation made $age before the clock's now, such as '2 hours', open for 72 hours from then, and accepted an
-     * hour after it was made when $isAccepted.
+     * hour after it was made when $isAccepted; with a new id when $id is null.
      */
-    private function storeInvitation(OrganizationId $organizationId, string $email, string $age, bool $isAccepted): void
+    private function storeInvitation(OrganizationId $organizationId, string $email, string $age, bool $isAccepted, ?string $id = null): void
     {
         $createdAt = $this->clock->now()->modify('-'.$age);
         $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             'INSERT INTO org_invitation (organization_id, id, email, org_roles, invited_by, created_at, expires_at, accepted_at)'
             ." VALUES (?, ?, ?, '{}', ?, ?, ?, ?)",
             [
-                $organizationId->toString(), Uuid::v7()->toRfc4122(), $email, Uuid::v7()->toRfc4122(),
+                $organizationId->toString(), $id ?? Uuid::v7()->toRfc4122(), $email, Uuid::v7()->toRfc4122(),
                 $createdAt->format(\DATE_ATOM), $createdAt->modify('+72 hours')->format(\DATE_ATOM),
                 $isAccepted ? $createdAt->modify('+1 hour')->format(\DATE_ATOM) : null,
             ],

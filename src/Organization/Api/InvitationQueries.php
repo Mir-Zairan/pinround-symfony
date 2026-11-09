@@ -20,7 +20,8 @@ interface InvitationQueries
      * invitedAt, then by id, both descending.
      *
      * @param int                    $limit how many to return at most, 1 to MAX_LIMIT
-     * @param PendingInvitation|null $after the last invitation of the previous page; null for the first page
+     * @param PendingInvitation|null $after the last invitation of the previous page, of which only id and invitedAt are
+     *                                      read; null for the first page
      *
      * @return list<PendingInvitation>
      *

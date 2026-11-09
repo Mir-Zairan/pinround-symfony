@@ -50,6 +50,11 @@
                         </li>
                     {% endfor %}
                 </ul>
+                {% if nextPage %}
+                    <div class="people__more">
+                        <twig:Button href="{{ path('organization_admin_people', nextPage) }}" variant="outline">Show more</twig:Button>
+                    </div>
+                {% endif %}
             {% endif %}
         </section>
     </div>

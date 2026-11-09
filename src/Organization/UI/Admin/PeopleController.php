@@ -8,6 +8,7 @@ use App\Identity\Api\CurrentUser;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\InvitationQueries;
 use App\Organization\Api\OrganizationPermission;
+use App\Organization\Api\PendingInvitation;
 use App\Organization\Application\AlreadyInTheOrganization;
 use App\Organization\Application\InvalidEmailAddress;
 use App\Organization\Application\InvitationSentMeanwhile;
@@ -20,7 +21,9 @@ use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Uid\Uuid;
 
 /**
  * The admin page of people (FR-ID-02): invite an email address, and see the invitations not joined yet. ADMIN_AREA
@@ -38,9 +41,16 @@ final class PeopleController extends AbstractController
     public const string ALREADY_IN = 'This person is in the organization already.';
     public const string FORM_EXPIRED = 'The page was open too long. Try again.';
 
+    public const int PAGE_SIZE = 20;
+    /** The query parameters of the next page: the invitedAt and id of the last invitation shown, both or neither. */
+    public const string AFTER_INVITED_AT = 'after_invited_at';
+    public const string AFTER_ID = 'after_id';
+
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
     private const string CSRF_ID = 'organization_admin_people_invite';
+    /** With microseconds and the offset, so the cursor names the exact created_at the database holds. */
+    private const string CURSOR_TIME_FORMAT = 'Y-m-d\TH:i:s.uP';
 
     public function __construct(
         private readonly InvitationQueries $invitationQueries,
@@ -52,15 +62,18 @@ final class PeopleController extends AbstractController
     ) {
     }
 
+    /**
+     * The page after the invitation that AFTER_INVITED_AT and AFTER_ID name, or the first page without them.
+     */
     #[Route('/admin/people', name: self::ROUTE, methods: ['GET'])]
-    public function show(): Response
+    public function show(Request $request): Response
     {
         $organizationId = $this->tenantContext->get();
         $this->denyAccessUnlessGranted(AdminPermission::AREA, $organizationId);
         $this->denyAccessUnlessGranted(OrganizationPermission::INVITE, $organizationId);
         \assert($organizationId instanceof OrganizationId);
 
-        return $this->renderPage($organizationId);
+        return $this->renderPage($organizationId, after: $this->pageCursorOf($request));
     }
 
     /**
@@ -113,14 +126,47 @@ final class PeopleController extends AbstractController
     }
 
     /**
+     * The cursor pendingOf reads, which needs only the id and invitedAt; null when the request names no page.
+     *
+     * @throws BadRequestHttpException when only one of the two parameters is given, or either is no valid value
+     */
+    private function pageCursorOf(Request $request): ?PendingInvitation
+    {
+        $hasInvitedAt = $request->query->has(self::AFTER_INVITED_AT);
+        if (!$hasInvitedAt && !$request->query->has(self::AFTER_ID)) {
+            return null;
+        }
+        $invitedAtText = $request->query->getString(self::AFTER_INVITED_AT);
+        $id = $request->query->getString(self::AFTER_ID);
+        $invitedAt = \DateTimeImmutable::createFromFormat('!'.self::CURSOR_TIME_FORMAT, $invitedAtText);
+        // The round trip refuses what createFromFormat rolls over, such as a 31 November, instead of reading another time.
+        if (!$hasInvitedAt || false === $invitedAt || $invitedAt->format(self::CURSOR_TIME_FORMAT) !== $invitedAtText || !Uuid::isValid($id)) {
+            throw new BadRequestHttpException('The page of invitations to show is not valid.');
+        }
+
+        return new PendingInvitation($id, '', $invitedAt, $invitedAt);
+    }
+
+    /**
      * Reads the pending invitations, so it needs a transaction open under $organizationId.
      */
-    private function renderPage(OrganizationId $organizationId, string $typedEmail = '', ?string $emailError = null, ?string $formError = null): Response
+    private function renderPage(OrganizationId $organizationId, string $typedEmail = '', ?string $emailError = null, ?string $formError = null, ?PendingInvitation $after = null): Response
     {
         $hasError = null !== $emailError || null !== $formError;
+        $pendingInvitations = $this->invitationQueries->pendingOf($organizationId, self::PAGE_SIZE + 1, $after);
+        $nextPage = null;
+        if (\count($pendingInvitations) > self::PAGE_SIZE) {
+            $pendingInvitations = \array_slice($pendingInvitations, 0, self::PAGE_SIZE);
+            $lastShown = $pendingInvitations[self::PAGE_SIZE - 1];
+            $nextPage = [
+                self::AFTER_INVITED_AT => $lastShown->invitedAt()->format(self::CURSOR_TIME_FORMAT),
+                self::AFTER_ID => $lastShown->id(),
+            ];
+        }
 
         return $this->render('@Organization/admin/people.html.twig', [
-            'pendingInvitations' => $this->invitationQueries->pendingOf($organizationId, InvitationQueries::MAX_LIMIT),
+            'pendingInvitations' => $pendingInvitations,
+            'nextPage' => $nextPage,
             'typedEmail' => $typedEmail,
             'emailError' => $emailError,
             'formError' => $formError,
