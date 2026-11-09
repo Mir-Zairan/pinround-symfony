@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Ticketing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Domain\Project;
 use App\Ticketing\Domain\ProjectId;
@@ -121,6 +122,30 @@ final class DoctrineProjectsTest extends KernelTestCase
 
         self::assertNotNull($found);
         self::assertSame(self::OTHER_PROJECT, $found->id()->toString());
+    }
+
+    #[Test]
+    public function eachOrganizationFindsItsOwnProjectUnderTheSharedKeyWithTheTenantFilterOff(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->projects()->add(
+            new Project(new ProjectId(self::SHOP_PROJECT), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), new ProjectKey('SHOP'), 'Shop'),
+        ));
+        $this->transactions()->committedAs(self::OTHER_ORGANIZATION, fn () => $this->projects()->add(
+            new Project(new ProjectId(self::OTHER_PROJECT), new OrganizationId(self::OTHER_ORGANIZATION), new TeamId(self::OTHER_TEAM), new ProjectKey('SHOP'), 'Shop'),
+        ));
+        $this->entityManager()->clear();
+        $this->entityManager()->getFilters()->disable(TenantFilter::NAME);
+
+        $foundIdOf = fn (string $organizationId): ?string => $this->transactions()->rolledBackAs(
+            $organizationId,
+            fn (): ?string => $this->projects()->byKey(new ProjectKey('SHOP'))?->id()->toString(),
+        );
+
+        self::assertSame(
+            [self::ACME_FOODS => self::SHOP_PROJECT, self::OTHER_ORGANIZATION => self::OTHER_PROJECT],
+            [self::ACME_FOODS => $foundIdOf(self::ACME_FOODS), self::OTHER_ORGANIZATION => $foundIdOf(self::OTHER_ORGANIZATION)],
+        );
+        self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
     }
 
     #[Test]
