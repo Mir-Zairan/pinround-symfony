@@ -3,7 +3,8 @@ parameters:
     # interface => one of the async_* transports. A message with no entry goes to the failed transport, never lost.
     # when@test replaces the whole map, so an entry here is repeated there.
     outbox_relay.target_transports:
-        # Short jobs for worker-notify (ADR-0033), today the audit entry of each (RecordOrganizationAuditEntry).
+        # Short jobs for worker-notify (ADR-0033), today the audit entry of each (RecordOrganizationAuditEntry) and
+        # the invitation email of MemberInvited (EmailInvitationLinkHandler).
         App\Organization\Api\Event\OrganizationEvent: async_notify
 
 framework:
