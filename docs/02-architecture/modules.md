@@ -146,8 +146,9 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Story:** Lena adds a team step "Design check" under Checking. Raj still sees the team in the same five groups as every other team.
 - **Owns:** `wf_step` (core, company or team steps, each with its group), `wf_rule_set` (the three rules per org or team), `wf_transition` (the verb catalogue as data).
 - **Api:**
-  - `StepQueries::stepsFor(TeamId): list<StepView>` (ordered by group, then position)
-  - `StepQueries::groupOf(StepId): Group`
+  - `StepQueries::stepsFor(TeamId): list<StepView>` (built in P02.T2: one query on `wf_step`, the organization's core and company steps and the team's own steps, without removed ones; in the groups' list order Waiting, Checking, Doing, To do, Done, then by position, then by id; `StepView` offers `id()` as a string, `name()`, `groupCode()`, `groupLabel()`, `position()`, `origin()` and `coreCode()`, the codes as strings because the Api may not expose Workflow's Domain enums; `Infrastructure\Doctrine\DbalStepQueries`)
+  - `StepQueries::groupOf(string $stepId): ?string` (built in P02.T2: the step's group code, also for a removed step, as a ticket may still be in it; null when the organization has no such step; an id that is not a UUIDv7 throws `InvalidArgumentException` before any query)
+  - `stepsFor` and `groupOf` read under row-level security with no cache yet, so they need an open transaction whose tenant is the organization; under any other tenant, or none, they find nothing.
   - `TransitionPolicy::available(TicketState, ActorContext): list<TransitionView>`
   - `TransitionPolicy::check(TicketState, TransitionName, ActorContext): Decision` (allowed, or a rule note)
   - `TurnRules::turnFor(TicketState, TeamFacts): Turn` (a pure function)
