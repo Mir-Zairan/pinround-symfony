@@ -32,4 +32,15 @@ final class CoreStepTest extends TestCase
 
         self::assertSame($expected, $actual);
     }
+
+    #[Test]
+    public function positionsFollowTheCoreOrderOfTheWorkflowEngineFromZero(): void
+    {
+        $positions = [];
+        foreach (CoreStep::cases() as $coreStep) {
+            $positions[$coreStep->value] = $coreStep->position();
+        }
+
+        self::assertSame(['backlog' => 0, 'todo' => 1, 'progress' => 2, 'review' => 3, 'test' => 4, 'input' => 5, 'hold' => 6, 'done' => 7], $positions);
+    }
 }

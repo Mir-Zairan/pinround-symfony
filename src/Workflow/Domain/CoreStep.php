@@ -32,6 +32,23 @@ enum CoreStep: string
         };
     }
 
+    /**
+     * The step's place in the core order of workflow-engine.md, from 0; steps sort by group first, then by this.
+     */
+    public function position(): int
+    {
+        return match ($this) {
+            self::Backlog => 0,
+            self::Todo => 1,
+            self::Progress => 2,
+            self::Review => 3,
+            self::Test => 4,
+            self::Input => 5,
+            self::Hold => 6,
+            self::Done => 7,
+        };
+    }
+
     public function group(): Group
     {
         return match ($this) {
