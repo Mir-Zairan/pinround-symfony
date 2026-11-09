@@ -73,7 +73,7 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 **Steps:**
 1. `Workflow\Domain\Group` enum (`todo`, `doing`, `check`, `wait`, `done`) with label and list order (Waiting, Checking, Doing, To do, Done).
 2. `Step` entity; `CoreStep` codes (`backlog`, `todo`, `progress`, `review`, `test`, `input`, `hold`, `done`).
-3. Migration `wf_step`, `wf_rule_set` with RLS. `SetUpOrganizationWorkflow`, an `Organization\Api\OrganizationSetupStep` ([ADR-0036](../03-adr/0036-organization-setup-steps-in-the-creating-transaction.md)) that `CreateOrganization` runs in the organization's own transaction, inserts the eight core steps and the default rule set (all three rules on); the migration `Version20261110140000` gives them to organizations that already exist.
+3. Migration `wf_step`, `wf_rule_set` with RLS. `SetUpOrganizationWorkflow`, an `Organization\Api\OrganizationSetupStep` ([ADR-0036](../03-adr/0036-organization-setup-steps-in-the-creating-transaction.md)) that `CreateOrganization` runs in the transaction that creates the organization, inserts the eight core steps and the default rule set (all three rules on); the migration `Version20261110140000` gives them to organizations that already exist.
 4. `StepQueries::stepsFor(TeamId)` ordered by group list order, then position, then id, without removed steps; `groupOf(string $stepId)` (the group code, removed steps included). The Api uses strings for ids and codes, as it may not expose Workflow's Domain types.
 5. Hint texts per group for lists: "Someone must answer first", "Being checked", "Being built", "Not started".
 **Files:** `src/Workflow/**`, migrations.
