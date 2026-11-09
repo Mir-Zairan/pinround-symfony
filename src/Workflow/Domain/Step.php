@@ -21,7 +21,6 @@ final class Step implements TenantOwned
     private readonly ?CoreStep $coreCode;
     private readonly string $name;
     private readonly Group $group;
-    private readonly int $position;
     /** When the step was removed; null while it is in use. */
     private ?\DateTimeImmutable $archivedAt = null;
 
@@ -38,7 +37,7 @@ final class Step implements TenantOwned
         ?CoreStep $coreCode,
         string $name,
         Group $group,
-        int $position,
+        private readonly int $position,
     ) {
         $trimmedName = trim($name);
         if ('' === $trimmedName) {
@@ -74,7 +73,6 @@ final class Step implements TenantOwned
         $this->coreCode = $coreCode;
         $this->name = $trimmedName;
         $this->group = $group;
-        $this->position = $position;
     }
 
     public function id(): StepId

@@ -146,7 +146,7 @@ final class WorkflowTablesTest extends KernelTestCase
     public function theDatabaseRefusesASecondCoreStepWithTheSameCode(): void
     {
         $this->expectException(UniqueConstraintViolationException::class);
-        $this->expectExceptionMessage('wf_step_organization_id_team_id_core_code_key');
+        $this->expectExceptionMessageIsOrContains('wf_step_organization_id_team_id_core_code_key');
 
         $this->asTheApp(function (Connection $connection): void {
             $this->insertStep($connection, self::FIRST_STEP, null, 'core', 'todo', 'todo');

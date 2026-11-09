@@ -12,15 +12,15 @@ use App\SharedKernel\Domain\TenantOwned;
  * A project of an organization, owned by one of its teams (FR-ORG-06). Its tickets are numbered from 1 up without
  * gaps; the counter is not kept on this object but handed out by NextTicketNumber, straight in the database.
  */
-final class Project implements TenantOwned
+final readonly class Project implements TenantOwned
 {
-    private readonly string $organizationId;
-    private readonly string $id;
-    private readonly string $teamId;
-    private readonly string $key;
-    private readonly string $name;
+    private string $organizationId;
+    private string $id;
+    private string $teamId;
+    private string $key;
+    private string $name;
     // The number the next ticket gets. Only NextTicketNumber changes it, in the database; this copy is the start.
-    private readonly int $nextNumber;
+    private int $nextNumber;
 
     /**
      * @throws BlankProjectName when nothing is left of the name after trimming

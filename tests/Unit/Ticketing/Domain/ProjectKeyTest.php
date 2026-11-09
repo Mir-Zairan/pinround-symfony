@@ -51,7 +51,7 @@ final class ProjectKeyTest extends TestCase
     public function itRejectsAnyOtherKeyWithAPlainMessage(string $key): void
     {
         $this->expectException(InvalidProjectKey::class);
-        $this->expectExceptionMessage('A project key is 2 to 10 capital letters or digits and starts with a letter.');
+        $this->expectExceptionMessageIsOrContains('A project key is 2 to 10 capital letters or digits and starts with a letter.');
 
         new ProjectKey($key);
     }

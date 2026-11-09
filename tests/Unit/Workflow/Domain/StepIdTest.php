@@ -43,7 +43,7 @@ final class StepIdTest extends TestCase
     public function itRejectsAnythingButACanonicalUuidV7(string $value): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A step id must be a canonical UUIDv7.');
+        $this->expectExceptionMessageIsOrContains('A step id must be a canonical UUIDv7.');
 
         new StepId($value);
     }
