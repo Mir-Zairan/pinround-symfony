@@ -314,6 +314,11 @@ final class InvitationAcceptTest extends WebTestCase
                 return 100;
             }
 
+            public function isValidEmail(string $email): bool
+            {
+                return true;
+            }
+
             public function register(string $email, string $name, #[\SensitiveParameter] string $password, \DateTimeImmutable $now): UserId
             {
                 throw new RegistrationRefused([RegistrationRefusal::EmailTaken]);
