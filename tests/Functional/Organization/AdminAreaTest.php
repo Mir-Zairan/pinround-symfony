@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Organization;
 
-use App\Identity\Domain\User;
 use App\Identity\UI\Controller\RecentAuthRedirects;
 use App\Organization\UI\EnterChosenOrganization;
 use App\Organization\UI\SendAdminToTwoStepProof;
@@ -29,6 +28,7 @@ use Zenstruck\Foundry\Test\Factories;
 final class AdminAreaTest extends WebTestCase
 {
     use Factories;
+    use LogsInAdmins;
     use LogsInUsers;
     use ReadsSessionMetadata;
     use TurnsOnTwoStepLogin;
@@ -54,7 +54,7 @@ final class AdminAreaTest extends WebTestCase
     public function anAdminWithoutTwoStepLoginLandsOnTheSetupPageAndComesBackAfterIt(): void
     {
         [$lena, $acmeFoods] = $this->memberWithOrgRoles('Lena Berg', '{admin}');
-        $this->logInWithThePassword($lena);
+        $this->logInWithThePassword($this->client, $lena);
 
         $this->client->request('GET', self::ADMIN_AREA);
 
@@ -82,7 +82,7 @@ final class AdminAreaTest extends WebTestCase
     public function anAdminWhoseLastCodeIsOverAnHourOldIsAskedForThePasswordAndACodeAgain(): void
     {
         [$sara, $acmeFoods] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
-        $seed = $this->logInWithACode($sara);
+        $seed = $this->logInWithACode($this->client, $this->clock, $sara);
 
         $this->clock->sleep(59 * 60);
         $this->client->request('GET', self::ADMIN_AREA);
@@ -108,7 +108,7 @@ final class AdminAreaTest extends WebTestCase
     public function anAdminWithTwoStepLoginOnButNoCodeInThisSessionIsAskedForOne(): void
     {
         [$sara, $acmeFoods] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
-        $this->logInWithThePassword($sara);
+        $this->logInWithThePassword($this->client, $sara);
         $passwordOnlySession = $this->takeTheSessionCookie();
         [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $sara);
         $this->clock->sleep(30);
@@ -133,7 +133,7 @@ final class AdminAreaTest extends WebTestCase
     public function turningTwoStepLoginOffOrSettingItUpAgainInAnotherSessionEndsTheProofHere(): void
     {
         [$lena, $acmeFoods] = $this->memberWithOrgRoles('Lena Berg', '{admin}');
-        $seed = $this->logInWithACode($lena);
+        $seed = $this->logInWithACode($this->client, $this->clock, $lena);
         $this->client->request('GET', self::ADMIN_AREA);
         $this->assertAdminAreaOpensFor($acmeFoods);
         $this->client->request('GET', '/_test/recent-auth');
@@ -182,7 +182,7 @@ final class AdminAreaTest extends WebTestCase
     public function aManagerWithAFreshCodeIsRefusedWithoutARedirect(): void
     {
         [$raj] = $this->memberWithOrgRoles('Raj Patel', '{manager}');
-        $this->logInWithACode($raj);
+        $this->logInWithACode($this->client, $this->clock, $raj);
 
         $this->client->request('GET', self::ADMIN_AREA);
 
@@ -193,7 +193,7 @@ final class AdminAreaTest extends WebTestCase
     public function aMemberWithoutAnOrgRoleIsRefusedWithoutARedirect(): void
     {
         [$omar] = $this->memberWithOrgRoles('Omar Haddad', '{}');
-        $this->logInWithThePassword($omar);
+        $this->logInWithThePassword($this->client, $omar);
 
         $this->client->request('GET', self::ADMIN_AREA);
 
@@ -213,7 +213,7 @@ final class AdminAreaTest extends WebTestCase
         $this->addMembership($lena, $acmeFoods);
         $this->addMembership($lena, $betaBakery);
         $this->setOrgRoles($lena, $betaBakery, '{admin}');
-        $this->logInWithACode($lena);
+        $this->logInWithACode($this->client, $this->clock, $lena);
 
         self::writeSessionAttribute($this->client, EnterChosenOrganization::SESSION_KEY, $acmeFoods->toString());
         $this->client->request('GET', self::ADMIN_AREA);
@@ -258,30 +258,6 @@ final class AdminAreaTest extends WebTestCase
     }
 
     /**
-     * Turns two-step login on and logs in with a code from the app, at the clock's time after a 30-second step.
-     *
-     * @return string the seed
-     */
-    private function logInWithACode(User $user): string
-    {
-        [$seed] = $this->turnOnTwoStepLogin($this->client, $this->clock, $user);
-        $this->clock->sleep(30);
-        $this->openCodePage($this->client, $user);
-        $this->client->submitForm('Log in', ['code' => self::codeOf($seed, $this->clock)]);
-        self::assertResponseRedirects('/', 302);
-
-        return $seed;
-    }
-
-    private function logInWithThePassword(User $user): void
-    {
-        $this->client->request('GET', '/login');
-        self::assertResponseStatusCodeSame(200);
-        $this->client->submitForm('Log in', ['email' => $user->email()->toString(), 'password' => self::PASSWORD]);
-        self::assertResponseRedirects('/', 302);
-    }
-
-    /**
      * Removes the session cookie from the client, so the next request starts another session.
      */
     private function takeTheSessionCookie(): Cookie
@@ -291,20 +267,5 @@ final class AdminAreaTest extends WebTestCase
         $this->client->getCookieJar()->clear();
 
         return $cookie;
-    }
-
-    /**
-     * @param string $orgRoles a PostgreSQL text[] literal, such as '{admin}'
-     *
-     * @return array{User, OrganizationId} a user who is a member of one new organization only, so it is chosen at once
-     */
-    private function memberWithOrgRoles(string $name, string $orgRoles): array
-    {
-        $user = $this->createUserWithoutOrganization($name);
-        $acmeFoods = $this->createOrganization('Acme Foods');
-        $this->addMembership($user, $acmeFoods);
-        $this->setOrgRoles($user, $acmeFoods, $orgRoles);
-
-        return [$user, $acmeFoods];
     }
 }

@@ -38,6 +38,18 @@ final readonly class InviteMember
     }
 
     /**
+     * As the People page invites: no org roles and no team, so the UI needs no Domain types. Throws as __invoke does.
+     *
+     * @throws InvalidEmailAddress
+     * @throws AlreadyInTheOrganization
+     * @throws InvitationSentMeanwhile
+     */
+    public function withoutRoles(OrganizationId $organizationId, string $email, UserId $actingUser, \DateTimeImmutable $now): InvitationId
+    {
+        return $this($organizationId, $email, new OrgRoles(), null, null, $actingUser, $now);
+    }
+
+    /**
      * Every refusal but InvitationSentMeanwhile comes before anything is saved.
      *
      * @param TeamRole|null $teamRole Member or Viewer, given exactly when $teamId is

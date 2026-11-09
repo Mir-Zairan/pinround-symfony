@@ -21,6 +21,8 @@ interface OrganizationTransactions
      *
      * @param \Closure(): T $write
      *
+     * @param-immediately-invoked-callable $write
+     *
      * @return T
      *
      * @throws TenantSwitchRefused when a transaction is open, as it would keep its own tenant for the writes
