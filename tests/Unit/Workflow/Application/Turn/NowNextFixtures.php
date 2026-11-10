@@ -6,6 +6,8 @@ namespace App\Tests\Unit\Workflow\Application\Turn;
 
 use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\NowNextContext;
+use App\Workflow\Api\TeamFacts;
+use App\Workflow\Api\TeamMemberLoad;
 use App\Workflow\Api\TicketState;
 
 final class NowNextFixtures
@@ -42,19 +44,24 @@ final class NowNextFixtures
         );
     }
 
-    public static function context(?string $viewer = null, ?string $asker = null, bool $isReviewBeforeTest = true, string $stepName = 'Design check'): NowNextContext
+    /**
+     * @param array<string, string>|null $names display names by user id; the default names the four people below
+     * @param TeamFacts|null             $team  the default team: Lena leads, Lena and Omar develop, Mia tests
+     */
+    public static function context(?string $viewer = null, ?string $asker = null, bool $isReviewBeforeTest = true, string $stepName = 'Design check', ?array $names = null, ?TeamFacts $team = null): NowNextContext
     {
         return new NowNextContext(
             stepName: $stepName,
-            firstNames: [
+            firstNames: $names ?? [
                 self::LENA => 'Lena Hart',
                 self::OMAR => 'Omar',
                 self::MIA => 'Mia',
                 self::BEN => 'Ben',
             ],
+            team: $team ?? new TeamFacts(new UserId(self::LENA), 'Lena', [new TeamMemberLoad(new UserId(self::LENA)), new TeamMemberLoad(new UserId(self::OMAR))], [new TeamMemberLoad(new UserId(self::MIA))]),
+            isReviewBeforeTest: $isReviewBeforeTest,
             viewerId: null === $viewer ? null : new UserId($viewer),
             askerId: null === $asker ? null : new UserId($asker),
-            isReviewBeforeTest: $isReviewBeforeTest,
         );
     }
 }

@@ -13,10 +13,17 @@ use App\Workflow\Domain\CoreStep;
 
 /**
  * The sentences of workflow-engine.md, "Now and Next sentences". The person is the one the turn rules chose, so the
- * sentence never disagrees with Home.
+ * sentence never disagrees with Home. Next names the reviewer and tester stored on the ticket, else the ones the team
+ * would pick (the same choice the turn rules make), and starts in lowercase, as the documented sentences do.
  */
 final readonly class PlainNowNext implements NowNext
 {
+    public function __construct(
+        private ReviewerChoice $reviewerChoice,
+        private TesterChoice $testerChoice,
+    ) {
+    }
+
     public function now(TicketState $ticket, Turn $turn, NowNextContext $context): string
     {
         $words = new SentenceWords($context);
@@ -64,21 +71,23 @@ final readonly class PlainNowNext implements NowNext
         if (NeedsYouKind::Check === $turn->kind) {
             return null === $ticket->pendingAssigneeId
                 ? 'it is planned like any ticket'
-                : ucfirst($words->action($ticket->pendingAssigneeId, 'someone', 'get', ' it'));
+                : $words->action($ticket->pendingAssigneeId, 'someone', 'get', ' it');
         }
 
-        $tester = $words->action($ticket->testerId, 'a tester', 'test', ' it');
-        $hasReviewPart = null !== $ticket->reviewerId || $context->isReviewBeforeTest;
+        $reviewerId = $ticket->reviewerId ?? $this->reviewerChoice->choose($ticket->assigneeId, $context->team)->userId;
+        $testerId = $ticket->testerId ?? $this->testerChoice->choose($context->team)->userId;
+        $review = $words->action($reviewerId, 'a reviewer', 'review', '');
+        $reviewTheCode = $words->action($reviewerId, 'a reviewer', 'review', ' the code');
+        $test = $words->action($testerId, 'a tester', 'test', '');
+        $testIt = $words->action($testerId, 'a tester', 'test', ' it');
 
         return match ($step) {
             null, CoreStep::Done => null,
-            CoreStep::Backlog, CoreStep::Todo => ucfirst($words->action($ticket->assigneeId, 'a developer', 'build', ' it')
-                .($hasReviewPart ? ', '.$words->action($ticket->reviewerId, 'a reviewer', 'review', '') : '')
-                .', '.$words->action($ticket->testerId, 'a tester', 'test', '')),
-            CoreStep::Progress => ucfirst($hasReviewPart
-                ? $words->action($ticket->reviewerId, 'a reviewer', 'review', ' the code').', then '.$tester
-                : $tester),
-            CoreStep::Review => ucfirst($tester),
+            CoreStep::Backlog, CoreStep::Todo => $words->action($ticket->assigneeId, 'a developer', 'build', ' it')
+                .($context->isReviewBeforeTest || null !== $ticket->reviewerId ? ', '.$review : '')
+                .', '.$test,
+            CoreStep::Progress => $context->isReviewBeforeTest ? $reviewTheCode.', then '.$testIt : $testIt,
+            CoreStep::Review => $testIt,
             CoreStep::Test => 'Done',
             CoreStep::Input, CoreStep::Hold => 'it goes back to work',
         };

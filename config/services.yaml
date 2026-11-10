@@ -164,6 +164,12 @@ when@test:
         test.workflow_needs_you_score:
             alias: App\Workflow\Api\NeedsYouScore
             public: true
+        test.workflow_now_next:
+            alias: App\Workflow\Api\NowNext
+            public: true
+        test.workflow_verb_for:
+            alias: App\Workflow\Api\VerbFor
+            public: true
         # No ticket exists before P03, so DbalTurnProjectorTest puts the facts it projects into this source.
         App\Tests\Integration\Insight\InMemoryTicketTurnSource:
             autoconfigure: true

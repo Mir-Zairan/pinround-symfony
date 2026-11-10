@@ -51,9 +51,9 @@ final readonly class SentenceWords
      * A clause such as "Omar builds it" or "you build it"; every verb used here takes a plain "s" in the third person.
      * It starts with a lowercase "you" or "a …"; the caller capitalizes the first clause of a sentence.
      */
-    public function action(?UserId $userId, string $fallback, string $verbStem, string $rest, ?string $label = null): string
+    public function action(?UserId $userId, string $fallback, string $verbStem, string $rest): string
     {
-        $subject = $this->who($userId, $label, $fallback);
+        $subject = $this->who($userId, null, $fallback);
 
         return $subject.' '.('you' === $subject ? $verbStem : $verbStem.'s').$rest;
     }

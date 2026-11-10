@@ -204,7 +204,7 @@ Below the title, every ticket shows "Now: …" and, when not done, "Next: …". 
 | Code review | "{tester} tests it" |
 | Testing | "Done" |
 | Needs input, On hold | "it goes back to work" |
-| Team or company step | the Next sentence of the core step it moves on to |
+| Team or company step | none: the line shows "—", as the step it moves on to is not known until the move |
 
 The status pill shows the step name in the group's colours. While a question is open it shows "Waiting · question to {to}" in the Waiting colours.
 
