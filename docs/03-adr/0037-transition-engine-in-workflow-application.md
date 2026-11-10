@@ -15,7 +15,7 @@ The verb catalogue is data in `Workflow\Domain`; the guards and the policy that 
 
 ## Status
 
-Accepted · Supersedes in part [ADR-0014](0014-status-model-five-groups.md): only the Engine bullet naming `Workflow\Domain\TransitionEngine`. The engine is `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy`; it stays pure PHP with the same inputs and outputs. The rest of ADR-0014 stays as decided.
+Accepted · Supersedes in part [ADR-0014](0014-status-model-five-groups.md): only the Engine bullet naming `Workflow\Domain\TransitionEngine`. The engine is `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy`; it stays pure PHP and now takes `TicketState`, `ActorInTeam` and `RuleSetView`; the team's step set is not passed. The rest of ADR-0014 stays as decided.
 
 - Date: 2026-11-10
 - Deciders: Zairan Mir (lead)

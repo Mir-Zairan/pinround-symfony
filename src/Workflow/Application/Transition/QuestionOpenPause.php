@@ -14,7 +14,7 @@ use App\Workflow\Api\TicketState;
 final readonly class QuestionOpenPause
 {
     /**
-     * The same answer for every move, so it is asked once per ticket, also in a step no verb leaves.
+     * The same answer for every move, so it is asked once per ticket, also in a step where no verb applies.
      */
     public function noteFor(TicketState $ticket): ?RuleNote
     {
