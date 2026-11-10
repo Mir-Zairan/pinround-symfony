@@ -30,26 +30,26 @@ final readonly class FixedTeamQueries implements TeamQueries
 
     public function summariesOf(OrganizationId $organizationId, array $teamIds): array
     {
-        throw new \LogicException('CreateProject reads no team summaries.');
+        throw new \LogicException('Only teamsOf is expected.');
     }
 
     public function allSummariesOf(OrganizationId $organizationId): array
     {
-        throw new \LogicException('CreateProject reads no team summaries.');
+        throw new \LogicException('Only teamsOf is expected.');
     }
 
     public function countOf(OrganizationId $organizationId): int
     {
-        throw new \LogicException('CreateProject counts no teams.');
+        throw new \LogicException('Only teamsOf is expected.');
     }
 
     public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
     {
-        throw new \LogicException('CreateProject reads no team summaries.');
+        throw new \LogicException('Only teamsOf is expected.');
     }
 
     public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob
     {
-        throw new \LogicException('CreateProject reads no jobs.');
+        throw new \LogicException('Only teamsOf is expected.');
     }
 }

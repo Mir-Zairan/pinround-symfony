@@ -17,6 +17,9 @@ final class InMemoryProjects implements Projects
     /** @var array<string, Project> by id */
     public array $saved = [];
 
+    /** @var list<string> the project id of each save() call */
+    public array $saveCalls = [];
+
     /**
      * @param bool $isKeyTakenOnAdd add() refuses every key, as when another transaction saved the key after byKey()
      */
@@ -48,5 +51,13 @@ final class InMemoryProjects implements Projects
             throw new ProjectKeyInUse('The unique index refused the key.');
         }
         $this->saved[$project->id()->toString()] = $project;
+    }
+
+    public function save(Project $project): void
+    {
+        if (!isset($this->saved[$project->id()->toString()])) {
+            throw new \LogicException('Only a project found or added before is saved.');
+        }
+        $this->saveCalls[] = $project->id()->toString();
     }
 }

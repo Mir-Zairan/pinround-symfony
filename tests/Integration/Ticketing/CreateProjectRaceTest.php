@@ -15,6 +15,7 @@ use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Application\CreateProject\CreateProject;
 use App\Ticketing\Application\CreateProject\ProjectKeyTaken;
+use App\Ticketing\Application\OrganizationTeams;
 use App\Ticketing\Domain\Project;
 use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Domain\ProjectKey;
@@ -62,7 +63,7 @@ final class CreateProjectRaceTest extends KernelTestCase
         $projects = new DoctrineProjects($this->entityManager());
         $createProject = new CreateProject(
             $this->projectsThatLoseTheRaceTo($secondSession, $projects),
-            self::teamQueriesWithTheShopTeam(),
+            new OrganizationTeams(self::teamQueriesWithTheShopTeam()),
         );
         $connection = $this->connection();
 
@@ -125,6 +126,11 @@ final class CreateProjectRaceTest extends KernelTestCase
             public function add(Project $project): void
             {
                 $this->projects->add($project);
+            }
+
+            public function save(Project $project): void
+            {
+                $this->projects->save($project);
             }
         };
     }

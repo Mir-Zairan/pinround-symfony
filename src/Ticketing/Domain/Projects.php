@@ -26,4 +26,11 @@ interface Projects
      *                         the caller must roll back and must not use the ORM again in that request
      */
     public function add(Project $project): void;
+
+    /**
+     * Saves the changes to a project found through byId() or byKey(), or added before, at once.
+     *
+     * @throws \LogicException when the project was not found or added through this repository
+     */
+    public function save(Project $project): void;
 }

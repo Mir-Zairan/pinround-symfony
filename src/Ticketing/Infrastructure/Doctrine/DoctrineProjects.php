@@ -53,4 +53,12 @@ final readonly class DoctrineProjects implements Projects
             throw new ProjectKeyInUse('Another project of the organization has this key.', 0, $exception);
         }
     }
+
+    public function save(Project $project): void
+    {
+        if (!$this->entityManager->contains($project)) {
+            throw new \LogicException('Only a project found through byId or byKey, or added before, is saved.');
+        }
+        $this->entityManager->flush();
+    }
 }

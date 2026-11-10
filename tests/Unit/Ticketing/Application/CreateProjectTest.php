@@ -10,7 +10,8 @@ use App\Ticketing\Application\CreateProject\CreateProject;
 use App\Ticketing\Application\CreateProject\ProjectKeyNotValid;
 use App\Ticketing\Application\CreateProject\ProjectKeyTaken;
 use App\Ticketing\Application\CreateProject\ProjectNameMissing;
-use App\Ticketing\Application\CreateProject\ProjectTeamNotFound;
+use App\Ticketing\Application\OrganizationTeams;
+use App\Ticketing\Application\ProjectTeamNotFound;
 use App\Ticketing\Domain\BlankProjectName;
 use App\Ticketing\Domain\InvalidProjectKey;
 use App\Ticketing\Domain\Project;
@@ -40,7 +41,7 @@ final class CreateProjectTest extends TestCase
         $project = $projects->byId($projectId);
         self::assertNotNull($project);
         self::assertTrue($project->organizationId()->equals(self::acmeFoods()));
-        self::assertTrue($project->owningTeam()->equals(new TeamId(self::MOBILE_TEAM)));
+        self::assertSame(self::MOBILE_TEAM, $project->owningTeam()?->toString());
         self::assertSame('SHOP', $project->key()->toString());
         self::assertSame('Online shop', $project->name());
     }
@@ -136,7 +137,7 @@ final class CreateProjectTest extends TestCase
 
     private static function createProject(InMemoryProjects $projects): CreateProject
     {
-        return new CreateProject($projects, new FixedTeamQueries(self::acmeFoods(), [new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)]));
+        return new CreateProject($projects, new OrganizationTeams(new FixedTeamQueries(self::acmeFoods(), [new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)])));
     }
 
     private static function acmeFoods(): OrganizationId
