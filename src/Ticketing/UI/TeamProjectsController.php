@@ -72,7 +72,7 @@ final class TeamProjectsController extends AbstractController
     public const string ALREADY_LINKED = 'One of those projects is already in a team, so none was added.';
     public const string KEY_NOT_VALID = 'A project key is 2 to 10 capital letters or digits and starts with a letter.';
     public const string NAME_MISSING = 'Give the project a name.';
-    /** With the key as typed, which the key format has accepted by then. */
+    /** With the key after trimming and capitals, which the key format has accepted by then. */
     public const string KEY_TAKEN = 'Another project already uses the key %s.';
 
     /** The flash type base.html.twig shows in its toast region. */
@@ -158,7 +158,7 @@ final class TeamProjectsController extends AbstractController
     public function create(string $slug, Request $request): Response
     {
         $organizationId = $this->requestTenant();
-        $key = $request->request->getString(self::KEY_FIELD);
+        $key = strtoupper(trim($request->request->getString(self::KEY_FIELD)));
         $name = $request->request->getString(self::NAME_FIELD);
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
 

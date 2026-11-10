@@ -71,10 +71,23 @@
 
 .team__project {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.team__project-head {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 4px 16px;
+}
+
+.team__project-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  margin-left: auto;
 }
 
 .team__project-name {
@@ -91,7 +104,6 @@
 }
 
 .team__project-tickets {
-  flex-basis: 100%;
   font-size: 14px;
   color: var(--on-surface-var);
 }
@@ -150,11 +162,50 @@
   display: none;
 }
 
+/* The prototype's .pick toggle: a row button, filled when chosen. The real checkbox stays inside the label so the form
+   works without JavaScript; it is hidden from sight but still takes focus and the space key. */
 .team__picker-option {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
   min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
   overflow-wrap: anywhere;
   cursor: pointer;
+}
+
+.team__picker-option:hover {
+  background: var(--s-high);
+}
+
+.team__picker-option input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.team__picker-option:has(input:checked) {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.team__picker-option:has(input:checked)::after {
+  content: '\2713';
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.team__picker-option:has(input:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.team__picker-option:has(input:checked) .team__project-key {
+  color: inherit;
 }

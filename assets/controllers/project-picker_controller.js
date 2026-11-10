@@ -29,6 +29,11 @@ export default class extends Controller {
     }
   }
 
+  // Enter in the search field would submit the link form with whatever is ticked.
+  ignoreEnter(event) {
+    event.preventDefault();
+  }
+
   update() {
     if (!this.hasSubmitTarget) {
       return;

@@ -184,6 +184,17 @@ final class TeamProjectsTest extends WebTestCase
         self::assertSame(['PAY' => $this->shop->toString()], $this->owningTeamsByKey());
     }
 
+    #[Test]
+    public function aKeyTypedInLowercaseWithSpacesAroundItIsCreatedTrimmedAndInCapitals(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+
+        $this->client->request('POST', self::CREATE, $this->createForm(' shop ', 'Web shop'));
+
+        self::assertSame('Added SHOP', $this->toastOfTheTeamPage());
+        self::assertSame(['SHOP' => $this->shop->toString()], $this->owningTeamsByKey());
+    }
+
     /**
      * @return iterable<string, array{string}>
      */
@@ -254,8 +265,8 @@ final class TeamProjectsTest extends WebTestCase
      */
     public static function refusedNewProjects(): iterable
     {
-        yield 'a key in lowercase' => ['pay', 'Payments', TeamProjectsController::KEY_NOT_VALID];
-        yield 'a key with a space' => ['PAY ', 'Payments', TeamProjectsController::KEY_NOT_VALID];
+        yield 'a key with a space inside' => ['PA Y', 'Payments', TeamProjectsController::KEY_NOT_VALID];
+        yield 'a key that starts with a digit' => ['1PAY', 'Payments', TeamProjectsController::KEY_NOT_VALID];
         yield 'a blank name' => ['PAY', '   ', TeamProjectsController::NAME_MISSING];
         yield 'the key of a project of another team' => ['APP', 'Payments', 'Another project already uses the key APP.'];
     }

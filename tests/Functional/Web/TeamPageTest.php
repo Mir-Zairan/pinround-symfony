@@ -75,24 +75,23 @@ final class TeamPageTest extends WebTestCase
         $page = $this->client->request('GET', '/teams/shop');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertStringContainsString('You lead this team.', $page->filter('main .team__subline')->text());
-        self::assertStringNotContainsString(self::LEAD_ONLY_NOTE, $page->filter('main')->text());
+        self::assertSame('You lead this team. You link its projects and add its own steps.', $page->filter('main .team__subline')->text());
+        self::assertStringNotContainsString('Only the team lead', $page->filter('main')->text());
     }
 
     /**
      * @return iterable<string, array{string}>
      */
-    public static function peopleWhoAreNotShopsLead(): iterable
+    public static function peopleWhoCanChangeNothingOnShop(): iterable
     {
         yield 'Omar, a member' => ['Omar'];
         yield 'Mia, a viewer' => ['Mia'];
         yield 'Raj, a Manager' => ['Raj'];
-        yield 'Sara, an Admin' => ['Sara'];
     }
 
     #[Test]
-    #[DataProvider('peopleWhoAreNotShopsLead')]
-    public function everyoneButTheLeadIsToldOnlyTheLeadCanChangeProjectsAndSteps(string $person): void
+    #[DataProvider('peopleWhoCanChangeNothingOnShop')]
+    public function everyoneWhoCanChangeNothingIsToldOnlyTheLeadCanChangeProjectsAndSteps(string $person): void
     {
         $this->logIn($this->client, $this->createAcmeFoodsPeople()[$person]);
 
@@ -100,6 +99,18 @@ final class TeamPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(self::LEAD_ONLY_NOTE, $page->filter('main .team__subline')->text());
+        self::assertStringNotContainsString('You lead this team.', $page->filter('main')->text());
+    }
+
+    #[Test]
+    public function anAdminWhoIsNotTheLeadIsToldOnlyTheLeadCanRemoveProjectsAndChangeSteps(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Sara']);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Only the team lead can remove projects and change steps.', $page->filter('main .team__subline')->text());
         self::assertStringNotContainsString('You lead this team.', $page->filter('main')->text());
     }
 
@@ -118,7 +129,7 @@ final class TeamPageTest extends WebTestCase
         self::assertSame('Projects 2', $page->filter('#team-projects')->text());
         $removeLabel = 'Lena' === $person ? ' Remove' : '';
         self::assertSame(
-            ['CART Checkout 0 open tickets See tickets of CART'.$removeLabel, 'SHOP Web shop 0 open tickets See tickets of SHOP'.$removeLabel],
+            ['CART Checkout See tickets of CART'.$removeLabel.' 0 open tickets', 'SHOP Web shop See tickets of SHOP'.$removeLabel.' 0 open tickets'],
             $page->filter('.team__project')->each(static fn ($project): string => $project->text()),
         );
         self::assertStringNotContainsString('Mobile app', $page->filter('main')->text());
@@ -183,7 +194,7 @@ final class TeamPageTest extends WebTestCase
         self::assertSame('Add a project', $page->filter('#add-project-dialog-title')->text());
         self::assertSame(['LOOSE Not in a team'], $page->filter('#add-project-form .team__picker-option')->each(static fn ($option): string => $option->text()));
         self::assertSame('Add project', $page->filter('button[form="add-project-form"]')->text());
-        self::assertCount(1, $page->filter('form.team__new-project input[name="key"]'));
+        self::assertSame('[A-Za-z][A-Za-z0-9]{1,9}', $page->filter('form.team__new-project input[name="key"]')->attr('pattern'));
         self::assertCount(1, $page->filter('form.team__new-project input[name="name"]'));
         self::assertSame('Create project', $page->filter('form.team__new-project button')->text());
     }

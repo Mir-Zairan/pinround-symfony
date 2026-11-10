@@ -14,7 +14,9 @@
             <h1 class="team__title">{{ team.name }}</h1>
             <p class="team__subline">
                 {%- if isLead -%}
-                    You lead this team.
+                    You lead this team. You link its projects and add its own steps.
+                {%- elseif canLink or canCreate -%}
+                    Only the team lead can remove projects and change steps.
                 {%- else -%}
                     Only the team lead can change projects and steps.
                 {%- endif -%}
@@ -39,7 +41,7 @@
                                                 <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.linkCsrfId) }}">
                                                 <label class="login__field">
                                                     Find by key or name
-                                                    <input class="login__input" type="search" autocomplete="off" {{ stimulus_target('project-picker', 'search') }} data-action="input->project-picker#filter">
+                                                    <input class="login__input" type="search" autocomplete="off" {{ stimulus_target('project-picker', 'search') }} data-action="input->project-picker#filter keydown.enter->project-picker#ignoreEnter">
                                                 </label>
                                                 <ul class="team__picker-list">
                                                     {% for unlinked in unlinkedProjects %}
@@ -62,7 +64,7 @@
                                             <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.createCsrfId) }}">
                                             <label class="login__field">
                                                 Key
-                                                <input class="login__input mono" type="text" name="{{ projectForms.keyField }}" maxlength="10" autocomplete="off" autocapitalize="characters" required>
+                                                <input class="login__input mono" type="text" name="{{ projectForms.keyField }}" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{1,9}" title="2 to 10 letters or digits, starting with a letter" autocomplete="off" autocapitalize="characters" required>
                                             </label>
                                             <label class="login__field">
                                                 Name
@@ -89,21 +91,25 @@
                         {% for project in projects %}
                             <li>
                                 <twig:Card class="team__project">
-                                    <div class="team__project-name">
-                                        <span class="mono team__project-key">{{ project.key }}</span>
-                                        <span>{{ project.name }}</span>
+                                    <div class="team__project-head">
+                                        <div class="team__project-name">
+                                            <span class="mono team__project-key">{{ project.key }}</span>
+                                            <span>{{ project.name }}</span>
+                                        </div>
+                                        <div class="team__project-actions">
+                                            {% if ticketsUrls[project.id] is not null %}
+                                                <a class="team__project-link" href="{{ ticketsUrls[project.id] }}">See tickets<span class="visually-hidden"> of {{ project.key }}</span></a>
+                                            {% endif %}
+                                            {% if canUnlink %}
+                                                <form class="team__remove" method="post" action="{{ path(projectForms.unlinkRoute, {slug: team.slug}) }}">
+                                                    <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.unlinkCsrfId) }}">
+                                                    <input type="hidden" name="{{ projectForms.projectIdField }}" value="{{ project.id }}">
+                                                    <twig:Button type="submit" variant="text" size="sm" aria-label="Remove {{ project.key }} from the team">Remove</twig:Button>
+                                                </form>
+                                            {% endif %}
+                                        </div>
                                     </div>
                                     <p class="team__project-tickets">{{ project.openTicketCount }} open {{ project.openTicketCount == 1 ? 'ticket' : 'tickets' }}</p>
-                                    {% if ticketsUrls[project.id] is not null %}
-                                        <a class="team__project-link" href="{{ ticketsUrls[project.id] }}">See tickets<span class="visually-hidden"> of {{ project.key }}</span></a>
-                                    {% endif %}
-                                    {% if canUnlink %}
-                                        <form class="team__remove" method="post" action="{{ path(projectForms.unlinkRoute, {slug: team.slug}) }}">
-                                            <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.unlinkCsrfId) }}">
-                                            <input type="hidden" name="{{ projectForms.projectIdField }}" value="{{ project.id }}">
-                                            <twig:Button type="submit" variant="text" size="sm" aria-label="Remove {{ project.key }} from the team">Remove</twig:Button>
-                                        </form>
-                                    {% endif %}
                                 </twig:Card>
                             </li>
                         {% endfor %}
