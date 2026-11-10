@@ -37,8 +37,9 @@ final class LinkProjectTest extends TestCase
         $shop = self::unlinkedShopProject();
         $projects = new InMemoryProjects(false, $shop);
 
-        self::linkProject($projects)(self::acmeFoods(), new TeamId(self::MOBILE_TEAM), self::SHOP_PROJECT);
+        $key = self::linkProject($projects)(self::acmeFoods(), new TeamId(self::MOBILE_TEAM), self::SHOP_PROJECT);
 
+        self::assertSame('SHOP', $key);
         self::assertSame(self::MOBILE_TEAM, $shop->owningTeam()?->toString());
         self::assertSame([self::SHOP_PROJECT], $projects->lockCalls, 'The project was checked without its row lock.');
         self::assertSame([self::SHOP_PROJECT], $projects->saveCalls);

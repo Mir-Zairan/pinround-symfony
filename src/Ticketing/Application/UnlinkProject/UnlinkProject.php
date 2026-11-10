@@ -30,6 +30,8 @@ final readonly class UnlinkProject
     /**
      * @param string $projectId a string, as the UI may not build the Domain's ProjectId
      *
+     * @return string the key of the project that was unlinked
+     *
      * @throws ProjectNotFound       when the organization has no project with that id, or the id is not a project id;
      *                               nothing is saved
      * @throws ProjectNotOfTeam      when the project is not linked to $owningTeam, also when it is linked to no team;
@@ -37,7 +39,7 @@ final readonly class UnlinkProject
      * @throws ProjectHasOpenTickets when the project still has open tickets; nothing is saved
      * @throws \LogicException       when no transaction is open; nothing is saved
      */
-    public function __invoke(OrganizationId $organizationId, TeamId $owningTeam, string $projectId): void
+    public function __invoke(OrganizationId $organizationId, TeamId $owningTeam, string $projectId): string
     {
         $project = $this->organizationProjects->lockedProjectOf($organizationId, $projectId);
         if (!($project->owningTeam()?->equals($owningTeam) ?? false)) {
@@ -50,5 +52,7 @@ final readonly class UnlinkProject
 
         $project->unlink();
         $this->projects->save($project);
+
+        return $project->key()->toString();
     }
 }

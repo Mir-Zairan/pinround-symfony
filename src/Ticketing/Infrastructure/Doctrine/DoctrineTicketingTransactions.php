@@ -20,7 +20,8 @@ final readonly class DoctrineTicketingTransactions implements TicketingTransacti
         if (null === $this->tenantContext->get()) {
             throw new \LogicException('A Ticketing transaction needs the request\'s tenant.');
         }
-        // A transaction already open would turn this one into a savepoint, whose rollback leaves a failed transaction.
+        // Inside an open transaction this would only be a savepoint: nothing is committed when run returns, and a
+        // failure would close the request's EntityManager.
         if ($this->entityManager->getConnection()->isTransactionActive()) {
             throw new \LogicException('A Ticketing transaction must not run inside another transaction.');
         }

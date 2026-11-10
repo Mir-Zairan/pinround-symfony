@@ -6,19 +6,27 @@ namespace App\Tests\Functional\Ticketing;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Tests\Integration\Organization\SecondSession;
 use App\Ticketing\Application\OpenTicketCounts;
+use App\Ticketing\Domain\Project;
 use App\Ticketing\Domain\ProjectId;
+use App\Ticketing\Domain\ProjectKey;
+use App\Ticketing\Domain\Projects;
+use App\Ticketing\Infrastructure\Doctrine\DoctrineProjects;
 use App\Ticketing\Infrastructure\Doctrine\TicketOpenTicketCounts;
 use App\Ticketing\UI\TeamProjectsController;
 use Doctrine\DBAL\Connection;
+use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -266,6 +274,51 @@ final class TeamProjectsTest extends WebTestCase
     }
 
     #[Test]
+    public function aKeyAnotherConnectionCommitsAfterTheCheckIsToldTakenAndTheNextRequestWorks(): void
+    {
+        $this->client->disableReboot();
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $entityManager = self::getContainer()->get('doctrine.orm.default_entity_manager');
+        $secondSession = SecondSession::besideTheApp($entityManager, self::getContainer()->get(TenantContext::class))->entityManager;
+        self::getContainer()->set(DoctrineProjects::class, $this->projectsThatLoseTheRaceTo($secondSession, new DoctrineProjects($entityManager), $this->acmeFoods, $this->shop));
+
+        try {
+            $this->client->request('POST', self::CREATE, $this->createForm('PAY', 'Payments'));
+
+            self::assertSame('Another project already uses the key PAY.', $this->toastOfTheTeamPage());
+        } finally {
+            $secondSession->getConnection()->close();
+        }
+        self::assertSame(['PAY' => $this->shop->toString()], $this->owningTeamsByKey());
+        $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+    }
+
+    #[Test]
+    public function aLeadLinkingTheSameProjectTwiceInAnyCaseGetsItOnceInTheToast(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $app = $this->addProject(null, 'APP', 'Mobile app');
+
+        $this->client->request('POST', self::LINK, $this->linkForm($app, strtoupper($app)));
+
+        self::assertSame('Added APP', $this->toastOfTheTeamPage());
+        self::assertSame(['APP' => $this->shop->toString()], $this->owningTeamsByKey());
+    }
+
+    #[Test]
+    public function aPersonTheVoterRefusesGetsForbiddenBeforeTheFormTokenIsChecked(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Omar']);
+        $shopProject = $this->addProject($this->shop, 'SHOP', 'Web shop');
+
+        $this->client->request('POST', self::UNLINK, ['project_id' => $shopProject, '_csrf_token' => 'not-the-token']);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['SHOP' => $this->shop->toString()], $this->owningTeamsByKey());
+    }
+
+    #[Test]
     public function aFormTokenThatIsNotValidChangesNothing(): void
     {
         $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
@@ -371,6 +424,62 @@ final class TeamProjectsTest extends WebTestCase
     private function createForm(string $key, string $name): array
     {
         return ['key' => $key, 'name' => $name, '_csrf_token' => $this->csrfTokenFor($this->client, TeamProjectsController::CREATE_CSRF_ID)];
+    }
+
+    /**
+     * Finds what the real repository finds, then lets the second session save the same key as a project of $team and
+     * commit before CreateProject acts, so only the unique index can refuse it.
+     */
+    private function projectsThatLoseTheRaceTo(EntityManagerInterface $secondSession, Projects $projects, OrganizationId $organizationId, TeamId $team): Projects
+    {
+        return new readonly class($secondSession, $projects, $organizationId, $team) implements Projects {
+            public function __construct(
+                private EntityManagerInterface $secondSession,
+                private Projects $projects,
+                private OrganizationId $organizationId,
+                private TeamId $team,
+            ) {
+            }
+
+            public function nextIdentity(): ProjectId
+            {
+                return $this->projects->nextIdentity();
+            }
+
+            public function byId(ProjectId $id): ?Project
+            {
+                return $this->projects->byId($id);
+            }
+
+            public function lockById(ProjectId $id): ?Project
+            {
+                return $this->projects->lockById($id);
+            }
+
+            public function byKey(ProjectKey $key): ?Project
+            {
+                $found = $this->projects->byKey($key);
+                $this->secondSession->wrapInTransaction(fn () => new DoctrineProjects($this->secondSession)->add(new Project(
+                    new ProjectId(Uuid::v7()->toRfc4122()),
+                    $this->organizationId,
+                    $this->team,
+                    $key,
+                    'Winner',
+                )));
+
+                return $found;
+            }
+
+            public function add(Project $project): void
+            {
+                $this->projects->add($project);
+            }
+
+            public function save(Project $project): void
+            {
+                $this->projects->save($project);
+            }
+        };
     }
 
     /**

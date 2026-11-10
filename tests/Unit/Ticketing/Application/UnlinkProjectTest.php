@@ -34,8 +34,9 @@ final class UnlinkProjectTest extends TestCase
         $shop = self::shopProject();
         $projects = new InMemoryProjects(false, $shop);
 
-        new UnlinkProject($projects, new OrganizationProjects($projects), new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::SHOP_TEAM), self::SHOP_PROJECT);
+        $key = new UnlinkProject($projects, new OrganizationProjects($projects), new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::SHOP_TEAM), self::SHOP_PROJECT);
 
+        self::assertSame('SHOP', $key);
         self::assertNull($shop->owningTeam());
         self::assertSame([self::SHOP_PROJECT], $projects->lockCalls, 'The project was checked without its row lock.');
         self::assertSame([self::SHOP_PROJECT], $projects->saveCalls);

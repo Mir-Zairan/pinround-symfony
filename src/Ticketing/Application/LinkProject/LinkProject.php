@@ -31,13 +31,15 @@ final readonly class LinkProject
     /**
      * @param string $projectId a string, as the UI may not build the Domain's ProjectId
      *
+     * @return string the key of the project that was linked
+     *
      * @throws ProjectTeamNotFound when the team is not a team of the organization; nothing is saved
      * @throws ProjectNotFound     when the organization has no project with that id, or the id is not a project id;
      *                             nothing is saved
      * @throws ProjectStillLinked  when the project is linked to a team, $team included; nothing is saved
      * @throws \LogicException     when no transaction is open; nothing is saved
      */
-    public function __invoke(OrganizationId $organizationId, TeamId $team, string $projectId): void
+    public function __invoke(OrganizationId $organizationId, TeamId $team, string $projectId): string
     {
         $this->organizationTeams->assertTeamOf($organizationId, $team);
         $project = $this->organizationProjects->lockedProjectOf($organizationId, $projectId);
@@ -48,5 +50,7 @@ final readonly class LinkProject
             throw new ProjectStillLinked('That project is already linked to a team.', 0, $alreadyLinked);
         }
         $this->projects->save($project);
+
+        return $project->key()->toString();
     }
 }

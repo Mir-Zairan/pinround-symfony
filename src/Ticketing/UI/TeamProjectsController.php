@@ -10,8 +10,6 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Ticketing\Api\ProjectPermission;
-use App\Ticketing\Api\ProjectQueries;
-use App\Ticketing\Api\ProjectSummary;
 use App\Ticketing\Application\CreateProject\CreateProject;
 use App\Ticketing\Application\CreateProject\ProjectKeyNotValid;
 use App\Ticketing\Application\CreateProject\ProjectKeyTaken;
@@ -84,7 +82,6 @@ final class TeamProjectsController extends AbstractController
     public function __construct(
         private readonly TicketingTransactions $ticketingTransactions,
         private readonly TeamQueries $teamQueries,
-        private readonly ProjectQueries $projectQueries,
         private readonly UnlinkProject $unlinkProject,
         private readonly LinkProject $linkProject,
         private readonly CreateProject $createProject,
@@ -106,9 +103,8 @@ final class TeamProjectsController extends AbstractController
                 if (!$this->isCsrfTokenValid(self::UNLINK_CSRF_ID, $csrfToken)) {
                     return self::FORM_EXPIRED;
                 }
-                ($this->unlinkProject)($organizationId, $team->id(), $projectId);
 
-                return \sprintf(self::UNLINKED, self::keysOf($this->projectQueries->unlinkedProjects(), [$projectId]));
+                return \sprintf(self::UNLINKED, ($this->unlinkProject)($organizationId, $team->id(), $projectId));
             });
         } catch (ProjectNotFound|ProjectNotOfTeam) {
             throw $this->createNotFoundException('No project of this team has that id.');
@@ -139,11 +135,15 @@ final class TeamProjectsController extends AbstractController
                 if ([] === $projectIds) {
                     return self::NO_PROJECT_CHOSEN;
                 }
-                foreach ($projectIds as $projectId) {
-                    ($this->linkProject)($organizationId, $team->id(), $projectId);
+                // Rows are locked in one order whatever the form sent, so two concurrent links cannot wait on each other.
+                $lockOrder = $projectIds;
+                sort($lockOrder);
+                $keysById = [];
+                foreach ($lockOrder as $projectId) {
+                    $keysById[$projectId] = ($this->linkProject)($organizationId, $team->id(), $projectId);
                 }
 
-                return \sprintf(self::ADDED, self::keysOf($this->projectQueries->projectsOf($team->id()), $projectIds));
+                return \sprintf(self::ADDED, implode(', ', array_map(static fn (string $projectId): string => $keysById[$projectId], $projectIds)));
             });
         } catch (ProjectNotFound|ProjectTeamNotFound) {
             throw $this->createNotFoundException(self::NOT_FOUND);
@@ -223,25 +223,6 @@ final class TeamProjectsController extends AbstractController
         }
 
         return array_values(array_unique($projectIds));
-    }
-
-    /**
-     * @param list<ProjectSummary> $projects
-     * @param list<string>         $projectIds lowercase
-     *
-     * @return string the keys of $projectIds, in their order, joined by ", "
-     */
-    private static function keysOf(array $projects, array $projectIds): string
-    {
-        $keysById = [];
-        foreach ($projects as $project) {
-            $keysById[$project->id()] = $project->key();
-        }
-
-        return implode(', ', array_map(
-            static fn (string $projectId): string => $keysById[$projectId] ?? throw new \LogicException('A project the command just changed is missing from its list.'),
-            $projectIds,
-        ));
     }
 
     private function redirectWithToast(string $slug, string $toast): Response
