@@ -80,15 +80,17 @@ Three rules exist today. Each is stored per org, and per team under the `team` p
 
 Which rule set applies to a team (built in P02.T3: `Workflow\Api\RuleQueries::rulesFor`, `Infrastructure\Doctrine\DbalRuleQueries`): under the policy `team`, the team's own row when it has one, else the organization's; under `extend` and `locked` always the organization's row, even if the team still has an old row of its own. An organization with no row has all three rules on. Under the policy `locked`, `StepQueries::moveTargetsFor` leaves the team's own steps out of the steps a ticket may be moved to; a ticket already in a team step keeps it.
 
-Each rule is one guard class that implements `Workflow\Domain\Guard`. A sketch:
+Each rule is one guard class that implements `Workflow\Application\Transition\Guard` (built in P02.T4: `TesterMovesDone`, `NoSelfReview`, `ReviewBeforeTest`, and `QuestionOpenPause`, which no team can turn off). Guards are in Application, not Domain, because they read Workflow's Api types:
 
 ```php
 interface Guard
 {
-    /** Returns null when allowed, or a plain-language note when blocked. */
-    public function check(TicketState $ticket, Transition $transition, ActorContext $actor, RuleSet $rules): ?string;
+    /** Returns null when allowed, or the plain note when blocked; the note keeps people as ids ("{reviewer} reviews it."). */
+    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote;
 }
 ```
+
+`ActorInTeam` is the person's team role (lead, member, viewer or none) and job in the ticket's team; org roles grant no move. A guard is asked also about a person who may not use the verb, so its note can explain the rule to them, as the assignee in code review is told who reviews their code.
 
 New rules are added as new guard classes plus a column in `wf_rule_set`, plus an ADR if they change behaviour for everyone.
 
@@ -309,7 +311,7 @@ Unknown statuses map to To do and show a warning in Admin until someone maps the
 
 - **Why not the Symfony Workflow component?** Its places and transitions are configured statically (YAML/PHP config, compiled into the container). pinround's steps are data, and they differ per organization and team at runtime. So we keep a small engine of our own: transitions are a fixed catalogue of verbs (the table above), steps come from `wf_step`, and guards are classes. This decision is recorded in [ADR-0014](../03-adr/0014-status-model-five-groups.md).
 - **Classes:**
-  - `Workflow\Domain\TransitionEngine` (lists available verbs, checks guards);
+  - `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy` (built in P02.T4: lists the verbs a person may use and checks one, over `Domain\TransitionCatalogue` and the guards; pure, the caller passes `TicketState`, `ActorInTeam` and `RuleQueries::rulesFor`);
   - `Workflow\Domain\TurnRules` (pure);
   - `Workflow\Domain\Sentence\NowNext` (the sentences above; it returns structured parts so the UI can bold names);
   - `Ticketing\Application\Move\MoveTicketHandler` (loads the ticket, asks the engine, applies the move, projects the turn, writes the event).

@@ -110,6 +110,7 @@ services:
     # Other modules read steps and rules through WorkflowCache (performance-and-scale.md, "Caching").
     App\Workflow\Api\StepQueries: '@App\Workflow\Infrastructure\Cache\CachedStepQueries'
     App\Workflow\Api\RuleQueries: '@App\Workflow\Infrastructure\Cache\CachedRuleQueries'
+    App\Workflow\Api\TransitionPolicy: '@App\Workflow\Application\Transition\CatalogueTransitionPolicy'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
