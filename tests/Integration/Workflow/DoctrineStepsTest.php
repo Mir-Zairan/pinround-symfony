@@ -110,6 +110,28 @@ final class DoctrineStepsTest extends KernelTestCase
     }
 
     #[Test]
+    public function aStepNeverAddedNorLoadedIsNotSaved(): void
+    {
+        $storedRows = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): int|string {
+            try {
+                $this->steps()->save(
+                    new Step(new StepId(self::CORE_STEP), new OrganizationId(self::ACME_FOODS), null, StepOrigin::Core, CoreStep::Todo, 'To do', Group::Todo, 1),
+                );
+                self::fail('A step that was never added was saved.');
+            } catch (\LogicException $refusal) {
+                self::assertSame('Only a step found through byId or added before is saved.', $refusal->getMessage());
+            }
+
+            $rows = $this->connection()->fetchOne('SELECT COUNT(*) FROM wf_step WHERE id = ?', [self::CORE_STEP]);
+            self::assertTrue(\is_int($rows) || \is_string($rows));
+
+            return $rows;
+        });
+
+        self::assertSame(0, (int) $storedRows);
+    }
+
+    #[Test]
     public function nextIdentityGivesADifferentStepIdEachTime(): void
     {
         self::assertFalse($this->steps()->nextIdentity()->equals($this->steps()->nextIdentity()));

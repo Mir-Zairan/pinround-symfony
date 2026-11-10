@@ -21,6 +21,8 @@ interface OrgSettingsStore
     /**
      * Writes the changes to settings loaded with of() at once. The update checks the version they were loaded with, so
      * it fails when another transaction changed them meanwhile; the caller must then roll back.
+     *
+     * @throws \LogicException when the settings were neither loaded through of() nor added; nothing is written
      */
     public function save(OrgSettings $settings): void;
 }
