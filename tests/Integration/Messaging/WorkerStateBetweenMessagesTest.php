@@ -109,6 +109,7 @@ final class WorkerStateBetweenMessagesTest extends KernelTestCase
                 'messageId' => $messageIdOfA,
                 'identityMapSizeAtStart' => 0,
                 'identityMapSizeAfterLoading' => 2,
+                'workflowCacheOrganizationId' => self::ORG_A,
             ],
             [
                 'organizationId' => self::ORG_B,
@@ -116,6 +117,7 @@ final class WorkerStateBetweenMessagesTest extends KernelTestCase
                 'messageId' => $messageIdOfB,
                 'identityMapSizeAtStart' => 0,
                 'identityMapSizeAfterLoading' => 1,
+                'workflowCacheOrganizationId' => self::ORG_B,
             ],
         ], $this->sightingHandler()->sightings());
     }

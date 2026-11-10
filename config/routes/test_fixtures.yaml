@@ -50,6 +50,19 @@ when@test:
         controller: App\Tests\Fixtures\Http\WorkerResetProbeController::enterOrganizationThenFail
         methods: [POST]
 
+    # Without the request transaction, whose BEGIN would start WorkflowCache afresh and hide what the reset left.
+    test_worker_reset_workflow_cache_close_then_fail:
+        path: /_test/worker-reset/workflow-cache/{organizationId}/close-then-fail
+        controller: App\Tests\Fixtures\Http\WorkflowCacheResetProbeController::rememberThenCloseTheConnectionThenFail
+        methods: [POST]
+        defaults: { _request_transaction: false }
+
+    test_worker_reset_workflow_cache_invalidate:
+        path: /_test/worker-reset/workflow-cache/{organizationId}/invalidate
+        controller: App\Tests\Fixtures\Http\WorkflowCacheResetProbeController::invalidateTheTeamOutsideATransaction
+        methods: [POST]
+        defaults: { _request_transaction: false }
+
     test_current_actor_report:
         path: /_test/actor
         controller: App\Tests\Fixtures\Http\CurrentActorProbeController::reportActor
