@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Insight;
 
+use App\Insight\Api\TurnProjector;
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TurnRowResolver;
 use App\Insight\Infrastructure\Doctrine\DbalTurnProjector;
@@ -210,6 +211,22 @@ final class DbalTurnProjectorTest extends KernelTestCase
 
         self::assertSame('Lena reviews their own code: no other developer in the team', $note);
         self::assertSame([self::LENA, 'review'], [$this->storedRowOf(self::ACME_FOODS)['turn_user_id'] ?? null, $this->storedRowOf(self::ACME_FOODS)['kind'] ?? null]);
+    }
+
+    /**
+     * The container's TenantContext and real clock apply here, so waiting_since is not asserted.
+     */
+    #[Test]
+    public function theContainersTurnProjectorWritesTheRowFromItsSource(): void
+    {
+        $projector = self::getContainer()->get('test.insight_turn_projector');
+        self::assertInstanceOf(TurnProjector::class, $projector);
+        $this->source()->put($this->facts($this->buildingTicket(self::OMAR)));
+
+        $this->transactions()->committedAs(self::ACME_FOODS, static fn (): ?string => $projector->refresh(new TicketId(self::TICKET)));
+
+        $row = $this->storedRowOf(self::ACME_FOODS);
+        self::assertSame([self::OMAR, 'build', 'doing'], [$row['turn_user_id'] ?? null, $row['kind'] ?? null, $row['grp'] ?? null]);
     }
 
     private function buildingTicket(string $assigneeId, ?string $priority = null, bool $isCheckNeeded = false): TicketState

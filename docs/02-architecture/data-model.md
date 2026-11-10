@@ -268,7 +268,7 @@ One row per **open** ticket. The row is deleted when the ticket is done. Created
 
 Indexes: see [Index catalogue](#index-catalogue).
 
-Updated **synchronously** in the same transaction as the change, by `TurnProjector::refresh(TicketId)` (`DbalTurnProjector`, one upsert or delete; `waiting_since` starts again only when the turn person or label changes) ([ADR-0015](../03-adr/0015-turn-read-model.md)).
+Updated **synchronously** in the same transaction as the change, by `TurnProjector::refresh(TicketId)` (`DbalTurnProjector`, one upsert or delete; `waiting_since` starts again only when the turn person or label changes) ([ADR-0015](../03-adr/0015-turn-read-model.md)). Every change of the turn or of a column the row copies calls it: `team_id`, `project_id`, `grp`, `visibility`, `reporter_id`, `assignee_id`, `pending_assignee_id`, `reviewer_id`, `tester_id`, `waiting_on_user_id`, `check_user_id`, and the priority, release and risk check behind `base_score`. A stale visibility column would show a restricted ticket on Home and Whose turn. This list is wider than ADR-0015's update path, which names only the commands that change a turn (see the P02.T6 hand-off note in [phase 2](../05-plan/phase-02-projects-and-workflow.md)).
 
 Home and "Whose turn?" read this table joined with `tkt_ticket_list_v`, a read-only SQL view owned by Ticketing (key, title, priority, release, step). Only Insight's query service may use that join ([ADR-0015](../03-adr/0015-turn-read-model.md)).
 

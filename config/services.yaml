@@ -113,8 +113,9 @@ services:
     App\Workflow\Api\TransitionPolicy: '@App\Workflow\Application\Transition\CatalogueTransitionPolicy'
     App\Workflow\Api\TurnRules: '@App\Workflow\Application\Turn\OrderedTurnRules'
     App\Workflow\Api\NeedsYouScore: '@App\Workflow\Application\Turn\WeightedNeedsYouScore'
-    # Its TicketTurnSource comes with Ticketing's Api in P03; until a module calls TurnProjector, the container drops
-    # both, so dev and prod compile without a source. The test env gives it an in-memory one below.
+    # Its TicketTurnSource comes in P03 as an Insight Infrastructure adapter over a Ticketing Api query; until a module
+    # calls TurnProjector, the container drops both, so dev and prod compile without a source. The test env gives it an
+    # in-memory one below.
     App\Insight\Api\TurnProjector: '@App\Insight\Infrastructure\Doctrine\DbalTurnProjector'
 
     # add more service definitions when explicit configuration is needed

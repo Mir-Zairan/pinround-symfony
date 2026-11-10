@@ -257,7 +257,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Story:** Lena opens Home. pinround does not scan 200k tickets. It reads her 30 rows from `ins_ticket_turn` and sorts them by score.
 - **Owns:** `ins_ticket_turn` (turn user, turn label, kind, base score, waiting since, group, checker), `ins_team_counts` (open tickets per team and group, for managers), `ins_release_progress`.
 - **Api:**
-  - `TurnProjector::refresh(TicketId): ?string` (called synchronously by Ticketing and Conversation in the transaction of every change that can move a turn; reads the ticket through the `TicketTurnSource` port that Ticketing implements, and returns the override note for the ticket's activity)
+  - `TurnProjector::refresh(TicketId): ?string` (called synchronously by Ticketing and Conversation in every transaction that changes the turn or a column the row copies: `team_id`, `project_id`, `grp`, `visibility`, `reporter_id`, `assignee_id`, `pending_assignee_id`, `reviewer_id`, `tester_id`, `waiting_on_user_id`, `check_user_id`, and the priority, release and risk check behind `base_score`; a stale visibility column would show a restricted ticket on Home and Whose turn. It reads the ticket through the `TicketTurnSource` port, which Insight implements in P03 with an Infrastructure adapter over a Ticketing Api query that returns SharedKernel-only data, the team's lead and member loads included; it returns the override note for the ticket's activity)
   - `HomeQueries::needsYou(UserId, OrganizationId): NeedsList` (top 5 + grouped rest)
   - `HomeQueries::whoseTurn(ProjectFilter): list<TurnGroup>`
   - `HomeQueries::workload(TeamId): list<Load>`

@@ -7,8 +7,11 @@ namespace App\Insight\Api;
 use App\SharedKernel\Domain\TicketId;
 
 /**
- * Keeps the ticket's row in ins_ticket_turn, the turn read model of ADR-0015, in step with the ticket. Every command
- * that can change a turn calls it in its own transaction, so Home is right as soon as that transaction commits.
+ * Keeps the ticket's row in ins_ticket_turn, the turn read model of ADR-0015, in step with the ticket. Every
+ * transaction that changes the turn or a column the row copies calls it: team_id, project_id, grp, visibility,
+ * reporter_id, assignee_id, pending_assignee_id, reviewer_id, tester_id, waiting_on_user_id, check_user_id, and the
+ * priority, release and risk check behind base_score. Home and Whose turn filter on the copied visibility columns, so
+ * a stale row shows a restricted ticket to people who may no longer see it.
  */
 interface TurnProjector
 {
