@@ -28,10 +28,14 @@ final readonly class DoctrineOrgSettingsStore implements OrgSettingsStore
     }
 
     /**
+     * @throws \LogicException         when the settings were neither loaded through of() nor added; nothing is written
      * @throws OptimisticLockException when the row's version is no longer the one the settings were loaded with
      */
     public function save(OrgSettings $settings): void
     {
-        $this->add($settings);
+        if (!$this->entityManager->contains($settings)) {
+            throw new \LogicException('Only settings found through of() or added before are saved.');
+        }
+        $this->entityManager->flush();
     }
 }

@@ -18,8 +18,8 @@ use Symfony\Component\Security\Core\Authorization\Voter\Vote;
  * organization's step policy, through StepChangeRights. Only the team's Lead is ever granted, and the actor's roles
  * are read under the request's tenant, so a team of another organization is never granted without reading the teams.
  *
- * Each vote reads the step policy (one query) and keeps nothing between votes, so a policy changed earlier in the
- * request counts at once.
+ * A vote for a lead of the team reads the step policy (one query), anyone else is denied without one; nothing is kept
+ * between votes, so a policy changed earlier in the request counts at once.
  *
  * @extends DenyByDefaultVoter<TeamId>
  */
@@ -42,10 +42,10 @@ final class WorkflowVoter extends DenyByDefaultVoter
     protected function grants(string $attribute, object $subject, TokenInterface $token, ?Vote $vote): bool
     {
         $actor = $this->currentActor->actorFor($token->getUser());
-        if (null === $actor) {
+        if (null === $actor || !$actor->roles()->isLeadOf($subject)) {
             return false;
         }
-        $rights = new StepChangeRights($this->settingsQueries->stepPolicyOf($actor->organizationId()), $actor->roles()->isLeadOf($subject));
+        $rights = new StepChangeRights($this->settingsQueries->stepPolicyOf($actor->organizationId()), isLeadOfTeam: true);
 
         return match ($attribute) {
             WorkflowPermission::STEP_CHANGE_TEAM => $rights->mayChangeTeamSteps(),

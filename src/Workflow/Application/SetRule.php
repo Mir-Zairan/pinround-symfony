@@ -26,7 +26,8 @@ final readonly class SetRule
 
     /**
      * A team's first own rule set starts as a copy of the organization's, then the one rule changes. An organization
-     * without a rule set starts from the defaults.
+     * without a rule set starts from the defaults. Only the one rule is written, so a rule someone else switched at the
+     * same time is kept.
      *
      * @param string $ruleCode one of tester_moves_done, no_self_review, review_before_test
      *
@@ -40,29 +41,22 @@ final readonly class SetRule
             throw new RuleUnknown(\sprintf('There is no rule "%s".', $ruleCode));
         }
 
-        if (null === $teamId) {
-            $ruleSet = $this->organizationRuleSet($organizationId);
-            $this->ruleSets->saveForOrganization($organizationId, $ruleSet->withRule($ruleCode, $isOn));
-
-            return;
+        if (null !== $teamId) {
+            $isTeamOfTheOrganization = array_any(
+                $this->teamQueries->teamsOf($organizationId),
+                static fn (TeamId $organizationTeam): bool => $organizationTeam->equals($teamId),
+            );
+            if (!$isTeamOfTheOrganization) {
+                throw new RuleTeamNotFound('That team is not in this organization.');
+            }
+            if (StepPolicy::Team !== $this->settingsQueries->stepPolicyOf($organizationId)) {
+                throw new TeamRulesNeedTeamPolicy('Only when your admin lets teams decide does a team set its own rules.');
+            }
         }
 
-        $isTeamOfTheOrganization = array_any(
-            $this->teamQueries->teamsOf($organizationId),
-            static fn (TeamId $organizationTeam): bool => $organizationTeam->equals($teamId),
-        );
-        if (!$isTeamOfTheOrganization) {
-            throw new RuleTeamNotFound('That team is not in this organization.');
-        }
-        if (StepPolicy::Team !== $this->settingsQueries->stepPolicyOf($organizationId)) {
-            throw new TeamRulesNeedTeamPolicy('Only when your admin lets teams decide does a team set its own rules.');
-        }
-        $ruleSet = $this->ruleSets->forTeam($organizationId, $teamId) ?? $this->organizationRuleSet($organizationId);
-        $this->ruleSets->saveForTeam($organizationId, $teamId, $ruleSet->withRule($ruleCode, $isOn));
-    }
-
-    private function organizationRuleSet(OrganizationId $organizationId): RuleSet
-    {
-        return $this->ruleSets->forOrganization($organizationId) ?? RuleSet::defaults();
+        $startingRules = null === $teamId
+            ? RuleSet::defaults()
+            : $this->ruleSets->forOrganization($organizationId) ?? RuleSet::defaults();
+        $this->ruleSets->switchRule($organizationId, $teamId, $ruleCode, $isOn, $startingRules);
     }
 }

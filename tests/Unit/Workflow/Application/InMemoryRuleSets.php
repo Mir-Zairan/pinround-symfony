@@ -27,9 +27,10 @@ final class InMemoryRuleSets implements RuleSets
         return $this->saved[self::key($organizationId, null)] ?? null;
     }
 
-    public function saveForTeam(OrganizationId $organizationId, TeamId $teamId, RuleSet $ruleSet): void
+    public function switchRule(OrganizationId $organizationId, ?TeamId $teamId, string $ruleCode, bool $isOn, RuleSet $startingRules): void
     {
-        $this->saved[self::key($organizationId, $teamId)] = $ruleSet;
+        $key = self::key($organizationId, $teamId);
+        $this->saved[$key] = ($this->saved[$key] ?? $startingRules)->withRule($ruleCode, $isOn);
     }
 
     public function forTeam(OrganizationId $organizationId, TeamId $teamId): ?RuleSet

@@ -23,7 +23,14 @@ final readonly class DbalRuleSets implements RuleSets
 
     public function saveForOrganization(OrganizationId $organizationId, RuleSet $ruleSet): void
     {
-        $this->save($organizationId, null, $ruleSet);
+        $this->refuseOutsideATransaction();
+
+        $this->connection->executeStatement(
+            self::INSERT_ROW.' ON CONFLICT (organization_id, team_id) DO UPDATE SET tester_moves_done = EXCLUDED.tester_moves_done,'
+            .' no_self_review = EXCLUDED.no_self_review, review_before_test = EXCLUDED.review_before_test',
+            self::rowValues($organizationId, null, $ruleSet),
+            self::ROW_TYPES,
+        );
     }
 
     public function forOrganization(OrganizationId $organizationId): ?RuleSet
@@ -36,9 +43,20 @@ final readonly class DbalRuleSets implements RuleSets
         ));
     }
 
-    public function saveForTeam(OrganizationId $organizationId, TeamId $teamId, RuleSet $ruleSet): void
+    /**
+     * The upsert updates the switched rule's column only, so it does not lose a rule another transaction switched
+     * after this one read $startingRules; it waits for that transaction's row lock, then updates the committed row.
+     */
+    public function switchRule(OrganizationId $organizationId, ?TeamId $teamId, string $ruleCode, bool $isOn, RuleSet $startingRules): void
     {
-        $this->save($organizationId, $teamId, $ruleSet);
+        $column = self::columnOf($ruleCode);
+        $this->refuseOutsideATransaction();
+
+        $this->connection->executeStatement(
+            self::INSERT_ROW.\sprintf(' ON CONFLICT (organization_id, team_id) DO UPDATE SET %1$s = EXCLUDED.%1$s', $column),
+            self::rowValues($organizationId, $teamId, $startingRules->withRule($ruleCode, $isOn)),
+            self::ROW_TYPES,
+        );
     }
 
     public function forTeam(OrganizationId $organizationId, TeamId $teamId): ?RuleSet
@@ -51,18 +69,32 @@ final readonly class DbalRuleSets implements RuleSets
         ));
     }
 
-    private function save(OrganizationId $organizationId, ?TeamId $teamId, RuleSet $ruleSet): void
-    {
-        $this->refuseOutsideATransaction();
+    private const string INSERT_ROW = 'INSERT INTO wf_rule_set (organization_id, team_id, tester_moves_done, no_self_review, review_before_test)'
+        .' VALUES (?, ?, ?, ?, ?)';
 
-        $this->connection->executeStatement(
-            'INSERT INTO wf_rule_set (organization_id, team_id, tester_moves_done, no_self_review, review_before_test)'
-            .' VALUES (?, ?, ?, ?, ?)'
-            .' ON CONFLICT (organization_id, team_id) DO UPDATE SET tester_moves_done = EXCLUDED.tester_moves_done,'
-            .' no_self_review = EXCLUDED.no_self_review, review_before_test = EXCLUDED.review_before_test',
-            [$organizationId->toString(), $teamId?->toString(), $ruleSet->testerMovesDone, $ruleSet->noSelfReview, $ruleSet->reviewBeforeTest],
-            [2 => ParameterType::BOOLEAN, 3 => ParameterType::BOOLEAN, 4 => ParameterType::BOOLEAN],
-        );
+    private const array ROW_TYPES = [2 => ParameterType::BOOLEAN, 3 => ParameterType::BOOLEAN, 4 => ParameterType::BOOLEAN];
+
+    /**
+     * @return list<string|bool|null>
+     */
+    private static function rowValues(OrganizationId $organizationId, ?TeamId $teamId, RuleSet $ruleSet): array
+    {
+        return [$organizationId->toString(), $teamId?->toString(), $ruleSet->testerMovesDone, $ruleSet->noSelfReview, $ruleSet->reviewBeforeTest];
+    }
+
+    /**
+     * The column is picked from this fixed list, so the rule code a caller passes never becomes SQL text.
+     *
+     * @throws \InvalidArgumentException when $ruleCode is not one of RuleSet::RULE_CODES
+     */
+    private static function columnOf(string $ruleCode): string
+    {
+        return match ($ruleCode) {
+            'tester_moves_done' => 'tester_moves_done',
+            'no_self_review' => 'no_self_review',
+            'review_before_test' => 'review_before_test',
+            default => throw new \InvalidArgumentException(\sprintf('There is no rule "%s".', $ruleCode)),
+        };
     }
 
     private function refuseOutsideATransaction(): void

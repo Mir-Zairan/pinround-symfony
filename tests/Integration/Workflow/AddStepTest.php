@@ -55,9 +55,9 @@ final class AddStepTest extends KernelTestCase
             $stepId = $this->addStep(StepPolicy::Extend)(new OrganizationId(self::ACME_FOODS), null, '  Design check ', 'check');
 
             return [
-                $stepId->toString(),
+                $stepId,
                 $this->checkingStepsFor(self::SHOP_TEAM),
-                $this->connection()->fetchAssociative('SELECT team_id, origin, core_code, archived_at FROM wf_step WHERE id = ?', [$stepId->toString()]),
+                $this->connection()->fetchAssociative('SELECT team_id, origin, core_code, archived_at FROM wf_step WHERE id = ?', [$stepId]),
             ];
         });
 

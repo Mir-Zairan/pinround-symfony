@@ -13,7 +13,6 @@ use App\Workflow\Domain\BlankStepName;
 use App\Workflow\Domain\DoneGroupStepRefused;
 use App\Workflow\Domain\Group;
 use App\Workflow\Domain\Step;
-use App\Workflow\Domain\StepId;
 use App\Workflow\Domain\StepOrigin;
 use App\Workflow\Domain\Steps;
 
@@ -34,13 +33,15 @@ final readonly class AddStep
      *
      * @param string $groupCode one of todo, doing, check, wait (done is refused)
      *
+     * @return string the new step's id, a lowercase UUIDv7
+     *
      * @throws StepGroupUnknown  when the group code is not one of the five; nothing is saved
      * @throws StepTeamNotFound  when the team is not a team of the organization; nothing is saved
      * @throws TeamStepsLocked   when a team step is added under the step policy locked; nothing is saved
      * @throws StepNameMissing   when nothing is left of the name after trimming; nothing is saved
      * @throws StepInDoneRefused when the group is done; nothing is saved
      */
-    public function __invoke(OrganizationId $organizationId, ?TeamId $teamId, string $name, string $groupCode): StepId
+    public function __invoke(OrganizationId $organizationId, ?TeamId $teamId, string $name, string $groupCode): string
     {
         $group = Group::tryFrom($groupCode) ?? throw new StepGroupUnknown(\sprintf('There is no group "%s".', $groupCode));
         if (null !== $teamId) {
@@ -74,6 +75,6 @@ final readonly class AddStep
         }
         $this->steps->add($step);
 
-        return $step->id();
+        return $step->id()->toString();
     }
 }

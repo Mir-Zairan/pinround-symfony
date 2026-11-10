@@ -68,7 +68,7 @@ final class SetRuleTest extends TestCase
     {
         $ruleSets = new InMemoryRuleSets();
         $ruleSets->saveForOrganization(self::acmeFoods(), RuleSet::defaults());
-        $ruleSets->saveForTeam(self::acmeFoods(), self::shopTeam(), new RuleSet(testerMovesDone: false, noSelfReview: false, reviewBeforeTest: true));
+        $ruleSets->saved[InMemoryRuleSets::key(self::acmeFoods(), self::shopTeam())] = new RuleSet(testerMovesDone: false, noSelfReview: false, reviewBeforeTest: true);
 
         self::setRule($ruleSets, StepPolicy::Team)(self::acmeFoods(), self::shopTeam(), 'review_before_test', false);
 

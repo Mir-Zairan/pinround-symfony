@@ -28,12 +28,17 @@ interface RuleSets
     public function forOrganization(OrganizationId $organizationId): ?RuleSet;
 
     /**
-     * Adds the team's own rule set, or replaces the one it has; the organization's and other teams' stay as they are.
-     * Under another organization as tenant the database refuses the write, which fails the transaction.
+     * Turns one rule of the organization's rule set (no team) or of the team's own on or off and writes that rule only,
+     * so a rule someone else switched at the same time is kept. A rule set that does not exist yet is added as
+     * $startingRules with the one rule switched; $startingRules is not used otherwise. Under another organization as
+     * tenant the database refuses the write, which fails the transaction.
      *
-     * @throws \LogicException when no transaction is open
+     * @param string $ruleCode one of RuleSet::RULE_CODES
+     *
+     * @throws \InvalidArgumentException when $ruleCode is not one of RuleSet::RULE_CODES; nothing is written
+     * @throws \LogicException           when no transaction is open
      */
-    public function saveForTeam(OrganizationId $organizationId, TeamId $teamId, RuleSet $ruleSet): void;
+    public function switchRule(OrganizationId $organizationId, ?TeamId $teamId, string $ruleCode, bool $isOn, RuleSet $startingRules): void;
 
     /**
      * The team's own rule set, never the organization's; null when the team has none (or it is another

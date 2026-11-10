@@ -133,6 +133,26 @@ final class WorkflowVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, self::SHOP, [WorkflowPermission::RULES_CHANGE_TEAM]));
     }
 
+    /**
+     * Only a lead of the team can be granted, so the step policy is not read for anyone else.
+     */
+    #[Test]
+    public function forSomeoneWhoDoesNotLeadTheTeamTheStepPolicyIsNotRead(): void
+    {
+        $voter = $this->voterReading(new readonly class implements SettingsQueries {
+            public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
+            {
+                throw new \LogicException('The step policy was read for someone who does not lead the team.');
+            }
+        });
+
+        foreach ([[self::LENA, self::MOBILE], [self::OMAR, self::SHOP], [self::SARA, self::SHOP], [self::BETA_LEAD, self::SHOP]] as [$userId, $teamId]) {
+            foreach ([WorkflowPermission::STEP_CHANGE_TEAM, WorkflowPermission::RULES_CHANGE_TEAM] as $attribute) {
+                self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, $userId, $teamId, $attribute), $userId.' '.$attribute);
+            }
+        }
+    }
+
     private function decide(WorkflowVoter $voter, string $userId, string $teamId, string $attribute): int
     {
         return $voter->vote(self::tokenOf($userId), new TeamId($teamId), [$attribute]);
@@ -143,16 +163,9 @@ final class WorkflowVoterTest extends TestCase
         return new UsernamePasswordToken(new InMemoryUser($userId, null), 'main');
     }
 
-    /**
-     * Acme Foods: Lena leads Shop and has no org role; Omar is a member and Mia a viewer of Shop; Raj is a Manager and
-     * a viewer of Shop; Sara is an Admin with no team role; another Admin leads Mobile. Beta Bakery: its lead leads
-     * Checkout and has no org role. Nobody has no actor.
-     */
     private function voter(StepPolicy $acmeFoodsPolicy, StepPolicy $betaBakeryPolicy): WorkflowVoter
     {
-        $shop = new TeamId(self::SHOP);
-        $actor = static fn (string $userId, string $organizationId, Roles $roles): ActorContext => new ActorContext(new UserId($userId), new OrganizationId($organizationId), $roles);
-        $settingsQueries = new readonly class([self::ACME_FOODS => $acmeFoodsPolicy, self::BETA_BAKERY => $betaBakeryPolicy]) implements SettingsQueries {
+        return $this->voterReading(new readonly class([self::ACME_FOODS => $acmeFoodsPolicy, self::BETA_BAKERY => $betaBakeryPolicy]) implements SettingsQueries {
             /**
              * @param array<string, StepPolicy> $stepPolicyByOrganization
              */
@@ -164,7 +177,18 @@ final class WorkflowVoterTest extends TestCase
             {
                 return $this->stepPolicyByOrganization[$organizationId->toString()] ?? StepPolicy::Extend;
             }
-        };
+        });
+    }
+
+    /**
+     * Acme Foods: Lena leads Shop and has no org role; Omar is a member and Mia a viewer of Shop; Raj is a Manager and
+     * a viewer of Shop; Sara is an Admin with no team role; another Admin leads Mobile. Beta Bakery: its lead leads
+     * Checkout and has no org role. Nobody has no actor.
+     */
+    private function voterReading(SettingsQueries $settingsQueries): WorkflowVoter
+    {
+        $shop = new TeamId(self::SHOP);
+        $actor = static fn (string $userId, string $organizationId, Roles $roles): ActorContext => new ActorContext(new UserId($userId), new OrganizationId($organizationId), $roles);
 
         return new WorkflowVoter(new FixedCurrentActor([
             self::LENA => $actor(self::LENA, self::ACME_FOODS, new Roles(false, false, [$shop], [], [])),

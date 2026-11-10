@@ -8,13 +8,12 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Integration\Organization\TenantTransactions;
-use App\Workflow\Api\StepOccupancy;
+use App\Tests\Unit\Workflow\Application\FixedStepOccupancy;
 use App\Workflow\Api\StepView;
 use App\Workflow\Application\CoreStepNotRemovable;
 use App\Workflow\Application\RemoveStep;
 use App\Workflow\Application\StepHasOpenTickets;
 use App\Workflow\Application\UnknownStep;
-use App\Workflow\Domain\StepId;
 use App\Workflow\Infrastructure\Doctrine\DbalStepQueries;
 use App\Workflow\Infrastructure\Doctrine\DoctrineSteps;
 use Doctrine\DBAL\Connection;
@@ -30,11 +29,14 @@ final class RemoveStepTest extends KernelTestCase
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-000000001fa1';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000001fb1';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-000000001fc1';
+    private const string MOBILE_TEAM = '0197a3c0-0000-7000-8000-000000001fc2';
     private const string CODE_REVIEW = '0197a3c0-0000-7000-8000-000000001fd1';
     private const string SHOP_READY_TO_MERGE = '0197a3c0-0000-7000-8000-000000001fd2';
     private const string DESIGN_CHECK = '0197a3c0-0000-7000-8000-000000001fd3';
+    private const string MOBILE_DEVICE_CHECK = '0197a3c0-0000-7000-8000-000000001fd4';
     private const string UNKNOWN_STEP = '0197a3c0-0000-7000-8000-000000001fff';
     private const string NOW = '2027-03-15 10:00:00+00';
+    private const string LATER = '2027-03-16 08:30:00+00';
 
     protected function setUp(): void
     {
@@ -43,6 +45,7 @@ final class RemoveStepTest extends KernelTestCase
             $this->insertStep(self::CODE_REVIEW, null, 'Code review', 'review', 'core', 3);
             $this->insertStep(self::DESIGN_CHECK, null, 'Design check', null, 'company', 0);
             $this->insertStep(self::SHOP_READY_TO_MERGE, self::SHOP_TEAM, 'Ready to merge', null, 'team', 0);
+            $this->insertStep(self::MOBILE_DEVICE_CHECK, self::MOBILE_TEAM, 'Device check', null, 'team', 0);
         });
     }
 
@@ -57,38 +60,64 @@ final class RemoveStepTest extends KernelTestCase
     #[Test]
     public function aTeamStepIsArchivedAndLeavesTheTeamsSteps(): void
     {
-        [$stepIds, $archivedAt] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
-            $this->removeStep(0)(new OrganizationId(self::ACME_FOODS), new StepId(self::SHOP_READY_TO_MERGE), new \DateTimeImmutable(self::NOW));
+        $stepOccupancy = new FixedStepOccupancy(0);
+        [$stepIds, $archivedAt] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($stepOccupancy): array {
+            $this->removeStep($stepOccupancy)(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), self::SHOP_READY_TO_MERGE, new \DateTimeImmutable(self::NOW));
 
             return [
                 array_map(static fn (StepView $step): string => $step->id(), new DbalStepQueries($this->connection())->stepsFor(new TeamId(self::SHOP_TEAM))),
-                $this->connection()->fetchOne("SELECT to_char(archived_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') FROM wf_step WHERE id = ?", [self::SHOP_READY_TO_MERGE]),
+                $this->archivedAtOf(self::SHOP_READY_TO_MERGE),
             ];
         });
 
         self::assertSame([self::CODE_REVIEW, self::DESIGN_CHECK], $stepIds);
         self::assertSame('2027-03-15 10:00:00', $archivedAt);
+        self::assertSame([self::SHOP_READY_TO_MERGE], $stepOccupancy->askedStepIds);
     }
 
     #[Test]
     public function aCompanyStepIsArchived(): void
     {
-        $archivedCount = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): mixed {
-            $this->removeStep(0)(new OrganizationId(self::ACME_FOODS), new StepId(self::DESIGN_CHECK), new \DateTimeImmutable(self::NOW));
+        $archivedIds = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $this->removeStep(new FixedStepOccupancy(0))(new OrganizationId(self::ACME_FOODS), null, self::DESIGN_CHECK, new \DateTimeImmutable(self::NOW));
 
-            return $this->connection()->fetchOne('SELECT count(*) FROM wf_step WHERE archived_at IS NOT NULL AND id = ?', [self::DESIGN_CHECK]);
+            return $this->connection()->fetchFirstColumn('SELECT id FROM wf_step WHERE archived_at IS NOT NULL');
         });
 
+        self::assertSame([self::DESIGN_CHECK], $archivedIds);
+    }
+
+    /**
+     * The step is loaded again for the second call, which keeps the first time instead of moving it to the later one.
+     */
+    #[Test]
+    public function removingARemovedStepAgainKeepsItsFirstTime(): void
+    {
+        [$archivedAt, $archivedCount] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $removeStep = $this->removeStep(new FixedStepOccupancy(0));
+            $removeStep(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), self::SHOP_READY_TO_MERGE, new \DateTimeImmutable(self::NOW));
+            $this->entityManager()->clear();
+            $removeStep(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), self::SHOP_READY_TO_MERGE, new \DateTimeImmutable(self::LATER));
+
+            return [
+                $this->archivedAtOf(self::SHOP_READY_TO_MERGE),
+                $this->connection()->fetchOne('SELECT count(*) FROM wf_step WHERE archived_at IS NOT NULL'),
+            ];
+        });
+
+        self::assertSame('2027-03-15 10:00:00', $archivedAt);
         self::assertSame(1, $archivedCount);
     }
 
     #[Test]
     public function aCoreStepIsRefused(): void
     {
-        self::assertSame(
-            [CoreStepNotRemovable::class, 'Code review is a core step, which every team keeps.'],
-            $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, self::CODE_REVIEW, 0),
-        );
+        foreach ([null, self::SHOP_TEAM] as $teamId) {
+            self::assertSame(
+                [CoreStepNotRemovable::class, 'Code review is a core step, which every team keeps.'],
+                $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, $teamId, self::CODE_REVIEW, 0),
+            );
+        }
     }
 
     #[Test]
@@ -96,17 +125,20 @@ final class RemoveStepTest extends KernelTestCase
     {
         self::assertSame(
             [StepHasOpenTickets::class, '2 open tickets are still in this step. Move them first.'],
-            $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, self::SHOP_READY_TO_MERGE, 2),
+            $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, self::SHOP_TEAM, self::SHOP_READY_TO_MERGE, 2),
         );
     }
 
     #[Test]
-    public function anUnknownStepIsRefused(): void
+    public function anUnknownOrMalformedStepIdIsRefused(): void
     {
-        self::assertSame(
-            [UnknownStep::class, 'That step is not in this organization.'],
-            $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, self::UNKNOWN_STEP, 0),
-        );
+        foreach ([self::UNKNOWN_STEP, 'not-a-step-id', ''] as $stepId) {
+            self::assertSame(
+                [UnknownStep::class, 'That step is not in this organization.'],
+                $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, null, $stepId, 0),
+                $stepId,
+            );
+        }
     }
 
     /**
@@ -118,22 +150,55 @@ final class RemoveStepTest extends KernelTestCase
     {
         self::assertSame(
             [UnknownStep::class, 'That step is not in this organization.'],
-            $this->refusalAs(self::BETA_BAKERY, self::BETA_BAKERY, self::SHOP_READY_TO_MERGE, 0),
+            $this->refusalAs(self::BETA_BAKERY, self::BETA_BAKERY, self::SHOP_TEAM, self::SHOP_READY_TO_MERGE, 0),
         );
         self::assertSame(
             [UnknownStep::class, 'That step is not in this organization.'],
-            $this->refusalAs(self::ACME_FOODS, self::BETA_BAKERY, self::SHOP_READY_TO_MERGE, 0),
+            $this->refusalAs(self::ACME_FOODS, self::BETA_BAKERY, self::SHOP_TEAM, self::SHOP_READY_TO_MERGE, 0),
+        );
+    }
+
+    /**
+     * The voter granted the lead STEP_CHANGE_TEAM on their own team only, so the step must be one of that team's.
+     */
+    #[Test]
+    public function aTeamRemovesNeitherAnotherTeamsStepNorACompanyStep(): void
+    {
+        self::assertSame(
+            [UnknownStep::class, 'That step is not one of this team\'s steps.'],
+            $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, self::SHOP_TEAM, self::MOBILE_DEVICE_CHECK, 0),
+        );
+        self::assertSame(
+            [UnknownStep::class, 'That step is not one of this team\'s steps.'],
+            $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, self::SHOP_TEAM, self::DESIGN_CHECK, 0),
+        );
+    }
+
+    /**
+     * Without a team the caller was voted as an Admin of company steps, so a team step is refused too.
+     */
+    #[Test]
+    public function withoutATeamATeamStepIsRefused(): void
+    {
+        self::assertSame(
+            [UnknownStep::class, 'That step is not a company step.'],
+            $this->refusalAs(self::ACME_FOODS, self::ACME_FOODS, null, self::SHOP_READY_TO_MERGE, 0),
         );
     }
 
     /**
      * @return array{class-string, string}|null the refusal's class and message; null when the step was removed
      */
-    private function refusalAs(string $tenantId, string $organizationId, string $stepId, int $openTickets): ?array
+    private function refusalAs(string $tenantId, string $organizationId, ?string $teamId, string $stepId, int $openTickets): ?array
     {
-        [$refusal, $archivedCount] = $this->transactions()->rolledBackAs($tenantId, function () use ($organizationId, $stepId, $openTickets): array {
+        [$refusal, $archivedCount] = $this->transactions()->rolledBackAs($tenantId, function () use ($organizationId, $teamId, $stepId, $openTickets): array {
             try {
-                $this->removeStep($openTickets)(new OrganizationId($organizationId), new StepId($stepId), new \DateTimeImmutable(self::NOW));
+                $this->removeStep(new FixedStepOccupancy($openTickets))(
+                    new OrganizationId($organizationId),
+                    null === $teamId ? null : new TeamId($teamId),
+                    $stepId,
+                    new \DateTimeImmutable(self::NOW),
+                );
                 $refusal = null;
             } catch (\DomainException $exception) {
                 $refusal = [$exception::class, $exception->getMessage()];
@@ -146,18 +211,14 @@ final class RemoveStepTest extends KernelTestCase
         return $refusal;
     }
 
-    private function removeStep(int $openTickets): RemoveStep
+    private function removeStep(FixedStepOccupancy $stepOccupancy): RemoveStep
     {
-        return new RemoveStep(new DoctrineSteps($this->entityManager()), new readonly class($openTickets) implements StepOccupancy {
-            public function __construct(private int $openTickets)
-            {
-            }
+        return new RemoveStep(new DoctrineSteps($this->entityManager()), $stepOccupancy);
+    }
 
-            public function openTicketsIn(string $stepId): int
-            {
-                return $this->openTickets;
-            }
-        });
+    private function archivedAtOf(string $stepId): mixed
+    {
+        return $this->connection()->fetchOne("SELECT to_char(archived_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') FROM wf_step WHERE id = ?", [$stepId]);
     }
 
     private function insertStep(string $stepId, ?string $teamId, string $name, ?string $coreCode, string $origin, int $position): void
