@@ -140,7 +140,7 @@ All cache keys start with the org id. Pools are tag-aware (Symfony Cache with Va
 
 | What | Key | TTL | Invalidated by tag |
 |---|---|---|---|
-| Steps and rules for a team (workflow config) | `org:{o}:wf:team:{t}` | 1 day | `wf-team-{t}` on any step/rule/policy change |
+| Steps and rules for a team (workflow config) | `org.{o}.wf.team.{t}.{entry}`, entry `steps`, `move-targets.{policy}` or `rules.{policy}` (Symfony keys refuse `:`) | 1 day | `wf-team-{t}` and `wf-org-{o}`: a team step or rule change clears its team; a company step or org rule change clears every team. Cleared after commit and again when the relayed event is handled. The policy is in the key, so a policy change needs no clear |
 | Release progress bar | `org:{o}:rel:{team}:{release}` | 5 min | `ticket-team-{t}` on move |
 | Team stack and workload counts | `org:{o}:load:{team}` | 2 min | `turn-team-{t}` on turn change |
 | Manager team overview | `org:{o}:mgr` | 5 min | `turn-org-{o}` |
