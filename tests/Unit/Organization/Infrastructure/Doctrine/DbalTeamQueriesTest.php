@@ -31,7 +31,7 @@ final class DbalTeamQueriesTest extends TestCase
         $connection->method('fetchOne')->willReturn('designer');
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('org_team_member holds an unknown job.');
+        $this->expectExceptionMessageIsOrContains('org_team_member holds an unknown job.');
 
         new DbalTeamQueries($connection)->jobOf(new TeamId('0197a3c0-0000-7000-8000-0000000005d1'), new UserId('0197a3c0-0000-7000-8000-0000000005c3'));
     }

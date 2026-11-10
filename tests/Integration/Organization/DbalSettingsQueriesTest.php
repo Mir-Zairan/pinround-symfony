@@ -99,7 +99,7 @@ final class DbalSettingsQueriesTest extends KernelTestCase
     public function anUnknownStoredPolicyIsRefused(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('org_settings holds an unknown step policy.');
+        $this->expectExceptionMessageIsOrContains('org_settings holds an unknown step policy.');
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): StepPolicy {
             $this->connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{step_policy}', '\"open\"')");

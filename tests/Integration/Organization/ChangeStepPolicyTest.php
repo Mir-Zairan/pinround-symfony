@@ -79,7 +79,7 @@ final class ChangeStepPolicyTest extends KernelTestCase
     public function anOrganizationWithoutSettingsIsRefused(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The organization has no settings.');
+        $this->expectExceptionMessageIsOrContains('The organization has no settings.');
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, fn () => $this->changeStepPolicy(StepPolicy::Locked));
     }
