@@ -16,7 +16,7 @@ final readonly class Turn
      * @param string|null       $label        set only when $userId is null and somebody still holds the turn
      * @param NeedsYouKind|null $kind         null when nobody holds the turn (Done)
      * @param string|null       $overrideNote set when a fallback chose the person, for the caller to write to the
-     *                                        ticket's activity; for example "Lena reviews her own code: no other
+     *                                        ticket's activity; for example "Lena reviews their own code: no other
      *                                        developer in the team"
      */
     public function __construct(

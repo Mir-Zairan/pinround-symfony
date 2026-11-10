@@ -107,7 +107,7 @@ final class OrderedTurnRulesTest extends TestCase
         $ticket = $this->ticket('review', 'check', assigneeId: self::LENA);
 
         self::assertEquals(
-            new Turn($this->id(self::LENA), null, NeedsYouKind::Review, 'Lena reviews her own code: no other developer in the team'),
+            new Turn($this->id(self::LENA), null, NeedsYouKind::Review, 'Lena reviews their own code: no other developer in the team'),
             $this->turn($ticket),
         );
     }

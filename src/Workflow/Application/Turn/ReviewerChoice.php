@@ -25,7 +25,7 @@ final readonly class ReviewerChoice
             static fn (TeamMemberLoad $developer): bool => !$developer->userId->equals($team->leadId),
         ));
         if ([] === $others) {
-            return new ChosenPerson($team->leadId, \sprintf('%s reviews her own code: no other developer in the team', $team->leadDisplayName));
+            return new ChosenPerson($team->leadId, \sprintf('%s reviews their own code: no other developer in the team', $team->leadDisplayName));
         }
 
         usort($others, static fn (TeamMemberLoad $a, TeamMemberLoad $b): int => [$a->openReviews, $a->userId->toString()] <=> [$b->openReviews, $b->userId->toString()]);

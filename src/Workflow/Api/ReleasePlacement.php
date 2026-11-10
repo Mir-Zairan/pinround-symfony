@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Workflow\Application\Turn;
+namespace App\Workflow\Api;
 
 /**
  * Where a ticket's release stands against the org's current release; the caller knows the current one, the ticket state

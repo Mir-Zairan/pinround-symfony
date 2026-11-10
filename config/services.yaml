@@ -112,6 +112,7 @@ services:
     App\Workflow\Api\RuleQueries: '@App\Workflow\Infrastructure\Cache\CachedRuleQueries'
     App\Workflow\Api\TransitionPolicy: '@App\Workflow\Application\Transition\CatalogueTransitionPolicy'
     App\Workflow\Api\TurnRules: '@App\Workflow\Application\Turn\OrderedTurnRules'
+    App\Workflow\Api\NeedsYouScore: '@App\Workflow\Application\Turn\WeightedNeedsYouScore'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -153,6 +154,9 @@ when@test:
             public: true
         test.workflow_turn_rules:
             alias: App\Workflow\Api\TurnRules
+            public: true
+        test.workflow_needs_you_score:
+            alias: App\Workflow\Api\NeedsYouScore
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

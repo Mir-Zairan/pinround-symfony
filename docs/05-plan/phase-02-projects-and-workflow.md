@@ -142,11 +142,11 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 **Why:** "whose turn" must be instant on Home and in lists ([FR-WF-08, FR-WF-14, FR-WF-15](../01-requirements/functional-requirements.md#wf--workflow-steps-and-turns), [ADR-0015](../03-adr/0015-turn-read-model.md)).
 **Steps:**
 1. `TurnRules::turnFor(TicketState, TeamFacts)` with the exact order from [whose turn](../02-architecture/workflow-engine.md#whose-turn): open question → asked person; check needed and no assignee → checker; Done → nobody; Backlog/On hold → lead; Code review → reviewer; Testing or any Checking step → tester; Needs input → waiting-on user or label (Customer, Product owner, Technical owner); else assignee or lead.
-2. Reviewer choice (lead; if the lead is the author, the other developer with the fewest open reviews) and tester choice (the team tester with the fewest tickets in Testing) as pure functions (FR-WF-14). Fallbacks: no tester in the team → the Testing turn goes to the lead; the lead is the author and there is no other developer → the lead reviews and the override is written to the ticket activity ("Lena reviews her own code: no other developer in the team").
+2. Reviewer choice (lead; if the lead is the author, the other developer with the fewest open reviews) and tester choice (the team tester with the fewest tickets in Testing) as pure functions (FR-WF-14). Fallbacks: no tester in the team → the Testing turn goes to the lead; the lead is the author and there is no other developer → the lead reviews and the override is written to the ticket activity ("Lena reviews their own code: no other developer in the team").
 3. Needs-you `kind` (`answer`, `check`, `review`, `test`, `assign`, `input`, `decide`, `build`) and `base_score` = kind base + priority weight + release points ([needs-you kinds and score](../02-architecture/workflow-engine.md#needs-you-kinds-and-score)). The time part is computed in SQL at read time.
 4. Migration `ins_ticket_turn` with the four indexes from the data model; RLS.
 5. `Insight\Api\TurnProjector::project(TicketState, TeamFacts, ?OpenQuestion)`: upsert (or delete when Done), sets `waiting_since` only when the turn person changes.
-**Files:** `src/Workflow/Domain/TurnRules.php`, `src/Insight/**`.
+**Files:** `src/Workflow/Api/{TurnRules,Turn,TeamFacts,TeamMemberLoad,NeedsYouKind,NeedsYouScore,ReleasePlacement}.php`, `src/Workflow/Application/Turn/**`, `src/Insight/**`.
 **Acceptance criteria:**
 - [x] Every turn rule has a unit test with the expected person or label.
 - [ ] A label waiter ("Customer") has `turn_user_id` NULL and `turn_label` set.

@@ -76,7 +76,7 @@ final class ReviewerAndTesterChoiceTest extends TestCase
         $chosen = new ReviewerChoice()->choose($this->id(self::LENA), $team);
 
         self::assertTrue($chosen->userId->equals($this->id(self::LENA)));
-        self::assertSame('Lena reviews her own code: no other developer in the team', $chosen->overrideNote);
+        self::assertSame('Lena reviews their own code: no other developer in the team', $chosen->overrideNote);
     }
 
     #[Test]

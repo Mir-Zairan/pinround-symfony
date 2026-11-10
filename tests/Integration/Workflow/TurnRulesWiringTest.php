@@ -7,9 +7,11 @@ namespace App\Tests\Integration\Workflow;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\NeedsYouKind;
+use App\Workflow\Api\ReleasePlacement;
 use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Application\Turn\OrderedTurnRules;
+use App\Workflow\Application\Turn\WeightedNeedsYouScore;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -31,5 +33,14 @@ final class TurnRulesWiringTest extends KernelTestCase
         self::assertNotNull($turn->userId);
         self::assertTrue($turn->userId->equals($lena));
         self::assertSame(NeedsYouKind::Build, $turn->kind);
+    }
+
+    #[Test]
+    public function theApiResolvesTheNeedsYouScoreToTheWeightedOne(): void
+    {
+        $score = self::getContainer()->get('test.workflow_needs_you_score');
+        self::assertInstanceOf(WeightedNeedsYouScore::class, $score);
+
+        self::assertSame(110, $score->baseScore(NeedsYouKind::Check, null, ReleasePlacement::NoRelease, true));
     }
 }

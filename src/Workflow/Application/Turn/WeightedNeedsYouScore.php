@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace App\Workflow\Application\Turn;
 
 use App\Workflow\Api\NeedsYouKind;
+use App\Workflow\Api\NeedsYouScore;
+use App\Workflow\Api\ReleasePlacement;
 
 /**
  * The part of the needs-you score that does not change with time: kind base + priority weight + release points
  * (workflow-engine.md, "Needs-you kinds and score"). The waiting-days part is added in SQL at read time.
  */
-final readonly class NeedsYouScore
+final readonly class WeightedNeedsYouScore implements NeedsYouScore
 {
     /**
      * @param string|null $priority one of blocker, critical, major, normal, minor; null counts as no weight
      *
      * @throws \InvalidArgumentException when the priority is not one of the five
      */
-    public function baseScore(NeedsYouKind $kind, ?string $priority, ReleasePlacement $release): int
+    public function baseScore(NeedsYouKind $kind, ?string $priority, ReleasePlacement $release, bool $isRiskCheck = false): int
     {
-        return $this->kindBase($kind) + $this->priorityWeight($priority) + match ($release) {
+        return $this->kindBase($kind) + (NeedsYouKind::Check === $kind && $isRiskCheck ? 40 : 0) + $this->priorityWeight($priority) + match ($release) {
             ReleasePlacement::InCurrentRelease => 30,
             ReleasePlacement::InOtherRelease => 10,
             ReleasePlacement::NoRelease => 0,
