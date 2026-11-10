@@ -55,7 +55,7 @@ final readonly class OrderedTurnRules implements TurnRules
         }
 
         if (CoreStep::Test === $step || Group::Check->value === $ticket->groupCode) {
-            $tester = null === $ticket->testerId ? $this->testerChoice->choose($team)->userId : $ticket->testerId;
+            $tester = $ticket->testerId ?? $this->testerChoice->choose($team)->userId;
 
             return new Turn($tester, null, NeedsYouKind::Test);
         }

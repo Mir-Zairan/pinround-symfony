@@ -30,7 +30,7 @@ final class TicketTurnFactsTest extends TestCase
     public function factsWithoutAReporterAreRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('The turn facts of a ticket need its reporter.');
+        $this->expectExceptionMessageIsOrContains('The turn facts of a ticket need its reporter.');
 
         $this->facts(null, 'all');
     }
@@ -39,7 +39,7 @@ final class TicketTurnFactsTest extends TestCase
     public function aVisibilityOtherThanAllOrTeamIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A ticket visibility must be all or team.');
+        $this->expectExceptionMessageIsOrContains('A ticket visibility must be all or team.');
 
         $this->facts(new UserId(self::MIA), 'private');
     }

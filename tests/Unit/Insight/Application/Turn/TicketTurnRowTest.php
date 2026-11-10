@@ -42,7 +42,7 @@ final class TicketTurnRowTest extends TestCase
     public function aRowWithNeitherOrBothIsRefusedAsTheTableWould(?UserId $turnUserId, ?string $turnLabel): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A turn row names a person or a label, never both and never neither.');
+        $this->expectExceptionMessageIsOrContains('A turn row names a person or a label, never both and never neither.');
 
         new TicketTurnRow($this->facts(), $turnUserId, $turnLabel, NeedsYouKind::Input, 20, null);
     }
