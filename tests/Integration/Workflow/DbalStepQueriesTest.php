@@ -157,11 +157,20 @@ final class DbalStepQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function moveTargetsForRefusesAnIdThatIsNotATeamIdBeforeAnyQuery(): void
+    public function moveTargetsUnderFollowsThePassedPolicyNotTheStoredOne(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $allIds = array_column($this->stepsFor(self::ACME_FOODS, self::SHOP_TEAM), 0);
 
-        $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->moveTargetsFor('team-1'));
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Locked);
+        self::assertSame($allIds, $this->moveTargetIdsUnder(StepPolicy::Extend), 'Stored locked, passed extend: the team step stays.');
+
+        $this->organizationRows()->removeAllOf(self::ACME_FOODS);
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Extend);
+        self::assertSame(
+            array_values(array_diff($allIds, [self::SHOP_READY_TO_SHIP])),
+            $this->moveTargetIdsUnder(StepPolicy::Locked),
+            'Stored extend, passed locked: the team step goes.',
+        );
     }
 
     #[Test]
@@ -243,7 +252,18 @@ final class DbalStepQueriesTest extends KernelTestCase
     {
         return $this->transactions()->rolledBackAs($tenantId, fn (): array => array_map(
             static fn (StepView $step): string => $step->id(),
-            $this->queries()->moveTargetsFor($teamId),
+            $this->queries()->moveTargetsFor(new TeamId($teamId)),
+        ));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function moveTargetIdsUnder(StepPolicy $policy): array
+    {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => array_map(
+            static fn (StepView $step): string => $step->id(),
+            $this->queries()->moveTargetsUnder(new TeamId(self::SHOP_TEAM), $policy),
         ));
     }
 

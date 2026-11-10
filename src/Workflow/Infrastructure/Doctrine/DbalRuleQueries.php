@@ -22,13 +22,20 @@ final readonly class DbalRuleQueries implements RuleQueries
     ) {
     }
 
-    public function rulesFor(string $teamId): RuleSetView
+    public function rulesFor(TeamId $teamId): RuleSetView
     {
-        $team = new TeamId($teamId);
+        return $this->rulesUnder($teamId, $this->settingsQueries->stepPolicyOf($this->tenantContext->require()));
+    }
+
+    /**
+     * rulesFor with the step policy already read, so a caller that keys a cache on the policy stores what it keyed.
+     */
+    public function rulesUnder(TeamId $teamId, StepPolicy $stepPolicy): RuleSetView
+    {
         $organizationId = $this->tenantContext->require();
 
-        $teamRules = StepPolicy::Team === $this->settingsQueries->stepPolicyOf($organizationId)
-            ? $this->ruleSets->forTeam($organizationId, $team)
+        $teamRules = StepPolicy::Team === $stepPolicy
+            ? $this->ruleSets->forTeam($organizationId, $teamId)
             : null;
         $rules = $teamRules ?? $this->ruleSets->forOrganization($organizationId) ?? RuleSet::defaults();
 

@@ -8,10 +8,10 @@ use App\Organization\Api\StepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
-use App\Workflow\Api\RuleSetView;
 use App\Workflow\Infrastructure\Doctrine\DbalRuleQueries;
 use App\Workflow\Infrastructure\Doctrine\DbalRuleSets;
 use Doctrine\DBAL\Connection;
@@ -117,11 +117,14 @@ final class DbalRuleQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function anIdThatIsNotATeamIdIsRefusedBeforeAnyQuery(): void
+    public function rulesUnderFollowsThePassedPolicyNotTheStoredOne(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Team);
+        self::assertSame(self::ORGANIZATION_RULES, $this->rulesUnder(StepPolicy::Extend), 'Stored team, passed extend: the organization\'s rules.');
 
-        $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): RuleSetView => $this->queries()->rulesFor('team-1'));
+        $this->organizationRows()->removeAllOf(self::ACME_FOODS);
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Extend);
+        self::assertSame(self::SHOP_RULES, $this->rulesUnder(StepPolicy::Team), 'Stored extend, passed team: the team\'s rules.');
     }
 
     #[Test]
@@ -131,10 +134,22 @@ final class DbalRuleQueriesTest extends KernelTestCase
 
         $this->connection()->beginTransaction();
         try {
-            $this->queries()->rulesFor(self::SHOP_TEAM);
+            $this->queries()->rulesFor(new TeamId(self::SHOP_TEAM));
         } finally {
             $this->connection()->rollBack();
         }
+    }
+
+    /**
+     * @return array{bool, bool, bool}
+     */
+    private function rulesUnder(StepPolicy $policy): array
+    {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($policy): array {
+            $rules = $this->queries()->rulesUnder(new TeamId(self::SHOP_TEAM), $policy);
+
+            return [$rules->testerMovesDone, $rules->noSelfReview, $rules->reviewBeforeTest];
+        });
     }
 
     /**
@@ -143,7 +158,7 @@ final class DbalRuleQueriesTest extends KernelTestCase
     private function rulesAs(string $tenantId, string $teamId): array
     {
         return $this->transactions()->rolledBackAs($tenantId, function () use ($teamId): array {
-            $rules = $this->queries()->rulesFor($teamId);
+            $rules = $this->queries()->rulesFor(new TeamId($teamId));
 
             return [$rules->testerMovesDone, $rules->noSelfReview, $rules->reviewBeforeTest];
         });

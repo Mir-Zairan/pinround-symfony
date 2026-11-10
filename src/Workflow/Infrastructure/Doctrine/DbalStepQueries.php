@@ -36,11 +36,20 @@ final readonly class DbalStepQueries implements StepQueries
         return array_map(self::stepView(...), $rows);
     }
 
-    public function moveTargetsFor(string $teamId): array
+    public function moveTargetsFor(TeamId $teamId): array
     {
-        $team = new TeamId($teamId);
-        $steps = $this->stepsFor($team);
-        if (StepPolicy::Locked !== $this->settingsQueries->stepPolicyOf($this->tenantContext->require())) {
+        return $this->moveTargetsUnder($teamId, $this->settingsQueries->stepPolicyOf($this->tenantContext->require()));
+    }
+
+    /**
+     * moveTargetsFor with the step policy already read, so a caller that keys a cache on the policy stores what it keyed.
+     *
+     * @return list<StepView>
+     */
+    public function moveTargetsUnder(TeamId $teamId, StepPolicy $stepPolicy): array
+    {
+        $steps = $this->stepsFor($teamId);
+        if (StepPolicy::Locked !== $stepPolicy) {
             return $steps;
         }
 

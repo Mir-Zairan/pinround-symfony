@@ -27,17 +27,14 @@ interface StepQueries
      * The steps a ticket of the team may be moved to: what stepsFor gives, except that under the step policy locked the
      * team's own steps are left out. Under extend and team it equals stepsFor. A ticket already in a team step keeps it;
      * only the choice of a new step changes. It always reads the step policy (one query, as the policy is in the cache
-     * key), which needs the tenant of the open transaction; a miss adds the steps query and a second policy read.
-     * A bad id throws before any query.
-     *
-     * @param string $teamId a team's uuid, in any case
+     * key), which needs the tenant of the open transaction; a miss adds the steps query and uses that same policy, never
+     * a second read.
      *
      * @return list<StepView> in the order of stepsFor
      *
-     * @throws \InvalidArgumentException when $teamId is not a canonical UUIDv7
-     * @throws \LogicException           when no tenant is set, or the stored step policy is unknown
+     * @throws \LogicException when no tenant is set, or the stored step policy is unknown
      */
-    public function moveTargetsFor(string $teamId): array;
+    public function moveTargetsFor(TeamId $teamId): array;
 
     /**
      * One query, never cached. A removed step still answers, as a ticket may still be in it.

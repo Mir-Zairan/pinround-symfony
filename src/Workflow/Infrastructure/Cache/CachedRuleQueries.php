@@ -24,13 +24,12 @@ final readonly class CachedRuleQueries implements RuleQueries
     ) {
     }
 
-    public function rulesFor(string $teamId): RuleSetView
+    public function rulesFor(TeamId $teamId): RuleSetView
     {
-        $team = new TeamId($teamId);
         // The step policy picks the team's rule set or the organization's, so it is in the key: a policy change needs
-        // no invalidation.
+        // no invalidation. It is read once and passed on, so the stored value is the one the key names.
         $stepPolicy = $this->settingsQueries->stepPolicyOf($this->tenantContext->require());
 
-        return $this->workflowCache->remember($team, 'rules.'.$stepPolicy->value, fn (): RuleSetView => $this->ruleQueries->rulesFor($teamId));
+        return $this->workflowCache->remember($teamId, 'rules.'.$stepPolicy->value, fn (): RuleSetView => $this->ruleQueries->rulesUnder($teamId, $stepPolicy));
     }
 }

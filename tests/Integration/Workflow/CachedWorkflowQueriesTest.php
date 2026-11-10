@@ -26,7 +26,9 @@ use App\Workflow\Application\SetRule;
 use App\Workflow\Infrastructure\Cache\CachedRuleQueries;
 use App\Workflow\Infrastructure\Cache\CachedStepQueries;
 use App\Workflow\Infrastructure\Cache\WorkflowCache;
+use App\Workflow\Infrastructure\Doctrine\DbalRuleQueries;
 use App\Workflow\Infrastructure\Doctrine\DbalRuleSets;
+use App\Workflow\Infrastructure\Doctrine\DbalStepQueries;
 use App\Workflow\Infrastructure\Doctrine\DoctrineSteps;
 use App\Workflow\Infrastructure\Messenger\MessengerWorkflowEvents;
 use Doctrine\DBAL\Connection;
@@ -164,6 +166,41 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
         self::assertSame([false, false, false], $this->rules());
     }
 
+    /**
+     * A policy change committing between the key's read and the load would store the new policy's answer under the old
+     * key, if the load read the policy again. The stored policy is Locked throughout; the stub answers what the key uses.
+     */
+    #[Test]
+    public function aMissReadsThePolicyOnceAndStoresTheValueOfTheKeysPolicy(): void
+    {
+        $this->writeBehindTheCache(function (): void {
+            $this->insertStep(self::ACME_FOODS, self::PAIRING, self::SHOP_TEAM, 'Pairing');
+            $this->insertRuleSet(self::ACME_FOODS, self::SHOP_TEAM, [false, false, false]);
+        });
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Locked);
+        $keyPolicies = new SequencedSettingsQueries([StepPolicy::Team, StepPolicy::Extend, StepPolicy::Locked]);
+        $workflowCache = self::getContainer()->get(WorkflowCache::class);
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $stepQueries = new CachedStepQueries(new DbalStepQueries($this->connection(), new DbalSettingsQueries($this->connection()), $tenantContext), $workflowCache, $keyPolicies, $tenantContext);
+        $ruleQueries = new CachedRuleQueries(new DbalRuleQueries(new DbalRuleSets($this->connection()), new DbalSettingsQueries($this->connection()), $tenantContext), $workflowCache, $keyPolicies, $tenantContext);
+
+        $read = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($stepQueries, $ruleQueries): array {
+            $team = new TeamId(self::SHOP_TEAM);
+            $rules = $ruleQueries->rulesFor($team);
+
+            return [
+                $this->namesOf($stepQueries->moveTargetsFor($team)),
+                [$rules->testerMovesDone, $rules->noSelfReview, $rules->reviewBeforeTest],
+                $this->namesOf($stepQueries->moveTargetsFor($team)),
+            ];
+        });
+
+        self::assertSame(['Design check', 'Pairing'], $read[0], 'Key policy extend: the team step is kept.');
+        self::assertSame([false, false, false], $read[1], 'Key policy team: the team rules.');
+        self::assertSame(['Design check'], $read[2], 'Key policy locked: the team step is left out.');
+        self::assertSame(3, $keyPolicies->reads, 'One policy read per call, none by the load.');
+    }
+
     #[Test]
     public function aRolledBackChangeIsReadInsideItsTransactionOnlyAndInvalidatesNothing(): void
     {
@@ -173,7 +210,7 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
         $insideTheTransaction = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
             $this->addStep()(new OrganizationId(self::ACME_FOODS), null, 'Legal check', 'check');
 
-            return $this->namesOf($this->stepQueries()->moveTargetsFor(self::SHOP_TEAM));
+            return $this->namesOf($this->stepQueries()->moveTargetsFor(new TeamId(self::SHOP_TEAM)));
         });
 
         self::assertSame(['Design check', 'Legal check', 'Pairing'], $insideTheTransaction, 'A change waiting for its commit is read from the rows.');
@@ -255,7 +292,7 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
      */
     private function moveTargetNames(): array
     {
-        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->namesOf($this->stepQueries()->moveTargetsFor(self::SHOP_TEAM)));
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->namesOf($this->stepQueries()->moveTargetsFor(new TeamId(self::SHOP_TEAM))));
     }
 
     /**
@@ -264,7 +301,7 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
     private function rules(string $organizationId = self::ACME_FOODS): array
     {
         return $this->transactions()->rolledBackAs($organizationId, function (): array {
-            $rules = $this->ruleQueries()->rulesFor(self::SHOP_TEAM);
+            $rules = $this->ruleQueries()->rulesFor(new TeamId(self::SHOP_TEAM));
 
             return [$rules->testerMovesDone, $rules->noSelfReview, $rules->reviewBeforeTest];
         });

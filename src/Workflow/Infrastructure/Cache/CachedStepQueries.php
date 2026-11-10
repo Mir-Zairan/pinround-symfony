@@ -28,13 +28,13 @@ final readonly class CachedStepQueries implements StepQueries
         return $this->workflowCache->remember($teamId, 'steps', fn (): array => $this->stepQueries->stepsFor($teamId));
     }
 
-    public function moveTargetsFor(string $teamId): array
+    public function moveTargetsFor(TeamId $teamId): array
     {
-        $team = new TeamId($teamId);
-        // The step policy is in the key, so a policy change needs no invalidation.
+        // The step policy is in the key, so a policy change needs no invalidation. It is read once and passed on, so the
+        // stored value is the one the key names.
         $stepPolicy = $this->settingsQueries->stepPolicyOf($this->tenantContext->require());
 
-        return $this->workflowCache->remember($team, 'move-targets.'.$stepPolicy->value, fn (): array => $this->stepQueries->moveTargetsFor($teamId));
+        return $this->workflowCache->remember($teamId, 'move-targets.'.$stepPolicy->value, fn (): array => $this->stepQueries->moveTargetsUnder($teamId, $stepPolicy));
     }
 
     public function groupOf(string $stepId): ?string
