@@ -4,7 +4,7 @@ import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // The demo seed gives Shop one project (SHOP) and leaves APP and DOCS with no team. The specs change links, so they run
-// one after the other, and each puts the links back before it ends.
+// one after the other, and the lead's afterEach puts the links back.
 test.describe.configure({ mode: 'serial' });
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -43,6 +43,21 @@ async function addProjects(page: Page, keys: string[]): Promise<void> {
 test.describe('as the lead', () => {
   test.use({ storageState: LENA_STORAGE_STATE });
 
+  // Whatever the test did, Shop ends with exactly SHOP and APP and DOCS have no team, as the seed leaves them.
+  test.afterEach(async ({ page }) => {
+    await openShopTeam(page);
+    const removeButtons = page.getByRole('button', { name: /^Remove (?!SHOP )\S+ from the team$/ });
+    while ((await removeButtons.count()) > 0) {
+      await removeButtons.first().click();
+      await page.waitForLoadState('networkidle');
+    }
+    if ((await page.getByRole('button', { name: 'Remove SHOP from the team' }).count()) === 0) {
+      await addProjects(page, ['SHOP']);
+      await expect(page.getByText('Added SHOP')).toBeVisible();
+    }
+    await expect(projectRows(page)).toHaveCount(1);
+  });
+
   test('the Add project dialog filters, ignores Enter, counts the ticked projects and links them', async ({ page }) => {
     await openShopTeam(page);
     await expect(projectRows(page)).toHaveCount(1);
@@ -66,14 +81,11 @@ test.describe('as the lead', () => {
     await expect(noMatch).toBeHidden();
     await expect(dialog.getByRole('checkbox', { name: /^APP / })).toBeVisible();
 
-    let posted = false;
-    page.on('request', (request) => {
-      posted ||= 'POST' === request.method();
-    });
     await dialog.getByRole('checkbox', { name: /^APP / }).check();
+    const noPost = expect(page.waitForRequest((request) => request.method() === 'POST', { timeout: 500 })).rejects.toThrow();
     await search.press('Enter');
+    await noPost;
     await expect(dialog).toBeVisible();
-    expect(posted).toBe(false);
 
     await expect(submit).toBeEnabled();
     await dialog.getByRole('checkbox', { name: /^DOCS / }).check();
@@ -85,12 +97,6 @@ test.describe('as the lead', () => {
     await expect(projectRows(page)).toHaveCount(3);
     await expect(projectRows(page).filter({ hasText: 'APP' })).toHaveCount(1);
     await expect(projectRows(page).filter({ hasText: 'DOCS' })).toHaveCount(1);
-
-    for (const key of ['APP', 'DOCS']) {
-      await page.getByRole('button', { name: `Remove ${key} from the team` }).click();
-      await expect(page.getByText(`${key} removed from the team`)).toBeVisible();
-    }
-    await expect(projectRows(page)).toHaveCount(1);
   });
 
   test('Remove unlinks a project and the dialog then lists it', async ({ page }) => {

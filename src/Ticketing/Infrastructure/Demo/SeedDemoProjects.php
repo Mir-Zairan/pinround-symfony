@@ -31,8 +31,8 @@ final readonly class SeedDemoProjects implements DemoSeedStep
     private const string TEAM = 'Shop';
     private const string KEY = 'SHOP';
     private const string NAME = 'Shop';
-    /** Projects with no team, so the Team page's "Add project" dialog has something to list. Key => [name, is linked]. */
-    private const array UNLINKED = ['APP' => ['Acme app', false], 'DOCS' => ['Acme docs', false]];
+    /** Projects with no team, so the Team page's "Add project" dialog has something to list. Key => name. */
+    private const array UNLINKED = ['APP' => 'Acme app', 'DOCS' => 'Acme docs'];
 
     public function __construct(
         private DemoOrganizations $demoOrganizations,
@@ -56,16 +56,18 @@ final readonly class SeedDemoProjects implements DemoSeedStep
             $shopTeam = $this->findTeamByName($organizationId, self::TEAM)
                 ?? throw new DemoSeedRefused(\sprintf('The demo organization %s has no team %s yet, so the projects cannot be made. Seed the organizations first.', self::ORGANIZATION, self::TEAM));
             $created = 0;
-            foreach ([self::KEY => [self::NAME, true], ...self::UNLINKED] as $key => [$name, $isLinked]) {
+            if (null === $this->projects->byKey(new ProjectKey(self::KEY))) {
+                ($this->createProject)($organizationId, $shopTeam, self::KEY, self::NAME);
+                ++$created;
+            }
+            foreach (self::UNLINKED as $key => $name) {
                 if (null !== $this->projects->byKey(new ProjectKey($key))) {
                     continue;
                 }
                 $projectId = ($this->createProject)($organizationId, $shopTeam, $key, $name);
-                if (!$isLinked) {
-                    $project = $this->projects->byId($projectId) ?? throw new DemoSeedRefused(\sprintf('The demo project %s was not found after it was made.', $key));
-                    $project->unlink();
-                    $this->projects->save($project);
-                }
+                $project = $this->projects->byId($projectId) ?? throw new DemoSeedRefused(\sprintf('The demo project %s was not found after it was made.', $key));
+                $project->unlink();
+                $this->projects->save($project);
                 ++$created;
             }
 

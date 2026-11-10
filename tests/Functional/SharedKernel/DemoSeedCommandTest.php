@@ -276,9 +276,20 @@ final class DemoSeedCommandTest extends KernelTestCase
         $projectsAfterFirstRun = $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
             'SELECT p.id, p.key, p.name, t.name AS team FROM tkt_project p JOIN org_team t ON t.organization_id = p.organization_id AND t.id = p.team_id',
         ));
+        $unlinkedAfterFirstRun = $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT id, key, name, team_id FROM tkt_project WHERE team_id IS NULL ORDER BY key',
+        ));
 
         $second = $this->runSeed();
 
+        self::assertCount(2, $unlinkedAfterFirstRun);
+        self::assertSame(
+            [['APP', 'Acme app', null], ['DOCS', 'Acme docs', null]],
+            array_map(static fn (array $row): array => [$row['key'], $row['name'], $row['team_id']], $unlinkedAfterFirstRun),
+        );
+        self::assertSame($unlinkedAfterFirstRun, $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT id, key, name, team_id FROM tkt_project WHERE team_id IS NULL ORDER BY key',
+        )));
         self::assertStringContainsString('Projects: created 3, kept 0.', $first->getDisplay());
         self::assertCount(1, $projectsAfterFirstRun);
         self::assertSame(['SHOP', 'Shop', 'Shop'], [$projectsAfterFirstRun[0]['key'], $projectsAfterFirstRun[0]['name'], $projectsAfterFirstRun[0]['team']]);
