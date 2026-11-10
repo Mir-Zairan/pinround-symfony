@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace App\Workflow\Application\Transition;
 
-use App\Organization\Api\ActorContext;
-use App\Organization\Api\MemberJob;
+use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\TicketState;
@@ -17,7 +16,15 @@ use App\Workflow\Domain\Transition;
  */
 final readonly class QuestionOpenPause implements Guard
 {
-    public function check(TicketState $ticket, Transition $transition, ActorContext $actor, ?MemberJob $actorJob, RuleSetView $rules): ?RuleNote
+    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote
+    {
+        return $this->noteFor($ticket);
+    }
+
+    /**
+     * The same answer for every move, so it can be asked once per ticket, also in a step no verb leaves.
+     */
+    public function noteFor(TicketState $ticket): ?RuleNote
     {
         if (null === $ticket->askedUserId) {
             return null;

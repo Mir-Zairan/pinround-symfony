@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Workflow\Application\Transition;
 
-use App\Organization\Api\ActorContext;
-use App\Organization\Api\MemberJob;
+use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Application\Transition\ReviewBeforeTest;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\Mover;
@@ -21,25 +20,25 @@ final class ReviewBeforeTestTest extends TestCase
     private const string NOTE = 'Team rule: code review comes before testing.';
 
     /**
-     * @return iterable<string, array{bool, ActorContext, MemberJob|null, string|null}> rule on, actor, actor's job,
-     *                                                                                  rendered note or null
+     * @return iterable<string, array{bool, ActorInTeam, string|null}> rule on, actor with their job,
+     *                                                                 rendered note or null
      */
     public static function actorsSkippingCodeReview(): iterable
     {
-        yield 'on, assignee developer' => [true, GuardFixtures::omar(), MemberJob::Developer, self::NOTE];
-        yield 'on, lead' => [true, GuardFixtures::lena(), MemberJob::Developer, self::NOTE];
-        yield 'on, tester' => [true, GuardFixtures::mia(), MemberJob::Tester, self::NOTE];
-        yield 'off, assignee developer' => [false, GuardFixtures::omar(), MemberJob::Developer, null];
-        yield 'off, lead' => [false, GuardFixtures::lena(), MemberJob::Developer, null];
+        yield 'on, assignee developer' => [true, GuardFixtures::omar(), self::NOTE];
+        yield 'on, lead' => [true, GuardFixtures::lena(), self::NOTE];
+        yield 'on, tester' => [true, GuardFixtures::mia(), self::NOTE];
+        yield 'off, assignee developer' => [false, GuardFixtures::omar(), null];
+        yield 'off, lead' => [false, GuardFixtures::lena(), null];
     }
 
     #[Test]
     #[DataProvider('actorsSkippingCodeReview')]
-    public function withTheRuleOnNobodyMovesFromInProgressStraightToTesting(bool $isRuleOn, ActorContext $actor, ?MemberJob $actorJob, ?string $expectedNote): void
+    public function withTheRuleOnNobodyMovesFromInProgressStraightToTesting(bool $isRuleOn, ActorInTeam $actor, ?string $expectedNote): void
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
 
-        $note = new ReviewBeforeTest()->check($ticket, self::sendToTesting(), $actor, $actorJob, GuardFixtures::rules(reviewBeforeTest: $isRuleOn));
+        $note = new ReviewBeforeTest()->check($ticket, self::sendToTesting(), $actor, GuardFixtures::rules(reviewBeforeTest: $isRuleOn));
 
         self::assertSame($expectedNote, $note?->render(GuardFixtures::nameOf(...)));
     }
@@ -51,7 +50,7 @@ final class ReviewBeforeTestTest extends TestCase
         $guard = new ReviewBeforeTest();
 
         foreach (new TransitionCatalogue()->all() as $transition) {
-            self::assertNull($guard->check($ticket, $transition, GuardFixtures::omar(), MemberJob::Developer, GuardFixtures::rules()), $transition->label);
+            self::assertNull($guard->check($ticket, $transition, GuardFixtures::omar(), GuardFixtures::rules()), $transition->label);
         }
     }
 
@@ -62,8 +61,8 @@ final class ReviewBeforeTestTest extends TestCase
         $guard = new ReviewBeforeTest();
         $intoHold = new Transition(Verb::SendToCodeReview, 'Put on hold', [CoreStep::Progress], CoreStep::Hold, [Mover::Lead], false);
 
-        self::assertNull($guard->check($ticket, $intoHold, GuardFixtures::lena(), MemberJob::Developer, GuardFixtures::rules()));
-        self::assertNull($guard->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), MemberJob::Developer, GuardFixtures::rules()));
+        self::assertNull($guard->check($ticket, $intoHold, GuardFixtures::lena(), GuardFixtures::rules()));
+        self::assertNull($guard->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules()));
     }
 
     /**

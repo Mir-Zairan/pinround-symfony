@@ -40,4 +40,25 @@ final readonly class Transition
     {
         return \in_array($step, $this->from, true);
     }
+
+    /**
+     * Whether the verb takes a ticket out of the step it is in: one of its from steps, and in To do with or without an
+     * assignee as its assigneeInTodo says.
+     */
+    public function leaves(CoreStep $step, bool $hasAssignee): bool
+    {
+        if (!$this->startsFrom($step)) {
+            return false;
+        }
+
+        if (CoreStep::Todo !== $step) {
+            return true;
+        }
+
+        return match ($this->assigneeInTodo) {
+            AssigneeInTodo::Any => true,
+            AssigneeInTodo::Nobody => !$hasAssignee,
+            AssigneeInTodo::Someone => $hasAssignee,
+        };
+    }
 }

@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace App\Workflow\Application\Transition;
 
-use App\Organization\Api\ActorContext;
-use App\Organization\Api\MemberJob;
+use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\TicketState;
@@ -18,9 +17,9 @@ use App\Workflow\Domain\Transition;
  */
 final readonly class TesterMovesDone implements Guard
 {
-    public function check(TicketState $ticket, Transition $transition, ActorContext $actor, ?MemberJob $actorJob, RuleSetView $rules): ?RuleNote
+    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote
     {
-        if (!$rules->testerMovesDone || CoreStep::Done !== $transition->to || MemberJob::Tester === $actorJob) {
+        if (!$rules->testerMovesDone || CoreStep::Done !== $transition->to || $actor->isTester()) {
             return null;
         }
 
