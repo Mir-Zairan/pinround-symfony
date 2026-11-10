@@ -179,7 +179,7 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 3. "How work moves here": the policy sentence, the five groups with their steps (team steps highlighted), "Add team step" (name + group chips, not Done) when allowed, rule list (editable switches only under `team` policy, else "· set by the admin").
 4. Non-leads see "Only the team lead can change projects and steps."
 5. People section shell (workload bars are filled in P03.T9).
-**Files:** `src/Web/UI/Controller/TeamController.php` (moved from `src/Organization/UI/Controller/`), templates, Live Component for adding a step, `deptrac.yaml` and `docs/02-architecture/modules.md` (Web may use `Workflow_Api`).
+**Files:** `src/Web/UI/Controller/TeamController.php` (moved from `src/Organization/UI/Controller/`), `src/Ticketing/Api/{ProjectQueries,ProjectSummary}.php`, `src/Ticketing/Infrastructure/Doctrine/DbalProjectQueries.php`, templates, Live Component for adding a step, `deptrac.yaml` and `docs/02-architecture/modules.md` (Web may use `Workflow_Api`).
 **Acceptance criteria:**
 - [ ] Lena can add "Design check" under Checking; Omar cannot see the add form.
 - [ ] Under `locked`, nobody sees "Add team step" and the policy sentence says so.

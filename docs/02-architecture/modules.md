@@ -182,6 +182,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Story:** Mia's report becomes `SHOP-412` at once, with the flag "maybe the same as an older ticket". Lena confirms it. Omar moves it through the steps.
 - **Owns:** `tkt_project` (with the key counter), `tkt_ticket`, `tkt_ticket_event` (partitioned history), `tkt_duplicate_link`, `tkt_summary` (current + history).
 - **Api:**
+  - `ProjectQueries::projectsOf(TeamId): list<ProjectSummary>` and `ProjectQueries::unlinkedProjects(): list<ProjectSummary>` (built in P02.T8 for the Team page: the team's projects, and the organization's projects with no team, each by key; empty when there are none. The organization is `TenantContext`'s, read under row-level security in the caller's transaction; no tenant throws `TenantNotSet` before any query. Each list is one query on `tkt_project` using `(organization_id, team_id)` plus, when not empty, one batch call of `OpenTicketCounts`. `ProjectSummary` offers `id()` as a string, `key()`, `name()` and `openTicketCount()`; `Infrastructure\Doctrine\DbalProjectQueries`)
   - `TicketQueries::byKey(OrganizationId, string $key): ?TicketView`
   - `TicketQueries::list(ListFilter, ?Cursor): Page<TicketRow>`
   - `TicketQueries::reportedBy(UserId): list<TicketRow>`
