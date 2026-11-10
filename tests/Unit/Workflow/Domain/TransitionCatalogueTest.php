@@ -22,17 +22,23 @@ final class TransitionCatalogueTest extends TestCase
             ['give_it_to', 'Give it to…', ['todo', 'backlog'], 'todo', ['lead', 'checker'], true, 'nobody'],
             ['start_work', 'Start work', ['todo'], 'progress', ['assignee'], true, 'someone'],
             ['send_to_code_review', 'Send to code review', ['progress'], 'review', ['assignee', 'lead_when_unassigned'], true, 'any'],
+            ['send_to_testing', 'Send to testing', ['progress'], 'test', ['assignee'], false, 'any'],
             ['approve_code', 'Approve code', ['review'], 'test', ['reviewer'], true, 'any'],
             ['ask_for_changes', 'Ask for changes', ['review'], 'progress', ['reviewer'], false, 'any'],
             ['pass_it', 'Pass it', ['test'], 'done', ['tester', 'lead'], true, 'any'],
             ['needs_changes', 'Needs changes', ['test'], 'progress', ['tester'], false, 'any'],
+            ['input_given', 'Input given · go on', ['input'], 'todo', ['waited_on', 'lead'], true, 'any'],
+            ['go_on', 'Go on', ['hold'], 'progress', ['lead'], true, 'any'],
+            ['reopen', 'Reopen', ['done'], 'progress', ['lead', 'tester'], false, 'any'],
+            ['put_on_hold', 'Put on hold', ['backlog', 'todo', 'progress', 'review', 'test', 'input'], 'hold', ['lead'], false, 'any'],
+            ['move_on', 'Move on to…', [], null, ['assignee', 'lead'], true, 'any'],
         ];
 
         $actual = array_map(static fn (Transition $transition): array => [
             $transition->verb->value,
             $transition->label,
             array_map(static fn (CoreStep $step): string => $step->value, $transition->from),
-            $transition->to->value,
+            $transition->to?->value,
             array_map(static fn (Mover $mover): string => $mover->value, $transition->movers),
             $transition->isPrimary,
             $transition->assigneeInTodo->value,
@@ -57,6 +63,6 @@ final class TransitionCatalogueTest extends TestCase
     #[Test]
     public function forGivesTheWholeRowOfTheVerb(): void
     {
-        self::assertEquals(new TransitionCatalogue()->all()[6], new TransitionCatalogue()->for(Verb::PassIt));
+        self::assertEquals(new TransitionCatalogue()->all()[7], new TransitionCatalogue()->for(Verb::PassIt));
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Workflow;
 
 use App\Tests\Unit\Workflow\Application\Transition\GuardFixtures;
+use App\Workflow\Api\MoveTarget;
 use App\Workflow\Api\TransitionView;
 use App\Workflow\Application\Transition\CatalogueTransitionPolicy;
 use PHPUnit\Framework\Attributes\Test;
@@ -24,8 +25,9 @@ final class TransitionPolicyWiringTest extends KernelTestCase
         $availability = $policy->available(GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::lena(), GuardFixtures::rules());
 
         self::assertEquals([
-            new TransitionView('plan_it', 'Plan it', true),
-            new TransitionView('give_it_to', 'Give it to…', false),
+            new TransitionView('plan_it', 'Plan it', true, MoveTarget::coreStep('todo')),
+            new TransitionView('give_it_to', 'Give it to…', false, MoveTarget::coreStep('todo')),
+            new TransitionView('put_on_hold', 'Put on hold', false, MoveTarget::coreStep('hold')),
         ], $availability->transitions);
         self::assertNull($availability->ruleNote);
     }

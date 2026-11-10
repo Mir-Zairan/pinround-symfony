@@ -26,6 +26,7 @@ final class GuardFixtures
 
     private const string TEAM = '0190a000-0000-7000-8000-0000000000f2';
     private const string STEP = '0190a000-0000-7000-8000-0000000000f3';
+    private const string PREVIOUS_STEP = '0190a000-0000-7000-8000-0000000000f4';
 
     private const array NAMES = [self::LENA => 'Lena', self::OMAR => 'Omar', self::MIA => 'Mia', self::RAJ => 'Raj', self::SARA => 'Sara'];
 
@@ -86,6 +87,10 @@ final class GuardFixtures
         ?string $asked = null,
         ?string $checker = null,
         bool $hasTeam = true,
+        ?string $previousStepId = null,
+        ?string $reporter = null,
+        ?string $waitingOnUser = null,
+        ?string $waitingOnLabel = null,
     ): TicketState {
         return new TicketState(
             stepId: self::STEP,
@@ -96,9 +101,26 @@ final class GuardFixtures
             reviewerId: self::userIdOrNull($reviewer),
             testerId: self::userIdOrNull($tester),
             askedUserId: self::userIdOrNull($asked),
+            previousStepId: $previousStepId,
+            reporterId: self::userIdOrNull($reporter),
+            waitingOnUserId: self::userIdOrNull($waitingOnUser),
+            waitingOnLabel: $waitingOnLabel,
             isCheckNeeded: null !== $checker,
             checkerId: self::userIdOrNull($checker),
         );
+    }
+
+    /**
+     * The uuid of a step the ticket was in before; any valid id will do, the policy only passes it on.
+     */
+    public static function previousStepId(): string
+    {
+        return self::PREVIOUS_STEP;
+    }
+
+    public static function ticketStepId(): string
+    {
+        return self::STEP;
     }
 
     private static function userIdOrNull(?string $userId): ?UserId

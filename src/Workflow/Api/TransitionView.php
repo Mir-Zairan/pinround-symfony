@@ -10,11 +10,12 @@ namespace App\Workflow\Api;
 final readonly class TransitionView
 {
     /**
-     * @param string $verb      the verb's stable code, for example "plan_it"; the page sends it back to make the move
-     * @param string $label     the button text, for example "Plan it"
-     * @param bool   $isPrimary true for the filled button, false for an outline one
+     * @param string     $verb       the verb's stable code, for example "plan_it"; the page sends it back to make the move
+     * @param string     $label      the button text, for example "Plan it"
+     * @param bool       $isPrimary  true for the filled button, false for an outline one
+     * @param MoveTarget $moveTarget where the verb takes the ticket; the same one check() allows with
      */
-    public function __construct(public string $verb, public string $label, public bool $isPrimary)
+    public function __construct(public string $verb, public string $label, public bool $isPrimary, public MoveTarget $moveTarget)
     {
     }
 }

@@ -19,6 +19,12 @@ enum Mover: string
     /** The lead of the ticket's team, but only while the ticket has no assignee. */
     case LeadWhenUnassigned = 'lead_when_unassigned';
 
+    /**
+     * The person a ticket in Needs input waits on: the user it waits on, else the reporter while no label (a customer,
+     * a supplier) names someone outside the system.
+     */
+    case WaitedOn = 'waited_on';
+
     /** The person checking a new ticket, while that check is needed. */
     case Checker = 'checker';
 

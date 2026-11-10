@@ -44,13 +44,19 @@ final class ReviewBeforeTestTest extends TestCase
     }
 
     #[Test]
-    public function noVerbOfTheCatalogueSkipsCodeReview(): void
+    public function onlySendToTestingOfTheCatalogueSkipsCodeReview(): void
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
         $guard = new ReviewBeforeTest();
 
         foreach (new TransitionCatalogue()->all() as $transition) {
-            self::assertNull($guard->check($ticket, $transition, GuardFixtures::omar(), GuardFixtures::rules()), $transition->label);
+            $note = $guard->check($ticket, $transition, GuardFixtures::omar(), GuardFixtures::rules());
+
+            if (Verb::SendToTesting === $transition->verb) {
+                self::assertSame(self::NOTE, $note?->render(GuardFixtures::nameOf(...)));
+            } else {
+                self::assertNull($note, $transition->label);
+            }
         }
     }
 
