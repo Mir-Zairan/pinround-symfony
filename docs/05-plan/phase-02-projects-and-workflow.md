@@ -148,7 +148,7 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 5. `Insight\Api\TurnProjector::project(TicketState, TeamFacts, ?OpenQuestion)`: upsert (or delete when Done), sets `waiting_since` only when the turn person changes.
 **Files:** `src/Workflow/Domain/TurnRules.php`, `src/Insight/**`.
 **Acceptance criteria:**
-- [ ] Every turn rule has a unit test with the expected person or label.
+- [x] Every turn rule has a unit test with the expected person or label.
 - [ ] A label waiter ("Customer") has `turn_user_id` NULL and `turn_label` set.
 - [ ] Reprojecting with the same turn keeps `waiting_since`; a new turn person resets it.
 - [ ] A Done ticket has no row.

@@ -1,0 +1,54 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Workflow\Application\Turn;
+
+use App\Workflow\Api\NeedsYouKind;
+
+/**
+ * The part of the needs-you score that does not change with time: kind base + priority weight + release points
+ * (workflow-engine.md, "Needs-you kinds and score"). The waiting-days part is added in SQL at read time.
+ */
+final readonly class NeedsYouScore
+{
+    /**
+     * @param string|null $priority one of blocker, critical, major, normal, minor; null counts as no weight
+     *
+     * @throws \InvalidArgumentException when the priority is not one of the five
+     */
+    public function baseScore(NeedsYouKind $kind, ?string $priority, ReleasePlacement $release): int
+    {
+        return $this->kindBase($kind) + $this->priorityWeight($priority) + match ($release) {
+            ReleasePlacement::InCurrentRelease => 30,
+            ReleasePlacement::InOtherRelease => 10,
+            ReleasePlacement::NoRelease => 0,
+        };
+    }
+
+    private function kindBase(NeedsYouKind $kind): int
+    {
+        return match ($kind) {
+            NeedsYouKind::Answer => 100,
+            NeedsYouKind::Check => 70,
+            NeedsYouKind::Review, NeedsYouKind::Test => 30,
+            NeedsYouKind::Assign => 25,
+            NeedsYouKind::Input => 20,
+            NeedsYouKind::Decide => 15,
+            NeedsYouKind::Build => 10,
+        };
+    }
+
+    private function priorityWeight(?string $priority): int
+    {
+        return match ($priority) {
+            null => 0,
+            'blocker' => 50,
+            'critical' => 40,
+            'major' => 20,
+            'normal' => 8,
+            'minor' => 3,
+            default => throw new \InvalidArgumentException('A priority must be blocker, critical, major, normal or minor.'),
+        };
+    }
+}
