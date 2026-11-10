@@ -32,11 +32,12 @@ use App\Workflow\Domain\Verb;
  * ticket's step is offered to its movers unless a guard blocks it. The first blocking note in catalogue order is the
  * rule note. At most one button is filled: the first offered verb the catalogue marks primary (ticket-page.md, "Bold =
  * filled"); in Backlog the lead sees Plan it filled and Give it to… outline. In a company or team step only Put on hold
- * and Move on to… apply, and Move on to… is blocked by none of the guards (the choice is tested: into Testing from a
- * Checking step review_before_test does not stop it, as that rule is about In progress → Testing). Every offered verb
- * carries where it goes (MoveSideEffects); a "Move on to…" label names the core step it goes to.
+ * and Move on to… apply, and no guard blocks Move on to…: review_before_test is about In progress → Testing and
+ * no_self_review about Code review → Testing, neither a step Move on to… leaves. Every offered verb carries where it
+ * goes (MoveSideEffects); a "Move on to…" label names the core step it goes to.
  *
- * "Move to another step…" is the lead's separate list (moveChoices) and check (checkMoveTo).
+ * "Move to another step…" is the lead's separate list (moveChoices) and check (checkMoveTo); both take the team's move
+ * targets (StepQueries::moveTargetsFor), and checkMoveTo refuses a step outside them.
  */
 final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 {
@@ -80,7 +81,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             if (null === $blockingNote && $this->mayUse($ticket, $transition, $actor)) {
                 $isPrimary = $transition->isPrimary && !$hasPrimary;
                 $hasPrimary = $hasPrimary || $isPrimary;
-                $transitions[] = new TransitionView($transition->verb->value, $this->labelOf($transition, $ticket), $isPrimary, $this->moveTargetOf($transition, $ticket));
+                $transitions[] = $this->viewOf($transition, $ticket, $isPrimary);
             }
         }
 
@@ -109,13 +110,13 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             return Decision::refused($blockingNote);
         }
 
-        return $this->mayUse($ticket, $transition, $actor) ? Decision::allowed($this->moveTargetOf($transition, $ticket)) : Decision::refused(null);
+        return $this->mayUse($ticket, $transition, $actor) ? Decision::allowed(self::moveTargetOf($this->coreTargetOf($transition, $ticket), $ticket)) : Decision::refused(null);
     }
 
     /**
      * @param list<StepView> $steps
      */
-    public function moveChoices(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, array $steps): MoveChoices
+    public function moveChoices(TicketState $ticket, ActorInTeam $actor, array $steps): MoveChoices
     {
         $noteForEveryMove = $this->noteForEveryMove($ticket, $actor);
         if (null !== $noteForEveryMove) {
@@ -141,7 +142,10 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         return new MoveChoices($groups, null);
     }
 
-    public function checkMoveTo(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, StepView $target): Decision
+    /**
+     * @param list<StepView> $steps
+     */
+    public function checkMoveTo(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, StepView $target, array $steps): Decision
     {
         $noteForEveryMove = $this->noteForEveryMove($ticket, $actor);
         if (null !== $noteForEveryMove) {
@@ -149,6 +153,10 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         }
 
         if (!$this->moveRights->leadsTheTeam($actor) || $target->id() === $ticket->stepId) {
+            return Decision::refused(null);
+        }
+
+        if (!array_any($steps, static fn (StepView $step): bool => $step->id() === $target->id())) {
             return Decision::refused(null);
         }
 
@@ -195,24 +203,26 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         return Group::tryFrom($ticket->groupCode) ?? throw new \InvalidArgumentException(\sprintf('"%s" is not a group.', $ticket->groupCode));
     }
 
-    private function moveTargetOf(Transition $transition, TicketState $ticket): MoveTarget
+    private function viewOf(Transition $transition, TicketState $ticket, bool $isPrimary): TransitionView
     {
-        $coreTarget = $this->moveSideEffects->coreTargetOf($transition, self::groupOfCustomStep($ticket), null !== $ticket->previousStepId);
+        $coreTarget = $this->coreTargetOf($transition, $ticket);
+        $label = Verb::MoveOn === $transition->verb
+            ? 'Move on to '.($coreTarget?->stepName() ?? 'the previous step')
+            : $transition->label;
 
+        return new TransitionView($transition->verb->value, $label, $isPrimary, self::moveTargetOf($coreTarget, $ticket));
+    }
+
+    private function coreTargetOf(Transition $transition, TicketState $ticket): ?CoreStep
+    {
+        return $this->moveSideEffects->coreTargetOf($transition, self::groupOfCustomStep($ticket), null !== $ticket->previousStepId);
+    }
+
+    private static function moveTargetOf(?CoreStep $coreTarget, TicketState $ticket): MoveTarget
+    {
         return null === $coreTarget
             ? MoveTarget::step($ticket->previousStepId ?? throw new \LogicException('Only a ticket with a previous step goes back to it.'))
             : MoveTarget::coreStep($coreTarget->value);
-    }
-
-    private function labelOf(Transition $transition, TicketState $ticket): string
-    {
-        if (Verb::MoveOn !== $transition->verb) {
-            return $transition->label;
-        }
-
-        $coreTarget = $this->moveSideEffects->coreTargetOf($transition, self::groupOfCustomStep($ticket), null !== $ticket->previousStepId);
-
-        return 'Move on to '.($coreTarget?->stepName() ?? 'the previous step');
     }
 
     private function blockingNote(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote

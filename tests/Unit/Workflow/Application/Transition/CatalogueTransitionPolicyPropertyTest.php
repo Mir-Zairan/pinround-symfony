@@ -10,14 +10,6 @@ use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\StepView;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionView;
-use App\Workflow\Application\Transition\CatalogueTransitionPolicy;
-use App\Workflow\Application\Transition\MoveRights;
-use App\Workflow\Application\Transition\NoSelfReview;
-use App\Workflow\Application\Transition\QuestionOpenPause;
-use App\Workflow\Application\Transition\ReviewBeforeTest;
-use App\Workflow\Application\Transition\TesterMovesDone;
-use App\Workflow\Domain\MoveSideEffects;
-use App\Workflow\Domain\TransitionCatalogue;
 use App\Workflow\Domain\Verb;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -33,31 +25,19 @@ final class CatalogueTransitionPolicyPropertyTest extends TestCase
     private const int COMBINATIONS = 1000;
     private const string REVIEW_FIRST_NOTE = 'Team rule: code review comes before testing.';
 
-    private const array GROUP_OF_CORE_STEP = [
-        'backlog' => 'todo',
-        'todo' => 'todo',
-        'progress' => 'doing',
-        'review' => 'check',
-        'test' => 'check',
-        'input' => 'wait',
-        'hold' => 'wait',
-        'done' => 'done',
-    ];
-
-    private const array GROUPS = ['todo', 'doing', 'check', 'wait', 'done'];
-
     #[Test]
     public function whatIsOfferedIsAllowedAndWhatIsNotOfferedIsRefusedInEveryRandomCombination(): void
     {
         $random = new Randomizer(new Mt19937(1));
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
         $people = self::people();
-        $steps = self::steps();
+        $steps = GuardFixtures::steps();
+        $stepOfAnotherTeam = new StepView('0190a000-0000-7000-8000-0000000001ff', 'Other team step', 'doing', 'Doing', 11, 'team', null);
         $combinationsWithAVerb = 0;
         $combinationsWithAMoveChoice = 0;
 
         for ($i = 0; $i < self::COMBINATIONS; ++$i) {
-            $ticket = self::randomTicket($random);
+            $ticket = self::randomTicket($random, $steps);
             $actor = $people[$random->getInt(0, \count($people) - 1)];
             $rules = new RuleSetView(1 === $random->getInt(0, 1), 1 === $random->getInt(0, 1), 1 === $random->getInt(0, 1));
             $context = \sprintf('combination %d', $i);
@@ -82,11 +62,21 @@ final class CatalogueTransitionPolicyPropertyTest extends TestCase
 
             $combinationsWithAVerb += [] === $offered ? 0 : 1;
 
-            $groups = $policy->moveChoices($ticket, $actor, $rules, $steps)->groups;
+            $decision = $policy->checkMoveTo($ticket, $actor, $rules, $stepOfAnotherTeam, $steps);
+            self::assertFalse($decision->isAllowed, $context.': a step outside the move targets is allowed');
+            self::assertNull($decision->moveTarget, $context);
+
+            $groups = $policy->moveChoices($ticket, $actor, $steps)->groups;
             $combinationsWithAMoveChoice += [] === $groups ? 0 : 1;
+            if ([] === $groups) {
+                foreach ($steps as $step) {
+                    self::assertFalse($policy->checkMoveTo($ticket, $actor, $rules, $step, $steps)->isAllowed, $context.': move to '.$step->name().' without a list');
+                }
+            }
+
             foreach ($groups as $group) {
                 foreach ($group->choices as $choice) {
-                    $decision = $policy->checkMoveTo($ticket, $actor, $rules, $choice->step);
+                    $decision = $policy->checkMoveTo($ticket, $actor, $rules, $choice->step, $steps);
                     $name = $context.': move to '.$choice->step->name();
 
                     if ($choice->isCurrent) {
@@ -105,18 +95,19 @@ final class CatalogueTransitionPolicyPropertyTest extends TestCase
         self::assertGreaterThan(0, $combinationsWithAMoveChoice);
     }
 
-    private static function randomTicket(Randomizer $random): TicketState
+    /**
+     * @param list<StepView> $steps the step the ticket is in is one of them, and gives its core and group codes
+     */
+    private static function randomTicket(Randomizer $random, array $steps): TicketState
     {
-        $coreCodes = [...array_keys(self::GROUP_OF_CORE_STEP), null];
-        $coreCode = $coreCodes[$random->getInt(0, \count($coreCodes) - 1)];
-        $groupCode = null === $coreCode ? self::GROUPS[$random->getInt(0, \count(self::GROUPS) - 1)] : self::GROUP_OF_CORE_STEP[$coreCode];
+        $step = $steps[$random->getInt(0, \count($steps) - 1)];
         $user = static fn (): ?string => self::userIds()[$random->getInt(0, \count(self::userIds()) - 1)];
         $isCheckNeeded = 1 === $random->getInt(0, 1);
 
         return new TicketState(
-            stepId: GuardFixtures::ticketStepId(),
-            coreCode: $coreCode,
-            groupCode: $groupCode,
+            stepId: $step->id(),
+            coreCode: $step->coreCode(),
+            groupCode: $step->groupCode(),
             teamId: 1 === $random->getInt(0, 4) ? null : GuardFixtures::ticket('todo', 'todo')->teamId,
             assigneeId: self::userIdOrNull($user()),
             reviewerId: self::userIdOrNull($user()),
@@ -159,32 +150,5 @@ final class CatalogueTransitionPolicyPropertyTest extends TestCase
             GuardFixtures::viewer(),
             GuardFixtures::otherTeamMember(),
         ];
-    }
-
-    /**
-     * Index 5 is In progress, the step of GuardFixtures::ticketStepId().
-     *
-     * @return list<StepView>
-     */
-    private static function steps(): array
-    {
-        return [
-            new StepView('0190a000-0000-7000-8000-000000000101', 'Needs input', 'wait', 'Waiting', 5, 'core', 'input'),
-            new StepView('0190a000-0000-7000-8000-000000000102', 'On hold', 'wait', 'Waiting', 6, 'core', 'hold'),
-            new StepView('0190a000-0000-7000-8000-000000000103', 'Code review', 'check', 'Checking', 3, 'core', 'review'),
-            new StepView('0190a000-0000-7000-8000-000000000104', 'Testing', 'check', 'Checking', 4, 'core', 'test'),
-            new StepView('0190a000-0000-7000-8000-000000000105', 'Design check', 'check', 'Checking', 10, 'team', null),
-            new StepView(GuardFixtures::ticketStepId(), 'In progress', 'doing', 'Doing', 2, 'core', 'progress'),
-            new StepView('0190a000-0000-7000-8000-000000000107', 'Backlog', 'todo', 'To do', 0, 'core', 'backlog'),
-            new StepView('0190a000-0000-7000-8000-000000000108', 'To do', 'todo', 'To do', 1, 'core', 'todo'),
-            new StepView('0190a000-0000-7000-8000-000000000109', 'Done', 'done', 'Done', 7, 'core', 'done'),
-        ];
-    }
-
-    private static function policy(): CatalogueTransitionPolicy
-    {
-        $moveRights = new MoveRights();
-
-        return new CatalogueTransitionPolicy(new TransitionCatalogue(), new QuestionOpenPause(), $moveRights, new MoveSideEffects(), new TesterMovesDone($moveRights), new NoSelfReview(), new ReviewBeforeTest());
     }
 }

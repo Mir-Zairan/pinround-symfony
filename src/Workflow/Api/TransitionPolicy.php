@@ -37,14 +37,17 @@ interface TransitionPolicy
      * StepQueries::moveTargetsFor the ticket's team. Grouped in the order the steps come, the ticket's own step marked
      * current. In progress → Testing stays in the list while review_before_test is on and is refused by checkMoveTo.
      *
-     * @param list<StepView> $steps
+     * @param list<StepView> $steps StepQueries::moveTargetsFor the ticket's team
      */
-    public function moveChoices(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, array $steps): MoveChoices;
+    public function moveChoices(TicketState $ticket, ActorInTeam $actor, array $steps): MoveChoices;
 
     /**
      * Whether the lead may move the ticket to this step with "Move to another step…". Refused for anyone but the lead,
-     * while a question is open, to the step the ticket is in, and from In progress to Testing while review_before_test
-     * is on (with that rule's note). The caller passes a step of the ticket's team; this does not look it up.
+     * while a question is open, to the step the ticket is in, to a step whose id is not in $steps (without a note:
+     * another team's step, a removed one, or a team step under the policy locked), and from In progress to Testing
+     * while review_before_test is on (with that rule's note).
+     *
+     * @param list<StepView> $steps StepQueries::moveTargetsFor the ticket's team, the list moveChoices took
      */
-    public function checkMoveTo(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, StepView $target): Decision;
+    public function checkMoveTo(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, StepView $target, array $steps): Decision;
 }

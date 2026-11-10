@@ -18,20 +18,20 @@ final class TransitionCatalogueTest extends TestCase
     public function theRowsMatchTheCatalogueTableInButtonOrder(): void
     {
         $expected = [
-            ['plan_it', 'Plan it', ['backlog'], 'todo', ['lead'], true, 'any'],
-            ['give_it_to', 'Give it to…', ['todo', 'backlog'], 'todo', ['lead', 'checker'], true, 'nobody'],
-            ['start_work', 'Start work', ['todo'], 'progress', ['assignee'], true, 'someone'],
-            ['send_to_code_review', 'Send to code review', ['progress'], 'review', ['assignee', 'lead_when_unassigned'], true, 'any'],
-            ['send_to_testing', 'Send to testing', ['progress'], 'test', ['assignee'], false, 'any'],
-            ['approve_code', 'Approve code', ['review'], 'test', ['reviewer'], true, 'any'],
-            ['ask_for_changes', 'Ask for changes', ['review'], 'progress', ['reviewer'], false, 'any'],
-            ['pass_it', 'Pass it', ['test'], 'done', ['tester', 'lead'], true, 'any'],
-            ['needs_changes', 'Needs changes', ['test'], 'progress', ['tester'], false, 'any'],
-            ['input_given', 'Input given · go on', ['input'], 'todo', ['waited_on', 'lead'], true, 'any'],
-            ['go_on', 'Go on', ['hold'], 'progress', ['lead'], true, 'any'],
-            ['reopen', 'Reopen', ['done'], 'progress', ['lead', 'tester'], false, 'any'],
-            ['put_on_hold', 'Put on hold', ['backlog', 'todo', 'progress', 'review', 'test', 'input'], 'hold', ['lead'], false, 'any'],
-            ['move_on', 'Move on to…', [], null, ['assignee', 'lead'], true, 'any'],
+            ['plan_it', 'Plan it', ['backlog'], 'todo', ['lead'], true, 'any', false, true],
+            ['give_it_to', 'Give it to…', ['todo', 'backlog'], 'todo', ['lead', 'checker'], true, 'nobody', false, true],
+            ['start_work', 'Start work', ['todo'], 'progress', ['assignee'], true, 'someone', false, true],
+            ['send_to_code_review', 'Send to code review', ['progress'], 'review', ['assignee', 'lead_when_unassigned'], true, 'any', false, true],
+            ['send_to_testing', 'Send to testing', ['progress'], 'test', ['assignee'], false, 'any', false, false],
+            ['approve_code', 'Approve code', ['review'], 'test', ['reviewer'], true, 'any', false, true],
+            ['ask_for_changes', 'Ask for changes', ['review'], 'progress', ['reviewer'], false, 'any', false, true],
+            ['pass_it', 'Pass it', ['test'], 'done', ['tester', 'lead'], true, 'any', false, true],
+            ['needs_changes', 'Needs changes', ['test'], 'progress', ['tester'], false, 'any', false, true],
+            ['input_given', 'Input given · go on', ['input'], 'todo', ['waited_on', 'lead'], true, 'any', false, true],
+            ['go_on', 'Go on', ['hold'], 'progress', ['lead'], true, 'any', false, true],
+            ['reopen', 'Reopen', ['done'], 'progress', ['lead', 'tester'], false, 'any', false, true],
+            ['put_on_hold', 'Put on hold', ['backlog', 'todo', 'progress', 'review', 'test', 'input'], 'hold', ['lead'], false, 'any', true, true],
+            ['move_on', 'Move on to…', [], null, ['assignee', 'lead'], true, 'any', true, true],
         ];
 
         $actual = array_map(static fn (Transition $transition): array => [
@@ -42,6 +42,8 @@ final class TransitionCatalogueTest extends TestCase
             array_map(static fn (Mover $mover): string => $mover->value, $transition->movers),
             $transition->isPrimary,
             $transition->assigneeInTodo->value,
+            $transition->fromCustomStep,
+            $transition->explainsBlock,
         ], new TransitionCatalogue()->all());
 
         self::assertSame($expected, $actual);

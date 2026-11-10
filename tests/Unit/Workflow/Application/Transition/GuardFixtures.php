@@ -8,7 +8,16 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleSetView;
+use App\Workflow\Api\StepView;
 use App\Workflow\Api\TicketState;
+use App\Workflow\Application\Transition\CatalogueTransitionPolicy;
+use App\Workflow\Application\Transition\MoveRights;
+use App\Workflow\Application\Transition\NoSelfReview;
+use App\Workflow\Application\Transition\QuestionOpenPause;
+use App\Workflow\Application\Transition\ReviewBeforeTest;
+use App\Workflow\Application\Transition\TesterMovesDone;
+use App\Workflow\Domain\MoveSideEffects;
+use App\Workflow\Domain\TransitionCatalogue;
 
 /**
  * The Shop team of Acme Foods: Lena leads it, Omar develops, Mia tests, and a viewer reads along. Raj is a manager and
@@ -121,6 +130,34 @@ final class GuardFixtures
     public static function ticketStepId(): string
     {
         return self::STEP;
+    }
+
+    /**
+     * Wait, Check and Doing before To do and Done, as StepQueries::moveTargetsFor orders them; index 5 is In progress,
+     * the step of ticketStepId().
+     *
+     * @return list<StepView>
+     */
+    public static function steps(): array
+    {
+        return [
+            new StepView('0190a000-0000-7000-8000-000000000101', 'Needs input', 'wait', 'Waiting', 5, 'core', 'input'),
+            new StepView('0190a000-0000-7000-8000-000000000102', 'On hold', 'wait', 'Waiting', 6, 'core', 'hold'),
+            new StepView('0190a000-0000-7000-8000-000000000103', 'Code review', 'check', 'Checking', 3, 'core', 'review'),
+            new StepView('0190a000-0000-7000-8000-000000000104', 'Testing', 'check', 'Checking', 4, 'core', 'test'),
+            new StepView('0190a000-0000-7000-8000-000000000105', 'Design check', 'check', 'Checking', 10, 'team', null),
+            new StepView(self::STEP, 'In progress', 'doing', 'Doing', 2, 'core', 'progress'),
+            new StepView('0190a000-0000-7000-8000-000000000107', 'Backlog', 'todo', 'To do', 0, 'core', 'backlog'),
+            new StepView('0190a000-0000-7000-8000-000000000108', 'To do', 'todo', 'To do', 1, 'core', 'todo'),
+            new StepView('0190a000-0000-7000-8000-000000000109', 'Done', 'done', 'Done', 7, 'core', 'done'),
+        ];
+    }
+
+    public static function policy(): CatalogueTransitionPolicy
+    {
+        $moveRights = new MoveRights();
+
+        return new CatalogueTransitionPolicy(new TransitionCatalogue(), new QuestionOpenPause(), $moveRights, new MoveSideEffects(), new TesterMovesDone($moveRights), new NoSelfReview(), new ReviewBeforeTest());
     }
 
     private static function userIdOrNull(?string $userId): ?UserId

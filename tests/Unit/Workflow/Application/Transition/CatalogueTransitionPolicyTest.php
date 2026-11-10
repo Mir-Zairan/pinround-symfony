@@ -10,14 +10,6 @@ use App\Workflow\Api\MoveTarget;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionView;
-use App\Workflow\Application\Transition\CatalogueTransitionPolicy;
-use App\Workflow\Application\Transition\MoveRights;
-use App\Workflow\Application\Transition\NoSelfReview;
-use App\Workflow\Application\Transition\QuestionOpenPause;
-use App\Workflow\Application\Transition\ReviewBeforeTest;
-use App\Workflow\Application\Transition\TesterMovesDone;
-use App\Workflow\Domain\MoveSideEffects;
-use App\Workflow\Domain\TransitionCatalogue;
 use App\Workflow\Domain\Verb;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -80,7 +72,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     #[DataProvider('catalogueRowsByRole')]
     public function eachCatalogueRowIsOfferedToItsMoversOnlyAndCheckAgrees(string $verb, TicketState $ticket, RuleSetView $rules, ActorInTeam $actor, bool $isOffered): void
     {
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         self::assertSame($isOffered, \in_array($verb, self::verbsOf($policy->available($ticket, $actor, $rules)), true));
         self::assertSame($isOffered, $policy->check($ticket, $actor, $rules, $verb)->isAllowed);
@@ -90,7 +82,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     public function withNoSelfReviewOnLenaAsTheAssigneeGetsNoApproveCodeAndANoteNamingOmar(): void
     {
         $ticket = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA, reviewer: GuardFixtures::OMAR, tester: GuardFixtures::MIA);
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         $availability = $policy->available($ticket, GuardFixtures::lena(), GuardFixtures::rules());
         $decision = $policy->check($ticket, GuardFixtures::lena(), GuardFixtures::rules(), Verb::ApproveCode->value);
@@ -107,7 +99,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA, reviewer: GuardFixtures::OMAR, tester: GuardFixtures::MIA);
 
-        $availability = self::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
+        $availability = GuardFixtures::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
 
         self::assertSame([Verb::ApproveCode->value, Verb::AskForChanges->value], self::verbsOf($availability));
         self::assertNull($availability->ruleNote);
@@ -118,7 +110,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA, reviewer: GuardFixtures::LENA);
 
-        $availability = self::policy()->available($ticket, GuardFixtures::lena(), GuardFixtures::rules());
+        $availability = GuardFixtures::policy()->available($ticket, GuardFixtures::lena(), GuardFixtures::rules());
 
         self::assertSame([Verb::ApproveCode->value, Verb::AskForChanges->value, Verb::PutOnHold->value], self::verbsOf($availability));
         self::assertNull($availability->ruleNote);
@@ -128,7 +120,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     public function inToDoGiveItToIsOfferedOnlyWhileNobodyIsAssigned(): void
     {
         $ticket = GuardFixtures::ticket('todo', 'todo', assignee: GuardFixtures::OMAR);
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         self::assertSame([Verb::PutOnHold->value], self::verbsOf($policy->available($ticket, GuardFixtures::lena(), GuardFixtures::rules())));
         self::assertSame([Verb::StartWork->value], self::verbsOf($policy->available($ticket, GuardFixtures::omar(), GuardFixtures::rules())));
@@ -140,8 +132,8 @@ final class CatalogueTransitionPolicyTest extends TestCase
         $whileChecked = GuardFixtures::ticket('todo', 'todo', checker: GuardFixtures::OMAR);
         $afterTheCheck = new TicketState($whileChecked->stepId, 'todo', 'todo', $whileChecked->teamId, isCheckNeeded: false, checkerId: $whileChecked->checkerId);
 
-        self::assertSame([Verb::GiveItTo->value], self::verbsOf(self::policy()->available($whileChecked, GuardFixtures::omar(), GuardFixtures::rules())));
-        self::assertSame([], self::verbsOf(self::policy()->available($afterTheCheck, GuardFixtures::omar(), GuardFixtures::rules())));
+        self::assertSame([Verb::GiveItTo->value], self::verbsOf(GuardFixtures::policy()->available($whileChecked, GuardFixtures::omar(), GuardFixtures::rules())));
+        self::assertSame([], self::verbsOf(GuardFixtures::policy()->available($afterTheCheck, GuardFixtures::omar(), GuardFixtures::rules())));
     }
 
     #[Test]
@@ -149,7 +141,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::LENA, tester: GuardFixtures::OMAR);
 
-        $availability = self::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
+        $availability = GuardFixtures::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
 
         self::assertSame([Verb::NeedsChanges->value], self::verbsOf($availability));
         self::assertSame('Team rule: only the tester moves a ticket to Done.', $availability->ruleNote?->render(GuardFixtures::nameOf(...)));
@@ -158,7 +150,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     #[Test]
     public function aPersonWhoIsNotATesterSeesTheDoneRuleInTesting(): void
     {
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         $availability = $policy->available(self::omarsTicketInTesting(), GuardFixtures::lena(), GuardFixtures::rules());
         $decision = $policy->check(self::omarsTicketInTesting(), GuardFixtures::lena(), GuardFixtures::rules(), Verb::PassIt->value);
@@ -184,7 +176,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     public function whileAQuestionIsOpenNobodyMovesTheTicketTheAskedPersonIncluded(ActorInTeam $actor): void
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, asked: GuardFixtures::MIA);
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         $availability = $policy->available($ticket, $actor, GuardFixtures::rules());
         $decision = $policy->check($ticket, $actor, GuardFixtures::rules(), Verb::SendToCodeReview->value);
@@ -200,7 +192,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     {
         $ticket = GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::OMAR, asked: GuardFixtures::MIA);
 
-        $availability = self::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
+        $availability = GuardFixtures::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
 
         self::assertSame('Paused until Mia answers the question below.', $availability->ruleNote?->render(GuardFixtures::nameOf(...)));
     }
@@ -224,7 +216,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     #[DataProvider('peopleWhoDoNotMoveTickets')]
     public function withoutTheTeamRoleLeadOrMemberNobodyGetsAVerbAndTheManagersNoteWins(ActorInTeam $actor, TicketState $ticket): void
     {
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         $availability = $policy->available($ticket, $actor, GuardFixtures::rules());
         $decision = $policy->check($ticket, $actor, GuardFixtures::rules(), Verb::SendToCodeReview->value);
@@ -238,7 +230,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     #[Test]
     public function anUnknownVerbIsRefusedWithoutANote(): void
     {
-        $decision = self::policy()->check(GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR), GuardFixtures::omar(), GuardFixtures::rules(), 'send_to_the_moon');
+        $decision = GuardFixtures::policy()->check(GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR), GuardFixtures::omar(), GuardFixtures::rules(), 'send_to_the_moon');
 
         self::assertFalse($decision->isAllowed);
         self::assertNull($decision->ruleNote);
@@ -247,7 +239,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     #[Test]
     public function aVerbThatDoesNotApplyInTheTicketsStepIsRefusedWithoutANote(): void
     {
-        $decision = self::policy()->check(GuardFixtures::ticket('progress', 'doing'), GuardFixtures::lena(), GuardFixtures::rules(), Verb::PlanIt->value);
+        $decision = GuardFixtures::policy()->check(GuardFixtures::ticket('progress', 'doing'), GuardFixtures::lena(), GuardFixtures::rules(), Verb::PlanIt->value);
 
         self::assertFalse($decision->isAllowed);
         self::assertNull($decision->ruleNote);
@@ -256,7 +248,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     #[Test]
     public function theButtonsComeInCatalogueOrderWithTheFirstOneFilled(): void
     {
-        $availability = self::policy()->available(self::omarsTicketInCodeReview(), GuardFixtures::lena(), GuardFixtures::rules());
+        $availability = GuardFixtures::policy()->available(self::omarsTicketInCodeReview(), GuardFixtures::lena(), GuardFixtures::rules());
 
         self::assertEquals([
             new TransitionView('approve_code', 'Approve code', true, MoveTarget::coreStep('test')),
@@ -268,7 +260,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     #[Test]
     public function inBacklogOnlyPlanItIsFilledThoughGiveItToIsPrimaryInTheCatalogue(): void
     {
-        $availability = self::policy()->available(GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::lena(), GuardFixtures::rules());
+        $availability = GuardFixtures::policy()->available(GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::lena(), GuardFixtures::rules());
 
         self::assertEquals([
             new TransitionView('plan_it', 'Plan it', true, MoveTarget::coreStep('todo')),
@@ -282,7 +274,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::LENA, tester: GuardFixtures::OMAR);
 
-        $availability = self::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
+        $availability = GuardFixtures::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
 
         self::assertEquals([new TransitionView('needs_changes', 'Needs changes', false, MoveTarget::coreStep('progress'))], $availability->transitions);
     }
@@ -291,7 +283,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     public function aMemberWhoIsNeitherLeadNorAssigneeHasNoVerbAndNoNoteInACompanyOrTeamStep(): void
     {
         $ticket = GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::OMAR);
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         $availability = $policy->available($ticket, GuardFixtures::mia(), GuardFixtures::rules());
         $decision = $policy->check($ticket, GuardFixtures::lena(), GuardFixtures::rules(), Verb::ApproveCode->value);
@@ -308,7 +300,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('"nowhere" is not a core step.');
 
-        self::policy()->available(GuardFixtures::ticket('nowhere', 'doing'), GuardFixtures::lena(), GuardFixtures::rules());
+        GuardFixtures::policy()->available(GuardFixtures::ticket('nowhere', 'doing'), GuardFixtures::lena(), GuardFixtures::rules());
     }
 
     #[Test]
@@ -317,14 +309,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('"nowhere" is not a core step.');
 
-        self::policy()->check(GuardFixtures::ticket('nowhere', 'doing'), GuardFixtures::lena(), GuardFixtures::rules(), Verb::PlanIt->value);
-    }
-
-    private static function policy(): CatalogueTransitionPolicy
-    {
-        $moveRights = new MoveRights();
-
-        return new CatalogueTransitionPolicy(new TransitionCatalogue(), new QuestionOpenPause(), $moveRights, new MoveSideEffects(), new TesterMovesDone($moveRights), new NoSelfReview(), new ReviewBeforeTest());
+        GuardFixtures::policy()->check(GuardFixtures::ticket('nowhere', 'doing'), GuardFixtures::lena(), GuardFixtures::rules(), Verb::PlanIt->value);
     }
 
     /**

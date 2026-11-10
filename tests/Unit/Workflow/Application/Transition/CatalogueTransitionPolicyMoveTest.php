@@ -11,14 +11,6 @@ use App\Workflow\Api\MoveTarget;
 use App\Workflow\Api\StepView;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionView;
-use App\Workflow\Application\Transition\CatalogueTransitionPolicy;
-use App\Workflow\Application\Transition\MoveRights;
-use App\Workflow\Application\Transition\NoSelfReview;
-use App\Workflow\Application\Transition\QuestionOpenPause;
-use App\Workflow\Application\Transition\ReviewBeforeTest;
-use App\Workflow\Application\Transition\TesterMovesDone;
-use App\Workflow\Domain\MoveSideEffects;
-use App\Workflow\Domain\TransitionCatalogue;
 use App\Workflow\Domain\Verb;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -63,7 +55,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[DataProvider('leadsMoves')]
     public function everyAllowedVerbCarriesItsMoveTargetInAvailableAndInCheck(TicketState $ticket, Verb $verb, string $label, MoveTarget $target): void
     {
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
         $rules = GuardFixtures::rules(reviewBeforeTest: false);
 
         $view = array_values(array_filter(
@@ -83,7 +75,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[Test]
     public function aRefusedDecisionCarriesNoMoveTarget(): void
     {
-        $decision = self::policy()->check(GuardFixtures::ticket('hold', 'wait'), GuardFixtures::omar(), GuardFixtures::rules(), Verb::GoOn->value);
+        $decision = GuardFixtures::policy()->check(GuardFixtures::ticket('hold', 'wait'), GuardFixtures::omar(), GuardFixtures::rules(), Verb::GoOn->value);
 
         self::assertFalse($decision->isAllowed);
         self::assertNull($decision->moveTarget);
@@ -94,7 +86,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('hold', 'wait', assignee: GuardFixtures::OMAR);
 
-        self::assertSame([], self::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules())->transitions);
+        self::assertSame([], GuardFixtures::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules())->transitions);
     }
 
     /**
@@ -119,7 +111,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[DataProvider('buttonsWithTheirFilledFlag')]
     public function atMostOneButtonIsFilledAndItIsTheFirstPrimaryVerbOffered(TicketState $ticket, ActorInTeam $actor, array $expected): void
     {
-        $buttons = self::policy()->available($ticket, $actor, GuardFixtures::rules(reviewBeforeTest: false))->transitions;
+        $buttons = GuardFixtures::policy()->available($ticket, $actor, GuardFixtures::rules(reviewBeforeTest: false))->transitions;
 
         self::assertSame($expected, array_map(static fn (TransitionView $button): array => [$button->verb, $button->isPrimary], $buttons));
     }
@@ -128,7 +120,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     public function withReviewFirstOnSendToTestingIsHiddenWithoutANoteButCheckRefusesItWithTheRulesNote(): void
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         $availability = $policy->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
         $decision = $policy->check($ticket, GuardFixtures::omar(), GuardFixtures::rules(), Verb::SendToTesting->value);
@@ -140,20 +132,19 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     }
 
     /**
-     * The guards of "Move on to…" are those of the core move into the same step, and no guard stops a move into Testing
-     * from a Checking step: review_before_test is about In progress → Testing, and no_self_review about Code review →
-     * Testing, and neither is the step the ticket leaves.
+     * No guard blocks "Move on to…", also into Testing from a Checking step: review_before_test is about In progress →
+     * Testing, and no_self_review about Code review → Testing, and neither is the step the ticket leaves.
      */
     #[Test]
     public function withEveryRuleOnNothingBlocksMoveOnFromACheckingStepIntoTesting(): void
     {
         $ticket = GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::LENA, reviewer: GuardFixtures::OMAR);
-        $policy = self::policy();
+        $policy = GuardFixtures::policy();
 
         $availability = $policy->available($ticket, GuardFixtures::lena(), GuardFixtures::rules());
         $decision = $policy->check($ticket, GuardFixtures::lena(), GuardFixtures::rules(), Verb::MoveOn->value);
 
-        self::assertContains('move_on', array_map(static fn (TransitionView $button): string => $button->verb, $availability->transitions));
+        self::assertSame(['put_on_hold', 'move_on'], array_map(static fn (TransitionView $button): string => $button->verb, $availability->transitions));
         self::assertNull($availability->ruleNote);
         self::assertTrue($decision->isAllowed);
         self::assertEquals(MoveTarget::coreStep('test'), $decision->moveTarget);
@@ -165,7 +156,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('"sideways" is not a group.');
 
-        self::policy()->available(GuardFixtures::ticket(null, 'sideways'), GuardFixtures::lena(), GuardFixtures::rules());
+        GuardFixtures::policy()->available(GuardFixtures::ticket(null, 'sideways'), GuardFixtures::lena(), GuardFixtures::rules());
     }
 
     #[Test]
@@ -173,7 +164,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
 
-        $choices = self::policy()->moveChoices($ticket, GuardFixtures::lena(), GuardFixtures::rules(), self::steps());
+        $choices = GuardFixtures::policy()->moveChoices($ticket, GuardFixtures::lena(), GuardFixtures::steps());
 
         self::assertNull($choices->ruleNote);
         self::assertSame(
@@ -198,10 +189,10 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[Test]
     public function aTicketInATeamStepMarksThatStepCurrent(): void
     {
-        $steps = self::steps();
+        $steps = GuardFixtures::steps();
         $ticket = new TicketState($steps[4]->id(), null, 'check', GuardFixtures::ticket('todo', 'todo')->teamId);
 
-        $choices = self::policy()->moveChoices($ticket, GuardFixtures::lena(), GuardFixtures::rules(), $steps);
+        $choices = GuardFixtures::policy()->moveChoices($ticket, GuardFixtures::lena(), $steps);
 
         $current = [];
         foreach ($choices->groups as $group) {
@@ -236,7 +227,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[DataProvider('peopleWithoutAMoveList')]
     public function onlyTheLeadGetsTheMoveListAndNotWhileAQuestionIsOpen(ActorInTeam $actor, TicketState $ticket, ?string $expectedNote): void
     {
-        $choices = self::policy()->moveChoices($ticket, $actor, GuardFixtures::rules(), self::steps());
+        $choices = GuardFixtures::policy()->moveChoices($ticket, $actor, GuardFixtures::steps());
 
         self::assertSame([], $choices->groups);
         self::assertSame($expectedNote, $choices->ruleNote?->render(GuardFixtures::nameOf(...)));
@@ -247,7 +238,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
 
-        $decision = self::policy()->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(), self::steps()[3]);
+        $decision = GuardFixtures::policy()->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::steps()[3], GuardFixtures::steps());
 
         self::assertFalse($decision->isAllowed);
         self::assertSame(self::REVIEW_FIRST_NOTE, $decision->ruleNote?->render(GuardFixtures::nameOf(...)));
@@ -258,9 +249,9 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     public function inProgressToTestingIsAllowedWithReviewFirstOffAndGoesToThatStep(): void
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
-        $testing = self::steps()[3];
+        $testing = GuardFixtures::steps()[3];
 
-        $decision = self::policy()->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(reviewBeforeTest: false), $testing);
+        $decision = GuardFixtures::policy()->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(reviewBeforeTest: false), $testing, GuardFixtures::steps());
 
         self::assertTrue($decision->isAllowed);
         self::assertEquals(MoveTarget::step($testing->id()), $decision->moveTarget);
@@ -269,20 +260,20 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[Test]
     public function reviewFirstOnlyStopsTestingFromInProgress(): void
     {
-        $steps = self::steps();
+        $steps = GuardFixtures::steps();
         $fromReview = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::OMAR);
         $fromProgress = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
 
-        self::assertTrue(self::policy()->checkMoveTo($fromReview, GuardFixtures::lena(), GuardFixtures::rules(), $steps[3])->isAllowed);
-        self::assertTrue(self::policy()->checkMoveTo($fromProgress, GuardFixtures::lena(), GuardFixtures::rules(), $steps[2])->isAllowed);
-        self::assertTrue(self::policy()->checkMoveTo($fromProgress, GuardFixtures::lena(), GuardFixtures::rules(), $steps[4])->isAllowed);
+        self::assertTrue(GuardFixtures::policy()->checkMoveTo($fromReview, GuardFixtures::lena(), GuardFixtures::rules(), $steps[3], $steps)->isAllowed);
+        self::assertTrue(GuardFixtures::policy()->checkMoveTo($fromProgress, GuardFixtures::lena(), GuardFixtures::rules(), $steps[2], $steps)->isAllowed);
+        self::assertTrue(GuardFixtures::policy()->checkMoveTo($fromProgress, GuardFixtures::lena(), GuardFixtures::rules(), $steps[4], $steps)->isAllowed);
     }
 
     #[Test]
     #[DataProvider('peopleWithoutAMoveList')]
     public function nobodyButTheLeadMayMoveToAnotherStepAndNotWhileAQuestionIsOpen(ActorInTeam $actor, TicketState $ticket, ?string $expectedNote): void
     {
-        $decision = self::policy()->checkMoveTo($ticket, $actor, GuardFixtures::rules(reviewBeforeTest: false), self::steps()[0]);
+        $decision = GuardFixtures::policy()->checkMoveTo($ticket, $actor, GuardFixtures::rules(reviewBeforeTest: false), GuardFixtures::steps()[0], GuardFixtures::steps());
 
         self::assertFalse($decision->isAllowed);
         self::assertSame($expectedNote, $decision->ruleNote?->render(GuardFixtures::nameOf(...)));
@@ -291,40 +282,40 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[Test]
     public function movingToTheStepTheTicketIsInIsRefusedWithoutANote(): void
     {
-        $steps = self::steps();
+        $steps = GuardFixtures::steps();
         $ticket = new TicketState($steps[5]->id(), 'progress', 'doing', GuardFixtures::ticket('todo', 'todo')->teamId);
 
-        $decision = self::policy()->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(), $steps[5]);
+        $decision = GuardFixtures::policy()->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(), $steps[5], $steps);
 
         self::assertFalse($decision->isAllowed);
         self::assertNull($decision->ruleNote);
     }
 
-    /**
-     * Wait, Check and Doing before To do and Done, as StepQueries::moveTargetsFor orders them; index 5 is In progress,
-     * the step of GuardFixtures::ticketStepId().
-     *
-     * @return list<StepView>
-     */
-    private static function steps(): array
+    #[Test]
+    public function aStepOutsideTheTeamsMoveTargetsIsRefusedWithoutANoteAndOneInsideIsAllowed(): void
     {
-        return [
-            new StepView('0190a000-0000-7000-8000-000000000101', 'Needs input', 'wait', 'Waiting', 5, 'core', 'input'),
-            new StepView('0190a000-0000-7000-8000-000000000102', 'On hold', 'wait', 'Waiting', 6, 'core', 'hold'),
-            new StepView('0190a000-0000-7000-8000-000000000103', 'Code review', 'check', 'Checking', 3, 'core', 'review'),
-            new StepView('0190a000-0000-7000-8000-000000000104', 'Testing', 'check', 'Checking', 4, 'core', 'test'),
-            new StepView('0190a000-0000-7000-8000-000000000105', 'Design check', 'check', 'Checking', 10, 'team', null),
-            new StepView(GuardFixtures::ticketStepId(), 'In progress', 'doing', 'Doing', 2, 'core', 'progress'),
-            new StepView('0190a000-0000-7000-8000-000000000107', 'Backlog', 'todo', 'To do', 0, 'core', 'backlog'),
-            new StepView('0190a000-0000-7000-8000-000000000108', 'To do', 'todo', 'To do', 1, 'core', 'todo'),
-            new StepView('0190a000-0000-7000-8000-000000000109', 'Done', 'done', 'Done', 7, 'core', 'done'),
-        ];
+        $steps = GuardFixtures::steps();
+        $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
+        $backlog = $steps[6];
+        $targetsWithoutBacklog = array_values(array_filter($steps, static fn (StepView $step): bool => $step->id() !== $backlog->id()));
+        $policy = GuardFixtures::policy();
+
+        $outside = $policy->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(reviewBeforeTest: false), $backlog, $targetsWithoutBacklog);
+        $inside = $policy->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(reviewBeforeTest: false), $backlog, $steps);
+
+        self::assertFalse($outside->isAllowed);
+        self::assertNull($outside->ruleNote);
+        self::assertNull($outside->moveTarget);
+        self::assertTrue($inside->isAllowed);
     }
 
-    private static function policy(): CatalogueTransitionPolicy
+    #[Test]
+    public function anEmptyListOfMoveTargetsRefusesEveryStep(): void
     {
-        $moveRights = new MoveRights();
+        $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
 
-        return new CatalogueTransitionPolicy(new TransitionCatalogue(), new QuestionOpenPause(), $moveRights, new MoveSideEffects(), new TesterMovesDone($moveRights), new NoSelfReview(), new ReviewBeforeTest());
+        $decision = GuardFixtures::policy()->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(reviewBeforeTest: false), GuardFixtures::steps()[0], []);
+
+        self::assertFalse($decision->isAllowed);
     }
 }
