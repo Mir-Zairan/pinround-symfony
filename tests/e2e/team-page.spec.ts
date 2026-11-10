@@ -28,6 +28,17 @@ async function openAddProjectDialog(page: Page) {
   return dialog;
 }
 
+function teamSteps(page: Page) {
+  return page.locator('.team__step--team');
+}
+
+async function addDesignCheckStep(page: Page): Promise<void> {
+  const form = page.getByRole('form', { name: 'Add a team step' });
+  await form.getByLabel('Step name').fill('Design check');
+  await form.locator('label.team__group-choice').filter({ hasText: 'Checking' }).click();
+  await form.getByRole('button', { name: 'Add step', exact: true }).click();
+}
+
 function projectRows(page: Page) {
   return page.locator('.team__projects > li');
 }
@@ -46,6 +57,12 @@ test.describe('as the lead', () => {
   // Whatever the test did, Shop ends with exactly SHOP and APP and DOCS have no team, as the seed leaves them.
   test.afterEach(async ({ page }) => {
     await openShopTeam(page);
+    const removeStepButtons = page.getByRole('button', { name: 'Remove step Design check' });
+    while ((await removeStepButtons.count()) > 0) {
+      await removeStepButtons.first().click();
+      await page.waitForLoadState('networkidle');
+    }
+    await expect(teamSteps(page)).toHaveCount(0);
     const removeButtons = page.getByRole('button', { name: /^Remove (?!SHOP )\S+ from the team$/ });
     while ((await removeButtons.count()) > 0) {
       await removeButtons.first().click();
@@ -117,6 +134,25 @@ test.describe('as the lead', () => {
     await expect(projectRows(page)).toHaveCount(1);
   });
 
+  test('Add a team step puts Design check under Checking, highlighted, and its x removes it', async ({ page }) => {
+    await openShopTeam(page);
+    await expect(page.getByRole('form', { name: 'Add a team step' })).toBeVisible();
+    await expect(teamSteps(page)).toHaveCount(0);
+
+    await addDesignCheckStep(page);
+
+    await expect(page.getByText('Added “Design check” to Checking.')).toBeVisible();
+    const checking = page.locator('.team__group').filter({ hasText: 'Checking' });
+    await expect(checking.locator('.team__step--team', { hasText: 'Design check' })).toHaveCount(1);
+    await expect(teamSteps(page)).toHaveCount(1);
+
+    await page.getByRole('button', { name: 'Remove step Design check' }).click();
+
+    await expect(page.getByText('Removed the team step.')).toBeVisible();
+    await expect(teamSteps(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Remove step Design check' })).toHaveCount(0);
+  });
+
   test('the Team page has no serious or critical accessibility violations with the dialog closed and open', async ({ page }) => {
     await openShopTeam(page);
     expect(await seriousViolations(page)).toEqual([]);
@@ -124,6 +160,16 @@ test.describe('as the lead', () => {
     await openAddProjectDialog(page);
 
     expect(await seriousViolations(page)).toEqual([]);
+  });
+
+  test('How work moves here has no serious or critical accessibility violations with a team step added', async ({ page }) => {
+    await openShopTeam(page);
+    await addDesignCheckStep(page);
+    await expect(teamSteps(page)).toHaveCount(1);
+
+    const { violations } = await new AxeBuilder({ page }).include('.team__flow').withTags(AXE_TAGS).analyze();
+
+    expect(violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')).toEqual([]);
   });
 
   test.describe('narrow viewport', () => {
@@ -136,6 +182,14 @@ test.describe('as the lead', () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 
       await openAddProjectDialog(page);
+
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    });
+
+    test('How work moves here has no horizontal scroll at 360px with a team step added', async ({ page }) => {
+      await openShopTeam(page);
+      await addDesignCheckStep(page);
+      await expect(teamSteps(page)).toHaveCount(1);
 
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
     });
@@ -152,5 +206,14 @@ test.describe('as a member who is not the lead', () => {
     await expect(page.getByRole('button', { name: 'Add project' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0);
     await expect(projectRows(page)).toHaveCount(1);
+  });
+
+  test('the page offers no Add a team step and no x on steps', async ({ page }) => {
+    await openShopTeam(page);
+
+    await expect(page.getByRole('heading', { name: 'How work moves here' })).toBeVisible();
+    await expect(page.getByRole('form', { name: 'Add a team step' })).toHaveCount(0);
+    await expect(page.getByText('Add a team step')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Remove step / })).toHaveCount(0);
   });
 });
