@@ -32,7 +32,7 @@ function teamList(page: Page) {
   return mainMenu(page).locator('.nav-menu__list');
 }
 
-test('the menu lists Lena\'s items in order and the team pages as not built yet', async ({ page }) => {
+test('the menu lists Lena\'s items in order and links Home and her team pages', async ({ page }) => {
   await openHome(page);
 
   await expect(mainMenu(page).locator(':scope > a, :scope > span, :scope > div > button')).toHaveText([
@@ -42,7 +42,9 @@ test('the menu lists Lena\'s items in order and the team pages as not built yet'
     'Teams',
     'Admin (not built yet)',
   ]);
-  await expect(mainMenu(page).getByRole('link')).toHaveText(['Home']);
+  // The team links sit in the closed list, so they count only with hidden elements included.
+  await expect(mainMenu(page).getByRole('link', { includeHidden: true })).toHaveText(['Home', 'Mobile', 'Shop']);
+  await expect(teamList(page).locator('a[href="/teams/mobile"], a[href="/teams/shop"]')).toHaveCount(2);
 });
 
 test('a click opens the team list and a second click closes it', async ({ page }) => {
@@ -53,7 +55,7 @@ test('a click opens the team list and a second click closes it', async ({ page }
   await teamsButton(page).click();
 
   await expect(teamsButton(page)).toHaveAttribute('aria-expanded', 'true');
-  await expect(teamList(page).locator(':scope > *')).toHaveText(['Mobile (not built yet)', 'Shop (not built yet)']);
+  await expect(teamList(page).locator(':scope > *')).toHaveText(['Mobile', 'Shop']);
 
   await teamsButton(page).click();
 
@@ -98,17 +100,19 @@ test('ArrowDown opens the team list', async ({ page }) => {
   await expect(teamList(page)).toBeVisible();
 });
 
-test('while no team page is built, Tab from the open list closes it and moves on to the next item', async ({ page }) => {
-  // With team_show built, the teams are links and Tab moves into the list instead (menu_controller.js triggerKey).
+test('Tab from the open team list moves into it, onto the first team link, and keeps it open', async ({ page }) => {
   await openHome(page);
   await teamsButton(page).click();
   await expect(teamsButton(page)).toBeFocused();
 
   await page.keyboard.press('Tab');
 
-  await expect(teamsButton(page)).toHaveAttribute('aria-expanded', 'false');
-  await expect(teamList(page)).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Report a problem' })).toBeFocused();
+  await expect(teamsButton(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(teamList(page)).toBeVisible();
+  const firstTeam = teamList(page).getByRole('link').first();
+  await expect(firstTeam).toBeFocused();
+  await expect(firstTeam).toHaveText('Mobile');
+  await expect(firstTeam).toHaveAttribute('href', '/teams/mobile');
 });
 
 for (const scheme of ['light', 'dark'] as const) {

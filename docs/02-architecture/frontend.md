@@ -58,7 +58,7 @@ Menu items come from the user's roles. There is no mode switch: a person with se
 | Home | everyone | `web_home` |
 | Tickets | everyone with a team role, and managers | `ticketing_tickets` (`/tickets`) |
 | My reports (with a count of questions waiting on me) | everyone with a team role | `my_reports` (`/my-reports`) |
-| Team | everyone with a team role: "Team" for one team; a "Teams ▾" disclosure listing the teams by name when there are several | `team_show` (`/teams/{slug}`; until teams have a slug, MainMenu passes the team's id as `teamId`) |
+| Team | everyone with a team role: "Team" for one team; a "Teams ▾" disclosure listing the teams by name when there are several | `team_show` (`/teams/{slug}`, the slug from `TeamSummary::slug` or, for a person's only team, `Roles::teamSlugOf`) |
 | Admin | org admins | `web_admin` with `tab: people` (`/admin/people`; the admin home is its People tab; current on every tab) |
 
 A team role is lead, member or viewer. Without an organization (the picker, a page without a login) the menu is Home alone, and there is no "Report a problem" or bell. `App\Web\UI\Navigation\MainMenu` builds the items (Twig `main_menu()`) and decides "Report a problem" and the bell (`can_report_problems()`); the route names above live there. Showing an item grants nothing: each page asks its own voter.
