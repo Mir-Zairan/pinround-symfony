@@ -100,3 +100,61 @@
   color: var(--primary);
   font-weight: 700;
 }
+
+.team__section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.team__remove {
+  margin: 0;
+}
+
+.team__dialog-sub,
+.team__dialog-empty {
+  color: var(--on-surface-var);
+}
+
+.team__dialog-heading {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.team__picker,
+.team__new-project {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.team__new-project {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--outline-var);
+}
+
+.team__picker-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.team__picker-list [hidden] {
+  display: none;
+}
+
+.team__picker-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Web\UI\Controller;
 
 use App\Organization\Domain\SlugFormat;
+use App\Ticketing\UI\TeamProjectsController;
 use App\Web\UI\Controller\TeamController;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -25,5 +26,34 @@ final class TeamControllerTest extends TestCase
         $slugRequirement = (string) ($routes[0]->newInstance()->requirements['slug'] ?? '');
 
         self::assertSame(SlugFormat::PATTERN, '/^(?=.{1,63}\z)'.$slugRequirement.'\z/');
+    }
+
+    #[Test]
+    public function theProjectFormsNameTheRoutesTokensAndFieldsOfTheTicketingController(): void
+    {
+        $constantOfTicketingController = [
+            'unlinkRoute' => 'UNLINK_ROUTE',
+            'linkRoute' => 'LINK_ROUTE',
+            'createRoute' => 'CREATE_ROUTE',
+            'unlinkCsrfId' => 'UNLINK_CSRF_ID',
+            'linkCsrfId' => 'LINK_CSRF_ID',
+            'createCsrfId' => 'CREATE_CSRF_ID',
+            'csrfField' => 'CSRF_FIELD',
+            'projectIdField' => 'PROJECT_ID_FIELD',
+            'projectIdsField' => 'PROJECT_IDS_FIELD',
+            'keyField' => 'KEY_FIELD',
+            'nameField' => 'NAME_FIELD',
+        ];
+
+        foreach ($constantOfTicketingController as $formKey => $constantName) {
+            self::assertSame(
+                new \ReflectionClassConstant(TeamProjectsController::class, $constantName)->getValue(),
+                TeamController::PROJECT_FORMS[$formKey],
+                $formKey,
+            );
+        }
+        $projectForms = new \ReflectionClassConstant(TeamController::class, 'PROJECT_FORMS')->getValue();
+        self::assertIsArray($projectForms);
+        self::assertSame(array_keys($constantOfTicketingController), array_keys($projectForms));
     }
 }

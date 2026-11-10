@@ -116,8 +116,9 @@ final class TeamPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Projects 2', $page->filter('#team-projects')->text());
+        $removeLabel = 'Lena' === $person ? ' Remove' : '';
         self::assertSame(
-            ['CART Checkout 0 open tickets See tickets of CART', 'SHOP Web shop 0 open tickets See tickets of SHOP'],
+            ['CART Checkout 0 open tickets See tickets of CART'.$removeLabel, 'SHOP Web shop 0 open tickets See tickets of SHOP'.$removeLabel],
             $page->filter('.team__project')->each(static fn ($project): string => $project->text()),
         );
         self::assertStringNotContainsString('Mobile app', $page->filter('main')->text());
@@ -162,14 +163,116 @@ final class TeamPageTest extends WebTestCase
     }
 
     #[Test]
+    public function theLeadSeesRemoveOnEveryProjectAndAddProjectWithBothDialogParts(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->addProject($this->shop, 'SHOP', 'Web shop');
+        $this->addProject($this->shop, 'CART', 'Checkout');
+        $this->addProject(null, 'LOOSE', 'Not in a team');
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addProject(null, 'OTHER', 'Another organization', $betaBakery);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['Remove CART from the team', 'Remove SHOP from the team'],
+            $page->filter('.team__remove button')->each(static fn ($button): ?string => $button->attr('aria-label')),
+        );
+        self::assertSame('Add project', $page->filter('#team-projects ~ div button[data-action="dialog#open"]')->text());
+        self::assertSame('Add a project', $page->filter('#add-project-dialog-title')->text());
+        self::assertSame(['LOOSE Not in a team'], $page->filter('#add-project-form .team__picker-option')->each(static fn ($option): string => $option->text()));
+        self::assertSame('Add project', $page->filter('button[form="add-project-form"]')->text());
+        self::assertCount(1, $page->filter('form.team__new-project input[name="key"]'));
+        self::assertCount(1, $page->filter('form.team__new-project input[name="name"]'));
+        self::assertSame('Create project', $page->filter('form.team__new-project button')->text());
+    }
+
+    #[Test]
+    public function theDialogSaysEveryProjectHasATeamWhenNoneIsLeftToAdd(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->addProject($this->shop, 'SHOP', 'Web shop');
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Every project already has a team.', $page->filter('.team__dialog-empty')->text());
+        self::assertCount(0, $page->filter('#add-project-form'));
+        self::assertCount(0, $page->filter('button[form="add-project-form"]'));
+    }
+
+    #[Test]
+    public function anAdminCanAddProjectsButNotRemoveThem(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Sara']);
+        $this->addProject($this->shop, 'SHOP', 'Web shop');
+        $this->addProject(null, 'LOOSE', 'Not in a team');
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.team__remove'));
+        self::assertCount(1, $page->filter('#add-project-form'));
+        self::assertCount(1, $page->filter('form.team__new-project'));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function peopleWhoCannotChangeProjects(): iterable
+    {
+        yield 'Omar, a member' => ['Omar'];
+        yield 'Mia, a viewer' => ['Mia'];
+        yield 'Raj, a Manager' => ['Raj'];
+    }
+
+    #[Test]
+    #[DataProvider('peopleWhoCannotChangeProjects')]
+    public function everyoneElseSeesNoRemoveNoAddProjectAndNoDialog(string $person): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()[$person]);
+        $this->addProject($this->shop, 'SHOP', 'Web shop');
+        $this->addProject(null, 'LOOSE', 'Not in a team');
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.team__remove'));
+        self::assertCount(0, $page->filter('#add-project-dialog'));
+        self::assertStringNotContainsString('Add project', $page->filter('main')->text());
+        self::assertStringNotContainsString('Not in a team', $page->filter('main')->text());
+    }
+
+    #[Test]
+    public function theLeadRemovesAProjectWithTheRenderedFormAndSeesTheToastAndOneRowLess(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->addProject($this->shop, 'SHOP', 'Web shop');
+        $this->addProject($this->shop, 'CART', 'Checkout');
+        $page = $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submit($page->filter('.team__remove button')->first()->form());
+        self::assertResponseRedirects('/teams/shop', 302);
+        $page = $this->client->followRedirect();
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('CART removed from the team', $page->filter('[data-toast-message-value]')->attr('data-toast-message-value'));
+        self::assertSame('Projects 1', $page->filter('#team-projects')->text());
+        self::assertStringNotContainsString('Checkout', $page->filter('.team__projects')->text());
+    }
+
+    #[Test]
     public function theQueriesStayTheSameWhateverTheNumberOfProjects(): void
     {
-        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Omar']);
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
         $this->client->disableReboot();
         $exporter = self::getContainer()->get('tracing.in_memory_exporter');
         self::assertInstanceOf(InMemoryExporter::class, $exporter);
 
         $this->addProject($this->shop, 'SHOP', 'Web shop');
+        $this->addProject(null, 'L1', 'Loose one');
         // The first request of a session also loads the logged-in user's own state, so it is no yardstick.
         $this->client->request('GET', '/teams/shop');
         self::assertResponseStatusCodeSame(200);
@@ -182,6 +285,7 @@ final class TeamPageTest extends WebTestCase
 
         foreach (['CART', 'PAY', 'SEARCH', 'STOCK'] as $key) {
             $this->addProject($this->shop, $key, 'Project '.$key);
+            $this->addProject(null, 'L'.$key, 'Loose '.$key);
         }
         $spansBeforeFiveProjects = \count(ExportedSpans::of($exporter));
         $page = $this->client->request('GET', '/teams/shop');

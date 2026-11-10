@@ -132,6 +132,7 @@ Every controller is small, stays under about 150 lines, and has a test (Playwrig
 | `menu` | The "⋯" menus, the avatar menu and the bell popover: open/close, Escape, click outside, roving focus (the avatar menu is a disclosure and keeps its items in the Tab order) |
 | `theme-switch` | The avatar menu's System / Light / Dark switch: sets or removes `data-theme` on `<html>` at once and posts the choice to `/me/theme` |
 | `dialog` | Opens a `<dialog>`, keeps focus inside, gives focus back on close |
+| `project-picker` | The Team page's "Add a project" dialog: filters the unlinked projects by key or name, and keeps the submit button's label ("Add N projects") and disabled state in step with the checked boxes |
 | `clipboard` | "Copy link" |
 | `queue` | Keyboard shortcuts in a queue: J/K for next/previous (phase 12 adds more shortcuts) |
 | `autosize` | Grows textareas with their content |

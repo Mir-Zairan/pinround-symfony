@@ -7,6 +7,7 @@ namespace App\Web\UI\Controller;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
+use App\Ticketing\Api\ProjectPermission;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
 use App\Web\UI\Team\ProjectTicketsLink;
@@ -29,6 +30,24 @@ final class TeamController extends AbstractController
      */
     public const string SLUG_REQUIREMENT = '[a-z0-9]+(?:-[a-z0-9]+)*';
 
+    /**
+     * The routes, CSRF token ids and field names of Ticketing's TeamProjectsController, which Web_UI may not import;
+     * TeamControllerTest keeps them the same.
+     */
+    public const array PROJECT_FORMS = [
+        'unlinkRoute' => 'ticketing_team_projects_unlink',
+        'linkRoute' => 'ticketing_team_projects_link',
+        'createRoute' => 'ticketing_team_projects_create',
+        'unlinkCsrfId' => 'ticketing_team_projects_unlink',
+        'linkCsrfId' => 'ticketing_team_projects_link',
+        'createCsrfId' => 'ticketing_team_projects_create',
+        'csrfField' => '_csrf_token',
+        'projectIdField' => 'project_id',
+        'projectIdsField' => 'project_ids',
+        'keyField' => 'key',
+        'nameField' => 'name',
+    ];
+
     public function __construct(
         private readonly TeamQueries $teamQueries,
         private readonly ProjectQueries $projectQueries,
@@ -45,10 +64,16 @@ final class TeamController extends AbstractController
         $this->denyAccessUnlessGranted(TeamPermission::VIEW, $team->id());
 
         $projects = $this->projectQueries->projectsOf($team->id());
+        $canLink = $this->isGranted(ProjectPermission::LINK, $team->id());
 
         return $this->render('@Web/team/show.html.twig', [
             'team' => $team,
             'isLead' => $this->isGranted(TeamPermission::LEAD, $team->id()),
+            'canUnlink' => $this->isGranted(ProjectPermission::UNLINK, $team->id()),
+            'canLink' => $canLink,
+            'canCreate' => $this->isGranted(ProjectPermission::CREATE, $team->id()),
+            'unlinkedProjects' => $canLink ? $this->projectQueries->unlinkedProjects() : [],
+            'projectForms' => self::PROJECT_FORMS,
             'projects' => $projects,
             'ticketsUrls' => array_combine(
                 array_map(static fn (ProjectSummary $project): string => $project->id(), $projects),
