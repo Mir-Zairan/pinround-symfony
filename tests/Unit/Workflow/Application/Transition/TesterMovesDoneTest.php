@@ -45,6 +45,28 @@ final class TesterMovesDoneTest extends TestCase
         self::assertSame($expectedNote, $note?->render(GuardFixtures::nameOf(...)));
     }
 
+    /**
+     * @return iterable<string, array{bool, bool, string|null}> rule on, team has testers, rendered note for Lena or null
+     */
+    public static function rulesAndTeamsForTheLead(): iterable
+    {
+        yield 'on, with testers' => [true, true, self::NOTE];
+        yield 'on, without testers' => [true, false, null];
+        yield 'off, with testers' => [false, true, null];
+        yield 'off, without testers' => [false, false, null];
+    }
+
+    #[Test]
+    #[DataProvider('rulesAndTeamsForTheLead')]
+    public function theRuleBlocksTheLeadOnlyWhileItIsOnAndTheTeamHasATester(bool $isRuleOn, bool $hasTesters, ?string $expectedNote): void
+    {
+        $ticket = GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::OMAR, reviewer: GuardFixtures::LENA);
+
+        $note = new TesterMovesDone(new MoveRights())->check($ticket, new TransitionCatalogue()->for(Verb::PassIt), GuardFixtures::lena(), GuardFixtures::rules(testerMovesDone: $isRuleOn), GuardFixtures::team(testers: $hasTesters));
+
+        self::assertSame($expectedNote, $note?->render(GuardFixtures::nameOf(...)));
+    }
+
     #[Test]
     public function aMoveThatDoesNotGoToDoneIsNotItsBusiness(): void
     {

@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Workflow\Application\Transition;
 
-use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\StepView;
-use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionView;
 use App\Workflow\Domain\Verb;
 use PHPUnit\Framework\Attributes\Test;
@@ -17,8 +15,8 @@ use Random\Engine\Mt19937;
 use Random\Randomizer;
 
 /**
- * 1,000 seeded random tickets, people and rules: what available() and moveChoices() list is exactly what check() and
- * checkMoveTo() allow.
+ * 1,000 seeded random tickets (also in team steps of To do, Doing and Waiting), people and rules: what available()
+ * and moveChoices() list is exactly what check() and checkMoveTo() allow.
  */
 final class CatalogueTransitionPolicyPropertyTest extends TestCase
 {
@@ -31,13 +29,13 @@ final class CatalogueTransitionPolicyPropertyTest extends TestCase
         $random = new Randomizer(new Mt19937(1));
         $policy = GuardFixtures::policy();
         $people = self::people();
-        $steps = GuardFixtures::steps();
+        $steps = GuardFixtures::stepsWithTeamSteps();
         $stepOfAnotherTeam = new StepView('0190a000-0000-7000-8000-0000000001ff', 'Other team step', 'doing', 'Doing', 11, 'team', null);
         $combinationsWithAVerb = 0;
         $combinationsWithAMoveChoice = 0;
 
         for ($i = 0; $i < self::COMBINATIONS; ++$i) {
-            $ticket = self::randomTicket($random, $steps);
+            $ticket = GuardFixtures::randomTicket($random, $steps);
             $actor = $people[$random->getInt(0, \count($people) - 1)];
             $rules = new RuleSetView(1 === $random->getInt(0, 1), 1 === $random->getInt(0, 1), 1 === $random->getInt(0, 1));
             $context = \sprintf('combination %d', $i);
@@ -93,46 +91,6 @@ final class CatalogueTransitionPolicyPropertyTest extends TestCase
 
         self::assertGreaterThan(0, $combinationsWithAVerb);
         self::assertGreaterThan(0, $combinationsWithAMoveChoice);
-    }
-
-    /**
-     * @param list<StepView> $steps the step the ticket is in is one of them, and gives its core and group codes
-     */
-    private static function randomTicket(Randomizer $random, array $steps): TicketState
-    {
-        $step = $steps[$random->getInt(0, \count($steps) - 1)];
-        $user = static fn (): ?string => self::userIds()[$random->getInt(0, \count(self::userIds()) - 1)];
-        $isCheckNeeded = 1 === $random->getInt(0, 1);
-
-        return new TicketState(
-            stepId: $step->id(),
-            coreCode: $step->coreCode(),
-            groupCode: $step->groupCode(),
-            teamId: 1 === $random->getInt(0, 4) ? null : GuardFixtures::ticket('todo', 'todo')->teamId,
-            assigneeId: self::userIdOrNull($user()),
-            reviewerId: self::userIdOrNull($user()),
-            testerId: self::userIdOrNull($user()),
-            askedUserId: 1 === $random->getInt(0, 5) ? self::userIdOrNull($user()) : null,
-            previousStepId: 1 === $random->getInt(0, 1) ? GuardFixtures::previousStepId() : null,
-            reporterId: self::userIdOrNull($user()),
-            waitingOnUserId: self::userIdOrNull($user()),
-            waitingOnLabel: 1 === $random->getInt(0, 1) ? 'Supplier' : null,
-            isCheckNeeded: $isCheckNeeded,
-            checkerId: self::userIdOrNull($user()),
-        );
-    }
-
-    /**
-     * @return list<string|null> the people of GuardFixtures and nobody
-     */
-    private static function userIds(): array
-    {
-        return [null, GuardFixtures::LENA, GuardFixtures::OMAR, GuardFixtures::MIA, GuardFixtures::RAJ, GuardFixtures::SARA];
-    }
-
-    private static function userIdOrNull(?string $userId): ?UserId
-    {
-        return null === $userId ? null : new UserId($userId);
     }
 
     /**

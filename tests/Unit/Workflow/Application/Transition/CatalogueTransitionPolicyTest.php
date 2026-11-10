@@ -117,6 +117,83 @@ final class CatalogueTransitionPolicyTest extends TestCase
     }
 
     #[Test]
+    public function omarMovesOnFromATeamStepOfDoingIntoCodeReviewWhereLenaAsTheChosenReviewerMayApproveOrAskForChanges(): void
+    {
+        $policy = GuardFixtures::policy();
+        $inTeamStep = GuardFixtures::ticket(null, 'doing', assignee: GuardFixtures::OMAR);
+        $inCodeReview = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::OMAR);
+
+        $moveOn = $policy->available($inTeamStep, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team());
+
+        self::assertEquals([new TransitionView('move_on', 'Move on to Code review', true, MoveTarget::coreStep('review'))], $moveOn->transitions);
+        self::assertSame([Verb::ApproveCode->value, Verb::AskForChanges->value, Verb::PutOnHold->value], self::verbsOf($policy->available($inCodeReview, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team())));
+        self::assertTrue($policy->check($inCodeReview, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team(), Verb::ApproveCode->value)->isAllowed);
+        self::assertSame([], self::verbsOf($policy->available($inCodeReview, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team())));
+    }
+
+    #[Test]
+    public function whenLenaLeadsAndWroteTheCodeOmarIsTheChosenReviewerAndSheGetsTheNoteNamingHim(): void
+    {
+        $policy = GuardFixtures::policy();
+        $lenasCode = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA);
+
+        $lenas = $policy->available($lenasCode, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team());
+
+        self::assertSame([Verb::ApproveCode->value, Verb::AskForChanges->value], self::verbsOf($policy->available($lenasCode, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team())));
+        self::assertSame([Verb::PutOnHold->value], self::verbsOf($lenas));
+        self::assertSame('Team rule: nobody approves their own code. Omar reviews it.', $lenas->ruleNote?->render(GuardFixtures::nameOf(...)));
+    }
+
+    #[Test]
+    public function whenLenaIsTheTeamsOnlyDeveloperSheIsTheChosenReviewerOfHerOwnCode(): void
+    {
+        $policy = GuardFixtures::policy();
+        $lenasCode = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA);
+        $team = GuardFixtures::team(hasOtherDeveloper: false);
+
+        self::assertSame([Verb::ApproveCode->value, Verb::AskForChanges->value, Verb::PutOnHold->value], self::verbsOf($policy->available($lenasCode, GuardFixtures::lena(), GuardFixtures::rules(), $team)));
+        self::assertSame([], self::verbsOf($policy->available($lenasCode, GuardFixtures::omar(), GuardFixtures::rules(), $team)));
+    }
+
+    #[Test]
+    public function miaMovesOnFromATeamStepOfCheckingIntoTesting(): void
+    {
+        $ticket = GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::OMAR);
+
+        $availability = GuardFixtures::policy()->available($ticket, GuardFixtures::mia(), GuardFixtures::rules(), GuardFixtures::team());
+
+        self::assertEquals([new TransitionView('move_on', 'Move on to Testing', true, MoveTarget::coreStep('test'))], $availability->transitions);
+    }
+
+    #[Test]
+    public function theTicketsTesterWithoutTheJobTesterMovesOnFromATeamStepOfCheckingButNotFromOneOfDoing(): void
+    {
+        $miaWithoutTheJob = new ActorInTeam(GuardFixtures::mia()->userId, ActorInTeam::TEAM_ROLE_MEMBER, ActorInTeam::JOB_OTHER);
+        $policy = GuardFixtures::policy();
+
+        $inChecking = $policy->available(GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::OMAR, tester: GuardFixtures::MIA), $miaWithoutTheJob, GuardFixtures::rules(), GuardFixtures::team());
+        $inDoing = $policy->available(GuardFixtures::ticket(null, 'doing', assignee: GuardFixtures::OMAR, tester: GuardFixtures::MIA), GuardFixtures::mia(), GuardFixtures::rules(), GuardFixtures::team());
+
+        self::assertSame([Verb::MoveOn->value], self::verbsOf($inChecking));
+        self::assertSame([], self::verbsOf($inDoing));
+    }
+
+    #[Test]
+    public function inATeamWithoutTestersTheLeadIsTheChosenTesterAndMayPassItOrSayNeedsChanges(): void
+    {
+        $ticket = GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::OMAR, reviewer: GuardFixtures::LENA);
+        $policy = GuardFixtures::policy();
+
+        $withoutTesters = $policy->available($ticket, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team(testers: false));
+        $withTesters = $policy->available($ticket, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team());
+
+        self::assertSame([Verb::PassIt->value, Verb::NeedsChanges->value, Verb::PutOnHold->value], self::verbsOf($withoutTesters));
+        self::assertNull($withoutTesters->ruleNote);
+        self::assertTrue($policy->check($ticket, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team(testers: false), Verb::NeedsChanges->value)->isAllowed);
+        self::assertSame([Verb::PutOnHold->value], self::verbsOf($withTesters));
+    }
+
+    #[Test]
     public function inToDoGiveItToIsOfferedOnlyWhileNobodyIsAssigned(): void
     {
         $ticket = GuardFixtures::ticket('todo', 'todo', assignee: GuardFixtures::OMAR);

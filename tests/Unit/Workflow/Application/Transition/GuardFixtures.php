@@ -159,6 +159,21 @@ final class GuardFixtures
     }
 
     /**
+     * steps() and a team step in To do, Doing and Waiting, so a random ticket also lands in each group's custom step.
+     *
+     * @return list<StepView>
+     */
+    public static function stepsWithTeamSteps(): array
+    {
+        return [
+            ...self::steps(),
+            new StepView('0190a000-0000-7000-8000-000000000110', 'Ready to build', 'todo', 'To do', 11, 'team', null),
+            new StepView('0190a000-0000-7000-8000-000000000111', 'Pairing', 'doing', 'Doing', 12, 'team', null),
+            new StepView('0190a000-0000-7000-8000-000000000112', 'Waiting on supplier', 'wait', 'Waiting', 13, 'team', null),
+        ];
+    }
+
+    /**
      * The Shop team as the turn rules see it: Lena leads and develops, Omar develops, Mia tests. Without $testers the
      * team has no tester; with $hasOtherDeveloper false Lena is its only developer.
      */

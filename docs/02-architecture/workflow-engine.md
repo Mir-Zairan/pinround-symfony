@@ -74,7 +74,7 @@ Three rules exist today. Each is stored per org, and per team under the `team` p
 
 | Rule | Default | Effect | Note shown when it blocks |
 |---|---|---|---|
-| `tester_moves_done` | on | Only a team member with job "tester" may use Pass it (→ Done). With the rule off, the lead may pass too | "Team rule: only the tester moves a ticket to Done." |
+| `tester_moves_done` | on | Only a team member with job "tester" may use Pass it (→ Done). With the rule off, the lead may pass too; in a team without a tester it blocks nobody, as the Testing turn is the lead's | "Team rule: only the tester moves a ticket to Done." |
 | `no_self_review` | on | The assignee may not Approve code on their own ticket | "Team rule: nobody approves their own code. Lena reviews it." |
 | `review_before_test` | on | In progress → Testing directly is not allowed. "Send to testing" is hidden | "Team rule: code review comes before testing." |
 
@@ -85,8 +85,11 @@ Each rule is one guard class that implements `Workflow\Application\Transition\Gu
 ```php
 interface Guard
 {
-    /** Returns null when allowed, or the plain note when blocked; the note keeps people as ids ("{reviewer} reviews it."). */
-    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote;
+    /**
+     * Returns null when allowed, or the plain note when blocked; the note keeps people as ids ("{reviewer} reviews it.").
+     * $team is the TeamFacts the turn rules got, so a rule sees the same chosen reviewer and the same testers.
+     */
+    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team): ?RuleNote;
 }
 ```
 
@@ -108,13 +111,13 @@ New rules are added as new guard classes plus a column in `wf_rule_set`, plus an
 | Send to testing | In progress | Testing | Assignee | `review_before_test` must be off (the button is hidden without a note; `check()` refuses with the rule's note) | sets tester; draft-round dialog | TicketMoved |
 | Approve code | Code review | Testing | Turn (the reviewer) | `no_self_review` | sets tester | TicketMoved |
 | Ask for changes | Code review | In progress | Turn (the reviewer) | — | — | TicketMoved |
-| Pass it | Testing | Done | Tester; Lead when `tester_moves_done` is off | `tester_moves_done` | sets `closed_at`; removes the turn row | TicketMoved |
+| Pass it | Testing | Done | Tester; Lead when `tester_moves_done` is off or the team has no tester | `tester_moves_done` (blocks nobody in a team without testers) | sets `closed_at`; removes the turn row | TicketMoved |
 | Needs changes | Testing | In progress | Tester | — | — | TicketMoved |
 | Input given · go on | Needs input | previous step (or To do) | Turn, or Lead | — | — | TicketMoved |
 | Go on | On hold | previous step (or In progress) | Lead | — | — | TicketMoved |
 | Reopen | Done | In progress | Lead, Tester | — | clears `closed_at` | TicketMoved |
 | Put on hold | any except On hold and Done | On hold | Lead | — | remembers the previous step | TicketMoved |
-| Move on to <next core step> | a company or team step | next core step by group: To do → In progress, Doing → Code review, Checking → Testing, Waiting → previous step (or In progress; the button reads "Move on to the previous step" in the first case) | Assignee, Lead | none blocks it: `review_before_test` and `no_self_review` are about other core moves | — | TicketMoved |
+| Move on to <next core step> | a company or team step | next core step by group: To do → In progress, Doing → Code review, Checking → Testing, Waiting → previous step (or In progress; the button reads "Move on to the previous step" in the first case) | Assignee, Lead; in a Checking step also the Tester, whose turn it is there | none blocks it: `review_before_test` and `no_self_review` are about other core moves | — | TicketMoved |
 | Move to another step… | any | any step of the team | Lead | `review_before_test` blocks In progress → Testing | asks "waiting on whom?" when the target is Needs input | TicketMoved |
 
 Rules for every move:
@@ -124,7 +127,8 @@ Rules for every move:
 - **Side effects on every move** (inside the same transaction): reproject the turn row; write `TicketMoved` to the outbox; auto-clear the actor's own pings on this ticket ([realtime-and-notifications.md](realtime-and-notifications.md)); record the move for the activity list.
 - **Reviewer choice:** the reviewer is the team lead. If the lead is the assignee, it is the other developer in the team with the fewest open reviews. The reviewer is stored in `tkt_ticket.reviewer_id` and can be changed by the lead.
 - **Tester choice:** the team's tester. If the team has several, it is the one with the fewest tickets in Testing. Stored in `tkt_ticket.tester_id`.
-- **Fallbacks:** no tester in the team → `tester_id` stays empty and the Testing turn goes to the lead. The lead is the author and there is no other developer → the lead reviews their own code; this override is written to the ticket history (the "nobody approves their own code" rule is shown as overridden, never silently ignored).
+- **Fallbacks:** no tester in the team → `tester_id` stays empty and the Testing turn goes to the lead; there `tester_moves_done` blocks nobody, so the lead may Pass it and say Needs changes. The lead is the author and there is no other developer → the lead reviews their own code; this override is written to the ticket history (the "nobody approves their own code" rule is shown as overridden, never silently ignored).
+- **Verbs follow the turn:** with no reviewer or tester stored, the verbs ("Reviewer" and "Tester" in the table), `no_self_review`'s note, the turn and the Now and Next sentences all use the same chosen person (`Application\Turn\ReviewerChoice::reviewerOf`, `TesterChoice::testerOf`), so whoever's turn it is in a team gets at least one verb. A person with an open question is the exception by design: the ticket is paused for everyone until they answer.
 - **Managers and viewers** see no move buttons: "Managers can read and comment. Only the team moves tickets."
 
 The `previous_step_id`, `reviewer_id`, `tester_id`, `waiting_on_user_id` and `waiting_on_label` columns are part of `tkt_ticket` ([data-model.md](data-model.md#ticketing)).
@@ -311,9 +315,9 @@ Unknown statuses map to To do and show a warning in Admin until someone maps the
 
 - **Why not the Symfony Workflow component?** Its places and transitions are configured statically (YAML/PHP config, compiled into the container). pinround's steps are data, and they differ per organization and team at runtime. So we keep a small engine of our own: transitions are a fixed catalogue of verbs (the table above), steps come from `wf_step`, and guards are classes. This decision is recorded in [ADR-0014](../03-adr/0014-status-model-five-groups.md).
 - **Classes:**
-  - `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy` (built in P02.T4 and P02.T5: lists the verbs a person may use and checks one, each with where it goes (`MoveTarget`, from `Domain\MoveSideEffects`), and gives the lead the "Move to another step…" list (`moveChoices`) and its check (`checkMoveTo`), over `Domain\TransitionCatalogue` and the guards; pure, the caller passes `TicketState`, `ActorInTeam` and `RuleQueries::rulesFor`; in Application, not Domain, per [ADR-0037](../03-adr/0037-transition-engine-in-workflow-application.md));
-  - `Workflow\Domain\TurnRules` (pure);
-  - `Workflow\Domain\Sentence\NowNext` (the sentences above; it returns structured parts so the UI can bold names);
+  - `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy` (built in P02.T4 and P02.T5: lists the verbs a person may use and checks one, each with where it goes (`MoveTarget`, from `Domain\MoveSideEffects`), and gives the lead the "Move to another step…" list (`moveChoices`) and its check (`checkMoveTo`), over `Domain\TransitionCatalogue` and the guards; pure, the caller passes `TicketState`, `ActorInTeam`, `RuleQueries::rulesFor` and the `TeamFacts` it gives `TurnRules::turnFor`; in Application, not Domain, per [ADR-0037](../03-adr/0037-transition-engine-in-workflow-application.md));
+  - `Workflow\Application\Turn\OrderedTurnRules` behind `Workflow\Api\TurnRules` (pure; `ReviewerChoice` and `TesterChoice` pick the reviewer and tester when none is stored);
+  - `Workflow\Application\Turn\PlainNowNext` behind `Workflow\Api\NowNext` and `PlainVerbFor` behind `Workflow\Api\VerbFor` (the sentences above; pure, they return plain strings);
   - `Ticketing\Application\Move\MoveTicketHandler` (loads the ticket, asks the engine, applies the move, projects the turn, writes the event).
-- **Tests:** a table-driven unit test per transition × role × rule combination. A golden test locks the Now/Next sentence for every row of the tables above, so copy changes are deliberate.
+- **Tests:** a table-driven unit test per transition × role × rule combination. Two seeded property tests of 1,000 cases each: what the policy offers is what it allows, and whoever the turn rules give the turn to gets at least one verb. A golden test locks the Now/Next sentence for every row of the tables above, so copy changes are deliberate.
 - **Concurrency:** moves use the ticket's `version` (optimistic lock). When two people act at once, the second one sees "This ticket changed. Here is the new state." and the page refreshes through Turbo.
