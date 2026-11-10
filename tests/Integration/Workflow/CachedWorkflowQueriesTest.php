@@ -203,7 +203,7 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
         self::assertSame(['Design check', 'Pairing'], $read[0], 'Key policy extend: the team step is kept.');
         self::assertSame([false, false, false], $read[1], 'Key policy team: the team rules.');
         self::assertSame(['Design check'], $read[2], 'Key policy locked: the team step is left out.');
-        self::assertSame(3, $keyPolicies->reads, 'One policy read per call, none by the load.');
+        self::assertSame(3, $keyPolicies->reads, 'The cached layer reads the policy once per call; the value checks above prove the load uses the policy it is given.');
     }
 
     #[Test]
