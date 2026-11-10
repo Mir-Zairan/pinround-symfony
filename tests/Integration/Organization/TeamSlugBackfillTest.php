@@ -191,6 +191,8 @@ final class TeamSlugBackfillTest extends KernelTestCase
     }
 
     /**
+     * Team ids rise with each insert; the first test inserts the later-created team first, so an order by id fails it.
+     *
      * @param ?string $slug null while the migration's down() has removed the column
      */
     private function insertTeam(Connection $migrator, string $organizationId, string $name, string $createdAt, ?string $slug = null): void
@@ -212,8 +214,6 @@ final class TeamSlugBackfillTest extends KernelTestCase
     }
 
     /**
-     * Team ids rise with each insert; the first test inserts the later-created team first, so an order by id fails it.
-     *
      * @return array<string, string> slug by team name, by name
      */
     private function slugsByName(Connection $migrator): array

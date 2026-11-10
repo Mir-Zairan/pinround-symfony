@@ -110,6 +110,18 @@ final class DbalMembershipQueriesTest extends KernelTestCase
     }
 
     #[Test]
+    public function theRolesCarryTheSlugOfEachTeamOfTheUserAndNoneOfAnyOtherTeam(): void
+    {
+        $slugs = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $roles = $this->queries()->rolesOf(new UserId(self::RAJ), new OrganizationId(self::ACME_FOODS));
+
+            return array_map(static fn (string $teamId): ?string => $roles->teamSlugOf(new TeamId($teamId)), [self::ACME_TEAM_A, self::ACME_TEAM_B, self::BETA_TEAM]);
+        });
+
+        self::assertSame(['shop', 'payments', null], $slugs);
+    }
+
+    #[Test]
     public function aUserWithNoMembershipHasNoRoles(): void
     {
         self::assertSame(
