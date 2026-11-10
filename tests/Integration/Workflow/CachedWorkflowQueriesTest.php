@@ -49,6 +49,7 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-000000002121';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000002122';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-000000002131';
+    private const string MOBILE_TEAM = '0197a3c0-0000-7000-8000-000000002132';
     private const string LENA = '0197a3c0-0000-7000-8000-000000002141';
     private const string SARA = '0197a3c0-0000-7000-8000-000000002142';
     private const string DESIGN_CHECK = '0197a3c0-0000-7000-8000-000000002151';
@@ -63,6 +64,10 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
             $this->connection()->executeStatement(
                 'INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?)',
                 [self::ACME_FOODS, self::SHOP_TEAM, 'SHOP', self::LENA, '2027-03-01 09:00:00+00'],
+            );
+            $this->connection()->executeStatement(
+                'INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?)',
+                [self::ACME_FOODS, self::MOBILE_TEAM, 'MOBILE', self::LENA, '2027-03-01 09:00:00+00'],
             );
             $this->insertStep(self::ACME_FOODS, self::DESIGN_CHECK, null, 'Design check');
             $this->insertRuleSet(self::ACME_FOODS, null, [true, false, true]);
@@ -263,6 +268,24 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
     }
 
     #[Test]
+    public function theRelayedEventOfACompanyStepInvalidatesTheEntriesOfEveryTeam(): void
+    {
+        $this->connection()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->addStep()(new OrganizationId(self::ACME_FOODS), null, 'Pairing', 'check'));
+        self::assertSame(['Design check', 'Pairing'], $this->stepNames());
+        self::assertSame(['Design check', 'Pairing'], $this->stepNames(self::ACME_FOODS, self::MOBILE_TEAM));
+        $this->writeBehindTheCache(fn () => $this->insertStep(self::ACME_FOODS, self::LEGAL_CHECK, null, 'Legal check'));
+        self::assertSame(['Design check', 'Pairing'], $this->stepNames());
+        self::assertSame(['Design check', 'Pairing'], $this->stepNames(self::ACME_FOODS, self::MOBILE_TEAM));
+
+        self::runTheWorkerUntilIdle('outbox');
+        self::runTheWorkerUntilIdle('async_notify');
+
+        self::assertSame(['Design check', 'Legal check', 'Pairing'], $this->stepNames());
+        self::assertSame(['Design check', 'Legal check', 'Pairing'], $this->stepNames(self::ACME_FOODS, self::MOBILE_TEAM));
+    }
+
+    #[Test]
     public function theKernelResetBetweenRequestsForgetsTheTransactionsTenant(): void
     {
         $workflowCache = self::getContainer()->get(WorkflowCache::class);
@@ -282,9 +305,9 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
     /**
      * @return list<string>
      */
-    private function stepNames(string $organizationId = self::ACME_FOODS): array
+    private function stepNames(string $organizationId = self::ACME_FOODS, string $teamId = self::SHOP_TEAM): array
     {
-        return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->namesOf($this->stepQueries()->stepsFor(new TeamId(self::SHOP_TEAM))));
+        return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->namesOf($this->stepQueries()->stepsFor(new TeamId($teamId))));
     }
 
     /**
