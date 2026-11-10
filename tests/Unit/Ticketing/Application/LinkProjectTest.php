@@ -29,6 +29,7 @@ final class LinkProjectTest extends TestCase
     private const string CHECKOUT_TEAM = '0197a3c0-0000-7000-8000-0000000024c3';
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000024d1';
     private const string BETA_PROJECT = '0197a3c0-0000-7000-8000-0000000024d2';
+    private const string SECOND_PROJECT = '0197a3c0-0000-7000-8000-0000000024d3';
     private const string UNKNOWN_PROJECT = '0197a3c0-0000-7000-8000-0000000024d9';
 
     #[Test]
@@ -119,9 +120,45 @@ final class LinkProjectTest extends TestCase
         self::assertSame([], $projects->saveCalls);
     }
 
-    private static function linkProject(InMemoryProjects $projects): LinkProject
+    #[Test]
+    public function severalProjectsAreLockedInAscendingIdOrderWhateverOrderIsGivenAndTheTeamIsCheckedOnce(): void
     {
-        return new LinkProject($projects, new OrganizationProjects($projects), new OrganizationTeams(new FixedTeamQueries(self::acmeFoods(), [new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)])));
+        $shop = self::unlinkedShopProject();
+        $second = new Project(new ProjectId(self::SECOND_PROJECT), self::acmeFoods(), new TeamId(self::SHOP_TEAM), new ProjectKey('CART'), 'Cart');
+        $second->unlink();
+        $projects = new InMemoryProjects(false, $shop, $second);
+        $teamQueries = self::teamQueries();
+
+        $keysById = self::linkProject($projects, $teamQueries)->linkAll(self::acmeFoods(), new TeamId(self::MOBILE_TEAM), [self::SECOND_PROJECT, self::SHOP_PROJECT]);
+
+        self::assertSame([self::SHOP_PROJECT => 'SHOP', self::SECOND_PROJECT => 'CART'], $keysById);
+        self::assertSame([self::SHOP_PROJECT, self::SECOND_PROJECT], $projects->lockCalls);
+        self::assertSame([self::SHOP_PROJECT, self::SECOND_PROJECT], $projects->saveCalls);
+        self::assertSame(1, $teamQueries->teamsOfCalls);
+    }
+
+    #[Test]
+    public function severalProjectsGoToNoTeamOfAnotherOrganization(): void
+    {
+        $projects = new InMemoryProjects(false, self::unlinkedShopProject());
+
+        try {
+            self::linkProject($projects)->linkAll(self::acmeFoods(), new TeamId(self::CHECKOUT_TEAM), [self::SHOP_PROJECT]);
+            self::fail('A team of another organization got the projects.');
+        } catch (ProjectTeamNotFound) {
+            self::assertSame([], $projects->lockCalls);
+            self::assertSame([], $projects->saveCalls);
+        }
+    }
+
+    private static function teamQueries(): FixedTeamQueries
+    {
+        return new FixedTeamQueries(self::acmeFoods(), [new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)]);
+    }
+
+    private static function linkProject(InMemoryProjects $projects, ?FixedTeamQueries $teamQueries = null): LinkProject
+    {
+        return new LinkProject($projects, new OrganizationProjects($projects), new OrganizationTeams($teamQueries ?? self::teamQueries()));
     }
 
     private static function unlinkedShopProject(): Project

@@ -72,7 +72,7 @@ final class TeamController extends AbstractController
             'canUnlink' => $this->isGranted(ProjectPermission::UNLINK, $team->id()),
             'canLink' => $canLink,
             'canCreate' => $this->isGranted(ProjectPermission::CREATE, $team->id()),
-            'unlinkedProjects' => $canLink ? $this->projectQueries->unlinkedProjects() : [],
+            'unlinkedProjects' => $canLink ? $this->projectQueries->unlinkedProjectChoices(ProjectQueries::CHOICE_LIMIT) : [],
             'projectForms' => self::PROJECT_FORMS,
             'projects' => $projects,
             'ticketsUrls' => array_combine(

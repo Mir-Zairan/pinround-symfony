@@ -42,6 +42,38 @@ final readonly class LinkProject
     public function __invoke(OrganizationId $organizationId, TeamId $team, string $projectId): string
     {
         $this->organizationTeams->assertTeamOf($organizationId, $team);
+
+        return $this->link($organizationId, $team, $projectId);
+    }
+
+    /**
+     * Links every project to the team, checking the team once. The rows are locked in ascending id order whatever the
+     * order of $projectIds, so two concurrent calls cannot wait on each other. Where one project fails, the ones
+     * before it are already saved: the caller's transaction must be rolled back.
+     *
+     * @param list<string> $projectIds distinct, lower-case ids; the UI may not build the Domain's ProjectId
+     *
+     * @return array<string, string> the key of each linked project by its id, in ascending id order
+     *
+     * @throws ProjectTeamNotFound when the team is not a team of the organization; nothing is saved
+     * @throws ProjectNotFound     when the organization has no project with one of the ids, or an id is not a project id
+     * @throws ProjectStillLinked  when one of the projects is linked to a team
+     * @throws \LogicException     when no transaction is open
+     */
+    public function linkAll(OrganizationId $organizationId, TeamId $team, array $projectIds): array
+    {
+        $this->organizationTeams->assertTeamOf($organizationId, $team);
+        sort($projectIds);
+        $keysById = [];
+        foreach ($projectIds as $projectId) {
+            $keysById[$projectId] = $this->link($organizationId, $team, $projectId);
+        }
+
+        return $keysById;
+    }
+
+    private function link(OrganizationId $organizationId, TeamId $team, string $projectId): string
+    {
         $project = $this->organizationProjects->lockedProjectOf($organizationId, $projectId);
 
         try {

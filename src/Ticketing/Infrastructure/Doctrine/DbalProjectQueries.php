@@ -6,6 +6,7 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
+use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
 use App\Ticketing\Application\OpenTicketCounts;
@@ -33,12 +34,19 @@ final readonly class DbalProjectQueries implements ProjectQueries
         ));
     }
 
-    public function unlinkedProjects(): array
+    public function unlinkedProjectChoices(int $limit): array
     {
-        return $this->summaries($this->connection->fetchAllAssociative(
-            'SELECT id, key, name FROM tkt_project WHERE organization_id = ? AND team_id IS NULL ORDER BY key',
-            [$this->tenantContext->require()->toString()],
-        ));
+        if ($limit < 1) {
+            throw new \InvalidArgumentException('A picker shows at least one project.');
+        }
+
+        return array_map(
+            static fn (array $row): ProjectChoice => new ProjectChoice(self::text($row['id'], 'id'), self::text($row['key'], 'key'), self::text($row['name'], 'name')),
+            $this->connection->fetchAllAssociative(
+                'SELECT id, key, name FROM tkt_project WHERE organization_id = ? AND team_id IS NULL ORDER BY key LIMIT ?',
+                [$this->tenantContext->require()->toString(), $limit],
+            ),
+        );
     }
 
     /**

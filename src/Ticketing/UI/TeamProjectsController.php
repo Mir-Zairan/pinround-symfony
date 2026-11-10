@@ -135,13 +135,7 @@ final class TeamProjectsController extends AbstractController
                 if ([] === $projectIds) {
                     return self::NO_PROJECT_CHOSEN;
                 }
-                // Rows are locked in one order whatever the form sent, so two concurrent links cannot wait on each other.
-                $lockOrder = $projectIds;
-                sort($lockOrder);
-                $keysById = [];
-                foreach ($lockOrder as $projectId) {
-                    $keysById[$projectId] = ($this->linkProject)($organizationId, $team->id(), $projectId);
-                }
+                $keysById = $this->linkProject->linkAll($organizationId, $team->id(), $projectIds);
 
                 return \sprintf(self::ADDED, implode(', ', array_map(static fn (string $projectId): string => $keysById[$projectId], $projectIds)));
             });

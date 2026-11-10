@@ -14,17 +14,21 @@ use App\SharedKernel\Domain\UserId;
 /**
  * The teams of one organization; any other organization has none.
  */
-final readonly class FixedTeamQueries implements TeamQueries
+final class FixedTeamQueries implements TeamQueries
 {
+    public int $teamsOfCalls = 0;
+
     /**
      * @param list<TeamId> $teamIds
      */
-    public function __construct(private OrganizationId $organizationId, private array $teamIds)
+    public function __construct(private readonly OrganizationId $organizationId, private readonly array $teamIds)
     {
     }
 
     public function teamsOf(OrganizationId $organizationId): array
     {
+        ++$this->teamsOfCalls;
+
         return $organizationId->equals($this->organizationId) ? $this->teamIds : [];
     }
 

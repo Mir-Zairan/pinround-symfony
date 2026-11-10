@@ -12,6 +12,8 @@ use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
 use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Ticketing\Api\ProjectChoice;
+use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
 use App\Ticketing\Infrastructure\Doctrine\DbalProjectQueries;
 use Doctrine\DBAL\Connection;
@@ -95,15 +97,36 @@ final class DbalProjectQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function unlinkedProjectsGivesOnlyTheProjectsWithNoTeamByKey(): void
+    public function unlinkedProjectChoicesGiveOnlyTheProjectsWithNoTeamByKey(): void
     {
         self::assertSame(
             [
-                [self::DATA, 'DATA', 'Data warehouse', 3],
-                [self::OPS, 'OPS', 'Archive', 1],
+                [self::DATA, 'DATA', 'Data warehouse'],
+                [self::OPS, 'OPS', 'Archive'],
             ],
-            $this->listed(self::ACME_FOODS, static fn (DbalProjectQueries $queries): array => $queries->unlinkedProjects()),
+            $this->chosen(self::ACME_FOODS, 10),
         );
+    }
+
+    #[Test]
+    public function unlinkedProjectChoicesStopAtTheLimit(): void
+    {
+        self::assertSame([[self::DATA, 'DATA', 'Data warehouse']], $this->chosen(self::ACME_FOODS, 1));
+    }
+
+    #[Test]
+    public function unlinkedProjectChoicesRefuseALimitBelowOneBeforeAnyQuery(): void
+    {
+        $recordedSql = new RecordedSql();
+
+        try {
+            $this->onRecordedConnection(self::ACME_FOODS, $recordedSql, function (Connection $connection): void {
+                new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), $this->tenantContext())->unlinkedProjectChoices(0);
+            });
+            self::fail('A limit of 0 was accepted.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame([], $recordedSql->statements);
+        }
     }
 
     #[Test]
@@ -125,7 +148,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
             $this->connection()->executeStatement('UPDATE tkt_project SET team_id = ? WHERE id = ?', [self::SHOP_TEAM, self::BETA_CAKE]);
         });
 
-        self::assertSame([], $this->listed(self::BETA_BAKERY, static fn (DbalProjectQueries $queries): array => $queries->unlinkedProjects()));
+        self::assertSame([], $this->chosen(self::BETA_BAKERY, 10));
     }
 
     #[Test]
@@ -136,13 +159,13 @@ final class DbalProjectQueriesTest extends KernelTestCase
             $this->listed(self::BETA_BAKERY, static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM))),
         );
         self::assertSame(
-            [[self::BETA_CAKE, 'CAKE', 'Cake orders', 6]],
-            $this->listed(self::BETA_BAKERY, static fn (DbalProjectQueries $queries): array => $queries->unlinkedProjects()),
+            [[self::BETA_CAKE, 'CAKE', 'Cake orders']],
+            $this->chosen(self::BETA_BAKERY, 10),
         );
     }
 
     #[Test]
-    public function eachListCostsOneQueryAndOneBatchCountOfAllItsProjects(): void
+    public function projectsOfCostsOneQueryAndOneBatchCountAndTheChoicesOneQueryAndNoCount(): void
     {
         $openTicketCounts = new RecordedOpenTicketCounts(self::OPEN_TICKETS);
         $recordedSql = new RecordedSql();
@@ -151,15 +174,15 @@ final class DbalProjectQueriesTest extends KernelTestCase
             $queries = new DbalProjectQueries($connection, $openTicketCounts, $this->tenantContext());
             $projectsOf = $queries->projectsOf(new TeamId(self::SHOP_TEAM));
             $afterProjectsOf = [\count($projectsOf), \count($recordedSql->statements), $openTicketCounts->calls];
-            $unlinkedProjects = $queries->unlinkedProjects();
+            $unlinkedChoices = $queries->unlinkedProjectChoices(10);
 
-            return [$afterProjectsOf, [\count($unlinkedProjects), \count($recordedSql->statements), $openTicketCounts->calls]];
+            return [$afterProjectsOf, [\count($unlinkedChoices), \count($recordedSql->statements), $openTicketCounts->calls]];
         });
 
         self::assertSame(
             [
                 [3, 1, [[self::APP, self::CART, self::SHOP]]],
-                [2, 2, [[self::APP, self::CART, self::SHOP], [self::DATA, self::OPS]]],
+                [2, 2, [[self::APP, self::CART, self::SHOP]]],
             ],
             $countsAfterEachList,
         );
@@ -178,7 +201,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
         $this->onRecordedConnection(self::ACME_FOODS, $recordedSql, function (Connection $connection): void {
             $queries = new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), $this->tenantContext());
             $queries->projectsOf(new TeamId(self::SHOP_TEAM));
-            $queries->unlinkedProjects();
+            $queries->unlinkedProjectChoices(ProjectQueries::CHOICE_LIMIT);
         });
         [$projectsOfSql, $unlinkedProjectsSql] = $recordedSql->statements;
 
@@ -197,7 +220,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
             // At this size a sequential scan still costs less than any index.
             $migrator->executeStatement('SET LOCAL enable_seqscan = off');
             $projectsOfPlan = $this->planOf($migrator, $projectsOfSql, [self::ACME_FOODS, self::SHOP_TEAM]);
-            $unlinkedProjectsPlan = $this->planOf($migrator, $unlinkedProjectsSql, [self::ACME_FOODS]);
+            $unlinkedProjectsPlan = $this->planOf($migrator, $unlinkedProjectsSql, [self::ACME_FOODS, (string) ProjectQueries::CHOICE_LIMIT]);
         } finally {
             $migrator->rollBack();
             $this->tenantContext()->clear();
@@ -236,7 +259,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
             $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
             $queries = new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), $this->tenantContext());
 
-            return [$queries->projectsOf(new TeamId(self::SHOP_TEAM)), $queries->unlinkedProjects()];
+            return [$queries->projectsOf(new TeamId(self::SHOP_TEAM)), $queries->unlinkedProjectChoices(10)];
         });
 
         self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
@@ -249,7 +272,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
         $refusals = [];
         foreach ([
             static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM)),
-            static fn (DbalProjectQueries $queries): array => $queries->unlinkedProjects(),
+            static fn (DbalProjectQueries $queries): array => $queries->unlinkedProjectChoices(10),
         ] as $list) {
             $recordedSql = new RecordedSql();
             $connection = new CloseOnFailedBeginConnection($this->connection()->getParams(), $recordedSql->wrap(new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver())));
@@ -319,6 +342,17 @@ final class DbalProjectQueriesTest extends KernelTestCase
         return $this->transactions()->rolledBackAs($organizationId, fn (): array => array_map(
             static fn (ProjectSummary $project): array => [$project->id(), $project->key(), $project->name(), $project->openTicketCount()],
             $list($this->queries(new RecordedOpenTicketCounts(self::OPEN_TICKETS))),
+        ));
+    }
+
+    /**
+     * @return list<array{string, string, string}>
+     */
+    private function chosen(string $organizationId, int $limit): array
+    {
+        return $this->transactions()->rolledBackAs($organizationId, fn (): array => array_map(
+            static fn (ProjectChoice $project): array => [$project->id(), $project->key(), $project->name()],
+            $this->queries(new RecordedOpenTicketCounts(self::OPEN_TICKETS))->unlinkedProjectChoices($limit),
         ));
     }
 

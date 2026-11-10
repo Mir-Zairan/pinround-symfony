@@ -173,6 +173,30 @@ final class TeamProjectsTest extends WebTestCase
     }
 
     #[Test]
+    public function projectsPostedInDescendingIdOrderAreLockedInAscendingIdOrderAndToastedInTheOrderChosen(): void
+    {
+        $this->client->disableReboot();
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $keysById = [
+            $this->addProject(null, 'APP', 'Mobile app') => 'APP',
+            $this->addProject(null, 'CART', 'Checkout') => 'CART',
+            $this->addProject(null, 'STOCK', 'Stock') => 'STOCK',
+        ];
+        $ids = array_keys($keysById);
+        sort($ids);
+        $descendingIds = array_reverse($ids);
+        /** @var \ArrayObject<int, string> $lockedIds */
+        $lockedIds = new \ArrayObject();
+        $entityManager = self::getContainer()->get('doctrine.orm.default_entity_manager');
+        self::getContainer()->set(DoctrineProjects::class, $this->projectsThatRecordLocks(new DoctrineProjects($entityManager), $lockedIds));
+
+        $this->client->request('POST', self::LINK, $this->linkForm(...$descendingIds));
+
+        self::assertSame($ids, $lockedIds->getArrayCopy());
+        self::assertSame('Added '.implode(', ', array_map(static fn (string $id): string => $keysById[$id], $descendingIds)), $this->toastOfTheTeamPage());
+    }
+
+    #[Test]
     #[DataProvider('peopleWhoMayLinkAndCreate')]
     public function theLeadOrAnAdminCreatesAProjectOfTheTeam(string $person): void
     {
@@ -479,6 +503,55 @@ final class TeamProjectsTest extends WebTestCase
                 )));
 
                 return $found;
+            }
+
+            public function add(Project $project): void
+            {
+                $this->projects->add($project);
+            }
+
+            public function save(Project $project): void
+            {
+                $this->projects->save($project);
+            }
+        };
+    }
+
+    /**
+     * Finds what the real repository finds and writes down the id of every row lock asked for.
+     *
+     * @param \ArrayObject<int, string> $lockedIds
+     */
+    private function projectsThatRecordLocks(Projects $projects, \ArrayObject $lockedIds): Projects
+    {
+        return new readonly class($projects, $lockedIds) implements Projects {
+            /**
+             * @param \ArrayObject<int, string> $lockedIds
+             */
+            public function __construct(private Projects $projects, private \ArrayObject $lockedIds)
+            {
+            }
+
+            public function nextIdentity(): ProjectId
+            {
+                return $this->projects->nextIdentity();
+            }
+
+            public function byId(ProjectId $id): ?Project
+            {
+                return $this->projects->byId($id);
+            }
+
+            public function lockById(ProjectId $id): ?Project
+            {
+                $this->lockedIds[] = $id->toString();
+
+                return $this->projects->lockById($id);
+            }
+
+            public function byKey(ProjectKey $key): ?Project
+            {
+                return $this->projects->byKey($key);
             }
 
             public function add(Project $project): void
