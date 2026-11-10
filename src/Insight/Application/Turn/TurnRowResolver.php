@@ -43,6 +43,7 @@ final readonly class TurnRowResolver
             $turn->kind,
             $this->needsYouScore->baseScore($turn->kind, $ticket->priority, $this->placementOf($facts), $facts->isRiskCheck),
             $ticket->isCheckNeeded ? $ticket->checkerId : null,
+            $turn->overrideNote,
         );
     }
 

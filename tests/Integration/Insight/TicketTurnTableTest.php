@@ -20,6 +20,7 @@ final class TicketTurnTableTest extends KernelTestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000016a1';
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000016d1';
+    private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000016c1';
     private const string TICKET = '0197a3c0-0000-7000-8000-0000000016e1';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000016f1';
     private const string CHECK_VIOLATION = '23514';
@@ -66,6 +67,38 @@ final class TicketTurnTableTest extends KernelTestCase
             ],
             $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'ins_ticket_turn'"),
         );
+    }
+
+    /**
+     * The first part of Home's "needs you" query (data-model.md, "Query patterns"), as pinround_app with the tenant set
+     * and the visibility predicate of a member who is neither admin nor triager.
+     */
+    #[Test]
+    public function homesTurnQueryReadsTheTurnUserIndex(): void
+    {
+        $connection = $this->connection();
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $connection->beginTransaction();
+        try {
+            // The test table holds a handful of rows, for which a sequential scan is cheaper than any index.
+            $connection->executeStatement('SET LOCAL enable_seqscan = off');
+            $plan = implode("\n", array_map(static fn (mixed $line): string => \is_string($line) ? $line : '', $connection->fetchFirstColumn(\sprintf(
+                "EXPLAIN SELECT ticket_id, kind, base_score, waiting_since FROM ins_ticket_turn tt
+                 WHERE organization_id = '%1\$s' AND turn_user_id = '%2\$s'
+                   AND (tt.visibility = 'all' OR tt.team_id = ANY(ARRAY['%3\$s']::uuid[])
+                        OR '%2\$s' IN (tt.reporter_id, tt.assignee_id, tt.pending_assignee_id, tt.reviewer_id, tt.tester_id, tt.waiting_on_user_id))
+                 ORDER BY base_score DESC LIMIT 100",
+                self::ACME_FOODS,
+                self::LENA,
+                self::SHOP_TEAM,
+            ))));
+        } finally {
+            $connection->rollBack();
+            $tenantContext->clear();
+        }
+
+        self::assertStringContainsString('Index Scan using ins_ticket_turn_turn_user_id_base_score_idx on ins_ticket_turn tt', $plan);
     }
 
     #[Test]

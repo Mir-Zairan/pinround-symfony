@@ -42,7 +42,7 @@ final readonly class DbalTurnProjector implements TurnProjector
     ) {
     }
 
-    public function refresh(TicketId $ticketId): void
+    public function refresh(TicketId $ticketId): ?string
     {
         // TenantMiddleware sets the tenant when a transaction begins; outside one the policy would hide every row.
         if (!$this->connection->isTransactionActive()) {
@@ -59,10 +59,12 @@ final readonly class DbalTurnProjector implements TurnProjector
                 [$organizationId, $ticketId->toString()],
             );
 
-            return;
+            return null;
         }
 
         $this->connection->executeStatement(self::UPSERT, $this->valuesOf($row, $organizationId));
+
+        return $row->overrideNote;
     }
 
     /**

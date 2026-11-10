@@ -39,7 +39,7 @@ FR-CNV-01, FR-CNV-02, FR-CNV-03, FR-CNV-04, FR-CNV-05, FR-CNV-06, FR-CNV-07, FR-
 
 ## Design notes
 - **Tables:** `cnv_message` (kind comment/question, `to_user_id`, `resolved_at`), `cnv_reply` (`is_answer`), `ntf_ping`, `ntf_notification` (monthly partitions, 90 days), `ntf_mute`, `ntf_delivery`. All with RLS.
-- **Question = pause, not a move.** The ticket keeps its step. Conversation calls `Insight\Api\TurnProjector` in the same transaction so the turn becomes the asked person; answering reprojects back ([questions: pause and resume](../02-architecture/workflow-engine.md#questions-pause-and-resume)).
+- **Question = pause, not a move.** The ticket keeps its step. Conversation calls `Insight\Api\TurnProjector::refresh(TicketId)` in the same transaction so the turn becomes the asked person; answering refreshes it back ([questions: pause and resume](../02-architecture/workflow-engine.md#questions-pause-and-resume)).
 - **Events:** `CommentPosted`, `QuestionAsked`, `QuestionAnswered`, `ReplyPosted`, `CommentResolved`, `PingSent`, `PingCleared`.
 - **Rate limit key:** `ping:{org}:{from}:{to}:{ticket}`, fixed window of N hours from `org_settings.ping_limit_hours`. If Valkey is down, pinging is refused with a plain message (fail closed).
 - **Mercure:** user topic `…/u/{userId}` carries Turbo Streams with content for that user only; ticket topic `…/t/{ticketId}` carries only "refresh" signals, so a user who lost access never gets content ([Mercure topics](../02-architecture/realtime-and-notifications.md#mercure-topics)). Publishing happens in outbox handlers, never in the web request.

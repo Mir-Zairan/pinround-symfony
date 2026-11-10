@@ -48,6 +48,17 @@ final class TurnRowResolverTest extends TestCase
     }
 
     #[Test]
+    public function theRowCarriesTheTurnsOverrideNoteAndNoneWhenTheTurnHasNone(): void
+    {
+        $note = 'Lena reviews their own code: no other developer in the team';
+        $withNote = $this->resolver(new Turn($this->id(self::LENA), null, NeedsYouKind::Review, $note))->rowFor($this->facts($this->ticket()));
+        $withoutNote = $this->resolver(new Turn($this->id(self::LENA), null, NeedsYouKind::Review))->rowFor($this->facts($this->ticket()));
+
+        self::assertNotNull($withoutNote);
+        self::assertSame([$note, null], [$withNote?->overrideNote, $withoutNote->overrideNote]);
+    }
+
+    #[Test]
     public function aDoneTicketGetsNoRowEvenWithAQuestionOpenAndTheRulesAreNotAsked(): void
     {
         $rules = new FixedTurnRules(new Turn($this->id(self::MIA), null, NeedsYouKind::Answer));

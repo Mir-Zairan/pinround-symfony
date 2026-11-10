@@ -14,10 +14,12 @@ use App\Workflow\Api\NeedsYouKind;
 final readonly class TicketTurnRow
 {
     /**
-     * @param UserId|null $turnUserId  the person whose turn it is; null when a label holds the turn
-     * @param string|null $turnLabel   who the ticket waits on outside the team, for example "Customer"; set only
-     *                                 when $turnUserId is null
-     * @param UserId|null $checkUserId the person who takes the quick look, while the ticket needs one
+     * @param UserId|null $turnUserId   the person whose turn it is; null when a label holds the turn
+     * @param string|null $turnLabel    who the ticket waits on outside the team, for example "Customer"; set only
+     *                                  when $turnUserId is null
+     * @param UserId|null $checkUserId  the person who takes the quick look, while the ticket needs one
+     * @param string|null $overrideNote the turn's note when a fallback chose the person, for the ticket's activity;
+     *                                  not stored in the table
      *
      * @throws \InvalidArgumentException when not exactly one of $turnUserId and $turnLabel is set, as the table's
      *                                   ins_ticket_turn_turn_check demands
@@ -29,6 +31,7 @@ final readonly class TicketTurnRow
         public NeedsYouKind $kind,
         public int $baseScore,
         public ?UserId $checkUserId,
+        public ?string $overrideNote = null,
     ) {
         if ((null === $turnUserId) === (null === $turnLabel)) {
             throw new \InvalidArgumentException('A turn row names a person or a label, never both and never neither.');

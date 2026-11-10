@@ -17,7 +17,12 @@ interface TurnProjector
      * nobody's turn or no longer exists. Reads no other ticket. waiting_since is kept while the turn's person or label
      * stays the same and starts now when either changes.
      *
+     * @return string|null the turn's override note when a fallback chose the person, for the caller to write to the
+     *                     ticket's activity, for example "Lena reviews their own code: no other developer in the
+     *                     team"; returned on every refresh while that fallback holds, so the caller writes it only
+     *                     when its change moved the turn. Null when no fallback was needed or the ticket has no row.
+     *
      * @throws \LogicException when no transaction is open: the row must share the fate of the change
      */
-    public function refresh(TicketId $ticketId): void;
+    public function refresh(TicketId $ticketId): ?string;
 }
