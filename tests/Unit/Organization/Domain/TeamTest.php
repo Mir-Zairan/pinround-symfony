@@ -13,6 +13,7 @@ use App\Organization\Domain\TeamHasOneLead;
 use App\Organization\Domain\TeamMemberView;
 use App\Organization\Domain\TeamRole;
 use App\Organization\Domain\TeamRoleChange;
+use App\Organization\Domain\TeamSlug;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -44,10 +45,17 @@ final class TeamTest extends TestCase
     #[Test]
     public function aBlankNameIsRefusedAndANameIsTrimmed(): void
     {
-        self::assertSame('Shop', new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), "  Shop\n", new UserId(self::LENA), Job::Developer, self::createdAt())->name());
+        self::assertSame('Shop', new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), "  Shop\n", new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, self::createdAt())->name());
 
         $this->expectException(BlankTeamName::class);
-        new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), " \t", new UserId(self::LENA), Job::Developer, self::createdAt());
+        new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), " \t", new TeamSlug('team'), new UserId(self::LENA), Job::Developer, self::createdAt());
+    }
+
+    /** The slug is given, not made from the name here: only CreateTeam knows which slugs are taken. */
+    #[Test]
+    public function theTeamKeepsTheSlugItWasGiven(): void
+    {
+        self::assertSame('shop-2', new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop-2'), new UserId(self::LENA), Job::Developer, self::createdAt())->slug()->toString());
     }
 
     #[Test]
@@ -211,7 +219,7 @@ final class TeamTest extends TestCase
 
     private function shopTeamLedByLena(): Team
     {
-        return new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, self::createdAt());
+        return new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, self::createdAt());
     }
 
     /**

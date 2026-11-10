@@ -62,12 +62,12 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
         $this->tearDownRows();
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $this->connection()->executeStatement(
-                'INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?)',
-                [self::ACME_FOODS, self::SHOP_TEAM, 'SHOP', self::LENA, '2027-03-01 09:00:00+00'],
+                'INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [self::ACME_FOODS, self::SHOP_TEAM, 'SHOP', 'shop', self::LENA, '2027-03-01 09:00:00+00'],
             );
             $this->connection()->executeStatement(
-                'INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?)',
-                [self::ACME_FOODS, self::MOBILE_TEAM, 'MOBILE', self::LENA, '2027-03-01 09:00:00+00'],
+                'INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [self::ACME_FOODS, self::MOBILE_TEAM, 'MOBILE', 'mobile', self::LENA, '2027-03-01 09:00:00+00'],
             );
             $this->insertStep(self::ACME_FOODS, self::DESIGN_CHECK, null, 'Design check');
             $this->insertRuleSet(self::ACME_FOODS, null, [true, false, true]);

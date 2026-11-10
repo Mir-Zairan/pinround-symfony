@@ -19,6 +19,7 @@ use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamHasOneLead;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Domain\UnknownTeam;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -240,8 +241,8 @@ final class InviteMemberTest extends TestCase
     private function inviteMember(?FixedUserQueries $userQueries = null): InviteMember
     {
         $teams = new InMemoryTeams(
-            new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, self::now()),
-            new Team(new TeamId(self::CHECKOUT_TEAM), new OrganizationId(self::BETA_BAKERY), 'Checkout', new UserId(self::BEN), Job::Developer, self::now()),
+            new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, self::now()),
+            new Team(new TeamId(self::CHECKOUT_TEAM), new OrganizationId(self::BETA_BAKERY), 'Checkout', new TeamSlug('checkout'), new UserId(self::BEN), Job::Developer, self::now()),
         );
 
         return new InviteMember($this->invitations, $this->memberships, $teams, $userQueries ?? new FixedUserQueries(), new RecordingInvitedPersonRegistration(), $this->events);

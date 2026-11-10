@@ -223,8 +223,8 @@ final class AddStepTest extends KernelTestCase
             new SetUpOrganizationWorkflow(new DoctrineSteps($this->entityManager()), new DbalRuleSets($this->connection()))->setUp(new OrganizationId(self::ACME_FOODS));
             foreach ([self::SHOP_TEAM => 'SHOP', self::MOBILE_TEAM => 'Mobile'] as $teamId => $teamName) {
                 $this->connection()->executeStatement(
-                    'INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?)',
-                    [self::ACME_FOODS, $teamId, $teamName, self::LENA, '2027-03-01 09:00:00+00'],
+                    'INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                    [self::ACME_FOODS, $teamId, $teamName, strtolower($teamName), self::LENA, '2027-03-01 09:00:00+00'],
                 );
             }
 

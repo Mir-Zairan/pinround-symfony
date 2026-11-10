@@ -8,6 +8,7 @@ use App\Organization\Domain\Job;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamMemberView;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -65,7 +66,7 @@ final class DoctrineTeamsTest extends KernelTestCase
             ];
         });
 
-        self::assertSame(['Shop', self::ACME_FOODS, self::LENA], [$team->name(), $team->organizationId()->toString(), $team->leadUserId()->toString()]);
+        self::assertSame(['Shop', 'shop', self::ACME_FOODS, self::LENA], [$team->name(), $team->slug()->toString(), $team->organizationId()->toString(), $team->leadUserId()->toString()]);
         self::assertSame(['organization_id' => self::ACME_FOODS, 'lead_user_id' => self::LENA], $storedRow);
         self::assertEquals(new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), $team->createdAt());
         self::assertSame(
@@ -201,7 +202,7 @@ final class DoctrineTeamsTest extends KernelTestCase
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): void {
             $this->teams()->add($this->shopTeam());
-            $this->teams()->add(new Team(new TeamId(self::OTHER_TEAM), new OrganizationId(self::ACME_FOODS), 'SHOP', new UserId(self::MIA), Job::Tester, new \DateTimeImmutable('2027-03-15 10:00:00 UTC')));
+            $this->teams()->add(new Team(new TeamId(self::OTHER_TEAM), new OrganizationId(self::ACME_FOODS), 'SHOP', new TeamSlug('shop-2'), new UserId(self::MIA), Job::Tester, new \DateTimeImmutable('2027-03-15 10:00:00 UTC')));
         });
     }
 
@@ -213,7 +214,7 @@ final class DoctrineTeamsTest extends KernelTestCase
 
     private function shopTeam(): Team
     {
-        $team = new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+        $team = new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
         $team->addMember(new UserId(self::OMAR), TeamRole::Member, Job::Developer, new \DateTimeImmutable('2027-03-15 10:05:00 UTC'));
         $team->addMember(new UserId(self::MIA), TeamRole::Member, Job::Tester, new \DateTimeImmutable('2027-03-15 10:06:00 UTC'));
 

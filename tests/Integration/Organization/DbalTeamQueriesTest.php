@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Organization;
 
 use App\Organization\Api\MemberJob;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -249,8 +250,8 @@ final class DbalTeamQueriesTest extends KernelTestCase
     private function addTeam(string $organizationId, string $teamId, string $name): void
     {
         $this->connection()->executeStatement(
-            "INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, '2027-03-15 10:00:00+00')",
-            [$organizationId, $teamId, $name, self::LENA],
+            "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
+            [$organizationId, $teamId, $name, TeamSlug::fromName($name)->toString(), self::LENA],
         );
     }
 

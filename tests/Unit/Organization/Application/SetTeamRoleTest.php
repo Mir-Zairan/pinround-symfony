@@ -14,6 +14,7 @@ use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamHasOneLead;
 use App\Organization\Domain\TeamMemberView;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Domain\UnknownTeam;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -154,7 +155,7 @@ final class SetTeamRoleTest extends TestCase
     /** Lena leads, Omar is a member; Mia is in the organization but not in the team. */
     private static function shopTeam(): Team
     {
-        $team = new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, new \DateTimeImmutable('2027-03-01 09:00:00 UTC'));
+        $team = new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, new \DateTimeImmutable('2027-03-01 09:00:00 UTC'));
         $team->addMember(new UserId(self::OMAR), TeamRole::Member, Job::Developer, new \DateTimeImmutable('2027-03-01 09:05:00 UTC'));
 
         return $team;

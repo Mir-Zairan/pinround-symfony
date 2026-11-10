@@ -19,6 +19,7 @@ final class Team implements TenantOwned
     private readonly string $organizationId;
     private readonly string $id;
     private readonly string $name;
+    private readonly string $slug;
     private string $leadUserId;
     // Not readonly: Teams::lockById refreshes a loaded team, and Doctrine then sets every field again, which a
     // readonly property refuses for a new but equal date object.
@@ -32,9 +33,11 @@ final class Team implements TenantOwned
     private array|(\ArrayAccess&\Traversable) $members;
 
     /**
+     * @param TeamSlug $slug one no other team of the organization has; it never changes, even when the name does
+     *
      * @throws BlankTeamName when nothing is left of the name after trimming
      */
-    public function __construct(TeamId $id, OrganizationId $organizationId, string $name, UserId $lead, Job $leadJob, \DateTimeImmutable $createdAt)
+    public function __construct(TeamId $id, OrganizationId $organizationId, string $name, TeamSlug $slug, UserId $lead, Job $leadJob, \DateTimeImmutable $createdAt)
     {
         $trimmedName = trim($name);
         if ('' === $trimmedName) {
@@ -44,6 +47,7 @@ final class Team implements TenantOwned
         $this->id = $id->toString();
         $this->organizationId = $organizationId->toString();
         $this->name = $trimmedName;
+        $this->slug = $slug->toString();
         $this->leadUserId = $lead->toString();
         $this->createdAt = $createdAt;
         $this->members = [new TeamMember($this, $lead, TeamRole::Lead, $leadJob, $createdAt)];
@@ -62,6 +66,11 @@ final class Team implements TenantOwned
     public function name(): string
     {
         return $this->name;
+    }
+
+    public function slug(): TeamSlug
+    {
+        return new TeamSlug($this->slug);
     }
 
     public function leadUserId(): UserId

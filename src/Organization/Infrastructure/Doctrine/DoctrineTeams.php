@@ -6,6 +6,8 @@ namespace App\Organization\Infrastructure\Doctrine;
 
 use App\Organization\Domain\Team;
 use App\Organization\Domain\Teams;
+use App\Organization\Domain\TeamSlug;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
@@ -44,6 +46,23 @@ final readonly class DoctrineTeams implements Teams
             ->getOneOrNullResult();
 
         return $team instanceof Team ? $team : null;
+    }
+
+    /**
+     * A slug has no LIKE wildcard (TeamSlug allows only a-z, 0-9 and "-"), so $base goes into the pattern as it is.
+     */
+    public function slugsTakenFrom(OrganizationId $organizationId, TeamSlug $base): array
+    {
+        /** @var list<string> $slugs */
+        $slugs = $this->entityManager->createQuery(
+            'SELECT t.slug FROM '.Team::class.' t WHERE t.organizationId = :organization AND (t.slug = :base OR t.slug LIKE :suffixed)',
+        )
+            ->setParameter('organization', $organizationId->toString())
+            ->setParameter('base', $base->toString())
+            ->setParameter('suffixed', $base->toString().'-%')
+            ->getSingleColumnResult();
+
+        return array_map(static fn (string $slug): TeamSlug => new TeamSlug($slug), $slugs);
     }
 
     public function add(Team $team): void

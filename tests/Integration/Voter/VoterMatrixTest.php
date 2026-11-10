@@ -13,6 +13,7 @@ use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Security\SecurityUser;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Application\OpenInvitationLink;
+use App\Organization\Domain\TeamSlug;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -313,8 +314,8 @@ final class VoterMatrixTest extends KernelTestCase
     private static function addTeam(string $organizationId, string $teamId, string $name, string $lead): void
     {
         self::connection()->executeStatement(
-            "INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, '2027-03-15 10:00:00+00')",
-            [$organizationId, $teamId, $name, self::PEOPLE[$lead][0]],
+            "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
+            [$organizationId, $teamId, $name, TeamSlug::fromName($name)->toString(), self::PEOPLE[$lead][0]],
         );
     }
 

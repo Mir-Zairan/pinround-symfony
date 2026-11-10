@@ -15,6 +15,7 @@ use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
 use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
 use App\SharedKernel\Application\TenantContext;
@@ -53,7 +54,7 @@ final class ConcurrentRoleChangesTest extends KernelTestCase
             $memberships->add(new Membership(new OrganizationId(self::ACME_FOODS), new UserId(self::SARA), new OrgRoles(OrgRole::Admin), $joinedAt));
             $memberships->add(new Membership(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), new OrgRoles(), $joinedAt));
             $memberships->add(new Membership(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), new OrgRoles(), $joinedAt));
-            $team = new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, $joinedAt);
+            $team = new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, $joinedAt);
             $team->addMember(new UserId(self::OMAR), TeamRole::Member, Job::Developer, $joinedAt);
             $team->addMember(new UserId(self::MIA), TeamRole::Member, Job::Tester, $joinedAt);
             new DoctrineTeams($this->entityManager())->add($team);

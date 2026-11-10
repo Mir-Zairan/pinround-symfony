@@ -18,6 +18,7 @@ use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
@@ -57,7 +58,7 @@ final class AcceptInvitationTest extends KernelTestCase
         $this->rows()->removeAllOf(self::ACME_FOODS);
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             new DoctrineOrganizations($this->entityManager())->add(new Organization(new OrganizationId(self::ACME_FOODS), 'Acme Foods', 'accept-'.self::ACME_FOODS, self::sentAt()));
-            new DoctrineTeams($this->entityManager())->add(new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, self::sentAt()));
+            new DoctrineTeams($this->entityManager())->add(new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, self::sentAt()));
             $invitation = Invitation::issue(
                 new InvitationId(self::INVITATION),
                 new OrganizationId(self::ACME_FOODS),
