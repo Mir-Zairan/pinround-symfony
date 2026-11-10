@@ -279,11 +279,11 @@ final class DemoSeedCommandTest extends KernelTestCase
 
         $second = $this->runSeed();
 
-        self::assertStringContainsString('Projects: created 1, kept 0.', $first->getDisplay());
+        self::assertStringContainsString('Projects: created 3, kept 0.', $first->getDisplay());
         self::assertCount(1, $projectsAfterFirstRun);
         self::assertSame(['SHOP', 'Shop', 'Shop'], [$projectsAfterFirstRun[0]['key'], $projectsAfterFirstRun[0]['name'], $projectsAfterFirstRun[0]['team']]);
         self::assertSame(Command::SUCCESS, $second->getStatusCode());
-        self::assertStringContainsString('Projects: created 0, kept 1.', $second->getDisplay());
+        self::assertStringContainsString('Projects: created 0, kept 3.', $second->getDisplay());
         self::assertSame($projectsAfterFirstRun, $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
             'SELECT p.id, p.key, p.name, t.name AS team FROM tkt_project p JOIN org_team t ON t.organization_id = p.organization_id AND t.id = p.team_id',
         )));
