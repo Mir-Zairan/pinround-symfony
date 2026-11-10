@@ -36,4 +36,31 @@ final class OrgSettingsTest extends TestCase
             'retention' => '2y',
         ], $settings->data());
     }
+
+    #[Test]
+    public function changeStepPolicyChangesThatSettingOnly(): void
+    {
+        $settings = new OrgSettings(new OrganizationId(self::ACME_FOODS), new UserId(self::SARA), new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+        $expected = $settings->data();
+        $expected['step_policy'] = 'locked';
+
+        $settings->changeStepPolicy('locked');
+
+        self::assertSame($expected, $settings->data());
+    }
+
+    #[Test]
+    public function changeStepPolicyRefusesAnUnknownPolicy(): void
+    {
+        $settings = new OrgSettings(new OrganizationId(self::ACME_FOODS), new UserId(self::SARA), new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+
+        try {
+            $settings->changeStepPolicy('open');
+            self::fail('An unknown step policy was accepted.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('"open" is not a step policy.', $exception->getMessage());
+        }
+
+        self::assertSame('extend', $settings->data()['step_policy']);
+    }
 }

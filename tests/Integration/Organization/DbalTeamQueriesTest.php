@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Organization;
 
+use App\Organization\Api\MemberJob;
 use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -28,6 +30,8 @@ final class DbalTeamQueriesTest extends KernelTestCase
     private const string ACME_MOBILE = '0197a3c0-0000-7000-8000-0000000005d3';
     private const string ACME_ANALYTICS = '0197a3c0-0000-7000-8000-0000000005d4';
     private const string BETA_CHECKOUT = '0197a3c0-0000-7000-8000-0000000005d5';
+    private const string OMAR = '0197a3c0-0000-7000-8000-0000000005c2';
+    private const string MIA = '0197a3c0-0000-7000-8000-0000000005c3';
 
     protected function setUp(): void
     {
@@ -35,6 +39,8 @@ final class DbalTeamQueriesTest extends KernelTestCase
         $this->transactions()->committedAs(self::BETA_BAKERY, function (): void {
             $this->addMembership(self::BETA_BAKERY);
             $this->addTeam(self::BETA_BAKERY, self::BETA_CHECKOUT, 'Checkout');
+            // Mia works in both organizations, with another job in Beta Bakery.
+            $this->addTeamMember(self::BETA_BAKERY, self::BETA_CHECKOUT, self::MIA, 'developer');
         });
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $this->addMembership(self::ACME_FOODS);
@@ -42,6 +48,9 @@ final class DbalTeamQueriesTest extends KernelTestCase
             $this->addTeam(self::ACME_FOODS, self::ACME_PAYMENTS, 'Payments');
             $this->addTeam(self::ACME_FOODS, self::ACME_MOBILE, 'mobile');
             $this->addTeam(self::ACME_FOODS, self::ACME_ANALYTICS, 'Analytics');
+            $this->addTeamMember(self::ACME_FOODS, self::ACME_SHOP, self::MIA, 'tester');
+            $this->addTeamMember(self::ACME_FOODS, self::ACME_SHOP, self::OMAR, 'developer');
+            $this->addTeamMember(self::ACME_FOODS, self::ACME_MOBILE, self::OMAR, 'other');
         });
     }
 
@@ -162,6 +171,43 @@ final class DbalTeamQueriesTest extends KernelTestCase
         self::assertSame(1, $countOf(self::BETA_BAKERY, self::BETA_BAKERY));
         self::assertSame(0, $countOf(self::ACME_FOODS, self::BETA_BAKERY), 'another tenant sees nothing');
         self::assertSame(0, $this->queries()->countOf(new OrganizationId(self::ACME_FOODS)), 'no tenant sees nothing');
+    }
+
+    #[Test]
+    public function jobOfGivesThePersonsJobInThatTeam(): void
+    {
+        self::assertSame(MemberJob::Tester, $this->jobAs(self::ACME_FOODS, self::ACME_SHOP, self::MIA));
+        self::assertSame(MemberJob::Developer, $this->jobAs(self::ACME_FOODS, self::ACME_SHOP, self::OMAR));
+        self::assertSame(MemberJob::Other, $this->jobAs(self::ACME_FOODS, self::ACME_MOBILE, self::OMAR));
+    }
+
+    #[Test]
+    public function jobOfIsNullForAPersonNotInTheTeam(): void
+    {
+        self::assertNull($this->jobAs(self::ACME_FOODS, self::ACME_MOBILE, self::MIA));
+        self::assertNull($this->jobAs(self::ACME_FOODS, self::ACME_PAYMENTS, self::OMAR));
+    }
+
+    #[Test]
+    public function jobOfIsNullForATeamOfAnotherOrganizationOrNoTenant(): void
+    {
+        // Under Beta Bakery itself Mia has a job in Checkout, so the nulls below come from row-level security.
+        self::assertSame(MemberJob::Developer, $this->jobAs(self::BETA_BAKERY, self::BETA_CHECKOUT, self::MIA));
+        self::assertNull($this->jobAs(self::ACME_FOODS, self::BETA_CHECKOUT, self::MIA));
+        self::assertNull($this->queries()->jobOf(new TeamId(self::ACME_SHOP), new UserId(self::MIA)));
+    }
+
+    private function jobAs(string $tenantId, string $teamId, string $userId): ?MemberJob
+    {
+        return $this->transactions()->rolledBackAs($tenantId, fn (): ?MemberJob => $this->queries()->jobOf(new TeamId($teamId), new UserId($userId)));
+    }
+
+    private function addTeamMember(string $organizationId, string $teamId, string $userId, string $job): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, 'member', ?, '2027-03-15 10:00:00+00')",
+            [$organizationId, $teamId, $userId, $job],
+        );
     }
 
     /**

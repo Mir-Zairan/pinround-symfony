@@ -18,7 +18,7 @@ final class ComposerLintScriptTest extends TestCase
         self::assertSame(
             [
                 '@php bin/console lint:container',
-                '@php bin/console lint:yaml config',
+                '@php bin/console lint:yaml config --parse-tags',
                 '@php bin/console lint:twig src',
                 '@php bin/check-tenant-setting',
                 '@lint:docs',

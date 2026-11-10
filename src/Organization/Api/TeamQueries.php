@@ -6,10 +6,11 @@ namespace App\Organization\Api;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 
 /**
- * An organization's teams, for other modules. Both reads run under row-level security, so they need an open
- * transaction whose tenant is the organization; under any other tenant, or none, they find nothing.
+ * An organization's teams, for other modules. Every read runs under row-level security, so it needs an open
+ * transaction whose tenant is the organization; under any other tenant, or none, it finds nothing.
  */
 interface TeamQueries
 {
@@ -39,4 +40,11 @@ interface TeamQueries
      * One `count(*)`, for a page that needs only how many teams there are.
      */
     public function countOf(OrganizationId $organizationId): int;
+
+    /**
+     * One query; null when the user is not in that team, or the team is unknown or belongs to another organization.
+     *
+     * @throws \LogicException when the stored job is not one of MemberJob's values
+     */
+    public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob;
 }

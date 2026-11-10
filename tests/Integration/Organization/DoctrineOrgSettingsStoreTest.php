@@ -87,6 +87,32 @@ final class DoctrineOrgSettingsStoreTest extends KernelTestCase
         self::assertEquals(new OrgSettings(new OrganizationId(self::ACME_FOODS), new UserId(self::SARA), new \DateTimeImmutable('2027-03-15 10:00:00 UTC'))->data(), $settings->data());
     }
 
+    /**
+     * Settings not loaded through of() would otherwise be inserted as a second row instead of updating the stored one.
+     */
+    #[Test]
+    public function savingSettingsThatWereNotLoadedIsRefusedAndWritesNothing(): void
+    {
+        $transactions = new TenantTransactions($this->entityManager(), self::getContainer()->get(TenantContext::class));
+        $transactions->committedAs(self::ACME_FOODS, fn () => $this->store()->add(
+            new OrgSettings(new OrganizationId(self::ACME_FOODS), new UserId(self::SARA), new \DateTimeImmutable('2027-03-15 10:00:00 UTC')),
+        ));
+
+        [$refusal, $storedRows] = $transactions->rolledBackAs(self::ACME_FOODS, function (): array {
+            try {
+                $this->store()->save(new OrgSettings(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new \DateTimeImmutable('2027-04-01 08:00:00 UTC')));
+                $refusal = null;
+            } catch (\LogicException $exception) {
+                $refusal = $exception->getMessage();
+            }
+
+            return [$refusal, $this->entityManager()->getConnection()->fetchAllAssociative("SELECT data->>'triager_id' AS triager_id, version FROM org_settings")];
+        });
+
+        self::assertSame('Only settings found through of() or added before are saved.', $refusal);
+        self::assertSame([['triager_id' => self::SARA, 'version' => 1]], $storedRows);
+    }
+
     #[Test]
     public function anOrganizationWithoutSettingsHasNone(): void
     {

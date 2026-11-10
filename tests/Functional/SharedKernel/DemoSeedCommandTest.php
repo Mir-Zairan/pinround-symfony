@@ -5,13 +5,21 @@ declare(strict_types=1);
 namespace App\Tests\Functional\SharedKernel;
 
 use App\Identity\Domain\Email;
+use App\Organization\Api\DemoOrganizations;
 use App\Organization\Infrastructure\Demo\SeedDemoOrganizations;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantSwitchRefused;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Console\DemoSeedCommand;
 use App\SharedKernel\Infrastructure\Console\DemoSeedRefused;
 use App\Tests\Factory\Identity\UserFactory;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Ticketing\ProjectRows;
+use App\Tests\Integration\Workflow\WorkflowRows;
+use App\Ticketing\Infrastructure\Demo\SeedDemoProjects;
+use App\Workflow\Domain\CoreStep;
+use App\Workflow\Domain\RuleSet;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
@@ -184,6 +192,29 @@ final class DemoSeedCommandTest extends KernelTestCase
     }
 
     #[Test]
+    public function bothDemoOrganizationsGetTheCoreStepsAndTheDefaultRuleSet(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+
+        $this->runSeed();
+
+        $defaults = RuleSet::defaults();
+        foreach (['sara@acme-foods.example', 'ben@beta-bakery.example'] as $email) {
+            self::assertSame(
+                [
+                    array_map(static fn (CoreStep $coreStep): string => $coreStep->value, CoreStep::cases()),
+                    [['tester_moves_done' => $defaults->testerMovesDone, 'no_self_review' => $defaults->noSelfReview, 'review_before_test' => $defaults->reviewBeforeTest]],
+                ],
+                $this->underTenant($this->organizationIdOf($email), fn (): array => [
+                    $this->connection()->fetchFirstColumn("SELECT core_code FROM wf_step WHERE origin = 'core' AND team_id IS NULL ORDER BY position"),
+                    $this->connection()->fetchAllAssociative('SELECT tester_moves_done, no_self_review, review_before_test FROM wf_rule_set WHERE team_id IS NULL'),
+                ]),
+                $email,
+            );
+        }
+    }
+
+    #[Test]
     public function lenaAndOmarEachBelongToExactlyOneOrganization(): void
     {
         $this->startWithPassword(self::PASSWORD);
@@ -234,6 +265,121 @@ final class DemoSeedCommandTest extends KernelTestCase
 
         self::assertStringContainsString('Organizations: created 1, kept 1; Members: created 1, kept 5; Teams: created 0, kept 2; Team members: created 0, kept 4', $second->getDisplay());
         self::assertCount(1, $this->organizationIdsOf('ben@beta-bakery.example'));
+    }
+
+    #[Test]
+    public function itCreatesProjectShopOwnedByTheShopTeamOfAcmeFoodsOnce(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $first = $this->runSeed();
+        $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
+        $projectsAfterFirstRun = $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT p.id, p.key, p.name, t.name AS team FROM tkt_project p JOIN org_team t ON t.organization_id = p.organization_id AND t.id = p.team_id',
+        ));
+
+        $second = $this->runSeed();
+
+        self::assertStringContainsString('Projects: created 1, kept 0.', $first->getDisplay());
+        self::assertCount(1, $projectsAfterFirstRun);
+        self::assertSame(['SHOP', 'Shop', 'Shop'], [$projectsAfterFirstRun[0]['key'], $projectsAfterFirstRun[0]['name'], $projectsAfterFirstRun[0]['team']]);
+        self::assertSame(Command::SUCCESS, $second->getStatusCode());
+        self::assertStringContainsString('Projects: created 0, kept 1.', $second->getDisplay());
+        self::assertSame($projectsAfterFirstRun, $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT p.id, p.key, p.name, t.name AS team FROM tkt_project p JOIN org_team t ON t.organization_id = p.organization_id AND t.id = p.team_id',
+        )));
+        self::assertSame(
+            0,
+            $this->underTenant($this->organizationIdOf('ben@beta-bakery.example'), fn (): mixed => $this->connection()->fetchOne('SELECT count(*) FROM tkt_project')),
+        );
+    }
+
+    #[Test]
+    public function theProjectStepRefusesWhenTheShopTeamIsMissing(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $this->runSeed();
+        $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
+        self::getContainer()->get('doctrine')->resetManager();
+        $this->projectRows()->removeAllOf($acmeFoods);
+        $this->committedUnderTenant($acmeFoods, function (): void {
+            $this->connection()->executeStatement("UPDATE org_team SET name = 'Webshop' WHERE name = 'Shop'");
+        });
+        $step = self::getContainer()->get(SeedDemoProjects::class);
+
+        $this->expectException(DemoSeedRefused::class);
+        $this->expectExceptionMessageIsOrContains('acme-foods has no team Shop yet');
+
+        $step->seed();
+    }
+
+    #[Test]
+    public function theProjectStepRefusesWhenAcmeFoodsIsMissing(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $step = self::getContainer()->get(SeedDemoProjects::class);
+
+        $this->expectException(DemoSeedRefused::class);
+        $this->expectExceptionMessageIsOrContains('The demo organization acme-foods does not exist yet');
+
+        $step->seed();
+    }
+
+    #[Test]
+    public function demoOrganizationsFindsEachSeededOrganizationBySlugAndNothingElse(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $demoOrganizations = self::getContainer()->get(DemoOrganizations::class);
+        self::assertNull($demoOrganizations->idBySlug('acme-foods'));
+        $this->runSeed();
+
+        self::assertSame($this->organizationIdOf('sara@acme-foods.example'), $demoOrganizations->idBySlug('acme-foods')?->toString());
+        self::assertSame($this->organizationIdOf('ben@beta-bakery.example'), $demoOrganizations->idBySlug('beta-bakery')?->toString());
+        self::assertNull($demoOrganizations->idBySlug('gamma-grocers'));
+    }
+
+    #[Test]
+    public function demoOrganizationsPutsTheTenantBackAsItWas(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $this->runSeed();
+        $betaBakery = new OrganizationId($this->organizationIdOf('ben@beta-bakery.example'));
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set($betaBakery);
+
+        try {
+            $acmeFoods = self::getContainer()->get(DemoOrganizations::class)->idBySlug('acme-foods');
+            self::assertSame($betaBakery->toString(), $tenantContext->get()?->toString());
+        } finally {
+            $tenantContext->clear();
+        }
+        self::assertSame($this->organizationIdOf('sara@acme-foods.example'), $acmeFoods?->toString());
+    }
+
+    #[Test]
+    public function demoOrganizationsAndTheProjectStepRefuseInsideAnOpenTransaction(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $this->runSeed();
+        $connection = $this->connection();
+        $refusals = [];
+
+        $connection->beginTransaction();
+        try {
+            foreach ([
+                'idBySlug' => static fn (): mixed => self::getContainer()->get(DemoOrganizations::class)->idBySlug('acme-foods'),
+                'seed' => static fn (): mixed => self::getContainer()->get(SeedDemoProjects::class)->seed(),
+            ] as $call => $work) {
+                try {
+                    $work();
+                } catch (TenantSwitchRefused) {
+                    $refusals[] = $call;
+                }
+            }
+        } finally {
+            $connection->rollBack();
+        }
+
+        self::assertSame(['idBySlug', 'seed'], $refusals);
     }
 
     #[Test]
@@ -412,13 +558,16 @@ final class DemoSeedCommandTest extends KernelTestCase
 
     private function removeOrganizationOf(string $email): void
     {
-        $this->rows()->removeAllOf(...$this->organizationIdsOf($email));
+        $organizationIds = $this->organizationIdsOf($email);
+        $this->projectRows()->removeAllOf(...$organizationIds);
+        $this->workflowRows()->removeAllOf(...$organizationIds);
+        $this->rows()->removeAllOf(...$organizationIds);
     }
 
     /**
-     * Removes what the seed made, wherever an earlier run left it: the organizations of the demo people, their
-     * outbox messages, credentials and the people themselves. The entity manager is emptied first, as the tenant
-     * may only change once it holds nothing.
+     * Removes what the seed made, wherever an earlier run left it: the organizations of the demo people with their
+     * projects and workflow, their outbox messages, credentials and the people themselves. The entity manager is
+     * emptied first, as the tenant may only change once it holds nothing.
      */
     private function removeDemoRows(): void
     {
@@ -432,12 +581,24 @@ final class DemoSeedCommandTest extends KernelTestCase
                 $organizationIds[$organizationId] = $organizationId;
             }
         }
+        $this->projectRows()->removeAllOf(...array_values($organizationIds));
+        $this->workflowRows()->removeAllOf(...array_values($organizationIds));
         $this->rows()->removeAllOf(...array_values($organizationIds));
         $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
         if ([] !== $userIds) {
             $migrator->executeStatement('DELETE FROM idn_credential WHERE user_id IN (?)', [$userIds], [ArrayParameterType::STRING]);
             $migrator->executeStatement('DELETE FROM idn_user WHERE id IN (?)', [$userIds], [ArrayParameterType::STRING]);
         }
+    }
+
+    private function projectRows(): ProjectRows
+    {
+        return new ProjectRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
+    }
+
+    private function workflowRows(): WorkflowRows
+    {
+        return new WorkflowRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function rows(): OrganizationRows

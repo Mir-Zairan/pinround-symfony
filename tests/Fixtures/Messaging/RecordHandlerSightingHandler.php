@@ -5,19 +5,24 @@ declare(strict_types=1);
 namespace App\Tests\Fixtures\Messaging;
 
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Infrastructure\Messenger\MessageBeingHandled;
 use App\Tests\Fixtures\Entity\TenantProbe;
+use App\Workflow\Infrastructure\Cache\WorkflowCache;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException;
 
 /**
- * @phpstan-type HandlerSighting array{organizationId: string|null, labels: list<mixed>, messageId: string|null, identityMapSizeAtStart: int, identityMapSizeAfterLoading: int}
+ * @phpstan-type HandlerSighting array{organizationId: string|null, labels: list<mixed>, messageId: string|null, identityMapSizeAtStart: int, identityMapSizeAfterLoading: int, workflowCacheOrganizationId: string|null}
  */
 #[AsMessageHandler]
 final class RecordHandlerSightingHandler
 {
+    /** One team for every organization, so only the organization of the transaction keeps their entries apart. */
+    private const string WORKFLOW_CACHE_TEAM_ID = '0197a3c0-0000-7000-8000-000000002212';
+
     /** @var list<HandlerSighting> */
     private array $sightings = [];
 
@@ -26,6 +31,7 @@ final class RecordHandlerSightingHandler
         private readonly MessageBeingHandled $messageBeingHandled,
         private readonly EntityManagerInterface $entityManager,
         private readonly Connection $connection,
+        private readonly WorkflowCache $workflowCache,
     ) {
     }
 
@@ -45,6 +51,11 @@ final class RecordHandlerSightingHandler
             'messageId' => $this->messageBeingHandled->messageId(),
             'identityMapSizeAtStart' => $identityMapSizeAtStart,
             'identityMapSizeAfterLoading' => $this->entityManager->getUnitOfWork()->size(),
+            'workflowCacheOrganizationId' => $this->workflowCache->remember(
+                new TeamId(self::WORKFLOW_CACHE_TEAM_ID),
+                'sighting',
+                fn (): ?string => $this->tenantContext->get()?->toString(),
+            ),
         ];
 
         if ($message->isFailingAfterLoading) {

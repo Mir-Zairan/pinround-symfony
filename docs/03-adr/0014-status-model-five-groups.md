@@ -17,6 +17,8 @@ Every step of every team belongs to one of five fixed groups; tickets move only 
 
 Accepted · 2026-11-06 · Deciders: Zairan Mir (lead).
 
+Superseded in part by [ADR-0037](0037-transition-engine-in-workflow-application.md): the Engine bullet naming `Workflow\Domain\TransitionEngine`; the engine is `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy`. Everything else here still stands.
+
 ## Context and problem statement
 
 Lena's Shop team wants a step "Design check" before code review. The Mobile team wants

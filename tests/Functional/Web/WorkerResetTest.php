@@ -101,6 +101,23 @@ final class WorkerResetTest extends WebTestCase
         self::assertSame(['organizationId' => null, 'isEntityManagerOpen' => true], $this->responseJson());
     }
 
+    /**
+     * Closing the connection ends its transaction without a ROLLBACK reaching the driver, so only the reset can tell
+     * WorkflowCache the transaction is over; until it does, an invalidation outside a transaction waits for a commit.
+     */
+    #[Test]
+    public function theNextRequestInvalidatesTheWorkflowCacheAtOnceAfterARequestClosedTheConnectionInsideATransaction(): void
+    {
+        $this->client->request('POST', '/_test/worker-reset/workflow-cache/'.self::ORG_A.'/close-then-fail');
+        self::assertResponseStatusCodeSame(500);
+        self::assertFalse($this->client->getContainer()->get('doctrine.dbal.default_connection')->isConnected());
+
+        $this->client->request('POST', '/_test/worker-reset/workflow-cache/'.self::ORG_A.'/invalidate');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['entry' => 'gone after the invalidation'], $this->responseJson());
+    }
+
     #[Test]
     public function theNextRequestStartsANewTraceWithNoParentAfterARequestThatThrew(): void
     {

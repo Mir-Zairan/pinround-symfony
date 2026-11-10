@@ -14,6 +14,9 @@ use App\SharedKernel\Domain\UserId;
  */
 final class OrgSettings implements TenantOwned
 {
+    /** The values of data.step_policy (workflow-engine.md); Organization\Api\StepPolicy has one case for each. */
+    public const array STEP_POLICIES = ['locked', 'extend', 'team'];
+
     private readonly string $organizationId;
     // Doctrine's optimistic lock: the column's default 1 on insert, raised by every update.
     private int $version = 1;
@@ -56,6 +59,20 @@ final class OrgSettings implements TenantOwned
         $triagerId = $this->data['triager_id'] ?? null;
 
         return \is_string($triagerId) ? new UserId($triagerId) : throw new \UnexpectedValueException('The settings hold no triager.');
+    }
+
+    /**
+     * Changes data.step_policy only; every other setting stays as it is.
+     *
+     * @throws \InvalidArgumentException when $stepPolicy is not one of STEP_POLICIES
+     */
+    public function changeStepPolicy(string $stepPolicy): void
+    {
+        if (!\in_array($stepPolicy, self::STEP_POLICIES, true)) {
+            throw new \InvalidArgumentException(\sprintf('"%s" is not a step policy.', $stepPolicy));
+        }
+
+        $this->data['step_policy'] = $stepPolicy;
     }
 
     /**

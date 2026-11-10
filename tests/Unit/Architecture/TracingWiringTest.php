@@ -79,7 +79,7 @@ final class TracingWiringTest extends TestCase
      */
     private static function config(): array
     {
-        $config = Yaml::parseFile(__DIR__.'/../../../config/services.yaml');
+        $config = Yaml::parseFile(__DIR__.'/../../../config/services.yaml', Yaml::PARSE_CUSTOM_TAGS);
         self::assertIsArray($config);
 
         return $config;

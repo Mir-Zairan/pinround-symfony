@@ -29,7 +29,9 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * The Organization commands wired as the app wires them, publishing on the real event.bus. Nothing in src calls them
- * yet, so the container has removed them; this builds them from the same parts.
+ * yet, so the container has removed them; this builds them from the same parts. CreateOrganization gets no setup
+ * steps: the tests that use this clean up with OrganizationRows, which leaves wf_ rows behind, and none of them reads
+ * a step or a rule set.
  */
 final readonly class OrganizationCommandsOnTheEventBus
 {
@@ -55,7 +57,7 @@ final readonly class OrganizationCommandsOnTheEventBus
         $organization = new OrganizationId($organizationId);
         $sara = new UserId(self::SARA);
 
-        new CreateOrganization(new DoctrineOrganizations($this->entityManager), $memberships, new DoctrineOrgSettingsStore($this->entityManager), $events)(
+        new CreateOrganization(new DoctrineOrganizations($this->entityManager), $memberships, new DoctrineOrgSettingsStore($this->entityManager), $events, [])(
             $organization,
             'Acme Foods',
             $slug,

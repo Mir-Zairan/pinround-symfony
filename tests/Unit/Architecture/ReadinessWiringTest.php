@@ -66,7 +66,7 @@ final class ReadinessWiringTest extends TestCase
      */
     private static function config(): array
     {
-        $config = Yaml::parseFile(\dirname(__DIR__, 3).'/config/services.yaml');
+        $config = Yaml::parseFile(\dirname(__DIR__, 3).'/config/services.yaml', Yaml::PARSE_CUSTOM_TAGS);
         self::assertIsArray($config);
 
         return $config;

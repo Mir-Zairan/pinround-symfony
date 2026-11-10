@@ -46,6 +46,8 @@ final class RequestTransactionTest extends WebTestCase
         'test_worker_reset_report',
         'test_worker_reset_enter',
         'test_worker_reset_enter_then_fail',
+        'test_worker_reset_workflow_cache_close_then_fail',
+        'test_worker_reset_workflow_cache_invalidate',
         'test_current_actor_report',
         'test_admin_area',
         'test_log_leak',

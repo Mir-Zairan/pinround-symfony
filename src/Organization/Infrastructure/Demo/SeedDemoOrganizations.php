@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Organization\Infrastructure\Demo;
 
 use App\Identity\Api\UserQueries;
-use App\Organization\Api\MembershipQueries;
+use App\Organization\Api\DemoOrganizations;
 use App\Organization\Application\AddMember;
 use App\Organization\Application\CreateOrganization;
 use App\Organization\Application\CreateTeam;
@@ -95,7 +95,7 @@ final readonly class SeedDemoOrganizations implements DemoSeedStep
 
     public function __construct(
         private UserQueries $users,
-        private MembershipQueries $membershipQueries,
+        private DemoOrganizations $demoOrganizations,
         private Organizations $organizations,
         private Memberships $memberships,
         private Teams $teams,
@@ -144,7 +144,7 @@ final readonly class SeedDemoOrganizations implements DemoSeedStep
     private function seedOrganization(array $spec, array $userIds, SeededCounts $counts): void
     {
         $firstAdmin = $userIds[$spec['firstAdmin']];
-        $existingId = $this->findOrganizationBySlug($firstAdmin, $spec['slug']);
+        $existingId = $this->demoOrganizations->idBySlug($spec['slug']);
         $organizationId = $existingId ?? $this->organizations->nextIdentity();
 
         $this->inTransactionOf($organizationId, function () use ($spec, $userIds, $counts, $firstAdmin, $existingId, $organizationId): void {
@@ -166,16 +166,14 @@ final readonly class SeedDemoOrganizations implements DemoSeedStep
         });
     }
 
-    private function findOrganizationBySlug(UserId $firstAdmin, string $slug): ?OrganizationId
+    /**
+     * @return string|null the email of the demo organization's first admin; null when the slug is not a demo one
+     */
+    public static function firstAdminOf(string $slug): ?string
     {
-        foreach ($this->membershipQueries->organizationsOf($firstAdmin) as $organizationId) {
-            $foundSlug = $this->inTransactionOf($organizationId, fn (): ?string => $this->organizations->byId($organizationId)?->slug());
-            if ($foundSlug === $slug) {
-                return $organizationId;
-            }
-        }
+        $organization = array_find(self::ORGANIZATIONS, static fn (array $spec): bool => $spec['slug'] === $slug);
 
-        return null;
+        return $organization['firstAdmin'] ?? null;
     }
 
     private function addMemberIfMissing(OrganizationId $organizationId, string $email, UserId $userId, OrgRoles $orgRoles, SeededCounts $counts): void

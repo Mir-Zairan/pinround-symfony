@@ -45,6 +45,11 @@ services:
         autowire: true      # Automatically injects dependencies in your services.
         autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
 
+    # Tagged here, not with #[AutoconfigureTag]: an Api may not use a Vendor class (deptrac.yaml). ADR-0036.
+    _instanceof:
+        App\Organization\Api\OrganizationSetupStep:
+            tags: [app.organization_setup_step]
+
     # makes classes in src/ available to be used as services
     # this creates a service per class whose id is the fully-qualified class name
     App\:
@@ -96,6 +101,17 @@ services:
         tags:
             - { name: messenger.message_handler, bus: event.bus, handles: App\Organization\Api\Event\OrganizationEvent }
 
+    # Wired here, not with #[AutowireIterator]: the Application layer may not use a Vendor class (deptrac.yaml).
+    # The tag is the one the _instanceof rule above gives every OrganizationSetupStep.
+    App\Organization\Application\CreateOrganization:
+        arguments:
+            $setupSteps: !tagged_iterator app.organization_setup_step
+
+    # Other modules read steps and rules through WorkflowCache (performance-and-scale.md, "Caching").
+    App\Workflow\Api\StepQueries: '@App\Workflow\Infrastructure\Cache\CachedStepQueries'
+    App\Workflow\Api\RuleQueries: '@App\Workflow\Infrastructure\Cache\CachedRuleQueries'
+    App\Workflow\Api\TransitionPolicy: '@App\Workflow\Application\Transition\CatalogueTransitionPolicy'
+
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
@@ -122,6 +138,18 @@ when@test:
         test.session.storage.factory.mock_file:
             class: Symfony\Component\HttpFoundation\Session\Storage\MockFileSessionStorageFactory
             arguments: ['%kernel.cache_dir%/sessions', '%app.session_cookie_name%']
+
+        # No module reads steps, rules or verbs yet, so the compiled container would drop them; CachedWorkflowQueriesTest
+        # and TransitionPolicyWiringTest read them as another module would get them.
+        test.workflow_step_queries:
+            alias: App\Workflow\Api\StepQueries
+            public: true
+        test.workflow_rule_queries:
+            alias: App\Workflow\Api\RuleQueries
+            public: true
+        test.workflow_transition_policy:
+            alias: App\Workflow\Api\TransitionPolicy
+            public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
         tracing.in_memory_exporter:
