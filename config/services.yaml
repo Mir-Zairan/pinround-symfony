@@ -139,13 +139,16 @@ when@test:
             class: Symfony\Component\HttpFoundation\Session\Storage\MockFileSessionStorageFactory
             arguments: ['%kernel.cache_dir%/sessions', '%app.session_cookie_name%']
 
-        # No module reads steps or rules yet, so the compiled container would drop them; CachedWorkflowQueriesTest reads
-        # them as another module would get them.
+        # No module reads steps, rules or verbs yet, so the compiled container would drop them; CachedWorkflowQueriesTest
+        # and TransitionPolicyWiringTest read them as another module would get them.
         test.workflow_step_queries:
             alias: App\Workflow\Api\StepQueries
             public: true
         test.workflow_rule_queries:
             alias: App\Workflow\Api\RuleQueries
+            public: true
+        test.workflow_transition_policy:
+            alias: App\Workflow\Api\TransitionPolicy
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

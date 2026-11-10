@@ -123,7 +123,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     }
 
     #[Test]
-    public function theTicketsTesterWithoutTheJobTesterMayAskForChangesButNotPassIt(): void
+    public function theTicketsTesterWithoutTheJobTesterMaySayNeedsChangesButNotPassIt(): void
     {
         $ticket = GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::LENA, tester: GuardFixtures::OMAR);
 

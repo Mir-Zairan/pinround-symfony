@@ -311,7 +311,7 @@ Unknown statuses map to To do and show a warning in Admin until someone maps the
 
 - **Why not the Symfony Workflow component?** Its places and transitions are configured statically (YAML/PHP config, compiled into the container). pinround's steps are data, and they differ per organization and team at runtime. So we keep a small engine of our own: transitions are a fixed catalogue of verbs (the table above), steps come from `wf_step`, and guards are classes. This decision is recorded in [ADR-0014](../03-adr/0014-status-model-five-groups.md).
 - **Classes:**
-  - `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy` (built in P02.T4: lists the verbs a person may use and checks one, over `Domain\TransitionCatalogue` and the guards; pure, the caller passes `TicketState`, `ActorInTeam` and `RuleQueries::rulesFor`);
+  - `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy` (built in P02.T4: lists the verbs a person may use and checks one, over `Domain\TransitionCatalogue` and the guards; pure, the caller passes `TicketState`, `ActorInTeam` and `RuleQueries::rulesFor`; in Application, not Domain, per [ADR-0037](../03-adr/0037-transition-engine-in-workflow-application.md));
   - `Workflow\Domain\TurnRules` (pure);
   - `Workflow\Domain\Sentence\NowNext` (the sentences above; it returns structured parts so the UI can bold names);
   - `Ticketing\Application\Move\MoveTicketHandler` (loads the ticket, asks the engine, applies the move, projects the turn, writes the event).

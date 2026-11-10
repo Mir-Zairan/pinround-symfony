@@ -9,7 +9,7 @@ This folder holds every important architecture decision for pinround, why we mad
 - [Status lifecycle](#status-lifecycle) — Proposed, Accepted, Deprecated, Superseded.
 - [Naming and format](#naming-and-format) — file names, numbering, the template.
 - [How to change a decision](#how-to-change-a-decision) — superseding instead of editing.
-- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0036.
+- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0037.
 
 ## What an ADR is
 
@@ -65,7 +65,7 @@ stateDiagram-v2
 
 ## All decisions
 
-All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 on 2026-11-10) (deciders: Zairan Mir, lead, with the team).
+All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10) (deciders: Zairan Mir, lead, with the team).
 
 | ADR | Title | Decision in one line |
 |---|---|---|
@@ -105,3 +105,4 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026
 | [0034](0034-allow-list-log-redaction.md) | Keep only allow-listed ids in log records | Log records keep only allow-listed id and shape keys; exception messages are withheld; the org id is `organization_id`. Supersedes part of ADR-0027 and ADR-0029. |
 | [0035](0035-web-owns-its-ui-preferences.md) | Web owns its UI preferences | Web gets the `web_` prefix for per-user, per-organization UI preference tables under RLS, first `web_home_focus`. Supersedes the Web row of ADR-0002's module table. |
 | [0036](0036-organization-setup-steps-in-the-creating-transaction.md) | Set up a new organization's required data in the transaction that creates it | Other modules implement `Organization\Api\OrganizationSetupStep`; `CreateOrganization` runs each step in the transaction that creates the organization, chosen over an `OrganizationCreated` event so no organization exists without its core steps. |
+| [0037](0037-transition-engine-in-workflow-application.md) | The transition engine lives in Workflow's Application layer | The verb catalogue is data in `Workflow\Domain`; the guards, `MoveRights` and `CatalogueTransitionPolicy` live in `Workflow\Application\Transition` behind `Workflow\Api\TransitionPolicy`, which takes plain `ActorInTeam` and `RuleSetView`. Supersedes the Engine bullet of ADR-0014. |
