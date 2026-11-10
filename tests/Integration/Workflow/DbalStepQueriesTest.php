@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Workflow;
 
+use App\Organization\Api\StepPolicy;
+use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
+use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Workflow\Api\StepView;
 use App\Workflow\Infrastructure\Doctrine\DbalStepQueries;
@@ -49,6 +52,7 @@ final class DbalStepQueriesTest extends KernelTestCase
     protected function setUp(): void
     {
         $this->rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->organizationRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $this->addStep(self::ACME_FOODS, self::DONE, null, 'Done', 'done', 'done', 'core', 7);
             $this->addStep(self::ACME_FOODS, self::BACKLOG, null, 'Backlog', 'todo', 'backlog', 'core', 0);
@@ -75,6 +79,7 @@ final class DbalStepQueriesTest extends KernelTestCase
         self::getContainer()->get('doctrine')->resetManager();
         self::getContainer()->get(TenantContext::class)->reset();
         $this->rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->organizationRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         parent::tearDown();
     }
 
@@ -108,6 +113,55 @@ final class DbalStepQueriesTest extends KernelTestCase
         self::assertNotContains(self::SHOP_REMOVED_PAIRING, $mobileStepIds);
         self::assertNotContains(self::REMOVED_TRIAGE, $mobileStepIds);
         self::assertCount(10, $mobileStepIds);
+    }
+
+    #[Test]
+    public function moveTargetsForLeavesOutTheTeamsOwnStepsUnderLockedAndKeepsCoreAndCompanySteps(): void
+    {
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Locked);
+
+        $shopTargetIds = $this->moveTargetIds(self::ACME_FOODS, self::SHOP_TEAM);
+
+        self::assertNotContains(self::SHOP_READY_TO_SHIP, $shopTargetIds);
+        self::assertSame(
+            array_values(array_diff(array_column($this->stepsFor(self::ACME_FOODS, self::SHOP_TEAM), 0), [self::SHOP_READY_TO_SHIP])),
+            $shopTargetIds,
+        );
+        self::assertContains(self::DESIGN_CHECK, $shopTargetIds);
+        self::assertNotContains(self::MOBILE_DEVICE_CHECK, $this->moveTargetIds(self::ACME_FOODS, self::MOBILE_TEAM));
+        self::assertCount(9, $this->moveTargetIds(self::ACME_FOODS, self::MOBILE_TEAM));
+    }
+
+    #[Test]
+    public function moveTargetsForEqualsStepsForUnderExtendTeamAndWithNoSettings(): void
+    {
+        $expectedIds = array_column($this->stepsFor(self::ACME_FOODS, self::SHOP_TEAM), 0);
+        self::assertContains(self::SHOP_READY_TO_SHIP, $expectedIds);
+
+        self::assertSame($expectedIds, $this->moveTargetIds(self::ACME_FOODS, self::SHOP_TEAM), 'No settings row means extend.');
+
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Extend);
+        self::assertSame($expectedIds, $this->moveTargetIds(self::ACME_FOODS, self::SHOP_TEAM));
+
+        $this->organizationRows()->removeAllOf(self::ACME_FOODS);
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Team);
+        self::assertSame($expectedIds, $this->moveTargetIds(self::ACME_FOODS, self::SHOP_TEAM));
+    }
+
+    #[Test]
+    public function anotherOrganizationsLockedPolicyDoesNotHideMyTeamSteps(): void
+    {
+        $this->policies()->set(self::BETA_BAKERY, StepPolicy::Locked);
+
+        self::assertContains(self::SHOP_READY_TO_SHIP, $this->moveTargetIds(self::ACME_FOODS, self::SHOP_TEAM));
+    }
+
+    #[Test]
+    public function moveTargetsForRefusesAnIdThatIsNotATeamIdBeforeAnyQuery(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->moveTargetsFor('team-1'));
     }
 
     #[Test]
@@ -183,6 +237,22 @@ final class DbalStepQueriesTest extends KernelTestCase
     }
 
     /**
+     * @return list<string>
+     */
+    private function moveTargetIds(string $tenantId, string $teamId): array
+    {
+        return $this->transactions()->rolledBackAs($tenantId, fn (): array => array_map(
+            static fn (StepView $step): string => $step->id(),
+            $this->queries()->moveTargetsFor($teamId),
+        ));
+    }
+
+    private function organizationRows(): OrganizationRows
+    {
+        return new OrganizationRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
+    }
+
+    /**
      * @return list<array{string, string, string, string, int, string, ?string}>
      */
     private function stepsFor(string $tenantId, string $teamId): array
@@ -212,7 +282,12 @@ final class DbalStepQueriesTest extends KernelTestCase
 
     private function queries(): DbalStepQueries
     {
-        return new DbalStepQueries($this->connection());
+        return new DbalStepQueries($this->connection(), new DbalSettingsQueries($this->connection()), self::getContainer()->get(TenantContext::class));
+    }
+
+    private function policies(): StepPolicyRows
+    {
+        return new StepPolicyRows($this->entityManager(), $this->transactions());
     }
 
     private function connection(): Connection

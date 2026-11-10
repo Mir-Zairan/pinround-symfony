@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Workflow;
 
 use App\Organization\Api\StepPolicy;
+use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -213,7 +214,7 @@ final class AddStepTest extends KernelTestCase
     {
         return array_values(array_map(
             static fn (StepView $step): array => [$step->name(), $step->origin(), $step->position()],
-            array_filter(new DbalStepQueries($this->connection())->stepsFor(new TeamId($teamId)), static fn (StepView $step): bool => 'check' === $step->groupCode()),
+            array_filter(new DbalStepQueries($this->connection(), new DbalSettingsQueries($this->connection()), self::getContainer()->get(TenantContext::class))->stepsFor(new TeamId($teamId)), static fn (StepView $step): bool => 'check' === $step->groupCode()),
         ));
     }
 

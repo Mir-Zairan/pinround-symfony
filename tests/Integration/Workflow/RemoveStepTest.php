@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Workflow;
 
+use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -65,7 +66,7 @@ final class RemoveStepTest extends KernelTestCase
             $this->removeStep($stepOccupancy)(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), self::SHOP_READY_TO_MERGE, new \DateTimeImmutable(self::NOW));
 
             return [
-                array_map(static fn (StepView $step): string => $step->id(), new DbalStepQueries($this->connection())->stepsFor(new TeamId(self::SHOP_TEAM))),
+                array_map(static fn (StepView $step): string => $step->id(), new DbalStepQueries($this->connection(), new DbalSettingsQueries($this->connection()), self::getContainer()->get(TenantContext::class))->stepsFor(new TeamId(self::SHOP_TEAM))),
                 $this->archivedAtOf(self::SHOP_READY_TO_MERGE),
             ];
         });

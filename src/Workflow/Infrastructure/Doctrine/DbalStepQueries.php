@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Workflow\Infrastructure\Doctrine;
 
+use App\Organization\Api\SettingsQueries;
+use App\Organization\Api\StepPolicy;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
@@ -14,8 +17,11 @@ use Doctrine\DBAL\Connection;
 
 final readonly class DbalStepQueries implements StepQueries
 {
-    public function __construct(private Connection $connection)
-    {
+    public function __construct(
+        private Connection $connection,
+        private SettingsQueries $settingsQueries,
+        private TenantContext $tenantContext,
+    ) {
     }
 
     public function stepsFor(TeamId $teamId): array
@@ -28,6 +34,20 @@ final readonly class DbalStepQueries implements StepQueries
         );
 
         return array_map(self::stepView(...), $rows);
+    }
+
+    public function moveTargetsFor(string $teamId): array
+    {
+        $team = new TeamId($teamId);
+        $steps = $this->stepsFor($team);
+        if (StepPolicy::Locked !== $this->settingsQueries->stepPolicyOf($this->tenantContext->require())) {
+            return $steps;
+        }
+
+        return array_values(array_filter(
+            $steps,
+            static fn (StepView $step): bool => StepOrigin::Team->value !== $step->origin(),
+        ));
     }
 
     public function groupOf(string $stepId): ?string

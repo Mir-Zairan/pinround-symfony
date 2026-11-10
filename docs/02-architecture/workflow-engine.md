@@ -78,6 +78,8 @@ Three rules exist today. Each is stored per org, and per team under the `team` p
 | `no_self_review` | on | The assignee may not Approve code on their own ticket | "Team rule: nobody approves their own code. Lena reviews it." |
 | `review_before_test` | on | In progress → Testing directly is not allowed. "Send to testing" is hidden | "Team rule: code review comes before testing." |
 
+Which rule set applies to a team (built in P02.T3: `Workflow\Api\RuleQueries::rulesFor`, `Infrastructure\Doctrine\DbalRuleQueries`): under the policy `team`, the team's own row when it has one, else the organization's; under `extend` and `locked` always the organization's row, even if the team still has an old row of its own. An organization with no row has all three rules on. Under the policy `locked`, `StepQueries::moveTargetsFor` leaves the team's own steps out of the steps a ticket may be moved to; a ticket already in a team step keeps it.
+
 Each rule is one guard class that implements `Workflow\Domain\Guard`. A sketch:
 
 ```php
