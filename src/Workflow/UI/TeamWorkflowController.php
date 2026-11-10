@@ -7,6 +7,7 @@ namespace App\Workflow\UI;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Workflow\Api\WorkflowPermission;
@@ -24,7 +25,6 @@ use App\Workflow\Application\StepTeamNotFound;
 use App\Workflow\Application\TeamRulesNeedTeamPolicy;
 use App\Workflow\Application\TeamStepsLocked;
 use App\Workflow\Application\UnknownStep;
-use App\Workflow\Application\WorkflowTransactions;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -37,7 +37,7 @@ use Symfony\Component\Routing\Attribute\Route;
  * team's own rules. Each answers with a redirect to the team page and a toast. Only team steps and team rules: company
  * steps and the organization's rules are the Admin's, elsewhere.
  *
- * Without the request transaction, as TeamProjectsController: WorkflowTransactions gives each action a transaction of
+ * Without the request transaction, as TeamProjectsController: Transactions gives each action a transaction of
  * its own, which also covers the team lookup and the access checks, so the toast is set only once the change is
  * committed. In that order: a slug of no team of the organization is not found, a person the voter refuses is denied
  * (also every lead under a step policy that does not let her), and a form token that is not valid changes nothing.
@@ -103,7 +103,7 @@ final class TeamWorkflowController extends AbstractController
     private const string TEAM_NOT_FOUND = 'No team of this organization has that slug.';
 
     public function __construct(
-        private readonly WorkflowTransactions $workflowTransactions,
+        private readonly Transactions $transactions,
         private readonly TeamQueries $teamQueries,
         private readonly AddStep $addStep,
         private readonly RemoveStep $removeStep,
@@ -122,7 +122,7 @@ final class TeamWorkflowController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
 
         try {
-            $toast = $this->workflowTransactions->run(function () use ($organizationId, $slug, $name, $groupCode, $csrfToken): string {
+            $toast = $this->transactions->run(function () use ($organizationId, $slug, $name, $groupCode, $csrfToken): string {
                 $team = $this->teamOf($organizationId, $slug);
                 $this->denyAccessUnlessGranted(WorkflowPermission::STEP_CHANGE_TEAM, $team->id());
                 if (!$this->isCsrfTokenValid(self::ADD_STEP_CSRF_ID, $csrfToken)) {
@@ -162,7 +162,7 @@ final class TeamWorkflowController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
 
         try {
-            $toast = $this->workflowTransactions->run(function () use ($organizationId, $slug, $stepId, $csrfToken): string {
+            $toast = $this->transactions->run(function () use ($organizationId, $slug, $stepId, $csrfToken): string {
                 $team = $this->teamOf($organizationId, $slug);
                 $this->denyAccessUnlessGranted(WorkflowPermission::STEP_CHANGE_TEAM, $team->id());
                 if (!$this->isCsrfTokenValid(self::REMOVE_STEP_CSRF_ID, $csrfToken)) {
@@ -190,7 +190,7 @@ final class TeamWorkflowController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
 
         try {
-            $toast = $this->workflowTransactions->run(function () use ($organizationId, $slug, $ruleCode, $isOnValue, $csrfToken): string {
+            $toast = $this->transactions->run(function () use ($organizationId, $slug, $ruleCode, $isOnValue, $csrfToken): string {
                 $team = $this->teamOf($organizationId, $slug);
                 $this->denyAccessUnlessGranted(WorkflowPermission::RULES_CHANGE_TEAM, $team->id());
                 if (!$this->isCsrfTokenValid(self::SET_RULE_CSRF_ID, $csrfToken)) {

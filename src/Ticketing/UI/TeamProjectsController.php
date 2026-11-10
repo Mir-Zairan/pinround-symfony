@@ -7,6 +7,7 @@ namespace App\Ticketing\UI;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Ticketing\Api\ProjectPermission;
@@ -18,7 +19,6 @@ use App\Ticketing\Application\LinkProject\LinkProject;
 use App\Ticketing\Application\LinkProject\ProjectStillLinked;
 use App\Ticketing\Application\ProjectNotFound;
 use App\Ticketing\Application\ProjectTeamNotFound;
-use App\Ticketing\Application\TicketingTransactions;
 use App\Ticketing\Application\UnlinkProject\ProjectHasOpenTickets;
 use App\Ticketing\Application\UnlinkProject\ProjectNotOfTeam;
 use App\Ticketing\Application\UnlinkProject\UnlinkProject;
@@ -33,9 +33,9 @@ use Symfony\Component\Routing\Attribute\Route;
  * team to it, and create a project it owns. Each answers with a redirect to the team page and a toast.
  *
  * Without the request transaction: a refused command, such as CreateProject when another request took the key first,
- * has written inside the transaction, and only rolling back the whole of it undoes that. TicketingTransactions gives
- * each action a transaction of its own, which also covers the team lookup and the access checks. In that order: a slug
- * of no team of the organization is not found, a person the voter refuses is denied, and a form token that is not
+ * has written inside the transaction, and only rolling back the whole of it undoes that. Transactions gives each action
+ * a transaction of its own, which also covers the team lookup and the access checks. In that order: a slug of no team
+ * of the organization is not found, a person the voter refuses is denied, and a form token that is not
  * valid changes nothing.
  */
 final class TeamProjectsController extends AbstractController
@@ -80,7 +80,7 @@ final class TeamProjectsController extends AbstractController
     private const string NOT_FOUND = 'No project of this organization has that id.';
 
     public function __construct(
-        private readonly TicketingTransactions $ticketingTransactions,
+        private readonly Transactions $transactions,
         private readonly TeamQueries $teamQueries,
         private readonly UnlinkProject $unlinkProject,
         private readonly LinkProject $linkProject,
@@ -97,7 +97,7 @@ final class TeamProjectsController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
 
         try {
-            $toast = $this->ticketingTransactions->run(function () use ($organizationId, $slug, $projectId, $csrfToken): string {
+            $toast = $this->transactions->run(function () use ($organizationId, $slug, $projectId, $csrfToken): string {
                 $team = $this->teamOf($organizationId, $slug);
                 $this->denyAccessUnlessGranted(ProjectPermission::UNLINK, $team->id());
                 if (!$this->isCsrfTokenValid(self::UNLINK_CSRF_ID, $csrfToken)) {
@@ -126,7 +126,7 @@ final class TeamProjectsController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
 
         try {
-            $toast = $this->ticketingTransactions->run(function () use ($organizationId, $slug, $projectIds, $csrfToken): string {
+            $toast = $this->transactions->run(function () use ($organizationId, $slug, $projectIds, $csrfToken): string {
                 $team = $this->teamOf($organizationId, $slug);
                 $this->denyAccessUnlessGranted(ProjectPermission::LINK, $team->id());
                 if (!$this->isCsrfTokenValid(self::LINK_CSRF_ID, $csrfToken)) {
@@ -157,7 +157,7 @@ final class TeamProjectsController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
 
         try {
-            $toast = $this->ticketingTransactions->run(function () use ($organizationId, $slug, $key, $name, $csrfToken): string {
+            $toast = $this->transactions->run(function () use ($organizationId, $slug, $key, $name, $csrfToken): string {
                 $team = $this->teamOf($organizationId, $slug);
                 $this->denyAccessUnlessGranted(ProjectPermission::CREATE, $team->id());
                 if (!$this->isCsrfTokenValid(self::CREATE_CSRF_ID, $csrfToken)) {

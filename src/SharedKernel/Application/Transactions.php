@@ -2,13 +2,14 @@
 
 declare(strict_types=1);
 
-namespace App\Workflow\Application;
+namespace App\SharedKernel\Application;
 
 /**
  * Writes of a request that runs without the request transaction, so the action knows its change is committed, or
- * rolled back as a whole when a command is refused, before it answers with a toast.
+ * rolled back as a whole when a command is refused, before it answers, such as CreateProject when another request
+ * took the key first.
  */
-interface WorkflowTransactions
+interface Transactions
 {
     /**
      * Runs $write in a transaction of its own under the request's tenant, so row-level security applies, and commits

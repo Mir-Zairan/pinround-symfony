@@ -2,26 +2,28 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Integration\Ticketing;
+namespace App\Tests\Integration\SharedKernel\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Infrastructure\Doctrine\DoctrineTransactions;
 use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
+use App\Tests\Integration\Ticketing\ProjectRows;
 use App\Ticketing\Domain\Project;
 use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Domain\ProjectKey;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineProjects;
-use App\Ticketing\Infrastructure\Doctrine\DoctrineTicketingTransactions;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * DoctrineTicketingTransactions on the real tkt_project table as pinround_app, under row-level security.
+ * DoctrineTransactions on the real tkt_project table as pinround_app, under row-level security. The writes go through
+ * the entity manager, so the flush at commit is covered too.
  */
-final class DoctrineTicketingTransactionsTest extends KernelTestCase
+final class DoctrineTransactionsTest extends KernelTestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000012a1';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000012a2';
@@ -150,9 +152,9 @@ final class DoctrineTicketingTransactionsTest extends KernelTestCase
         return \is_int($count) ? $count : -1;
     }
 
-    private function transactions(): DoctrineTicketingTransactions
+    private function transactions(): DoctrineTransactions
     {
-        return new DoctrineTicketingTransactions($this->entityManager(), $this->tenantContext());
+        return new DoctrineTransactions($this->entityManager(), $this->tenantContext());
     }
 
     private function projects(): DoctrineProjects

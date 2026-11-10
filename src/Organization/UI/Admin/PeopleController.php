@@ -13,8 +13,8 @@ use App\Organization\Application\AlreadyInTheOrganization;
 use App\Organization\Application\InvalidEmailAddress;
 use App\Organization\Application\InvitationSentMeanwhile;
 use App\Organization\Application\InviteMember;
-use App\Organization\Application\OrganizationTransactions;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use Psr\Clock\ClockInterface;
@@ -55,7 +55,7 @@ final class PeopleController extends AbstractController
     public function __construct(
         private readonly InvitationQueries $invitationQueries,
         private readonly InviteMember $inviteMember,
-        private readonly OrganizationTransactions $organizationTransactions,
+        private readonly Transactions $transactions,
         private readonly TenantContext $tenantContext,
         private readonly CurrentUser $currentUser,
         private readonly ClockInterface $clock,
@@ -78,8 +78,8 @@ final class PeopleController extends AbstractController
 
     /**
      * Without the request transaction: when InviteMember refuses a concurrent invite, its DELETE has already run outside
-     * the ORM's savepoint, and only rolling back the whole transaction undoes it. runAs gives the invite a transaction of
-     * its own, which also covers the access checks and the page shown with a field error.
+     * the ORM's savepoint, and only rolling back the whole transaction undoes it. Transactions gives the invite a
+     * transaction of its own, which also covers the access checks and the page shown with a field error.
      */
     #[Route('/admin/people/invite', name: self::INVITE_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
     public function invite(Request $request): Response
@@ -93,7 +93,7 @@ final class PeopleController extends AbstractController
         $now = $this->clock->now();
 
         try {
-            return $this->organizationTransactions->runAs($organizationId, function () use ($organizationId, $email, $csrfToken, $now): Response {
+            return $this->transactions->run(function () use ($organizationId, $email, $csrfToken, $now): Response {
                 $this->denyAccessUnlessGranted(AdminPermission::AREA, $organizationId);
                 $this->denyAccessUnlessGranted(OrganizationPermission::INVITE, $organizationId);
                 if (!$this->isCsrfTokenValid(self::CSRF_ID, $csrfToken)) {
