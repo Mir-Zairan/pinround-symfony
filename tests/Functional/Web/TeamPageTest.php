@@ -5,18 +5,14 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
-use App\SharedKernel\Domain\OrganizationId;
-use App\SharedKernel\Domain\TeamId;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Identity\LogsInUsers;
-use Doctrine\DBAL\Connection;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
-use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -25,6 +21,7 @@ use Zenstruck\Foundry\Test\Factories;
  */
 final class TeamPageTest extends WebTestCase
 {
+    use CreatesAcmeFoodsTeams;
     use CreatesTeams;
     use Factories;
     use LogsInUsers {
@@ -35,12 +32,6 @@ final class TeamPageTest extends WebTestCase
 
     private KernelBrowser $client;
 
-    private OrganizationId $acmeFoods;
-
-    private TeamId $shop;
-
-    private TeamId $mobile;
-
     protected function setUp(): void
     {
         $this->client = self::createClient();
@@ -48,12 +39,7 @@ final class TeamPageTest extends WebTestCase
 
     protected function tearDown(): void
     {
-        foreach ($this->createdOrganizationIds as $organizationId) {
-            $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement(
-                'DELETE FROM tkt_project WHERE organization_id = ?',
-                [$organizationId],
-            ));
-        }
+        $this->removeCommittedProjects();
         $this->removeUsersAndOrganizations();
     }
 
@@ -269,38 +255,5 @@ final class TeamPageTest extends WebTestCase
     private function spanNamesAfter(InMemoryExporter $exporter, int $skipped): array
     {
         return array_map(static fn (SpanDataInterface $span): string => $span->getName(), \array_slice(ExportedSpans::of($exporter), $skipped));
-    }
-
-    private function addProject(TeamId $teamId, string $key, string $name): void
-    {
-        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
-            'INSERT INTO tkt_project (organization_id, id, team_id, key, name, next_number) VALUES (?, ?, ?, ?, ?, 1)',
-            [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $teamId->toString(), $key, $name],
-        ));
-    }
-
-    /**
-     * @param 'member'|'viewer'|null $miaTeamRole Mia's role in Shop, null for none
-     *
-     * @return array<string, User> by first name
-     */
-    private function createAcmeFoodsPeople(?string $miaTeamRole = 'viewer'): array
-    {
-        $this->acmeFoods = $this->createOrganization('Acme Foods');
-        $people = [];
-        foreach (['Lena' => '{}', 'Omar' => '{}', 'Mia' => '{}', 'Raj' => '{manager}', 'Sara' => '{admin}'] as $name => $orgRoles) {
-            $people[$name] = $this->createUserWithoutOrganization($name);
-            $this->addMembership($people[$name], $this->acmeFoods);
-            $this->setOrgRoles($people[$name], $this->acmeFoods, $orgRoles);
-        }
-
-        $this->shop = $this->createTeam($this->acmeFoods, 'Shop', $people['Lena']);
-        $this->mobile = $this->createTeam($this->acmeFoods, 'Mobile', $people['Lena']);
-        $this->addTeamRole($people['Omar'], $this->acmeFoods, $this->shop, 'member');
-        if (null !== $miaTeamRole) {
-            $this->addTeamRole($people['Mia'], $this->acmeFoods, $this->shop, $miaTeamRole);
-        }
-
-        return $people;
     }
 }

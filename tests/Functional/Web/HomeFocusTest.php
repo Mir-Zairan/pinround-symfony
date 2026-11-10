@@ -33,6 +33,7 @@ use Zenstruck\Foundry\Test\Factories;
 final class HomeFocusTest extends WebTestCase
 {
     use Factories;
+    use IssuesCsrfTokens;
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
@@ -257,20 +258,7 @@ final class HomeFocusTest extends WebTestCase
      */
     private function csrfToken(KernelBrowser $client): string
     {
-        $session = $client->getSession();
-        self::assertNotNull($session);
-        $request = Request::create('https://localhost/');
-        $request->setSession($session);
-        $requestStack = self::getContainer()->get('request_stack');
-        $requestStack->push($request);
-        try {
-            $token = self::getContainer()->get('security.csrf.token_manager')->getToken('web_home_focus')->getValue();
-        } finally {
-            $requestStack->pop();
-        }
-        $session->save();
-
-        return $token;
+        return $this->csrfTokenFor($client, 'web_home_focus');
     }
 
     private function choose(KernelBrowser $client, OrganizationId $organizationId): void
