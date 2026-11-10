@@ -215,7 +215,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
         $countsWithoutApp = array_diff_key(self::OPEN_TICKETS, [self::APP => true]);
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('OpenTicketCounts gave no count for a project.');
+        $this->expectExceptionMessageIsOrContains('OpenTicketCounts gave no count for a project.');
 
         $this->transactions()->rolledBackAs(
             self::ACME_FOODS,
