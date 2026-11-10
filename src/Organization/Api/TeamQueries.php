@@ -42,6 +42,12 @@ interface TeamQueries
     public function countOf(OrganizationId $organizationId): int;
 
     /**
+     * One query, for the team page at /teams/{slug}; null when no team of the organization has that slug, which is
+     * also the answer for a team of another organization.
+     */
+    public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary;
+
+    /**
      * One query; null when the user is not in that team, or the team is unknown or belongs to another organization.
      *
      * @throws \LogicException when the stored job is not one of MemberJob's values

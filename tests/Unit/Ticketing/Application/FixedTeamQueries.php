@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Ticketing\Application;
 
 use App\Organization\Api\MemberJob;
 use App\Organization\Api\TeamQueries;
+use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -40,6 +41,11 @@ final readonly class FixedTeamQueries implements TeamQueries
     public function countOf(OrganizationId $organizationId): int
     {
         throw new \LogicException('CreateProject counts no teams.');
+    }
+
+    public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
+    {
+        throw new \LogicException('CreateProject reads no team summaries.');
     }
 
     public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob

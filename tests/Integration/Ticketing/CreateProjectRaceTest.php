@@ -144,12 +144,17 @@ final class CreateProjectRaceTest extends KernelTestCase
 
             public function allSummariesOf(OrganizationId $organizationId): array
             {
-                return [new TeamSummary(new TeamId(CreateProjectRaceTest::SHOP_TEAM), 'Shop')];
+                return [new TeamSummary(new TeamId(CreateProjectRaceTest::SHOP_TEAM), 'Shop', 'shop')];
             }
 
             public function countOf(OrganizationId $organizationId): int
             {
                 return 1;
+            }
+
+            public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
+            {
+                throw new \LogicException('CreateProject reads no team by slug.');
             }
 
             public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob

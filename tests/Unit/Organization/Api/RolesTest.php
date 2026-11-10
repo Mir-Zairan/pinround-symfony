@@ -70,6 +70,34 @@ final class RolesTest extends TestCase
     }
 
     #[Test]
+    public function teamSlugOfGivesTheSlugOfEachTeamByIdInAnyCase(): void
+    {
+        $roles = new Roles(false, false, [new TeamId(self::TEAM_A)], [new TeamId(self::TEAM_B)], [], [
+            strtoupper(self::TEAM_A) => 'shop',
+            self::TEAM_B => 'mobile-app',
+        ]);
+
+        self::assertSame('shop', $roles->teamSlugOf(new TeamId(self::TEAM_A)));
+        self::assertSame('mobile-app', $roles->teamSlugOf(new TeamId(self::TEAM_B)));
+        self::assertNull($roles->teamSlugOf(new TeamId(self::TEAM_C)), 'a team whose slug was not given has none');
+    }
+
+    #[Test]
+    public function rolesWithoutSlugsHaveNoTeamSlug(): void
+    {
+        self::assertNull(new Roles(false, false, [new TeamId(self::TEAM_A)], [], [])->teamSlugOf(new TeamId(self::TEAM_A)));
+        self::assertNull(Roles::none()->teamSlugOf(new TeamId(self::TEAM_A)));
+    }
+
+    #[Test]
+    public function aSlugKeyThatIsNotATeamIdIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new Roles(false, false, [], [], [], ['shop' => 'shop']);
+    }
+
+    #[Test]
     public function aTeamCannotHaveTwoRoles(): void
     {
         $this->expectException(\InvalidArgumentException::class);

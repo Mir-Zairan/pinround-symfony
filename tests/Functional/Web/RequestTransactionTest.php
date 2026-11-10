@@ -63,7 +63,7 @@ final class RequestTransactionTest extends WebTestCase
         'test_tracing_query',
     ];
     /** Stand-ins under the real names of pages a later phase builds (MainMenuTest), so they carry no test_ prefix. */
-    private const array MENU_STAND_IN_ROUTE_NAMES = ['ticketing_tickets', 'team_show'];
+    private const array MENU_STAND_IN_ROUTE_NAMES = ['ticketing_tickets'];
 
     private KernelBrowser $client;
 

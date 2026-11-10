@@ -12,12 +12,18 @@ use App\SharedKernel\Domain\TeamId;
  */
 final readonly class Roles
 {
+    /** @var array<string, string> by canonical team id */
+    private array $teamSlugsById;
+
     /**
-     * @param list<TeamId> $leadTeamIds   the teams the user leads
-     * @param list<TeamId> $memberTeamIds the teams the user is a member of
-     * @param list<TeamId> $viewerTeamIds the teams the user is a viewer of
+     * @param list<TeamId>          $leadTeamIds   the teams the user leads
+     * @param list<TeamId>          $memberTeamIds the teams the user is a member of
+     * @param list<TeamId>          $viewerTeamIds the teams the user is a viewer of
+     * @param array<string, string> $teamSlugsById the slug of each of those teams, by team id in any case, so the
+     *                                             menu links them without another query; a team left out has none
      *
-     * @throws \InvalidArgumentException when a team is given twice, in one list or in two
+     * @throws \InvalidArgumentException when a team is given twice, in one list or in two, or a key of $teamSlugsById
+     *                                   is not a team id
      */
     public function __construct(
         private bool $isAdmin,
@@ -25,11 +31,18 @@ final readonly class Roles
         private array $leadTeamIds,
         private array $memberTeamIds,
         private array $viewerTeamIds,
+        array $teamSlugsById = [],
     ) {
         $teamIds = array_map(static fn (TeamId $teamId): string => $teamId->toString(), [...$leadTeamIds, ...$memberTeamIds, ...$viewerTeamIds]);
         if (\count(array_unique($teamIds)) !== \count($teamIds)) {
             throw new \InvalidArgumentException('A user has one team role per team.');
         }
+
+        $slugsByCanonicalId = [];
+        foreach ($teamSlugsById as $teamId => $slug) {
+            $slugsByCanonicalId[new TeamId($teamId)->toString()] = $slug;
+        }
+        $this->teamSlugsById = $slugsByCanonicalId;
     }
 
     public static function none(): self
@@ -71,6 +84,15 @@ final readonly class Roles
     public function isInTeam(TeamId $teamId): bool
     {
         return $this->isLeadOf($teamId) || $this->isMemberOf($teamId) || $this->isViewerOf($teamId);
+    }
+
+    /**
+     * The address part of a team the user has a role in; null when the team's slug was not given, as for a team the
+     * user is not in.
+     */
+    public function teamSlugOf(TeamId $teamId): ?string
+    {
+        return $this->teamSlugsById[$teamId->toString()] ?? null;
     }
 
     /**

@@ -45,7 +45,6 @@ final readonly class TeamSlug
     /** The cut leaves room for a "-2" suffix inside the 63 characters a slug may have. */
     private const int MAX_NAME_PART_LENGTH = 50;
 
-    private const string PATTERN = '/^(?=.{1,63}\z)[a-z0-9]+(?:-[a-z0-9]+)*\z/';
     private const string FALLBACK = 'team';
 
     private string $value;
@@ -56,8 +55,8 @@ final readonly class TeamSlug
      */
     public function __construct(string $value)
     {
-        if (1 !== preg_match(self::PATTERN, $value)) {
-            throw new InvalidTeamSlug('A team slug is lowercase letters and digits joined by single hyphens, at most 63 characters.');
+        if (1 !== preg_match(SlugFormat::PATTERN, $value)) {
+            throw new InvalidTeamSlug('A team slug is '.SlugFormat::RULE.'.');
         }
 
         $this->value = $value;

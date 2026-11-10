@@ -22,7 +22,7 @@ interface MembershipQueries
     /**
      * Read under row-level security on every call, uncached, so it needs an open transaction whose tenant is
      * $organizationId; under any other tenant, or none, it finds nothing. A user with no membership there has no
-     * roles, whatever team rows remain. The team ids come in id order.
+     * roles, whatever team rows remain. The team ids come in id order, each with its slug (Roles::teamSlugOf).
      *
      * @throws \LogicException when a stored role is not one this module knows
      */

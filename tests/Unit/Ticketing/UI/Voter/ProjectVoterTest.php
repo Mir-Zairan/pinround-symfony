@@ -9,6 +9,7 @@ use App\Organization\Api\MemberJob;
 use App\Organization\Api\Roles;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Api\TeamQueries;
+use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -62,6 +63,11 @@ final class ProjectVoterTest extends TestCase
             }
 
             public function countOf(OrganizationId $organizationId): int
+            {
+                throw new \LogicException('Only teamsOf is expected.');
+            }
+
+            public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
             {
                 throw new \LogicException('Only teamsOf is expected.');
             }
