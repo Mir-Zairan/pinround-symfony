@@ -32,7 +32,7 @@ final class WeightedNeedsYouScoreTest extends TestCase
     #[DataProvider('kindBases')]
     public function eachKindHasItsBase(NeedsYouKind $kind, int $expected): void
     {
-        self::assertSame($expected, new WeightedNeedsYouScore()->baseScore($kind, null, ReleasePlacement::NoRelease));
+        self::assertSame($expected, new WeightedNeedsYouScore()->baseScore($kind, null, ReleasePlacement::NoRelease, false));
     }
 
     /**
@@ -52,7 +52,7 @@ final class WeightedNeedsYouScoreTest extends TestCase
     #[DataProvider('priorityWeights')]
     public function eachPriorityAddsItsWeight(?string $priority, int $expected): void
     {
-        self::assertSame(10 + $expected, new WeightedNeedsYouScore()->baseScore(NeedsYouKind::Build, $priority, ReleasePlacement::NoRelease));
+        self::assertSame(10 + $expected, new WeightedNeedsYouScore()->baseScore(NeedsYouKind::Build, $priority, ReleasePlacement::NoRelease, false));
     }
 
     #[Test]
@@ -75,15 +75,15 @@ final class WeightedNeedsYouScoreTest extends TestCase
     {
         $score = new WeightedNeedsYouScore();
 
-        self::assertSame(40, $score->baseScore(NeedsYouKind::Build, null, ReleasePlacement::InCurrentRelease));
-        self::assertSame(20, $score->baseScore(NeedsYouKind::Build, null, ReleasePlacement::InOtherRelease));
-        self::assertSame(10, $score->baseScore(NeedsYouKind::Build, null, ReleasePlacement::NoRelease));
+        self::assertSame(40, $score->baseScore(NeedsYouKind::Build, null, ReleasePlacement::InCurrentRelease, false));
+        self::assertSame(20, $score->baseScore(NeedsYouKind::Build, null, ReleasePlacement::InOtherRelease, false));
+        self::assertSame(10, $score->baseScore(NeedsYouKind::Build, null, ReleasePlacement::NoRelease, false));
     }
 
     #[Test]
     public function kindPriorityAndReleaseAreSummed(): void
     {
-        self::assertSame(100 + 40 + 30, new WeightedNeedsYouScore()->baseScore(NeedsYouKind::Answer, 'critical', ReleasePlacement::InCurrentRelease));
+        self::assertSame(100 + 40 + 30, new WeightedNeedsYouScore()->baseScore(NeedsYouKind::Answer, 'critical', ReleasePlacement::InCurrentRelease, false));
     }
 
     #[Test]
@@ -91,6 +91,6 @@ final class WeightedNeedsYouScoreTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        new WeightedNeedsYouScore()->baseScore(NeedsYouKind::Build, 'urgent', ReleasePlacement::NoRelease);
+        new WeightedNeedsYouScore()->baseScore(NeedsYouKind::Build, 'urgent', ReleasePlacement::NoRelease, false);
     }
 }

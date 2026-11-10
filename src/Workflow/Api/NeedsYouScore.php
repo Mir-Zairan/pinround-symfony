@@ -18,5 +18,5 @@ interface NeedsYouScore
      *
      * @throws \InvalidArgumentException when the priority is not one of the five
      */
-    public function baseScore(NeedsYouKind $kind, ?string $priority, ReleasePlacement $release, bool $isRiskCheck = false): int;
+    public function baseScore(NeedsYouKind $kind, ?string $priority, ReleasePlacement $release, bool $isRiskCheck): int;
 }

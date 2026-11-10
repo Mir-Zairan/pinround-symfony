@@ -35,7 +35,7 @@ Acme Foods cannot pay for an AI service. Sara sets "Where the AI runs: Each pers
 - Optional: AI check per pin ("Looks fixed") and AI suggestion pins (vision).
 
 ## Out of scope
-- AI re-ranking of the Home top 10: **deferred, not planned in v1.** The brief allows it later as a Could (only inside the top 10 and only when the org allows AI); `NeedsScore` stays the only ranking. Revisit after launch.
+- AI re-ranking of the Home top 10: **deferred, not planned in v1.** The brief allows it later as a Could (only inside the top 10 and only when the org allows AI); `Workflow\Api\NeedsYouScore` stays the only ranking. Revisit after launch.
 - MCP tools (phase 09) — they are not "pinround's AI", they are the user's own agent.
 
 ## Requirements covered

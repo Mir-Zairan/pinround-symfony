@@ -48,7 +48,7 @@ NFR-PERF-01, NFR-PERF-10, NFR-SCAL-04, NFR-USE-01, NFR-USE-03, NFR-A11Y-01, NFR-
 ## Design notes
 - **Modules.** Insight owns all queries (`App\Insight\Application\HomeQueriesService` implementing `App\Insight\Api\HomeQueries`: `needsYou`, `whoseTurn`, `workload`, `myReports`, `teamsAtAGlance`). Web owns the page composition (`App\Web\UI\Controller\HomeController`, `templates/home/index.html.twig`). Notification provides `NotificationQueries::bell()` for the pings tray. Organization provides roles for focus chips.
 - **Tables.** Read: `ins_ticket_turn`, `ins_team_counts`, `ins_release_progress`, `tkt_ticket` (through the Ticketing view allowed for Insight), `ntf_ping`, `ntf_mute`, `cnv_message` (open question text via Conversation Api). This phase adds no tables. If you must add one, it needs `organization_id`, RLS and an index starting with `organization_id`.
-- **Score.** One class `App\Insight\Domain\NeedsScore` holds the formula: base by kind (answer 100, check 70 (+40 risk), review 30, test 30, assign 25, input 20, decide 15, build 10) + priority (Blocker 50, Critical 40, Major 20, Normal 8, Minor 3) + release (current 30, any 10) + min(days waiting, 60) × 0.5. `base_score` is stored on `ins_ticket_turn`; the time part is added in SQL (see the Home query in data-model.md). Ties: older first.
+- **Score.** Insight does not hold the `base_score` formula: it calls `Workflow\Api\NeedsYouScore` (built in P02.T6), which is base by kind (answer 100, check 70 (+40 risk), review 30, test 30, assign 25, input 20, decide 15, build 10) + priority (Blocker 50, Critical 40, Major 20, Normal 8, Minor 3) + release (current 30, any 10). `base_score` is stored on `ins_ticket_turn`; only the time part, min(days waiting, 60) × 0.5, is added in SQL (see the Home query in data-model.md). Ties: older first.
 - **Kinds order for groups:** Questions for you, New tickets to check, Code reviews, Tests, Need a developer, Your input, On hold, Your building work. A "check" item never also appears as another kind.
 - **Routes.** `GET /` (`home`), `GET /my-reports` (`my_reports`), `GET /?focus=work|team|teams|admin` (focus stored per user in session, not in the URL only), queue: `GET /t/{key}?queue={queueId}` where the queue is a short-lived server-side list of keys in the session.
 - **Security.** Read models copy `visibility` and `team_id`; every Home, My reports, Whose turn and workload query applies the one TicketVisibility predicate through `Ticketing\Api\TicketVisibility` (P03.T2; definition in [data-model.md](../02-architecture/data-model.md) and [ADR-0013](../03-adr/0013-authorization.md)). **Counts too:** `ins_team_counts` has a `visibility` column; viewers outside a team (including managers without a team role) count only `visibility = 'all'` rows, so a restricted ticket never changes a number they see. Draft rounds and private explanations never feed Home.
@@ -59,7 +59,7 @@ NFR-PERF-01, NFR-PERF-10, NFR-SCAL-04, NFR-USE-01, NFR-USE-03, NFR-A11Y-01, NFR-
 ### P07.T1 — Needs-you query and score
 - **Why:** the top 5 is the heart of pinround. It must be right and fast.
 - **Steps:**
-  1. Write `App\Insight\Domain\NeedsScore` and `NeedsKind` (enum) with the formula above.
+  1. Use `Workflow\Api\NeedsYouScore` and `NeedsYouKind` (built in P02.T6) for `base_score` and the kind; write only the SQL time part here.
   2. Make sure `TurnProjector` (phase 02) fills `kind`, `base_score`, `waiting_since`, `check_user_id`; add missing cases (check +40 for `risk`).
   3. Implement `HomeQueries::needsYou(UserId, OrganizationId): NeedsList` as three small queries, all with the visibility predicate:
      - **Top items:** `UNION ALL` of two index scans, one on `(organization_id, turn_user_id, base_score DESC)` and one on `(organization_id, check_user_id, base_score DESC)`, each ordered by `base_score`. The time part of the score adds at most 30 points (60 days × 0.5), so fetch only rows with `base_score ≥ (5th best base_score − 30)`, then compute the full score in SQL and keep the top 5. No `OR` across the two columns and no `ORDER BY` on a computed value over all rows.
@@ -68,7 +68,7 @@ NFR-PERF-01, NFR-PERF-10, NFR-SCAL-04, NFR-USE-01, NFR-USE-03, NFR-A11Y-01, NFR-
      Then batch-load titles, open question text and "Why" parts.
   4. Build the "Why" line: who is blocked, priority (Blocker/Critical/Major only), release ("in release vX" or "release vY"), wait ("no change for N days" when > 7, "changed today", else "updated <date>").
   5. Build the task sentence per kind ("Answer Mia's question", "Check the new ticket from Ben", "Review Omar's code", "Test it", "Pick a developer", "Give input", "Decide: go on or stop", "Start building"/"Build it").
-- **Files:** `src/Insight/Domain/NeedsScore.php`, `src/Insight/Application/HomeQueriesService.php`, `src/Insight/Infrastructure/Doctrine/NeedsYouQuery.php`.
+- **Files:** `src/Insight/Application/HomeQueriesService.php`, `src/Insight/Infrastructure/Doctrine/NeedsYouQuery.php`.
 - **Acceptance:**
   - [ ] One unit test per row of the kind table and per priority/release weight (`test_FR_HOME_03_*`).
   - [ ] Days capped at 60; ties break older first.
@@ -200,5 +200,5 @@ NFR-PERF-01, NFR-PERF-10, NFR-SCAL-04, NFR-USE-01, NFR-USE-03, NFR-A11Y-01, NFR-
 - [ ] Docs updated if behaviour changed (and their Index).
 
 ## Hand-off notes
-- Phase 08 may add AI re-ranking inside the top 10 only, behind the org AI policy. Keep `NeedsScore` as the default.
+- Phase 08 may add AI re-ranking inside the top 10 only, behind the org AI policy. Keep `Workflow\Api\NeedsYouScore` as the default.
 - Write here any prototype differences you chose, with the reason.
