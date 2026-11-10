@@ -105,7 +105,7 @@ New rules are added as new guard classes plus a column in `wf_rule_set`, plus an
 | Give it to someone else… | To do (assigned) | To do | Lead | same | notify both | TicketAssigned |
 | Start work | To do (assigned) | In progress | Assignee | — | — | TicketMoved |
 | Send to code review | In progress | Code review | Assignee; Lead when nobody is assigned | — | sets reviewer (see below); draft-round dialog ([ADR-0017](../03-adr/0017-private-draft-rounds.md)) | TicketMoved |
-| Send to testing | In progress | Testing | Assignee | `review_before_test` must be off | sets tester; draft-round dialog | TicketMoved |
+| Send to testing | In progress | Testing | Assignee | `review_before_test` must be off (the button is hidden without a note; `check()` refuses with the rule's note) | sets tester; draft-round dialog | TicketMoved |
 | Approve code | Code review | Testing | Turn (the reviewer) | `no_self_review` | sets tester | TicketMoved |
 | Ask for changes | Code review | In progress | Turn (the reviewer) | — | — | TicketMoved |
 | Pass it | Testing | Done | Tester; Lead when `tester_moves_done` is off | `tester_moves_done` | sets `closed_at`; removes the turn row | TicketMoved |
@@ -114,7 +114,7 @@ New rules are added as new guard classes plus a column in `wf_rule_set`, plus an
 | Go on | On hold | previous step (or In progress) | Lead | — | — | TicketMoved |
 | Reopen | Done | In progress | Lead, Tester | — | clears `closed_at` | TicketMoved |
 | Put on hold | any except On hold and Done | On hold | Lead | — | remembers the previous step | TicketMoved |
-| Move on to <next core step> | a company or team step | next core step by group: To do → In progress, Doing → Code review, Checking → Testing, Waiting → previous step (or In progress) | Assignee, Lead | the same guards as the core move it replaces | — | TicketMoved |
+| Move on to <next core step> | a company or team step | next core step by group: To do → In progress, Doing → Code review, Checking → Testing, Waiting → previous step (or In progress; the button reads "Move on to the previous step" in the first case) | Assignee, Lead | none blocks it: `review_before_test` and `no_self_review` are about other core moves | — | TicketMoved |
 | Move to another step… | any | any step of the team | Lead | `review_before_test` blocks In progress → Testing | asks "waiting on whom?" when the target is Needs input | TicketMoved |
 
 Rules for every move:
@@ -311,7 +311,7 @@ Unknown statuses map to To do and show a warning in Admin until someone maps the
 
 - **Why not the Symfony Workflow component?** Its places and transitions are configured statically (YAML/PHP config, compiled into the container). pinround's steps are data, and they differ per organization and team at runtime. So we keep a small engine of our own: transitions are a fixed catalogue of verbs (the table above), steps come from `wf_step`, and guards are classes. This decision is recorded in [ADR-0014](../03-adr/0014-status-model-five-groups.md).
 - **Classes:**
-  - `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy` (built in P02.T4: lists the verbs a person may use and checks one, over `Domain\TransitionCatalogue` and the guards; pure, the caller passes `TicketState`, `ActorInTeam` and `RuleQueries::rulesFor`; in Application, not Domain, per [ADR-0037](../03-adr/0037-transition-engine-in-workflow-application.md));
+  - `Workflow\Application\Transition\CatalogueTransitionPolicy` behind `Workflow\Api\TransitionPolicy` (built in P02.T4 and P02.T5: lists the verbs a person may use and checks one, each with where it goes (`MoveTarget`, from `Domain\MoveSideEffects`), and gives the lead the "Move to another step…" list (`moveChoices`) and its check (`checkMoveTo`), over `Domain\TransitionCatalogue` and the guards; pure, the caller passes `TicketState`, `ActorInTeam` and `RuleQueries::rulesFor`; in Application, not Domain, per [ADR-0037](../03-adr/0037-transition-engine-in-workflow-application.md));
   - `Workflow\Domain\TurnRules` (pure);
   - `Workflow\Domain\Sentence\NowNext` (the sentences above; it returns structured parts so the UI can bold names);
   - `Ticketing\Application\Move\MoveTicketHandler` (loads the ticket, asks the engine, applies the move, projects the turn, writes the event).

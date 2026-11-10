@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Workflow\Domain;
 
 use App\Workflow\Domain\AssigneeInTodo;
 use App\Workflow\Domain\CoreStep;
+use App\Workflow\Domain\Group;
 use App\Workflow\Domain\Mover;
 use App\Workflow\Domain\Transition;
 use App\Workflow\Domain\Verb;
@@ -66,6 +67,44 @@ final class TransitionTest extends TestCase
         $this->expectExceptionMessageIsOrContains('A transition leaves at least one step.');
 
         new Transition(Verb::PlanIt, 'Plan it', [], CoreStep::Todo, [Mover::Lead], true);
+    }
+
+    /**
+     * @return iterable<string, array{bool, Group, bool}> leaves custom steps, group, applies
+     */
+    public static function customSteps(): iterable
+    {
+        yield 'a custom-step row, Doing' => [true, Group::Doing, true];
+        yield 'a custom-step row, Waiting' => [true, Group::Wait, true];
+        yield 'a custom-step row, Done' => [true, Group::Done, false];
+        yield 'a core-only row, Doing' => [false, Group::Doing, false];
+    }
+
+    #[Test]
+    #[DataProvider('customSteps')]
+    public function appliesInCustomStepOnlyForARowThatLeavesOneAndNeverFromDone(bool $fromCustomStep, Group $group, bool $applies): void
+    {
+        $transition = new Transition(Verb::PutOnHold, 'Put on hold', [CoreStep::Todo], CoreStep::Hold, [Mover::Lead], false, fromCustomStep: $fromCustomStep);
+
+        self::assertSame($applies, $transition->appliesInCustomStep($group));
+    }
+
+    #[Test]
+    public function aTransitionWithNoCoreFromStepIsAllowedWhenItLeavesACustomStep(): void
+    {
+        $transition = new Transition(Verb::MoveOn, 'Move on to…', [], null, [Mover::Lead], true, fromCustomStep: true);
+
+        self::assertSame([], $transition->from);
+        self::assertTrue($transition->appliesInCustomStep(Group::Todo));
+        self::assertFalse($transition->appliesIn(CoreStep::Todo, false));
+    }
+
+    #[Test]
+    public function aTransitionMayHaveNoFixedTargetStep(): void
+    {
+        $transition = new Transition(Verb::MoveOn, 'Move on to…', [], null, [Mover::Lead], true, fromCustomStep: true);
+
+        self::assertNull($transition->to);
     }
 
     #[Test]

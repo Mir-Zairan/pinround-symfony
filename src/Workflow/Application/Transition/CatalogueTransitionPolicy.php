@@ -135,7 +135,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 
         $groups = [];
         foreach ($choicesByGroup as $groupCode => $choices) {
-            $groups[] = new MoveChoiceGroup((string) $groupCode, $labelsByGroup[$groupCode], $choices);
+            $groups[] = new MoveChoiceGroup($groupCode, $labelsByGroup[$groupCode], $choices);
         }
 
         return new MoveChoices($groups, null);
