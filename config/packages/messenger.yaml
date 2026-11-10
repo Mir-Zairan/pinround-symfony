@@ -6,7 +6,8 @@ parameters:
         # Short jobs for worker-notify (ADR-0033), today the audit entry of each (RecordOrganizationAuditEntry) and
         # queueing the invitation email of MemberInvited (QueueInvitationLinkEmailHandler).
         App\Organization\Api\Event\OrganizationEvent: async_notify
-        # No handler yet: event.bus accepts an event nobody listens to.
+        # Short jobs for worker-notify too, today the second invalidation of the workflow cache
+        # (InvalidateWorkflowCacheHandler).
         App\Workflow\Api\Event\WorkflowEvent: async_notify
 
 framework:

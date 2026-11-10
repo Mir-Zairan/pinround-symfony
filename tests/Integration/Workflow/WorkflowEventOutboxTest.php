@@ -17,6 +17,7 @@ use App\Workflow\Api\Event\StepRemoved;
 use App\Workflow\Application\AddStep;
 use App\Workflow\Application\RemoveStep;
 use App\Workflow\Application\SetRule;
+use App\Workflow\Infrastructure\Cache\WorkflowCache;
 use App\Workflow\Infrastructure\Doctrine\DbalRuleSets;
 use App\Workflow\Infrastructure\Doctrine\DoctrineSteps;
 use App\Workflow\Infrastructure\Messenger\MessengerWorkflowEvents;
@@ -150,7 +151,7 @@ final class WorkflowEventOutboxTest extends KernelTestCase
 
     private function events(): MessengerWorkflowEvents
     {
-        return new MessengerWorkflowEvents(self::getContainer()->get('event.bus'), $this->connection());
+        return new MessengerWorkflowEvents(self::getContainer()->get('event.bus'), $this->connection(), self::getContainer()->get(WorkflowCache::class));
     }
 
     private function connection(): Connection
