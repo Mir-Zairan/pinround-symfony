@@ -163,10 +163,10 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 1. `NowNext::now(TicketState, Turn, names)` and `::next(...)` exactly as in [Now and Next sentences](../02-architecture/workflow-engine.md#now-and-next-sentences): "Omar builds it", "Lena reviews the code", "Mia tests it", "Waiting for input from Ben", "Lena decides if it goes on", "Lena plans it", "Lena picks a developer", "Lena takes a quick look at the new ticket", "Mia answers Lena's question", "Done. Nobody needs to act."
 2. `VerbFor::person(...)`: the short task for Home and lists ("Test it", "Review Omar's code", "Answer Mia's question", "Check the new ticket", "Plan it", "Pick a developer", "Start building", "Build it", "Give input", "Decide: go on or stop").
 3. First names only; the viewer becomes "you" where the prototype does ("Turn: you").
-**Files:** `src/Workflow/Domain/NowNext.php`, `src/Workflow/Domain/VerbFor.php`.
+**Files:** `src/Workflow/Api/{NowNext,VerbFor,NowNextContext}.php`, `src/Workflow/Application/Turn/{PlainNowNext,PlainVerbFor,SentenceWords}.php`.
 **Acceptance criteria:**
-- [ ] Each sentence in [Now and Next texts](../04-prototype/screens/ticket-page.md#now-and-next-texts) is produced by a test case with the same words.
-- [ ] No sentence contains a raw step code.
+- [x] Each sentence in [Now and Next texts](../04-prototype/screens/ticket-page.md#now-and-next-texts) is produced by a test case with the same words.
+- [x] No sentence contains a raw step code.
 **Tests:** table-driven unit tests; `lint:copy` passes on the strings.
 **Prototype check:** Now/Next lines for each step on the ticket page header.
 **Size:** S
@@ -217,3 +217,4 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 - 2026-11-10 (P02.T5): a Waiting company or team step labels "Move on to…" as "Move on to the previous step" when the ticket has a previous step, else "Move on to In progress".
 - 2026-11-10 (P02.T5): with `review_before_test` on, "Send to testing" is hidden without a note under the buttons (`Transition::explainsBlock` is false), while `check()` refuses it with "Team rule: code review comes before testing." (`CatalogueTransitionPolicyMoveTest::withReviewFirstOnSendToTestingIsHiddenWithoutANoteButCheckRefusesItWithTheRulesNote`).
 - 2026-11-10 (P02.T5): `TransitionView` and an allowed `Decision` carry the `MoveTarget`, so P03 applies the move without recomputing it; `checkMoveTo(ticket, actor, rules, target, steps)` returns `MoveTarget::step` of the chosen step and refuses, without a note, a target not in `steps` (the caller passes the same `StepQueries::moveTargetsFor` list as to `moveChoices(ticket, actor, steps)`).
+- 2026-11-10 (P02.T7): `NowNext` and `VerbFor` are Api interfaces implemented by `Application\Turn\{PlainNowNext,PlainVerbFor}`, not in Domain, so Ticketing and Insight can call them (the P02.T6 precedent). Instead of a names map the caller passes a `NowNextContext` (step name, first names by user id, viewer, asker of the open question, `review_before_test`): the turn alone does not say who asked. With the viewer, the sentence reads "You build it", "Waiting for input from you", "Mia answers your question". `next` returns null for Done and for a team or company step (its next sentence depends on the step it moves on to). A missing reviewer or tester reads "a reviewer" or "a tester".
