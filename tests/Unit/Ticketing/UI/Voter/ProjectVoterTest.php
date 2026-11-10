@@ -28,6 +28,7 @@ final class ProjectVoterTest extends TestCase
 {
     private const string LENA = '0197a3c0-0000-7000-8000-0000000014a1';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000014a2';
+    private const string MIA = '0197a3c0-0000-7000-8000-0000000014a3';
     private const string RAJ = '0197a3c0-0000-7000-8000-0000000014a4';
     private const string SARA = '0197a3c0-0000-7000-8000-0000000014a5';
     private const string BETA_ADMIN = '0197a3c0-0000-7000-8000-0000000014a6';
@@ -99,8 +100,8 @@ final class ProjectVoterTest extends TestCase
     {
         $voter = $this->voter();
 
-        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::LENA, self::SHOP));
-        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::LENA, self::MOBILE));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, ProjectPermission::CREATE, self::LENA, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::CREATE, self::LENA, self::MOBILE));
         self::assertCount(0, $this->teamQueries);
     }
 
@@ -109,11 +110,11 @@ final class ProjectVoterTest extends TestCase
     {
         $voter = $this->voter();
 
-        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::SARA, self::SHOP));
-        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::SARA, self::MOBILE));
-        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::SARA, self::CHECKOUT));
-        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, self::BETA_ADMIN, self::CHECKOUT));
-        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::BETA_ADMIN, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, ProjectPermission::CREATE, self::SARA, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, ProjectPermission::CREATE, self::SARA, self::MOBILE));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::CREATE, self::SARA, self::CHECKOUT));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, ProjectPermission::CREATE, self::BETA_ADMIN, self::CHECKOUT));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::CREATE, self::BETA_ADMIN, self::SHOP));
     }
 
     #[Test]
@@ -121,8 +122,8 @@ final class ProjectVoterTest extends TestCase
     {
         $voter = $this->voter();
 
-        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::RAJ, self::SHOP));
-        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, self::OMAR, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::CREATE, self::RAJ, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::CREATE, self::OMAR, self::SHOP));
         self::assertCount(0, $this->teamQueries);
     }
 
@@ -133,20 +134,64 @@ final class ProjectVoterTest extends TestCase
     }
 
     #[Test]
+    public function onlyTheLeadOfTheOwningTeamUnlinksAProject(): void
+    {
+        $voter = $this->voter();
+
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, ProjectPermission::UNLINK, self::LENA, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::UNLINK, self::LENA, self::MOBILE));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::UNLINK, self::OMAR, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::UNLINK, self::MIA, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::UNLINK, self::RAJ, self::SHOP));
+    }
+
+    #[Test]
+    public function anAdminWithNoLeadRoleUnlinksNoProjectOfTheirOrganization(): void
+    {
+        $voter = $this->voter();
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::UNLINK, self::SARA, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::UNLINK, self::BETA_ADMIN, self::CHECKOUT));
+        self::assertCount(0, $this->teamQueries);
+    }
+
+    #[Test]
+    public function theLeadOrAnAdminOfTheOrganizationLinksAProjectToTheTeam(): void
+    {
+        $voter = $this->voter();
+
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, ProjectPermission::LINK, self::LENA, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::LINK, self::LENA, self::MOBILE));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $this->decide($voter, ProjectPermission::LINK, self::SARA, self::MOBILE));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::LINK, self::BETA_ADMIN, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::LINK, self::OMAR, self::SHOP));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->decide($voter, ProjectPermission::LINK, self::MIA, self::SHOP));
+    }
+
+    #[Test]
+    public function withoutAnActorUnlinkAndLinkAreDenied(): void
+    {
+        $voter = $this->voter();
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), new TeamId(self::SHOP), [ProjectPermission::UNLINK]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), new TeamId(self::SHOP), [ProjectPermission::LINK]));
+    }
+
+    #[Test]
     public function theTeamsOfAnOrganizationAreReadOncePerRequestAndAgainAfterTheReset(): void
     {
         $voter = $this->voter();
 
-        $this->decide($voter, self::SARA, self::SHOP);
-        $this->decide($voter, self::SARA, self::MOBILE);
-        $this->decide($voter, self::SARA, self::CHECKOUT);
+        $this->decide($voter, ProjectPermission::CREATE, self::SARA, self::SHOP);
+        $this->decide($voter, ProjectPermission::CREATE, self::SARA, self::MOBILE);
+        $this->decide($voter, ProjectPermission::CREATE, self::SARA, self::CHECKOUT);
         self::assertCount(1, $this->teamQueries);
-        $this->decide($voter, self::BETA_ADMIN, self::CHECKOUT);
-        $this->decide($voter, self::BETA_ADMIN, self::SHOP);
+        $this->decide($voter, ProjectPermission::CREATE, self::BETA_ADMIN, self::CHECKOUT);
+        $this->decide($voter, ProjectPermission::CREATE, self::BETA_ADMIN, self::SHOP);
         self::assertCount(2, $this->teamQueries);
 
         $voter->reset();
-        $this->decide($voter, self::SARA, self::SHOP);
+        $this->decide($voter, ProjectPermission::CREATE, self::SARA, self::SHOP);
 
         self::assertCount(3, $this->teamQueries);
     }
@@ -160,11 +205,13 @@ final class ProjectVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new TeamId(self::SHOP), [TeamPermission::VIEW]));
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new OrganizationId(self::ACME_FOODS), [ProjectPermission::CREATE]));
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, self::SHOP, [ProjectPermission::CREATE]));
+        self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, self::SHOP, [ProjectPermission::UNLINK]));
+        self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new OrganizationId(self::ACME_FOODS), [ProjectPermission::LINK]));
     }
 
-    private function decide(ProjectVoter $voter, string $userId, string $teamId): int
+    private function decide(ProjectVoter $voter, string $attribute, string $userId, string $teamId): int
     {
-        return $voter->vote(self::tokenOf($userId), new TeamId($teamId), [ProjectPermission::CREATE]);
+        return $voter->vote(self::tokenOf($userId), new TeamId($teamId), [$attribute]);
     }
 
     private static function tokenOf(string $userId): TokenInterface
@@ -173,7 +220,8 @@ final class ProjectVoterTest extends TestCase
     }
 
     /**
-     * Lena leads Shop and has no org role; Omar is a member of Shop; Raj is a Manager; Sara is an Admin of Acme Foods
+     * Lena leads Shop and has no org role; Omar is a member of Shop; Mia is a viewer of Shop; Raj is a Manager and a
+     * viewer of Shop; Sara is an Admin of Acme Foods
      * with no team role; the Beta Bakery admin is an Admin of Beta Bakery.
      */
     private function voter(): ProjectVoter
@@ -184,6 +232,7 @@ final class ProjectVoterTest extends TestCase
         return new ProjectVoter(new FixedCurrentActor([
             self::LENA => $actor(self::LENA, self::ACME_FOODS, new Roles(false, false, [$shop], [], [])),
             self::OMAR => $actor(self::OMAR, self::ACME_FOODS, new Roles(false, false, [], [$shop], [])),
+            self::MIA => $actor(self::MIA, self::ACME_FOODS, new Roles(false, false, [], [], [$shop])),
             self::RAJ => $actor(self::RAJ, self::ACME_FOODS, new Roles(false, true, [], [], [$shop])),
             self::SARA => $actor(self::SARA, self::ACME_FOODS, new Roles(true, false, [], [], [])),
             self::BETA_ADMIN => $actor(self::BETA_ADMIN, self::BETA_BAKERY, new Roles(true, false, [], [], [])),
