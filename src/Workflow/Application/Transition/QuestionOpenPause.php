@@ -4,25 +4,17 @@ declare(strict_types=1);
 
 namespace App\Workflow\Application\Transition;
 
-use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleNote;
-use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\TicketState;
-use App\Workflow\Domain\Transition;
 
 /**
  * No move while a question is open, for everyone, the asked person too: they answer first. It is not one of the
- * rules a team can turn off.
+ * rules a team can turn off, and not a guard: the policy asks it once per ticket, before any verb.
  */
-final readonly class QuestionOpenPause implements Guard
+final readonly class QuestionOpenPause
 {
-    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote
-    {
-        return $this->noteFor($ticket);
-    }
-
     /**
-     * The same answer for every move, so it can be asked once per ticket, also in a step no verb leaves.
+     * The same answer for every move, so it is asked once per ticket, also in a step no verb leaves.
      */
     public function noteFor(TicketState $ticket): ?RuleNote
     {

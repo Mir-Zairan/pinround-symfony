@@ -17,9 +17,13 @@ use App\Workflow\Domain\Transition;
  */
 final readonly class TesterMovesDone implements Guard
 {
+    public function __construct(private MoveRights $moveRights)
+    {
+    }
+
     public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote
     {
-        if (!$rules->testerMovesDone || CoreStep::Done !== $transition->to || $actor->isTester()) {
+        if (!$rules->testerMovesDone || CoreStep::Done !== $transition->to || $this->moveRights->isTester($actor)) {
             return null;
         }
 

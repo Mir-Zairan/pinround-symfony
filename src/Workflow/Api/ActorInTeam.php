@@ -13,8 +13,15 @@ use App\SharedKernel\Domain\UserId;
  */
 final readonly class ActorInTeam
 {
-    private const array TEAM_ROLES = ['lead', 'member', 'viewer'];
-    private const array JOBS = ['developer', 'tester', 'other'];
+    public const string TEAM_ROLE_LEAD = 'lead';
+    public const string TEAM_ROLE_MEMBER = 'member';
+    public const string TEAM_ROLE_VIEWER = 'viewer';
+    public const string JOB_DEVELOPER = 'developer';
+    public const string JOB_TESTER = 'tester';
+    public const string JOB_OTHER = 'other';
+
+    private const array TEAM_ROLES = [self::TEAM_ROLE_LEAD, self::TEAM_ROLE_MEMBER, self::TEAM_ROLE_VIEWER];
+    private const array JOBS = [self::JOB_DEVELOPER, self::JOB_TESTER, self::JOB_OTHER];
 
     /**
      * @param string|null $teamRole lead, member or viewer: the person's team role in the ticket's team; null when they
@@ -33,23 +40,5 @@ final readonly class ActorInTeam
         if (null !== $job && !\in_array($job, self::JOBS, true)) {
             throw new \InvalidArgumentException(\sprintf('"%s" is not a job.', $job));
         }
-    }
-
-    public function leadsTheTeam(): bool
-    {
-        return 'lead' === $this->teamRole;
-    }
-
-    /**
-     * True for the team roles lead and member; a viewer reads and comments only.
-     */
-    public function movesTickets(): bool
-    {
-        return 'lead' === $this->teamRole || 'member' === $this->teamRole;
-    }
-
-    public function isTester(): bool
-    {
-        return 'tester' === $this->job;
     }
 }

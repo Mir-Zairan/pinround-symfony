@@ -42,10 +42,10 @@ final readonly class Transition
     }
 
     /**
-     * Whether the verb takes a ticket out of the step it is in: one of its from steps, and in To do with or without an
-     * assignee as its assigneeInTodo says.
+     * Whether the verb can be used from this step: one of its from steps, and in To do with or without an assignee as
+     * its assigneeInTodo says.
      */
-    public function leaves(CoreStep $step, bool $hasAssignee): bool
+    public function appliesIn(CoreStep $step, bool $hasAssignee): bool
     {
         if (!$this->startsFrom($step)) {
             return false;

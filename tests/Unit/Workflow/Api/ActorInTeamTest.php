@@ -15,27 +15,24 @@ final class ActorInTeamTest extends TestCase
     private const string LENA = '0190a000-0000-7000-8000-00000000000a';
 
     /**
-     * @return iterable<string, array{string|null, string|null, bool, bool, bool}> team role, job, leads the team,
-     *                                                                             moves tickets, is a tester
+     * @return iterable<string, array{string|null, string|null}> team role, job
      */
-    public static function teamRolesAndJobs(): iterable
+    public static function validTeamRolesAndJobs(): iterable
     {
-        yield 'lead and developer' => ['lead', 'developer', true, true, false];
-        yield 'member and tester' => ['member', 'tester', false, true, true];
-        yield 'viewer and tester' => ['viewer', 'tester', false, false, true];
-        yield 'member with the job other' => ['member', 'other', false, true, false];
-        yield 'no role and no job' => [null, null, false, false, false];
+        yield 'lead and developer' => ['lead', 'developer'];
+        yield 'member and tester' => ['member', 'tester'];
+        yield 'viewer and other' => ['viewer', 'other'];
+        yield 'no role and no job' => [null, null];
     }
 
     #[Test]
-    #[DataProvider('teamRolesAndJobs')]
-    public function onlyALeadLeadsAndOnlyALeadOrMemberMovesTickets(?string $teamRole, ?string $job, bool $leadsTheTeam, bool $movesTickets, bool $isTester): void
+    #[DataProvider('validTeamRolesAndJobs')]
+    public function keepsEveryNamedTeamRoleAndJobAsGiven(?string $teamRole, ?string $job): void
     {
         $actor = new ActorInTeam(new UserId(self::LENA), $teamRole, $job);
 
-        self::assertSame($leadsTheTeam, $actor->leadsTheTeam());
-        self::assertSame($movesTickets, $actor->movesTickets());
-        self::assertSame($isTester, $actor->isTester());
+        self::assertSame($teamRole, $actor->teamRole);
+        self::assertSame($job, $actor->job);
     }
 
     #[Test]

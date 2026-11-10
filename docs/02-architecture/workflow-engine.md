@@ -80,7 +80,7 @@ Three rules exist today. Each is stored per org, and per team under the `team` p
 
 Which rule set applies to a team (built in P02.T3: `Workflow\Api\RuleQueries::rulesFor`, `Infrastructure\Doctrine\DbalRuleQueries`): under the policy `team`, the team's own row when it has one, else the organization's; under `extend` and `locked` always the organization's row, even if the team still has an old row of its own. An organization with no row has all three rules on. Under the policy `locked`, `StepQueries::moveTargetsFor` leaves the team's own steps out of the steps a ticket may be moved to; a ticket already in a team step keeps it.
 
-Each rule is one guard class that implements `Workflow\Application\Transition\Guard` (built in P02.T4: `TesterMovesDone`, `NoSelfReview`, `ReviewBeforeTest`, and `QuestionOpenPause`, which no team can turn off). Guards are in Application, not Domain, because they read Workflow's Api types:
+Each rule is one guard class that implements `Workflow\Application\Transition\Guard` (built in P02.T4: `TesterMovesDone`, `NoSelfReview`, `ReviewBeforeTest`). An open question is not a guard: `QuestionOpenPause`, which no team can turn off, is the pause check the policy runs first, once per ticket, before any verb. Guards are in Application, not Domain, because they read Workflow's Api types:
 
 ```php
 interface Guard
@@ -90,7 +90,7 @@ interface Guard
 }
 ```
 
-`ActorInTeam` is the person's team role (lead, member, viewer or none) and job in the ticket's team; org roles grant no move. A guard is asked also about a person who may not use the verb, so its note can explain the rule to them, as the assignee in code review is told who reviews their code.
+`ActorInTeam` is the person's team role (lead, member, viewer or none) and job in the ticket's team, plain data; org roles grant no move. What they let the person do (leads the team, moves tickets, is a tester) is `Application\Transition\MoveRights`. A guard is asked also about a person who may not use the verb, so its note can explain the rule to them, as the assignee in code review is told who reviews their code.
 
 New rules are added as new guard classes plus a column in `wf_rule_set`, plus an ADR if they change behaviour for everyone.
 

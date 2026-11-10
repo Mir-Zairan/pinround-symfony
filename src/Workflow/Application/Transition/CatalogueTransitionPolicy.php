@@ -21,7 +21,7 @@ use App\Workflow\Domain\Verb;
 
 /**
  * The transition policy over the verb catalogue and the guards. In this order: a person without the team role lead or
- * member gets no verb and the managers' note; an open question pauses every move; then every verb that leaves the
+ * member gets no verb and the managers' note; an open question pauses every move; then every verb that applies in the
  * ticket's step is offered to its movers unless a guard blocks it. The first blocking note in catalogue order is the
  * rule note. A company or team step has no verb yet (Move on to… comes with P02.T5).
  */
@@ -35,6 +35,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
     public function __construct(
         private TransitionCatalogue $catalogue,
         private QuestionOpenPause $questionOpenPause,
+        private MoveRights $moveRights,
         TesterMovesDone $testerMovesDone,
         NoSelfReview $noSelfReview,
         ReviewBeforeTest $reviewBeforeTest,
@@ -52,7 +53,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         $transitions = [];
         $ruleNote = null;
         foreach ($this->catalogue->all() as $transition) {
-            if (!self::leavesTicketsStep($transition, $ticket)) {
+            if (!self::appliesToTicketsStep($transition, $ticket)) {
                 continue;
             }
 
@@ -79,7 +80,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         }
 
         $transition = $this->catalogue->for($knownVerb);
-        if (!self::leavesTicketsStep($transition, $ticket)) {
+        if (!self::appliesToTicketsStep($transition, $ticket)) {
             return Decision::refused(null);
         }
 
@@ -93,14 +94,14 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 
     private function noteForEveryMove(TicketState $ticket, ActorInTeam $actor): ?RuleNote
     {
-        if (null === $ticket->teamId || !$actor->movesTickets()) {
+        if (null === $ticket->teamId || !$this->moveRights->movesTickets($actor)) {
             return new RuleNote(self::NO_TEAM_ROLE_NOTE);
         }
 
         return $this->questionOpenPause->noteFor($ticket);
     }
 
-    private static function leavesTicketsStep(Transition $transition, TicketState $ticket): bool
+    private static function appliesToTicketsStep(Transition $transition, TicketState $ticket): bool
     {
         if (null === $ticket->coreCode) {
             return false;
@@ -108,7 +109,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 
         $step = CoreStep::tryFrom($ticket->coreCode) ?? throw new \InvalidArgumentException(\sprintf('"%s" is not a core step.', $ticket->coreCode));
 
-        return $transition->leaves($step, null !== $ticket->assigneeId);
+        return $transition->appliesIn($step, null !== $ticket->assigneeId);
     }
 
     private function blockingNote(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote
@@ -125,22 +126,22 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 
     private function mayUse(TicketState $ticket, Transition $transition, ActorInTeam $actor): bool
     {
-        return array_any($transition->movers, static fn (Mover $mover): bool => self::isMover($mover, $ticket, $actor));
+        return array_any($transition->movers, fn (Mover $mover): bool => $this->isMover($mover, $ticket, $actor));
     }
 
     /**
      * A tester is the ticket's tester or anyone with the job tester in the team (personas-and-roles.md: Pass it and
      * Needs changes are for the job tester); a checker only counts while the check is needed.
      */
-    private static function isMover(Mover $mover, TicketState $ticket, ActorInTeam $actor): bool
+    private function isMover(Mover $mover, TicketState $ticket, ActorInTeam $actor): bool
     {
         return match ($mover) {
-            Mover::Lead => $actor->leadsTheTeam(),
-            Mover::LeadWhenUnassigned => $actor->leadsTheTeam() && null === $ticket->assigneeId,
+            Mover::Lead => $this->moveRights->leadsTheTeam($actor),
+            Mover::LeadWhenUnassigned => $this->moveRights->leadsTheTeam($actor) && null === $ticket->assigneeId,
             Mover::Assignee => self::isSamePerson($ticket->assigneeId, $actor->userId),
             Mover::Checker => $ticket->isCheckNeeded && self::isSamePerson($ticket->checkerId, $actor->userId),
             Mover::Reviewer => self::isSamePerson($ticket->reviewerId, $actor->userId),
-            Mover::Tester => $actor->isTester() || self::isSamePerson($ticket->testerId, $actor->userId),
+            Mover::Tester => $this->moveRights->isTester($actor) || self::isSamePerson($ticket->testerId, $actor->userId),
         };
     }
 

@@ -19,7 +19,7 @@ final readonly class Decision
     }
 
     /**
-     * @param RuleNote|null $ruleNote null when no rule explains it, for example a verb that does not leave the ticket's step
+     * @param RuleNote|null $ruleNote null when no rule explains it, for example a verb that does not apply in the ticket's step
      */
     public static function refused(?RuleNote $ruleNote): self
     {

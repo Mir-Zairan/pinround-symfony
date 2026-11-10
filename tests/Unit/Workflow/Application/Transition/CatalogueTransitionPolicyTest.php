@@ -10,6 +10,7 @@ use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionView;
 use App\Workflow\Application\Transition\CatalogueTransitionPolicy;
+use App\Workflow\Application\Transition\MoveRights;
 use App\Workflow\Application\Transition\NoSelfReview;
 use App\Workflow\Application\Transition\QuestionOpenPause;
 use App\Workflow\Application\Transition\ReviewBeforeTest;
@@ -135,10 +136,15 @@ final class CatalogueTransitionPolicyTest extends TestCase
     #[Test]
     public function aPersonWhoIsNotATesterSeesTheDoneRuleInTesting(): void
     {
-        $availability = self::policy()->available(self::omarsTicketInTesting(), GuardFixtures::lena(), GuardFixtures::rules());
+        $policy = self::policy();
+
+        $availability = $policy->available(self::omarsTicketInTesting(), GuardFixtures::lena(), GuardFixtures::rules());
+        $decision = $policy->check(self::omarsTicketInTesting(), GuardFixtures::lena(), GuardFixtures::rules(), Verb::PassIt->value);
 
         self::assertSame([], self::verbsOf($availability));
         self::assertSame('Team rule: only the tester moves a ticket to Done.', $availability->ruleNote?->render(GuardFixtures::nameOf(...)));
+        self::assertFalse($decision->isAllowed);
+        self::assertSame('Team rule: only the tester moves a ticket to Done.', $decision->ruleNote?->render(GuardFixtures::nameOf(...)));
     }
 
     /**
@@ -217,7 +223,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
     }
 
     #[Test]
-    public function aVerbThatDoesNotLeaveTheTicketsStepIsRefusedWithoutANote(): void
+    public function aVerbThatDoesNotApplyInTheTicketsStepIsRefusedWithoutANote(): void
     {
         $decision = self::policy()->check(GuardFixtures::ticket('progress', 'doing'), GuardFixtures::lena(), GuardFixtures::rules(), Verb::PlanIt->value);
 
@@ -271,7 +277,9 @@ final class CatalogueTransitionPolicyTest extends TestCase
 
     private static function policy(): CatalogueTransitionPolicy
     {
-        return new CatalogueTransitionPolicy(new TransitionCatalogue(), new QuestionOpenPause(), new TesterMovesDone(), new NoSelfReview(), new ReviewBeforeTest());
+        $moveRights = new MoveRights();
+
+        return new CatalogueTransitionPolicy(new TransitionCatalogue(), new QuestionOpenPause(), $moveRights, new TesterMovesDone($moveRights), new NoSelfReview(), new ReviewBeforeTest());
     }
 
     /**

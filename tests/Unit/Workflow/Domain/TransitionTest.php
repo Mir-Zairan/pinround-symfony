@@ -35,7 +35,7 @@ final class TransitionTest extends TestCase
 
     /**
      * @return iterable<string, array{AssigneeInTodo, CoreStep, bool, bool}> assignee in To do, ticket's step, has an
-     *                                                                       assignee, leaves
+     *                                                                       assignee, applies in it
      */
     public static function ticketsInAStep(): iterable
     {
@@ -52,11 +52,11 @@ final class TransitionTest extends TestCase
 
     #[Test]
     #[DataProvider('ticketsInAStep')]
-    public function leavesOnlyItsFromStepsAndInToDoOnlyWithTheAssigneeItAsksFor(AssigneeInTodo $assigneeInTodo, CoreStep $step, bool $hasAssignee, bool $isLeaving): void
+    public function appliesInOnlyItsFromStepsAndInToDoOnlyWithTheAssigneeItAsksFor(AssigneeInTodo $assigneeInTodo, CoreStep $step, bool $hasAssignee, bool $appliesInStep): void
     {
         $transition = new Transition(Verb::GiveItTo, 'Give it to…', [CoreStep::Todo, CoreStep::Backlog], CoreStep::Todo, [Mover::Lead], true, $assigneeInTodo);
 
-        self::assertSame($isLeaving, $transition->leaves($step, $hasAssignee));
+        self::assertSame($appliesInStep, $transition->appliesIn($step, $hasAssignee));
     }
 
     #[Test]
