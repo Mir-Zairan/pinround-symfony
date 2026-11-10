@@ -7,20 +7,24 @@ namespace App\Ticketing\Application\UnlinkProject;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Ticketing\Application\OpenTicketCounts;
+use App\Ticketing\Application\OrganizationProjects;
 use App\Ticketing\Application\ProjectNotFound;
-use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Domain\Projects;
 
 /**
  * Unlinks a project from the team that owns it (FR-ORG-06); it has no team until LinkProject links it again, and its
- * tickets are kept. Its writes share the caller's transaction, begun under $organizationId. Who may unlink is the
- * voter's question, asked by the UI: ProjectPermission::UNLINK on $owningTeam. The project must then be that team's,
- * so a lead never unlinks another team's project.
+ * tickets are kept. It must run in the caller's transaction, begun under $organizationId: the project's row stays
+ * locked until it ends, so a link of the same project, or a ticket taking a number in it, waits for it. Who may unlink
+ * is the voter's question, asked by the UI: ProjectPermission::UNLINK on $owningTeam. The project must then be that
+ * team's, so a lead never unlinks another team's project.
  */
 final readonly class UnlinkProject
 {
-    public function __construct(private Projects $projects, private OpenTicketCounts $openTicketCounts)
-    {
+    public function __construct(
+        private Projects $projects,
+        private OrganizationProjects $organizationProjects,
+        private OpenTicketCounts $openTicketCounts,
+    ) {
     }
 
     /**
@@ -31,17 +35,11 @@ final readonly class UnlinkProject
      * @throws ProjectNotOfTeam      when the project is not linked to $owningTeam, also when it is linked to no team;
      *                               nothing is saved
      * @throws ProjectHasOpenTickets when the project still has open tickets; nothing is saved
+     * @throws \LogicException       when no transaction is open; nothing is saved
      */
     public function __invoke(OrganizationId $organizationId, TeamId $owningTeam, string $projectId): void
     {
-        try {
-            $project = $this->projects->byId(new ProjectId($projectId));
-        } catch (\InvalidArgumentException) {
-            $project = null;
-        }
-        if (null === $project || !$project->organizationId()->equals($organizationId)) {
-            throw new ProjectNotFound('That project is not in this organization.');
-        }
+        $project = $this->organizationProjects->lockedProjectOf($organizationId, $projectId);
         if (!($project->owningTeam()?->equals($owningTeam) ?? false)) {
             throw new ProjectNotOfTeam('That project is not linked to this team.');
         }

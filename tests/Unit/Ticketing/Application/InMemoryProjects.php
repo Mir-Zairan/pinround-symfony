@@ -20,6 +20,9 @@ final class InMemoryProjects implements Projects
     /** @var list<string> the project id of each save() call */
     public array $saveCalls = [];
 
+    /** @var list<string> the project id of each lockById() call */
+    public array $lockCalls = [];
+
     /**
      * @param bool $isKeyTakenOnAdd add() refuses every key, as when another transaction saved the key after byKey()
      */
@@ -37,6 +40,13 @@ final class InMemoryProjects implements Projects
 
     public function byId(ProjectId $id): ?Project
     {
+        return $this->saved[$id->toString()] ?? null;
+    }
+
+    public function lockById(ProjectId $id): ?Project
+    {
+        $this->lockCalls[] = $id->toString();
+
         return $this->saved[$id->toString()] ?? null;
     }
 

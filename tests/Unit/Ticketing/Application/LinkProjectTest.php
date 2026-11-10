@@ -8,6 +8,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Ticketing\Application\LinkProject\LinkProject;
 use App\Ticketing\Application\LinkProject\ProjectStillLinked;
+use App\Ticketing\Application\OrganizationProjects;
 use App\Ticketing\Application\OrganizationTeams;
 use App\Ticketing\Application\ProjectNotFound;
 use App\Ticketing\Application\ProjectTeamNotFound;
@@ -39,6 +40,7 @@ final class LinkProjectTest extends TestCase
         self::linkProject($projects)(self::acmeFoods(), new TeamId(self::MOBILE_TEAM), self::SHOP_PROJECT);
 
         self::assertSame(self::MOBILE_TEAM, $shop->owningTeam()?->toString());
+        self::assertSame([self::SHOP_PROJECT], $projects->lockCalls, 'The project was checked without its row lock.');
         self::assertSame([self::SHOP_PROJECT], $projects->saveCalls);
     }
 
@@ -118,7 +120,7 @@ final class LinkProjectTest extends TestCase
 
     private static function linkProject(InMemoryProjects $projects): LinkProject
     {
-        return new LinkProject($projects, new OrganizationTeams(new FixedTeamQueries(self::acmeFoods(), [new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)])));
+        return new LinkProject($projects, new OrganizationProjects($projects), new OrganizationTeams(new FixedTeamQueries(self::acmeFoods(), [new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)])));
     }
 
     private static function unlinkedShopProject(): Project

@@ -190,6 +190,40 @@ final class DoctrineProjectsTest extends KernelTestCase
     }
 
     #[Test]
+    public function lockByIdFindsOnlyAProjectOfTheTransactionsOrganization(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->projects()->add(
+            new Project(new ProjectId(self::SHOP_PROJECT), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), new ProjectKey('SHOP'), 'Shop'),
+        ));
+        $this->entityManager()->clear();
+
+        $lockedIdOf = fn (string $organizationId): ?string => $this->transactions()->rolledBackAs(
+            $organizationId,
+            fn (): ?string => $this->projects()->lockById(new ProjectId(self::SHOP_PROJECT))?->id()->toString(),
+        );
+
+        self::assertSame(
+            [self::ACME_FOODS => self::SHOP_PROJECT, self::OTHER_ORGANIZATION => null],
+            [self::ACME_FOODS => $lockedIdOf(self::ACME_FOODS), self::OTHER_ORGANIZATION => $lockedIdOf(self::OTHER_ORGANIZATION)],
+        );
+    }
+
+    #[Test]
+    public function lockByIdRefusesToRunOutsideATransaction(): void
+    {
+        self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
+
+        try {
+            $this->projects()->lockById(new ProjectId(self::SHOP_PROJECT));
+            self::fail('A project was locked outside a transaction.');
+        } catch (\LogicException $outsideATransaction) {
+            self::assertSame('Locking a project needs an open transaction.', $outsideATransaction->getMessage());
+        } finally {
+            self::getContainer()->get(TenantContext::class)->reset();
+        }
+    }
+
+    #[Test]
     public function aNewIdentityIsAProjectIdNotHandedOutBefore(): void
     {
         self::assertFalse($this->projects()->nextIdentity()->equals($this->projects()->nextIdentity()));

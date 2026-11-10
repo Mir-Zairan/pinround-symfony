@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Ticketing\Application;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\Ticketing\Application\OrganizationProjects;
 use App\Ticketing\Application\ProjectNotFound;
 use App\Ticketing\Application\UnlinkProject\ProjectHasOpenTickets;
 use App\Ticketing\Application\UnlinkProject\ProjectNotOfTeam;
@@ -33,9 +34,10 @@ final class UnlinkProjectTest extends TestCase
         $shop = self::shopProject();
         $projects = new InMemoryProjects(false, $shop);
 
-        new UnlinkProject($projects, new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::SHOP_TEAM), self::SHOP_PROJECT);
+        new UnlinkProject($projects, new OrganizationProjects($projects), new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::SHOP_TEAM), self::SHOP_PROJECT);
 
         self::assertNull($shop->owningTeam());
+        self::assertSame([self::SHOP_PROJECT], $projects->lockCalls, 'The project was checked without its row lock.');
         self::assertSame([self::SHOP_PROJECT], $projects->saveCalls);
     }
 
@@ -57,7 +59,7 @@ final class UnlinkProjectTest extends TestCase
         $projects = new InMemoryProjects(false, self::shopProject(), $beta);
 
         try {
-            new UnlinkProject($projects, new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::SHOP_TEAM), $projectId);
+            new UnlinkProject($projects, new OrganizationProjects($projects), new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::SHOP_TEAM), $projectId);
             self::fail('A project the organization does not have was unlinked.');
         } catch (ProjectNotFound $notFound) {
             self::assertSame('That project is not in this organization.', $notFound->getMessage());
@@ -74,7 +76,7 @@ final class UnlinkProjectTest extends TestCase
         $projects = new InMemoryProjects(false, $shop);
 
         try {
-            new UnlinkProject($projects, new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::MOBILE_TEAM), self::SHOP_PROJECT);
+            new UnlinkProject($projects, new OrganizationProjects($projects), new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::MOBILE_TEAM), self::SHOP_PROJECT);
             self::fail('Another team unlinked the project.');
         } catch (ProjectNotOfTeam $notOfTeam) {
             self::assertSame('That project is not linked to this team.', $notOfTeam->getMessage());
@@ -93,7 +95,7 @@ final class UnlinkProjectTest extends TestCase
 
         $this->expectException(ProjectNotOfTeam::class);
 
-        new UnlinkProject($projects, new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::SHOP_TEAM), self::SHOP_PROJECT);
+        new UnlinkProject($projects, new OrganizationProjects($projects), new FixedOpenTicketCounts())(self::acmeFoods(), new TeamId(self::SHOP_TEAM), self::SHOP_PROJECT);
     }
 
     /**
@@ -113,7 +115,7 @@ final class UnlinkProjectTest extends TestCase
         $projects = new InMemoryProjects(false, $shop);
 
         try {
-            new UnlinkProject($projects, new FixedOpenTicketCounts([self::SHOP_PROJECT => $openTickets]))(self::acmeFoods(), new TeamId(self::SHOP_TEAM), self::SHOP_PROJECT);
+            new UnlinkProject($projects, new OrganizationProjects($projects), new FixedOpenTicketCounts([self::SHOP_PROJECT => $openTickets]))(self::acmeFoods(), new TeamId(self::SHOP_TEAM), self::SHOP_PROJECT);
             self::fail('A project with open tickets was unlinked.');
         } catch (ProjectHasOpenTickets $hasOpenTickets) {
             self::assertSame([$openTickets, $message], [$hasOpenTickets->openTickets, $hasOpenTickets->getMessage()]);

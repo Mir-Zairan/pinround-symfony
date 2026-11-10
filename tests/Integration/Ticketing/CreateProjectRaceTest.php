@@ -109,6 +109,11 @@ final class CreateProjectRaceTest extends KernelTestCase
                 return $this->projects->byId($id);
             }
 
+            public function lockById(ProjectId $id): ?Project
+            {
+                return $this->projects->lockById($id);
+            }
+
             public function byKey(ProjectKey $key): ?Project
             {
                 $found = $this->projects->byKey($key);

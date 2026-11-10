@@ -83,7 +83,7 @@ Ticketing, Workflow and Conversation. Only the `Ticketing → Workflow` link (`s
 
 ```mermaid
 erDiagram
-  org_team ||--o{ tkt_project : owns
+  org_team |o--o{ tkt_project : owns
   tkt_project ||--o{ tkt_ticket : contains
   wf_step ||--o{ tkt_ticket : "current step (id only)"
   tkt_ticket ||--o{ tkt_ticket_event : history
@@ -190,7 +190,7 @@ Only the important columns are listed. Every tenant table also has `organization
 
 | Table | Columns | Constraints / indexes |
 |---|---|---|
-| tkt_project | id, organization_id, team_id, key (`SHOP`), name, next_number int (the number the next ticket gets; starts at 1, `CHECK (next_number >= 1)`) | `UNIQUE (organization_id, key)` |
+| tkt_project | id, organization_id, team_id NULL (null while the project is unlinked; `Version20261111100000`), key (`SHOP`), name, next_number int (the number the next ticket gets; starts at 1, `CHECK (next_number >= 1)`) | `UNIQUE (organization_id, key)` |
 | tkt_ticket | id, organization_id, project_id, number int, key text, title, description, type (`bug`/`story`/`task`), priority (`blocker`/`critical`/`major`/`normal`/`minor`), priority_rank smallint (0 = blocker … 4 = minor, set with priority), step_id, previous_step_id NULL, assignee_id NULL, pending_assignee_id NULL, reviewer_id NULL, tester_id NULL, waiting_on_user_id NULL, waiting_on_label NULL, reporter_id, team_id NULL, visibility (`all`/`team`), release NULL, parent_id NULL, components `text[]`, check_reasons `text[]`, checked_at, checked_by, closed_as_duplicate_of NULL, closed_at NULL (set when the step's group becomes `done`, cleared on reopen), version, created_at, updated_at, search `tsvector` GENERATED (title weight A, description B) STORED | `UNIQUE (organization_id, project_id, number)`; `UNIQUE (organization_id, key)`; indexes: see [Index catalogue](#index-catalogue) |
 | tkt_ticket_event | id, organization_id, ticket_id, actor_id, type, from_step, to_step, payload `jsonb`, at | Partitioned by `RANGE (at)` monthly; `PRIMARY KEY (id, at)` (a partitioned table's key must contain the partition column); `(organization_id, ticket_id, at DESC)` |
 | tkt_duplicate_link | organization_id, ticket_id, candidate_id, score real, source (`fts`/`ai`), decided (`same`/`different`/NULL) | `PK (organization_id, ticket_id, candidate_id)` |
