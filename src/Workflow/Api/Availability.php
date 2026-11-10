@@ -10,7 +10,7 @@ namespace App\Workflow\Api;
 final readonly class Availability
 {
     /**
-     * @param list<TransitionView> $transitions in the order the buttons are shown
+     * @param list<TransitionView> $transitions in the order the buttons are shown; at most one is primary
      * @param RuleNote|null        $ruleNote    why a move is not offered, or null when there is nothing to explain
      */
     public function __construct(public array $transitions, public ?RuleNote $ruleNote)

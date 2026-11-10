@@ -23,10 +23,10 @@ final class TransitionPolicyWiringTest extends KernelTestCase
 
         $availability = $policy->available(GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::lena(), GuardFixtures::rules());
 
-        self::assertSame(
-            ['plan_it' => 'Plan it', 'give_it_to' => 'Give it to…'],
-            array_column(array_map(static fn (TransitionView $transition): array => ['verb' => $transition->verb, 'label' => $transition->label], $availability->transitions), 'label', 'verb'),
-        );
+        self::assertEquals([
+            new TransitionView('plan_it', 'Plan it', true),
+            new TransitionView('give_it_to', 'Give it to…', false),
+        ], $availability->transitions);
         self::assertNull($availability->ruleNote);
     }
 }

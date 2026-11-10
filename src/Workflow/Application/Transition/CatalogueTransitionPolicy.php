@@ -23,7 +23,9 @@ use App\Workflow\Domain\Verb;
  * The transition policy over the verb catalogue and the guards. In this order: a person without the team role lead or
  * member gets no verb and the managers' note; an open question pauses every move; then every verb that applies in the
  * ticket's step is offered to its movers unless a guard blocks it. The first blocking note in catalogue order is the
- * rule note. A company or team step has no verb yet (Move on to… comes with P02.T5).
+ * rule note. At most one button is filled: the first offered verb the catalogue marks primary (ticket-page.md, "Bold =
+ * filled"); in Backlog the lead sees Plan it filled and Give it to… outline. A company or team step has no verb yet
+ * (Move on to… comes with P02.T5).
  */
 final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 {
@@ -52,6 +54,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 
         $transitions = [];
         $ruleNote = null;
+        $hasPrimary = false;
         foreach ($this->catalogue->all() as $transition) {
             if (!self::appliesToTicketsStep($transition, $ticket)) {
                 continue;
@@ -60,7 +63,9 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             $blockingNote = $this->blockingNote($ticket, $transition, $actor, $rules);
             $ruleNote ??= $blockingNote;
             if (null === $blockingNote && $this->mayUse($ticket, $transition, $actor)) {
-                $transitions[] = new TransitionView($transition->verb->value, $transition->label, $transition->isPrimary);
+                $isPrimary = $transition->isPrimary && !$hasPrimary;
+                $hasPrimary = $hasPrimary || $isPrimary;
+                $transitions[] = new TransitionView($transition->verb->value, $transition->label, $isPrimary);
             }
         }
 

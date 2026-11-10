@@ -243,6 +243,27 @@ final class CatalogueTransitionPolicyTest extends TestCase
     }
 
     #[Test]
+    public function inBacklogOnlyPlanItIsFilledThoughGiveItToIsPrimaryInTheCatalogue(): void
+    {
+        $availability = self::policy()->available(GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::lena(), GuardFixtures::rules());
+
+        self::assertEquals([
+            new TransitionView('plan_it', 'Plan it', true),
+            new TransitionView('give_it_to', 'Give it to…', false),
+        ], $availability->transitions);
+    }
+
+    #[Test]
+    public function aVerbTheCatalogueMarksOutlineStaysOutlineWhenItIsTheOnlyButton(): void
+    {
+        $ticket = GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::LENA, tester: GuardFixtures::OMAR);
+
+        $availability = self::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
+
+        self::assertEquals([new TransitionView('needs_changes', 'Needs changes', false)], $availability->transitions);
+    }
+
+    #[Test]
     public function aCompanyOrTeamStepHasNoVerbAndNoNote(): void
     {
         $ticket = GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::OMAR);
