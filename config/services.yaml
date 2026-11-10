@@ -113,6 +113,9 @@ services:
     App\Workflow\Api\TransitionPolicy: '@App\Workflow\Application\Transition\CatalogueTransitionPolicy'
     App\Workflow\Api\TurnRules: '@App\Workflow\Application\Turn\OrderedTurnRules'
     App\Workflow\Api\NeedsYouScore: '@App\Workflow\Application\Turn\WeightedNeedsYouScore'
+    # Its TicketTurnSource comes with Ticketing's Api in P03; until a module calls TurnProjector, the container drops
+    # both, so dev and prod compile without a source. The test env gives it an in-memory one below.
+    App\Insight\Api\TurnProjector: '@App\Insight\Infrastructure\Doctrine\DbalTurnProjector'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -157,6 +160,14 @@ when@test:
             public: true
         test.workflow_needs_you_score:
             alias: App\Workflow\Api\NeedsYouScore
+            public: true
+        # No ticket exists before P03, so DbalTurnProjectorTest puts the facts it projects into this source.
+        App\Tests\Integration\Insight\InMemoryTicketTurnSource:
+            autoconfigure: true
+            public: true
+        App\Insight\Application\Turn\TicketTurnSource: '@App\Tests\Integration\Insight\InMemoryTicketTurnSource'
+        test.insight_turn_projector:
+            alias: App\Insight\Api\TurnProjector
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
