@@ -75,8 +75,8 @@ final class EmailInvitationLinkHandlerTest extends KernelTestCase
         $capturedLogRecords->clear();
 
         self::runTheWorkerUntilIdle('outbox');
-        $relayed = $this->asyncNotify()->getSent();
-        self::assertSame([MemberInvited::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, \array_slice($relayed, -1)));
+        // Not the last envelope: setUpShop's events share the second of the invite, and the outbox reads by available_at alone.
+        self::assertCount(1, $this->sentEnvelopesOf(MemberInvited::class));
         self::assertCount(0, self::getMailerMessages(), 'The relay only moves the event; worker-notify sends the email.');
 
         self::runTheWorkerUntilIdle('async_notify');

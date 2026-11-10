@@ -72,7 +72,8 @@ final class OrganizationEventRoutingTest extends KernelTestCase
         self::runTheWorkerUntilIdle('outbox');
 
         $relayed = $this->asyncNotify()->getSent();
-        self::assertSame(
+        // The outbox reads by available_at, stored to the second, so events written in one second come in no fixed order.
+        self::assertEqualsCanonicalizing(
             [MemberJoined::class, MemberJoined::class, MemberJoined::class, TeamCreated::class, TeamRoleChanged::class, OrgRolesChanged::class],
             array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed),
         );

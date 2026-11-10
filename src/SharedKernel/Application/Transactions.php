@@ -6,8 +6,8 @@ namespace App\SharedKernel\Application;
 
 /**
  * Writes of a request that runs without the request transaction, so the action knows its change is committed, or
- * rolled back as a whole when a command is refused, before it answers, such as CreateProject when another request
- * took the key first.
+ * rolled back as a whole, before it answers. For a command that can be refused after it already wrote, which would
+ * leave the request transaction failed.
  */
 interface Transactions
 {

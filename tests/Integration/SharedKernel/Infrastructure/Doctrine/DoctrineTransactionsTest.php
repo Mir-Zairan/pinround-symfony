@@ -6,41 +6,34 @@ namespace App\Tests\Integration\SharedKernel\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
-use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Infrastructure\Doctrine\DoctrineTransactions;
 use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
-use App\Tests\Integration\Ticketing\ProjectRows;
-use App\Ticketing\Domain\Project;
-use App\Ticketing\Domain\ProjectId;
-use App\Ticketing\Domain\ProjectKey;
-use App\Ticketing\Infrastructure\Doctrine\DoctrineProjects;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * DoctrineTransactions on the real tkt_project table as pinround_app, under row-level security. The writes go through
- * the entity manager, so the flush at commit is covered too.
+ * DoctrineTransactions on a real tenant table (wf_step) as pinround_app, under row-level security. The rows are
+ * written and counted through plain DBAL, so the test depends on no module.
  */
 final class DoctrineTransactionsTest extends KernelTestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000012a1';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000012a2';
-    private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000012c1';
-    private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000012d1';
-    private const string BAKERY_PROJECT = '0197a3c0-0000-7000-8000-0000000012d2';
+    private const string DESIGN_CHECK = '0197a3c0-0000-7000-8000-0000000012d1';
+    private const string BAKERY_CHECK = '0197a3c0-0000-7000-8000-0000000012d2';
 
     protected function setUp(): void
     {
-        $this->rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->removeStepsOf(self::ACME_FOODS, self::BETA_BAKERY);
     }
 
     protected function tearDown(): void
     {
         self::getContainer()->get('doctrine')->resetManager();
         $this->tenantContext()->reset();
-        $this->rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->removeStepsOf(self::ACME_FOODS, self::BETA_BAKERY);
         parent::tearDown();
     }
 
@@ -48,20 +41,20 @@ final class DoctrineTransactionsTest extends KernelTestCase
     public function theWriteRunsUnderTheRequestsTenantAndIsCommitted(): void
     {
         $this->tenantContext()->set(new OrganizationId(self::BETA_BAKERY));
-        $this->transactions()->run(fn () => $this->projects()->add($this->project(self::BAKERY_PROJECT, self::BETA_BAKERY, 'BREAD')));
-        $this->entityManager()->clear();
+        $this->transactions()->run(fn () => $this->insertCompanyStep(self::BETA_BAKERY, self::BAKERY_CHECK, 'Taste check'));
+        $this->tenantContext()->reset();
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
-        [$tenantSetting, $visibleKeys] = $this->transactions()->run(fn (): array => [
+        [$tenantSetting, $visibleNames] = $this->transactions()->run(fn (): array => [
             $this->connection()->fetchOne('SELECT current_setting(?, true)', [TenantSetting::NAME]),
-            $this->connection()->fetchFirstColumn('SELECT key FROM tkt_project'),
+            $this->connection()->fetchFirstColumn('SELECT name FROM wf_step'),
         ]);
-        $this->transactions()->run(fn () => $this->projects()->add($this->project(self::SHOP_PROJECT, self::ACME_FOODS, 'SHOP')));
+        $this->transactions()->run(fn () => $this->insertCompanyStep(self::ACME_FOODS, self::DESIGN_CHECK, 'Design check'));
 
         self::assertSame(self::ACME_FOODS, $tenantSetting);
-        self::assertSame([], $visibleKeys, 'a project of another organization is visible');
+        self::assertSame([], $visibleNames, 'a step of another organization is visible');
         self::assertFalse($this->connection()->isTransactionActive());
-        self::assertSame(1, $this->projectRowCount(self::ACME_FOODS, self::SHOP_PROJECT));
+        self::assertSame(1, $this->stepRowCount(self::ACME_FOODS, self::DESIGN_CHECK));
     }
 
     #[Test]
@@ -70,7 +63,7 @@ final class DoctrineTransactionsTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
         $thrown = $this->thrownBy(fn () => $this->transactions()->run(function (): void {
-            $this->projects()->add($this->project(self::SHOP_PROJECT, self::ACME_FOODS, 'SHOP'));
+            $this->insertCompanyStep(self::ACME_FOODS, self::DESIGN_CHECK, 'Design check');
 
             throw new \DomainException('refused');
         }));
@@ -79,7 +72,7 @@ final class DoctrineTransactionsTest extends KernelTestCase
         self::assertSame('refused', $thrown->getMessage());
         self::assertFalse($this->connection()->isTransactionActive());
         self::assertFalse($this->entityManager()->isOpen());
-        self::assertSame(0, $this->projectRowCount(self::ACME_FOODS, self::SHOP_PROJECT));
+        self::assertSame(0, $this->stepRowCount(self::ACME_FOODS, self::DESIGN_CHECK));
     }
 
     #[Test]
@@ -129,21 +122,27 @@ final class DoctrineTransactionsTest extends KernelTestCase
         return null;
     }
 
-    private function project(string $projectId, string $organizationId, string $key): Project
+    /**
+     * A company step: no team and no core code.
+     */
+    private function insertCompanyStep(string $organizationId, string $stepId, string $name): void
     {
-        return new Project(new ProjectId($projectId), new OrganizationId($organizationId), new TeamId(self::SHOP_TEAM), new ProjectKey($key), 'Project '.$key);
+        $this->connection()->executeStatement(
+            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position, archived_at) VALUES (?, ?, NULL, ?, 'check', NULL, 'company', 0, NULL)",
+            [$organizationId, $stepId, $name],
+        );
     }
 
     /**
      * Through the migrator, which FORCE ROW LEVEL SECURITY binds too, so it counts under the organization as tenant.
      */
-    private function projectRowCount(string $organizationId, string $projectId): int
+    private function stepRowCount(string $organizationId, string $stepId): int
     {
         $this->tenantContext()->reset();
         $this->tenantContext()->set(new OrganizationId($organizationId));
         try {
-            $count = self::getContainer()->get('doctrine.dbal.migrator_connection')->transactional(
-                static fn (Connection $migrator): mixed => $migrator->fetchOne('SELECT count(*) FROM tkt_project WHERE id = ?', [$projectId]),
+            $count = $this->migrator()->transactional(
+                static fn (Connection $migrator): mixed => $migrator->fetchOne('SELECT count(*) FROM wf_step WHERE id = ?', [$stepId]),
             );
         } finally {
             $this->tenantContext()->reset();
@@ -152,19 +151,32 @@ final class DoctrineTransactionsTest extends KernelTestCase
         return \is_int($count) ? $count : -1;
     }
 
+    /**
+     * Through the migrator, which owns wf_step and so may delete from it (the app may not), under each organization as
+     * tenant.
+     */
+    private function removeStepsOf(string ...$organizationIds): void
+    {
+        foreach ($organizationIds as $organizationId) {
+            $this->tenantContext()->set(new OrganizationId($organizationId));
+            try {
+                $this->migrator()->transactional(static function (Connection $migrator) use ($organizationId): void {
+                    $migrator->executeStatement('DELETE FROM wf_step WHERE organization_id = ?', [$organizationId]);
+                });
+            } finally {
+                $this->tenantContext()->reset();
+            }
+        }
+    }
+
     private function transactions(): DoctrineTransactions
     {
         return new DoctrineTransactions($this->entityManager(), $this->tenantContext());
     }
 
-    private function projects(): DoctrineProjects
+    private function migrator(): Connection
     {
-        return new DoctrineProjects($this->entityManager());
-    }
-
-    private function rows(): ProjectRows
-    {
-        return new ProjectRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), $this->tenantContext());
+        return self::getContainer()->get('doctrine.dbal.migrator_connection');
     }
 
     private function connection(): Connection
