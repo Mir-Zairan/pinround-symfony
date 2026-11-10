@@ -209,3 +209,173 @@
 .team__picker-option:has(input:checked) .team__project-key {
   color: inherit;
 }
+
+.team__flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.team__policy {
+  color: var(--on-surface-var);
+}
+
+.team__groups,
+.team__steps,
+.team__rules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.team__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.team__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.team__group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 110px;
+  font-weight: 700;
+}
+
+.team__group-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--group-todo);
+}
+
+.team__group-dot--doing { background: var(--group-doing); }
+.team__group-dot--check { background: var(--group-check); }
+.team__group-dot--wait { background: var(--group-wait); }
+.team__group-dot--done { background: var(--group-done); }
+
+.team__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.team__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--s-high);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.team__step--team {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.team__step-remove {
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.team__step-remove:hover {
+  background: var(--s-high);
+}
+
+.team__add-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: var(--s-high);
+}
+
+.team__add-step-name {
+  flex: 1 1 240px;
+}
+
+.team__add-step-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.team__group-choice {
+  position: relative;
+}
+
+.team__group-choice input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.team__group-choice:has(input:checked) .chip {
+  background: var(--secondary-container);
+  border-color: transparent;
+  color: var(--on-secondary-container);
+}
+
+.team__group-choice:has(input:focus-visible) .chip {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.team__rules-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.team__rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.team__rule {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.team__rule-form {
+  margin: 0;
+}
+
+.team__rule-mark {
+  min-width: 28px;
+  color: var(--on-surface-var);
+}
+
+.team__rule-mark--on {
+  color: var(--passed);
+}

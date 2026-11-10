@@ -5,14 +5,19 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
+use App\Organization\Api\StepPolicy;
+use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Identity\LogsInUsers;
+use Doctrine\DBAL\Connection;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -40,6 +45,7 @@ final class TeamPageTest extends WebTestCase
     protected function tearDown(): void
     {
         $this->removeCommittedProjects();
+        $this->removeCommittedWorkflow();
         $this->removeUsersAndOrganizations();
     }
 
@@ -308,6 +314,241 @@ final class TeamPageTest extends WebTestCase
         self::assertContains('db SELECT', $statementsWithOneProject);
     }
 
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function peopleWhoCannotChangeSteps(): iterable
+    {
+        yield 'Omar, a member' => ['Omar'];
+        yield 'Mia, a viewer' => ['Mia'];
+        yield 'Raj, a Manager' => ['Raj'];
+        yield 'Sara, an Admin who is not the lead' => ['Sara'];
+    }
+
+    #[Test]
+    public function underExtendTheLeadSeesTheAddStepPanelWithGroupChipsButNoDoneAndARemoveOnHerTeamsStep(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->setStepPolicy(StepPolicy::Extend);
+        $this->insertStep($this->shop, 'Ready to merge', 'team');
+        $this->insertStep(null, 'Code review', 'company');
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('How work moves here', $page->filter('#team-flow')->text());
+        self::assertSame(
+            'Your admin set the company steps. As lead, you can add team steps inside the five groups.',
+            $page->filter('.team__policy')->text(),
+        );
+        self::assertSame('Add a team step', $page->filter('.team__add-step h3')->text());
+        self::assertSame(['To do', 'Doing', 'Checking', 'Waiting'], $page->filter('.team__add-step .chip')->each(static fn ($chip): string => $chip->text()));
+        self::assertSame('check', $page->filter('.team__add-step input[type="radio"][checked]')->attr('value'));
+        self::assertSame(['Remove step Ready to merge'], $page->filter('.team__step-remove')->each(static fn ($button): ?string => $button->attr('aria-label')));
+        self::assertSame(['Ready to merge'], $page->filter('.team__step--team')->each(static fn ($step): string => trim($step->text(), " \u{00D7}")));
+    }
+
+    #[Test]
+    #[DataProvider('peopleWhoCannotChangeSteps')]
+    public function everyoneButTheLeadSeesNoAddStepPanelAndNoRemoveOnSteps(string $person): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()[$person]);
+        $this->setStepPolicy(StepPolicy::Team);
+        $this->insertStep($this->shop, 'Ready to merge', 'team');
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.team__add-step'));
+        self::assertCount(0, $page->filter('.team__step-remove'));
+        self::assertStringNotContainsString('Add a team step', $page->filter('main')->text());
+        self::assertSame(['Ready to merge'], $page->filter('.team__step--team')->each(static fn ($step): string => $step->text()));
+    }
+
+    #[Test]
+    public function underLockedNobodyNotEvenTheLeadSeesTheAddPanelOrARemoveAndThePolicySentenceIsTheLockedOne(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->setStepPolicy(StepPolicy::Locked);
+        $this->insertStep($this->shop, 'Ready to merge', 'team');
+        $this->insertStep(null, 'Code review', 'company');
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Your admin set these steps for the whole company. Teams cannot change them.', $page->filter('.team__policy')->text());
+        self::assertCount(0, $page->filter('.team__add-step'));
+        self::assertCount(0, $page->filter('.team__step-remove'));
+        self::assertCount(0, $page->filter('.team__step--team'));
+        self::assertStringContainsString('Code review', $page->filter('.team__groups')->text());
+    }
+
+    #[Test]
+    public function underExtendAPersonWhoIsNotTheLeadIsToldTheTeamLeadCanAddSteps(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Omar']);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Your admin set the company steps. The team lead can add team steps inside the five groups.', $page->filter('.team__policy')->text());
+    }
+
+    #[Test]
+    public function underTeamTheLeadSeesTheTeamDecidesSentenceAndASwitchForEachRule(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->setStepPolicy(StepPolicy::Team);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Your admin lets each lead shape the team’s steps and rules. Every step still sits in one of the five groups.', $page->filter('.team__policy')->text());
+        self::assertSame(
+            ['Only the tester can move a ticket to Done', 'Nobody approves their own code review', 'Code review must happen before testing'],
+            $page->filter('.team__rule-form button[role="switch"]')->each(static fn ($switch): ?string => $switch->attr('aria-label')),
+        );
+        self::assertSame(['true', 'true', 'true'], $page->filter('.team__rule-form button[role="switch"]')->each(static fn ($switch): ?string => $switch->attr('aria-checked')));
+        self::assertSame(['0', '0', '0'], $page->filter('.team__rule-form input[name="is_on"]')->each(static fn ($field): ?string => $field->attr('value')));
+        self::assertCount(0, $page->filter('.team__rule-mark'));
+    }
+
+    #[Test]
+    public function underTeamTheLeadTurnsARuleOffWithItsSwitchAndThePageShowsItOff(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->setStepPolicy(StepPolicy::Team);
+        $page = $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submit($page->filter('.team__rule-form')->eq(1)->form());
+        self::assertResponseRedirects('/teams/shop', 302);
+        $page = $this->client->followRedirect();
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['true', 'false', 'true'], $page->filter('.team__rule-form button[role="switch"]')->each(static fn ($switch): ?string => $switch->attr('aria-checked')));
+        self::assertSame(['0', '1', '0'], $page->filter('.team__rule-form input[name="is_on"]')->each(static fn ($field): ?string => $field->attr('value')));
+    }
+
+    /**
+     * @return iterable<string, array{string, ?StepPolicy}>
+     */
+    public static function peopleAndPoliciesWithNoRuleSwitch(): iterable
+    {
+        yield 'Lena under extend' => ['Lena', StepPolicy::Extend];
+        yield 'Lena under locked' => ['Lena', StepPolicy::Locked];
+        yield 'Omar under team' => ['Omar', StepPolicy::Team];
+        yield 'Mia under team' => ['Mia', StepPolicy::Team];
+        yield 'Raj under team' => ['Raj', StepPolicy::Team];
+        yield 'Sara under team' => ['Sara', StepPolicy::Team];
+    }
+
+    #[Test]
+    #[DataProvider('peopleAndPoliciesWithNoRuleSwitch')]
+    public function whoeverMayNotChangeRulesSeesOnMarksSetByTheAdmin(string $person, StepPolicy $stepPolicy): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()[$person]);
+        $this->setStepPolicy($stepPolicy);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.team__rule-form'));
+        self::assertSame(
+            [
+                'On Only the tester can move a ticket to Done · set by the admin',
+                'On Nobody approves their own code review · set by the admin',
+                'On Code review must happen before testing · set by the admin',
+            ],
+            $page->filter('.team__rule')->each(static fn ($rule): string => $rule->text()),
+        );
+        self::assertCount(3, $page->filter('.team__rule-mark--on'));
+    }
+
+    #[Test]
+    public function aRuleThatIsOffShowsAnOffMarkWithoutTheGreen(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Omar']);
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'INSERT INTO wf_rule_set (organization_id, team_id, tester_moves_done, no_self_review, review_before_test) VALUES (?, NULL, true, false, true)',
+            [$this->acmeFoods->toString()],
+        ));
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['On', 'Off', 'On'], $page->filter('.team__rule-mark')->each(static fn ($mark): string => $mark->text()));
+        self::assertCount(1, $page->filter('.team__rule-mark:not(.team__rule-mark--on)'));
+    }
+
+    #[Test]
+    public function theLeadAddsDesignCheckUnderCheckingAndTheOtherPeopleNeverSawTheForm(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $page = $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+        $form = $page->filter('.team__add-step')->form(['name' => 'Design check', 'group' => 'check']);
+
+        $this->client->submit($form);
+        self::assertResponseRedirects('/teams/shop', 302);
+        $page = $this->client->followRedirect();
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Added “Design check” to Checking. Managers still see it as Checking.', $page->filter('[data-toast-message-value]')->attr('data-toast-message-value'));
+        $checking = $page->filter('.team__group')->eq(2);
+        self::assertStringStartsWith('Checking', $checking->text());
+        self::assertSame(['Design check'], $checking->filter('.team__step--team')->each(static fn ($step): string => trim($step->text(), " \u{00D7}")));
+    }
+
+    #[Test]
+    public function theTeamsStepsAreShownInTheFiveGroupsInOrderWithCoreAndCompanyStepsBeforeTeamSteps(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Omar']);
+        $this->insertStep($this->shop, 'Ready to merge', 'team', 'doing');
+        $this->insertStep(null, 'In progress', 'core', 'doing', 'progress');
+        $this->insertStep(null, 'Backlog', 'core', 'todo', 'backlog');
+        $this->insertStep(null, 'Done', 'core', 'done', 'done');
+        $this->insertStep($this->mobile, 'Device check', 'team', 'doing');
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['To do Backlog', 'Doing In progress Ready to merge', 'Checking', 'Waiting', 'Done Done'],
+            $page->filter('.team__group')->each(static fn ($group): string => $group->text()),
+        );
+    }
+
+    #[Test]
+    public function theQueriesStayTheSameWhateverTheNumberOfSteps(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->client->disableReboot();
+        $exporter = self::getContainer()->get('tracing.in_memory_exporter');
+        self::assertInstanceOf(InMemoryExporter::class, $exporter);
+        $this->insertStep($this->shop, 'Step 0', 'team');
+        // The first request of a session also loads the logged-in user's own state, so it is no yardstick.
+        $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+
+        $spansBefore = \count(ExportedSpans::of($exporter));
+        $page = $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('.team__step--team'));
+        $statementsWithOneStep = $this->spanNamesAfter($exporter, $spansBefore);
+
+        foreach ([1, 2, 3, 4] as $number) {
+            $this->insertStep($this->shop, 'Step '.$number, 'team', ['todo', 'doing', 'check', 'wait'][$number - 1]);
+        }
+        $spansBeforeFive = \count(ExportedSpans::of($exporter));
+        $page = $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(5, $page->filter('.team__step--team'));
+        $statementsWithFiveSteps = $this->spanNamesAfter($exporter, $spansBeforeFive);
+
+        self::assertSame($statementsWithOneStep, $statementsWithFiveSteps);
+    }
+
     #[Test]
     public function aPersonOfTheOrganizationWithNoTeamAndNoOrgRoleIsRefused(): void
     {
@@ -362,6 +603,44 @@ final class TeamPageTest extends WebTestCase
         $this->client->request('GET', '/teams/shop');
 
         self::assertResponseRedirects('/login', 302);
+    }
+
+    private function setStepPolicy(StepPolicy $stepPolicy): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO org_settings (organization_id, data, created_at) VALUES (?, ?, '2026-11-08 09:00:00+00')",
+            [$this->acmeFoods->toString(), json_encode(['step_policy' => $stepPolicy->value], \JSON_THROW_ON_ERROR)],
+        ));
+    }
+
+    /**
+     * Test organizations have no core steps, so a test inserts the ones it needs.
+     *
+     * @param ?TeamId $teamId null for a company or core step
+     */
+    private function insertStep(?TeamId $teamId, string $name, string $origin, string $groupCode = 'check', ?string $coreCode = null): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)',
+            [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $teamId?->toString(), $name, $groupCode, $coreCode, $origin],
+        ));
+    }
+
+    /**
+     * Through the migrator, as the app may not delete steps or rule sets; must run before LogsInUsers' tearDown deletes
+     * the organizations. The outbox rows are the events the add-step action published.
+     */
+    private function removeCommittedWorkflow(): void
+    {
+        foreach ($this->createdOrganizationIds as $organizationId) {
+            $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
+                $migrator->executeStatement('DELETE FROM wf_step WHERE organization_id = ?', [$organizationId]);
+                $migrator->executeStatement('DELETE FROM wf_rule_set WHERE organization_id = ?', [$organizationId]);
+                $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
+
+                return 0;
+            });
+        }
     }
 
     /**

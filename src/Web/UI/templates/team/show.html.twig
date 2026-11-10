@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="{{ asset('styles/team.css') }}">
 {% endblock %}
 
-{# TODO(P02.T8): "How work moves here" below the projects, for the team's lead. #}
 {% block main %}
     <div class="team">
         <header class="team__header">
@@ -115,6 +114,76 @@
                         {% endfor %}
                     </ul>
                 {% endif %}
+
+                <section class="team__flow" aria-labelledby="team-flow">
+                    <h2 class="team__section-title" id="team-flow">How work moves here</h2>
+                    <p class="team__policy">
+                        {%- if stepPolicy == 'locked' -%}
+                            Your admin set these steps for the whole company. Teams cannot change them.
+                        {%- elseif stepPolicy == 'extend' -%}
+                            Your admin set the company steps. {{ isLead ? 'As lead, you can' : 'The team lead can' }} add team steps inside the five groups.
+                        {%- else -%}
+                            Your admin lets each lead shape the team’s steps and rules. Every step still sits in one of the five groups.
+                        {%- endif -%}
+                    </p>
+                    <ul class="team__groups">
+                        {% for group in stepGroups %}
+                            <li class="team__group">
+                                <span class="team__group-label"><span class="team__group-dot team__group-dot--{{ group.code }}" aria-hidden="true"></span>{{ group.label }}</span>
+                                <ul class="team__steps">
+                                    {% for step in group.steps %}
+                                        <li class="team__step{{ step.origin == 'team' ? ' team__step--team' }}">
+                                            <span>{{ step.name }}</span>
+                                            {% if step.origin == 'team' and canChangeSteps %}
+                                                <form class="team__remove" method="post" action="{{ path(workflowForms.removeStepRoute, {slug: team.slug}) }}">
+                                                    <input type="hidden" name="{{ workflowForms.csrfField }}" value="{{ csrf_token(workflowForms.removeStepCsrfId) }}">
+                                                    <input type="hidden" name="{{ workflowForms.stepIdField }}" value="{{ step.id }}">
+                                                    <button class="team__step-remove" type="submit" aria-label="Remove step {{ step.name }}">×</button>
+                                                </form>
+                                            {% endif %}
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                    {% if canChangeSteps %}
+                        <form class="team__add-step" method="post" action="{{ path(workflowForms.addStepRoute, {slug: team.slug}) }}" aria-labelledby="add-step-title">
+                            <h3 class="visually-hidden" id="add-step-title">Add a team step</h3>
+                            <input type="hidden" name="{{ workflowForms.csrfField }}" value="{{ csrf_token(workflowForms.addStepCsrfId) }}">
+                            <input class="login__input team__add-step-name" type="text" name="{{ workflowForms.nameField }}" placeholder="New step, for example: Ready to merge" aria-label="Step name" maxlength="80" autocomplete="off" required>
+                            <fieldset class="team__add-step-groups">
+                                <legend>in</legend>
+                                {% for code, label in workflowForms.groupLabels %}
+                                    <label class="team__group-choice">
+                                        <input type="radio" name="{{ workflowForms.groupField }}" value="{{ code }}"{{ code == 'check' ? ' checked' }}>
+                                        <span class="chip">{{ label }}</span>
+                                    </label>
+                                {% endfor %}
+                            </fieldset>
+                            <twig:Button type="submit">Add step</twig:Button>
+                        </form>
+                    {% endif %}
+                    <h3 class="team__rules-title">Rules</h3>
+                    <ul class="team__rules">
+                        {% for code, label in workflowForms.ruleLabels %}
+                            <li class="team__rule">
+                                {% if canChangeRules %}
+                                    <form class="team__rule-form" method="post" action="{{ path(workflowForms.setRuleRoute, {slug: team.slug}) }}">
+                                        <input type="hidden" name="{{ workflowForms.csrfField }}" value="{{ csrf_token(workflowForms.setRuleCsrfId) }}">
+                                        <input type="hidden" name="{{ workflowForms.ruleField }}" value="{{ code }}">
+                                        <input type="hidden" name="{{ workflowForms.isOnField }}" value="{{ ruleStates[code] ? workflowForms.isOff : workflowForms.isOn }}">
+                                        <twig:Switch type="submit" :checked="ruleStates[code]" :label="label"/>
+                                    </form>
+                                    <span>{{ label }}</span>
+                                {% else %}
+                                    <strong class="team__rule-mark{{ ruleStates[code] ? ' team__rule-mark--on' }}">{{ ruleStates[code] ? 'On' : 'Off' }}</strong>
+                                    <span>{{ label }} · set by the admin</span>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </section>
             </section>
 
             <section class="team__column team__column--aside" aria-labelledby="team-people">
