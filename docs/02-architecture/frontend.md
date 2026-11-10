@@ -246,7 +246,7 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Round view (prototype "Review round" board) | `GET /t/{key}/rounds/{number}` | Review | Screenshot + PinLayer, before/after, verdicts |
 | Full-screen review (prototype "Review in full screen" board) | `GET /t/{key}/rounds/{number}/focus` | Review | Full-screen pin walker |
 | Draft round | part of the ticket page; `POST /t/{key}/draft…` | Review | `DraftRoundEditor` |
-| Team page | `GET /teams/{slug}` (`team_show`) | Organization + Workflow | Projects, "How work moves here", people with WorkloadBar |
+| Team page | `GET /teams/{slug}` (`team_show`) | Web (reads Organization, Ticketing and Workflow) | Projects, "How work moves here", people with WorkloadBar |
 | Admin tabs | `GET /admin/{tab}` (`web_admin`), tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data; the menu's Admin item opens people | Web (+ owning module per tab) | Admin layout with tab list |
 | Manager "Teams at a glance" | part of `/` for managers | Insight | GroupBar per team |
 | Local AI sheet | dialog from the header chip; `POST /ai/laptop/status`, `POST /ai/laptop/package`, `POST /ai/laptop/result` | Assist | `local-ai` controller |

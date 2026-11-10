@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
-use App\Organization\UI\Controller\TeamController;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Fixtures\Http\MenuPageStandInController;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Web\UI\Controller\TeamController;
 use App\Web\UI\Navigation\MainMenu;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;

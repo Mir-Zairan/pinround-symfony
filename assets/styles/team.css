@@ -1,0 +1,102 @@
+/* The Team page (src/Web/UI/templates/team/show.html.twig): the team's projects and its people. */
+
+.team {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.team__header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.team__title {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.team__subline {
+  max-width: 680px;
+  font-size: 16px;
+  color: var(--on-surface-var);
+}
+
+.team__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+.team__column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.team__column--main {
+  flex: 999 1 560px;
+}
+
+.team__column--aside {
+  flex: 1 1 320px;
+}
+
+.team__section-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.team__count,
+.team__hint {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--on-surface-var);
+}
+
+.team__projects {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.team__project {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.team__project-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.team__project-key {
+  color: var(--primary);
+}
+
+.team__project-tickets {
+  flex-basis: 100%;
+  font-size: 14px;
+  color: var(--on-surface-var);
+}
+
+.team__project-link {
+  color: var(--primary);
+  font-weight: 700;
+}

@@ -1,0 +1,54 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}{{ team.name }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/team.css') }}">
+{% endblock %}
+
+{# TODO(P02.T8): "Add project" and "Remove" in the projects section, and "How work moves here" below it, for the team's lead. #}
+{% block main %}
+    <div class="team">
+        <header class="team__header">
+            <h1 class="team__title">{{ team.name }}</h1>
+            <p class="team__subline">
+                {%- if isLead -%}
+                    You lead this team.
+                {%- else -%}
+                    Only the team lead can change projects and steps.
+                {%- endif -%}
+            </p>
+        </header>
+
+        <div class="team__row">
+            <section class="team__column team__column--main" aria-labelledby="team-projects">
+                <h2 class="team__section-title" id="team-projects">Projects <span class="team__count">{{ projects|length }}</span></h2>
+                {% if projects is empty %}
+                    <twig:EmptyState message="No projects yet."/>
+                {% else %}
+                    <ul class="team__projects">
+                        {% for project in projects %}
+                            <li>
+                                <twig:Card class="team__project">
+                                    <div class="team__project-name">
+                                        <span class="mono team__project-key">{{ project.key }}</span>
+                                        <span>{{ project.name }}</span>
+                                    </div>
+                                    <p class="team__project-tickets">{{ project.openTicketCount }} open {{ project.openTicketCount == 1 ? 'ticket' : 'tickets' }}</p>
+                                    {% if ticketsUrls[project.id] is not null %}
+                                        <a class="team__project-link" href="{{ ticketsUrls[project.id] }}">See tickets<span class="visually-hidden"> of {{ project.key }}</span></a>
+                                    {% endif %}
+                                </twig:Card>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </section>
+
+            <section class="team__column team__column--aside" aria-labelledby="team-people">
+                <h2 class="team__section-title" id="team-people">People <span class="team__hint">waiting on them</span></h2>
+                <twig:EmptyState message="How many open tickets wait on each person comes later."/>
+            </section>
+        </div>
+    </div>
+{% endblock %}
