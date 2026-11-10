@@ -15,8 +15,8 @@ use App\Workflow\Domain\Group;
 /**
  * The turn rules in the order of workflow-engine.md, "Whose turn"; the first match wins.
  *
- * A step's own reviewer or tester is used when the ticket has one; without one the choice is made here, so a ticket
- * in Code review or Testing always has someone's turn.
+ * A ticket's own reviewer or tester is used when it has one; without one ReviewerChoice or TesterChoice chooses, so a
+ * ticket in Code review or Testing always has someone's turn, the same person the transition policy lets move it.
  */
 final readonly class OrderedTurnRules implements TurnRules
 {
@@ -55,9 +55,7 @@ final readonly class OrderedTurnRules implements TurnRules
         }
 
         if (CoreStep::Test === $step || Group::Check->value === $ticket->groupCode) {
-            $tester = $ticket->testerId ?? $this->testerChoice->choose($team)->userId;
-
-            return new Turn($tester, null, NeedsYouKind::Test);
+            return new Turn($this->testerChoice->testerOf($ticket, $team)->userId, null, NeedsYouKind::Test);
         }
 
         if (CoreStep::Input === $step) {
@@ -72,11 +70,7 @@ final readonly class OrderedTurnRules implements TurnRules
 
     private function reviewTurn(TicketState $ticket, TeamFacts $team): Turn
     {
-        if (null !== $ticket->reviewerId) {
-            return new Turn($ticket->reviewerId, null, NeedsYouKind::Review);
-        }
-
-        $reviewer = $this->reviewerChoice->choose($ticket->assigneeId, $team);
+        $reviewer = $this->reviewerChoice->reviewerOf($ticket, $team);
 
         return new Turn($reviewer->userId, null, NeedsYouKind::Review, $reviewer->overrideNote);
     }

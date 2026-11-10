@@ -6,8 +6,9 @@ namespace App\Workflow\Domain;
 
 /**
  * The verbs as data, one row per button of the transition catalogue in workflow-engine.md. Who may still passes the
- * guards: Pass it names the lead, and the tester_moves_done rule blocks the lead while it is on. "Move on to…" has no
- * fixed target and no core from step: it leaves a company or team step, and MoveSideEffects names where it goes.
+ * guards: Pass it names the lead, and the tester_moves_done rule blocks the lead while it is on and the team has a
+ * tester. "Move on to…" has no fixed target and no core from step: it leaves a company or team step, and
+ * MoveSideEffects names where it goes; in a Checking step the tester, whose turn it is there, may use it too.
  */
 final readonly class TransitionCatalogue
 {
@@ -30,7 +31,7 @@ final readonly class TransitionCatalogue
             new Transition(Verb::GoOn, 'Go on', [CoreStep::Hold], CoreStep::Progress, [Mover::Lead], isPrimary: true),
             new Transition(Verb::Reopen, 'Reopen', [CoreStep::Done], CoreStep::Progress, [Mover::Lead, Mover::Tester], isPrimary: false),
             new Transition(Verb::PutOnHold, 'Put on hold', [CoreStep::Backlog, CoreStep::Todo, CoreStep::Progress, CoreStep::Review, CoreStep::Test, CoreStep::Input], CoreStep::Hold, [Mover::Lead], isPrimary: false, fromCustomStep: true),
-            new Transition(Verb::MoveOn, 'Move on to…', [], null, [Mover::Assignee, Mover::Lead], isPrimary: true, fromCustomStep: true),
+            new Transition(Verb::MoveOn, 'Move on to…', [], null, [Mover::Assignee, Mover::Lead, Mover::TesterInCheckingStep], isPrimary: true, fromCustomStep: true),
         ];
     }
 

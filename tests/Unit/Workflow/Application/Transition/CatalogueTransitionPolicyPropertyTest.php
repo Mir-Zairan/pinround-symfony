@@ -43,12 +43,12 @@ final class CatalogueTransitionPolicyPropertyTest extends TestCase
             $context = \sprintf('combination %d', $i);
 
             $offered = [];
-            foreach ($policy->available($ticket, $actor, $rules)->transitions as $view) {
+            foreach ($policy->available($ticket, $actor, $rules, GuardFixtures::team())->transitions as $view) {
                 $offered[$view->verb] = $view;
             }
 
             foreach (Verb::cases() as $verb) {
-                $decision = $policy->check($ticket, $actor, $rules, $verb->value);
+                $decision = $policy->check($ticket, $actor, $rules, GuardFixtures::team(), $verb->value);
                 $view = $offered[$verb->value] ?? null;
 
                 if ($view instanceof TransitionView) {

@@ -22,7 +22,7 @@ final class TransitionPolicyWiringTest extends KernelTestCase
         $policy = self::getContainer()->get('test.workflow_transition_policy');
         self::assertInstanceOf(CatalogueTransitionPolicy::class, $policy);
 
-        $availability = $policy->available(GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::lena(), GuardFixtures::rules());
+        $availability = $policy->available(GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team());
 
         self::assertEquals([
             new TransitionView('plan_it', 'Plan it', true, MoveTarget::coreStep('todo')),

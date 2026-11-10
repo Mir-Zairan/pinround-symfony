@@ -7,6 +7,7 @@ namespace App\Workflow\Application\Transition;
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\RuleSetView;
+use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\Transition;
@@ -16,7 +17,7 @@ use App\Workflow\Domain\Transition;
  */
 final readonly class ReviewBeforeTest implements Guard
 {
-    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote
+    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team): ?RuleNote
     {
         if (!$transition->startsFrom(CoreStep::Progress) || CoreStep::Test !== $transition->to) {
             return null;

@@ -9,6 +9,8 @@ use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\StepView;
+use App\Workflow\Api\TeamFacts;
+use App\Workflow\Api\TeamMemberLoad;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Application\Transition\CatalogueTransitionPolicy;
 use App\Workflow\Application\Transition\MoveRights;
@@ -16,8 +18,11 @@ use App\Workflow\Application\Transition\NoSelfReview;
 use App\Workflow\Application\Transition\QuestionOpenPause;
 use App\Workflow\Application\Transition\ReviewBeforeTest;
 use App\Workflow\Application\Transition\TesterMovesDone;
+use App\Workflow\Application\Turn\ReviewerChoice;
+use App\Workflow\Application\Turn\TesterChoice;
 use App\Workflow\Domain\MoveSideEffects;
 use App\Workflow\Domain\TransitionCatalogue;
+use Random\Randomizer;
 
 /**
  * The Shop team of Acme Foods: Lena leads it, Omar develops, Mia tests, and a viewer reads along. Raj is a manager and
@@ -153,11 +158,63 @@ final class GuardFixtures
         ];
     }
 
+    /**
+     * The Shop team as the turn rules see it: Lena leads and develops, Omar develops, Mia tests. Without $testers the
+     * team has no tester; with $hasOtherDeveloper false Lena is its only developer.
+     */
+    public static function team(bool $testers = true, bool $hasOtherDeveloper = true): TeamFacts
+    {
+        $developers = [new TeamMemberLoad(new UserId(self::LENA))];
+        if ($hasOtherDeveloper) {
+            $developers[] = new TeamMemberLoad(new UserId(self::OMAR));
+        }
+
+        return new TeamFacts(new UserId(self::LENA), 'Lena', $developers, $testers ? [new TeamMemberLoad(new UserId(self::MIA))] : []);
+    }
+
     public static function policy(): CatalogueTransitionPolicy
     {
         $moveRights = new MoveRights();
 
-        return new CatalogueTransitionPolicy(new TransitionCatalogue(), new QuestionOpenPause(), $moveRights, new MoveSideEffects(), new TesterMovesDone($moveRights), new NoSelfReview(), new ReviewBeforeTest());
+        return new CatalogueTransitionPolicy(new TransitionCatalogue(), new QuestionOpenPause(), $moveRights, new MoveSideEffects(), new TesterMovesDone($moveRights), new NoSelfReview(new ReviewerChoice()), new ReviewBeforeTest(), new ReviewerChoice(), new TesterChoice());
+    }
+
+    /**
+     * A ticket in one of $steps with a random team (or none), people (any of userIds() or nobody), question, previous
+     * step, waiting on and check.
+     *
+     * @param list<StepView> $steps the step the ticket is in is one of them, and gives its core and group codes
+     */
+    public static function randomTicket(Randomizer $random, array $steps): TicketState
+    {
+        $step = $steps[$random->getInt(0, \count($steps) - 1)];
+        $user = static fn (): ?UserId => self::userIdOrNull(self::userIds()[$random->getInt(0, \count(self::userIds()) - 1)]);
+        $isCheckNeeded = 1 === $random->getInt(0, 1);
+
+        return new TicketState(
+            stepId: $step->id(),
+            coreCode: $step->coreCode(),
+            groupCode: $step->groupCode(),
+            teamId: 1 === $random->getInt(0, 4) ? null : new TeamId(self::TEAM),
+            assigneeId: $user(),
+            reviewerId: $user(),
+            testerId: $user(),
+            askedUserId: 1 === $random->getInt(0, 5) ? $user() : null,
+            previousStepId: 1 === $random->getInt(0, 1) ? self::PREVIOUS_STEP : null,
+            reporterId: $user(),
+            waitingOnUserId: $user(),
+            waitingOnLabel: 1 === $random->getInt(0, 1) ? 'Supplier' : null,
+            isCheckNeeded: $isCheckNeeded,
+            checkerId: $user(),
+        );
+    }
+
+    /**
+     * @return list<string|null> the people of this team and outside it, and nobody
+     */
+    public static function userIds(): array
+    {
+        return [null, self::LENA, self::OMAR, self::MIA, self::RAJ, self::SARA];
     }
 
     private static function userIdOrNull(?string $userId): ?UserId

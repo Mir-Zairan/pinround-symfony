@@ -40,7 +40,7 @@ final class TesterMovesDoneTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::OMAR, reviewer: GuardFixtures::LENA, tester: GuardFixtures::MIA);
 
-        $note = new TesterMovesDone(new MoveRights())->check($ticket, new TransitionCatalogue()->for(Verb::PassIt), $actor, GuardFixtures::rules(testerMovesDone: $isRuleOn));
+        $note = new TesterMovesDone(new MoveRights())->check($ticket, new TransitionCatalogue()->for(Verb::PassIt), $actor, GuardFixtures::rules(testerMovesDone: $isRuleOn), GuardFixtures::team());
 
         self::assertSame($expectedNote, $note?->render(GuardFixtures::nameOf(...)));
     }
@@ -56,7 +56,7 @@ final class TesterMovesDoneTest extends TestCase
                 continue;
             }
 
-            self::assertNull($guard->check($ticket, $transition, GuardFixtures::lena(), GuardFixtures::rules()), $transition->label);
+            self::assertNull($guard->check($ticket, $transition, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team()), $transition->label);
         }
     }
 }

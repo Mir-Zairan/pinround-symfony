@@ -59,10 +59,10 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
         $rules = GuardFixtures::rules(reviewBeforeTest: false);
 
         $view = array_values(array_filter(
-            $policy->available($ticket, GuardFixtures::lena(), $rules)->transitions,
+            $policy->available($ticket, GuardFixtures::lena(), $rules, GuardFixtures::team())->transitions,
             static fn (TransitionView $transition): bool => $transition->verb === $verb->value,
         ));
-        $decision = $policy->check($ticket, GuardFixtures::lena(), $rules, $verb->value);
+        $decision = $policy->check($ticket, GuardFixtures::lena(), $rules, GuardFixtures::team(), $verb->value);
 
         self::assertCount(1, $view);
         self::assertSame($label, $view[0]->label);
@@ -75,7 +75,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[Test]
     public function aRefusedDecisionCarriesNoMoveTarget(): void
     {
-        $decision = GuardFixtures::policy()->check(GuardFixtures::ticket('hold', 'wait'), GuardFixtures::omar(), GuardFixtures::rules(), Verb::GoOn->value);
+        $decision = GuardFixtures::policy()->check(GuardFixtures::ticket('hold', 'wait'), GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team(), Verb::GoOn->value);
 
         self::assertFalse($decision->isAllowed);
         self::assertNull($decision->moveTarget);
@@ -86,7 +86,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('hold', 'wait', assignee: GuardFixtures::OMAR);
 
-        self::assertSame([], GuardFixtures::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules())->transitions);
+        self::assertSame([], GuardFixtures::policy()->available($ticket, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team())->transitions);
     }
 
     /**
@@ -111,7 +111,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     #[DataProvider('buttonsWithTheirFilledFlag')]
     public function atMostOneButtonIsFilledAndItIsTheFirstPrimaryVerbOffered(TicketState $ticket, ActorInTeam $actor, array $expected): void
     {
-        $buttons = GuardFixtures::policy()->available($ticket, $actor, GuardFixtures::rules(reviewBeforeTest: false))->transitions;
+        $buttons = GuardFixtures::policy()->available($ticket, $actor, GuardFixtures::rules(reviewBeforeTest: false), GuardFixtures::team())->transitions;
 
         self::assertSame($expected, array_map(static fn (TransitionView $button): array => [$button->verb, $button->isPrimary], $buttons));
     }
@@ -122,8 +122,8 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
         $policy = GuardFixtures::policy();
 
-        $availability = $policy->available($ticket, GuardFixtures::omar(), GuardFixtures::rules());
-        $decision = $policy->check($ticket, GuardFixtures::omar(), GuardFixtures::rules(), Verb::SendToTesting->value);
+        $availability = $policy->available($ticket, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team());
+        $decision = $policy->check($ticket, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team(), Verb::SendToTesting->value);
 
         self::assertSame(['send_to_code_review'], array_map(static fn (TransitionView $button): string => $button->verb, $availability->transitions));
         self::assertNull($availability->ruleNote);
@@ -141,8 +141,8 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
         $ticket = GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::LENA, reviewer: GuardFixtures::OMAR);
         $policy = GuardFixtures::policy();
 
-        $availability = $policy->available($ticket, GuardFixtures::lena(), GuardFixtures::rules());
-        $decision = $policy->check($ticket, GuardFixtures::lena(), GuardFixtures::rules(), Verb::MoveOn->value);
+        $availability = $policy->available($ticket, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team());
+        $decision = $policy->check($ticket, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team(), Verb::MoveOn->value);
 
         self::assertSame(['put_on_hold', 'move_on'], array_map(static fn (TransitionView $button): string => $button->verb, $availability->transitions));
         self::assertNull($availability->ruleNote);
@@ -156,7 +156,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('"sideways" is not a group.');
 
-        GuardFixtures::policy()->available(GuardFixtures::ticket(null, 'sideways'), GuardFixtures::lena(), GuardFixtures::rules());
+        GuardFixtures::policy()->available(GuardFixtures::ticket(null, 'sideways'), GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team());
     }
 
     #[Test]

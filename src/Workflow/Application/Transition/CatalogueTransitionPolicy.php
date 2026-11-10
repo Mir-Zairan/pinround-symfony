@@ -15,9 +15,12 @@ use App\Workflow\Api\MoveTarget;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\StepView;
+use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionPolicy;
 use App\Workflow\Api\TransitionView;
+use App\Workflow\Application\Turn\ReviewerChoice;
+use App\Workflow\Application\Turn\TesterChoice;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\Group;
 use App\Workflow\Domain\Mover;
@@ -35,6 +38,10 @@ use App\Workflow\Domain\Verb;
  * and Move on to… apply, and no guard blocks Move on to…: review_before_test is about In progress → Testing and
  * no_self_review about Code review → Testing, neither a step Move on to… leaves. Every offered verb carries where it
  * goes (MoveSideEffects); a "Move on to…" label names the core step it goes to.
+ *
+ * The reviewer and the tester are the ones ReviewerChoice::reviewerOf and TesterChoice::testerOf give, as in the turn
+ * rules, so a ticket that reached Code review or Testing without one stored is still moved by the person whose turn
+ * it is.
  *
  * "Move to another step…" is the lead's separate list (moveChoices) and check (checkMoveTo); both take the team's move
  * targets (StepQueries::moveTargetsFor), and checkMoveTo refuses a step outside them.
@@ -54,11 +61,13 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         TesterMovesDone $testerMovesDone,
         NoSelfReview $noSelfReview,
         private ReviewBeforeTest $reviewBeforeTest,
+        private ReviewerChoice $reviewerChoice,
+        private TesterChoice $testerChoice,
     ) {
         $this->guards = [$testerMovesDone, $noSelfReview, $reviewBeforeTest];
     }
 
-    public function available(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules): Availability
+    public function available(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team): Availability
     {
         $noteForEveryMove = $this->noteForEveryMove($ticket, $actor);
         if (null !== $noteForEveryMove) {
@@ -73,12 +82,12 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
                 continue;
             }
 
-            $blockingNote = $this->blockingNote($ticket, $transition, $actor, $rules);
+            $blockingNote = $this->blockingNote($ticket, $transition, $actor, $rules, $team);
             if ($transition->explainsBlock) {
                 $ruleNote ??= $blockingNote;
             }
 
-            if (null === $blockingNote && $this->mayUse($ticket, $transition, $actor)) {
+            if (null === $blockingNote && $this->mayUse($ticket, $transition, $actor, $team)) {
                 $isPrimary = $transition->isPrimary && !$hasPrimary;
                 $hasPrimary = $hasPrimary || $isPrimary;
                 $transitions[] = $this->viewOf($transition, $ticket, $isPrimary);
@@ -88,7 +97,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         return new Availability($transitions, $ruleNote);
     }
 
-    public function check(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, string $verb): Decision
+    public function check(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team, string $verb): Decision
     {
         $noteForEveryMove = $this->noteForEveryMove($ticket, $actor);
         if (null !== $noteForEveryMove) {
@@ -105,12 +114,12 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             return Decision::refused(null);
         }
 
-        $blockingNote = $this->blockingNote($ticket, $transition, $actor, $rules);
+        $blockingNote = $this->blockingNote($ticket, $transition, $actor, $rules, $team);
         if (null !== $blockingNote) {
             return Decision::refused($blockingNote);
         }
 
-        return $this->mayUse($ticket, $transition, $actor) ? Decision::allowed(self::moveTargetOf($this->coreTargetOf($transition, $ticket), $ticket)) : Decision::refused(null);
+        return $this->mayUse($ticket, $transition, $actor, $team) ? Decision::allowed(self::moveTargetOf($this->coreTargetOf($transition, $ticket), $ticket)) : Decision::refused(null);
     }
 
     /**
@@ -225,10 +234,10 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             : MoveTarget::coreStep($coreTarget->value);
     }
 
-    private function blockingNote(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote
+    private function blockingNote(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team): ?RuleNote
     {
         foreach ($this->guards as $guard) {
-            $note = $guard->check($ticket, $transition, $actor, $rules);
+            $note = $guard->check($ticket, $transition, $actor, $rules, $team);
             if (null !== $note) {
                 return $note;
             }
@@ -237,16 +246,17 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         return null;
     }
 
-    private function mayUse(TicketState $ticket, Transition $transition, ActorInTeam $actor): bool
+    private function mayUse(TicketState $ticket, Transition $transition, ActorInTeam $actor, TeamFacts $team): bool
     {
-        return array_any($transition->movers, fn (Mover $mover): bool => $this->isMover($mover, $ticket, $actor));
+        return array_any($transition->movers, fn (Mover $mover): bool => $this->isMover($mover, $ticket, $actor, $team));
     }
 
     /**
-     * A tester is the ticket's tester or anyone with the job tester in the team (personas-and-roles.md: Pass it and
-     * Needs changes are for the job tester); a checker only counts while the check is needed.
+     * A tester is the ticket's tester (with none stored, the one TesterChoice finds: the lead in a team without a
+     * tester) or anyone with the job tester in the team (personas-and-roles.md: Pass it and Needs changes are for the
+     * job tester); a checker only counts while the check is needed.
      */
-    private function isMover(Mover $mover, TicketState $ticket, ActorInTeam $actor): bool
+    private function isMover(Mover $mover, TicketState $ticket, ActorInTeam $actor, TeamFacts $team): bool
     {
         return match ($mover) {
             Mover::Lead => $this->moveRights->leadsTheTeam($actor),
@@ -254,9 +264,15 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             Mover::Assignee => self::isSamePerson($ticket->assigneeId, $actor->userId),
             Mover::WaitedOn => self::isSamePerson(self::personWaitedOn($ticket), $actor->userId),
             Mover::Checker => $ticket->isCheckNeeded && self::isSamePerson($ticket->checkerId, $actor->userId),
-            Mover::Reviewer => self::isSamePerson($ticket->reviewerId, $actor->userId),
-            Mover::Tester => $this->moveRights->isTester($actor) || self::isSamePerson($ticket->testerId, $actor->userId),
+            Mover::Reviewer => self::isSamePerson($this->reviewerChoice->reviewerOf($ticket, $team)->userId, $actor->userId),
+            Mover::Tester => $this->isTesterOf($ticket, $actor, $team),
+            Mover::TesterInCheckingStep => null === $ticket->coreCode && Group::Check === self::groupOf($ticket) && $this->isTesterOf($ticket, $actor, $team),
         };
+    }
+
+    private function isTesterOf(TicketState $ticket, ActorInTeam $actor, TeamFacts $team): bool
+    {
+        return $this->moveRights->isTester($actor) || self::isSamePerson($this->testerChoice->testerOf($ticket, $team)->userId, $actor->userId);
     }
 
     /**

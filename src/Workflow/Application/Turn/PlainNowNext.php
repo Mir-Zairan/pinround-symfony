@@ -74,8 +74,8 @@ final readonly class PlainNowNext implements NowNext
                 : $words->action($ticket->pendingAssigneeId, 'someone', 'get', ' it');
         }
 
-        $reviewerId = $ticket->reviewerId ?? $this->reviewerChoice->choose($ticket->assigneeId, $context->team)->userId;
-        $testerId = $ticket->testerId ?? $this->testerChoice->choose($context->team)->userId;
+        $reviewerId = $this->reviewerChoice->reviewerOf($ticket, $context->team)->userId;
+        $testerId = $this->testerChoice->testerOf($ticket, $context->team)->userId;
         $review = $words->action($reviewerId, 'a reviewer', 'review', '');
         $reviewTheCode = $words->action($reviewerId, 'a reviewer', 'review', ' the code');
         $test = $words->action($testerId, 'a tester', 'test', '');

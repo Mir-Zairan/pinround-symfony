@@ -38,7 +38,7 @@ final class ReviewBeforeTestTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
 
-        $note = new ReviewBeforeTest()->check($ticket, self::sendToTesting(), $actor, GuardFixtures::rules(reviewBeforeTest: $isRuleOn));
+        $note = new ReviewBeforeTest()->check($ticket, self::sendToTesting(), $actor, GuardFixtures::rules(reviewBeforeTest: $isRuleOn), GuardFixtures::team());
 
         self::assertSame($expectedNote, $note?->render(GuardFixtures::nameOf(...)));
     }
@@ -50,7 +50,7 @@ final class ReviewBeforeTestTest extends TestCase
         $guard = new ReviewBeforeTest();
 
         foreach (new TransitionCatalogue()->all() as $transition) {
-            $note = $guard->check($ticket, $transition, GuardFixtures::omar(), GuardFixtures::rules());
+            $note = $guard->check($ticket, $transition, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team());
 
             if (Verb::SendToTesting === $transition->verb) {
                 self::assertSame(self::NOTE, $note?->render(GuardFixtures::nameOf(...)));
@@ -67,8 +67,8 @@ final class ReviewBeforeTestTest extends TestCase
         $guard = new ReviewBeforeTest();
         $intoHold = new Transition(Verb::SendToCodeReview, 'Put on hold', [CoreStep::Progress], CoreStep::Hold, [Mover::Lead], false);
 
-        self::assertNull($guard->check($ticket, $intoHold, GuardFixtures::lena(), GuardFixtures::rules()));
-        self::assertNull($guard->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules()));
+        self::assertNull($guard->check($ticket, $intoHold, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team()));
+        self::assertNull($guard->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team()));
     }
 
     /**
