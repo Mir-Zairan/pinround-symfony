@@ -175,7 +175,7 @@ FR-ORG-06, FR-ORG-07 (projects + how work moves here), FR-WF-01, FR-WF-02, FR-WF
 **Why:** a team sees its own way of working, in plain words ([FR-ORG-07](../01-requirements/functional-requirements.md#org--organization-teams-and-roles)).
 **Steps:**
 1. Route `GET /teams/{slug}` (`team_show`), voter `TEAM_VIEW`. The slug is made from the team's name when the team is created, gets `-2`, `-3` and so on when another team of the organization already has it, and never changes, also on a rename; teams made before it got one from a backfill migration. A slug no team of the request's organization has, a slug of another organization's team included, is a 404.
-2. Projects section: key, name, open ticket count (0 until P03), link "See tickets"; for the lead only, "Remove", which unlinks the project from the team (refused while it has open tickets), and "Add project", which creates a new project or links an unlinked one.
+2. Projects section: key, name, open ticket count (0 until P03), link "See tickets"; for the lead only, "Remove", which unlinks the project from the team (refused while it has open tickets); for the lead or an admin, "Add project", which creates a new project or links an unlinked one.
 3. "How work moves here": the policy sentence, the five groups with their steps (team steps highlighted), "Add team step" (name + group chips, not Done) when allowed, rule list (editable switches only under `team` policy, else "· set by the admin").
 4. Non-leads see "Only the team lead can change projects and steps."
 5. People section shell (workload bars are filled in P03.T9).
