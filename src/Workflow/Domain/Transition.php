@@ -14,7 +14,8 @@ final readonly class Transition
      * @param string         $label     the button text, for example "Plan it"
      * @param list<CoreStep> $from      the steps the ticket may be in, at least one
      * @param list<Mover>    $movers    who may use it, at least one
-     * @param bool           $isPrimary true for the filled button, false for an outline one
+     * @param bool           $isPrimary the row's default: true for a filled button, false for an outline one; the policy
+     *                                  fills at most the first primary verb it offers
      *
      * @throws \InvalidArgumentException when $from or $movers is empty
      */
