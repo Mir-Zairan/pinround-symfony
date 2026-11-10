@@ -9,6 +9,7 @@ use App\Organization\Api\StepPolicy;
 use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\Workflow\Api\Event\RulesChanged;
 use App\Workflow\Domain\RuleSet;
 use App\Workflow\Domain\RuleSets;
 
@@ -20,14 +21,14 @@ use App\Workflow\Domain\RuleSets;
  */
 final readonly class SetRule
 {
-    public function __construct(private RuleSets $ruleSets, private SettingsQueries $settingsQueries, private TeamQueries $teamQueries)
+    public function __construct(private RuleSets $ruleSets, private SettingsQueries $settingsQueries, private TeamQueries $teamQueries, private WorkflowEvents $events)
     {
     }
 
     /**
      * A team's first own rule set starts as a copy of the organization's, then the one rule changes. An organization
      * without a rule set starts from the defaults. Only the one rule is written, so a rule someone else switched at the
-     * same time is kept.
+     * same time is kept. RulesChanged is published on every set, also when the rule already had that value.
      *
      * @param string $ruleCode one of tester_moves_done, no_self_review, review_before_test
      *
@@ -58,5 +59,6 @@ final readonly class SetRule
             ? RuleSet::defaults()
             : $this->ruleSets->forOrganization($organizationId) ?? RuleSet::defaults();
         $this->ruleSets->switchRule($organizationId, $teamId, $ruleCode, $isOn, $startingRules);
+        $this->events->publish(new RulesChanged($organizationId->toString(), $teamId?->toString(), $ruleCode, $isOn));
     }
 }

@@ -12,6 +12,8 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Unit\Workflow\Application\FixedStepPolicy;
+use App\Tests\Unit\Workflow\Application\RecordingWorkflowEvents;
+use App\Workflow\Api\Event\StepAdded;
 use App\Workflow\Api\StepView;
 use App\Workflow\Application\AddStep;
 use App\Workflow\Application\SetUpOrganizationWorkflow;
@@ -42,6 +44,14 @@ final class AddStepTest extends KernelTestCase
     private const string UNKNOWN_TEAM = '0197a3c0-0000-7000-8000-000000001ec3';
     private const string LENA = '0197a3c0-0000-7000-8000-000000001eb1';
 
+    private RecordingWorkflowEvents $events;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->events = new RecordingWorkflowEvents();
+    }
+
     protected function tearDown(): void
     {
         self::getContainer()->get('doctrine')->resetManager();
@@ -65,6 +75,23 @@ final class AddStepTest extends KernelTestCase
         self::assertSame([['Code review', 'core', 3], ['Testing', 'core', 4], ['Design check', 'company', 5]], $checking);
         self::assertSame(['team_id' => null, 'origin' => 'company', 'core_code' => null, 'archived_at' => null], $storedRow);
         self::assertMatchesRegularExpression('/^[0-9a-f]{8}-[0-9a-f]{4}-7/', $stepId);
+    }
+
+    #[Test]
+    public function aCompanyStepAndATeamStepEachPublishStepAddedWithTheirTeamAndGroup(): void
+    {
+        [$companyStepId, $teamStepId] = $this->inAcmeFoods(fn (): array => [
+            $this->addStep(StepPolicy::Team)(new OrganizationId(self::ACME_FOODS), null, 'Design check', 'check'),
+            $this->addStep(StepPolicy::Team)(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), 'Building', 'doing'),
+        ]);
+
+        self::assertEquals(
+            [
+                new StepAdded(self::ACME_FOODS, $companyStepId, null, 'check'),
+                new StepAdded(self::ACME_FOODS, $teamStepId, self::SHOP_TEAM, 'doing'),
+            ],
+            $this->events->published,
+        );
     }
 
     /**
@@ -135,6 +162,7 @@ final class AddStepTest extends KernelTestCase
 
         self::assertSame('Your admin has locked the steps, so teams cannot add their own.', $refusal);
         self::assertSame(['Design check'], $names);
+        self::assertCount(1, $this->events->published, 'Only the company step is published.');
     }
 
     #[Test]
@@ -153,6 +181,7 @@ final class AddStepTest extends KernelTestCase
 
         self::assertSame('That team is not in this organization.', $refusal);
         self::assertSame(8, $stepCount, 'Only the core steps are saved.');
+        self::assertSame([], $this->events->published);
     }
 
     #[Test]
@@ -177,6 +206,7 @@ final class AddStepTest extends KernelTestCase
             self::assertInstanceOf($refusalClass, $refusal, $groupCode);
             self::assertSame($message, $refusal->getMessage());
             self::assertSame(8, $stepCount, 'Only the core steps are saved.');
+            self::assertSame([], $this->events->published, $groupCode);
         }
     }
 
@@ -204,7 +234,7 @@ final class AddStepTest extends KernelTestCase
 
     private function addStep(StepPolicy $stepPolicy): AddStep
     {
-        return new AddStep(new DoctrineSteps($this->entityManager()), new FixedStepPolicy($stepPolicy), new DbalTeamQueries($this->connection()));
+        return new AddStep(new DoctrineSteps($this->entityManager()), new FixedStepPolicy($stepPolicy), new DbalTeamQueries($this->connection()), $this->events);
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Architecture;
 
 use App\Organization\Api\Event\OrganizationEvent;
+use App\Workflow\Api\Event\WorkflowEvent;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
@@ -16,19 +17,19 @@ use Symfony\Component\Yaml\Yaml;
 final class OutboxRelayRoutesConfigTest extends TestCase
 {
     #[Test]
-    public function theRelaySendsExactlyTheOrganizationEventsOnToAsyncNotify(): void
+    public function theRelaySendsExactlyTheOrganizationAndWorkflowEventsOnToAsyncNotify(): void
     {
         $config = self::messengerConfig();
         self::assertIsArray($config['parameters'] ?? null);
 
         self::assertEqualsCanonicalizing(
-            [OrganizationEvent::class => 'async_notify'],
+            [OrganizationEvent::class => 'async_notify', WorkflowEvent::class => 'async_notify'],
             $config['parameters']['outbox_relay.target_transports'] ?? null,
         );
     }
 
     #[Test]
-    public function theOrganizationEventsAreRoutedToTheOutbox(): void
+    public function theOrganizationAndWorkflowEventsAreRoutedToTheOutbox(): void
     {
         $framework = self::messengerConfig()['framework'] ?? null;
         self::assertIsArray($framework);
@@ -37,6 +38,7 @@ final class OutboxRelayRoutesConfigTest extends TestCase
         self::assertIsArray($routing);
 
         self::assertSame('outbox', $routing[OrganizationEvent::class] ?? null);
+        self::assertSame('outbox', $routing[WorkflowEvent::class] ?? null);
     }
 
     /**

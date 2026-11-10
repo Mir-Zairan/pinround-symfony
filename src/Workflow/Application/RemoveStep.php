@@ -6,6 +6,7 @@ namespace App\Workflow\Application;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\Workflow\Api\Event\StepRemoved;
 use App\Workflow\Api\StepOccupancy;
 use App\Workflow\Domain\StepId;
 use App\Workflow\Domain\Steps;
@@ -20,12 +21,13 @@ use App\Workflow\Domain\Steps;
  */
 final readonly class RemoveStep
 {
-    public function __construct(private Steps $steps, private StepOccupancy $stepOccupancy)
+    public function __construct(private Steps $steps, private StepOccupancy $stepOccupancy, private WorkflowEvents $events)
     {
     }
 
     /**
-     * Removing a step that was removed before changes nothing.
+     * Removing a step that was removed before changes nothing and publishes nothing; otherwise StepRemoved is
+     * published in the caller's transaction.
      *
      * @param ?TeamId $teamId the team whose step it is; null for a company step
      *
@@ -59,7 +61,11 @@ final readonly class RemoveStep
             throw new StepHasOpenTickets($openTickets);
         }
 
+        $wasRemovedBefore = null !== $step->archivedAt();
         $step->archive($at);
         $this->steps->save($step);
+        if (!$wasRemovedBefore) {
+            $this->events->publish(new StepRemoved($organizationId->toString(), $step->id()->toString(), $teamId?->toString(), $at));
+        }
     }
 }

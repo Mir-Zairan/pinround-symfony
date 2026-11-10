@@ -9,6 +9,7 @@ use App\Organization\Api\StepPolicy;
 use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\Workflow\Api\Event\StepAdded;
 use App\Workflow\Domain\BlankStepName;
 use App\Workflow\Domain\DoneGroupStepRefused;
 use App\Workflow\Domain\Group;
@@ -23,13 +24,14 @@ use App\Workflow\Domain\Steps;
  */
 final readonly class AddStep
 {
-    public function __construct(private Steps $steps, private SettingsQueries $settingsQueries, private TeamQueries $teamQueries)
+    public function __construct(private Steps $steps, private SettingsQueries $settingsQueries, private TeamQueries $teamQueries, private WorkflowEvents $events)
     {
     }
 
     /**
      * The new step comes last among the steps of its group it is listed with (core and company steps, plus the team's
      * own for a team step). Two steps added at the same moment may share a position; lists then order them by id.
+     * StepAdded is published in the caller's transaction.
      *
      * @param string $groupCode one of todo, doing, check, wait (done is refused)
      *
@@ -74,6 +76,7 @@ final readonly class AddStep
             throw new StepInDoneRefused($inDone->getMessage(), 0, $inDone);
         }
         $this->steps->add($step);
+        $this->events->publish(new StepAdded($organizationId->toString(), $step->id()->toString(), $teamId?->toString(), $group->value));
 
         return $step->id()->toString();
     }

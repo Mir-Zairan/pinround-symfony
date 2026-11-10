@@ -10,6 +10,8 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Unit\Workflow\Application\FixedStepOccupancy;
+use App\Tests\Unit\Workflow\Application\RecordingWorkflowEvents;
+use App\Workflow\Api\Event\StepRemoved;
 use App\Workflow\Api\StepView;
 use App\Workflow\Application\CoreStepNotRemovable;
 use App\Workflow\Application\RemoveStep;
@@ -39,8 +41,11 @@ final class RemoveStepTest extends KernelTestCase
     private const string NOW = '2027-03-15 10:00:00+00';
     private const string LATER = '2027-03-16 08:30:00+00';
 
+    private RecordingWorkflowEvents $events;
+
     protected function setUp(): void
     {
+        $this->events = new RecordingWorkflowEvents();
         $this->rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $this->insertStep(self::CODE_REVIEW, null, 'Code review', 'review', 'core', 3);
@@ -74,6 +79,20 @@ final class RemoveStepTest extends KernelTestCase
         self::assertSame([self::CODE_REVIEW, self::DESIGN_CHECK], $stepIds);
         self::assertSame('2027-03-15 10:00:00', $archivedAt);
         self::assertSame([self::SHOP_READY_TO_MERGE], $stepOccupancy->askedStepIds);
+        self::assertEquals(
+            [new StepRemoved(self::ACME_FOODS, self::SHOP_READY_TO_MERGE, self::SHOP_TEAM, new \DateTimeImmutable(self::NOW))],
+            $this->events->published,
+        );
+    }
+
+    #[Test]
+    public function aCompanyStepRemovedPublishesStepRemovedWithNoTeam(): void
+    {
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): void {
+            $this->removeStep(new FixedStepOccupancy(0))(new OrganizationId(self::ACME_FOODS), null, self::DESIGN_CHECK, new \DateTimeImmutable(self::NOW));
+        });
+
+        self::assertEquals([new StepRemoved(self::ACME_FOODS, self::DESIGN_CHECK, null, new \DateTimeImmutable(self::NOW))], $this->events->published);
     }
 
     #[Test]
@@ -108,6 +127,11 @@ final class RemoveStepTest extends KernelTestCase
 
         self::assertSame('2027-03-15 10:00:00', $archivedAt);
         self::assertSame(1, $archivedCount);
+        self::assertEquals(
+            [new StepRemoved(self::ACME_FOODS, self::SHOP_READY_TO_MERGE, self::SHOP_TEAM, new \DateTimeImmutable(self::NOW))],
+            $this->events->published,
+            'The second removal publishes nothing.',
+        );
     }
 
     #[Test]
@@ -208,13 +232,14 @@ final class RemoveStepTest extends KernelTestCase
             return [$refusal, $this->connection()->fetchOne('SELECT count(*) FROM wf_step WHERE archived_at IS NOT NULL')];
         });
         self::assertSame(0, $archivedCount, 'A refused removal archives nothing.');
+        self::assertSame([], $this->events->published, 'A refused removal publishes nothing.');
 
         return $refusal;
     }
 
     private function removeStep(FixedStepOccupancy $stepOccupancy): RemoveStep
     {
-        return new RemoveStep(new DoctrineSteps($this->entityManager()), $stepOccupancy);
+        return new RemoveStep(new DoctrineSteps($this->entityManager()), $stepOccupancy, $this->events);
     }
 
     private function archivedAtOf(string $stepId): mixed

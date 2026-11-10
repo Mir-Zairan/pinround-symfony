@@ -8,6 +8,7 @@ use App\Organization\Api\StepPolicy;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Unit\Ticketing\Application\FixedTeamQueries;
+use App\Workflow\Api\Event\RulesChanged;
 use App\Workflow\Application\RuleTeamNotFound;
 use App\Workflow\Application\RuleUnknown;
 use App\Workflow\Application\SetRule;
@@ -121,12 +122,54 @@ final class SetRuleTest extends TestCase
         self::assertEquals([InMemoryRuleSets::key(self::acmeFoods(), null) => RuleSet::defaults()], $ruleSets->saved);
     }
 
+    #[Test]
+    public function anOrganizationRuleChangePublishesRulesChangedWithNoTeam(): void
+    {
+        $events = new RecordingWorkflowEvents();
+
+        self::setRule(new InMemoryRuleSets(), StepPolicy::Extend, $events)(self::acmeFoods(), null, 'review_before_test', false);
+
+        self::assertEquals([new RulesChanged(self::ACME_FOODS, null, 'review_before_test', false)], $events->published);
+    }
+
+    #[Test]
+    public function aTeamRuleChangePublishesRulesChangedWithTheTeamAndTheNewValue(): void
+    {
+        $events = new RecordingWorkflowEvents();
+
+        self::setRule(new InMemoryRuleSets(), StepPolicy::Team, $events)(self::acmeFoods(), self::shopTeam(), 'no_self_review', true);
+
+        self::assertEquals([new RulesChanged(self::ACME_FOODS, self::SHOP_TEAM, 'no_self_review', true)], $events->published);
+    }
+
+    #[Test]
+    public function aRefusedRuleChangePublishesNothing(): void
+    {
+        $events = new RecordingWorkflowEvents();
+        $attempts = [
+            [StepPolicy::Team, null, 'lead_moves_done', RuleUnknown::class],
+            [StepPolicy::Team, new TeamId(self::BETA_BAKERY_TEAM), 'no_self_review', RuleTeamNotFound::class],
+            [StepPolicy::Locked, self::shopTeam(), 'no_self_review', TeamRulesNeedTeamPolicy::class],
+        ];
+
+        foreach ($attempts as [$stepPolicy, $teamId, $ruleCode, $refusalClass]) {
+            try {
+                self::setRule(new InMemoryRuleSets(), $stepPolicy, $events)(self::acmeFoods(), $teamId, $ruleCode, false);
+                self::fail(\sprintf('%s was not thrown.', $refusalClass));
+            } catch (\Exception $refusal) {
+                self::assertInstanceOf($refusalClass, $refusal);
+            }
+        }
+
+        self::assertSame([], $events->published);
+    }
+
     /**
      * Acme Foods has the one team SHOP.
      */
-    private static function setRule(InMemoryRuleSets $ruleSets, StepPolicy $stepPolicy): SetRule
+    private static function setRule(InMemoryRuleSets $ruleSets, StepPolicy $stepPolicy, ?RecordingWorkflowEvents $events = null): SetRule
     {
-        return new SetRule($ruleSets, new FixedStepPolicy($stepPolicy), new FixedTeamQueries(self::acmeFoods(), [self::shopTeam()]));
+        return new SetRule($ruleSets, new FixedStepPolicy($stepPolicy), new FixedTeamQueries(self::acmeFoods(), [self::shopTeam()]), $events ?? new RecordingWorkflowEvents());
     }
 
     private static function acmeFoods(): OrganizationId
