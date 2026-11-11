@@ -4,15 +4,17 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Api;
 
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * What the ticket visibility predicate reads of one ticket: its visibility, its team and the six people on it, as
- * tkt_ticket and ins_ticket_turn hold them.
+ * What the ticket visibility predicate reads of one ticket: its organization, its visibility, its team and the six
+ * people on it, as tkt_ticket and ins_ticket_turn hold them.
  */
 final readonly class TicketVisibilityFacts
 {
+    /** The values of Domain\Visibility, which this Api may not depend on. */
     public const string FOR_EVERYONE = 'all';
     public const string TEAM_ONLY = 'team';
 
@@ -22,6 +24,7 @@ final readonly class TicketVisibilityFacts
      * @throws \InvalidArgumentException when the visibility is not all or team
      */
     public function __construct(
+        public OrganizationId $organizationId,
         public string $visibility,
         public ?TeamId $teamId,
         public UserId $reporterId,

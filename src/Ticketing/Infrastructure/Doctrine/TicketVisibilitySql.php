@@ -11,7 +11,7 @@ use Doctrine\DBAL\ParameterType;
 /**
  * TicketVisibility as a SQL condition with named parameters, for a table that carries the predicate's columns
  * (tkt_ticket, ins_ticket_turn). The only place SQL may filter on visibility; HandWrittenVisibilityConditionTest
- * fails on any other.
+ * fails on any other. It keeps to the viewer's organization by itself, besides row-level security.
  *
  * The condition is true for a visible row and false or NULL for a hidden one (a NULL people column makes the IN list
  * NULL): use it as a filter (WHERE, ON, FILTER), never negated.
@@ -47,22 +47,25 @@ final readonly class TicketVisibilitySql
 
         return new self(
             \sprintf(
-                "(%1\$s.visibility = 'all'"
+                '(%1$s.organization_id = CAST(:%2$sorg AS uuid)'
+                ." AND (%1\$s.visibility = 'all'"
                 .' OR %1$s.team_id = ANY(CAST(:%2$steams AS uuid[]))'
                 .' OR CAST(:%2$sme AS uuid) IN (%1$s.reporter_id, %1$s.assignee_id, %1$s.pending_assignee_id,'
                 .' %1$s.reviewer_id, %1$s.tester_id, %1$s.waiting_on_user_id)'
                 .' OR CAST(:%2$sis_admin AS boolean)'
-                .' OR (%1$s.team_id IS NULL AND CAST(:%2$sis_triager AS boolean)))',
+                .' OR (%1$s.team_id IS NULL AND CAST(:%2$sis_triager AS boolean))))',
                 $tableAlias,
                 $prefix,
             ),
             [
+                $prefix.'org' => $visibility->organizationId()->toString(),
                 $prefix.'teams' => $teamIdsLiteral,
                 $prefix.'me' => $visibility->viewerId()->toString(),
                 $prefix.'is_admin' => $visibility->isAdmin(),
                 $prefix.'is_triager' => $visibility->isTriager(),
             ],
             [
+                $prefix.'org' => ParameterType::STRING,
                 $prefix.'teams' => ParameterType::STRING,
                 $prefix.'me' => ParameterType::STRING,
                 $prefix.'is_admin' => ParameterType::BOOLEAN,

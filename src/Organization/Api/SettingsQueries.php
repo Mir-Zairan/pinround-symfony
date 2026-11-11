@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Organization\Api;
 
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 
 /**
  * An organization's settings, for other modules. The reads run under row-level security, so they need an open
@@ -21,4 +22,13 @@ interface SettingsQueries
      * @throws \LogicException when the stored step policy is not one of StepPolicy's values
      */
     public function stepPolicyOf(OrganizationId $organizationId): StepPolicy;
+
+    /**
+     * Who triages the organization's restricted tickets with no team (data.triager_id), cached as stepPolicyOf is.
+     * Null when the organization has no settings row (or it is not visible under the current tenant) or the row names
+     * no triager.
+     *
+     * @throws \InvalidArgumentException when the stored triager is not a user id
+     */
+    public function triagerOf(OrganizationId $organizationId): ?UserId;
 }

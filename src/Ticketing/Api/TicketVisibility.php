@@ -4,42 +4,58 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Api;
 
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 
 /**
  * The one ticket visibility predicate (ADR-0013 Clarifications, data-model.md › Ticket visibility predicate) for one
- * viewer: a ticket is visible when it is for everyone, or in one of the viewer's teams, or has the viewer as one of its
- * six people, or the viewer is an admin, or it has no team and the viewer is the organization's triager.
- * isVisible() is the PHP check; TicketVisibilitySql renders the same rule as SQL. The caller builds it from
- * Organization\Api\ActorContext and the triager of the organization's settings, which this module may not read itself.
+ * viewer in one organization: a ticket of that organization is visible when it is for everyone, or in one of the
+ * viewer's teams, or has the viewer as one of its six people, or the viewer is an admin, or it has no team and the
+ * viewer is the organization's triager. A ticket of another organization is never visible, not even to an admin.
+ * isVisible() is the PHP check; TicketVisibilitySql renders the same rule as SQL. Application\ActorTicketVisibility
+ * builds it from Organization\Api\ActorContext and the triager, which this Api may not depend on.
  */
 final readonly class TicketVisibility
 {
     /**
      * @param list<TeamId> $teamIds
      */
-    private function __construct(private UserId $viewerId, private array $teamIds, private bool $isAdmin, private UserId $triagerId)
-    {
+    private function __construct(
+        private OrganizationId $organizationId,
+        private UserId $viewerId,
+        private array $teamIds,
+        private bool $isAdmin,
+        private ?UserId $triagerId,
+    ) {
     }
 
     /**
-     * @param list<TeamId> $teamIds   the teams the viewer has any team role in: lead, member or viewer
-     * @param bool         $isAdmin   whether the viewer has the org role Admin; the Manager role widens nothing
-     * @param UserId       $triagerId the org setting triager_id, who sees restricted tickets with no team
+     * @param OrganizationId $organizationId the viewer's organization, the only one whose tickets can be visible
+     * @param list<TeamId>   $teamIds        the teams the viewer has any team role in: lead, member or viewer
+     * @param bool           $isAdmin        whether the viewer has the org role Admin; the Manager role widens nothing
+     * @param ?UserId        $triagerId      the org setting triager_id, who sees restricted tickets with no team; null
+     *                                       when the organization has none, so nobody sees them as triager
      */
-    public static function for(UserId $viewerId, array $teamIds, bool $isAdmin, UserId $triagerId): self
+    public static function for(OrganizationId $organizationId, UserId $viewerId, array $teamIds, bool $isAdmin, ?UserId $triagerId): self
     {
-        return new self($viewerId, $teamIds, $isAdmin, $triagerId);
+        return new self($organizationId, $viewerId, $teamIds, $isAdmin, $triagerId);
     }
 
     public function isVisible(TicketVisibilityFacts $ticket): bool
     {
-        return TicketVisibilityFacts::FOR_EVERYONE === $ticket->visibility
+        return $ticket->organizationId->equals($this->organizationId) && (
+            TicketVisibilityFacts::FOR_EVERYONE === $ticket->visibility
             || (null !== $ticket->teamId && $this->isInTeam($ticket->teamId))
             || array_any($ticket->involvedUserIds(), fn (UserId $person): bool => $person->equals($this->viewerId))
             || $this->isAdmin
-            || (null === $ticket->teamId && $this->isTriager());
+            || (null === $ticket->teamId && $this->isTriager())
+        );
+    }
+
+    public function organizationId(): OrganizationId
+    {
+        return $this->organizationId;
     }
 
     public function viewerId(): UserId
@@ -62,7 +78,7 @@ final readonly class TicketVisibility
 
     public function isTriager(): bool
     {
-        return $this->viewerId->equals($this->triagerId);
+        return null !== $this->triagerId && $this->viewerId->equals($this->triagerId);
     }
 
     private function isInTeam(TeamId $teamId): bool

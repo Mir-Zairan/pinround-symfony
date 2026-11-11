@@ -10,6 +10,7 @@ use App\Organization\Api\StepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Identity\LogsInUsers;
 use Doctrine\DBAL\Connection;
@@ -593,6 +594,11 @@ final class TeamPageTest extends WebTestCase
                 ++$this->reads;
 
                 return StepPolicy::Team;
+            }
+
+            public function triagerOf(OrganizationId $organizationId): ?UserId
+            {
+                return null;
             }
         };
         self::getContainer()->set(DbalSettingsQueries::class, $settings);

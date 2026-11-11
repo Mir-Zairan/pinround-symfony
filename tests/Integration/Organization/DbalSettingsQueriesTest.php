@@ -108,6 +108,60 @@ final class DbalSettingsQueriesTest extends KernelTestCase
         });
     }
 
+    #[Test]
+    public function aNewOrganizationHasItsFirstAdminAsTriager(): void
+    {
+        self::assertSame(self::SARA, $this->triagerAs(self::ACME_FOODS, self::ACME_FOODS)?->toString());
+    }
+
+    #[Test]
+    public function anotherOrganizationsTriagerIsNeverRead(): void
+    {
+        self::assertSame(self::SARA, $this->triagerAs(self::BETA_BAKERY, self::BETA_BAKERY)?->toString());
+        self::assertNull($this->triagerAs(self::BETA_BAKERY, self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function noTenantReadsNoTriager(): void
+    {
+        self::assertNull($this->queries()->triagerOf(new OrganizationId(self::ACME_FOODS)));
+    }
+
+    #[Test]
+    public function anOrganizationWithoutSettingsHasNoTriager(): void
+    {
+        $this->rows()->removeAllOf(self::ACME_FOODS);
+
+        self::assertNull($this->triagerAs(self::ACME_FOODS, self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function settingsWithoutATriagerHaveNoTriager(): void
+    {
+        self::assertNull($this->transactions()->rolledBackAs(self::ACME_FOODS, function (): ?UserId {
+            $this->connection()->executeStatement("UPDATE org_settings SET data = data - 'triager_id'");
+
+            return $this->queries()->triagerOf(new OrganizationId(self::ACME_FOODS));
+        }));
+    }
+
+    #[Test]
+    public function aStoredTriagerThatIsNotAUserIdIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): ?UserId {
+            $this->connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{triager_id}', '\"sara\"')");
+
+            return $this->queries()->triagerOf(new OrganizationId(self::ACME_FOODS));
+        });
+    }
+
+    private function triagerAs(string $tenantId, string $askedId): ?UserId
+    {
+        return $this->transactions()->rolledBackAs($tenantId, fn (): ?UserId => $this->queries()->triagerOf(new OrganizationId($askedId)));
+    }
+
     private function stepPolicyAs(string $tenantId, string $askedId): StepPolicy
     {
         return $this->transactions()->rolledBackAs($tenantId, fn (): StepPolicy => $this->queries()->stepPolicyOf(new OrganizationId($askedId)));
