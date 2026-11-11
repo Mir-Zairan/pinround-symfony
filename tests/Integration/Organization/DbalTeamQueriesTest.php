@@ -266,12 +266,13 @@ final class DbalTeamQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function peopleByJobFindsNoOneForATeamOfAnotherOrganizationOrNoTenant(): void
+    public function peopleByJobFindsNoOneForATeamOfAnotherOrganizationAnUnknownTeamOrNoTenant(): void
     {
         $noOne = ['developer' => [], 'tester' => [], 'other' => []];
         // Under Beta Bakery itself Mia develops in Checkout, so the empty lists below come from row-level security.
         self::assertSame(['developer' => [self::MIA], 'tester' => [], 'other' => []], $this->peopleByJobAs(self::BETA_BAKERY, self::BETA_CHECKOUT));
         self::assertSame($noOne, $this->peopleByJobAs(self::ACME_FOODS, self::BETA_CHECKOUT));
+        self::assertSame($noOne, $this->peopleByJobAs(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000005df'));
         self::assertSame($noOne, $this->peopleByJobAs(null, self::ACME_SHOP));
     }
 
