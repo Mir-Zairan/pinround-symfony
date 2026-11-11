@@ -18,7 +18,7 @@
             {% for group in groups %}
                 {% for step in group.steps %}
                     <section class="tickets__step" id="step-{{ step.id }}" data-group="{{ group.code }}" data-step-id="{{ step.id }}"
-                        {{ stimulus_controller('step-collapse', {url: step.collapseUrl, token: csrf_token('ticketing_step_collapse')}) }}>
+                        {{ stimulus_controller('step-collapse', {url: step.collapseUrl, token: csrf_token(step.csrfId)}) }}>
                         <h2 class="tickets__step-heading">
                             <button type="button" class="tickets__step-toggle" aria-expanded="{{ step.isCollapsed ? 'false' : 'true' }}" aria-controls="step-{{ step.id }}-rows"
                                 {{ stimulus_target('step-collapse', 'toggle') }} data-step-toggle data-action="step-collapse#toggle">
@@ -34,7 +34,7 @@
                         </h2>
                         <div class="tickets__rows" id="step-{{ step.id }}-rows" {{ stimulus_target('step-collapse', 'rows') }}{% if step.isCollapsed %} hidden{% endif %}>
                             {% if step.pageFrameId is not null %}<turbo-frame id="{{ step.pageFrameId }}">{% endif %}
-                            <ul class="tickets__row-list">
+                            <ul class="tickets__row-list"{% if step.pageFrameId is not null %} tabindex="-1" autofocus{% endif %}>
                                 {% for row in step.rows %}
                                     <li class="tickets__row" data-ticket-key="{{ row.key }}">
                                         <span class="tickets__key">{{ row.key }}</span>

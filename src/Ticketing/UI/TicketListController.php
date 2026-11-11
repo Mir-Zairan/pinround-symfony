@@ -121,6 +121,7 @@ final class TicketListController extends AbstractController
                 'count' => TicketListText::stepCountOf($step),
                 'isCollapsed' => \in_array($step->stepId, $collapsedStepIds, true),
                 'collapseUrl' => $this->generateUrl(StepCollapseController::ROUTE, ['stepId' => $step->stepId]),
+                'csrfId' => StepCollapseController::CSRF_ID,
                 'pageFrameId' => $cursor?->stepId === $step->stepId ? self::frameIdOf($cursor) : null,
                 'moreFrameId' => null === $step->nextCursor ? null : self::frameIdOf($step->nextCursor),
                 'rows' => array_map(static fn (TicketListRow $row): array => [

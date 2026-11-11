@@ -171,6 +171,34 @@
   border-top: 1px solid var(--outline-var);
 }
 
+/* On a narrow screen or a zoomed one the five cells do not fit a line: the title takes the first line and the key,
+   priority, assignee and time wrap together on the second. */
+@media (max-width: 40em) {
+  .tickets__row {
+    flex-wrap: wrap;
+    gap: var(--space-8) var(--space-12);
+  }
+
+  .tickets__summary {
+    flex: 1 0 100%;
+    order: -1;
+  }
+
+  .tickets__key,
+  .tickets__priority {
+    width: auto;
+  }
+
+  .tickets__updated {
+    width: auto;
+    margin-left: auto;
+  }
+}
+
+.tickets__row-list:focus {
+  outline: none;
+}
+
 .tickets__rows[hidden] {
   display: none;
 }
