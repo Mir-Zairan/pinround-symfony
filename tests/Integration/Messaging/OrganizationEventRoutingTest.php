@@ -72,7 +72,9 @@ final class OrganizationEventRoutingTest extends KernelTestCase
         self::runTheWorkerUntilIdle('outbox');
 
         $relayed = $this->asyncNotify()->getSent();
-        self::assertSame(
+        // The relay sorts by available_at alone, stored to the second. On a small table PostgreSQL scans the heap and a
+        // row may sit in a slot an earlier, vacuumed row freed, so events of one second come in no fixed order.
+        self::assertEqualsCanonicalizing(
             [MemberJoined::class, MemberJoined::class, MemberJoined::class, TeamCreated::class, TeamRoleChanged::class, OrgRolesChanged::class],
             array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed),
         );

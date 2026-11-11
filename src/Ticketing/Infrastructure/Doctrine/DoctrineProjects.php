@@ -10,7 +10,9 @@ use App\Ticketing\Domain\ProjectKey;
 use App\Ticketing\Domain\ProjectKeyInUse;
 use App\Ticketing\Domain\Projects;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Query;
 use Symfony\Component\Uid\Uuid;
 
 final readonly class DoctrineProjects implements Projects
@@ -34,6 +36,21 @@ final readonly class DoctrineProjects implements Projects
         return $this->entityManager->getRepository(Project::class)->findOneBy(['id' => $id->toString()]);
     }
 
+    public function lockById(ProjectId $id): ?Project
+    {
+        if (!$this->entityManager->getConnection()->isTransactionActive()) {
+            throw new \LogicException('Locking a project needs an open transaction.');
+        }
+
+        $project = $this->entityManager->createQuery('SELECT p FROM '.Project::class.' p WHERE p.id = :id')
+            ->setParameter('id', $id->toString())
+            ->setLockMode(LockMode::PESSIMISTIC_WRITE)
+            ->setHint(Query::HINT_REFRESH, true)
+            ->getOneOrNullResult();
+
+        return $project instanceof Project ? $project : null;
+    }
+
     public function byKey(ProjectKey $key): ?Project
     {
         return $this->entityManager->getRepository(Project::class)->findOneBy(['key' => $key->toString()]);
@@ -52,5 +69,13 @@ final readonly class DoctrineProjects implements Projects
 
             throw new ProjectKeyInUse('Another project of the organization has this key.', 0, $exception);
         }
+    }
+
+    public function save(Project $project): void
+    {
+        if (!$this->entityManager->contains($project)) {
+            throw new \LogicException('Only a project found through byId, lockById or byKey, or added before, is saved.');
+        }
+        $this->entityManager->flush();
     }
 }

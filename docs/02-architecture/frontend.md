@@ -58,7 +58,7 @@ Menu items come from the user's roles. There is no mode switch: a person with se
 | Home | everyone | `web_home` |
 | Tickets | everyone with a team role, and managers | `ticketing_tickets` (`/tickets`) |
 | My reports (with a count of questions waiting on me) | everyone with a team role | `my_reports` (`/my-reports`) |
-| Team | everyone with a team role: "Team" for one team; a "Teams ▾" disclosure listing the teams by name when there are several | `team_show` (`/teams/{slug}`; until teams have a slug, MainMenu passes the team's id as `teamId`) |
+| Team | everyone with a team role: "Team" for one team; a "Teams ▾" disclosure listing the teams by name when there are several | `team_show` (`/teams/{slug}`, the slug from `TeamSummary::slug` or, for a person's only team, `Roles::teamSlugOf`) |
 | Admin | org admins | `web_admin` with `tab: people` (`/admin/people`; the admin home is its People tab; current on every tab) |
 
 A team role is lead, member or viewer. Without an organization (the picker, a page without a login) the menu is Home alone, and there is no "Report a problem" or bell. `App\Web\UI\Navigation\MainMenu` builds the items (Twig `main_menu()`) and decides "Report a problem" and the bell (`can_report_problems()`); the route names above live there. Showing an item grants nothing: each page asks its own voter.
@@ -132,6 +132,7 @@ Every controller is small, stays under about 150 lines, and has a test (Playwrig
 | `menu` | The "⋯" menus, the avatar menu and the bell popover: open/close, Escape, click outside, roving focus (the avatar menu is a disclosure and keeps its items in the Tab order) |
 | `theme-switch` | The avatar menu's System / Light / Dark switch: sets or removes `data-theme` on `<html>` at once and posts the choice to `/me/theme` |
 | `dialog` | Opens a `<dialog>`, keeps focus inside, gives focus back on close |
+| `project-picker` | The Team page's "Add a project" dialog: filters the unlinked projects by key or name, and keeps the submit button's label ("Add N projects") and disabled state in step with the checked boxes |
 | `clipboard` | "Copy link" |
 | `queue` | Keyboard shortcuts in a queue: J/K for next/previous (phase 12 adds more shortcuts) |
 | `autosize` | Grows textareas with their content |
@@ -246,7 +247,7 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Round view (prototype "Review round" board) | `GET /t/{key}/rounds/{number}` | Review | Screenshot + PinLayer, before/after, verdicts |
 | Full-screen review (prototype "Review in full screen" board) | `GET /t/{key}/rounds/{number}/focus` | Review | Full-screen pin walker |
 | Draft round | part of the ticket page; `POST /t/{key}/draft…` | Review | `DraftRoundEditor` |
-| Team page | `GET /teams/{slug}` (`team_show`) | Organization + Workflow | Projects, "How work moves here", people with WorkloadBar |
+| Team page | `GET /teams/{slug}` (`team_show`) | Web (reads Organization, Ticketing and Workflow) | Projects, "How work moves here", people with WorkloadBar |
 | Admin tabs | `GET /admin/{tab}` (`web_admin`), tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data; the menu's Admin item opens people | Web (+ owning module per tab) | Admin layout with tab list |
 | Manager "Teams at a glance" | part of `/` for managers | Insight | GroupBar per team |
 | Local AI sheet | dialog from the header chip; `POST /ai/laptop/status`, `POST /ai/laptop/package`, `POST /ai/laptop/result` | Assist | `local-ai` controller |

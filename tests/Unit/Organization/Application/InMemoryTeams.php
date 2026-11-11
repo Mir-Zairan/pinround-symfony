@@ -6,6 +6,8 @@ namespace App\Tests\Unit\Organization\Application;
 
 use App\Organization\Domain\Team;
 use App\Organization\Domain\Teams;
+use App\Organization\Domain\TeamSlug;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 
 /**
@@ -44,6 +46,21 @@ final class InMemoryTeams implements Teams
         $this->calls[] = 'lockById';
 
         return $this->teams[$id->toString()] ?? null;
+    }
+
+    public function slugsTakenFrom(OrganizationId $organizationId, TeamSlug $base): array
+    {
+        $this->calls[] = 'slugsTakenFrom';
+
+        $taken = [];
+        foreach ($this->teams as $team) {
+            $slug = $team->slug()->toString();
+            if ($team->organizationId()->equals($organizationId) && ($slug === $base->toString() || str_starts_with($slug, $base->toString().'-'))) {
+                $taken[] = $team->slug();
+            }
+        }
+
+        return $taken;
     }
 
     public function add(Team $team): void

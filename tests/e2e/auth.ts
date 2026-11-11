@@ -13,6 +13,10 @@ export const LENA_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 
 export const OMAR_EMAIL = 'omar@acme-foods.example';
 export const OMAR_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'omar.json');
 
+// Ben leads Ovens, the team of Beta Bakery, the one demo organization under the step policy team.
+export const BEN_EMAIL = 'ben@beta-bakery.example';
+export const BEN_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'ben.json');
+
 /** The password make seed gave the demo people (DEMO_PASSWORD); the tests never hold a value of their own. */
 export function demoPassword(): string {
   const password = process.env.E2E_PASSWORD;

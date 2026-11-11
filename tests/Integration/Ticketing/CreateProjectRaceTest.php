@@ -15,6 +15,7 @@ use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Application\CreateProject\CreateProject;
 use App\Ticketing\Application\CreateProject\ProjectKeyTaken;
+use App\Ticketing\Application\OrganizationTeams;
 use App\Ticketing\Domain\Project;
 use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Domain\ProjectKey;
@@ -62,7 +63,7 @@ final class CreateProjectRaceTest extends KernelTestCase
         $projects = new DoctrineProjects($this->entityManager());
         $createProject = new CreateProject(
             $this->projectsThatLoseTheRaceTo($secondSession, $projects),
-            self::teamQueriesWithTheShopTeam(),
+            new OrganizationTeams(self::teamQueriesWithTheShopTeam()),
         );
         $connection = $this->connection();
 
@@ -108,6 +109,11 @@ final class CreateProjectRaceTest extends KernelTestCase
                 return $this->projects->byId($id);
             }
 
+            public function lockById(ProjectId $id): ?Project
+            {
+                return $this->projects->lockById($id);
+            }
+
             public function byKey(ProjectKey $key): ?Project
             {
                 $found = $this->projects->byKey($key);
@@ -125,6 +131,11 @@ final class CreateProjectRaceTest extends KernelTestCase
             public function add(Project $project): void
             {
                 $this->projects->add($project);
+            }
+
+            public function save(Project $project): void
+            {
+                $this->projects->save($project);
             }
         };
     }
@@ -144,12 +155,17 @@ final class CreateProjectRaceTest extends KernelTestCase
 
             public function allSummariesOf(OrganizationId $organizationId): array
             {
-                return [new TeamSummary(new TeamId(CreateProjectRaceTest::SHOP_TEAM), 'Shop')];
+                return [new TeamSummary(new TeamId(CreateProjectRaceTest::SHOP_TEAM), 'Shop', 'shop')];
             }
 
             public function countOf(OrganizationId $organizationId): int
             {
                 return 1;
+            }
+
+            public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
+            {
+                throw new \LogicException('CreateProject reads no team by slug.');
             }
 
             public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob

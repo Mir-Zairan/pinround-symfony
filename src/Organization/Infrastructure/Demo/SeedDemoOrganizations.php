@@ -6,7 +6,9 @@ namespace App\Organization\Infrastructure\Demo;
 
 use App\Identity\Api\UserQueries;
 use App\Organization\Api\DemoOrganizations;
+use App\Organization\Api\StepPolicy;
 use App\Organization\Application\AddMember;
+use App\Organization\Application\ChangeStepPolicy;
 use App\Organization\Application\CreateOrganization;
 use App\Organization\Application\CreateTeam;
 use App\Organization\Application\SetTeamRole;
@@ -29,17 +31,18 @@ use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 
 /**
- * The neutral example organizations: Acme Foods with its teams Shop and Mobile, and Beta Bakery with Ben alone, made
- * through the Organization commands with the system as actor. It runs after SeedDemoPeople, whose people it finds by
- * email. Lena and Omar are in Acme Foods only, so logging in as them never shows the organization picker; add one of
- * them to Beta Bakery to try it.
+ * The neutral example organizations: Acme Foods with its teams Shop and Mobile, and Beta Bakery with Ben and his team
+ * Ovens under the step policy team, made through the Organization commands with the system as actor. It runs after
+ * SeedDemoPeople, whose people it finds by email. Lena and Omar are in Acme Foods only, so logging in as them never
+ * shows the organization picker; add one of them to Beta Bakery to try it.
  *
  * Each organization's writes run in one transaction under that organization as tenant. An organization is found by
  * its slug among the organizations of its first admin, a team by its name and a member by their membership, and
- * whatever is found stays as it is.
+ * whatever is found stays as it is. A step policy is set only in a run that creates one of the organization's teams,
+ * so a later change of it stays until one of those teams is made again.
  *
  * @phpstan-type TeamSpec array{name: string, lead: string, leadJob: Job, members: list<array{email: string, role: TeamRole, job: Job}>}
- * @phpstan-type OrganizationSpec array{name: string, slug: string, firstAdmin: string, members: list<array{email: string, roles: list<OrgRole>}>, teams: list<TeamSpec>}
+ * @phpstan-type OrganizationSpec array{name: string, slug: string, firstAdmin: string, members: list<array{email: string, roles: list<OrgRole>}>, teams: list<TeamSpec>, stepPolicy: StepPolicy|null}
  */
 #[AsTaggedItem(priority: 50)]
 final readonly class SeedDemoOrganizations implements DemoSeedStep
@@ -83,13 +86,17 @@ final readonly class SeedDemoOrganizations implements DemoSeedStep
                     ],
                 ],
             ],
+            'stepPolicy' => null,
         ],
         [
             'name' => 'Beta Bakery',
             'slug' => 'beta-bakery',
             'firstAdmin' => self::BEN,
             'members' => [],
-            'teams' => [],
+            'teams' => [
+                ['name' => 'Ovens', 'lead' => self::BEN, 'leadJob' => Job::Developer, 'members' => []],
+            ],
+            'stepPolicy' => StepPolicy::Team,
         ],
     ];
 
@@ -102,6 +109,7 @@ final readonly class SeedDemoOrganizations implements DemoSeedStep
         private CreateOrganization $createOrganization,
         private AddMember $addMember,
         private CreateTeam $createTeam,
+        private ChangeStepPolicy $changeStepPolicy,
         private SetTeamRole $setTeamRole,
         private TenantContext $tenantContext,
         private EntityManagerInterface $entityManager,
@@ -160,8 +168,12 @@ final readonly class SeedDemoOrganizations implements DemoSeedStep
             foreach ($spec['members'] as $member) {
                 $this->addMemberIfMissing($organizationId, $member['email'], $userIds[$member['email']], new OrgRoles(...$member['roles']), $counts);
             }
+            $createdATeam = false;
             foreach ($spec['teams'] as $team) {
-                $this->seedTeam($organizationId, $team, $userIds, $counts, $now);
+                $createdATeam = $this->seedTeam($organizationId, $team, $userIds, $counts, $now) || $createdATeam;
+            }
+            if (null !== $spec['stepPolicy'] && $createdATeam) {
+                ($this->changeStepPolicy)($organizationId, $spec['stepPolicy'], null, $now);
             }
         });
     }
@@ -190,10 +202,13 @@ final readonly class SeedDemoOrganizations implements DemoSeedStep
     /**
      * @param TeamSpec              $spec
      * @param array<string, UserId> $userIds
+     *
+     * @return bool whether the team was created now
      */
-    private function seedTeam(OrganizationId $organizationId, array $spec, array $userIds, SeededCounts $counts, \DateTimeImmutable $now): void
+    private function seedTeam(OrganizationId $organizationId, array $spec, array $userIds, SeededCounts $counts, \DateTimeImmutable $now): bool
     {
         $teamId = $this->findTeamByName($spec['name']);
+        $isNew = null === $teamId;
         if (null === $teamId) {
             $teamId = ($this->createTeam)($organizationId, $spec['name'], $userIds[$spec['lead']], $spec['leadJob'], null, $now);
             $counts->created('teams', $spec['name']);
@@ -211,6 +226,8 @@ final readonly class SeedDemoOrganizations implements DemoSeedStep
             ($this->setTeamRole)($teamId, $userIds[$member['email']], $member['role'], $member['job'], null, $now);
             $counts->created('team members', $label);
         }
+
+        return $isNew;
     }
 
     /**

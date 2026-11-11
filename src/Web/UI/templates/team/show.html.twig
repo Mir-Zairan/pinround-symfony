@@ -1,0 +1,195 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}{{ team.name }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/team.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="team">
+        <header class="team__header">
+            <h1 class="team__title">{{ team.name }}</h1>
+            <p class="team__subline">
+                {%- if isLead -%}
+                    You lead this team. You link its projects and add its own steps.
+                {%- elseif canLink or canCreate -%}
+                    Only the team lead can remove projects and change steps.
+                {%- else -%}
+                    Only the team lead can change projects and steps.
+                {%- endif -%}
+            </p>
+        </header>
+
+        <div class="team__row">
+            <section class="team__column team__column--main" aria-labelledby="team-projects">
+                <div class="team__section-head">
+                    <h2 class="team__section-title" id="team-projects">Projects <span class="team__count">{{ projects|length }}</span></h2>
+                    {% if canLink or canCreate %}
+                        <div {{ stimulus_controller('project-picker') }}>
+                            <twig:Dialog id="add-project-dialog" title="Add a project">
+                                <twig:block name="trigger"><twig:Button size="sm" data-action="dialog#open">Add project</twig:Button></twig:block>
+                                <twig:block name="content">
+                                    {% if canLink %}
+                                        <p class="team__dialog-sub">Pick one or more projects to link to this team.</p>
+                                        {% if unlinkedProjects is empty %}
+                                            <p class="team__dialog-empty">Every project already has a team.</p>
+                                        {% else %}
+                                            <form id="add-project-form" class="team__picker" method="post" action="{{ path(projectForms.linkRoute, {slug: team.slug}) }}">
+                                                <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.linkCsrfId) }}">
+                                                <label class="login__field">
+                                                    Find by key or name
+                                                    <input class="login__input" type="search" autocomplete="off" {{ stimulus_target('project-picker', 'search') }} data-action="input->project-picker#filter keydown.enter->project-picker#ignoreEnter">
+                                                </label>
+                                                <ul class="team__picker-list">
+                                                    {% for unlinked in unlinkedProjects %}
+                                                        <li {{ stimulus_target('project-picker', 'option') }} data-search="{{ (unlinked.key ~ ' ' ~ unlinked.name)|lower }}">
+                                                            <label class="team__picker-option">
+                                                                <input type="checkbox" name="{{ projectForms.projectIdsField }}[]" value="{{ unlinked.id }}" data-action="change->project-picker#update">
+                                                                <span class="mono team__project-key">{{ unlinked.key }}</span>
+                                                                <span>{{ unlinked.name }}</span>
+                                                            </label>
+                                                        </li>
+                                                    {% endfor %}
+                                                </ul>
+                                                <p class="team__dialog-empty" hidden {{ stimulus_target('project-picker', 'noMatch') }}>No project matches.</p>
+                                            </form>
+                                        {% endif %}
+                                    {% endif %}
+                                    {% if canCreate %}
+                                        <form class="team__new-project" method="post" action="{{ path(projectForms.createRoute, {slug: team.slug}) }}" aria-labelledby="new-project-title">
+                                            <h3 class="team__dialog-heading" id="new-project-title">New project</h3>
+                                            <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.createCsrfId) }}">
+                                            <label class="login__field">
+                                                Key
+                                                <input class="login__input mono" type="text" name="{{ projectForms.keyField }}" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{1,9}" title="2 to 10 letters or digits, starting with a letter" autocomplete="off" autocapitalize="characters" required>
+                                            </label>
+                                            <label class="login__field">
+                                                Name
+                                                <input class="login__input" type="text" name="{{ projectForms.nameField }}" autocomplete="off" required>
+                                            </label>
+                                            <div><twig:Button type="submit" variant="outline">Create project</twig:Button></div>
+                                        </form>
+                                    {% endif %}
+                                </twig:block>
+                                <twig:block name="actions">
+                                    <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+                                    {% if canLink and unlinkedProjects is not empty %}
+                                        <twig:Button type="submit" form="add-project-form" data-project-picker-target="submit">Add project</twig:Button>
+                                    {% endif %}
+                                </twig:block>
+                            </twig:Dialog>
+                        </div>
+                    {% endif %}
+                </div>
+                {% if projects is empty %}
+                    <twig:EmptyState message="No projects yet."/>
+                {% else %}
+                    <ul class="team__projects">
+                        {% for project in projects %}
+                            <li>
+                                <twig:Card class="team__project">
+                                    <div class="team__project-head">
+                                        <div class="team__project-name">
+                                            <span class="mono team__project-key">{{ project.key }}</span>
+                                            <span>{{ project.name }}</span>
+                                        </div>
+                                        <div class="team__project-actions">
+                                            {% if ticketsUrls[project.id] is not null %}
+                                                <a class="team__project-link" href="{{ ticketsUrls[project.id] }}">See tickets<span class="visually-hidden"> of {{ project.key }}</span></a>
+                                            {% endif %}
+                                            {% if canUnlink %}
+                                                <form class="team__remove" method="post" action="{{ path(projectForms.unlinkRoute, {slug: team.slug}) }}">
+                                                    <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.unlinkCsrfId) }}">
+                                                    <input type="hidden" name="{{ projectForms.projectIdField }}" value="{{ project.id }}">
+                                                    <twig:Button type="submit" variant="text" size="sm" aria-label="Remove {{ project.key }} from the team">Remove</twig:Button>
+                                                </form>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <p class="team__project-tickets">{{ project.openTicketCount }} open {{ project.openTicketCount == 1 ? 'ticket' : 'tickets' }}</p>
+                                </twig:Card>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+
+                <section class="team__flow" aria-labelledby="team-flow">
+                    <h2 class="team__section-title" id="team-flow">How work moves here</h2>
+                    <p class="team__policy">
+                        {%- if stepPolicy == 'locked' -%}
+                            Your admin set these steps for the whole company. Teams cannot change them.
+                        {%- elseif stepPolicy == 'extend' -%}
+                            Your admin set the company steps. {{ isLead ? 'As lead, you can' : 'The team lead can' }} add team steps inside the five groups.
+                        {%- else -%}
+                            Your admin lets each lead shape the team’s steps and rules. Every step still sits in one of the five groups.
+                        {%- endif -%}
+                    </p>
+                    <ul class="team__groups">
+                        {% for group in stepGroups %}
+                            <li class="team__group">
+                                <span class="team__group-label"><span class="team__group-dot team__group-dot--{{ group.code }}" aria-hidden="true"></span>{{ group.label }}</span>
+                                <ul class="team__steps">
+                                    {% for step in group.steps %}
+                                        <li class="team__step{{ step.origin == 'team' ? ' team__step--team' }}">
+                                            <span>{{ step.name }}</span>
+                                            {% if step.origin == 'team' and canChangeSteps %}
+                                                <form class="team__remove" method="post" action="{{ path(workflowForms.removeStepRoute, {slug: team.slug}) }}">
+                                                    <input type="hidden" name="{{ workflowForms.csrfField }}" value="{{ csrf_token(workflowForms.removeStepCsrfId) }}">
+                                                    <input type="hidden" name="{{ workflowForms.stepIdField }}" value="{{ step.id }}">
+                                                    <button class="team__step-remove" type="submit" aria-label="Remove step {{ step.name }}">×</button>
+                                                </form>
+                                            {% endif %}
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                    {% if canChangeSteps %}
+                        <form class="team__add-step" method="post" action="{{ path(workflowForms.addStepRoute, {slug: team.slug}) }}" aria-labelledby="add-step-title" {{ stimulus_controller('add-step') }}>
+                            <h3 class="visually-hidden" id="add-step-title">Add a team step</h3>
+                            <input type="hidden" name="{{ workflowForms.csrfField }}" value="{{ csrf_token(workflowForms.addStepCsrfId) }}">
+                            <input class="login__input team__add-step-name" type="text" name="{{ workflowForms.nameField }}" placeholder="New step, for example: Ready to merge" aria-label="Step name" maxlength="80" autocomplete="off" required {{ stimulus_target('add-step', 'name') }} data-action="input->add-step#update">
+                            <fieldset class="team__add-step-groups">
+                                <legend>in</legend>
+                                {% for code, label in workflowForms.groupLabels %}
+                                    <label class="team__group-choice">
+                                        <input type="radio" name="{{ workflowForms.groupField }}" value="{{ code }}"{{ code == 'check' ? ' checked' }}>
+                                        <span class="chip">{{ label }}</span>
+                                    </label>
+                                {% endfor %}
+                            </fieldset>
+                            <twig:Button type="submit" data-add-step-target="submit">Add step</twig:Button>
+                        </form>
+                    {% endif %}
+                    <h3 class="team__rules-title">Rules</h3>
+                    <ul class="team__rules">
+                        {% for code, label in workflowForms.ruleLabels %}
+                            <li class="team__rule">
+                                {% if canChangeRules %}
+                                    <form class="team__rule-form" method="post" action="{{ path(workflowForms.setRuleRoute, {slug: team.slug}) }}">
+                                        <input type="hidden" name="{{ workflowForms.csrfField }}" value="{{ csrf_token(workflowForms.setRuleCsrfId) }}">
+                                        <input type="hidden" name="{{ workflowForms.ruleField }}" value="{{ code }}">
+                                        <input type="hidden" name="{{ workflowForms.isOnField }}" value="{{ ruleStates[code] ? workflowForms.isOff : workflowForms.isOn }}">
+                                        <twig:Switch type="submit" :checked="ruleStates[code]" :label="label"/>
+                                    </form>
+                                    <span>{{ label }}</span>
+                                {% else %}
+                                    <strong class="team__rule-mark{{ ruleStates[code] ? ' team__rule-mark--on' }}">{{ ruleStates[code] ? 'On' : 'Off' }}</strong>
+                                    <span>{{ label }} · set by the {{ stepPolicy == 'team' ? 'team lead' : 'admin' }}</span>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </section>
+            </section>
+
+            <section class="team__column team__column--aside" aria-labelledby="team-people">
+                <h2 class="team__section-title" id="team-people">People <span class="team__hint">waiting on them</span></h2>
+                <twig:EmptyState message="How many open tickets wait on each person comes later."/>
+            </section>
+        </div>
+    </div>
+{% endblock %}

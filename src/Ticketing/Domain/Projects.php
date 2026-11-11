@@ -16,6 +16,15 @@ interface Projects
 
     public function byId(ProjectId $id): ?Project;
 
+    /**
+     * The project, its row locked for update until the transaction ends, so two changes to the same project's team,
+     * or such a change and NextTicketNumber, run one after the other. It reloads the project and drops its unsaved
+     * changes.
+     *
+     * @throws \LogicException when no transaction is open, as the lock would end with the statement
+     */
+    public function lockById(ProjectId $id): ?Project;
+
     public function byKey(ProjectKey $key): ?Project;
 
     /**
@@ -26,4 +35,12 @@ interface Projects
      *                         the caller must roll back and must not use the ORM again in that request
      */
     public function add(Project $project): void;
+
+    /**
+     * Saves the changes to a project found through byId(), lockById() or byKey(), or added before, at once. It
+     * flushes the whole unit of work, so every other unsaved change of the request's entities is saved with it.
+     *
+     * @throws \LogicException when the project was not found or added through this repository
+     */
+    public function save(Project $project): void;
 }

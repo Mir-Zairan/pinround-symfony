@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
+use App\Organization\Domain\TeamSlug;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use Doctrine\DBAL\Connection;
@@ -24,8 +25,8 @@ trait CreatesTeams
         $teamId = new TeamId(Uuid::v7()->toRfc4122());
         $this->committedAs($organizationId, static function (Connection $migrator) use ($organizationId, $teamId, $name, $lead): int {
             $migrator->executeStatement(
-                "INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, '2026-11-08 09:00:00+00')",
-                [$organizationId->toString(), $teamId->toString(), $name, $lead->id()->toString()],
+                "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, '2026-11-08 09:00:00+00')",
+                [$organizationId->toString(), $teamId->toString(), $name, TeamSlug::fromName($name)->toString(), $lead->id()->toString()],
             );
 
             return self::insertTeamRole($migrator, $organizationId, $teamId, $lead, 'lead');

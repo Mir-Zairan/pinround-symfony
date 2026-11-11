@@ -43,6 +43,7 @@ $managerSeesAllTeams = '"Teams at a glance" for all teams';
 $managerAssigns = 'Give it to… (assign)';
 $adminWithoutTeamRole = 'An admin with no team role may see every ticket in the org';
 $leadLinksProjects = 'link projects.';
+$leadLinksAndUnlinksProjects = '| Link / unlink Jira projects to the team | — | — | ✅ | — | — | — |';
 $leadChangesTeamSteps = '| Add / remove team steps | — | — | ⚠️ policy extend or team | — | — | — |';
 $leadChangesTeamRules = '| Change team rules | — | — | ⚠️ policy team | — | — | — |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
@@ -165,6 +166,25 @@ return [
     ['source' => $deniedUnlessARuleAllows, 'attribute' => ProjectPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => ProjectPermission::CREATE, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => ProjectPermission::CREATE, 'actor' => 'Sara', 'subject' => 'Checkout', 'expected' => 'denied'],
+
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Mia', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => ProjectPermission::UNLINK, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
+
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::LINK, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $adminPages, 'attribute' => ProjectPermission::LINK, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::LINK, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::LINK, 'actor' => 'Mia', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::LINK, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::LINK, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $leadLinksAndUnlinksProjects, 'attribute' => ProjectPermission::LINK, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => ProjectPermission::LINK, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
 
     ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'granted'],
     ['source' => $leadChangesTeamSteps, 'attribute' => WorkflowPermission::STEP_CHANGE_TEAM, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],

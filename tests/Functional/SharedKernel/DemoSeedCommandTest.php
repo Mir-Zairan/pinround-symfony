@@ -156,7 +156,7 @@ final class DemoSeedCommandTest extends KernelTestCase
     }
 
     #[Test]
-    public function betaBakeryHoldsOnlyBenAndItsRowsAreInvisibleUnderAcmeFoods(): void
+    public function betaBakeryHoldsOnlyBenWithHisTeamOvensUnderThePolicyTeamAndItsRowsAreInvisibleUnderAcmeFoods(): void
     {
         $this->startWithPassword(self::PASSWORD);
 
@@ -172,11 +172,19 @@ final class DemoSeedCommandTest extends KernelTestCase
             )),
         );
         self::assertSame(
-            [0, 0],
-            $this->underTenant($betaBakery, fn (): array => [
-                $this->connection()->fetchOne('SELECT count(*) FROM org_team'),
-                $this->connection()->fetchOne('SELECT count(*) FROM org_team_member'),
-            ]),
+            ['Ovens|ben@beta-bakery.example|lead'],
+            $this->underTenant($betaBakery, fn (): array => $this->connection()->fetchFirstColumn(
+                "SELECT t.name || '|' || u.email || '|' || tm.team_role FROM org_team_member tm"
+                .' JOIN org_team t ON t.organization_id = tm.organization_id AND t.id = tm.team_id JOIN idn_user u ON u.id = tm.user_id',
+            )),
+        );
+        self::assertSame(
+            ['team'],
+            $this->underTenant($betaBakery, fn (): array => $this->connection()->fetchFirstColumn("SELECT data->>'step_policy' FROM org_settings")),
+        );
+        self::assertSame(
+            ['extend'],
+            $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchFirstColumn("SELECT data->>'step_policy' FROM org_settings")),
         );
         self::assertSame(
             [],
@@ -235,7 +243,7 @@ final class DemoSeedCommandTest extends KernelTestCase
     {
         $this->startWithPassword(self::PASSWORD);
         $first = $this->runSeed();
-        self::assertStringContainsString('Organizations: created 2, kept 0; Members: created 6, kept 0; Teams: created 2, kept 0; Team members: created 4, kept 0', $first->getDisplay());
+        self::assertStringContainsString('Organizations: created 2, kept 0; Members: created 6, kept 0; Teams: created 3, kept 0; Team members: created 4, kept 0', $first->getDisplay());
         $rowsAfterFirstRun = $this->organizationRows();
         $outboxAfterFirstRun = $this->outboxCount();
         $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
@@ -243,14 +251,21 @@ final class DemoSeedCommandTest extends KernelTestCase
         $this->committedUnderTenant($acmeFoods, function (): void {
             $this->connection()->executeStatement("UPDATE org_team_member SET team_role = 'viewer' WHERE user_id = (SELECT id FROM idn_user WHERE email = 'mia@acme-foods.example')");
         });
+        $this->committedUnderTenant($this->organizationIdOf('ben@beta-bakery.example'), function (): void {
+            $this->connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{step_policy}', '\"locked\"')");
+        });
         $rowsAfterChange = $this->organizationRows();
 
         $second = $this->runSeed();
 
         self::assertSame(Command::SUCCESS, $second->getStatusCode());
-        self::assertStringContainsString('Organizations: created 0, kept 2; Members: created 0, kept 6; Teams: created 0, kept 2; Team members: created 0, kept 4', $second->getDisplay());
+        self::assertStringContainsString('Organizations: created 0, kept 2; Members: created 0, kept 6; Teams: created 0, kept 3; Team members: created 0, kept 4', $second->getDisplay());
         self::assertSame($rowsAfterChange, $this->organizationRows());
         self::assertNotSame($rowsAfterFirstRun, $rowsAfterChange);
+        self::assertSame(
+            ['locked'],
+            $this->underTenant($this->organizationIdOf('ben@beta-bakery.example'), fn (): array => $this->connection()->fetchFirstColumn("SELECT data->>'step_policy' FROM org_settings")),
+        );
         self::assertSame($outboxAfterFirstRun, $this->outboxCount());
     }
 
@@ -263,8 +278,12 @@ final class DemoSeedCommandTest extends KernelTestCase
 
         $second = $this->runSeed();
 
-        self::assertStringContainsString('Organizations: created 1, kept 1; Members: created 1, kept 5; Teams: created 0, kept 2; Team members: created 0, kept 4', $second->getDisplay());
+        self::assertStringContainsString('Organizations: created 1, kept 1; Members: created 1, kept 5; Teams: created 1, kept 2; Team members: created 0, kept 4', $second->getDisplay());
         self::assertCount(1, $this->organizationIdsOf('ben@beta-bakery.example'));
+        self::assertSame(
+            ['team'],
+            $this->underTenant($this->organizationIdOf('ben@beta-bakery.example'), fn (): array => $this->connection()->fetchFirstColumn("SELECT data->>'step_policy' FROM org_settings")),
+        );
     }
 
     #[Test]
@@ -276,14 +295,25 @@ final class DemoSeedCommandTest extends KernelTestCase
         $projectsAfterFirstRun = $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
             'SELECT p.id, p.key, p.name, t.name AS team FROM tkt_project p JOIN org_team t ON t.organization_id = p.organization_id AND t.id = p.team_id',
         ));
+        $unlinkedAfterFirstRun = $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT id, key, name, team_id FROM tkt_project WHERE team_id IS NULL ORDER BY key',
+        ));
 
         $second = $this->runSeed();
 
-        self::assertStringContainsString('Projects: created 1, kept 0.', $first->getDisplay());
+        self::assertCount(2, $unlinkedAfterFirstRun);
+        self::assertSame(
+            [['APP', 'Acme app', null], ['DOCS', 'Acme docs', null]],
+            array_map(static fn (array $row): array => [$row['key'], $row['name'], $row['team_id']], $unlinkedAfterFirstRun),
+        );
+        self::assertSame($unlinkedAfterFirstRun, $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT id, key, name, team_id FROM tkt_project WHERE team_id IS NULL ORDER BY key',
+        )));
+        self::assertStringContainsString('Projects: created 3, kept 0.', $first->getDisplay());
         self::assertCount(1, $projectsAfterFirstRun);
         self::assertSame(['SHOP', 'Shop', 'Shop'], [$projectsAfterFirstRun[0]['key'], $projectsAfterFirstRun[0]['name'], $projectsAfterFirstRun[0]['team']]);
         self::assertSame(Command::SUCCESS, $second->getStatusCode());
-        self::assertStringContainsString('Projects: created 0, kept 1.', $second->getDisplay());
+        self::assertStringContainsString('Projects: created 0, kept 3.', $second->getDisplay());
         self::assertSame($projectsAfterFirstRun, $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchAllAssociative(
             'SELECT p.id, p.key, p.name, t.name AS team FROM tkt_project p JOIN org_team t ON t.organization_id = p.organization_id AND t.id = p.team_id',
         )));

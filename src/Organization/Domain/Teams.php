@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Organization\Domain;
 
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 
 /**
@@ -28,8 +29,18 @@ interface Teams
     public function lockById(TeamId $id): ?Team;
 
     /**
+     * The organization's slugs that are $base or $base with a hyphen and more after it, so
+     * TeamSlug::firstFreeAmong() can pick a free one. Nothing is locked: a team created meanwhile with the same slug
+     * makes add() fail on the unique index.
+     *
+     * @return list<TeamSlug> in no particular order
+     */
+    public function slugsTakenFrom(OrganizationId $organizationId, TeamSlug $base): array;
+
+    /**
      * Saves the team and its members at once, so a name another team of the organization has already, in any letter
-     * case, fails here: the unique index refuses it and the save throws. A second lead fails only at COMMIT.
+     * case, or a slug it has already, fails here: the unique index refuses it and the save throws. A second lead
+     * fails only at COMMIT.
      */
     public function add(Team $team): void;
 

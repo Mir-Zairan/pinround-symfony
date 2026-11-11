@@ -35,7 +35,7 @@ final readonly class DbalTeamQueries implements TeamQueries
         // One array literal parameter keeps the SQL text the same for any number of ids; a TeamId is always a uuid, so
         // it needs no quoting inside the literal.
         $rows = $this->connection->fetchAllAssociative(
-            'SELECT id, name FROM org_team WHERE organization_id = ? AND id = ANY(?::uuid[]) ORDER BY lower(name), id',
+            'SELECT id, name, slug FROM org_team WHERE organization_id = ? AND id = ANY(?::uuid[]) ORDER BY lower(name), id',
             [$organizationId->toString(), '{'.implode(',', array_map(static fn (TeamId $teamId): string => $teamId->toString(), $teamIds)).'}'],
         );
 
@@ -45,7 +45,7 @@ final readonly class DbalTeamQueries implements TeamQueries
     public function allSummariesOf(OrganizationId $organizationId): array
     {
         return self::summaries($this->connection->fetchAllAssociative(
-            'SELECT id, name FROM org_team WHERE organization_id = ? ORDER BY lower(name), id',
+            'SELECT id, name, slug FROM org_team WHERE organization_id = ? ORDER BY lower(name), id',
             [$organizationId->toString()],
         ));
     }
@@ -55,6 +55,16 @@ final readonly class DbalTeamQueries implements TeamQueries
         $count = $this->connection->fetchOne('SELECT count(*) FROM org_team WHERE organization_id = ?', [$organizationId->toString()]);
 
         return \is_int($count) ? $count : throw new \LogicException('A team count from the database is not an integer.');
+    }
+
+    public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
+    {
+        $row = $this->connection->fetchAssociative(
+            'SELECT id, name, slug FROM org_team WHERE organization_id = ? AND slug = ?',
+            [$organizationId->toString(), $slug],
+        );
+
+        return false === $row ? null : self::summary($row);
     }
 
     /**
@@ -81,12 +91,18 @@ final readonly class DbalTeamQueries implements TeamQueries
      */
     private static function summaries(array $rows): array
     {
-        return array_map(
-            static fn (array $row): TeamSummary => new TeamSummary(
-                self::teamId($row['id']),
-                \is_string($row['name']) ? $row['name'] : throw new \LogicException('A team name from the database is not a string.'),
-            ),
-            $rows,
+        return array_map(self::summary(...), $rows);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private static function summary(array $row): TeamSummary
+    {
+        return new TeamSummary(
+            self::teamId($row['id']),
+            \is_string($row['name']) ? $row['name'] : throw new \LogicException('A team name from the database is not a string.'),
+            \is_string($row['slug']) ? $row['slug'] : throw new \LogicException('A team slug from the database is not a string.'),
         );
     }
 

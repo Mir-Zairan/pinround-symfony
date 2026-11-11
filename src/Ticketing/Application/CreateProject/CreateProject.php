@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Application\CreateProject;
 
-use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\Ticketing\Application\OrganizationTeams;
+use App\Ticketing\Application\ProjectTeamNotFound;
 use App\Ticketing\Domain\BlankProjectName;
 use App\Ticketing\Domain\InvalidProjectKey;
 use App\Ticketing\Domain\Project;
@@ -21,7 +22,7 @@ use App\Ticketing\Domain\Projects;
  */
 final readonly class CreateProject
 {
-    public function __construct(private Projects $projects, private TeamQueries $teamQueries)
+    public function __construct(private Projects $projects, private OrganizationTeams $organizationTeams)
     {
     }
 
@@ -40,13 +41,7 @@ final readonly class CreateProject
         } catch (InvalidProjectKey $invalidKey) {
             throw new ProjectKeyNotValid($invalidKey->getMessage(), 0, $invalidKey);
         }
-        $isTeamOfTheOrganization = array_any(
-            $this->teamQueries->teamsOf($organizationId),
-            static fn (TeamId $teamId): bool => $teamId->equals($owningTeam),
-        );
-        if (!$isTeamOfTheOrganization) {
-            throw new ProjectTeamNotFound('That team is not in this organization.');
-        }
+        $this->organizationTeams->assertTeamOf($organizationId, $owningTeam);
         if (null !== $this->projects->byKey($projectKey)) {
             throw self::keyTaken($projectKey);
         }

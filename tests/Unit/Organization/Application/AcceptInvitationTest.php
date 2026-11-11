@@ -25,6 +25,7 @@ use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamMemberView;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Domain\TeamSlug;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -54,7 +55,7 @@ final class AcceptInvitationTest extends TestCase
     {
         $this->linkToken = InvitationLinkToken::generate();
         $this->memberships = new InMemoryMemberships(new Membership(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new OrgRoles(), self::sentAt()));
-        $this->teams = new InMemoryTeams(new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, self::sentAt()));
+        $this->teams = new InMemoryTeams(new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, self::sentAt()));
         $this->events = new RecordingOrganizationEvents();
         $this->registration = new RecordingInvitedPersonRegistration();
     }

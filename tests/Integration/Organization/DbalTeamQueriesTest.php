@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Organization;
 
 use App\Organization\Api\MemberJob;
+use App\Organization\Api\TeamSummary;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -174,6 +176,42 @@ final class DbalTeamQueriesTest extends KernelTestCase
     }
 
     #[Test]
+    public function summariesCarryEachTeamsSlug(): void
+    {
+        $acmeFoods = new OrganizationId(self::ACME_FOODS);
+        $slugs = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => [
+            self::slugsOf($this->queries()->allSummariesOf($acmeFoods)),
+            self::slugsOf($this->queries()->summariesOf($acmeFoods, [new TeamId(self::ACME_SHOP), new TeamId(self::ACME_MOBILE)])),
+        ]);
+
+        self::assertSame([['analytics', 'mobile', 'payments', 'shop'], ['mobile', 'shop']], $slugs);
+    }
+
+    #[Test]
+    public function bySlugFindsTheTeamOfTheOrganizationWithThatSlug(): void
+    {
+        self::assertSame([self::ACME_PAYMENTS, 'Payments', 'payments'], $this->bySlugAs(self::ACME_FOODS, self::ACME_FOODS, 'payments'));
+        self::assertSame([self::BETA_CHECKOUT, 'Checkout', 'checkout'], $this->bySlugAs(self::BETA_BAKERY, self::BETA_BAKERY, 'checkout'));
+    }
+
+    #[Test]
+    public function bySlugIsNullForASlugNoTeamOfTheOrganizationHas(): void
+    {
+        self::assertNull($this->bySlugAs(self::ACME_FOODS, self::ACME_FOODS, 'support'));
+        self::assertNull($this->bySlugAs(self::ACME_FOODS, self::ACME_FOODS, 'Shop'), 'a slug is matched exactly');
+    }
+
+    #[Test]
+    public function bySlugIsNullForATeamOfAnotherOrganizationOrNoTenant(): void
+    {
+        // Beta Bakery's own tenant finds Checkout (bySlugFindsTheTeamOfTheOrganizationWithThatSlug), so these nulls come
+        // from the organization asked and from row-level security.
+        self::assertNull($this->bySlugAs(self::ACME_FOODS, self::ACME_FOODS, 'checkout'));
+        self::assertNull($this->bySlugAs(self::ACME_FOODS, self::BETA_BAKERY, 'checkout'));
+        self::assertNull($this->queries()->bySlug(new OrganizationId(self::BETA_BAKERY), 'checkout'));
+    }
+
+    #[Test]
     public function jobOfGivesThePersonsJobInThatTeam(): void
     {
         self::assertSame(MemberJob::Tester, $this->jobAs(self::ACME_FOODS, self::ACME_SHOP, self::MIA));
@@ -195,6 +233,28 @@ final class DbalTeamQueriesTest extends KernelTestCase
         self::assertSame(MemberJob::Developer, $this->jobAs(self::BETA_BAKERY, self::BETA_CHECKOUT, self::MIA));
         self::assertNull($this->jobAs(self::ACME_FOODS, self::BETA_CHECKOUT, self::MIA));
         self::assertNull($this->queries()->jobOf(new TeamId(self::ACME_SHOP), new UserId(self::MIA)));
+    }
+
+    /**
+     * @param list<TeamSummary> $summaries
+     *
+     * @return list<string>
+     */
+    private static function slugsOf(array $summaries): array
+    {
+        return array_map(static fn (TeamSummary $summary): string => $summary->slug(), $summaries);
+    }
+
+    /**
+     * @return array{string, string, string}|null id, name and slug of the team found
+     */
+    private function bySlugAs(string $tenantId, string $askedId, string $slug): ?array
+    {
+        return $this->transactions()->rolledBackAs($tenantId, function () use ($askedId, $slug): ?array {
+            $team = $this->queries()->bySlug(new OrganizationId($askedId), $slug);
+
+            return null === $team ? null : [$team->id()->toString(), $team->name(), $team->slug()];
+        });
     }
 
     private function jobAs(string $tenantId, string $teamId, string $userId): ?MemberJob
@@ -249,8 +309,8 @@ final class DbalTeamQueriesTest extends KernelTestCase
     private function addTeam(string $organizationId, string $teamId, string $name): void
     {
         $this->connection()->executeStatement(
-            "INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, '2027-03-15 10:00:00+00')",
-            [$organizationId, $teamId, $name, self::LENA],
+            "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
+            [$organizationId, $teamId, $name, TeamSlug::fromName($name)->toString(), self::LENA],
         );
     }
 

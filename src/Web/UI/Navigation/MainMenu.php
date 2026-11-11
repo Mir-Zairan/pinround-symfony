@@ -31,7 +31,7 @@ final readonly class MainMenu
     public const string TICKETS_ROUTE = 'ticketing_tickets';
     /** P07 (`/my-reports`). */
     public const string MY_REPORTS_ROUTE = 'my_reports';
-    /** P02.T8 (`/teams/{slug}`); teams have no slug yet, so it gets the team's id as "teamId". */
+    /** P02.T8 (`/teams/{slug}`), with the team's slug as "slug". */
     public const string TEAM_ROUTE = 'team_show';
     /** P11 (`/admin/{tab}`); the admin home is its People tab. */
     public const string ADMIN_ROUTE = 'web_admin';
@@ -98,16 +98,20 @@ final readonly class MainMenu
     /**
      * @param non-empty-list<TeamId> $teamIds
      *
-     * @return MenuItem|null null when none of the teams is found, which happens only outside the request transaction
+     * @return MenuItem|null null when none of the teams is found, which happens only outside the request transaction,
+     *                       or when the roles carry no slug for the only team
      */
     private function teamItem(ActorContext $actor, array $teamIds): ?MenuItem
     {
         if (1 === \count($teamIds)) {
-            return $this->pageItem('Team', self::TEAM_ROUTE, ['teamId' => $teamIds[0]->toString()]);
+            // The slug comes with the roles, so the one-team menu runs no team query.
+            $slug = $actor->roles()->teamSlugOf($teamIds[0]);
+
+            return null === $slug ? null : $this->pageItem('Team', self::TEAM_ROUTE, ['slug' => $slug]);
         }
 
         $teamPages = array_map(
-            fn (TeamSummary $team): MenuItem => $this->pageItem($team->name(), self::TEAM_ROUTE, ['teamId' => $team->id()->toString()]),
+            fn (TeamSummary $team): MenuItem => $this->pageItem($team->name(), self::TEAM_ROUTE, ['slug' => $team->slug()]),
             $this->teamQueries->summariesOf($actor->organizationId(), $teamIds),
         );
 

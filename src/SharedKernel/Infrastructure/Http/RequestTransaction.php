@@ -21,8 +21,9 @@ use Symfony\Contracts\Service\ResetInterface;
  * request's tenant (ADR-0005). Commits on the response, rolls back on an exception, and rolls back anything
  * it opened that is still open when the request finishes, terminates or the worker resets (ADR-0008).
  *
- * A route whose defaults set ROUTE_DEFAULT to false runs without one, so it still answers while the database is down
- * (the health routes); it must then read no tenant data.
+ * A route whose defaults set ROUTE_DEFAULT to false runs without one. It must then read no tenant data outside a
+ * transaction of its own: either it touches none (the health routes, which so still answer while the database is down),
+ * or it opens its own transaction under the request's tenant (TeamProjectsController, PeopleController).
  *
  * A streamed response body runs after the commit, outside any transaction, so it sees no tenant rows (fails closed).
  * Whatever fills TenantContext must do it on kernel.request at a priority above 6. Organization's

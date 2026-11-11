@@ -8,7 +8,7 @@ use App\SharedKernel\Domain\TeamId;
 
 final readonly class TeamSummary
 {
-    public function __construct(private TeamId $id, private string $name)
+    public function __construct(private TeamId $id, private string $name, private string $slug)
     {
     }
 
@@ -20,5 +20,13 @@ final readonly class TeamSummary
     public function name(): string
     {
         return $this->name;
+    }
+
+    /**
+     * The team's part of its address, /teams/{slug}: unique within the organization and never changed by a rename.
+     */
+    public function slug(): string
+    {
+        return $this->slug;
     }
 }

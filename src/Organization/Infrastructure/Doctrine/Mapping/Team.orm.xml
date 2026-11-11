@@ -6,6 +6,7 @@
     <entity name="App\Organization\Domain\Team" table="org_team">
         <unique-constraints>
             <unique-constraint name="org_team_organization_id_name_key" columns="organization_id,name"/>
+            <unique-constraint name="org_team_organization_id_slug_key" columns="organization_id,slug"/>
         </unique-constraints>
 
         <!-- (organization_id, id): the target of the member's foreign key, so a member names a team of its own organization. -->
@@ -13,6 +14,7 @@
         <id name="id" type="guid" column="id" position="1"/>
 
         <field name="name" type="citext" column="name"/>
+        <field name="slug" type="text" column="slug"/>
         <field name="leadUserId" type="guid" column="lead_user_id"/>
         <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
 

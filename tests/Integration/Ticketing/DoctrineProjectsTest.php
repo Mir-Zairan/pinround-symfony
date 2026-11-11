@@ -62,11 +62,52 @@ final class DoctrineProjectsTest extends KernelTestCase
         self::assertNotNull($byKey);
         self::assertSame(
             [self::SHOP_PROJECT, self::ACME_FOODS, self::SHOP_TEAM, 'SHOP', 'Shop'],
-            [$byKey->id()->toString(), $byKey->organizationId()->toString(), $byKey->owningTeam()->toString(), $byKey->key()->toString(), $byKey->name()],
+            [$byKey->id()->toString(), $byKey->organizationId()->toString(), $byKey->owningTeam()?->toString(), $byKey->key()->toString(), $byKey->name()],
         );
         self::assertNotNull($byId);
         self::assertSame(self::SHOP_PROJECT, $byId->id()->toString());
         self::assertSame(['organization_id' => self::ACME_FOODS, 'team_id' => self::SHOP_TEAM, 'key' => 'SHOP', 'name' => 'Shop', 'next_number' => 1], $storedRow);
+    }
+
+    #[Test]
+    public function anUnlinkedProjectIsSavedWithoutATeamAndLinkedToAnotherTeamLater(): void
+    {
+        [$unlinkedTeam, $unlinkedRow, $relinked, $relinkedRow] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $this->projects()->add(new Project(new ProjectId(self::SHOP_PROJECT), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), new ProjectKey('SHOP'), 'Shop'));
+            $this->entityManager()->clear();
+            $found = $this->projects()->byId(new ProjectId(self::SHOP_PROJECT));
+            self::assertNotNull($found);
+            $found->unlink();
+            $this->projects()->save($found);
+            $this->entityManager()->clear();
+            $unlinked = $this->projects()->byId(new ProjectId(self::SHOP_PROJECT));
+            self::assertNotNull($unlinked);
+            $unlinkedTeam = $unlinked->owningTeam();
+            $unlinkedRow = $this->connection()->fetchOne('SELECT team_id FROM tkt_project WHERE id = ?', [self::SHOP_PROJECT]);
+            $unlinked->linkTo(new TeamId(self::OTHER_TEAM));
+            $this->projects()->save($unlinked);
+            $this->entityManager()->clear();
+
+            return [
+                $unlinkedTeam,
+                $unlinkedRow,
+                $this->projects()->byId(new ProjectId(self::SHOP_PROJECT)),
+                $this->connection()->fetchOne('SELECT team_id FROM tkt_project WHERE id = ?', [self::SHOP_PROJECT]),
+            ];
+        });
+
+        self::assertSame([null, null], [$unlinkedTeam, $unlinkedRow]);
+        self::assertNotNull($relinked);
+        self::assertSame([self::OTHER_TEAM, self::OTHER_TEAM, 'SHOP'], [$relinkedRow, $relinked->owningTeam()?->toString(), $relinked->key()->toString()]);
+    }
+
+    #[Test]
+    public function aProjectThisRepositoryNeitherFoundNorAddedIsNotSaved(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, fn () => $this->projects()->save(
+            new Project(new ProjectId(self::SHOP_PROJECT), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), new ProjectKey('SHOP'), 'Shop'),
+        ));
     }
 
     #[Test]
@@ -146,6 +187,40 @@ final class DoctrineProjectsTest extends KernelTestCase
             [self::ACME_FOODS => $foundIdOf(self::ACME_FOODS), self::OTHER_ORGANIZATION => $foundIdOf(self::OTHER_ORGANIZATION)],
         );
         self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
+    }
+
+    #[Test]
+    public function lockByIdFindsOnlyAProjectOfTheTransactionsOrganization(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->projects()->add(
+            new Project(new ProjectId(self::SHOP_PROJECT), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), new ProjectKey('SHOP'), 'Shop'),
+        ));
+        $this->entityManager()->clear();
+
+        $lockedIdOf = fn (string $organizationId): ?string => $this->transactions()->rolledBackAs(
+            $organizationId,
+            fn (): ?string => $this->projects()->lockById(new ProjectId(self::SHOP_PROJECT))?->id()->toString(),
+        );
+
+        self::assertSame(
+            [self::ACME_FOODS => self::SHOP_PROJECT, self::OTHER_ORGANIZATION => null],
+            [self::ACME_FOODS => $lockedIdOf(self::ACME_FOODS), self::OTHER_ORGANIZATION => $lockedIdOf(self::OTHER_ORGANIZATION)],
+        );
+    }
+
+    #[Test]
+    public function lockByIdRefusesToRunOutsideATransaction(): void
+    {
+        self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
+
+        try {
+            $this->projects()->lockById(new ProjectId(self::SHOP_PROJECT));
+            self::fail('A project was locked outside a transaction.');
+        } catch (\LogicException $outsideATransaction) {
+            self::assertSame('Locking a project needs an open transaction.', $outsideATransaction->getMessage());
+        } finally {
+            self::getContainer()->get(TenantContext::class)->reset();
+        }
     }
 
     #[Test]

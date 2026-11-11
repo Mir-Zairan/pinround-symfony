@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Organization;
 
 use App\Organization\Api\Roles;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Infrastructure\Doctrine\DbalMembershipQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -106,6 +107,18 @@ final class DbalMembershipQueriesTest extends KernelTestCase
             ['isAdmin' => false, 'isManager' => true, 'teamIds' => [self::ACME_TEAM_B, self::ACME_TEAM_A], 'leadTeamIds' => [self::ACME_TEAM_B], 'memberTeamIds' => [], 'viewerTeamIds' => [self::ACME_TEAM_A]],
             $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => self::describe($this->queries()->rolesOf(new UserId(self::RAJ), new OrganizationId(self::ACME_FOODS)))),
         );
+    }
+
+    #[Test]
+    public function theRolesCarryTheSlugOfEachTeamOfTheUserAndNoneOfAnyOtherTeam(): void
+    {
+        $slugs = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $roles = $this->queries()->rolesOf(new UserId(self::RAJ), new OrganizationId(self::ACME_FOODS));
+
+            return array_map(static fn (string $teamId): ?string => $roles->teamSlugOf(new TeamId($teamId)), [self::ACME_TEAM_A, self::ACME_TEAM_B, self::BETA_TEAM]);
+        });
+
+        self::assertSame(['shop', 'payments', null], $slugs);
     }
 
     #[Test]
@@ -216,8 +229,8 @@ final class DbalMembershipQueriesTest extends KernelTestCase
     private function addTeam(string $organizationId, string $teamId, string $name, string $leadUserId): void
     {
         $this->connection()->executeStatement(
-            "INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at) VALUES (?, ?, ?, ?, '2027-03-15 10:00:00+00')",
-            [$organizationId, $teamId, $name, $leadUserId],
+            "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
+            [$organizationId, $teamId, $name, TeamSlug::fromName($name)->toString(), $leadUserId],
         );
     }
 

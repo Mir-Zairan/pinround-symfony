@@ -14,6 +14,7 @@ use App\Organization\Domain\OrgSettings;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamMember;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
@@ -54,7 +55,7 @@ final class OrganizationTablesIsolationTest extends KernelTestCase
     private const array TABLES = [
         'org_organization' => [Organization::class, 'id', "INSERT INTO org_organization (organization_id, name, slug, status, created_at) VALUES ('".self::THIRD_ORG."', 'Smuggled', 'smuggled', 'active', now())", 'name = name', false],
         'org_membership' => [Membership::class, 'organizationId', "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES ('".self::THIRD_ORG."', '".self::SARA."', '{admin}', now())", 'joined_at = joined_at', true],
-        'org_team' => [Team::class, 'organizationId', "INSERT INTO org_team (id, organization_id, name, lead_user_id, created_at) VALUES ('0197a3c0-0000-7000-8000-0000000006d3', '".self::THIRD_ORG."', 'Smuggled', '".self::SARA."', now())", 'name = name', false],
+        'org_team' => [Team::class, 'organizationId', "INSERT INTO org_team (id, organization_id, name, slug, lead_user_id, created_at) VALUES ('0197a3c0-0000-7000-8000-0000000006d3', '".self::THIRD_ORG."', 'Smuggled', 'smuggled', '".self::SARA."', now())", 'name = name', false],
         'org_team_member' => [TeamMember::class, 'organizationId', "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES ('".self::THIRD_ORG."', '".self::BETA_TEAM."', '".self::SARA."', 'lead', 'other', now())", 'job = job', true],
         'org_settings' => [OrgSettings::class, 'organizationId', "INSERT INTO org_settings (organization_id, data, created_at) VALUES ('".self::THIRD_ORG."', '{}', now())", 'data = data', false],
         'org_invitation' => [Invitation::class, 'organizationId', "INSERT INTO org_invitation (organization_id, id, email, org_roles, invited_by, created_at, expires_at) VALUES ('".self::THIRD_ORG."', '0197a3c0-0000-7000-8000-0000000006e3', 'omar@acme-foods.example', '{}', '".self::SARA."', now(), now() + interval '72 hours')", 'email = email', true],
@@ -229,7 +230,7 @@ final class OrganizationTablesIsolationTest extends KernelTestCase
             $entityManager = $this->entityManager();
             new DoctrineOrganizations($entityManager)->add(new Organization($organization, $slug, $slug, $at));
             new DoctrineMemberships($entityManager)->add(new Membership($organization, new UserId(self::SARA), new OrgRoles(OrgRole::Admin), $at));
-            $team = new Team(new TeamId($teamId), $organization, 'Shop', new UserId(self::LENA), Job::Developer, $at);
+            $team = new Team(new TeamId($teamId), $organization, 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, $at);
             $team->addMember(new UserId(self::MIA), TeamRole::Member, Job::Tester, $at);
             new DoctrineTeams($entityManager)->add($team);
             new DoctrineOrgSettingsStore($entityManager)->add(new OrgSettings($organization, new UserId(self::SARA), $at));

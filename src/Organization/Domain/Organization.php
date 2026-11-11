@@ -13,9 +13,6 @@ use App\SharedKernel\Domain\TenantOwned;
  */
 final readonly class Organization implements TenantOwned
 {
-    // Lowercase letters and digits in groups joined by single hyphens, 63 characters at most (a DNS label).
-    private const string SLUG = '/^(?=.{1,63}\z)[a-z0-9]+(?:-[a-z0-9]+)*\z/';
-
     private string $id;
     private string $name;
     private OrganizationStatus $status;
@@ -31,8 +28,8 @@ final readonly class Organization implements TenantOwned
         if ('' === $trimmedName) {
             throw new BlankOrganizationName('An organization needs a name.');
         }
-        if (1 !== preg_match(self::SLUG, $slug)) {
-            throw new InvalidOrganizationSlug('A slug is lowercase letters and digits joined by single hyphens, at most 63 characters.');
+        if (1 !== preg_match(SlugFormat::PATTERN, $slug)) {
+            throw new InvalidOrganizationSlug('A slug is '.SlugFormat::RULE.'.');
         }
 
         $this->id = $id->toString();

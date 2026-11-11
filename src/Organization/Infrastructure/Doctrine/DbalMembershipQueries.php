@@ -46,12 +46,16 @@ final readonly class DbalMembershipQueries implements MembershipQueries
         $leadTeamIds = [];
         $memberTeamIds = [];
         $viewerTeamIds = [];
+        $teamSlugsById = [];
         $teamRows = $this->connection->fetchAllAssociative(
-            'SELECT team_id, team_role FROM org_team_member WHERE organization_id = ? AND user_id = ? ORDER BY team_id',
+            'SELECT member.team_id, member.team_role, team.slug FROM org_team_member member'
+            .' JOIN org_team team ON team.organization_id = member.organization_id AND team.id = member.team_id'
+            .' WHERE member.organization_id = ? AND member.user_id = ? ORDER BY member.team_id',
             [$organizationId->toString(), $userId->toString()],
         );
         foreach ($teamRows as $teamRow) {
             $teamId = self::teamId($teamRow['team_id']);
+            $teamSlugsById[$teamId->toString()] = \is_string($teamRow['slug']) ? $teamRow['slug'] : throw new \LogicException('A team slug from the database is not a string.');
             match (self::teamRole($teamRow['team_role'])) {
                 TeamRole::Lead => $leadTeamIds[] = $teamId,
                 TeamRole::Member => $memberTeamIds[] = $teamId,
@@ -65,6 +69,7 @@ final readonly class DbalMembershipQueries implements MembershipQueries
             $leadTeamIds,
             $memberTeamIds,
             $viewerTeamIds,
+            $teamSlugsById,
         );
     }
 

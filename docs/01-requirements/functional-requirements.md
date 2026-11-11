@@ -109,7 +109,7 @@ An admin shall give or remove the org roles Admin and Manager for any person. Bo
 The nav shows Home, Tickets (not for pure admins), My reports and Team (people with a team role), Admin (admins). A "Report a problem" button is shown to everyone with a team role.
 
 **FR-ORG-06 — Projects** · Must · 🏁 · Prototype: `Main › Team` (projects)
-A project has a unique key per organization (2–10 capital letters/digits, starts with a letter), a name and one owning team. Ticket keys are `KEY-n` with `n` counting up per project without gaps from concurrency.
+A project has a unique key per organization (2–10 capital letters/digits, starts with a letter), a name and at most one owning team; the owning team's lead can unlink it while it has no open tickets, and a team's lead (for their own team) or an admin can link an unlinked project. Ticket keys are `KEY-n` with `n` counting up per project without gaps from concurrency.
 - Accept: two tickets created at the same moment never get the same number.
 
 **FR-ORG-07 — Team page** · Should · Prototype: `Main › Team`

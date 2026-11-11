@@ -107,6 +107,16 @@ services:
         arguments:
             $setupSteps: !tagged_iterator app.organization_setup_step
 
+    # Several services read the step policy on one page; it is read once per request. AddStep and SetRule check it
+    # again inside their own transaction, after the voter, so they read it fresh.
+    App\Organization\Api\SettingsQueries: '@App\Organization\Infrastructure\Doctrine\RequestScopedSettingsQueries'
+    App\Workflow\Application\AddStep:
+        arguments:
+            $settingsQueries: '@App\Organization\Infrastructure\Doctrine\DbalSettingsQueries'
+    App\Workflow\Application\SetRule:
+        arguments:
+            $settingsQueries: '@App\Organization\Infrastructure\Doctrine\DbalSettingsQueries'
+
     # Other modules read steps and rules through WorkflowCache (performance-and-scale.md, "Caching").
     App\Workflow\Api\StepQueries: '@App\Workflow\Infrastructure\Cache\CachedStepQueries'
     App\Workflow\Api\RuleQueries: '@App\Workflow\Infrastructure\Cache\CachedRuleQueries'

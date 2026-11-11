@@ -28,7 +28,8 @@ use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 
 /**
- * Acme Foods has the teams Shop and Mobile. Only the routes a test adds exist, besides Home.
+ * Acme Foods has the teams Shop and Mobile, with the slugs shop and mobile-app. Only the routes a test adds exist,
+ * besides Home.
  */
 final class MainMenuTest extends TestCase
 {
@@ -36,6 +37,7 @@ final class MainMenuTest extends TestCase
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000000a';
     private const string SHOP = '0197a3c0-0000-7000-8000-0000000000d1';
     private const string MOBILE = '0197a3c0-0000-7000-8000-0000000000d2';
+    private const array SLUGS = [self::SHOP => 'shop', self::MOBILE => 'mobile-app'];
 
     private RouteCollection $routes;
 
@@ -48,14 +50,15 @@ final class MainMenuTest extends TestCase
         $this->routes = new RouteCollection();
         $this->routes->add(MainMenu::HOME_ROUTE, new Route('/'));
         $this->requestStack = new RequestStack();
-        $this->teamQueries = new class([self::SHOP => 'Shop', self::MOBILE => 'Mobile']) implements TeamQueries, \Countable {
+        $this->teamQueries = new class([self::SHOP => 'Shop', self::MOBILE => 'Mobile'], self::SLUGS) implements TeamQueries, \Countable {
             /** @var int<0, max> */
             private int $summariesOfCalls = 0;
 
             /**
              * @param array<string, string> $teamNamesById
+             * @param array<string, string> $teamSlugsById
              */
-            public function __construct(private readonly array $teamNamesById)
+            public function __construct(private readonly array $teamNamesById, private readonly array $teamSlugsById)
             {
             }
 
@@ -74,6 +77,11 @@ final class MainMenuTest extends TestCase
                 throw new \LogicException('Only summariesOf is expected.');
             }
 
+            public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
+            {
+                throw new \LogicException('Only summariesOf is expected.');
+            }
+
             public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob
             {
                 throw new \LogicException('Only summariesOf is expected.');
@@ -85,7 +93,7 @@ final class MainMenuTest extends TestCase
                 $summaries = [];
                 foreach ($teamIds as $teamId) {
                     if (isset($this->teamNamesById[$teamId->toString()])) {
-                        $summaries[] = new TeamSummary($teamId, $this->teamNamesById[$teamId->toString()]);
+                        $summaries[] = new TeamSummary($teamId, $this->teamNamesById[$teamId->toString()], $this->teamSlugsById[$teamId->toString()]);
                     }
                 }
                 usort($summaries, static fn (TeamSummary $first, TeamSummary $second): int => strcasecmp($first->name(), $second->name()));
@@ -127,23 +135,34 @@ final class MainMenuTest extends TestCase
     }
 
     #[Test]
-    public function theTeamItemLinksTheOnlyTeamByItsId(): void
+    public function theTeamItemLinksTheOnlyTeamByTheSlugInTheRoles(): void
     {
-        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{teamId}'));
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
 
-        $items = $this->menuFor(new Roles(false, false, [], [new TeamId(self::SHOP)], []))->items();
+        $items = $this->menuFor(new Roles(false, false, [], [new TeamId(self::SHOP)], [], [self::SHOP => 'shop']))->items();
 
         self::assertSame(['Home', 'Tickets', 'My reports', 'Team'], self::labelsOf($items));
         self::assertFalse($items[3]->isGroup());
-        self::assertSame(['teamId' => self::SHOP], $items[3]->routeParameters());
-        self::assertSame('/teams/'.self::SHOP, $items[3]->url());
+        self::assertSame(['slug' => 'shop'], $items[3]->routeParameters());
+        self::assertSame('/teams/shop', $items[3]->url());
         self::assertCount(0, $this->teamQueries, 'one team needs no names');
+    }
+
+    #[Test]
+    public function theTeamItemIsLeftOutWhenTheRolesCarryNoSlugForTheOnlyTeam(): void
+    {
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
+
+        $items = $this->menuFor(new Roles(false, false, [], [new TeamId(self::SHOP)], []))->items();
+
+        self::assertSame(['Home', 'Tickets', 'My reports'], self::labelsOf($items));
+        self::assertCount(0, $this->teamQueries);
     }
 
     #[Test]
     public function twoOrMoreTeamsBecomeATeamsGroupListedByName(): void
     {
-        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{teamId}'));
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
 
         $items = $this->menuFor(new Roles(true, false, [new TeamId(self::SHOP)], [], [new TeamId(self::MOBILE)]))->items();
 
@@ -153,7 +172,7 @@ final class MainMenuTest extends TestCase
         self::assertFalse($teams->isCurrent());
         self::assertNull($teams->url());
         self::assertSame(['Mobile', 'Shop'], self::labelsOf($teams->children()));
-        self::assertSame(['/teams/'.self::MOBILE, '/teams/'.self::SHOP], array_map(static fn (MenuItem $team): ?string => $team->url(), $teams->children()));
+        self::assertSame(['/teams/mobile-app', '/teams/shop'], array_map(static fn (MenuItem $team): ?string => $team->url(), $teams->children()));
         self::assertCount(1, $this->teamQueries);
     }
 
@@ -171,7 +190,7 @@ final class MainMenuTest extends TestCase
     #[Test]
     public function aViewerCountsAsHavingATeamRole(): void
     {
-        $menu = $this->menuFor(new Roles(false, false, [], [], [new TeamId(self::SHOP)]));
+        $menu = $this->menuFor(new Roles(false, false, [], [], [new TeamId(self::SHOP)], self::SLUGS));
 
         self::assertSame(['Home', 'Tickets', 'My reports', 'Team'], self::labelsOf($menu->items()));
         self::assertTrue($menu->canReportProblems());
@@ -247,8 +266,8 @@ final class MainMenuTest extends TestCase
     #[Test]
     public function onlyTheTeamOfTheCurrentTeamPageIsCurrent(): void
     {
-        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{teamId}'));
-        $this->requestStack->push(new Request(attributes: ['_route' => MainMenu::TEAM_ROUTE, '_route_params' => ['teamId' => self::SHOP]]));
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
+        $this->requestStack->push(new Request(attributes: ['_route' => MainMenu::TEAM_ROUTE, '_route_params' => ['slug' => 'shop']]));
 
         $items = $this->menuFor(new Roles(false, false, [], [new TeamId(self::SHOP), new TeamId(self::MOBILE)], []))->items();
 

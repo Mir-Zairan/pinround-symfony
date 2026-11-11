@@ -12,6 +12,7 @@ use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\Team;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Domain\TeamSlug;
 use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
 use App\SharedKernel\Application\TenantContext;
@@ -64,7 +65,7 @@ final class DoctrineInvitationsTest extends KernelTestCase
         $createdAt = new \DateTimeImmutable('2027-03-15 10:00:00 UTC');
 
         [$found, $storedHash, $storedRoles] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($createdAt): array {
-            new DoctrineTeams($this->entityManager())->add(new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new UserId(self::LENA), Job::Developer, $createdAt));
+            new DoctrineTeams($this->entityManager())->add(new Team(new TeamId(self::SHOP_TEAM), new OrganizationId(self::ACME_FOODS), 'Shop', new TeamSlug('shop'), new UserId(self::LENA), Job::Developer, $createdAt));
             $invitation = Invitation::issue(new InvitationId(self::NEW_FOR_ACME), new OrganizationId(self::ACME_FOODS), 'omar@acme-foods.example', new OrgRoles(OrgRole::Manager), new TeamId(self::SHOP_TEAM), TeamRole::Member, new UserId(self::SARA), $createdAt);
             $invitation->attachLinkTokenHash(hash('sha256', 'the link token', true));
             $this->invitations()->add($invitation);
