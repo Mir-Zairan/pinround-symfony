@@ -31,7 +31,7 @@ use Symfony\Component\Uid\Uuid;
 /**
  * The new ticket form at /tickets/new (FR-TKT-01, P03.T1): a person picks a project of one of their teams, writes the
  * ticket and may give it to someone in that team. A person whose teams own no project, or who may create tickets in
- * none of them, is denied.
+ * none of them, is denied, as is a project that is not one of their choices or stops being one before the ticket is saved.
  *
  * Without the request transaction: a refused create has already taken the project's next number, and only rolling
  * back the whole transaction gives it back. Transactions gives each request a transaction of its own; a refusal leaves
@@ -138,6 +138,9 @@ final class NewTicketController extends AbstractController
                     $errors = ['description' => self::DESCRIPTION_OVER_LIMIT];
                 } catch (AssigneeNotInTeam) {
                     $errors = ['assignee' => self::ASSIGNEE_NOT_IN_TEAM];
+                } catch (\DomainException) {
+                    // The project was removed or lost its team after the choices were read: as if it had been forged.
+                    throw $this->createAccessDeniedException('You may not make tickets in that project.');
                 }
 
                 throw new TicketFormRefused($this->renderForm($choices, $input, $errors));

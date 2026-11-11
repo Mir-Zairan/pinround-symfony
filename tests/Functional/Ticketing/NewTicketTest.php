@@ -4,15 +4,24 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Ticketing;
 
+use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Application\UseCaseTicketCommands;
+use App\Ticketing\UI\NewTicketController;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -79,6 +88,327 @@ final class NewTicketTest extends WebTestCase
         ]], $this->committedTickets());
     }
 
+    #[Test]
+    public function bugAndNormalArePreselectedAndATicketWithNoOneStartsInBacklogAtTheTimeOfTheRequest(): void
+    {
+        $this->client->disableReboot();
+        // An hour back, not a fixed date: the firewall ends a session that seems idle for longer than its limit.
+        $requestTime = time() - 3600;
+        self::getContainer()->set('clock', new MockClock(new \DateTimeImmutable('@'.$requestTime)));
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Omar']);
+
+        $form = $this->client->request('GET', self::NEW_TICKET);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['bug'], $form->filter('input[name="type"][checked]')->extract(['value']));
+        self::assertSame(['normal'], $form->filter('input[name="priority"][checked]')->extract(['value']));
+        $this->client->submitForm('Make ticket', ['title' => 'Search shows no results']);
+
+        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertSame([[
+            'key' => 'SHOP-1',
+            'title' => 'Search shows no results',
+            'type' => 'bug',
+            'priority' => 'normal',
+            'assignee_id' => null,
+            'reporter_id' => $people['Omar']->id()->toString(),
+        ]], $this->committedTickets());
+        self::assertSame(['SHOP-1' => ['backlog', $requestTime]], $this->coreStepsAndCreationTimes());
+    }
+
+    #[Test]
+    public function aTicketGivenToATeamMemberStartsInToDo(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Lena']);
+
+        $this->postTicket($projectId, ['assignee_id' => $people['Omar']->id()->toString()]);
+
+        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        $stepsAndTimes = $this->coreStepsAndCreationTimes();
+        self::assertSame(['SHOP-1'], array_keys($stepsAndTimes));
+        self::assertSame('todo', $stepsAndTimes['SHOP-1'][0]);
+    }
+
+    #[Test]
+    public function aViewerOfTheTeamOpensTheFormAndCreatesATicket(): void
+    {
+        $people = $this->createAcmeFoodsPeople('viewer');
+        $this->addCoreSteps();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Mia']);
+
+        $this->client->request('GET', self::NEW_TICKET);
+        self::assertResponseStatusCodeSame(200);
+        $this->client->submitForm('Make ticket', ['project_id' => $projectId, 'title' => 'Prices show no currency']);
+
+        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertSame(['SHOP-1'], array_column($this->committedTickets(), 'key'));
+        self::assertSame($people['Mia']->id()->toString(), $this->committedTickets()[0]['reporter_id']);
+    }
+
+    #[Test]
+    public function aProjectWithNoTeamIsNotOfferedAndAPostWithItsIdIsDenied(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $shopProjectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $teamlessProjectId = $this->addProject(null, 'STOCK', 'Stock');
+        $this->logIn($this->client, $people['Omar']);
+
+        $form = $this->client->request('GET', self::NEW_TICKET);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([$shopProjectId], $form->filter('select[name="project_id"] option')->extract(['value']));
+
+        $this->postTicket($teamlessProjectId);
+        self::assertResponseStatusCodeSame(403);
+        $this->postTicket(Uuid::v7()->toRfc4122());
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame([], $this->committedTickets());
+    }
+
+    #[Test]
+    public function aProjectThatLosesItsTeamBeforeTheTicketIsSavedIsDenied(): void
+    {
+        $this->client->disableReboot();
+        self::getContainer()->set(UseCaseTicketCommands::class, new readonly class implements TicketCommands {
+            public function create(OrganizationId $organizationId, UserId $reporter, string $projectId, string $title, string $description, string $type, string $priority, ?UserId $assignee, \DateTimeImmutable $reportedAt): string
+            {
+                throw new \DomainException('That project has no team, so it takes no tickets.');
+            }
+        });
+        $people = $this->createAcmeFoodsPeople();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Omar']);
+
+        $this->postTicket($projectId);
+
+        self::assertResponseStatusCodeSame(403);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function peopleWhoMayNotTakeTheTicket(): iterable
+    {
+        yield 'Mia, a viewer of the team' => ['Mia'];
+        yield 'Raj, a member of another team' => ['Raj'];
+    }
+
+    #[Test]
+    #[DataProvider('peopleWhoMayNotTakeTheTicket')]
+    public function aTicketGivenToSomeoneWhoMayNotTakeItIsRefusedAndKeepsItsNumber(string $person): void
+    {
+        $people = $this->createAcmeFoodsPeople('viewer');
+        $this->addTeamRole($people['Raj'], $this->acmeFoods, $this->mobile, 'member');
+        $this->addCoreSteps();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Lena']);
+
+        $page = $this->postTicket($projectId, ['assignee_id' => $people[$person]->id()->toString()]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(NewTicketController::ASSIGNEE_NOT_IN_TEAM, $page->filter('#ticket-assignee-error')->text());
+        self::assertSame([], $this->committedTickets());
+
+        $this->postTicket($projectId);
+        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertSame(['SHOP-1'], array_column($this->committedTickets(), 'key'));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, string, string}>
+     */
+    public static function refusedFields(): iterable
+    {
+        yield 'a blank title' => [['title' => '   '], '#ticket-title-error', NewTicketController::TITLE_MISSING];
+        yield 'a title of 201 characters' => [['title' => str_repeat('é', 201)], '#ticket-title-error', NewTicketController::TITLE_OVER_LIMIT];
+        yield 'a description of 50,001 characters' => [['description' => str_repeat('é', 50_001)], '#ticket-description-error', NewTicketController::DESCRIPTION_OVER_LIMIT];
+    }
+
+    /**
+     * @param array<string, string> $fields
+     */
+    #[Test]
+    #[DataProvider('refusedFields')]
+    public function aRefusedFieldShowsItsErrorAndUsesUpNoNumber(array $fields, string $errorSelector, string $error): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Omar']);
+
+        $page = $this->postTicket($projectId, $fields);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame($error, $page->filter($errorSelector)->text());
+        self::assertSame([], $this->committedTickets());
+
+        $this->postTicket($projectId);
+        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertSame(['SHOP-1'], array_column($this->committedTickets(), 'key'));
+    }
+
+    /**
+     * @return iterable<string, array{?string}>
+     */
+    public static function refusedCsrfTokens(): iterable
+    {
+        yield 'no token' => [null];
+        yield 'a wrong token' => ['not-the-token'];
+    }
+
+    #[Test]
+    #[DataProvider('refusedCsrfTokens')]
+    public function aPostWithoutAValidCsrfTokenIsRefused(?string $csrfToken): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Omar']);
+
+        $fields = $this->ticketFields($projectId);
+        unset($fields[NewTicketController::CSRF_FIELD]);
+        if (null !== $csrfToken) {
+            $fields[NewTicketController::CSRF_FIELD] = $csrfToken;
+        }
+        $page = $this->client->request('POST', self::NEW_TICKET, $fields);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(NewTicketController::FORM_EXPIRED, $page->filter('[role="alert"]')->text());
+        self::assertSame([], $this->committedTickets());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function peopleOfNoTeam(): iterable
+    {
+        yield 'Raj, a Manager of no team' => ['Raj'];
+        yield 'Sara, an Admin of no team' => ['Sara'];
+        yield 'a person of another organization' => ['other organization'];
+    }
+
+    #[Test]
+    #[DataProvider('peopleOfNoTeam')]
+    public function aPersonOfNoTeamWithAProjectIsDeniedTheFormAndTheCreate(string $person): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people[$person] ?? $this->personOfBetaBakery()[0]);
+
+        $this->client->request('GET', self::NEW_TICKET);
+        self::assertResponseStatusCodeSame(403);
+        $this->postTicket($projectId);
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame([], $this->committedTickets());
+    }
+
+    #[Test]
+    public function aMemberOfATeamInAnotherOrganizationIsOfferedOnlyTheirProjectsAndDeniedOurs(): void
+    {
+        $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $shopProjectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        [$betaPerson, $betaBakery] = $this->personOfBetaBakery();
+        $ovens = $this->createTeam($betaBakery, 'Ovens', $betaPerson);
+        $bakeProjectId = $this->addProject($ovens, 'BAKE', 'Bakery web', $betaBakery);
+        $this->logIn($this->client, $betaPerson);
+
+        $form = $this->client->request('GET', self::NEW_TICKET);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([$bakeProjectId], $form->filter('select[name="project_id"] option')->extract(['value']));
+        $this->postTicket($shopProjectId);
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame([], $this->committedTickets());
+    }
+
+    #[Test]
+    public function theFormReadsAsManyQueriesForThreeProjectsAsForOne(): void
+    {
+        $this->client->disableReboot();
+        $people = $this->createAcmeFoodsPeople();
+        $this->addTeamRole($people['Raj'], $this->acmeFoods, $this->mobile, 'member');
+        $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Lena']);
+        $this->client->request('GET', self::NEW_TICKET);
+        self::assertResponseStatusCodeSame(200);
+
+        $queriesForOne = $this->queryCountOfTheForm();
+        $this->addProject($this->mobile, 'APP', 'Mobile app');
+        $this->addProject($this->shop, 'CART', 'Checkout');
+        $queriesForThree = $this->queryCountOfTheForm();
+
+        self::assertSame($queriesForOne, $queriesForThree);
+    }
+
+    private function queryCountOfTheForm(): int
+    {
+        $debugData = $this->debugData();
+        $debugData->reset();
+        $form = $this->client->request('GET', self::NEW_TICKET);
+        self::assertResponseStatusCodeSame(200);
+        self::assertGreaterThan(0, $form->filter('select[name="assignee_id"] optgroup option')->count());
+
+        $queryCount = 0;
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            self::assertIsArray($queriesOfOneConnection);
+            $queryCount += \count($queriesOfOneConnection);
+        }
+
+        return $queryCount;
+    }
+
+    /**
+     * Posts the form with a valid CSRF token, Bug, Normal, a title and no one to give it to, unless $fields says else.
+     *
+     * @param array<string, string> $fields
+     */
+    private function postTicket(string $projectId, array $fields = []): Crawler
+    {
+        return $this->client->request('POST', self::NEW_TICKET, [...$this->ticketFields($projectId), ...$fields]);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function ticketFields(string $projectId): array
+    {
+        return [
+            NewTicketController::CSRF_FIELD => $this->csrfTokenFor($this->client, NewTicketController::CSRF_ID),
+            NewTicketController::PROJECT_FIELD => $projectId,
+            NewTicketController::TITLE_FIELD => 'Search shows no results',
+            NewTicketController::DESCRIPTION_FIELD => '',
+            NewTicketController::TYPE_FIELD => 'bug',
+            NewTicketController::PRIORITY_FIELD => 'normal',
+            NewTicketController::ASSIGNEE_FIELD => '',
+        ];
+    }
+
+    /**
+     * Omar of Beta Bakery, an organization of its own, with no team there yet.
+     *
+     * @return array{User, OrganizationId} the person and Beta Bakery
+     */
+    private function personOfBetaBakery(): array
+    {
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $person = $this->createUserWithoutOrganization('Omar');
+        $this->addMembership($person, $betaBakery);
+
+        return [$person, $betaBakery];
+    }
+
+    private function debugData(): DebugDataHolder
+    {
+        return self::getContainer()->get('doctrine.debug_data_holder');
+    }
+
     /**
      * Backlog and To do as core steps of Acme Foods, which CreateTicket needs.
      */
@@ -117,12 +447,41 @@ final class NewTicketTest extends WebTestCase
     }
 
     /**
-     * Through the migrator, as the app may not delete tickets or steps; the ticket's turn row goes with it.
+     * @return array<string, array{string, int}> the core code of each ticket's step and its creation time in Unix seconds, by key
+     */
+    private function coreStepsAndCreationTimes(): array
+    {
+        $rows = [];
+        $organizationId = $this->acmeFoods->toString();
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$rows): int {
+            $rows = $migrator->fetchAllAssociative(
+                'SELECT t.key, s.core_code, EXTRACT(EPOCH FROM t.created_at)::BIGINT AS created_at FROM tkt_ticket t'
+                .' JOIN wf_step s ON s.organization_id = t.organization_id AND s.id = t.step_id WHERE t.organization_id = ? ORDER BY t.number',
+                [$organizationId],
+            );
+
+            return 0;
+        });
+
+        $stepsAndTimes = [];
+        foreach ($rows as ['key' => $key, 'core_code' => $coreCode, 'created_at' => $createdAt]) {
+            self::assertIsString($key);
+            self::assertIsString($coreCode);
+            self::assertIsInt($createdAt);
+            $stepsAndTimes[$key] = [$coreCode, $createdAt];
+        }
+
+        return $stepsAndTimes;
+    }
+
+    /**
+     * Through the migrator, as the app may not delete tickets, their history or steps; the ticket's turn row goes with it.
      */
     private function removeCommittedTickets(): void
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
+                $migrator->executeStatement('DELETE FROM tkt_ticket_event WHERE organization_id = ?', [$organizationId]);
                 $migrator->executeStatement('DELETE FROM tkt_ticket WHERE organization_id = ?', [$organizationId]);
                 $migrator->executeStatement('DELETE FROM wf_step WHERE organization_id = ?', [$organizationId]);
                 $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
