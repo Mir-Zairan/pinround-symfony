@@ -125,8 +125,22 @@ final class TeamProjectsTest extends WebTestCase
 
         $this->client->request('POST', '/teams/mobile/projects/unlink', $this->unlinkForm($shopProject));
 
-        self::assertResponseStatusCodeSame(404);
+        self::assertResponseRedirects('/teams/mobile', 302);
+        self::assertSame(TeamProjectsController::NO_LONGER_OF_TEAM, $this->toastOfThePage('/teams/mobile'));
         self::assertSame(['SHOP' => $this->shop->toString()], $this->owningTeamsByKey());
+    }
+
+    #[Test]
+    public function removingAProjectThatLeftTheTeamMeanwhileRedirectsWithAToastAndChangesNothing(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $shopProject = $this->addProject(null, 'SHOP', 'Web shop');
+        $this->addProject($this->shop, 'CART', 'Checkout');
+
+        $this->client->request('POST', self::UNLINK, $this->unlinkForm($shopProject));
+
+        self::assertSame(TeamProjectsController::NO_LONGER_OF_TEAM, $this->toastOfTheTeamPage());
+        self::assertSame(['CART' => $this->shop->toString(), 'SHOP' => null], $this->owningTeamsByKey());
     }
 
     #[Test]
@@ -571,7 +585,12 @@ final class TeamProjectsTest extends WebTestCase
      */
     private function toastOfTheTeamPage(): string
     {
-        self::assertResponseRedirects('/teams/shop', 302);
+        return $this->toastOfThePage('/teams/shop');
+    }
+
+    private function toastOfThePage(string $path): string
+    {
+        self::assertResponseRedirects($path, 302);
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
 

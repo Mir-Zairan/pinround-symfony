@@ -65,6 +65,7 @@ final class TeamProjectsController extends AbstractController
 
     /** With the project's key. */
     public const string UNLINKED = '%s removed from the team';
+    public const string NO_LONGER_OF_TEAM = 'That project is no longer in this team.';
     /** With the keys of the projects, joined by ", ", or the key of the new project. */
     public const string ADDED = 'Added %s';
     public const string FORM_EXPIRED = 'The page was open too long. Try again.';
@@ -106,8 +107,11 @@ final class TeamProjectsController extends AbstractController
 
                 return \sprintf(self::UNLINKED, ($this->unlinkProject)($organizationId, $team->id(), $projectId));
             });
-        } catch (ProjectNotFound|ProjectNotOfTeam) {
-            throw $this->createNotFoundException('No project of this team has that id.');
+        } catch (ProjectNotFound) {
+            throw $this->createNotFoundException(self::NOT_FOUND);
+        } catch (ProjectNotOfTeam) {
+            // The page was out of date: the project is of this organization, so nothing leaks across tenants.
+            $toast = self::NO_LONGER_OF_TEAM;
         } catch (ProjectHasOpenTickets $openTickets) {
             $toast = $openTickets->getMessage();
         }
