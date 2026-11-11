@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Insight;
 
 use App\Insight\Api\TurnUserQueries;
+use App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -68,6 +70,25 @@ final class DbalTurnUserQueriesTest extends KernelTestCase
     public function eachOrganizationReadsOnlyItsOwnTurnRows(): void
     {
         self::assertSame([self::LENAS_TURN => self::BEN], self::idsOf($this->turnUsersAs(self::BETA_BAKERY, [self::LENAS_TURN, self::OMARS_TURN])));
+    }
+
+    /**
+     * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
+     * is another one: what still hides Acme Foods' turn rows from Beta Bakery's transaction is row-level security alone.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTurnRows(): void
+    {
+        self::assertNotSame([], $this->turnUsersAs(self::ACME_FOODS, [self::OMARS_TURN]));
+
+        $turnUsersUnderAcmeContext = new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            fn (Connection $connection): array => new DbalTurnUserQueries($connection, $this->tenantContext())
+                ->turnUsersOf([new TicketId(self::LENAS_TURN), new TicketId(self::OMARS_TURN)]),
+        );
+
+        self::assertSame([], $turnUsersUnderAcmeContext);
     }
 
     #[Test]
@@ -153,6 +174,11 @@ final class DbalTurnUserQueriesTest extends KernelTestCase
     private function migrator(): Connection
     {
         return self::getContainer()->get('doctrine.dbal.migrator_connection');
+    }
+
+    private function connection(): Connection
+    {
+        return $this->entityManager()->getConnection();
     }
 
     private function entityManager(): EntityManagerInterface

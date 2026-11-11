@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Ticketing;
 
+use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
+use App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Api\Cursor;
 use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\TicketListGroup;
@@ -15,6 +18,7 @@ use App\Ticketing\Api\TicketListRow;
 use App\Ticketing\Api\TicketListStep;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibility;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -245,6 +249,30 @@ final class DbalTicketQueriesTest extends KernelTestCase
         });
 
         self::assertSame([[], 1], [$groups, $queryCount]);
+    }
+
+    /**
+     * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
+     * is another one: what still hides Acme Foods' tickets from Beta Bakery's transaction is row-level security alone.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTickets(): void
+    {
+        $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+        self::assertNotSame([], $this->listedAs(self::ACME_FOODS, $this->filter()));
+
+        $groupsUnderAcmeContext = new OwnConnectionTransactions($this->entityManager()->getConnection(), $this->tenantContext())->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            fn (Connection $connection): array => new DbalTicketQueries(
+                $connection,
+                $this->tenantContext(),
+                new DbalTurnUserQueries($connection, $this->tenantContext()),
+                new DbalUserQueries($connection),
+            )->list($this->filter()),
+        );
+
+        self::assertSame([], $groupsUnderAcmeContext);
     }
 
     #[Test]
