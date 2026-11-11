@@ -99,7 +99,8 @@ Legend: ✅ allowed · ⚠️ allowed with a condition (see note) · — not all
 |---|---|---|---|---|---|---|
 | See tickets (visibility "all") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | See team-only tickets | ✅ | ⚠️ only if member of the team | ✅ | ✅ | ✅ | ⚠️ only if reporter, assignee, reviewer, tester, waited-on person, or the triager of a no-team ticket ⁵ |
-| Report a problem (create ticket) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Report a problem (create ticket through the intake) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| New ticket form (create ticket on the team's board) ⁷ | ⚠️ only with a role on the team | ⚠️ only with a role on the team | ✅ | ✅ | ✅ | — |
 | Add my report to an existing ticket | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Comment, reply | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Ask a question (pauses ticket) | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |
@@ -143,6 +144,7 @@ Notes:
 4. Moving to Testing straight from In progress is blocked while "code review must happen before testing" is on.
 5. The exact rule is the canonical [ticket visibility predicate](../02-architecture/data-model.md#ticket-visibility-predicate). It is the same for lists, search, duplicate suggestions, My reports, Home, counts, emails, AI, MCP and exports.
 6. Creating any token asks for the password and MFA again if the last check is older than 10 minutes. Admin pages and admin actions never accept a token: `ADMIN_*` voters deny every token-authenticated request, so a token cannot be used to skip admin MFA.
+7. The simple "New ticket" form files a ticket straight onto the team's board, so it needs a Lead, Member or Viewer role on that team; everyone can still report a problem through the intake ([ADR-0038](../03-adr/0038-create-ticket-team-form-needs-team-role.md)).
 
 ## Special visibility rules
 

@@ -18,6 +18,8 @@ Every action is allowed only if a voter says yes; roles come from the organizati
 
 Accepted · 2026-11-06 · Deciders: Zairan Mir (lead).
 
+Superseded in part by [ADR-0038](0038-create-ticket-team-form-needs-team-role.md) (create ticket row): the team ticket form needs a Lead, Member or Viewer role on the team; "Report a problem" stays open to every role. Everything else here still stands.
+
 ## Context and problem statement
 
 Lena leads the Shop team and is also an Admin for Acme Foods. Omar is a member of the Shop team
