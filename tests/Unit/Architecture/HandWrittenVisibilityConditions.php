@@ -20,6 +20,7 @@ final class HandWrittenVisibilityConditions
     public const array ALLOWED = [
         'src/Ticketing/Api/TicketVisibilitySql.php' => 'renders the canonical predicate',
         'src/Insight/Infrastructure/Doctrine/DbalTurnProjector.php' => 'copies the column into ins_ticket_turn (SET visibility = EXCLUDED.visibility); it writes the column and filters nothing',
+        'src/Ticketing/Infrastructure/Demo/SeedDemoTickets.php' => 'sets the column of a demo ticket (SET visibility = ?); it writes the column and filters nothing',
     ];
 
     private const string SQL_CONDITION = '/\bvisibility(?:\s*::\s*\w+)?\s*(?:=|<>|!=|\bNOT\s+IN\b|\bIN\b|\bIS\b)'
