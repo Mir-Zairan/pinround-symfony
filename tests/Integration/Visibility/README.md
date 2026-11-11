@@ -21,7 +21,7 @@ Its data provider `viewers()` yields `[viewer, seesTeamOnly, seesNoTeamTicket]`.
 | --- | --- | --- |
 | TicketVoter VIEW | `TicketVoterViewLeakTest` | P03.T2 |
 | Team page project counts, step count | `TicketCountsLeakTest` | P03.T2 |
-| Ticket list | planned | P03 task 5 |
+| Ticket list | `TicketListLeakTest` | P03.T3 |
 | Search | planned | P03 task 6 |
 | Ticket page | planned | P03.T6 |
 | Bell and email | planned | P04 |
