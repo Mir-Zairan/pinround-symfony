@@ -33,9 +33,10 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * The new ticket form at /tickets/new (FR-TKT-01, P03.T1): a person picks a project of one of their teams and writes the
- * ticket; only a Lead of the project's team may give it to someone in that team (personas-and-roles.md, as TicketVoter
+ * ticket; only a Lead of the project's team may give it to someone in that team (personas-and-roles.md, TicketCreationVoter
  * ASSIGN). A person whose teams own no project, or who may create tickets in none of them, is denied, as is a project
- * that is not one of their choices or stops being one before the ticket is saved, and an assignee sent by a non-lead.
+ * that is not one of their choices or stops being one before the ticket is saved, and an assignee sent by someone who
+ * leads none of the offered teams. A Lead who picks a project of a team they do not lead gets a field error instead.
  *
  * Without the request transaction: a refused create has already taken the project's next number, and only rolling
  * back the whole transaction gives it back. Transactions gives each request a transaction of its own; a refusal leaves
@@ -74,6 +75,7 @@ final class NewTicketController extends AbstractController
     public const string TYPE_UNKNOWN = 'Choose Bug, Story or Task.';
     public const string PRIORITY_UNKNOWN = 'Choose Critical, Major, Normal or Minor.';
     public const string ASSIGNEE_NOT_IN_TEAM = 'Choose someone in the project’s team, or no one.';
+    public const string ASSIGNEE_NOT_LED = 'Only the team’s lead can give it to someone.';
 
     /** The route of the ticket list, which takes the project key as PROJECT_QUERY. */
     public const string TICKET_LIST_ROUTE = 'ticketing_tickets';
@@ -122,10 +124,14 @@ final class NewTicketController extends AbstractController
                 $project = $this->chosenProject($choices, $input->projectId);
                 // Second line of defence: chosenProject only returns a choice the voter already granted.
                 $this->denyAccessUnlessGranted(TicketPermission::CREATE, $project->teamId());
-                if ('' !== $input->assigneeId && !$actor->roles()->isLeadOf($project->teamId())) {
-                    throw $this->createAccessDeniedException('Only the team lead may give a ticket to someone.');
-                }
                 $errors = $this->fieldErrorsOf($input);
+                if ('' !== $input->assigneeId && !$this->isGranted(TicketPermission::ASSIGN, $project->teamId())) {
+                    // Without the field on the page an assignee can only be forged; with it, the actor picked a project they do not lead.
+                    if ([] === $this->assignableTeamIdsOf($choices)) {
+                        throw $this->createAccessDeniedException('Only the team lead may give a ticket to someone.');
+                    }
+                    $errors['assignee'] = self::ASSIGNEE_NOT_LED;
+                }
                 if ([] !== $errors) {
                     throw new TicketFormRefused($this->renderForm($actor, $choices, $input, $errors));
                 }
@@ -245,17 +251,12 @@ final class NewTicketController extends AbstractController
      */
     private function renderForm(ActorContext $actor, array $choices, TicketFormInput $input, array $errors = []): Response
     {
-        $ledTeamIds = [];
-        foreach ($choices as $choice) {
-            if ($actor->roles()->isLeadOf($choice->teamId())) {
-                $ledTeamIds[$choice->teamId()->toString()] = $choice->teamId();
-            }
-        }
+        $assignableTeamIds = $this->assignableTeamIdsOf($choices);
 
         return $this->render('@Ticketing/new.html.twig', [
             'projects' => $choices,
-            'mayAssign' => [] !== $ledTeamIds,
-            'assigneeGroups' => $this->assigneeGroupsOf($actor, array_values($ledTeamIds)),
+            'mayAssign' => [] !== $assignableTeamIds,
+            'assigneeGroups' => $this->assigneeGroupsOf($actor, $assignableTeamIds),
             'typeLabels' => self::TYPE_LABELS,
             'priorityLabels' => self::PRIORITY_LABELS,
             'input' => $input,
@@ -264,6 +265,26 @@ final class NewTicketController extends AbstractController
             'descriptionMaxLength' => self::DESCRIPTION_MAX_LENGTH,
             'csrfId' => self::CSRF_ID,
         ], new Response(status: [] === $errors ? Response::HTTP_OK : Response::HTTP_UNPROCESSABLE_ENTITY));
+    }
+
+    /**
+     * The form shows "Give it to…" when this is not empty.
+     *
+     * @param list<TeamProjectChoice> $choices
+     *
+     * @return list<TeamId> each team of the choices the voter lets the actor give a new ticket to someone in, once
+     */
+    private function assignableTeamIdsOf(array $choices): array
+    {
+        $assignableTeamIds = [];
+        foreach ($choices as $choice) {
+            $teamId = $choice->teamId();
+            if (!isset($assignableTeamIds[$teamId->toString()]) && $this->isGranted(TicketPermission::ASSIGN, $teamId)) {
+                $assignableTeamIds[$teamId->toString()] = $teamId;
+            }
+        }
+
+        return array_values($assignableTeamIds);
     }
 
     /**

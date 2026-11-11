@@ -71,10 +71,40 @@ final class TicketCreationVoterTest extends TestCase
         );
     }
 
+    /**
+     * @return iterable<string, array{string, string, bool}> actor, team, granted
+     */
+    public static function assignMatrix(): iterable
+    {
+        yield 'Lena, the lead of Shop, for Shop' => [self::LENA, self::SHOP, true];
+        yield 'Lena for Mobile, a team she has no role in' => [self::LENA, self::MOBILE, false];
+        yield 'Lena for Checkout of Beta Bakery' => [self::LENA, self::CHECKOUT, false];
+        yield 'Omar, a member of Shop, for Shop' => [self::OMAR, self::SHOP, false];
+        yield 'the Shop viewer for Shop' => [self::SHOP_VIEWER, self::SHOP, false];
+        yield 'Raj, a Manager and a member of Mobile, for Mobile' => [self::RAJ, self::MOBILE, false];
+        yield 'Raj, a Manager with no role in Shop, for Shop' => [self::RAJ, self::SHOP, false];
+        yield 'Sara, an Admin with no role in Shop, for Shop' => [self::SARA, self::SHOP, false];
+        yield 'Sara, an Admin and a viewer of Mobile, for Mobile' => [self::SARA, self::MOBILE, false];
+        yield 'Ben, with no role, for Shop' => [self::BEN, self::SHOP, false];
+        yield 'the Beta Bakery admin, the lead of Checkout, for Checkout' => [self::BETA_ADMIN, self::CHECKOUT, true];
+        yield 'the Beta Bakery admin for Shop of Acme Foods' => [self::BETA_ADMIN, self::SHOP, false];
+    }
+
+    #[Test]
+    #[DataProvider('assignMatrix')]
+    public function onlyALeadOfTheTeamGivesANewTicketToSomeone(string $actor, string $teamId, bool $isGranted): void
+    {
+        self::assertSame(
+            $isGranted ? VoterInterface::ACCESS_GRANTED : VoterInterface::ACCESS_DENIED,
+            $this->voter()->vote(self::tokenOf($actor), new TeamId($teamId), [TicketPermission::ASSIGN]),
+        );
+    }
+
     #[Test]
     public function withoutAnActorItIsDenied(): void
     {
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->voter()->vote(new NullToken(), new TeamId(self::SHOP), [TicketPermission::CREATE]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->voter()->vote(new NullToken(), new TeamId(self::SHOP), [TicketPermission::ASSIGN]));
     }
 
     #[Test]
@@ -84,6 +114,8 @@ final class TicketCreationVoterTest extends TestCase
         $token = self::tokenOf(self::LENA);
 
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new TeamId(self::SHOP), [TicketPermission::VIEW]));
+        self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new TeamId(self::SHOP), [TicketPermission::MOVE]));
+        self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new OrganizationId(self::ACME_FOODS), [TicketPermission::ASSIGN]));
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new OrganizationId(self::ACME_FOODS), [TicketPermission::CREATE]));
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, self::SHOP, [TicketPermission::CREATE]));
     }

@@ -6,7 +6,7 @@ namespace App\Ticketing\Api;
 
 /**
  * The voter attributes for tickets (ADR-0013). TicketVoter decides VIEW, EDIT, MOVE and ASSIGN on a ticket's
- * TicketVisibilityFacts; TicketCreationVoter decides CREATE on the TeamId the new ticket is for.
+ * TicketVisibilityFacts; TicketCreationVoter decides CREATE and ASSIGN on the TeamId the new ticket is for.
  */
 final class TicketPermission
 {

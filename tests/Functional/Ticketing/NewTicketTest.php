@@ -186,6 +186,25 @@ final class NewTicketTest extends WebTestCase
     }
 
     #[Test]
+    public function aLeadWhoGivesATicketInATeamSheOnlyBelongsToGetsAFieldErrorAndKeepsHerInput(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $stock = $this->createTeam($this->acmeFoods, 'Stock', $people['Omar']);
+        $this->addTeamRole($people['Lena'], $this->acmeFoods, $stock, 'member');
+        $stockProjectId = $this->addProject($stock, 'STOCK', 'Stock');
+        $this->logIn($this->client, $people['Lena']);
+
+        $page = $this->postTicket($stockProjectId, ['title' => 'Stock count is off by one', 'assignee_id' => $people['Omar']->id()->toString()]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(NewTicketController::ASSIGNEE_NOT_LED, $page->filter('#ticket-assignee-error')->text());
+        self::assertSame('Stock count is off by one', $page->filter('input[name="title"]')->attr('value'));
+        self::assertSame([], $this->committedTickets());
+    }
+
+    #[Test]
     public function aViewerOfTheTeamOpensTheFormAndCreatesATicket(): void
     {
         $people = $this->createAcmeFoodsPeople('viewer');
