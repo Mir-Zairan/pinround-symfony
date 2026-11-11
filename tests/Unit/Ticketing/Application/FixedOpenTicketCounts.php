@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Ticketing\Application;
 
+use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Application\OpenTicketCounts;
 use App\Ticketing\Domain\ProjectId;
 
@@ -27,5 +28,13 @@ final readonly class FixedOpenTicketCounts implements OpenTicketCounts
         }
 
         return $counts;
+    }
+
+    /**
+     * The commands that use this double guard on every open ticket, so asking for a viewer's count is a mistake.
+     */
+    public function openTicketsVisibleTo(TicketVisibility $viewer, ProjectId ...$projectIds): array
+    {
+        throw new \LogicException('A guard counts every open ticket, not the ones a viewer may see.');
     }
 }

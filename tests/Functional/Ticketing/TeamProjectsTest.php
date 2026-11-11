@@ -12,6 +12,7 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\Organization\SecondSession;
+use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Application\OpenTicketCounts;
 use App\Ticketing\Domain\Project;
 use App\Ticketing\Domain\ProjectId;
@@ -151,6 +152,12 @@ final class TeamProjectsTest extends WebTestCase
             public function openTicketsIn(ProjectId ...$projectIds): array
             {
                 return array_fill_keys(array_map(static fn (ProjectId $projectId): string => $projectId->toString(), $projectIds), 2);
+            }
+
+            /** None the viewer may see, so the toast's 2 can only come from the guard count. */
+            public function openTicketsVisibleTo(TicketVisibility $viewer, ProjectId ...$projectIds): array
+            {
+                return array_fill_keys(array_map(static fn (ProjectId $projectId): string => $projectId->toString(), $projectIds), 0);
             }
         });
         $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);

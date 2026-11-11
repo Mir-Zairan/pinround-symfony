@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Web\UI\Controller;
 
+use App\Organization\Api\CurrentActor;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Api\TeamQueries;
@@ -92,6 +93,7 @@ final class TeamController extends AbstractController
         private readonly RuleQueries $ruleQueries,
         private readonly SettingsQueries $settingsQueries,
         private readonly TenantContext $tenantContext,
+        private readonly CurrentActor $currentActor,
     ) {
     }
 
@@ -102,7 +104,8 @@ final class TeamController extends AbstractController
         $team = $this->teamQueries->bySlug($organizationId, $slug) ?? throw $this->createNotFoundException('No team of this organization has that slug.');
         $this->denyAccessUnlessGranted(TeamPermission::VIEW, $team->id());
 
-        $projects = $this->projectQueries->projectsOf($team->id());
+        $viewer = $this->currentActor->actorFor($this->getUser()) ?? throw $this->createAccessDeniedException();
+        $projects = $this->projectQueries->projectsOf($team->id(), $viewer->userId());
         $canLink = $this->isGranted(ProjectPermission::LINK, $team->id());
 
         $rules = $this->ruleQueries->rulesFor($team->id());

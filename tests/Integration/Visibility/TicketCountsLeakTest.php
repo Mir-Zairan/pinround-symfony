@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Visibility;
 
 use App\Organization\Api\TeamPermission;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
+use App\Ticketing\Domain\ProjectId;
+use App\Ticketing\Infrastructure\Doctrine\TicketOpenTicketCounts;
 use App\Workflow\Api\StepOccupancy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -15,53 +19,51 @@ use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authorization\AccessDecisionManagerInterface;
 
 /**
- * The ticket counts that exist today. The team page shows each project's open tickets to whoever may view the team, so
- * a viewer who may read SHOP's count must also see the team-only ticket it counts. The step count is a guard before a
- * step is removed and counts every open ticket on purpose; the tenant alone bounds it.
+ * The ticket counts that exist today. The team page shows each project's open tickets to whoever may view the team,
+ * counted per viewer, so a viewer who may read SHOP's count sees every ticket it counts. The unlink and step counts are
+ * guards and count every open ticket on purpose; the tenant alone bounds them.
  */
 final class TicketCountsLeakTest extends VisibilityLeakCast
 {
-    /**
-     * Viewers who read a count that includes the team-only ticket they may not see, with the open work that ends it.
-     * The test fails once the leak is gone, so the entry is removed with the fix.
-     */
-    private const array KNOWN_LEAKS = [
-        'Raj' => 'TODO(P03.T2): TeamVoter lets a Manager view every team page, whose project counts include team-only tickets; count them per viewer with TicketVisibilitySql (ADR-0013 "manager counts").',
-    ];
-
     #[Test]
     #[DataProvider('viewers')]
     public function aViewerWhoReadsTheTeamPageCountSeesEveryTicketItCounts(string $viewer, bool $seesTeamOnly, bool $seesNoTeamTicket): void
     {
-        [$mayViewTeam, $shopOpenTickets] = self::asViewer($viewer, static fn (TokenInterface $token): array => [
-            self::accessDecisionManager()->decide($token, [TeamPermission::VIEW], new TeamId(self::SHOP_TEAM)),
-            array_map(static fn (ProjectSummary $project): int => $project->openTicketCount(), self::projectQueries()->projectsOf(new TeamId(self::SHOP_TEAM))),
-        ]);
-        $readsTeamOnlyTicketInCount = $mayViewTeam && [1] === $shopOpenTickets;
+        [$mayViewTeam, $shopOpenTickets] = self::readTeamPageAs($viewer);
 
-        if (\array_key_exists($viewer, self::KNOWN_LEAKS)) {
-            self::assertTrue($readsTeamOnlyTicketInCount && !$seesTeamOnly, 'The known leak is gone; remove its KNOWN_LEAKS entry.');
-            self::markTestIncomplete(self::KNOWN_LEAKS[$viewer]);
-        }
-        self::assertFalse($readsTeamOnlyTicketInCount && !$seesTeamOnly, \sprintf('%s reads SHOP\'s open count of %s with a ticket they may not see.', $viewer, json_encode($shopOpenTickets)));
+        self::assertFalse($mayViewTeam && ['SHOP 1'] === $shopOpenTickets && !$seesTeamOnly, \sprintf('%s reads SHOP\'s open count of %s with a ticket they may not see.', $viewer, json_encode($shopOpenTickets)));
     }
 
     /**
-     * The count may only include the ticket when the team page shows it: the lead and the admin may view the team and
-     * see the ticket; the outside reporter sees the ticket but not the team page.
+     * SHOP's one open ticket is team-only: the lead, the admin (ADR-0013) and its outside reporter count it; the
+     * manager who may view every team page, the triager and an outsider count none; Beta Bakery's admin finds no SHOP
+     * team, so no project and no count.
      */
     #[Test]
-    public function theTeamPageCountIncludesTheTeamOnlyTicketForThoseWhoSeeIt(): void
+    public function theTeamPageCountHasOnlyTheTicketsTheViewerMaySee(): void
     {
-        $readBy = static fn (string $viewer): array => self::asViewer($viewer, static fn (TokenInterface $token): array => [
-            self::accessDecisionManager()->decide($token, [TeamPermission::VIEW], new TeamId(self::SHOP_TEAM)),
-            array_map(static fn (ProjectSummary $project): string => $project->key().' '.$project->openTicketCount(), self::projectQueries()->projectsOf(new TeamId(self::SHOP_TEAM))),
-        ]);
+        self::assertSame([true, ['SHOP 1']], self::readTeamPageAs('Lena'));
+        self::assertSame([true, ['SHOP 1']], self::readTeamPageAs('Sara'));
+        self::assertSame(['SHOP 1'], self::readTeamPageAs('Mia')[1]);
+        self::assertSame([true, ['SHOP 0']], self::readTeamPageAs('Raj'));
+        self::assertSame(['SHOP 0'], self::readTeamPageAs('Omar')[1]);
+        self::assertSame(['SHOP 0'], self::readTeamPageAs('Noor')[1]);
+        self::assertSame([false, []], self::readTeamPageAs('Ben'));
+    }
 
-        self::assertSame([true, ['SHOP 1']], $readBy('Lena'));
-        self::assertSame([true, ['SHOP 1']], $readBy('Sara'));
-        self::assertFalse($readBy('Mia')[0]);
-        self::assertSame([false, []], $readBy('Ben'));
+    /**
+     * OpenTicketCounts::openTicketsIn guards UnlinkProject: a project with open tickets stays linked, whoever can see
+     * them, so it counts the team-only ticket. Under another organization as tenant it counts nothing.
+     */
+    #[Test]
+    public function theUnlinkCountIsAGuardThatCountsEveryOpenTicketOfTheTenantOnly(): void
+    {
+        $guardCount = static fn (): array => new TicketOpenTicketCounts(self::connection(), self::getContainer()->get(TenantContext::class))->openTicketsIn(new ProjectId(self::SHOP_PROJECT));
+
+        self::assertSame(
+            [[self::SHOP_PROJECT => 1], [self::SHOP_PROJECT => 0]],
+            [self::transactions()->rolledBackAs(self::ACME_FOODS, $guardCount), self::transactions()->rolledBackAs(self::BETA_BAKERY, $guardCount)],
+        );
     }
 
     /**
@@ -78,6 +80,23 @@ final class TicketCountsLeakTest extends VisibilityLeakCast
         $countedByBetaBakery = self::transactions()->rolledBackAs(self::BETA_BAKERY, static fn (): int => self::stepOccupancy()->openTicketsIn($stepId));
 
         self::assertSame([1, 0], [$countedByAcmeFoods, $countedByBetaBakery]);
+    }
+
+    /**
+     * What the team page reads for the viewer in a request: whether they may view the Shop team, and each of its
+     * projects' key and open count as projectsOf counts them for that viewer.
+     *
+     * @return array{bool, list<string>}
+     */
+    private static function readTeamPageAs(string $viewer): array
+    {
+        return self::asViewer($viewer, static fn (TokenInterface $token): array => [
+            self::accessDecisionManager()->decide($token, [TeamPermission::VIEW], new TeamId(self::SHOP_TEAM)),
+            array_map(
+                static fn (ProjectSummary $project): string => $project->key().' '.$project->openTicketCount(),
+                self::projectQueries()->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWERS[$viewer][0])),
+            ),
+        ]);
     }
 
     private static function accessDecisionManager(): AccessDecisionManagerInterface

@@ -6,8 +6,11 @@ namespace App\Tests\Integration\Ticketing;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
+use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
+use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Infrastructure\Doctrine\TicketOpenTicketCounts;
 use Doctrine\DBAL\Connection;
@@ -58,6 +61,30 @@ final class TicketOpenTicketCountsTest extends KernelTestCase
         ));
 
         self::assertSame([self::SHOP_PROJECT => 2, self::APP_PROJECT => 0], $counts);
+    }
+
+    /**
+     * Mia of Acme Foods sees both open tickets, which are for everyone; as a viewer of Beta Bakery she sees none of Acme
+     * Foods' tickets under Acme Foods as tenant, where the guard count finds two. Which team-only tickets a viewer sees is in
+     * Visibility\TicketCountsLeakTest.
+     */
+    #[Test]
+    public function theViewersCountHasOnlyTheOpenTicketsTheyMaySee(): void
+    {
+        $countedFor = fn (string $viewerOrganizationId): array => $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->openTicketCounts()->openTicketsVisibleTo(
+            TicketVisibility::for(new OrganizationId($viewerOrganizationId), new UserId(self::MIA), [], false, null),
+            new ProjectId(self::SHOP_PROJECT),
+            new ProjectId(self::APP_PROJECT),
+        ));
+
+        self::assertSame([self::SHOP_PROJECT => 2, self::APP_PROJECT => 0], $countedFor(self::ACME_FOODS));
+        self::assertSame([self::SHOP_PROJECT => 0, self::APP_PROJECT => 0], $countedFor(self::BETA_BAKERY));
+    }
+
+    #[Test]
+    public function noProjectsGiveNoViewerCounts(): void
+    {
+        self::assertSame([], $this->openTicketCounts()->openTicketsVisibleTo(TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), [], false, null)));
     }
 
     #[Test]
