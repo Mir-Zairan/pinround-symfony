@@ -26,6 +26,7 @@ use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\Attribute\When;
@@ -503,12 +504,14 @@ final class DemoSeedCommandTest extends KernelTestCase
     }
 
     /**
-     * Boots a fresh kernel, because the container keeps the DEMO_PASSWORD it first resolved.
+     * Boots a fresh kernel, because the container keeps the DEMO_PASSWORD it first resolved. Its clock stands inside
+     * the tkt_ticket_event partitions, which the migrations made only through 2027-12, for the seeded tickets' history.
      */
     private function startWithPassword(?string $password): void
     {
         null === $password ? putenv('DEMO_PASSWORD') : putenv('DEMO_PASSWORD='.$password);
         self::bootKernel();
+        self::getContainer()->set('clock', new MockClock(new \DateTimeImmutable('2027-03-15 10:00:00 UTC')));
     }
 
     private function runSeed(): CommandTester

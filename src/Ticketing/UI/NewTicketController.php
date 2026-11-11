@@ -11,6 +11,7 @@ use App\Organization\Api\CurrentActor;
 use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Ticketing\Api\ProjectQueries;
@@ -18,9 +19,11 @@ use App\Ticketing\Api\TeamProjectChoice;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
+use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
 use App\Ticketing\Application\CreateTicket\TicketDescriptionOverLimit;
 use App\Ticketing\Application\CreateTicket\TicketTitleMissing;
 use App\Ticketing\Application\CreateTicket\TicketTitleOverLimit;
+use App\Ticketing\Application\ProjectNotFound;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -29,9 +32,10 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * The new ticket form at /tickets/new (FR-TKT-01, P03.T1): a person picks a project of one of their teams, writes the
- * ticket and may give it to someone in that team. A person whose teams own no project, or who may create tickets in
- * none of them, is denied, as is a project that is not one of their choices or stops being one before the ticket is saved.
+ * The new ticket form at /tickets/new (FR-TKT-01, P03.T1): a person picks a project of one of their teams and writes the
+ * ticket; only a Lead of the project's team may give it to someone in that team (personas-and-roles.md, as TicketVoter
+ * ASSIGN). A person whose teams own no project, or who may create tickets in none of them, is denied, as is a project
+ * that is not one of their choices or stops being one before the ticket is saved, and an assignee sent by a non-lead.
  *
  * Without the request transaction: a refused create has already taken the project's next number, and only rolling
  * back the whole transaction gives it back. Transactions gives each request a transaction of its own; a refusal leaves
@@ -57,7 +61,7 @@ final class NewTicketController extends AbstractController
     public const string DEFAULT_TYPE = 'bug';
     public const string DEFAULT_PRIORITY = 'normal';
 
-    /** In characters after trimming, as CreateTicket counts them. */
+    /** In characters, as CreateTicket counts them: the title after trimming, the description as sent. */
     public const int TITLE_MAX_LENGTH = 200;
     public const int DESCRIPTION_MAX_LENGTH = 50_000;
 
@@ -97,7 +101,11 @@ final class NewTicketController extends AbstractController
             throw $this->createAccessDeniedException();
         }
         if ($request->isMethod('GET')) {
-            return $this->transactions->run(fn (): Response => $this->renderForm($this->creatableChoicesOf($this->requestActor()), new TicketFormInput()));
+            return $this->transactions->run(function (): Response {
+                $actor = $this->requestActor();
+
+                return $this->renderForm($actor, $this->creatableChoicesOf($actor), new TicketFormInput());
+            });
         }
 
         $input = TicketFormInput::fromRequest($request);
@@ -109,13 +117,17 @@ final class NewTicketController extends AbstractController
                 $actor = $this->requestActor();
                 $choices = $this->creatableChoicesOf($actor);
                 if (!$this->isCsrfTokenValid(self::CSRF_ID, $csrfToken)) {
-                    throw new TicketFormRefused($this->renderForm($choices, $input, ['form' => self::FORM_EXPIRED]));
+                    throw new TicketFormRefused($this->renderForm($actor, $choices, $input, ['form' => self::FORM_EXPIRED]));
                 }
                 $project = $this->chosenProject($choices, $input->projectId);
+                // Second line of defence: chosenProject only returns a choice the voter already granted.
                 $this->denyAccessUnlessGranted(TicketPermission::CREATE, $project->teamId());
+                if ('' !== $input->assigneeId && !$actor->roles()->isLeadOf($project->teamId())) {
+                    throw $this->createAccessDeniedException('Only the team lead may give a ticket to someone.');
+                }
                 $errors = $this->fieldErrorsOf($input);
                 if ([] !== $errors) {
-                    throw new TicketFormRefused($this->renderForm($choices, $input, $errors));
+                    throw new TicketFormRefused($this->renderForm($actor, $choices, $input, $errors));
                 }
 
                 try {
@@ -138,12 +150,12 @@ final class NewTicketController extends AbstractController
                     $errors = ['description' => self::DESCRIPTION_OVER_LIMIT];
                 } catch (AssigneeNotInTeam) {
                     $errors = ['assignee' => self::ASSIGNEE_NOT_IN_TEAM];
-                } catch (\DomainException) {
+                } catch (ProjectNotFound|ProjectHasNoTeam) {
                     // The project was removed or lost its team after the choices were read: as if it had been forged.
                     throw $this->createAccessDeniedException('You may not make tickets in that project.');
                 }
 
-                throw new TicketFormRefused($this->renderForm($choices, $input, $errors));
+                throw new TicketFormRefused($this->renderForm($actor, $choices, $input, $errors));
             });
         } catch (TicketFormRefused $refused) {
             return $refused->formPage();
@@ -226,18 +238,47 @@ final class NewTicketController extends AbstractController
     }
 
     /**
-     * One query for the teams' people and one for their names, so it needs the transaction run opens.
+     * Needs the transaction run opens: for a Lead, it reads the people, names and team names of the teams they lead.
      *
      * @param list<TeamProjectChoice> $choices
      * @param array<string, string>   $errors  by field, with "form" for the whole form
      */
-    private function renderForm(array $choices, TicketFormInput $input, array $errors = []): Response
+    private function renderForm(ActorContext $actor, array $choices, TicketFormInput $input, array $errors = []): Response
     {
-        $teamIds = [];
+        $ledTeamIds = [];
         foreach ($choices as $choice) {
-            $teamIds[$choice->teamId()->toString()] = $choice->teamId();
+            if ($actor->roles()->isLeadOf($choice->teamId())) {
+                $ledTeamIds[$choice->teamId()->toString()] = $choice->teamId();
+            }
         }
-        $assigneeIdsByTeam = $this->teamQueries->possibleAssigneesOf(array_values($teamIds));
+
+        return $this->render('@Ticketing/new.html.twig', [
+            'projects' => $choices,
+            'mayAssign' => [] !== $ledTeamIds,
+            'assigneeGroups' => $this->assigneeGroupsOf($actor, array_values($ledTeamIds)),
+            'typeLabels' => self::TYPE_LABELS,
+            'priorityLabels' => self::PRIORITY_LABELS,
+            'input' => $input,
+            'errors' => $errors,
+            'titleMaxLength' => self::TITLE_MAX_LENGTH,
+            'descriptionMaxLength' => self::DESCRIPTION_MAX_LENGTH,
+            'csrfId' => self::CSRF_ID,
+        ], new Response(status: [] === $errors ? Response::HTTP_OK : Response::HTTP_UNPROCESSABLE_ENTITY));
+    }
+
+    /**
+     * Three queries whatever the number of teams: their people, the people's names and the teams' names; none for no team.
+     *
+     * @param list<TeamId> $ledTeamIds
+     *
+     * @return list<array{teamName: string, assignees: list<UserView>}> ordered by team name
+     */
+    private function assigneeGroupsOf(ActorContext $actor, array $ledTeamIds): array
+    {
+        if ([] === $ledTeamIds) {
+            return [];
+        }
+        $assigneeIdsByTeam = $this->teamQueries->possibleAssigneesOf($ledTeamIds);
         $assigneeIds = [];
         foreach ($assigneeIdsByTeam as $teamAssigneeIds) {
             foreach ($teamAssigneeIds as $assigneeId) {
@@ -247,26 +288,16 @@ final class NewTicketController extends AbstractController
         $usersById = $this->userQueries->byIds(array_values($assigneeIds));
 
         $assigneeGroups = [];
-        foreach ($choices as $choice) {
+        foreach ($this->teamQueries->summariesOf($actor->organizationId(), $ledTeamIds) as $team) {
             $assigneeGroups[] = [
-                'projectKey' => $choice->key(),
+                'teamName' => $team->name(),
                 'assignees' => array_values(array_filter(array_map(
                     static fn (UserId $assigneeId): ?UserView => $usersById[$assigneeId->toString()] ?? null,
-                    $assigneeIdsByTeam[$choice->teamId()->toString()] ?? [],
+                    $assigneeIdsByTeam[$team->id()->toString()] ?? [],
                 ))),
             ];
         }
 
-        return $this->render('@Ticketing/new.html.twig', [
-            'projects' => $choices,
-            'assigneeGroups' => $assigneeGroups,
-            'typeLabels' => self::TYPE_LABELS,
-            'priorityLabels' => self::PRIORITY_LABELS,
-            'input' => $input,
-            'errors' => $errors,
-            'titleMaxLength' => self::TITLE_MAX_LENGTH,
-            'descriptionMaxLength' => self::DESCRIPTION_MAX_LENGTH,
-            'csrfId' => self::CSRF_ID,
-        ], new Response(status: [] === $errors ? Response::HTTP_OK : Response::HTTP_UNPROCESSABLE_ENTITY));
+        return $assigneeGroups;
     }
 }

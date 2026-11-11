@@ -55,7 +55,7 @@ FR-TKT-01, FR-TKT-02, FR-TKT-03, FR-TKT-04, FR-TKT-05, FR-TKT-06, FR-TKT-07, FR-
 1. Domain: `Ticket`, `TicketKey`, `TicketType`, `Priority` (with rank), `Visibility`; invariants (title 1–200 chars, description ≤ 50,000 chars).
 2. Migrations: `tkt_ticket` (all columns from [Ticketing tables](../02-architecture/data-model.md#ticketing), RLS, indexes), `tkt_ticket_event` partitioned monthly with primary key `(id, at)` (create the current and next 2 partitions; a scheduler job creates future ones; partitioned tables are excluded from the Doctrine schema diff), `tkt_summary`; add the foreign key `ins_ticket_turn.ticket_id → tkt_ticket.id`.
 3. `TicketCommands::create`: number from `NextTicketNumber`; start in To do when an assignee is chosen, else Backlog; project the turn; event `TicketCreated`.
-4. Page `/tickets/new`: title, description, project, type (default Bug), priority (default Normal), give it to (optional). After create: go to the ticket, toast "Ticket SHOP-12 made."
+4. Page `/tickets/new`: title, description, project, type (default Bug), priority (default Normal), give it to (optional; shown to, and accepted from, a Lead of the project's team only, personas-and-roles.md). After create: go to the ticket, toast "Ticket SHOP-12 made."
 5. `TicketVoter`: `VIEW`, `CREATE`, `EDIT`, `MOVE`, `ASSIGN` (rows from the [permission matrix](../00-product/personas-and-roles.md#permission-matrix)).
 6. Foundry factories and demo seed: 40 tickets in SHOP across all steps with neutral titles.
 **Files:** `src/Ticketing/**`, migrations, `tests/Factory/TicketFactory.php`.

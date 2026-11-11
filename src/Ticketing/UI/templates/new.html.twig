@@ -71,25 +71,28 @@
                         <p class="profile__error" id="ticket-priority-error">{{ errors.priority }}</p>
                     {% endif %}
                 </fieldset>
-                <div class="profile__field">
-                    <label class="login__field">
-                        Give it to
-                        <select class="login__input" name="assignee_id"
-                            {%- if errors.assignee is defined %} aria-invalid="true" aria-describedby="ticket-assignee-error"{% endif %}>
-                            <option value="">No one yet</option>
-                            {% for group in assigneeGroups %}
-                                <optgroup label="{{ group.projectKey }}">
-                                    {% for assignee in group.assignees %}
-                                        <option value="{{ assignee.id.toString }}"{% if assignee.id.toString == input.assigneeId %} selected{% endif %}>{{ assignee.displayName }}</option>
-                                    {% endfor %}
-                                </optgroup>
-                            {% endfor %}
-                        </select>
-                    </label>
-                    {% if errors.assignee is defined %}
-                        <p class="profile__error" id="ticket-assignee-error">{{ errors.assignee }}</p>
-                    {% endif %}
-                </div>
+                {# Only a Lead may give a ticket to someone, so the people are those of the teams they lead. #}
+                {% if mayAssign %}
+                    <div class="profile__field">
+                        <label class="login__field">
+                            Give it to
+                            <select class="login__input" name="assignee_id"
+                                {%- if errors.assignee is defined %} aria-invalid="true" aria-describedby="ticket-assignee-error"{% endif %}>
+                                <option value="">No one yet</option>
+                                {% for group in assigneeGroups %}
+                                    <optgroup label="{{ group.teamName }}">
+                                        {% for assignee in group.assignees %}
+                                            <option value="{{ assignee.id.toString }}"{% if assignee.id.toString == input.assigneeId %} selected{% endif %}>{{ assignee.displayName }}</option>
+                                        {% endfor %}
+                                    </optgroup>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        {% if errors.assignee is defined %}
+                            <p class="profile__error" id="ticket-assignee-error">{{ errors.assignee }}</p>
+                        {% endif %}
+                    </div>
+                {% endif %}
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
                 <div>
                     <twig:Button type="submit">Make ticket</twig:Button>
