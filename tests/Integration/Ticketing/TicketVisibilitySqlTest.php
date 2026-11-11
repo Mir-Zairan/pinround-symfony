@@ -11,7 +11,8 @@ use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Api\TicketVisibilityFacts;
-use App\Ticketing\Infrastructure\Doctrine\TicketVisibilitySql;
+use App\Ticketing\Api\TicketVisibilitySql;
+use App\Ticketing\Application\RoleTicketVisibilities;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -115,24 +116,50 @@ final class TicketVisibilitySqlTest extends KernelTestCase
             'SELECT shown.number::text FROM tkt_ticket shown WHERE '.$omar->sql()
             .' AND EXISTS (SELECT 1 FROM tkt_ticket also_shown WHERE also_shown.id = shown.id AND '.$lena->sql().') ORDER BY shown.number',
             [...$omar->parameters(), ...$lena->parameters()],
-            [...$omar->types(), ...$lena->types()],
         ));
 
         self::assertSame(['1'], $found);
     }
 
+    /**
+     * Omar is the assignee of ticket 4 and on none of tickets 2 (SHOP team) and 9 (no team; Lena triages), so of the
+     * three turn rows only ticket 4's is his to see.
+     */
     #[Test]
-    public function theTurnReadModelCarriesTheColumnsTheConditionReads(): void
+    public function theConditionFiltersTheTurnReadModelByItsCopiedColumns(): void
     {
         $condition = TicketVisibilitySql::of(TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], false, new UserId(self::LENA)), 'tt');
 
-        $found = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn(
-            'SELECT tt.ticket_id FROM ins_ticket_turn tt WHERE '.$condition->sql(),
-            $condition->parameters(),
-            $condition->types(),
-        ));
+        $found = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($condition): array {
+            foreach (['0197a3c0-0000-7000-8000-0000000034e2', '0197a3c0-0000-7000-8000-0000000034e4', '0197a3c0-0000-7000-8000-0000000034e9'] as $ticketId) {
+                $this->addTurnRowOf($ticketId);
+            }
 
-        self::assertSame([], $found, 'The tickets of this test have no turn rows.');
+            return $this->connection()->fetchFirstColumn(
+                'SELECT tt.ticket_id FROM ins_ticket_turn tt WHERE '.$condition->sql().' ORDER BY tt.ticket_id',
+                $condition->parameters(),
+            );
+        });
+
+        self::assertSame(['0197a3c0-0000-7000-8000-0000000034e4'], $found);
+    }
+
+    /**
+     * Another module gets a viewer's predicate from TicketVisibilities alone; Omar has no membership and Acme Foods no
+     * settings here, so he sees the ticket for everyone and the six he is on, read through the real Organization Api.
+     */
+    #[Test]
+    public function theViewerFromTicketVisibilitiesSeesWhatTheirStoredRolesAllow(): void
+    {
+        $visibilities = self::getContainer()->get('test.ticketing_ticket_visibilities');
+        self::assertInstanceOf(RoleTicketVisibilities::class, $visibilities);
+
+        $found = $this->transactions()->rolledBackAs(
+            self::ACME_FOODS,
+            fn (): array => $this->ticketNumbersFound($visibilities->of(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR))),
+        );
+
+        self::assertSame(['1', '3', '4', '5', '6', '7', '8'], $found);
     }
 
     /**
@@ -147,7 +174,6 @@ final class TicketVisibilitySqlTest extends KernelTestCase
             $this->connection()->fetchFirstColumn(
                 'SELECT t.number::text FROM tkt_ticket t WHERE '.$condition->sql().' ORDER BY t.number',
                 $condition->parameters(),
-                $condition->types(),
             ),
         );
     }
@@ -174,6 +200,21 @@ final class TicketVisibilitySqlTest extends KernelTestCase
         }
 
         return $numbers;
+    }
+
+    /**
+     * The ticket's turn row, with the predicate's columns copied from TICKETS as the turn projector copies them.
+     */
+    private function addTurnRowOf(string $ticketId): void
+    {
+        [$organizationId, $visibility, $teamId, $reporterId, $otherPeople] = self::TICKETS[$ticketId];
+        $people = ['assignee_id' => null, 'pending_assignee_id' => null, 'reviewer_id' => null, 'tester_id' => null, 'waiting_on_user_id' => null, ...$otherPeople];
+        $this->connection()->executeStatement(
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, kind, base_score, waiting_since,
+                 visibility, reporter_id, assignee_id, pending_assignee_id, reviewer_id, tester_id, waiting_on_user_id)
+             VALUES (?, ?, ?, ?, 'doing', ?, 'build', 18, '2027-03-15 10:00:00+00', ?, ?, ?, ?, ?, ?, ?)",
+            [$organizationId, $ticketId, $teamId, self::SHOP_PROJECT, $reporterId, $visibility, $reporterId, ...array_values($people)],
+        );
     }
 
     /**

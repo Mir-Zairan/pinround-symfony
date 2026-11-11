@@ -13,8 +13,8 @@ use App\SharedKernel\Domain\UserId;
  * viewer in one organization: a ticket of that organization is visible when it is for everyone, or in one of the
  * viewer's teams, or has the viewer as one of its six people, or the viewer is an admin, or it has no team and the
  * viewer is the organization's triager. A ticket of another organization is never visible, not even to an admin.
- * isVisible() is the PHP check; TicketVisibilitySql renders the same rule as SQL. Application\ActorTicketVisibility
- * builds it from Organization\Api\ActorContext and the triager, which this Api may not depend on.
+ * isVisible() is the PHP check; TicketVisibilitySql renders the same rule as SQL. Get a viewer's one from
+ * TicketVisibilities, which reads their roles and the triager from Organization, which this Api may not depend on.
  */
 final readonly class TicketVisibility
 {

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Integration\Architecture;
+namespace App\Tests\Unit\Architecture;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -26,6 +26,16 @@ final class HandWrittenVisibilityConditionTest extends TestCase
         $columns = ['visibility' => 'team'];
         // WHERE t.visibility = 'all' in a comment is not SQL that runs.
         $copied = 'SELECT visibility, team_id FROM tkt_ticket';
+        $cast = "SELECT id FROM tkt_ticket t WHERE t.visibility::text = 'all'";
+        $switched = "SELECT CASE t.visibility WHEN 'all' THEN 1 ELSE 0 END FROM tkt_ticket t";
+        $restrictedTickets = $this->tickets->findBy(['visibility' => 'team']);
+        $oneRestricted = $this->tickets->findOneBy(['project' => $project, 'visibility' => 'team']);
+        $restrictedCount = $this->tickets->count(array('visibility' => 'team'));
+        $criteria = Criteria::create()->where(Criteria::expr()->eq('visibility', 'team'));
+        $excluded = <<<'SQL'
+            SELECT id FROM tkt_ticket t
+            WHERE t.visibility NOT IN ('team')
+            SQL;
         PHP;
 
     #[Test]
@@ -45,6 +55,13 @@ final class HandWrittenVisibilityConditionTest extends TestCase
                 'Planted.php:6: = t.visibility',
                 'Planted.php:7: visibility !=',
                 'Planted.php:8: visibility IS',
+                'Planted.php:13: visibility::text =',
+                'Planted.php:14: CASE t.visibility WHEN',
+                "Planted.php:15: 'visibility' =>",
+                "Planted.php:16: 'visibility' =>",
+                "Planted.php:17: 'visibility' =>",
+                "Planted.php:18: eq('visibility'",
+                'Planted.php:21: visibility NOT IN',
             ],
             HandWrittenVisibilityConditions::inSource('Planted.php', self::PLANTED),
         );

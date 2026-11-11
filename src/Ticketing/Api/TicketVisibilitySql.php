@@ -2,17 +2,17 @@
 
 declare(strict_types=1);
 
-namespace App\Ticketing\Infrastructure\Doctrine;
+namespace App\Ticketing\Api;
 
 use App\SharedKernel\Domain\TeamId;
-use App\Ticketing\Api\TicketVisibility;
-use Doctrine\DBAL\ParameterType;
 
 /**
  * TicketVisibility as a SQL condition with named parameters, for a table that carries the predicate's columns
- * (tkt_ticket, ins_ticket_turn). The only place SQL may filter on visibility; HandWrittenVisibilityConditionTest
- * fails on any other. It keeps to the viewer's organization by itself, besides row-level security.
+ * (tkt_ticket, ins_ticket_turn), so every module that filters such a table uses this one rule (ADR-0013). The only
+ * place SQL may filter on visibility; HandWrittenVisibilityConditionTest fails on any other. It keeps to the viewer's
+ * organization by itself, besides row-level security.
  *
+ * Every parameter is a string and the SQL casts each one, so a caller binds parameters() as they are, with no types.
  * The condition is true for a visible row and false or NULL for a hidden one (a NULL people column makes the IN list
  * NULL): use it as a filter (WHERE, ON, FILTER), never negated.
  */
@@ -21,10 +21,9 @@ final readonly class TicketVisibilitySql
     private const string IDENTIFIER = '/^[a-z_][a-z0-9_]*$/';
 
     /**
-     * @param array<string, string|bool>   $parameters
-     * @param array<string, ParameterType> $types
+     * @param array<string, string> $parameters
      */
-    private function __construct(private string $sql, private array $parameters, private array $types)
+    private function __construct(private string $sql, private array $parameters)
     {
     }
 
@@ -48,7 +47,7 @@ final readonly class TicketVisibilitySql
         return new self(
             \sprintf(
                 '(%1$s.organization_id = CAST(:%2$sorg AS uuid)'
-                ." AND (%1\$s.visibility = 'all'"
+                ." AND (%1\$s.visibility = '%3\$s'"
                 .' OR %1$s.team_id = ANY(CAST(:%2$steams AS uuid[]))'
                 .' OR CAST(:%2$sme AS uuid) IN (%1$s.reporter_id, %1$s.assignee_id, %1$s.pending_assignee_id,'
                 .' %1$s.reviewer_id, %1$s.tester_id, %1$s.waiting_on_user_id)'
@@ -56,20 +55,14 @@ final readonly class TicketVisibilitySql
                 .' OR (%1$s.team_id IS NULL AND CAST(:%2$sis_triager AS boolean))))',
                 $tableAlias,
                 $prefix,
+                TicketVisibilityFacts::FOR_EVERYONE,
             ),
             [
                 $prefix.'org' => $visibility->organizationId()->toString(),
                 $prefix.'teams' => $teamIdsLiteral,
                 $prefix.'me' => $visibility->viewerId()->toString(),
-                $prefix.'is_admin' => $visibility->isAdmin(),
-                $prefix.'is_triager' => $visibility->isTriager(),
-            ],
-            [
-                $prefix.'org' => ParameterType::STRING,
-                $prefix.'teams' => ParameterType::STRING,
-                $prefix.'me' => ParameterType::STRING,
-                $prefix.'is_admin' => ParameterType::BOOLEAN,
-                $prefix.'is_triager' => ParameterType::BOOLEAN,
+                $prefix.'is_admin' => self::booleanLiteral($visibility->isAdmin()),
+                $prefix.'is_triager' => self::booleanLiteral($visibility->isTriager()),
             ],
         );
     }
@@ -80,18 +73,15 @@ final readonly class TicketVisibilitySql
     }
 
     /**
-     * @return array<string, string|bool> by parameter name without the colon, to merge into the query's parameters
+     * @return array<string, string> by parameter name without the colon, to merge into the query's parameters
      */
     public function parameters(): array
     {
         return $this->parameters;
     }
 
-    /**
-     * @return array<string, ParameterType> by parameter name, to merge into the query's types
-     */
-    public function types(): array
+    private static function booleanLiteral(bool $value): string
     {
-        return $this->types;
+        return $value ? 'true' : 'false';
     }
 }
