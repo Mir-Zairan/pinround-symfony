@@ -40,7 +40,7 @@ FR-TKT-01, FR-TKT-02, FR-TKT-03, FR-TKT-04, FR-TKT-05, FR-TKT-06, FR-TKT-07, FR-
 
 ## Design notes
 - **Ticket aggregate** (`Ticketing\Domain\Ticket`): owns step, assignee, pending assignee, reviewer, tester, previous step, waiting-on, priority + `priority_rank`, visibility, `version` for optimistic locking.
-- **Every move** = one transaction: voter → `TransitionPolicy::check` → `ticket.move()` → `TurnProjector::project` → `tkt_ticket_event` row → outbox `TicketMoved` → Turbo Stream response with a toast naming who acts next.
+- **Every move** = one transaction: voter → `TransitionPolicy::check` → `ticket.move()` → `TurnProjector::refresh(TicketId)` (its returned override note goes to the activity) → `tkt_ticket_event` row → outbox `TicketMoved` → Turbo Stream response with a toast naming who acts next.
 - **Search:** generated `tsvector` column on title + description (weights A/B), GIN index; `pg_trgm` GIN on title for key and fuzzy title matches ([ADR-0022](../03-adr/0022-search-and-duplicates.md)).
 - **List query:** one SQL query for the whole page: the visible steps joined `LATERAL` to `(SELECT … ORDER BY priority_rank, updated_at DESC, id DESC LIMIT 51)` per step, so every group gets its first 50 rows plus a "more" flag; keyset pagination on `(priority_rank, updated_at, id)` inside one step for "Show more"; assignee names fetched in one batch through `Identity\Api\UserQueries::byIds`. Indexes come from the canonical list in [data-model.md](../02-architecture/data-model.md) (including `(organization_id, step_id, priority_rank, updated_at DESC, id DESC)` for "All projects"); do not invent extra ones here.
 - **Query budgets:** list ≤ 5 queries, ticket page ≤ 10 (enforced by a query-count test helper).

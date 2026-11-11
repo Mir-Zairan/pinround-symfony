@@ -111,6 +111,14 @@ services:
     App\Workflow\Api\StepQueries: '@App\Workflow\Infrastructure\Cache\CachedStepQueries'
     App\Workflow\Api\RuleQueries: '@App\Workflow\Infrastructure\Cache\CachedRuleQueries'
     App\Workflow\Api\TransitionPolicy: '@App\Workflow\Application\Transition\CatalogueTransitionPolicy'
+    App\Workflow\Api\TurnRules: '@App\Workflow\Application\Turn\OrderedTurnRules'
+    App\Workflow\Api\NeedsYouScore: '@App\Workflow\Application\Turn\WeightedNeedsYouScore'
+    App\Workflow\Api\NowNext: '@App\Workflow\Application\Turn\PlainNowNext'
+    App\Workflow\Api\VerbFor: '@App\Workflow\Application\Turn\PlainVerbFor'
+    # Its TicketTurnSource comes in P03 as an Insight Infrastructure adapter over a Ticketing Api query; until a module
+    # calls TurnProjector, the container drops both, so dev and prod compile without a source. The test env gives it an
+    # in-memory one below.
+    App\Insight\Api\TurnProjector: '@App\Insight\Infrastructure\Doctrine\DbalTurnProjector'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -149,6 +157,26 @@ when@test:
             public: true
         test.workflow_transition_policy:
             alias: App\Workflow\Api\TransitionPolicy
+            public: true
+        test.workflow_turn_rules:
+            alias: App\Workflow\Api\TurnRules
+            public: true
+        test.workflow_needs_you_score:
+            alias: App\Workflow\Api\NeedsYouScore
+            public: true
+        test.workflow_now_next:
+            alias: App\Workflow\Api\NowNext
+            public: true
+        test.workflow_verb_for:
+            alias: App\Workflow\Api\VerbFor
+            public: true
+        # No ticket exists before P03, so DbalTurnProjectorTest puts the facts it projects into this source.
+        App\Tests\Integration\Insight\InMemoryTicketTurnSource:
+            autoconfigure: true
+            public: true
+        App\Insight\Application\Turn\TicketTurnSource: '@App\Tests\Integration\Insight\InMemoryTicketTurnSource'
+        test.insight_turn_projector:
+            alias: App\Insight\Api\TurnProjector
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

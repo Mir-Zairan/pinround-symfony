@@ -7,6 +7,7 @@ namespace App\Workflow\Application\Transition;
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\RuleSetView;
+use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\Transition;
@@ -16,12 +17,20 @@ use App\Workflow\Domain\Transition;
  */
 final readonly class ReviewBeforeTest implements Guard
 {
-    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote
+    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team): ?RuleNote
     {
-        if (!$rules->reviewBeforeTest || !$transition->startsFrom(CoreStep::Progress) || CoreStep::Test !== $transition->to) {
+        if (!$transition->startsFrom(CoreStep::Progress) || CoreStep::Test !== $transition->to) {
             return null;
         }
 
-        return new RuleNote('Team rule: code review comes before testing.');
+        return $this->noteFor($rules);
+    }
+
+    /**
+     * The note for a move from In progress to Testing, whichever way it is made (a verb, or "Move to another step…").
+     */
+    public function noteFor(RuleSetView $rules): ?RuleNote
+    {
+        return $rules->reviewBeforeTest ? new RuleNote('Team rule: code review comes before testing.') : null;
     }
 }

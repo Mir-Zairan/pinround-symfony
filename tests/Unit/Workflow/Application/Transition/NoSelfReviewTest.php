@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Workflow\Application\Transition;
 
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Application\Transition\NoSelfReview;
+use App\Workflow\Application\Turn\ReviewerChoice;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\Mover;
 use App\Workflow\Domain\Transition;
@@ -39,7 +40,7 @@ final class NoSelfReviewTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA, reviewer: GuardFixtures::OMAR, tester: GuardFixtures::MIA);
 
-        $note = new NoSelfReview()->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), $actor, GuardFixtures::rules(noSelfReview: $isRuleOn));
+        $note = new NoSelfReview(new ReviewerChoice())->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), $actor, GuardFixtures::rules(noSelfReview: $isRuleOn), GuardFixtures::team());
 
         self::assertSame($expectedNote, $note?->render(GuardFixtures::nameOf(...)));
     }
@@ -49,19 +50,19 @@ final class NoSelfReviewTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::OMAR, reviewer: GuardFixtures::LENA);
 
-        $note = new NoSelfReview()->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::omar(), GuardFixtures::rules());
+        $note = new NoSelfReview(new ReviewerChoice())->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team());
 
         self::assertSame('Team rule: nobody approves their own code. Lena reviews it.', $note?->render(GuardFixtures::nameOf(...)));
     }
 
     #[Test]
-    public function withNoReviewerSetTheNoteNamesNobody(): void
+    public function withNoReviewerSetTheNoteNamesTheReviewerTheTurnRulesChoose(): void
     {
         $ticket = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA);
 
-        $note = new NoSelfReview()->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules());
+        $note = new NoSelfReview(new ReviewerChoice())->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team());
 
-        self::assertSame('Team rule: nobody approves their own code.', $note?->render(GuardFixtures::nameOf(...)));
+        self::assertSame('Team rule: nobody approves their own code. Omar reviews it.', $note?->render(GuardFixtures::nameOf(...)));
     }
 
     #[Test]
@@ -69,7 +70,7 @@ final class NoSelfReviewTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA, reviewer: GuardFixtures::LENA);
 
-        self::assertNull(new NoSelfReview()->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules()));
+        self::assertNull(new NoSelfReview(new ReviewerChoice())->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team()));
     }
 
     #[Test]
@@ -77,17 +78,17 @@ final class NoSelfReviewTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('review', 'check', reviewer: GuardFixtures::OMAR);
 
-        self::assertNull(new NoSelfReview()->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules()));
+        self::assertNull(new NoSelfReview(new ReviewerChoice())->check($ticket, new TransitionCatalogue()->for(Verb::ApproveCode), GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team()));
     }
 
     #[Test]
     public function onlyAMoveFromCodeReviewToTestingIsBlocked(): void
     {
         $ticket = GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::LENA, reviewer: GuardFixtures::OMAR);
-        $guard = new NoSelfReview();
+        $guard = new NoSelfReview(new ReviewerChoice());
         $intoTestingFromElsewhere = new Transition(Verb::ApproveCode, 'Send to testing', [CoreStep::Progress], CoreStep::Test, [Mover::Assignee], false);
 
-        self::assertNull($guard->check($ticket, new TransitionCatalogue()->for(Verb::AskForChanges), GuardFixtures::lena(), GuardFixtures::rules()));
-        self::assertNull($guard->check($ticket, $intoTestingFromElsewhere, GuardFixtures::lena(), GuardFixtures::rules()));
+        self::assertNull($guard->check($ticket, new TransitionCatalogue()->for(Verb::AskForChanges), GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team()));
+        self::assertNull($guard->check($ticket, $intoTestingFromElsewhere, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team()));
     }
 }

@@ -7,6 +7,7 @@ namespace App\Workflow\Application\Transition;
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\RuleSetView;
+use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Domain\Transition;
 
@@ -20,7 +21,9 @@ use App\Workflow\Domain\Transition;
 interface Guard
 {
     /**
+     * @param TeamFacts $team the ticket's team, as the turn rules got it, so a rule sees the same reviewer and testers
+     *
      * @return RuleNote|null null when the rule allows the move, else the note that says why not
      */
-    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules): ?RuleNote;
+    public function check(TicketState $ticket, Transition $transition, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team): ?RuleNote;
 }

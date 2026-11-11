@@ -14,8 +14,14 @@ enum Verb: string
     case GiveItTo = 'give_it_to';
     case StartWork = 'start_work';
     case SendToCodeReview = 'send_to_code_review';
+    case SendToTesting = 'send_to_testing';
     case ApproveCode = 'approve_code';
     case AskForChanges = 'ask_for_changes';
     case PassIt = 'pass_it';
     case NeedsChanges = 'needs_changes';
+    case InputGiven = 'input_given';
+    case GoOn = 'go_on';
+    case Reopen = 'reopen';
+    case PutOnHold = 'put_on_hold';
+    case MoveOn = 'move_on';
 }

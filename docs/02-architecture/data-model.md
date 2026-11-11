@@ -251,15 +251,15 @@ Read models are owned by Insight and rebuilt from events if needed (`bin/console
 
 ### ins_ticket_turn (the most important table for speed)
 
-One row per **open** ticket. The row is deleted when the ticket is done.
+One row per **open** ticket. The row is deleted when the ticket is done. Created by `Version20261110160000`; a tenant table with `TenantTable::enableRls`, `pinround_app` has `SELECT, INSERT, UPDATE, DELETE`, `pinround_readonly` has `SELECT`. No entity maps it (hidden by `schema_filter`); `ticket_id` gets its foreign key to `tkt_ticket` in P03.T1.
 
 | Column | Meaning |
 |---|---|
-| ticket_id PK, organization_id | The ticket |
+| organization_id, ticket_id | The ticket; `PRIMARY KEY (organization_id, ticket_id)` |
 | team_id, project_id | For filters |
-| grp | The group of the current step |
-| turn_user_id NULL | Whose turn it is. NULL means an outside party (customer, owner) or nobody |
-| turn_label | Display text when there is no user ("Customer", "Product owner") |
+| grp | The group of the current step: `todo`, `doing`, `check` or `wait`, never `done` (`ins_ticket_turn_grp_check`) |
+| turn_user_id NULL | Whose turn it is. NULL means an outside party (customer, owner) holds it, named by `turn_label` |
+| turn_label NULL | Display text when there is no user ("Customer", "Product owner"). Exactly one of `turn_user_id` and `turn_label` is set (`ins_ticket_turn_turn_check`); a ticket that is nobody's turn has no row |
 | kind | `answer`, `check`, `review`, `test`, `assign`, `input`, `decide`, `build` |
 | base_score int | Kind + priority + release points (see [workflow-engine.md](workflow-engine.md#needs-you-kinds-and-score)) |
 | waiting_since timestamptz | When the turn last changed. Drives "waiting 12d" and the time part of the score |
@@ -268,7 +268,7 @@ One row per **open** ticket. The row is deleted when the ticket is done.
 
 Indexes: see [Index catalogue](#index-catalogue).
 
-Updated **synchronously** in the same transaction as the change, by `TurnProjector` ([ADR-0015](../03-adr/0015-turn-read-model.md)).
+Updated **synchronously** in the same transaction as the change, by `TurnProjector::refresh(TicketId)` (`DbalTurnProjector`, one upsert or delete; `waiting_since` starts again only when the turn person or label changes) ([ADR-0015](../03-adr/0015-turn-read-model.md)). Every change of the turn or of a column the row copies calls it: `team_id`, `project_id`, `grp`, `visibility`, `reporter_id`, `assignee_id`, `pending_assignee_id`, `reviewer_id`, `tester_id`, `waiting_on_user_id`, `check_user_id`, and the priority, release and risk check behind `base_score`. A stale visibility column would show a restricted ticket on Home and Whose turn. This list is wider than ADR-0015's update path, which names only the commands that change a turn (see the P02.T6 hand-off note in [phase 2](../05-plan/phase-02-projects-and-workflow.md)).
 
 Home and "Whose turn?" read this table joined with `tkt_ticket_list_v`, a read-only SQL view owned by Ticketing (key, title, priority, release, step). Only Insight's query service may use that join ([ADR-0015](../03-adr/0015-turn-read-model.md)).
 
@@ -505,7 +505,7 @@ ORDER BY at DESC LIMIT 6;
 - **Retention** is per organization. Because some orgs choose "always", partitions of `tkt_ticket_event` are normally **not dropped**; the purge deletes rows instead (below). Partitions of `ntf_notification` and `ast_usage` have one fixed lifetime for everyone and are dropped whole. A partition of `aud_event` or `tkt_ticket_event` may be dropped only when no org with a longer retention has rows in it (checked by the job).
 - **Ticket events follow the ticket:** events are deleted only together with their closed ticket (§10.3 rule: open tickets and their history are never deleted). The nightly job, as `pinround_retention`, finds closed tickets older than the org's cutoff and deletes, in chunks of 5,000 rows, their events, messages, rounds, pins and media references, then the tickets. Audit events are purged by `at < cutoff` per org, with a minimum of 1 year for security events.
 - The purge writes its own audit event per org and run.
-- Tables no entity maps are **excluded from the Doctrine schema diff** by the `schema_filter` regex on the default and migrator connections in `config/packages/doctrine.yaml`, and their DDL lives in hand-written migrations. Today it hides `processed_message`, `idn_login_attempt`, `web_home_focus`, `wf_rule_set`, `aud_event` and its partitions `aud_event_YYYYMM`; `tkt_ticket_event`, `ntf_notification` and `ast_usage` join it with their migrations. The Messenger tables stay visible: Messenger adds them to the expected schema. `DatabaseRolesTest::doctrineMigrationsDiffFindsNoChanges` runs the diff's comparison and fails on any difference.
+- Tables no entity maps are **excluded from the Doctrine schema diff** by the `schema_filter` regex on the default and migrator connections in `config/packages/doctrine.yaml`, and their DDL lives in hand-written migrations. Today it hides `processed_message`, `idn_login_attempt`, `web_home_focus`, `wf_rule_set`, `ins_ticket_turn`, `aud_event` and its partitions `aud_event_YYYYMM`; `tkt_ticket_event`, `ntf_notification` and `ast_usage` join it with their migrations. The Messenger tables stay visible: Messenger adds them to the expected schema. `DatabaseRolesTest::doctrineMigrationsDiffFindsNoChanges` runs the diff's comparison and fails on any difference.
 - Open tickets are never deleted, whatever their age. Media is deleted from the bucket by a worker. Bucket lifecycle rules catch orphans after 7 days.
 - **Export** before deletion is the admin's job. pinround shows a warning 30 days before the first purge after a change.
 

@@ -13,10 +13,10 @@ doctrine:
         # A failed nested savepoint is not covered: DBAL's nesting level stays one too high (DBAL's own behaviour).
         wrapper_class: &connection_class App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection
         # Tables no entity maps, built by hand-written migrations, that doctrine:migrations:diff would otherwise drop:
-        # processed_message, idn_login_attempt, web_home_focus, wf_rule_set (DbalRuleSets; no primary key, so no entity),
+        # processed_message, idn_login_attempt, web_home_focus, wf_rule_set (DbalRuleSets; no primary key, so no entity), ins_ticket_turn (DbalTurnProjector),
         # and aud_event with its monthly partitions aud_event_YYYYMM
         # (data-model.md, Partitions and retention). The Messenger tables stay visible: Messenger adds them to the expected schema, so diff checks them.
-        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|web_home_focus|wf_rule_set|aud_event(?:_\d{6})?)$)~'
+        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|web_home_focus|wf_rule_set|ins_ticket_turn|aud_event(?:_\d{6})?)$)~'
 
         profiling_collect_backtrace: '%kernel.debug%'
         types:
