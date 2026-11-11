@@ -227,4 +227,5 @@ FR-TKT-01, FR-TKT-02, FR-TKT-03, FR-TKT-04, FR-TKT-05, FR-TKT-06, FR-TKT-07, FR-
 - Every later read path must add its case to `tests/Integration/Visibility/` (P03.T2).
 - P05 replaces the Rounds empty state; P06 replaces `/tickets/new` with "Report a problem" (keep the simple form for leads as "New ticket" or remove it; decide in P06).
 - 2026-11-11 (P03.T1): `Version20261111120000` creates `tkt_ticket` without its `search` tsvector; the task that adds the GIN indexes (`search`, `title gin_trgm_ops`) adds the column too. `tkt_summary` has no entity (P08 fills it) and is in the `schema_filter`. The `ins_ticket_turn` foreign key means Insight tests need a parent ticket row: use `tests/Integration/Ticketing/TicketRows`.
+- 2026-11-11 (P03.T1): `AddTicketEventPartitions` is `#[WhenNot('prod')]` on the migrator connection, so prod partition maintenance still needs a runner as `pinround_migrator` ([operations.md](../02-architecture/operations.md), line 61).
 - (add dated notes here)
