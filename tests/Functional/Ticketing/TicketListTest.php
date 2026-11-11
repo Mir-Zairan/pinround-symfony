@@ -320,7 +320,7 @@ final class TicketListTest extends WebTestCase
     }
 
     #[Test]
-    public function thePageReadsAtMostFiveQueriesMoreThanTheShellFor200OpenTickets(): void
+    public function aWarmPageReadsAtMostFiveQueriesMoreThanTheShellFor200OpenTickets(): void
     {
         $this->client->disableReboot();
         foreach (['wait', 'check', 'doing', 'todo'] as $groupCode) {
@@ -329,26 +329,28 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->queryCountMoreThanTheShellOf(self::TICKETS));
+        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS));
     }
 
     #[Test]
-    public function aProjectPageReadsAtMostFiveQueriesMoreThanTheShell(): void
+    public function aWarmProjectPageReadsAtMostFiveQueriesMoreThanTheShell(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->queryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
+        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
     }
 
-    private function queryCountMoreThanTheShellOf(string $uri): int
+    private function warmQueryCountMoreThanTheShellOf(string $uri): int
     {
         // logIn() leaves the user in the entity manager, so the first request skips the user refresh (idn_user,
         // idn_credential) that every later one pays after the kernel resets its services; this one is not counted.
         $this->queryCountOf(self::SHELL);
         $shellQueryCount = $this->queryCountOf(self::SHELL);
+        // The first load fills the organization's cached list of steps, as the first load after any step change does.
+        $this->queryCountOf($uri);
 
         return $this->queryCountOf($uri) - $shellQueryCount;
     }

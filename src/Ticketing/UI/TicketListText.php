@@ -63,8 +63,8 @@ final class TicketListText
         if (!$isDone && null !== $row->turnUserId) {
             if ($row->turnUserId->equals($viewerId)) {
                 $parts[] = 'Turn: you';
-            } elseif (null !== $row->turnUserName && '' !== trim($row->turnUserName)) {
-                $parts[] = 'Turn: '.self::firstNameOf($row->turnUserName);
+            } elseif (null !== $row->turnUserFirstName && '' !== $row->turnUserFirstName) {
+                $parts[] = 'Turn: '.$row->turnUserFirstName;
             }
         }
 
@@ -101,13 +101,5 @@ final class TicketListText
         $updatedInUtc = $updatedAt->setTimezone($utc);
 
         return $updatedInUtc->format($updatedInUtc->format('Y') === $now->setTimezone($utc)->format('Y') ? 'j M' : 'j M Y');
-    }
-
-    /**
-     * The first word of a display name, as Identity's UserView::firstName reads it.
-     */
-    private static function firstNameOf(string $displayName): string
-    {
-        return explode(' ', trim($displayName), 2)[0];
     }
 }

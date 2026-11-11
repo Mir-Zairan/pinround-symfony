@@ -19,6 +19,7 @@ use App\Ticketing\Api\TicketListStep;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries;
+use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -200,7 +201,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
      * Omar is the assignee and Lena's is the turn; the other ticket has neither, nor a turn row.
      */
     #[Test]
-    public function aRowCarriesItsColumnsAssigneeAndTurnUserWithTheirNamesInThreeQueries(): void
+    public function aRowCarriesItsColumnsAssigneeAndTurnUserWithTheirNamesInFourQueries(): void
     {
         $assigned = $this->addTicket(ShopTeamRows::TO_DO_STEP, 1, '2027-03-15 11:00:00+00');
         $unassigned = $this->addTicket(ShopTeamRows::TO_DO_STEP, 3, '2027-03-15 10:00:00+00');
@@ -222,17 +223,17 @@ final class DbalTicketQueriesTest extends KernelTestCase
         });
         [$assignedRow, $unassignedRow] = $groups[0]->steps[0]->rows;
 
-        self::assertSame(3, $queryCount);
+        self::assertSame(4, $queryCount);
         self::assertSame(
             [$assigned, 'Add a gift note', 'story', '2027.3', 'critical', self::OMAR, 'Omar', self::LENA, 'Lena', '2027-03-15 11:00:00', ShopTeamRows::TO_DO_STEP],
             [
                 $assignedRow->key, $assignedRow->title, $assignedRow->type, $assignedRow->release, $assignedRow->priority,
                 $assignedRow->assigneeId?->toString(), $assignedRow->assigneeName, $assignedRow->turnUserId?->toString(),
-                $assignedRow->turnUserName, $assignedRow->updatedAt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'), $assignedRow->stepId,
+                $assignedRow->turnUserFirstName, $assignedRow->updatedAt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'), $assignedRow->stepId,
             ],
         );
         self::assertSame([$unassigned, null, null, null, null, null], [
-            $unassignedRow->key, $unassignedRow->release, $unassignedRow->assigneeId, $unassignedRow->assigneeName, $unassignedRow->turnUserId, $unassignedRow->turnUserName,
+            $unassignedRow->key, $unassignedRow->release, $unassignedRow->assigneeId, $unassignedRow->assigneeName, $unassignedRow->turnUserId, $unassignedRow->turnUserFirstName,
         ]);
     }
 
@@ -254,12 +255,15 @@ final class DbalTicketQueriesTest extends KernelTestCase
     /**
      * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
      * is another one: what still hides Acme Foods' tickets from Beta Bakery's transaction is row-level security alone.
+     * The steps are Acme Foods', read under Acme Foods, so the ticket query runs on them.
      */
     #[Test]
     public function rowLevelSecurityAloneHidesAnotherOrganizationsTickets(): void
     {
         $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
         self::assertNotSame([], $this->listedAs(self::ACME_FOODS, $this->filter()));
+        $acmeStepQueries = self::createStub(StepQueries::class);
+        $acmeStepQueries->method('listedSteps')->willReturn($this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->stepQueries()->listedSteps()));
 
         $groupsUnderAcmeContext = new OwnConnectionTransactions($this->entityManager()->getConnection(), $this->tenantContext())->rolledBackUnderAnotherContext(
             self::BETA_BAKERY,
@@ -267,6 +271,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
             fn (Connection $connection): array => new DbalTicketQueries(
                 $connection,
                 $this->tenantContext(),
+                $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
             )->list($this->filter()),
@@ -339,8 +344,8 @@ final class DbalTicketQueriesTest extends KernelTestCase
     {
         return array_map(static fn (TicketListGroup $group): array => [
             $group->code,
-            $group->label(),
-            $group->hint(),
+            $group->label,
+            $group->hint,
             array_map(static fn (TicketListStep $step): array => [$step->name, $step->isArchived], $group->steps),
         ], $groups);
     }
@@ -438,6 +443,14 @@ final class DbalTicketQueriesTest extends KernelTestCase
         self::assertInstanceOf(TicketQueries::class, $ticketQueries);
 
         return $ticketQueries;
+    }
+
+    private function stepQueries(): StepQueries
+    {
+        $stepQueries = self::getContainer()->get('test.workflow_step_queries');
+        self::assertInstanceOf(StepQueries::class, $stepQueries);
+
+        return $stepQueries;
     }
 
     private function debugData(): DebugDataHolder

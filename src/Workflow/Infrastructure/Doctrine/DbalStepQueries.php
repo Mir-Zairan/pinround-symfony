@@ -8,6 +8,7 @@ use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
+use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
 use App\Workflow\Domain\Group;
@@ -57,6 +58,28 @@ final readonly class DbalStepQueries implements StepQueries
             $steps,
             static fn (StepView $step): bool => StepOrigin::Team->value !== $step->origin(),
         ));
+    }
+
+    public function listedSteps(): array
+    {
+        $rows = $this->connection->fetchAllAssociative(
+            'SELECT id, name, grp, archived_at IS NOT NULL AS is_archived FROM wf_step WHERE organization_id = ?'
+            .' ORDER BY '.self::orderSql('grp', Group::inListOrder()).', '.self::orderSql('origin', StepOrigin::cases()).', position, id',
+            [$this->tenantContext->require()->toString()],
+        );
+
+        return array_map(static function (array $row): ListedStepView {
+            $group = Group::from(self::text($row['grp'], 'group'));
+
+            return new ListedStepView(
+                self::text($row['id'], 'id'),
+                self::text($row['name'], 'name'),
+                $group->value,
+                $group->label(),
+                $group->listHint(),
+                true === $row['is_archived'],
+            );
+        }, $rows);
     }
 
     public function groupOf(string $stepId): ?string

@@ -11,9 +11,10 @@ namespace App\Ticketing\Api;
 interface TicketQueries
 {
     /**
-     * Three queries at most whatever the number of steps: the rows of every step in one, the turn users of the shown
-     * rows in one, and the names of their assignees and turn users in one. Only the tickets the filter's viewer may
-     * see are read or counted (ADR-0013).
+     * Four queries at most whatever the number of steps: the organization's steps through Workflow's StepQueries in
+     * one (none while its cache holds them), the rows of every step in one, the turn users of the shown rows in one,
+     * and the names of their assignees and turn users in one. Only the tickets the filter's viewer may see are read or
+     * counted (ADR-0013).
      *
      * Groups come in list order (Waiting, Checking, Doing, To do, then Done when the filter shows it), steps in a
      * group as the team page orders them, archived steps included. A step with no ticket the viewer may see is left

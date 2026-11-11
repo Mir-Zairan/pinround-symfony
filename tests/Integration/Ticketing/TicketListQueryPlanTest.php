@@ -142,7 +142,7 @@ final class TicketListQueryPlanTest extends KernelTestCase
     }
 
     /**
-     * The one query of the captured ones that reads wf_step, which is the list's; it binds its parameters with no
+     * The one query of the captured ones that reads the tickets, which is the list's; it binds its parameters with no
      * types, as the SQL casts each one.
      *
      * @return array{string, array<string, mixed>}
@@ -153,7 +153,7 @@ final class TicketListQueryPlanTest extends KernelTestCase
             self::assertIsArray($queriesOfOneConnection);
             foreach ($queriesOfOneConnection as $query) {
                 self::assertIsArray($query);
-                if (\is_string($query['sql'] ?? null) && str_contains($query['sql'], 'FROM wf_step AS step')) {
+                if (\is_string($query['sql'] ?? null) && str_contains($query['sql'], 'FROM tkt_ticket AS ticket')) {
                     self::assertIsArray($query['params']);
 
                     /** @var array<string, mixed> $parameters */
@@ -163,7 +163,7 @@ final class TicketListQueryPlanTest extends KernelTestCase
                 }
             }
         }
-        self::fail('The list sent no query on wf_step.');
+        self::fail('The list sent no query on tkt_ticket.');
     }
 
     /**

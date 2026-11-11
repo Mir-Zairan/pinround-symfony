@@ -30,6 +30,11 @@ final readonly class FixedStepQueries implements StepQueries
         throw new \LogicException('Creating a ticket reads no move targets.');
     }
 
+    public function listedSteps(): array
+    {
+        throw new \LogicException('Creating a ticket lists no steps.');
+    }
+
     public function groupOf(string $stepId): ?string
     {
         throw new \LogicException('Creating a ticket reads no step group.');

@@ -11,6 +11,9 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
+use App\Workflow\Api\ListedStepView;
+use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
 use App\Workflow\Infrastructure\Doctrine\DbalStepQueries;
 use Doctrine\DBAL\Connection;
@@ -239,6 +242,54 @@ final class DbalStepQueriesTest extends KernelTestCase
     }
 
     #[Test]
+    public function listedStepsGivesEveryStepOfTheOrganizationOfEveryTeamAndRemovedInListOrderThenOriginThenPositionThenId(): void
+    {
+        self::assertSame(
+            [
+                [self::NEEDS_INPUT, 'Needs input', 'wait', 'Waiting', 'Someone must answer first', false],
+                [self::ON_HOLD, 'On hold', 'wait', 'Waiting', 'Someone must answer first', false],
+                [self::SHOP_READY_TO_SHIP, 'Ready to ship', 'wait', 'Waiting', 'Someone must answer first', false],
+                [self::CODE_REVIEW, 'Code review', 'check', 'Checking', 'Being checked', false],
+                [self::TESTING, 'Testing', 'check', 'Checking', 'Being checked', false],
+                [self::DESIGN_CHECK, 'Design check', 'check', 'Checking', 'Being checked', false],
+                [self::MOBILE_DEVICE_CHECK, 'Device check', 'check', 'Checking', 'Being checked', false],
+                [self::IN_PROGRESS, 'In progress', 'doing', 'Doing', 'Being built', false],
+                [self::SHOP_REMOVED_PAIRING, 'Pairing', 'doing', 'Doing', 'Being built', true],
+                [self::BACKLOG, 'Backlog', 'todo', 'To do', 'Not started', false],
+                [self::TODO, 'To do', 'todo', 'To do', 'Not started', false],
+                [self::REMOVED_TRIAGE, 'Triage', 'todo', 'To do', 'Not started', true],
+                [self::DONE, 'Done', 'done', 'Done', null, false],
+            ],
+            $this->listedStepsAs(self::ACME_FOODS, $this->queries()),
+        );
+    }
+
+    /**
+     * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
+     * is another one: what still hides Acme Foods' steps from Beta Bakery's transaction is row-level security alone.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsListedSteps(): void
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+
+        $stepsUnderAcmeContext = new OwnConnectionTransactions($this->connection(), $tenantContext)->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            static fn (Connection $connection): array => new DbalStepQueries($connection, new DbalSettingsQueries($connection), $tenantContext)->listedSteps(),
+        );
+
+        self::assertSame([], $stepsUnderAcmeContext);
+    }
+
+    #[Test]
+    public function listedStepsRefusesWithNoTenant(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->queries()->listedSteps();
+    }
+
+    #[Test]
     public function withNoTenantNothingIsFound(): void
     {
         self::assertSame([], $this->queries()->stepsFor(new TeamId(self::SHOP_TEAM)));
@@ -298,6 +349,17 @@ final class DbalStepQueriesTest extends KernelTestCase
             'INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [$organizationId, $stepId, $teamId, $name, $groupCode, $coreCode, $origin, $position, $archivedAt],
         );
+    }
+
+    /**
+     * @return list<array{string, string, string, string, string|null, bool}>
+     */
+    private function listedStepsAs(string $tenantId, StepQueries $stepQueries): array
+    {
+        return $this->transactions()->rolledBackAs($tenantId, static fn (): array => array_map(
+            static fn (ListedStepView $step): array => [$step->id, $step->name, $step->groupCode, $step->groupLabel, $step->groupHint, $step->isArchived],
+            $stepQueries->listedSteps(),
+        ));
     }
 
     private function queries(): DbalStepQueries

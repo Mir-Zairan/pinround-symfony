@@ -18,6 +18,7 @@ use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Unit\Workflow\Application\FixedStepOccupancy;
+use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\RuleQueries;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
@@ -109,6 +110,56 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
         self::assertSame(['Design check'], $this->stepNames());
         self::assertSame(['Design check'], $this->moveTargetNames());
         self::assertSame([true, false, true], $this->rules());
+    }
+
+    #[Test]
+    public function listedStepsAreKeptSoARowWrittenWithoutAChangeIsNotListed(): void
+    {
+        self::assertArrayNotHasKey('Legal check', $this->listedSteps());
+
+        $this->writeBehindTheCache(function (): void {
+            $this->insertStep(self::ACME_FOODS, self::LEGAL_CHECK, null, 'Legal check');
+        });
+
+        self::assertArrayNotHasKey('Legal check', $this->listedSteps());
+    }
+
+    /**
+     * Each change goes after a row written behind the cache, so the next read lists that row only if the change dropped
+     * the organization-wide entry; a team's change drops only the team's own entries otherwise.
+     */
+    #[Test]
+    public function aCommittedTeamStepCompanyStepOrRemoveStepDropsTheListedSteps(): void
+    {
+        $this->listedSteps();
+        $this->writeBehindTheCache(fn () => $this->insertStep(self::ACME_FOODS, self::LEGAL_CHECK, null, 'Legal check'));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->addStep()(new OrganizationId(self::ACME_FOODS), new TeamId(self::MOBILE_TEAM), 'Pairing', 'check'));
+        $afterATeamStep = $this->listedSteps();
+        self::assertFalse($afterATeamStep['Legal check'] ?? null);
+        self::assertFalse($afterATeamStep['Pairing'] ?? null);
+
+        $this->writeBehindTheCache(fn () => $this->connection()->executeStatement("UPDATE wf_step SET name = 'Legal review' WHERE id = ?", [self::LEGAL_CHECK]));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->addStep()(new OrganizationId(self::ACME_FOODS), null, 'Tasting', 'check'));
+        $afterACompanyStep = $this->listedSteps();
+        self::assertArrayNotHasKey('Legal check', $afterACompanyStep);
+        self::assertFalse($afterACompanyStep['Legal review'] ?? null);
+        self::assertFalse($afterACompanyStep['Tasting'] ?? null);
+
+        $this->writeBehindTheCache(fn () => $this->insertStep(self::ACME_FOODS, self::PAIRING, self::SHOP_TEAM, 'Shop pairing'));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->removeStep()(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), self::PAIRING, new \DateTimeImmutable('2027-03-15 10:00:00 UTC')));
+        self::assertTrue($this->listedSteps()['Shop pairing'] ?? null, 'A removed step is still listed, as removed.');
+    }
+
+    #[Test]
+    public function aCommittedTeamRuleDropsTheListedSteps(): void
+    {
+        $this->policies()->set(self::ACME_FOODS, StepPolicy::Team);
+        $this->listedSteps();
+        $this->writeBehindTheCache(fn () => $this->insertStep(self::ACME_FOODS, self::LEGAL_CHECK, null, 'Legal check'));
+
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->setRule()(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), 'tester_moves_done', false));
+
+        self::assertArrayHasKey('Legal check', $this->listedSteps());
     }
 
     #[Test]
@@ -248,6 +299,31 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
         self::assertSame([false, true, false], $this->rules(self::BETA_BAKERY));
     }
 
+    #[Test]
+    public function twoOrganizationsNeverShareTheirListedSteps(): void
+    {
+        self::assertArrayHasKey('Design check', $this->listedSteps(self::ACME_FOODS));
+
+        $bakerySteps = $this->listedSteps(self::BETA_BAKERY);
+        self::assertArrayHasKey('Tasting', $bakerySteps);
+        self::assertArrayNotHasKey('Design check', $bakerySteps);
+    }
+
+    #[Test]
+    public function theRelayedEventOfATeamStepDropsTheListedStepsASecondTime(): void
+    {
+        $this->connection()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->addStep()(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), 'Pairing', 'check'));
+        self::assertArrayHasKey('Pairing', $this->listedSteps());
+        $this->writeBehindTheCache(fn () => $this->insertStep(self::ACME_FOODS, self::LEGAL_CHECK, null, 'Legal check'));
+        self::assertArrayNotHasKey('Legal check', $this->listedSteps());
+
+        self::runTheWorkerUntilIdle('outbox');
+        self::runTheWorkerUntilIdle('async_notify');
+
+        self::assertArrayHasKey('Legal check', $this->listedSteps());
+    }
+
     /**
      * The entry is filled from the new rows after the commit, then a row is written behind the cache: only the
      * relayed event's handler can make the next read see it, as when a reader saved old rows after the first
@@ -303,12 +379,57 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
         self::assertSame(3, $workflowCache->remember(new TeamId(self::SHOP_TEAM), 'steps', $load), 'With no transaction nothing is kept.');
     }
 
+    #[Test]
+    public function anOrganizationEntryIsKeptOnlyInATransactionWithATenantAndNoWaitingChange(): void
+    {
+        $workflowCache = self::getContainer()->get(WorkflowCache::class);
+        $loads = 0;
+        $load = static function () use (&$loads): int {
+            return ++$loads;
+        };
+        self::assertSame(1, $workflowCache->rememberForOrganization('probe', $load));
+        self::assertSame(2, $workflowCache->rememberForOrganization('probe', $load), 'With no transaction nothing is kept.');
+
+        $workflowCache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        self::assertSame(3, $workflowCache->rememberForOrganization('probe', $load));
+        self::assertSame(3, $workflowCache->rememberForOrganization('probe', $load));
+
+        $workflowCache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM));
+        self::assertSame(4, $workflowCache->rememberForOrganization('probe', $load), 'A change waiting for its commit is read from the rows.');
+        $workflowCache->transactionEnded();
+    }
+
+    #[Test]
+    public function aRolledBackTeamStepInvalidatesNoListedSteps(): void
+    {
+        $this->listedSteps();
+        $this->writeBehindTheCache(fn () => $this->insertStep(self::ACME_FOODS, self::LEGAL_CHECK, null, 'Legal check'));
+
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): string => $this->addStep()(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), 'Pairing', 'check'));
+
+        self::assertArrayNotHasKey('Legal check', $this->listedSteps());
+    }
+
     /**
      * @return list<string>
      */
     private function stepNames(string $organizationId = self::ACME_FOODS, string $teamId = self::SHOP_TEAM): array
     {
         return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->namesOf($this->stepQueries()->stepsFor(new TeamId($teamId))));
+    }
+
+    /**
+     * @return array<string, bool> step name => whether it is removed
+     */
+    private function listedSteps(string $organizationId = self::ACME_FOODS): array
+    {
+        $this->startTheNextRequest();
+
+        return $this->transactions()->rolledBackAs($organizationId, fn (): array => array_column(
+            array_map(static fn (ListedStepView $step): array => [$step->name, $step->isArchived], $this->stepQueries()->listedSteps()),
+            1,
+            0,
+        ));
     }
 
     /**

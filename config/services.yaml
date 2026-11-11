@@ -162,6 +162,14 @@ when@test:
             class: Symfony\Component\HttpFoundation\Session\Storage\MockFileSessionStorageFactory
             arguments: ['%kernel.cache_dir%/sessions', '%app.session_cookie_name%']
 
+        # cache.workflow's test adapter (cache.yaml). Valkey keeps entries between requests, but cache.adapter.array is
+        # emptied by every kernel reset, so a warm page could not be measured; each test still boots a new, empty one.
+        test.cache.adapter.array_kept_between_requests:
+            class: Symfony\Component\Cache\Adapter\ArrayAdapter
+            abstract: true
+            arguments: [0]
+            tags: [{ name: cache.pool, clearer: cache.default_clearer }]
+
         # No module reads steps, rules or verbs yet, so the compiled container would drop them; CachedWorkflowQueriesTest
         # and TransitionPolicyWiringTest read them as another module would get them.
         test.workflow_step_queries:

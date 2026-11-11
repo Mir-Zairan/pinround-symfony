@@ -13,7 +13,8 @@ use Symfony\Contracts\Cache\TagAwareCacheInterface;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
- * The cache.workflow pool for one team's steps and rules (performance-and-scale.md, "Caching"). An entry is keyed and
+ * The cache.workflow pool for one team's steps and rules, and for the organization's whole list of steps
+ * (performance-and-scale.md, "Caching"). An entry is keyed and
  * tagged by the organization of the open transaction, so it is filled and read only under row-level security of that
  * organization. A change queues its tags with invalidateAfterCommit(); WorkflowCacheTransactionMiddleware tells this
  * class when the outermost transaction begins and ends, and the tags are invalidated only once it has committed.
@@ -66,30 +67,61 @@ final class WorkflowCache implements ResetInterface
     }
 
     /**
+     * Like remember(), for an entry of the whole organization rather than of one team: any change of any team's steps
+     * or rules, or of the organization's own, drops it.
+     *
+     * @template T
+     *
+     * @param string        $entry what is cached for the organization, made of letters, digits, '-' and '.' only
+     * @param \Closure(): T $load
+     *
+     * @return T
+     */
+    public function rememberForOrganization(string $entry, \Closure $load): mixed
+    {
+        if (null === $this->transactionTenant || [] !== $this->waitingTags) {
+            return $load();
+        }
+
+        $organization = $this->transactionTenant;
+        $key = \sprintf('org.%s.wf.org.%s', $organization->toString(), $entry);
+        $tags = [self::anyChangeTag($organization), self::organizationTag($organization)];
+
+        /* @var T */
+        return $this->pool->get($key, static function (ItemInterface $item) use ($load, $tags): mixed {
+            $item->tag($tags);
+
+            return $load();
+        });
+    }
+
+    /**
      * Queues the entries a change of the team's steps or rules (or, with no team, of the organization's own) makes
-     * stale. They are invalidated when the open transaction commits and kept when it rolls back. With no transaction
-     * open they are invalidated now.
+     * stale, the organization-wide ones of rememberForOrganization() included. They are invalidated when the open
+     * transaction commits and kept when it rolls back. With no transaction open they are invalidated now.
      */
     public function invalidateAfterCommit(OrganizationId $organization, ?TeamId $team): void
     {
-        $tag = null === $team ? self::organizationTag($organization) : self::teamTag($team);
+        $tags = self::tagsOfAChange($organization, $team);
         if (!$this->isTransactionOpen) {
-            $this->invalidate([$tag]);
+            $this->invalidate($tags);
 
             return;
         }
 
-        $this->waitingTags[$tag] = true;
+        foreach ($tags as $tag) {
+            $this->waitingTags[$tag] = true;
+        }
     }
 
     /**
      * Invalidates now what invalidateAfterCommit() would queue.
      *
-     * @throws \RuntimeException when the pool could not invalidate the tag, so a message handler is retried
+     * @throws \RuntimeException when the pool could not invalidate the tags, so a message handler is retried
      */
     public function invalidateNow(OrganizationId $organization, ?TeamId $team): void
     {
-        $this->invalidate([null === $team ? self::organizationTag($organization) : self::teamTag($team)]);
+        $this->invalidate(self::tagsOfAChange($organization, $team));
     }
 
     /**
@@ -151,6 +183,14 @@ final class WorkflowCache implements ResetInterface
         }
     }
 
+    /**
+     * @return list<string>
+     */
+    private static function tagsOfAChange(OrganizationId $organization, ?TeamId $team): array
+    {
+        return [null === $team ? self::organizationTag($organization) : self::teamTag($team), self::anyChangeTag($organization)];
+    }
+
     private static function teamTag(TeamId $team): string
     {
         return 'wf-team-'.$team->toString();
@@ -159,5 +199,14 @@ final class WorkflowCache implements ResetInterface
     private static function organizationTag(OrganizationId $organization): string
     {
         return 'wf-org-'.$organization->toString();
+    }
+
+    /**
+     * Carried only by organization-wide entries. The organization tag cannot do this job: it is cleared only by a change
+     * of the organization's own steps or rules, not by a team's.
+     */
+    private static function anyChangeTag(OrganizationId $organization): string
+    {
+        return 'wf-any-'.$organization->toString();
     }
 }

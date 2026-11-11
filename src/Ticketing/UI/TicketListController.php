@@ -112,8 +112,8 @@ final class TicketListController extends AbstractController
 
         return array_map(fn (TicketListGroup $group): array => [
             'code' => $group->code,
-            'label' => $group->label(),
-            'hint' => $group->hint(),
+            'label' => $group->label,
+            'hint' => $group->hint,
             'steps' => array_map(fn (TicketListStep $step): array => [
                 'id' => $step->stepId,
                 'name' => $step->name,

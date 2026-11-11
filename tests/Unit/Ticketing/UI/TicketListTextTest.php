@@ -44,13 +44,13 @@ final class TicketListTextTest extends TestCase
     public static function totalLines(): iterable
     {
         yield 'the shown steps summed' => [
-            [new TicketListGroup('wait', [self::stepOf(30, false)]), new TicketListGroup('todo', [self::stepOf(10, false), self::stepOf(1, false)])],
+            [new TicketListGroup('wait', 'Waiting', 'Someone must answer first', [self::stepOf(30, false)]), new TicketListGroup('todo', 'To do', 'Not started', [self::stepOf(10, false), self::stepOf(1, false)])],
             '41 tickets · grouped by step',
         ];
-        yield 'one ticket' => [[new TicketListGroup('todo', [self::stepOf(1, false)])], '1 ticket · grouped by step'];
+        yield 'one ticket' => [[new TicketListGroup('todo', 'To do', 'Not started', [self::stepOf(1, false)])], '1 ticket · grouped by step'];
         yield 'none' => [[], '0 tickets · grouped by step'];
         yield 'one capped step' => [
-            [new TicketListGroup('todo', [self::stepOf(1000, true), self::stepOf(5, false)])],
+            [new TicketListGroup('todo', 'To do', 'Not started', [self::stepOf(1000, true), self::stepOf(5, false)])],
             '1,005+ tickets · grouped by step',
         ];
     }
@@ -70,20 +70,20 @@ final class TicketListTextTest extends TestCase
      */
     public static function metas(): iterable
     {
-        yield 'type, release, the viewer\'s turn' => ['2.4', self::LENA, 'Lena Berg', false, 'Bug · Release 2.4 · Turn: you'];
-        yield 'another person\'s turn by first name' => ['2.4', self::OMAR, 'Omar Haddad', false, 'Bug · Release 2.4 · Turn: Omar'];
-        yield 'no release' => [null, self::OMAR, 'Omar Haddad', false, 'Bug · Turn: Omar'];
-        yield 'empty release' => ['', self::OMAR, 'Omar Haddad', false, 'Bug · Turn: Omar'];
+        yield 'type, release, the viewer\'s turn' => ['2.4', self::LENA, 'Lena', false, 'Bug · Release 2.4 · Turn: you'];
+        yield 'another person\'s turn by first name' => ['2.4', self::OMAR, 'Omar', false, 'Bug · Release 2.4 · Turn: Omar'];
+        yield 'no release' => [null, self::OMAR, 'Omar', false, 'Bug · Turn: Omar'];
+        yield 'empty release' => ['', self::OMAR, 'Omar', false, 'Bug · Turn: Omar'];
         yield 'nobody has the turn' => ['2.4', null, null, false, 'Bug · Release 2.4'];
-        yield 'the turn of a person with no name' => ['2.4', self::OMAR, ' ', false, 'Bug · Release 2.4'];
-        yield 'done has no turn' => ['2.4', self::LENA, 'Lena Berg', true, 'Bug · Release 2.4'];
+        yield 'the turn of a person with no name' => ['2.4', self::OMAR, '', false, 'Bug · Release 2.4'];
+        yield 'done has no turn' => ['2.4', self::LENA, 'Lena', true, 'Bug · Release 2.4'];
     }
 
     #[Test]
     #[DataProvider('metas')]
-    public function theMetaLineIsTypeReleaseThenTurnLeavingOutWhatIsNotThere(?string $release, ?string $turnUserId, ?string $turnUserName, bool $isDone, string $expected): void
+    public function theMetaLineIsTypeReleaseThenTurnLeavingOutWhatIsNotThere(?string $release, ?string $turnUserId, ?string $turnUserFirstName, bool $isDone, string $expected): void
     {
-        $row = self::rowOf('bug', $release, 'major', null === $turnUserId ? null : new UserId($turnUserId), $turnUserName);
+        $row = self::rowOf('bug', $release, 'major', null === $turnUserId ? null : new UserId($turnUserId), $turnUserFirstName);
 
         self::assertSame($expected, TicketListText::metaOf($row, new UserId(self::LENA), $isDone));
     }
@@ -138,7 +138,7 @@ final class TicketListTextTest extends TestCase
         return new TicketListStep(self::STEP, 'To do', false, $ticketCount, $isCountCapped, [], null);
     }
 
-    private static function rowOf(string $type, ?string $release, string $priority, ?UserId $turnUserId, ?string $turnUserName): TicketListRow
+    private static function rowOf(string $type, ?string $release, string $priority, ?UserId $turnUserId, ?string $turnUserFirstName): TicketListRow
     {
         return new TicketListRow(
             new TicketId('0190a000-0000-7000-8000-0000000000d1'),
@@ -150,7 +150,7 @@ final class TicketListTextTest extends TestCase
             null,
             null,
             $turnUserId,
-            $turnUserName,
+            $turnUserFirstName,
             new \DateTimeImmutable('2026-03-15T10:00:00+00:00'),
             self::STEP,
         );

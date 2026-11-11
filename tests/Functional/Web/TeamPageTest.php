@@ -13,6 +13,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Workflow\Infrastructure\Cache\WorkflowCache;
 use Doctrine\DBAL\Connection;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
@@ -595,6 +596,9 @@ final class TeamPageTest extends WebTestCase
         foreach ([1, 2, 3, 4] as $number) {
             $this->insertStep($this->shop, 'Step '.$number, 'team', ['todo', 'doing', 'check', 'wait'][$number - 1]);
         }
+        // Refills the workflow cache the inserts dropped, so both counted loads read it warm.
+        $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
         $spansBeforeFive = \count(ExportedSpans::of($exporter));
         $page = $this->client->request('GET', '/teams/shop');
         self::assertResponseStatusCodeSame(200);
@@ -735,6 +739,8 @@ final class TeamPageTest extends WebTestCase
             'INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)',
             [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $teamId?->toString(), $name, $groupCode, $coreCode, $origin],
         ));
+        // The cache.workflow pool outlives the request, so the direct write drops the entries as AddStep's event would.
+        self::getContainer()->get(WorkflowCache::class)->invalidateNow($this->acmeFoods, $teamId);
     }
 
     /**
