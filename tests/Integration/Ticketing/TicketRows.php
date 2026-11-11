@@ -48,6 +48,22 @@ final readonly class TicketRows
         ));
     }
 
+    /**
+     * Like addOf, with the visibility, team and people the ticket visibility predicate reads.
+     *
+     * @param 'all'|'team'                                                                                      $visibility
+     * @param array<'assignee_id'|'pending_assignee_id'|'reviewer_id'|'tester_id'|'waiting_on_user_id', string> $otherPeople by column
+     */
+    public function addWithAudienceOf(string $organizationId, string $ticketId, string $projectId, int $number, string $visibility, ?string $teamId, string $reporterId, array $otherPeople = []): void
+    {
+        $this->addOf($organizationId, $ticketId, $projectId, $reporterId, $number);
+        $people = ['assignee_id' => null, 'pending_assignee_id' => null, 'reviewer_id' => null, 'tester_id' => null, 'waiting_on_user_id' => null, ...$otherPeople];
+        $this->asTenant($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET visibility = ?, team_id = ?, assignee_id = ?, pending_assignee_id = ?, reviewer_id = ?, tester_id = ?, waiting_on_user_id = ? WHERE id = ?',
+            [$visibility, $teamId, ...array_values($people), $ticketId],
+        ));
+    }
+
     public function removeAllOf(string ...$organizationIds): void
     {
         foreach ($organizationIds as $organizationId) {
