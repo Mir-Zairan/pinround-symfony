@@ -51,7 +51,6 @@ final class DbalTurnProjectorTest extends KernelTestCase
     protected function setUp(): void
     {
         $this->clock = new MockClock(self::FIRST_REFRESH.'+00:00');
-        $this->removeRowsOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
             $this->ticketRows()->addOf($organizationId, self::TICKET, self::SHOP_PROJECT, self::LENA);
@@ -328,24 +327,6 @@ final class DbalTurnProjectorTest extends KernelTestCase
         self::assertInstanceOf(NeedsYouScore::class, $score);
 
         return $score;
-    }
-
-    /**
-     * Through the migrator, which owns the table and so may delete; FORCE ROW LEVEL SECURITY binds it too.
-     */
-    private function removeRowsOf(string ...$organizationIds): void
-    {
-        $tenantContext = self::getContainer()->get(TenantContext::class);
-        foreach ($organizationIds as $organizationId) {
-            $tenantContext->set(new OrganizationId($organizationId));
-            try {
-                self::getContainer()->get('doctrine.dbal.migrator_connection')->transactional(
-                    static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]),
-                );
-            } finally {
-                $tenantContext->clear();
-            }
-        }
     }
 
     private function connection(): Connection

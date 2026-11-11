@@ -46,6 +46,7 @@ final class TicketIsolationTest extends KernelTestCase
     protected function setUp(): void
     {
         $this->rows()->removeAllOf(self::ACME_FOODS, self::OTHER_ORGANIZATION);
+        $this->rows()->addProjectOf(self::ACME_FOODS, self::SHOP_PROJECT);
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $this->entityManager()->persist(Ticket::report(
                 new TicketId(self::TICKET),

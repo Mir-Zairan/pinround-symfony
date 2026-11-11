@@ -11,8 +11,9 @@ use Doctrine\DBAL\Connection;
 /**
  * Adds and removes committed tkt_ticket rows of test organizations through the migrator, which owns the table and so
  * may delete from it (the app may not), under each organization as tenant, as FORCE ROW LEVEL SECURITY applies to the
- * owner too. Removing a ticket removes its ins_ticket_turn and tkt_summary rows by their ON DELETE CASCADE. The caller
- * makes sure no transaction is open.
+ * owner too. Removing a ticket removes its ins_ticket_turn, tkt_summary and tkt_ticket_event rows by their ON DELETE
+ * CASCADE; removing an organization's tickets then removes its projects, which tkt_ticket_project_fkey kept until then.
+ * The caller makes sure no transaction is open.
  */
 final readonly class TicketRows
 {
@@ -21,10 +22,24 @@ final readonly class TicketRows
     }
 
     /**
-     * A bug ticket SHOP-<number> in a To do step, so rows of other tables can point at it.
+     * A project SHOP with no team for tickets to point at; nothing when the organization already has it.
+     */
+    public function addProjectOf(string $organizationId, string $projectId): void
+    {
+        $this->asTenant($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_project (organization_id, id, team_id, key, name, next_number) VALUES (?, ?, NULL, 'SHOP', 'Shop', 1)
+             ON CONFLICT (organization_id, id) DO NOTHING",
+            [$organizationId, $projectId],
+        ));
+    }
+
+    /**
+     * A bug ticket SHOP-<number> in a To do step of the project, which it adds when missing, so rows of other tables can
+     * point at it.
      */
     public function addOf(string $organizationId, string $ticketId, string $projectId, string $reporterId, int $number = 1): void
     {
+        $this->addProjectOf($organizationId, $projectId);
         $this->asTenant($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO tkt_ticket (organization_id, id, project_id, number, key, title, description, type, priority, priority_rank,
                  step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
@@ -41,6 +56,7 @@ final readonly class TicketRows
                 [$organizationId],
             ));
         }
+        new ProjectRows($this->migrator, $this->tenantContext)->removeAllOf(...$organizationIds);
     }
 
     /**

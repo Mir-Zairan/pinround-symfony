@@ -28,10 +28,22 @@ final class TicketTableTest extends KernelTestCase
     private const string LENA = '0197a3c0-0000-7000-8000-0000000032f1';
     private const string CHECK_VIOLATION = '23514';
 
+    protected function setUp(): void
+    {
+        $this->rows()->removeAllOf(self::ACME_FOODS);
+        $this->rows()->addProjectOf(self::ACME_FOODS, self::SHOP_PROJECT);
+    }
+
     protected function tearDown(): void
     {
         self::getContainer()->get(TenantContext::class)->reset();
+        $this->rows()->removeAllOf(self::ACME_FOODS);
         parent::tearDown();
+    }
+
+    private function rows(): TicketRows
+    {
+        return new TicketRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     #[Test]

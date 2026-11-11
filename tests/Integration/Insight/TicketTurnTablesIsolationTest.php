@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Insight;
 
 use App\SharedKernel\Application\TenantContext;
-use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
@@ -31,7 +30,6 @@ final class TicketTurnTablesIsolationTest extends KernelTestCase
 
     protected function setUp(): void
     {
-        $this->removeRowsOf(self::ACME_FOODS, self::BETA_BAKERY, self::THIRD_ORG);
         $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY, self::THIRD_ORG);
         foreach ([self::ACME_FOODS, self::BETA_BAKERY, self::THIRD_ORG] as $organizationId) {
             $this->ticketRows()->addOf($organizationId, self::TICKET, self::SHOP_PROJECT, self::LENA);
@@ -108,24 +106,6 @@ final class TicketTurnTablesIsolationTest extends KernelTestCase
     private function asAcmeFoods(string $sql): int
     {
         return (int) $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement($sql));
-    }
-
-    /**
-     * Through the migrator, which owns the table and so may delete; FORCE ROW LEVEL SECURITY binds it too.
-     */
-    private function removeRowsOf(string ...$organizationIds): void
-    {
-        $tenantContext = self::getContainer()->get(TenantContext::class);
-        foreach ($organizationIds as $organizationId) {
-            $tenantContext->set(new OrganizationId($organizationId));
-            try {
-                self::getContainer()->get('doctrine.dbal.migrator_connection')->transactional(
-                    static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]),
-                );
-            } finally {
-                $tenantContext->clear();
-            }
-        }
     }
 
     private function connection(): Connection
