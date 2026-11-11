@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
+use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
+use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
@@ -574,6 +576,33 @@ final class TeamPageTest extends WebTestCase
         $statementsWithFiveSteps = $this->spanNamesAfter($exporter, $spansBeforeFive);
 
         self::assertSame($statementsWithOneStep, $statementsWithFiveSteps);
+    }
+
+    /**
+     * The page, the move-target and rule caches and the voter for its two attributes each ask for the step policy.
+     */
+    #[Test]
+    public function theTeamPageReadsTheStepPolicyOnce(): void
+    {
+        $this->client->disableReboot();
+        $settings = new class implements SettingsQueries {
+            public int $reads = 0;
+
+            public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
+            {
+                ++$this->reads;
+
+                return StepPolicy::Team;
+            }
+        };
+        self::getContainer()->set(DbalSettingsQueries::class, $settings);
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(3, $page->filter('.team__rule-form button[role="switch"]'), 'Under team the voter and the rule cache asked too.');
+        self::assertSame(1, $settings->reads);
     }
 
     #[Test]

@@ -38,8 +38,8 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
  *
  * Each organization's writes run in one transaction under that organization as tenant. An organization is found by
  * its slug among the organizations of its first admin, a team by its name and a member by their membership, and
- * whatever is found stays as it is. A step policy is set only in the run that creates the organization's first team
- * of the spec, so a later change of it stays.
+ * whatever is found stays as it is. A step policy is set only in a run that creates one of the organization's teams,
+ * so a later change of it stays until one of those teams is made again.
  *
  * @phpstan-type TeamSpec array{name: string, lead: string, leadJob: Job, members: list<array{email: string, role: TeamRole, job: Job}>}
  * @phpstan-type OrganizationSpec array{name: string, slug: string, firstAdmin: string, members: list<array{email: string, roles: list<OrgRole>}>, teams: list<TeamSpec>, stepPolicy: StepPolicy|null}
