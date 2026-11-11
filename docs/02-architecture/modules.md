@@ -273,7 +273,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `HomeQueries::myReports(UserId): ReportTracking`
   - `HomeQueries::teamsAtAGlance(OrganizationId): list<TeamBar>`
 - **Consumes:** all ticket, conversation and round events (for counts and history). The turn row itself is updated synchronously.
-- **Depends on:** Workflow Api (group of a step), Ticketing Api (row details for display).
+- **Depends on:** Workflow Api (group of a step), Ticketing Api (turn facts for the projector, row details for display).
 - **ADRs:** [0015](../03-adr/0015-turn-read-model.md).
 
 ### Assist (`ast_`)

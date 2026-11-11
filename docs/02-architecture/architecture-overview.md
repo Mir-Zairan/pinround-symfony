@@ -127,19 +127,19 @@ The app is split into modules. Each module owns its tables and offers a small pu
 
 ```mermaid
 flowchart LR
-  WEB["Web (UI shell)"] --> TKT & INS & RVW & CNV & ORG & AST & NTF
+  WEB["Web (UI shell)"] --> TKT & INS & ORG & NTF & WF
   API["AgentApi<br/>(REST + MCP)"] --> TKT & RVW & CNV & MED & IDN
   IDN["Identity"]
   ORG["Organization"] --> IDN
   WF["Workflow"] --> ORG
-  TKT["Ticketing"] --> WF & ORG & MED
+  TKT["Ticketing"] --> WF & ORG & IDN & MED & INS
   CNV["Conversation"] --> TKT
   RVW["Review"] --> TKT & MED
   MED["Media"]
-  NTF["Notification"] --> ORG
+  NTF["Notification"] --> ORG & TKT
   AST["Assist (AI)"] --> TKT & RVW & ORG
   INT["Integration (Jira)"] --> TKT & WF
-  INS["Insight (read models)"]
+  INS["Insight (read models)"] --> WF & TKT
   AUD["Audit"]
   TKT -. events .-> INS & NTF & AUD & INT & AST
   CNV -. events .-> INS & NTF & AUD

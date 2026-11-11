@@ -7,7 +7,9 @@ namespace App\Tests\Integration\Ticketing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Infrastructure\Workflow\TicketStepOccupancy;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -79,6 +81,23 @@ final class TicketStepOccupancyTest extends KernelTestCase
         } finally {
             $connection->rollBack();
         }
+    }
+
+    /**
+     * The SQL names Acme Foods, with two open tickets, while the transaction's tenant, which row-level security uses, is
+     * Beta Bakery, whose three the SQL does not match: row-level security alone makes the count zero.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTickets(): void
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $openTickets = new OwnConnectionTransactions(self::getContainer()->get('doctrine.dbal.default_connection'), $tenantContext)->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            static fn (Connection $connection): int => new TicketStepOccupancy($connection, $tenantContext)->openTicketsIn(self::TICKET_ROWS_STEP),
+        );
+
+        self::assertSame(0, $openTickets);
     }
 
     private function stepOccupancy(): TicketStepOccupancy

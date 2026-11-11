@@ -12,6 +12,7 @@ use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
 use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
@@ -255,8 +256,8 @@ final class DbalProjectQueriesTest extends KernelTestCase
     {
         $this->entityManager()->getFilters()->disable(TenantFilter::NAME);
 
-        $listsUnderAcmeContext = $this->onRecordedConnection(self::BETA_BAKERY, new RecordedSql(), function (Connection $connection): array {
-            $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
+        $listsUnderAcmeContext = $ownConnectionTransactions->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, function (Connection $connection): array {
             $queries = new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), $this->tenantContext());
 
             return [$queries->projectsOf(new TeamId(self::SHOP_TEAM)), $queries->unlinkedProjectChoices(10)];
@@ -317,19 +318,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
      */
     private function onRecordedConnection(string $organizationId, RecordedSql $recordedSql, \Closure $work): mixed
     {
-        $this->tenantContext()->set(new OrganizationId($organizationId));
-        $connection = new CloseOnFailedBeginConnection(
-            $this->connection()->getParams(),
-            $recordedSql->wrap(new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver())),
-        );
-        $connection->beginTransaction();
-        try {
-            return $work($connection);
-        } finally {
-            $connection->rollBack();
-            $connection->close();
-            $this->tenantContext()->clear();
-        }
+        return new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackAs($organizationId, $work, $recordedSql);
     }
 
     /**

@@ -32,6 +32,11 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
 
     public function factsFor(TicketId $ticketId): ?TicketTurnFacts
     {
+        // Outside a transaction no tenant is set for row-level security, so the loads would silently count zero.
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('Turn facts for the projector are read in a transaction under the organization as tenant; none is open.');
+        }
+
         $snapshot = $this->ticketTurnQueries->factsOf($ticketId);
         if (null === $snapshot || null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
             return null;

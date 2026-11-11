@@ -11,20 +11,19 @@ use App\Insight\Infrastructure\Doctrine\DbalTicketTurnSource;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
-use App\SharedKernel\Domain\UserId;
-use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
-use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
+use App\Tests\Integration\Ticketing\ShopTickets;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Workflow\Api\TeamMemberLoad;
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -192,24 +191,53 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         $snapshotUnderAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketTurnSnapshot => $this->turnQueries()->factsOf($ticketId));
         self::assertNotNull($snapshotUnderAcme);
 
-        $factsUnderAcmeContext = $this->onOwnConnectionAs(self::BETA_BAKERY, function (Connection $connection) use ($snapshotUnderAcme, $ticketId): ?TicketTurnFacts {
-            $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
-            $turnQueries = new readonly class($snapshotUnderAcme) implements TicketTurnQueries {
-                public function __construct(private TicketTurnSnapshot $snapshot)
-                {
-                }
-
-                public function factsOf(TicketId $ticketId): TicketTurnSnapshot
-                {
-                    return $this->snapshot;
-                }
-            };
-
-            return new DbalTicketTurnSource($turnQueries, $connection, $this->tenantContext())->factsFor($ticketId);
-        });
+        $factsUnderAcmeContext = $this->ownConnectionTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, fn (Connection $connection): ?TicketTurnFacts => new DbalTicketTurnSource(self::turnQueriesReturning($snapshotUnderAcme), $connection, $this->tenantContext())->factsFor($ticketId));
 
         self::assertNotNull($factsUnderAcmeContext);
         self::assertSame([self::LENA => [0, 0], self::OMAR => [0, 0]], self::loadsOf($factsUnderAcmeContext->team->developers));
+    }
+
+    /**
+     * Ticketing's query is replaced by one that needs no transaction, so it is the source's own check that refuses.
+     */
+    #[Test]
+    public function withNoTransactionItRefusesBeforeAnyQuery(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $snapshotUnderAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketTurnSnapshot => $this->turnQueries()->factsOf($ticketId));
+        self::assertNotNull($snapshotUnderAcme);
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $debugData = $this->debugData();
+        $debugData->reset();
+
+        try {
+            new DbalTicketTurnSource(self::turnQueriesReturning($snapshotUnderAcme), $this->connection(), $this->tenantContext())->factsFor($ticketId);
+            self::fail('The turn facts were read with no transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame(
+                ['Turn facts for the projector are read in a transaction under the organization as tenant; none is open.', []],
+                [$refusal->getMessage(), array_filter($debugData->getData(), static fn (mixed $queriesOfOneConnection): bool => [] !== $queriesOfOneConnection)],
+            );
+        }
+    }
+
+    private static function turnQueriesReturning(TicketTurnSnapshot $snapshot): TicketTurnQueries
+    {
+        return new readonly class($snapshot) implements TicketTurnQueries {
+            public function __construct(private TicketTurnSnapshot $snapshot)
+            {
+            }
+
+            public function factsOf(TicketId $ticketId): TicketTurnSnapshot
+            {
+                return $this->snapshot;
+            }
+        };
+    }
+
+    private function debugData(): DebugDataHolder
+    {
+        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     /**
@@ -232,21 +260,9 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
     {
         $ticketCommands = self::getContainer()->get('test.ticketing_ticket_commands');
         self::assertInstanceOf(TicketCommands::class, $ticketCommands);
-        $key = $this->transactions()->committedAs(self::ACME_FOODS, static fn (): string => $ticketCommands->create(
-            new OrganizationId(self::ACME_FOODS),
-            new UserId(self::MIA),
-            self::SHOP_PROJECT,
-            'Cart total shows the wrong sum',
-            '',
-            'bug',
-            'major',
-            new UserId($assigneeId),
-            new \DateTimeImmutable('2027-03-15 10:00:00 UTC'),
-        ));
-        $ticketId = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): mixed => $this->connection()->fetchOne('SELECT id FROM tkt_ticket WHERE key = ?', [$key]));
-        self::assertIsString($ticketId);
 
-        return new TicketId($ticketId);
+        return new ShopTickets($ticketCommands, $this->transactions(), $this->connection())
+            ->createdFor(self::ACME_FOODS, self::SHOP_PROJECT, self::MIA, $assigneeId);
     }
 
     private function addTurn(string $organizationId, string $ticketId, string $userId, string $kind): void
@@ -256,32 +272,6 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
              VALUES (?, ?, NULL, ?, 'check', ?, ?, 100, '2027-03-15 10:00:00+00', 'all', ?)",
             [$organizationId, $ticketId, self::SHOP_PROJECT, $userId, $kind, self::MIA],
         ));
-    }
-
-    /**
-     * Runs $work in a rolled-back transaction under $organizationId as tenant, on a connection of its own.
-     *
-     * @template T
-     *
-     * @param \Closure(Connection): T $work
-     *
-     * @return T
-     */
-    private function onOwnConnectionAs(string $organizationId, \Closure $work): mixed
-    {
-        $this->tenantContext()->set(new OrganizationId($organizationId));
-        $connection = new CloseOnFailedBeginConnection(
-            $this->connection()->getParams(),
-            new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver()),
-        );
-        $connection->beginTransaction();
-        try {
-            return $work($connection);
-        } finally {
-            $connection->rollBack();
-            $connection->close();
-            $this->tenantContext()->clear();
-        }
     }
 
     private function factsAs(string $organizationId, TicketId $ticketId): ?TicketTurnFacts
@@ -352,6 +342,11 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
     private function transactions(): TenantTransactions
     {
         return new TenantTransactions($this->entityManager(), $this->tenantContext());
+    }
+
+    private function ownConnectionTransactions(): OwnConnectionTransactions
+    {
+        return new OwnConnectionTransactions($this->connection(), $this->tenantContext());
     }
 
     private function tenantContext(): TenantContext

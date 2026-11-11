@@ -16,6 +16,8 @@ interface TicketTurnSource
 {
     /**
      * @return TicketTurnFacts|null null when the tenant has no ticket with this id, so its turn row goes
+     *
+     * @throws \LogicException when no transaction is open, before any query
      */
     public function factsFor(TicketId $ticketId): ?TicketTurnFacts;
 }

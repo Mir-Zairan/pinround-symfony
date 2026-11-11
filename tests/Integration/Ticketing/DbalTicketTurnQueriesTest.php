@@ -11,16 +11,14 @@ use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
-use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries;
 use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
@@ -210,8 +208,7 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         $ticketId = $this->createdTicketFor(self::OMAR);
         self::assertNotNull($this->factsAs(self::ACME_FOODS, $ticketId));
 
-        $snapshotUnderAcmeContext = $this->onOwnConnectionAs(self::BETA_BAKERY, function (Connection $connection) use ($ticketId): ?TicketTurnSnapshot {
-            $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $snapshotUnderAcmeContext = $this->ownConnectionTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, function (Connection $connection) use ($ticketId): ?TicketTurnSnapshot {
             $stepQueries = self::getContainer()->get('test.workflow_step_queries');
             self::assertInstanceOf(StepQueries::class, $stepQueries);
 
@@ -278,21 +275,9 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
     {
         $ticketCommands = self::getContainer()->get('test.ticketing_ticket_commands');
         self::assertInstanceOf(TicketCommands::class, $ticketCommands);
-        $key = $this->transactions()->committedAs(self::ACME_FOODS, static fn (): string => $ticketCommands->create(
-            new OrganizationId(self::ACME_FOODS),
-            new UserId(self::MIA),
-            self::SHOP_PROJECT,
-            'Cart total shows the wrong sum',
-            '',
-            'bug',
-            'major',
-            new UserId($assigneeId),
-            new \DateTimeImmutable('2027-03-15 10:00:00 UTC'),
-        ));
-        $ticketId = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): mixed => $this->connection()->fetchOne('SELECT id FROM tkt_ticket WHERE key = ?', [$key]));
-        self::assertIsString($ticketId);
 
-        return new TicketId($ticketId);
+        return new ShopTickets($ticketCommands, $this->transactions(), $this->connection())
+            ->createdFor(self::ACME_FOODS, self::SHOP_PROJECT, self::MIA, $assigneeId);
     }
 
     private function updateTicket(string $sql, TicketId $ticketId): void
@@ -310,32 +295,6 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
                 [$organizationId, $stepId, self::ANOTHER_TEAM, $groupCode],
             ));
         } finally {
-            $this->tenantContext()->clear();
-        }
-    }
-
-    /**
-     * Runs $work in a rolled-back transaction under $organizationId as tenant, on a connection of its own.
-     *
-     * @template T
-     *
-     * @param \Closure(Connection): T $work
-     *
-     * @return T
-     */
-    private function onOwnConnectionAs(string $organizationId, \Closure $work): mixed
-    {
-        $this->tenantContext()->set(new OrganizationId($organizationId));
-        $connection = new CloseOnFailedBeginConnection(
-            $this->connection()->getParams(),
-            new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver()),
-        );
-        $connection->beginTransaction();
-        try {
-            return $work($connection);
-        } finally {
-            $connection->rollBack();
-            $connection->close();
             $this->tenantContext()->clear();
         }
     }
@@ -415,6 +374,11 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
     private function transactions(): TenantTransactions
     {
         return new TenantTransactions($this->entityManager(), $this->tenantContext());
+    }
+
+    private function ownConnectionTransactions(): OwnConnectionTransactions
+    {
+        return new OwnConnectionTransactions($this->connection(), $this->tenantContext());
     }
 
     private function tenantContext(): TenantContext
