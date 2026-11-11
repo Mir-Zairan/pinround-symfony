@@ -5,10 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Ticketing\UI\Voter;
 
 use App\Organization\Api\ActorContext;
-use App\Organization\Api\MemberJob;
 use App\Organization\Api\Roles;
-use App\Organization\Api\TeamQueries;
-use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -39,83 +36,34 @@ final class TicketCreationVoterTest extends TestCase
     private const string MOBILE = '0197a3c0-0000-7000-8000-0000000016d2';
     private const string CHECKOUT = '0197a3c0-0000-7000-8000-0000000016d3';
 
-    private TeamQueries&\Countable $teamQueries;
-
-    protected function setUp(): void
-    {
-        $this->teamQueries = new class([self::ACME_FOODS => [self::SHOP, self::MOBILE], self::BETA_BAKERY => [self::CHECKOUT]]) implements TeamQueries, \Countable {
-            /** @var list<string> the organization id of each teamsOf call */
-            private array $teamsOfCalls = [];
-
-            /**
-             * @param array<string, list<string>> $teamIdsByOrganization
-             */
-            public function __construct(private readonly array $teamIdsByOrganization)
-            {
-            }
-
-            public function summariesOf(OrganizationId $organizationId, array $teamIds): array
-            {
-                throw new \LogicException('Only teamsOf is expected.');
-            }
-
-            public function allSummariesOf(OrganizationId $organizationId): array
-            {
-                throw new \LogicException('Only teamsOf is expected.');
-            }
-
-            public function countOf(OrganizationId $organizationId): int
-            {
-                throw new \LogicException('Only teamsOf is expected.');
-            }
-
-            public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
-            {
-                throw new \LogicException('Only teamsOf is expected.');
-            }
-
-            public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob
-            {
-                throw new \LogicException('Only teamsOf is expected.');
-            }
-
-            public function teamsOf(OrganizationId $organizationId): array
-            {
-                $this->teamsOfCalls[] = $organizationId->toString();
-
-                return array_map(static fn (string $teamId): TeamId => new TeamId($teamId), $this->teamIdsByOrganization[$organizationId->toString()] ?? []);
-            }
-
-            /**
-             * The number of teamsOf calls so far.
-             */
-            public function count(): int
-            {
-                return \count($this->teamsOfCalls);
-            }
-        };
-    }
-
     /**
-     * Lena leads Shop; Omar is a member of Shop; the Shop viewer is its viewer; Raj is a Manager and Sara an Admin,
-     * neither with a team role; Ben has no role; the Beta Bakery admin is an Admin of Beta Bakery.
+     * Lena leads Shop; Omar is a member of Shop; the Shop viewer is its viewer; Raj is a Manager and a member of Mobile;
+     * Sara is an Admin and a viewer of Mobile; neither Raj nor Sara has a role in Shop. Ben has no role; the Beta Bakery
+     * admin is an Admin of Beta Bakery and leads Checkout.
      *
      * @return iterable<string, array{string, string, bool}> actor, team, granted
      */
     public static function matrix(): iterable
     {
-        foreach (['Lena' => self::LENA, 'Omar' => self::OMAR, 'the Shop viewer' => self::SHOP_VIEWER, 'Raj' => self::RAJ, 'Sara' => self::SARA, 'Ben' => self::BEN] as $name => $userId) {
-            yield $name.' for Shop' => [$userId, self::SHOP, true];
-            yield $name.' for Mobile, a team of theirs with no role in it' => [$userId, self::MOBILE, true];
+        foreach (['Lena' => self::LENA, 'Omar' => self::OMAR, 'the Shop viewer' => self::SHOP_VIEWER] as $name => $userId) {
+            yield $name.' for Shop, their team' => [$userId, self::SHOP, true];
+            yield $name.' for Mobile, a team of their organization with no role in it' => [$userId, self::MOBILE, false];
             yield $name.' for Checkout of Beta Bakery' => [$userId, self::CHECKOUT, false];
         }
+        yield 'Raj, a Manager with no role in Shop, for Shop' => [self::RAJ, self::SHOP, false];
+        yield 'Raj, a Manager and a member of Mobile, for Mobile' => [self::RAJ, self::MOBILE, true];
+        yield 'Sara, an Admin with no role in Shop, for Shop' => [self::SARA, self::SHOP, false];
+        yield 'Sara, an Admin and a viewer of Mobile, for Mobile' => [self::SARA, self::MOBILE, true];
+        yield 'Sara for Checkout of Beta Bakery' => [self::SARA, self::CHECKOUT, false];
+        yield 'Ben, with no role, for Shop' => [self::BEN, self::SHOP, false];
+        yield 'Ben, with no role, for Mobile' => [self::BEN, self::MOBILE, false];
         yield 'the Beta Bakery admin for Checkout' => [self::BETA_ADMIN, self::CHECKOUT, true];
         yield 'the Beta Bakery admin for Shop of Acme Foods' => [self::BETA_ADMIN, self::SHOP, false];
     }
 
     #[Test]
     #[DataProvider('matrix')]
-    public function everyUserOfTheTeamsOrganizationReportsAProblemToIt(string $actor, string $teamId, bool $isGranted): void
+    public function onlyATeamRoleOnTheTeamCreatesATicketForIt(string $actor, string $teamId, bool $isGranted): void
     {
         self::assertSame(
             $isGranted ? VoterInterface::ACCESS_GRANTED : VoterInterface::ACCESS_DENIED,
@@ -127,31 +75,13 @@ final class TicketCreationVoterTest extends TestCase
     public function withoutAnActorItIsDenied(): void
     {
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->voter()->vote(new NullToken(), new TeamId(self::SHOP), [TicketPermission::CREATE]));
-        self::assertCount(0, $this->teamQueries);
-    }
-
-    #[Test]
-    public function theTeamsOfAnOrganizationAreReadOncePerRequestAndAgainAfterTheReset(): void
-    {
-        $voter = $this->voter();
-
-        $voter->vote(self::tokenOf(self::OMAR), new TeamId(self::SHOP), [TicketPermission::CREATE]);
-        $voter->vote(self::tokenOf(self::SARA), new TeamId(self::MOBILE), [TicketPermission::CREATE]);
-        self::assertCount(1, $this->teamQueries);
-        $voter->vote(self::tokenOf(self::BETA_ADMIN), new TeamId(self::CHECKOUT), [TicketPermission::CREATE]);
-        self::assertCount(2, $this->teamQueries);
-
-        $voter->reset();
-        $voter->vote(self::tokenOf(self::OMAR), new TeamId(self::SHOP), [TicketPermission::CREATE]);
-
-        self::assertCount(3, $this->teamQueries);
     }
 
     #[Test]
     public function itAbstainsOnOtherAttributesAndOnOtherSubjects(): void
     {
         $voter = $this->voter();
-        $token = self::tokenOf(self::SARA);
+        $token = self::tokenOf(self::LENA);
 
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new TeamId(self::SHOP), [TicketPermission::VIEW]));
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new OrganizationId(self::ACME_FOODS), [TicketPermission::CREATE]));
@@ -166,16 +96,17 @@ final class TicketCreationVoterTest extends TestCase
     private function voter(): TicketCreationVoter
     {
         $shop = new TeamId(self::SHOP);
+        $mobile = new TeamId(self::MOBILE);
         $actor = static fn (string $userId, Roles $roles, string $organizationId = self::ACME_FOODS): ActorContext => new ActorContext(new UserId($userId), new OrganizationId($organizationId), $roles);
 
         return new TicketCreationVoter(new FixedCurrentActor([
             self::LENA => $actor(self::LENA, new Roles(false, false, [$shop], [], [])),
             self::OMAR => $actor(self::OMAR, new Roles(false, false, [], [$shop], [])),
             self::SHOP_VIEWER => $actor(self::SHOP_VIEWER, new Roles(false, false, [], [], [$shop])),
-            self::RAJ => $actor(self::RAJ, new Roles(false, true, [], [], [])),
-            self::SARA => $actor(self::SARA, new Roles(true, false, [], [], [])),
+            self::RAJ => $actor(self::RAJ, new Roles(false, true, [], [$mobile], [])),
+            self::SARA => $actor(self::SARA, new Roles(true, false, [], [], [$mobile])),
             self::BEN => $actor(self::BEN, Roles::none()),
             self::BETA_ADMIN => $actor(self::BETA_ADMIN, new Roles(true, false, [new TeamId(self::CHECKOUT)], [], []), self::BETA_BAKERY),
-        ]), $this->teamQueries);
+        ]));
     }
 }

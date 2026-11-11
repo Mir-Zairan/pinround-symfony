@@ -28,6 +28,9 @@ use App\Workflow\Api\WorkflowPermission;
  * Raj is a Manager, so their TEAM_VIEW rows cite the org-role text; Noor (Lead) and Mia (Member, Viewer) carry the
  * team-role rules.
  *
+ * TICKET_CREATE is the team ticket form's, which needs a team role on the team (phase 3's criteria), so its rows cite
+ * the team-role text, not the matrix row "Report a problem", which lets every role report through the intake.
+ *
  * Neither organization has a settings row, so both have the default step policy, extend: the STEP_CHANGE_TEAM and
  * RULES_CHANGE_TEAM rows hold under extend only. WorkflowVoterTest has the locked and team cases.
  */
@@ -47,7 +50,7 @@ $leadLinksProjects = 'link projects.';
 $leadLinksAndUnlinksProjects = '| Link / unlink Jira projects to the team | — | — | ✅ | — | — | — |';
 $leadChangesTeamSteps = '| Add / remove team steps | — | — | ⚠️ policy extend or team | — | — | — |';
 $leadChangesTeamRules = '| Change team rules | — | — | ⚠️ policy team | — | — | — |';
-$reportsAProblem = '| Report a problem (create ticket) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
+$adminWithTeamRole = 'An admin who is also a member or lead of the team gets that team role\'s rights too.';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
 return [
@@ -209,12 +212,16 @@ return [
     ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
 
-    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'granted'],
-    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'granted'],
-    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'granted'],
-    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Raj', 'subject' => 'Mobile', 'expected' => 'granted'],
-    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Sara', 'subject' => 'Support', 'expected' => 'granted'],
-    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
+    ['source' => $memberRights, 'attribute' => TicketPermission::CREATE, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $leadRights, 'attribute' => TicketPermission::CREATE, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $teamRoles, 'attribute' => TicketPermission::CREATE, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $teamRoles, 'attribute' => TicketPermission::CREATE, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $adminWithTeamRole, 'attribute' => TicketPermission::CREATE, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $adminWithTeamRole, 'attribute' => TicketPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Raj', 'subject' => 'Mobile', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Sara', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
 ];

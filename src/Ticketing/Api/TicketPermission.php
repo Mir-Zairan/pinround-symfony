@@ -13,7 +13,7 @@ final class TicketPermission
     /** See a ticket; the subject is its TicketVisibilityFacts. Whoever the ticket visibility predicate lets see it. */
     public const string VIEW = 'TICKET_VIEW';
 
-    /** Report a problem to a team; the subject is that TeamId. Every user of the team's organization, any role or none. */
+    /** Create a ticket for a team on the team ticket form; the subject is that TeamId. Its Lead, Member or Viewer. */
     public const string CREATE = 'TICKET_CREATE';
 
     /** Change a ticket's fields; the subject is its TicketVisibilityFacts. A Lead or Member of the ticket's team. */
