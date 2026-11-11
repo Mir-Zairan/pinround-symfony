@@ -125,12 +125,13 @@ services:
     App\Workflow\Api\NeedsYouScore: '@App\Workflow\Application\Turn\WeightedNeedsYouScore'
     App\Workflow\Api\NowNext: '@App\Workflow\Application\Turn\PlainNowNext'
     App\Workflow\Api\VerbFor: '@App\Workflow\Application\Turn\PlainVerbFor'
-    # Its TicketTurnSource comes in P03 as an Insight Infrastructure adapter over a Ticketing Api query; until a module
-    # calls TurnProjector, the container drops both, so dev and prod compile without a source. The test env gives it an
-    # in-memory one below.
+    # Its TicketTurnSource comes in P03 as an Insight Infrastructure adapter over a Ticketing Api query; until a page
+    # uses TicketCommands (CreateTicket calls TurnProjector), the container drops them all, so dev and prod compile
+    # without a source. The test env gives it an in-memory one below.
     App\Insight\Api\TurnProjector: '@App\Insight\Infrastructure\Doctrine\DbalTurnProjector'
     # A viewer's ticket visibility predicate (ADR-0013), for TicketVoter and the list queries of every module.
     App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
+    App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\CreateTicket\CreateTicket'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -193,6 +194,10 @@ when@test:
         # No module calls it before TicketVoter (P03.T2); TicketVisibilitySqlTest gets it as another module would.
         test.ticketing_ticket_visibilities:
             alias: App\Ticketing\Api\TicketVisibilities
+            public: true
+        # No page creates tickets before /tickets/new (P03.T1 step 4); CreateTicketTest gets it as a page would.
+        test.ticketing_ticket_commands:
+            alias: App\Ticketing\Api\TicketCommands
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

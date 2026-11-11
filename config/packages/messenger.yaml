@@ -9,6 +9,8 @@ parameters:
         # Short jobs for worker-notify too, today the second invalidation of the workflow cache
         # (InvalidateWorkflowCacheHandler).
         App\Workflow\Api\Event\WorkflowEvent: async_notify
+        # Short jobs for worker-notify too; no handler yet, the consumers come with Insight, Notification and Audit.
+        App\Ticketing\Api\Event\TicketEvent: async_notify
 
 framework:
     messenger:
@@ -137,12 +139,15 @@ framework:
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.
             App\Workflow\Api\Event\WorkflowEvent: outbox
+            # Domain events of Ticketing, the same way.
+            App\Ticketing\Api\Event\TicketEvent: outbox
 
 when@test:
     parameters:
         outbox_relay.target_transports:
             App\Organization\Api\Event\OrganizationEvent: async_notify
             App\Workflow\Api\Event\WorkflowEvent: async_notify
+            App\Ticketing\Api\Event\TicketEvent: async_notify
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey
             App\Tests\Fixtures\Messaging\OutageProbeRecorded: valkey_with_outage
