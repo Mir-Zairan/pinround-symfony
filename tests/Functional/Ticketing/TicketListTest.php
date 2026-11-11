@@ -220,6 +220,78 @@ final class TicketListTest extends WebTestCase
     }
 
     #[Test]
+    public function aCollapsedStepStaysCollapsedOnTheNextRequestAndOtherStepsStayOpen(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->addTicket('doing', 'Cart total shows the wrong sum', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKETS);
+        self::assertSame(['true', 'true'], $page->filter('.tickets__step-toggle')->each(static fn (Crawler $toggle): ?string => $toggle->attr('aria-expanded')));
+
+        $this->collapse($page, 'todo', '1');
+
+        self::assertResponseStatusCodeSame(204);
+        $reloaded = $this->client->request('GET', self::TICKETS);
+        self::assertSame('false', $reloaded->filter('[data-group="todo"] .tickets__step-toggle')->attr('aria-expanded'));
+        self::assertNotNull($reloaded->filter('[data-group="todo"] .tickets__rows')->getNode(0)?->attributes?->getNamedItem('hidden'));
+        self::assertSame('true', $reloaded->filter('[data-group="doing"] .tickets__step-toggle')->attr('aria-expanded'));
+        self::assertNull($reloaded->filter('[data-group="doing"] .tickets__rows')->getNode(0)?->attributes?->getNamedItem('hidden'));
+
+        $this->collapse($reloaded, 'todo', '0');
+
+        self::assertResponseStatusCodeSame(204);
+        $expanded = $this->client->request('GET', self::TICKETS);
+        self::assertSame('true', $expanded->filter('[data-group="todo"] .tickets__step-toggle')->attr('aria-expanded'));
+    }
+
+    #[Test]
+    public function collapsingNeedsTheCsrfTokenAndARecognisedValue(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKETS);
+        $url = (string) $page->filter('[data-group="todo"]')->attr('data-step-collapse-url-value');
+
+        $this->client->request('POST', $url, ['collapsed' => '1']);
+        self::assertResponseStatusCodeSame(422);
+        $this->client->request('POST', $url, ['collapsed' => '1', '_csrf_token' => 'forged']);
+        self::assertResponseStatusCodeSame(422);
+        $this->collapse($page, 'todo', 'maybe');
+        self::assertResponseStatusCodeSame(422);
+
+        $reloaded = $this->client->request('GET', self::TICKETS);
+        self::assertSame('true', $reloaded->filter('[data-group="todo"] .tickets__step-toggle')->attr('aria-expanded'));
+    }
+
+    #[Test]
+    public function collapsingByAnonymousVisitorIsRedirectedToLogin(): void
+    {
+        $this->client->request('POST', '/tickets/steps/'.Uuid::v7()->toRfc4122().'/collapse', ['collapsed' => '1']);
+
+        self::assertResponseRedirects();
+        self::assertStringContainsString('/login', (string) $this->client->getResponse()->headers->get('Location'));
+    }
+
+    #[Test]
+    public function collapsingAStepOfAnotherOrganizationNeedsItsOwnTokenAndChangesNothingForTheirPeople(): void
+    {
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $ben = $this->createUserWithoutOrganization('Ben');
+        $this->addMembership($ben, $betaBakery);
+        $this->logIn($this->client, $ben);
+        $page = $this->client->request('GET', self::TICKETS);
+        self::assertCount(0, $page->filter('[data-step-collapse-token-value]'));
+
+        $this->client->request('POST', '/tickets/steps/'.$this->steps['todo'].'/collapse', ['collapsed' => '1', '_csrf_token' => 'forged']);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('The page was open too long. Try again.', $this->client->getResponse()->getContent());
+        $this->logIn($this->client, $this->people['Lena']);
+        $lenasPage = $this->client->request('GET', self::TICKETS);
+        self::assertSame(0, $lenasPage->filter('.tickets__step-toggle[aria-expanded="false"]')->count());
+    }
+
+    #[Test]
     public function showMoreListsTheNextRowsOfThatStepOnly(): void
     {
         $this->addTicket('doing', 'Cart total shows the wrong sum', 'normal');
@@ -234,6 +306,7 @@ final class TicketListTest extends WebTestCase
         self::assertSame('Show more', $moreLink->text());
         self::assertStringContainsString('project=SHOP', (string) $moreLink->attr('href'));
 
+        $frameId = $page->filter('[data-group="todo"] turbo-frame')->attr('id');
         $nextPage = $this->client->click($moreLink->link());
 
         self::assertResponseStatusCodeSame(200);
@@ -241,6 +314,9 @@ final class TicketListTest extends WebTestCase
         // The oldest two by updated_at, newest first, after the 50 the first page showed.
         self::assertSame(['SHOP-3', 'SHOP-2'], $nextPage->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
         self::assertCount(0, $nextPage->filter('[data-step-more]'));
+        self::assertMatchesRegularExpression('/^step-[0-9a-f-]{36}-after-[0-9a-f]{16}$/', (string) $frameId);
+        self::assertSame($frameId, $nextPage->filter('[data-group="todo"] .tickets__rows > turbo-frame')->attr('id'));
+        self::assertSame(2, $nextPage->filter('turbo-frame#'.$frameId.' .tickets__row')->count());
     }
 
     #[Test]
@@ -294,6 +370,15 @@ final class TicketListTest extends WebTestCase
         }
 
         return $queryCount;
+    }
+
+    private function collapse(Crawler $page, string $groupCode, string $collapsed): void
+    {
+        $step = $page->filter('[data-group="'.$groupCode.'"]');
+        $this->client->request('POST', (string) $step->attr('data-step-collapse-url-value'), [
+            'collapsed' => $collapsed,
+            '_csrf_token' => $step->attr('data-step-collapse-token-value'),
+        ]);
     }
 
     /**

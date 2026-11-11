@@ -65,11 +65,12 @@ final class TicketListController extends AbstractController
         $projectKey = $request->query->getString(self::PROJECT_QUERY);
         $project = '' === $projectKey ? null : ($this->projectQueries->projectByKey($projectKey) ?? throw $this->createNotFoundException('No project has that key.'));
         $groups = $this->ticketQueries->list(new ListFilter($visibility, $project?->id(), $showsDone), $cursor);
+        $collapsedStepIds = CollapsedSteps::idsIn($request->getSession());
 
         return $this->render('@Ticketing/list.html.twig', [
             'heading' => null === $project ? self::ALL_TICKETS : $project->key().' · '.$project->name(),
             'totalLine' => TicketListText::totalLineOf($groups),
-            'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone),
+            'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $cursor, $collapsedStepIds),
             'noTickets' => self::NO_TICKETS,
         ]);
     }
@@ -90,11 +91,21 @@ final class TicketListController extends AbstractController
     }
 
     /**
+     * The Turbo frame a "Show more" link sits in, named by the page it opens; the response to that link holds a frame of
+     * the same id around the page's rows, so only those rows replace the link.
+     */
+    private static function frameIdOf(Cursor $cursor): string
+    {
+        return 'step-'.$cursor->stepId.'-after-'.substr(hash('sha256', TicketListCursorParameter::queryOf($cursor)[TicketListCursorParameter::AFTER_QUERY]), 0, 16);
+    }
+
+    /**
      * @param list<TicketListGroup> $groups
+     * @param list<string>          $collapsedStepIds
      *
      * @return list<array{code: string, label: string, hint: string|null, steps: list<array<string, mixed>>}>
      */
-    private function groupViewsOf(array $groups, UserId $viewerId, ?ProjectChoice $project, bool $showsDone): array
+    private function groupViewsOf(array $groups, UserId $viewerId, ?ProjectChoice $project, bool $showsDone, ?Cursor $cursor, array $collapsedStepIds): array
     {
         $now = $this->clock->now();
         $listQuery = array_filter([self::PROJECT_QUERY => $project?->key(), self::DONE_QUERY => $showsDone ? '1' : null], static fn (?string $value): bool => null !== $value);
@@ -108,6 +119,10 @@ final class TicketListController extends AbstractController
                 'name' => $step->name,
                 'isArchived' => $step->isArchived,
                 'count' => TicketListText::stepCountOf($step),
+                'isCollapsed' => \in_array($step->stepId, $collapsedStepIds, true),
+                'collapseUrl' => $this->generateUrl(StepCollapseController::ROUTE, ['stepId' => $step->stepId]),
+                'pageFrameId' => $cursor?->stepId === $step->stepId ? self::frameIdOf($cursor) : null,
+                'moreFrameId' => null === $step->nextCursor ? null : self::frameIdOf($step->nextCursor),
                 'rows' => array_map(static fn (TicketListRow $row): array => [
                     'key' => $row->key,
                     'title' => $row->title,

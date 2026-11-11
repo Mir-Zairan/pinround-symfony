@@ -166,3 +166,19 @@
   color: var(--primary);
   font-weight: 700;
 }
+
+.tickets__rows turbo-frame > .tickets__row-list {
+  border-top: 1px solid var(--outline-var);
+}
+
+.tickets__rows[hidden] {
+  display: none;
+}
+
+.tickets__step-toggle[aria-expanded="false"] .tickets__chevron {
+  transform: rotate(-90deg);
+}
+
+.tickets__rows turbo-frame {
+  display: block;
+}
