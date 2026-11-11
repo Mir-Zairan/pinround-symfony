@@ -317,6 +317,9 @@ final class TicketListTest extends WebTestCase
         self::assertMatchesRegularExpression('/^step-[0-9a-f-]{36}-after-[0-9a-f]{16}$/', (string) $frameId);
         self::assertSame($frameId, $nextPage->filter('[data-group="todo"] .tickets__rows > turbo-frame')->attr('id'));
         self::assertSame(2, $nextPage->filter('turbo-frame#'.$frameId.' .tickets__row')->count());
+        // Focus moves to the new rows after Turbo swaps the frame; the first page takes none.
+        self::assertCount(1, $nextPage->filter('turbo-frame#'.$frameId.' ul.tickets__row-list[tabindex="-1"][autofocus]'));
+        self::assertCount(0, $page->filter('[autofocus]'));
     }
 
     #[Test]
