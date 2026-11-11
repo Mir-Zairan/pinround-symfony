@@ -31,10 +31,10 @@ use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 
 /**
- * The neutral example organizations: Acme Foods with its teams Shop and Mobile, and Beta Bakery with Ben and his team Ovens
- * under the step policy team, made through the Organization commands with the system as actor. It runs after
- * SeedDemoPeople, whose people it finds by email. Lena and Omar are in Acme Foods only, so logging in as them never shows the organization picker; add one of
- * them to Beta Bakery to try it.
+ * The neutral example organizations: Acme Foods with its teams Shop and Mobile, and Beta Bakery with Ben and his team
+ * Ovens under the step policy team, made through the Organization commands with the system as actor. It runs after
+ * SeedDemoPeople, whose people it finds by email. Lena and Omar are in Acme Foods only, so logging in as them never
+ * shows the organization picker; add one of them to Beta Bakery to try it.
  *
  * Each organization's writes run in one transaction under that organization as tenant. An organization is found by
  * its slug among the organizations of its first admin, a team by its name and a member by their membership, and
