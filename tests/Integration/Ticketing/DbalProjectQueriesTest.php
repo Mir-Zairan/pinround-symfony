@@ -343,6 +343,39 @@ final class DbalProjectQueriesTest extends KernelTestCase
         );
     }
 
+    #[Test]
+    public function projectByKeyFindsTheOrganizationsProjectLinkedOrNot(): void
+    {
+        self::assertSame(
+            [[self::SHOP, 'SHOP', 'Web shop'], [self::OPS, 'OPS', 'Archive'], [self::BETA_CAKE, 'CAKE', 'Cake orders']],
+            [$this->foundByKey(self::ACME_FOODS, 'SHOP'), $this->foundByKey(self::ACME_FOODS, 'OPS'), $this->foundByKey(self::BETA_BAKERY, 'CAKE')],
+        );
+    }
+
+    #[Test]
+    public function projectByKeyFindsNoneForAKeyTheOrganizationHasNot(): void
+    {
+        self::assertSame([null, null], [$this->foundByKey(self::ACME_FOODS, 'NOPE'), $this->foundByKey(self::ACME_FOODS, 'BREAD')]);
+    }
+
+    /**
+     * Keys are upper case (tkt_project_key_check), so a lowercase one is no project and is not even asked for.
+     */
+    #[Test]
+    public function projectByKeyFindsNoneForALowercaseKeyWithoutAnyQuery(): void
+    {
+        $recordedSql = new RecordedSql();
+
+        $project = $this->onRecordedConnection(
+            self::ACME_FOODS,
+            $recordedSql,
+            fn (Connection $connection): ?ProjectChoice => new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext())->projectByKey('shop'),
+        );
+
+        self::assertSame([null, []], [$project, $recordedSql->statements]);
+        self::assertSame([self::SHOP, 'SHOP', 'Web shop'], $this->foundByKey(self::ACME_FOODS, 'SHOP'));
+    }
+
     /**
      * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
      * is another one: what still hides Acme Foods' projects from Beta Bakery's transaction is row-level security alone.
@@ -360,20 +393,22 @@ final class DbalProjectQueriesTest extends KernelTestCase
                 $queries->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER)),
                 $queries->unlinkedProjectChoices(10),
                 $queries->projectChoicesOfTeams([new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)]),
+                $queries->projectByKey('SHOP'),
             ];
         });
 
         self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
-        self::assertSame([[], [], []], $listsUnderAcmeContext);
+        self::assertSame([[], [], [], null], $listsUnderAcmeContext);
     }
 
     #[Test]
-    public function withNoTenantBothQueriesRefuseBeforeAnyQuery(): void
+    public function withNoTenantEveryQueryRefusesBeforeAnyQuery(): void
     {
         $refusals = [];
         foreach ([
             static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER)),
             static fn (DbalProjectQueries $queries): array => $queries->unlinkedProjectChoices(10),
+            static fn (DbalProjectQueries $queries): ?ProjectChoice => $queries->projectByKey('SHOP'),
         ] as $list) {
             $recordedSql = new RecordedSql();
             $connection = new CloseOnFailedBeginConnection($this->connection()->getParams(), $recordedSql->wrap(new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver())));
@@ -386,7 +421,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
             }
         }
 
-        self::assertSame([[], []], $refusals);
+        self::assertSame([[], [], []], $refusals);
     }
 
     /**
@@ -443,6 +478,18 @@ final class DbalProjectQueriesTest extends KernelTestCase
             static fn (ProjectChoice $project): array => [$project->id(), $project->key(), $project->name()],
             $this->queries(new RecordedOpenTicketCounts(self::OPEN_TICKETS))->unlinkedProjectChoices($limit),
         ));
+    }
+
+    /**
+     * @return array{string, string, string}|null id, key and name of the project with $key
+     */
+    private function foundByKey(string $organizationId, string $key): ?array
+    {
+        return $this->transactions()->rolledBackAs($organizationId, function () use ($key): ?array {
+            $project = $this->queries(new RecordedOpenTicketCounts(self::OPEN_TICKETS))->projectByKey($key);
+
+            return null === $project ? null : [$project->id(), $project->key(), $project->name()];
+        });
     }
 
     /**

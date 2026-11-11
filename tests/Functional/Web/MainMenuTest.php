@@ -131,8 +131,10 @@ final class MainMenuTest extends WebTestCase
         $routes = self::getContainer()->get('router')->getRouteCollection();
 
         // RequestTransactionTest proves test_fixtures.yaml defines no route of this name, in any environment.
-        self::assertSame(TicketListController::class.'::list', $routes->get(MainMenu::TICKETS_ROUTE)?->getDefault('_controller'), 'the tickets list is the real one, not a stand-in');
-        self::assertSame('/tickets', $routes->get(MainMenu::TICKETS_ROUTE)?->getPath());
+        $ticketsRoute = $routes->get(MainMenu::TICKETS_ROUTE);
+        self::assertNotNull($ticketsRoute);
+        self::assertSame(TicketListController::class.'::list', $ticketsRoute->getDefault('_controller'), 'the tickets list is the real one, not a stand-in');
+        self::assertSame('/tickets', $ticketsRoute->getPath());
         self::assertSame(TeamController::class.'::show', $routes->get(MainMenu::TEAM_ROUTE)?->getDefault('_controller'), 'the team page is the real one, not a stand-in');
         foreach ([MainMenu::MY_REPORTS_ROUTE, MainMenu::ADMIN_ROUTE] as $routeName) {
             self::assertNull($routes->get($routeName), $routeName.' has a page now: MainMenuTest expects it inert');

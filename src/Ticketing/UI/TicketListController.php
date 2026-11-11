@@ -97,7 +97,7 @@ final class TicketListController extends AbstractController
     private function groupViewsOf(array $groups, UserId $viewerId, ?ProjectChoice $project, bool $showsDone): array
     {
         $now = $this->clock->now();
-        $listQuery = array_filter([self::PROJECT_QUERY => $project?->key(), self::DONE_QUERY => $showsDone ? '1' : null]);
+        $listQuery = array_filter([self::PROJECT_QUERY => $project?->key(), self::DONE_QUERY => $showsDone ? '1' : null], static fn (?string $value): bool => null !== $value);
 
         return array_map(fn (TicketListGroup $group): array => [
             'code' => $group->code,

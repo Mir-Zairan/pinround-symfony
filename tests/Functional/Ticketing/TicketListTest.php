@@ -12,7 +12,6 @@ use App\Tests\Functional\Web\CreatesTeams;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
@@ -34,6 +33,7 @@ final class TicketListTest extends WebTestCase
     }
 
     private const string TICKETS = '/tickets';
+    private const string SHELL = '/_test/menu/shell';
     private const array PRIORITY_RANKS = ['blocker' => 0, 'critical' => 1, 'major' => 2, 'normal' => 3, 'minor' => 4];
 
     private KernelBrowser $client;
@@ -253,10 +253,7 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        $shellQueryCount = $this->queryCountOf('/_test/menu/shell');
-        $pageQueryCount = $this->queryCountOf(self::TICKETS);
-
-        self::assertLessThanOrEqual(5, $pageQueryCount - $shellQueryCount);
+        self::assertLessThanOrEqual(5, $this->queryCountMoreThanTheShellOf(self::TICKETS));
     }
 
     #[Test]
@@ -267,16 +264,22 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        $shellQueryCount = $this->queryCountOf('/_test/menu/shell');
-        $pageQueryCount = $this->queryCountOf(self::TICKETS.'?project=SHOP');
+        self::assertLessThanOrEqual(5, $this->queryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
+    }
 
-        self::assertLessThanOrEqual(5, $pageQueryCount - $shellQueryCount);
+    private function queryCountMoreThanTheShellOf(string $uri): int
+    {
+        // logIn() leaves the user in the entity manager, so the first request skips the user refresh (idn_user,
+        // idn_credential) that every later one pays after the kernel resets its services; this one is not counted.
+        $this->queryCountOf(self::SHELL);
+        $shellQueryCount = $this->queryCountOf(self::SHELL);
+
+        return $this->queryCountOf($uri) - $shellQueryCount;
     }
 
     private function queryCountOf(string $uri): int
     {
         $debugData = self::getContainer()->get('doctrine.debug_data_holder');
-        self::assertInstanceOf(DebugDataHolder::class, $debugData);
         $debugData->reset();
         $page = $this->client->request('GET', $uri);
         self::assertResponseStatusCodeSame(200);
@@ -287,7 +290,6 @@ final class TicketListTest extends WebTestCase
 
         $queryCount = 0;
         foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
             $queryCount += \count($queriesOfOneConnection);
         }
 
