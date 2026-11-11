@@ -129,7 +129,8 @@ services:
     # uses TicketCommands (its CreateTicket calls TurnProjector), the container drops them all, so dev and prod compile
     # without a source. The test env gives it an in-memory one below.
     App\Insight\Api\TurnProjector: '@App\Insight\Infrastructure\Doctrine\DbalTurnProjector'
-    # A viewer's ticket visibility predicate (ADR-0013), for TicketVoter and the list queries of every module.
+    # A viewer's ticket visibility predicate (ADR-0013), for the list queries of every module. TicketVoter takes
+    # RoleTicketVisibilities itself, for ofActor.
     App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
 
@@ -191,7 +192,7 @@ when@test:
         test.insight_turn_projector:
             alias: App\Insight\Api\TurnProjector
             public: true
-        # No module calls it before TicketVoter (P03.T2); TicketVisibilitySqlTest gets it as another module would.
+        # No other module calls it yet; TicketVisibilitySqlTest gets it as another module would.
         test.ticketing_ticket_visibilities:
             alias: App\Ticketing\Api\TicketVisibilities
             public: true

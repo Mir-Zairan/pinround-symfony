@@ -145,21 +145,48 @@ final class TicketVisibilitySqlTest extends KernelTestCase
     }
 
     /**
-     * Another module gets a viewer's predicate from TicketVisibilities alone; Omar has no membership and Acme Foods no
-     * settings here, so he sees the ticket for everyone and the six he is on, read through the real Organization Api.
+     * Another module gets a viewer's predicate from TicketVisibilities alone, read through the real Organization Api
+     * from stored rows: Lena leads the SHOP team and is the organization's triager, so she sees the no-team ticket 9;
+     * Mia is a member of the other team; Omar has no team role and is on the other team's tickets as reporter or
+     * worker; Raj is a Manager with no team role, an outsider to every restricted ticket; Sara is an Admin.
      */
     #[Test]
     public function theViewerFromTicketVisibilitiesSeesWhatTheirStoredRolesAllow(): void
     {
         $visibilities = self::getContainer()->get('test.ticketing_ticket_visibilities');
         self::assertInstanceOf(RoleTicketVisibilities::class, $visibilities);
+        $expectedByViewer = [
+            self::LENA => ['1', '2', '9'],
+            self::MIA => ['1', '3', '4', '5', '6', '7', '8', '9'],
+            self::OMAR => ['1', '3', '4', '5', '6', '7', '8'],
+            self::RAJ => ['1'],
+            self::SARA => ['1', '2', '3', '4', '5', '6', '7', '8', '9'],
+        ];
 
-        $found = $this->transactions()->rolledBackAs(
-            self::ACME_FOODS,
-            fn (): array => $this->ticketNumbersFound($visibilities->of(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR))),
-        );
+        $foundByViewer = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($visibilities, $expectedByViewer): array {
+            $this->addMembershipOf(self::LENA, '{}');
+            $this->addMembershipOf(self::MIA, '{}');
+            $this->addMembershipOf(self::OMAR, '{}');
+            $this->addMembershipOf(self::RAJ, '{manager}');
+            $this->addMembershipOf(self::SARA, '{admin}');
+            $this->addTeamOf(self::SHOP_TEAM, 'Shop', self::LENA, [self::LENA => 'lead']);
+            $this->addTeamOf(self::OTHER_TEAM, 'Web', self::MIA, [self::MIA => 'member']);
+            $this->connection()->executeStatement(
+                "INSERT INTO org_settings (organization_id, data, created_at) VALUES (?, jsonb_build_object('triager_id', ?::text), '2027-03-15 10:00:00+00')",
+                [self::ACME_FOODS, self::LENA],
+            );
+            $found = [];
+            foreach (array_keys($expectedByViewer) as $viewerId) {
+                $viewer = $visibilities->of(new OrganizationId(self::ACME_FOODS), new UserId($viewerId));
+                $found[$viewerId] = [$this->ticketNumbersFound($viewer), self::ticketNumbersShownBy($viewer)];
+            }
 
-        self::assertSame(['1', '3', '4', '5', '6', '7', '8'], $found);
+            return $found;
+        });
+
+        foreach ($expectedByViewer as $viewerId => $expectedTicketNumbers) {
+            self::assertSame([$expectedTicketNumbers, $expectedTicketNumbers], $foundByViewer[$viewerId], $viewerId);
+        }
     }
 
     /**
@@ -215,6 +242,31 @@ final class TicketVisibilitySqlTest extends KernelTestCase
              VALUES (?, ?, ?, ?, 'doing', ?, 'build', 18, '2027-03-15 10:00:00+00', ?, ?, ?, ?, ?, ?, ?)",
             [$organizationId, $ticketId, $teamId, self::SHOP_PROJECT, $reporterId, $visibility, $reporterId, ...array_values($people)],
         );
+    }
+
+    private function addMembershipOf(string $userId, string $orgRoles): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, ?, '2027-03-15 10:00:00+00')",
+            [self::ACME_FOODS, $userId, $orgRoles],
+        );
+    }
+
+    /**
+     * @param array<string, string> $teamRolesByUserId
+     */
+    private function addTeamOf(string $teamId, string $name, string $leadId, array $teamRolesByUserId): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
+            [self::ACME_FOODS, $teamId, $name, strtolower($name), $leadId],
+        );
+        foreach ($teamRolesByUserId as $userId => $teamRole) {
+            $this->connection()->executeStatement(
+                "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, ?, 'developer', '2027-03-15 10:00:00+00')",
+                [self::ACME_FOODS, $teamId, $userId, $teamRole],
+            );
+        }
     }
 
     /**

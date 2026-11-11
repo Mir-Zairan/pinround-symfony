@@ -6,6 +6,7 @@ use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamPermission;
 use App\Ticketing\Api\ProjectPermission;
+use App\Ticketing\Api\TicketPermission;
 use App\Workflow\Api\WorkflowPermission;
 
 /*
@@ -46,6 +47,7 @@ $leadLinksProjects = 'link projects.';
 $leadLinksAndUnlinksProjects = '| Link / unlink Jira projects to the team | — | — | ✅ | — | — | — |';
 $leadChangesTeamSteps = '| Add / remove team steps | — | — | ⚠️ policy extend or team | — | — | — |';
 $leadChangesTeamRules = '| Change team rules | — | — | ⚠️ policy team | — | — | — |';
+$reportsAProblem = '| Report a problem (create ticket) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
 return [
@@ -206,4 +208,13 @@ return [
     ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
+
+    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Raj', 'subject' => 'Mobile', 'expected' => 'granted'],
+    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Sara', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $reportsAProblem, 'attribute' => TicketPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
 ];

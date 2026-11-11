@@ -36,6 +36,18 @@ final class HandWrittenVisibilityConditionTest extends TestCase
             SELECT id FROM tkt_ticket t
             WHERE t.visibility NOT IN ('team')
             SQL;
+        $aliased = $qb->expr()->eq('t.visibility', ':visibility');
+        $aliasedList = $qb->expr()->in("tt.visibility", [':all', ':team']);
+        $castCondition = "SELECT id FROM tkt_ticket t WHERE CAST(t.visibility AS text) = 'all'";
+        $reversedCast = "WHERE 'all' = CAST(visibility AS text)";
+        $castCopied = 'SELECT CAST(visibility AS text) FROM tkt_ticket';
+        $sorted = $this->tickets->findBy(['project' => $project], ['visibility' => 'ASC']);
+        $oneSorted = $this->tickets->findOneBy(array('project' => $project), array('visibility' => 'DESC'));
+        $countedHere = count(['visibility' => 'team']);
+        $countedHereToo = \count(array('visibility' => 'team'));
+        $read = $row['visibility'] ?? null;
+        $nullsafe = $this->tickets?->count(['visibility' => 'team']);
+        $later = #[Pure] fn () => $this->tickets->findBy([$row['team'] => 1, 'visibility' => 'team']);
         PHP;
 
     #[Test]
@@ -62,6 +74,12 @@ final class HandWrittenVisibilityConditionTest extends TestCase
                 "Planted.php:17: 'visibility' =>",
                 "Planted.php:18: eq('visibility'",
                 'Planted.php:21: visibility NOT IN',
+                "Planted.php:23: eq('t.visibility'",
+                'Planted.php:24: in("tt.visibility"',
+                'Planted.php:25: CAST(t.visibility AS text) =',
+                'Planted.php:26: = CAST(visibility',
+                "Planted.php:33: 'visibility' =>",
+                "Planted.php:34: 'visibility' =>",
             ],
             HandWrittenVisibilityConditions::inSource('Planted.php', self::PLANTED),
         );
