@@ -17,8 +17,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 /**
  * tkt_ticket_event as pinround_app (Version20261111140000): another organization neither sees nor adds history of the
  * organization, a partition keeps the rows to its own tenant when queried directly, the app only reads and adds, and
- * the foreign keys of tkt_ticket_event and tkt_ticket refuse a ticket or project that is not the organization's.
- * The rows sit in a far month whose partition the test adds and drops, so they never depend on the wall clock.
+ * the foreign keys of tkt_ticket_event and tkt_ticket refuse a ticket or project that is not the organization's. The
+ * table also refuses a payload that is not an object and an event in a month with no partition. The rows sit in a far month whose partition the test adds and drops, so they never depend on the wall clock.
  */
 final class TicketEventIsolationTest extends KernelTestCase
 {
@@ -146,6 +146,35 @@ final class TicketEventIsolationTest extends KernelTestCase
                 "INSERT INTO tkt_ticket (organization_id, id, project_id, number, key, title, description, type, priority, priority_rank, step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
                  VALUES (?, ?, ?, 2, 'SHOP-2', 'Checkout button is hidden', '', 'bug', 'major', 2, ?, ?, 'all', '{}', '{}', now(), now())",
                 [self::ACME_FOODS, self::UNKNOWN_TICKET, self::OTHER_PROJECT, self::SHOP_PROJECT, self::LENA],
+            )),
+        );
+    }
+
+    #[Test]
+    public function aPayloadThatIsNotAnObjectIsRefused(): void
+    {
+        $this->assertRefused(
+            '23514',
+            'tkt_ticket_event_payload_check',
+            fn (): int|string => $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+                "INSERT INTO tkt_ticket_event (id, organization_id, ticket_id, actor_id, type, payload, at) VALUES (?, ?, ?, ?, 'reported', '[]', ?)",
+                [self::SMUGGLED_EVENT, self::ACME_FOODS, self::TICKET, self::LENA, self::AT],
+            )),
+        );
+    }
+
+    #[Test]
+    public function anEventInAMonthWithNoPartitionIsRefused(): void
+    {
+        $monthWithNoPartition = '2035-01-15 10:00:00+00';
+        self::assertNull($this->migrator()->fetchOne('SELECT to_regclass(?)', ['public.'.TicketEventPartitions::partitionNameFor(new \DateTimeImmutable($monthWithNoPartition))]));
+
+        $this->assertRefused(
+            '23514',
+            'no partition of relation "tkt_ticket_event" found for row',
+            fn (): int|string => $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+                self::INSERT,
+                [self::SMUGGLED_EVENT, self::ACME_FOODS, self::TICKET, self::LENA, $monthWithNoPartition],
             )),
         );
     }

@@ -14,10 +14,12 @@ use Symfony\Component\Scheduler\Attribute\AsPeriodicTask;
 /**
  * Keeps tkt_ticket_event partitioned from the current UTC month through three months ahead (data-model.md), so an
  * event never lands past the last partition. Safe to run again or twice at once: one transaction under an advisory
- * lock, creating only the months that are missing.
+ * lock, creating only the months that are missing. Gives up after 5 s waiting for a table lock; the next day's run, still
+ * months ahead of need, tries again.
  *
- * Creating a partition needs the table owner, so this runs on the migrator connection, which prod does not have; prod
- * gets its own runner as pinround_migrator (phase-03 hand-off notes).
+ * Creating a partition needs the table owner, so this runs on the migrator connection, which prod does not have. Prod
+ * has the migrations' partitions through 2027-12 and needs its own runner as pinround_migrator before then (phase-03
+ * hand-off notes).
  */
 #[WhenNot('prod')]
 #[AsPeriodicTask(frequency: '1 day')]
@@ -40,20 +42,18 @@ final readonly class AddTicketEventPartitions
     public function __invoke(): array
     {
         return $this->migrator->transactional(function (Connection $migrator): array {
-            // Two runs at once would both see a month missing and the second CREATE would fail.
-            $migrator->fetchOne("SELECT pg_advisory_xact_lock(hashtext('tkt_ticket_event_partitions'))");
+            // CREATE … PARTITION OF blocks tkt_ticket_event and tkt_ticket; queued behind a long query it would stall both.
+            $migrator->executeStatement("SET LOCAL lock_timeout = '5s'");
+            TicketEventPartitions::lockForChanges($migrator);
 
             $created = [];
-            $month = TicketEventPartitions::monthOf($this->clock->now());
-            for ($i = 0; $i <= self::MONTHS_AHEAD; ++$i) {
-                $partition = TicketEventPartitions::partitionNameFor($month);
-                if (null === $migrator->fetchOne('SELECT to_regclass(?)', ['public.'.$partition])) {
-                    foreach (TicketEventPartitions::statementsFor($month) as $statement) {
-                        $migrator->executeStatement($statement);
-                    }
-                    $created[] = $partition;
+            $thisMonth = TicketEventPartitions::monthOf($this->clock->now());
+            $lastMonth = $thisMonth->modify(\sprintf('+%d months', self::MONTHS_AHEAD));
+            foreach (TicketEventPartitions::monthsWithoutPartition($migrator, $thisMonth, $lastMonth) as $month) {
+                foreach (TicketEventPartitions::statementsFor($month) as $statement) {
+                    $migrator->executeStatement($statement);
                 }
-                $month = $month->modify('first day of next month');
+                $created[] = TicketEventPartitions::partitionNameFor($month);
             }
 
             return $created;

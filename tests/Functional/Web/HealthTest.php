@@ -49,7 +49,8 @@ final class HealthTest extends WebTestCase
         ObjectStorageIsReachable::class => 'object_storage',
     ];
 
-    // Inside the months the audit migration created partitions for (2026-11 to 2027-12), so next month always has one.
+    // Inside the months the aud_event and tkt_ticket_event migrations created partitions for (2026-11 to 2027-12), so
+    // next month always has one.
     private const string NOW = '2027-03-15 10:00:00 UTC';
 
     private KernelBrowser $client;
@@ -202,6 +203,8 @@ final class HealthTest extends WebTestCase
     public function readyAnswersFailWhenNextMonthHasNoAuditPartition(): void
     {
         $this->freezeTheClockAt('2027-12-15 10:00:00 UTC');
+        // So only the audit check fails: tkt_ticket_event's migrated months end with 2027-12 too.
+        $this->runTheTicketEventPartitionJobAt('2027-12-15 10:00:00 UTC');
         $capturedLogRecords = $this->capturedLogRecords();
         $capturedLogRecords->clear();
 
@@ -317,12 +320,17 @@ final class HealthTest extends WebTestCase
     /**
      * NextAuditPartitionExists and NextTicketEventPartitionExists read this clock. Call it before the test's first
      * request: the client reboots the kernel after it, which drops the frozen clock unless the test disabled reboots.
-     * The migration made tkt_ticket_event partitions from the wall clock, so the job adds the frozen months' ones and
-     * tearDown drops what it added.
      */
     private function freezeTheClockAt(string $now): void
     {
         self::getContainer()->set('clock', new MockClock($now));
+    }
+
+    /**
+     * For a clock past the migrations' tkt_ticket_event months; tearDown drops what the job added.
+     */
+    private function runTheTicketEventPartitionJobAt(string $now): void
+    {
         $this->addedTicketEventPartitions = [
             ...$this->addedTicketEventPartitions,
             ...new AddTicketEventPartitions(self::getContainer()->get('doctrine.dbal.migrator_connection'), new MockClock($now))(),

@@ -6,9 +6,12 @@ namespace App\Tests\Integration\Ticketing\Infrastructure\Scheduler;
 
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Scheduler\Generator\MessageContext;
+use Symfony\Component\Scheduler\Messenger\ServiceCallMessage;
 
 /**
  * The partition job on the migrated test database, at clocks years past the migration's months, so every partition it
@@ -101,6 +104,53 @@ final class AddTicketEventPartitionsTest extends KernelTestCase
         $job = self::getContainer()->get(AddTicketEventPartitions::class);
 
         self::assertSame(['tkt_ticket_event_203106', 'tkt_ticket_event_203107', 'tkt_ticket_event_203108', 'tkt_ticket_event_203109'], $job());
+    }
+
+    #[Test]
+    public function itGivesUpOnATableLockAfterFiveSecondsAndAddsNothing(): void
+    {
+        $migrator = $this->migrator();
+        // Far past the job's own timeout, so only that timeout can end the wait within the bound below.
+        $migrator->executeStatement("SET lock_timeout = '60s'");
+        $app = self::getContainer()->get('doctrine.dbal.default_connection');
+        $app->beginTransaction();
+        try {
+            $app->executeStatement('LOCK TABLE tkt_ticket_event IN ACCESS SHARE MODE');
+            $startedAt = hrtime(true);
+            try {
+                $this->jobAt('2031-06-15 10:00:00 UTC')();
+                self::fail('The job added partitions while a reader held tkt_ticket_event.');
+            } catch (DriverException $refusal) {
+                $sqlState = $refusal->getSQLState();
+            }
+            $waitedSeconds = (hrtime(true) - $startedAt) / 1e9;
+        } finally {
+            $app->rollBack();
+            $migrator->executeStatement('RESET lock_timeout');
+        }
+
+        self::assertSame('55P03', $sqlState);
+        self::assertEqualsWithDelta(5.0, $waitedSeconds, 2.0);
+        self::assertNull($migrator->fetchOne("SELECT to_regclass('public.tkt_ticket_event_203106')"), 'A partition was kept from the run that gave up.');
+    }
+
+    #[Test]
+    public function itIsTheOnlyJobOnTheDefaultScheduleAndRunsOnceADay(): void
+    {
+        $scheduleProvider = self::getContainer()->get('scheduler.provider.default');
+        $firstRunAfter = new \DateTimeImmutable('2031-06-15 10:00:00 UTC');
+
+        $nextTwoRunsByJob = [];
+        foreach ($scheduleProvider->getSchedule()->getRecurringMessages() as $recurringMessage) {
+            $trigger = $recurringMessage->getTrigger();
+            foreach ($recurringMessage->getMessages(new MessageContext('default', $recurringMessage->getId(), $trigger, $firstRunAfter)) as $message) {
+                $job = $message instanceof ServiceCallMessage ? $message->getServiceId().'::'.$message->getMethod() : get_debug_type($message);
+                $firstRun = $trigger->getNextRunDate($firstRunAfter);
+                $nextTwoRunsByJob[$job] = [$firstRun?->format('Y-m-d H:i:s'), null === $firstRun ? null : $trigger->getNextRunDate($firstRun)?->format('Y-m-d H:i:s')];
+            }
+        }
+
+        self::assertSame([AddTicketEventPartitions::class.'::__invoke' => ['2031-06-16 10:00:00', '2031-06-17 10:00:00']], $nextTwoRunsByJob);
     }
 
     private function jobAt(string $now): AddTicketEventPartitions
