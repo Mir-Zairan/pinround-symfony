@@ -9,6 +9,7 @@ use App\Organization\Application\ChangeStepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrgSettingsStore;
+use App\Organization\Infrastructure\Doctrine\RequestScopedSettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -315,6 +316,8 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
      */
     private function moveTargetNames(): array
     {
+        $this->startTheNextRequest();
+
         return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->namesOf($this->stepQueries()->moveTargetsFor(new TeamId(self::SHOP_TEAM))));
     }
 
@@ -323,6 +326,8 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
      */
     private function rules(string $organizationId = self::ACME_FOODS): array
     {
+        $this->startTheNextRequest();
+
         return $this->transactions()->rolledBackAs($organizationId, function (): array {
             $rules = $this->ruleQueries()->rulesFor(new TeamId(self::SHOP_TEAM));
 
@@ -413,6 +418,15 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
     {
         $this->rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         new OrganizationRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), $this->tenantContext())->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+    }
+
+    /**
+     * Each read stands for a request of its own, so the step policy is read again as the kernel's reset makes it.
+     */
+    private function startTheNextRequest(): void
+    {
+        $settingsQueries = self::getContainer()->get(RequestScopedSettingsQueries::class);
+        $settingsQueries->reset();
     }
 
     private function policies(): StepPolicyRows

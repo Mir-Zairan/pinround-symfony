@@ -13,7 +13,9 @@ use App\SharedKernel\Domain\OrganizationId;
 interface SettingsQueries
 {
     /**
-     * One query. Extend, the default, when the organization has no settings row (or it is not visible under the
+     * One query, or none: the autowired one keeps each answer until the next request or message, so it does not see a
+     * change made since its first read in that request. A write that checks the policy in its own transaction is given
+     * the uncached one (services.yaml). Extend, the default, when the organization has no settings row (or it is not visible under the
      * current tenant) or the row has no step policy.
      *
      * @throws \LogicException when the stored step policy is not one of StepPolicy's values
