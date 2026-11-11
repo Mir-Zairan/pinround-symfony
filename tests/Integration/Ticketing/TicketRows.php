@@ -34,6 +34,19 @@ final readonly class TicketRows
     }
 
     /**
+     * A project with that key, of that team or none, whose next ticket gets the number nextNumber; nothing when the
+     * organization already has it.
+     */
+    public function addKeyedProjectOf(string $organizationId, string $projectId, ?string $teamId, string $key, int $nextNumber): void
+    {
+        $this->asTenant($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_project (organization_id, id, team_id, key, name, next_number) VALUES (?, ?, ?, ?, 'Shop', ?)
+             ON CONFLICT (organization_id, id) DO NOTHING",
+            [$organizationId, $projectId, $teamId, $key, $nextNumber],
+        ));
+    }
+
+    /**
      * A bug ticket SHOP-<number> in a To do step of the project, which it adds when missing, so rows of other tables can
      * point at it.
      */
@@ -61,6 +74,14 @@ final readonly class TicketRows
         $this->asTenant($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             'UPDATE tkt_ticket SET visibility = ?, team_id = ?, assignee_id = ?, pending_assignee_id = ?, reviewer_id = ?, tester_id = ?, waiting_on_user_id = ? WHERE id = ?',
             [$visibility, $teamId, ...array_values($people), $ticketId],
+        ));
+    }
+
+    public function closeOf(string $organizationId, string $ticketId): void
+    {
+        $this->asTenant($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET closed_at = '2027-03-16 10:00:00+00' WHERE id = ?",
+            [$ticketId],
         ));
     }
 
