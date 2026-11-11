@@ -4,16 +4,23 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Ticketing;
 
+use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
+use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
+use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketTurnSnapshot;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries;
+use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
@@ -34,6 +41,11 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
     private const string OMAR = '0197a3c0-0000-7000-8000-00000000a752';
     private const string MIA = '0197a3c0-0000-7000-8000-00000000a753';
     private const string RAJ = '0197a3c0-0000-7000-8000-00000000a754';
+    private const string SARA = '0197a3c0-0000-7000-8000-00000000a755';
+    private const string SECOND_TESTER = '0197a3c0-0000-7000-8000-00000000a756';
+    private const string ANOTHER_TEAM = '0197a3c0-0000-7000-8000-00000000a712';
+    private const string ANOTHER_TEAMS_STEP = '0197a3c0-0000-7000-8000-00000000a733';
+    private const string UNKNOWN_STEP = '0197a3c0-0000-7000-8000-00000000a734';
     private const array MORE_PEOPLE = [
         '0197a3c0-0000-7000-8000-00000000a761' => 'developer',
         '0197a3c0-0000-7000-8000-00000000a762' => 'developer',
@@ -134,16 +146,113 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function withNoTenantItRefusesBeforeAnyQuery(): void
+    public function theTicketsPeopleWaitAndHistoryColumnsReachTheSnapshot(): void
     {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            "UPDATE tkt_ticket SET pending_assignee_id = ?, reviewer_id = ?, tester_id = ?, waiting_on_user_id = ?,
+                    waiting_on_label = 'Supplier price list', previous_step_id = ?, release = '2027.3'
+             WHERE id = ?",
+            [self::RAJ, self::LENA, self::SECOND_TESTER, self::SARA, ShopTeamRows::BACKLOG_STEP, $ticketId->toString()],
+        ));
+
+        $snapshot = $this->factsAs(self::ACME_FOODS, $ticketId);
+
+        self::assertNotNull($snapshot);
+        self::assertSame(
+            [self::RAJ, self::LENA, self::SECOND_TESTER, self::SARA, 'Supplier price list', ShopTeamRows::BACKLOG_STEP, '2027.3', self::OMAR, self::MIA],
+            [
+                $snapshot->pendingAssigneeId?->toString(), $snapshot->reviewerId?->toString(), $snapshot->testerId?->toString(),
+                $snapshot->waitingOnUserId?->toString(), $snapshot->waitingOnLabel, $snapshot->previousStepId, $snapshot->release,
+                $snapshot->assigneeId?->toString(), $snapshot->reporterId->toString(),
+            ],
+        );
+    }
+
+    /**
+     * The step is another team's, so the Shop team's cached steps do not list it and its group comes from the
+     * organization's steps.
+     */
+    #[Test]
+    public function aStepTheTeamDoesNotListGivesItsGroupWithoutACoreCode(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $this->addStepOfAnotherTeam(self::ACME_FOODS, self::ANOTHER_TEAMS_STEP, 'doing');
+        $this->updateTicket('UPDATE tkt_ticket SET step_id = \''.self::ANOTHER_TEAMS_STEP.'\' WHERE id = ?', $ticketId);
+
+        $snapshot = $this->factsAs(self::ACME_FOODS, $ticketId);
+
+        self::assertNotNull($snapshot);
+        self::assertSame(
+            [self::ANOTHER_TEAMS_STEP, 'doing', null, self::SHOP_TEAM],
+            [$snapshot->stepId, $snapshot->groupCode, $snapshot->coreCode, $snapshot->teamId?->toString()],
+        );
+    }
+
+    #[Test]
+    public function aStepItsOrganizationDoesNotHaveIsAnError(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $this->updateTicket('UPDATE tkt_ticket SET step_id = \''.self::UNKNOWN_STEP.'\' WHERE id = ?', $ticketId);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('A ticket is in a step its organization does not have.');
+        $this->factsAs(self::ACME_FOODS, $ticketId);
+    }
+
+    /**
+     * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
+     * is another one: what still hides Acme Foods' ticket from Beta Bakery's transaction is row-level security alone.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTicket(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        self::assertNotNull($this->factsAs(self::ACME_FOODS, $ticketId));
+
+        $snapshotUnderAcmeContext = $this->onOwnConnectionAs(self::BETA_BAKERY, function (Connection $connection) use ($ticketId): ?TicketTurnSnapshot {
+            $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+            $stepQueries = self::getContainer()->get('test.workflow_step_queries');
+            self::assertInstanceOf(StepQueries::class, $stepQueries);
+
+            return new DbalTicketTurnQueries($connection, $this->tenantContext(), $stepQueries, new DbalTeamQueries($connection), new DbalUserQueries($connection))
+                ->factsOf($ticketId);
+        });
+
+        self::assertNull($snapshotUnderAcmeContext);
+    }
+
+    #[Test]
+    public function withNoTransactionItRefusesBeforeAnyQuery(): void
+    {
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         $debugData = $this->debugData();
         $debugData->reset();
 
         try {
             $this->turnQueries()->factsOf(new TicketId(self::SHOP_PROJECT));
+            self::fail('The ticket was read with no transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame(
+                ['A ticket\'s turn facts are read in a transaction under the organization as tenant; none is open.', 0],
+                [$refusal->getMessage(), self::queryCountOf($debugData)],
+            );
+        }
+    }
+
+    #[Test]
+    public function withNoTenantItRefusesBeforeAnyQuery(): void
+    {
+        $debugData = $this->debugData();
+        $this->connection()->beginTransaction();
+        try {
+            $debugData->reset();
+            $this->turnQueries()->factsOf(new TicketId(self::SHOP_PROJECT));
             self::fail('The ticket was read with no tenant.');
         } catch (TenantNotSet) {
             self::assertSame(0, self::queryCountOf($debugData));
+        } finally {
+            $this->connection()->rollBack();
         }
     }
 
@@ -189,6 +298,46 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
     private function updateTicket(string $sql, TicketId $ticketId): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement($sql, [$ticketId->toString()]));
+    }
+
+    private function addStepOfAnotherTeam(string $organizationId, string $stepId, string $groupCode): void
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $this->tenantContext()->set(new OrganizationId($organizationId));
+        try {
+            $migrator->transactional(static fn (): int|string => $migrator->executeStatement(
+                "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, ?, 'Pairing', ?, NULL, 'team', 5)",
+                [$organizationId, $stepId, self::ANOTHER_TEAM, $groupCode],
+            ));
+        } finally {
+            $this->tenantContext()->clear();
+        }
+    }
+
+    /**
+     * Runs $work in a rolled-back transaction under $organizationId as tenant, on a connection of its own.
+     *
+     * @template T
+     *
+     * @param \Closure(Connection): T $work
+     *
+     * @return T
+     */
+    private function onOwnConnectionAs(string $organizationId, \Closure $work): mixed
+    {
+        $this->tenantContext()->set(new OrganizationId($organizationId));
+        $connection = new CloseOnFailedBeginConnection(
+            $this->connection()->getParams(),
+            new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver()),
+        );
+        $connection->beginTransaction();
+        try {
+            return $work($connection);
+        } finally {
+            $connection->rollBack();
+            $connection->close();
+            $this->tenantContext()->clear();
+        }
     }
 
     private function factsAs(string $organizationId, TicketId $ticketId): ?TicketTurnSnapshot
@@ -265,6 +414,11 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
 
     private function transactions(): TenantTransactions
     {
-        return new TenantTransactions($this->entityManager(), self::getContainer()->get(TenantContext::class));
+        return new TenantTransactions($this->entityManager(), $this->tenantContext());
+    }
+
+    private function tenantContext(): TenantContext
+    {
+        return self::getContainer()->get(TenantContext::class);
     }
 }

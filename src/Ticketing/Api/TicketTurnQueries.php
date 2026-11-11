@@ -20,8 +20,8 @@ interface TicketTurnQueries
      *
      * @return TicketTurnSnapshot|null null when the organization has no ticket with this id
      *
-     * @throws \LogicException when no tenant is set, before any query; when the ticket's step or team is not the
-     *                         organization's, or the lead of its team is no user
+     * @throws \LogicException when no transaction is open or no tenant is set, before any query; when the ticket's
+     *                         step or team is not the organization's, or the lead of its team is no user
      */
     public function factsOf(TicketId $ticketId): ?TicketTurnSnapshot;
 }

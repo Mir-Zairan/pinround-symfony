@@ -14,7 +14,6 @@ use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TeamMemberLoad;
 use App\Workflow\Api\TicketState;
-use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -84,16 +83,16 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
             return [];
         }
 
+        // One array literal keeps the SQL text the same for any team size; a UserId is a uuid, so needs no quoting.
         $rows = $this->connection->fetchAllAssociative(
             "SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn
-             WHERE organization_id = ? AND turn_user_id IN (?) AND kind IN ('review', 'test') AND ticket_id <> ?
+             WHERE organization_id = ? AND turn_user_id = ANY(?::uuid[]) AND kind IN ('review', 'test') AND ticket_id <> ?
              GROUP BY turn_user_id, kind",
             [
                 $this->tenantContext->require()->toString(),
-                array_map(static fn (UserId $userId): string => $userId->toString(), $userIds),
+                '{'.implode(',', array_map(static fn (UserId $userId): string => $userId->toString(), $userIds)).'}',
                 $ticketId->toString(),
             ],
-            [1 => ArrayParameterType::STRING],
         );
 
         $loads = [];

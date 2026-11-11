@@ -33,6 +33,10 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
 
     public function factsOf(TicketId $ticketId): ?TicketTurnSnapshot
     {
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('A ticket\'s turn facts are read in a transaction under the organization as tenant; none is open.');
+        }
+
         $row = $this->connection->fetchAssociative(
             "SELECT project_id, step_id, previous_step_id, team_id, visibility, priority, release, reporter_id, assignee_id,
                     pending_assignee_id, reviewer_id, tester_id, waiting_on_user_id, waiting_on_label,

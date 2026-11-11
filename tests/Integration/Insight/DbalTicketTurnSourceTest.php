@@ -7,16 +7,22 @@ namespace App\Tests\Integration\Insight;
 use App\Insight\Api\TurnProjector;
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TicketTurnSource;
+use App\Insight\Infrastructure\Doctrine\DbalTicketTurnSource;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
+use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Workflow\Api\TeamMemberLoad;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -35,6 +41,8 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
     private const string OMAR = '0197a3c0-0000-7000-8000-00000000b752';
     private const string MIA = '0197a3c0-0000-7000-8000-00000000b753';
     private const string RAJ = '0197a3c0-0000-7000-8000-00000000b754';
+    private const string SARA = '0197a3c0-0000-7000-8000-00000000b755';
+    private const string SECOND_TESTER = '0197a3c0-0000-7000-8000-00000000b756';
     private const string FIRST_OTHER_TICKET = '0197a3c0-0000-7000-8000-00000000b731';
     private const string SECOND_OTHER_TICKET = '0197a3c0-0000-7000-8000-00000000b732';
     private const string THIRD_OTHER_TICKET = '0197a3c0-0000-7000-8000-00000000b733';
@@ -133,6 +141,77 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         );
     }
 
+    #[Test]
+    public function theTicketStateCarriesTheTicketsColumns(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            "UPDATE tkt_ticket SET pending_assignee_id = ?, reviewer_id = ?, tester_id = ?, waiting_on_user_id = ?,
+                    waiting_on_label = 'Supplier price list', previous_step_id = ?, release = '2027.3', check_reasons = '{risk}'
+             WHERE id = ?",
+            [self::RAJ, self::LENA, self::SECOND_TESTER, self::SARA, ShopTeamRows::BACKLOG_STEP, $ticketId->toString()],
+        ));
+
+        $facts = $this->factsAs(self::ACME_FOODS, $ticketId);
+
+        self::assertNotNull($facts);
+        $ticket = $facts->ticket;
+        self::assertSame(
+            [
+                ShopTeamRows::TO_DO_STEP, 'todo', 'todo', self::SHOP_TEAM, self::OMAR, self::LENA, self::SECOND_TESTER, self::RAJ,
+                ShopTeamRows::BACKLOG_STEP, self::MIA, self::SARA, 'Supplier price list', 'major', '2027.3',
+                $ticketId->toString(), self::SHOP_PROJECT, 'all', true,
+            ],
+            [
+                $ticket->stepId, $ticket->coreCode, $ticket->groupCode, $ticket->teamId?->toString(), $ticket->assigneeId?->toString(),
+                $ticket->reviewerId?->toString(), $ticket->testerId?->toString(), $ticket->pendingAssigneeId?->toString(),
+                $ticket->previousStepId, $ticket->reporterId?->toString(), $ticket->waitingOnUserId?->toString(),
+                $ticket->waitingOnLabel, $ticket->priority, $ticket->release,
+                $facts->ticketId->toString(), $facts->projectId, $facts->visibility, $facts->isRiskCheck,
+            ],
+        );
+    }
+
+    /**
+     * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
+     * is another one: what still hides Acme Foods' review turns from Beta Bakery's transaction is row-level security
+     * alone. The ticket's snapshot is the one read under Acme Foods, so only the load query runs under Beta Bakery.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTurnsFromTheLoads(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $ticketRows = $this->ticketRows();
+        $ticketRows->addOf(self::ACME_FOODS, self::FIRST_OTHER_TICKET, self::SHOP_PROJECT, self::MIA, 1);
+        $ticketRows->addOf(self::ACME_FOODS, self::SECOND_OTHER_TICKET, self::SHOP_PROJECT, self::MIA, 2);
+        $this->addTurn(self::ACME_FOODS, self::FIRST_OTHER_TICKET, self::OMAR, 'review');
+        $this->addTurn(self::ACME_FOODS, self::SECOND_OTHER_TICKET, self::OMAR, 'review');
+        $factsUnderAcme = $this->factsAs(self::ACME_FOODS, $ticketId);
+        self::assertNotNull($factsUnderAcme);
+        self::assertSame([self::LENA => [0, 0], self::OMAR => [2, 0]], self::loadsOf($factsUnderAcme->team->developers));
+        $snapshotUnderAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketTurnSnapshot => $this->turnQueries()->factsOf($ticketId));
+        self::assertNotNull($snapshotUnderAcme);
+
+        $factsUnderAcmeContext = $this->onOwnConnectionAs(self::BETA_BAKERY, function (Connection $connection) use ($snapshotUnderAcme, $ticketId): ?TicketTurnFacts {
+            $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+            $turnQueries = new readonly class($snapshotUnderAcme) implements TicketTurnQueries {
+                public function __construct(private TicketTurnSnapshot $snapshot)
+                {
+                }
+
+                public function factsOf(TicketId $ticketId): TicketTurnSnapshot
+                {
+                    return $this->snapshot;
+                }
+            };
+
+            return new DbalTicketTurnSource($turnQueries, $connection, $this->tenantContext())->factsFor($ticketId);
+        });
+
+        self::assertNotNull($factsUnderAcmeContext);
+        self::assertSame([self::LENA => [0, 0], self::OMAR => [0, 0]], self::loadsOf($factsUnderAcmeContext->team->developers));
+    }
+
     /**
      * @param list<TeamMemberLoad> $members
      *
@@ -179,6 +258,32 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         ));
     }
 
+    /**
+     * Runs $work in a rolled-back transaction under $organizationId as tenant, on a connection of its own.
+     *
+     * @template T
+     *
+     * @param \Closure(Connection): T $work
+     *
+     * @return T
+     */
+    private function onOwnConnectionAs(string $organizationId, \Closure $work): mixed
+    {
+        $this->tenantContext()->set(new OrganizationId($organizationId));
+        $connection = new CloseOnFailedBeginConnection(
+            $this->connection()->getParams(),
+            new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver()),
+        );
+        $connection->beginTransaction();
+        try {
+            return $work($connection);
+        } finally {
+            $connection->rollBack();
+            $connection->close();
+            $this->tenantContext()->clear();
+        }
+    }
+
     private function factsAs(string $organizationId, TicketId $ticketId): ?TicketTurnFacts
     {
         return $this->transactions()->rolledBackAs($organizationId, fn (): ?TicketTurnFacts => $this->source()->factsFor($ticketId));
@@ -201,6 +306,14 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         self::assertInstanceOf(TicketTurnSource::class, $source);
 
         return $source;
+    }
+
+    private function turnQueries(): TicketTurnQueries
+    {
+        $turnQueries = self::getContainer()->get('test.ticketing_ticket_turn_queries');
+        self::assertInstanceOf(TicketTurnQueries::class, $turnQueries);
+
+        return $turnQueries;
     }
 
     private function projector(): TurnProjector
@@ -238,6 +351,11 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
 
     private function transactions(): TenantTransactions
     {
-        return new TenantTransactions($this->entityManager(), self::getContainer()->get(TenantContext::class));
+        return new TenantTransactions($this->entityManager(), $this->tenantContext());
+    }
+
+    private function tenantContext(): TenantContext
+    {
+        return self::getContainer()->get(TenantContext::class);
     }
 }
