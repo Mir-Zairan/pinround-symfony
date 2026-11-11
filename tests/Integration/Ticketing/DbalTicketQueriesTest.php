@@ -123,7 +123,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
         $groups = $this->listedAs(self::ACME_FOODS, $this->filter());
         [$doing, $toDo] = [$groups[0]->steps[0], $groups[1]->steps[0]];
 
-        self::assertSame([50, 50, false, null], [$doing->ticketCount, \count($doing->rows), $doing->hasMore(), $doing->nextCursor]);
+        self::assertSame([50, false, 50, false, null], [$doing->ticketCount, $doing->isCountCapped, \count($doing->rows), $doing->hasMore(), $doing->nextCursor]);
         self::assertSame(array_reverse($doingKeys), self::keysOf($doing));
         self::assertSame([51, true], [$toDo->ticketCount, $toDo->hasMore()]);
         self::assertSame(\array_slice(array_reverse($toDoKeys), 0, TicketListStep::PAGE_SIZE), self::keysOf($toDo));
@@ -134,6 +134,29 @@ final class DbalTicketQueriesTest extends KernelTestCase
 
         self::assertSame([['todo', 'To do', 'Not started', [['To do', false]]]], self::shapeOf($nextPage));
         self::assertSame([51, false, [$toDoKeys[0]]], [$nextPage[0]->steps[0]->ticketCount, $nextPage[0]->steps[0]->hasMore(), self::keysOf($nextPage[0]->steps[0])]);
+    }
+
+    /**
+     * To do holds one ticket past the cap, so it reports the cap and capped, on the first page and after its cursor;
+     * Doing holds exactly the cap, so its count is whole.
+     */
+    #[Test]
+    public function aStepCountsAtMostTheCapAndSaysWhenItHoldsMore(): void
+    {
+        $this->addManyTickets(ShopTeamRows::TO_DO_STEP, TicketListStep::COUNT_CAP + 1);
+        $this->addManyTickets(self::DOING_STEP, TicketListStep::COUNT_CAP);
+
+        $groups = $this->listedAs(self::ACME_FOODS, $this->filter());
+        [$doing, $toDo] = [$groups[0]->steps[0], $groups[1]->steps[0]];
+
+        self::assertSame([1000, false], [$doing->ticketCount, $doing->isCountCapped]);
+        self::assertSame([1000, true, TicketListStep::PAGE_SIZE], [$toDo->ticketCount, $toDo->isCountCapped, \count($toDo->rows)]);
+
+        $cursor = $toDo->nextCursor;
+        self::assertNotNull($cursor);
+        $nextStep = $this->listedAs(self::ACME_FOODS, $this->filter(), $cursor)[0]->steps[0];
+
+        self::assertSame([1000, true], [$nextStep->ticketCount, $nextStep->isCountCapped]);
     }
 
     /**
@@ -337,6 +360,24 @@ final class DbalTicketQueriesTest extends KernelTestCase
         }
 
         return $keys;
+    }
+
+    /**
+     * Normal tickets in one statement, as a thousand inserts one by one would be slow; their order does not matter.
+     */
+    private function addManyTickets(string $stepId, int $count): void
+    {
+        $firstNumber = $this->nextNumber;
+        $this->nextNumber += $count;
+        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_ticket (organization_id, id, project_id, number, key, title, description, type, priority, priority_rank,
+                 step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
+             SELECT CAST(? AS uuid), CAST('0197a3c0-0000-7000-8000-' || lpad(to_hex(7405568 + number), 12, '0') AS uuid), CAST(? AS uuid),
+                 number, 'SHOP-' || number, 'Checkout button is hidden', '', 'bug', 'normal', 3, CAST(? AS uuid), CAST(? AS uuid), 'all',
+                 '{}', '{}', TIMESTAMPTZ '2027-03-15 08:00:00+00', TIMESTAMPTZ '2027-03-15 08:00:00+00' + number * INTERVAL '1 minute'
+             FROM generate_series(CAST(? AS int), CAST(? AS int)) AS number",
+            [self::ACME_FOODS, self::SHOP_PROJECT, $stepId, self::LENA, $firstNumber, $firstNumber + $count - 1],
+        ));
     }
 
     private static function queryCountOf(DebugDataHolder $debugData): int

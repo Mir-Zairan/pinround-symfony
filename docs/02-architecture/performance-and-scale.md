@@ -97,6 +97,7 @@ Result: ≤ 8 queries (the Home budget), all index-only or index-range scans.
 - Indexes: see [data-model.md › Index catalogue](data-model.md#index-catalogue) (one project, or "All projects" of a team).
 - Default hides done steps (most rows), so the scan stays small.
 - **One query for all steps:** a `LATERAL` subquery takes the first 51 rows of each step (50 shown + 1 to know there is more), so the page stays within its ≤ 5-query budget. "Show more" in one step uses keyset pagination for that step only.
+- **Step counts are capped at 1,000:** each step counts at most 1,001 visible tickets in the row order, through the same index, so a big step (Done) never reads all its rows; past 1,000 the page shows "1,000+".
 - Project rail counts come from the read model `ins_project_counts`, not from `count(*)` on tickets.
 - "Turn:" and "To check by" come from the joined `ins_ticket_turn` row (same query).
 

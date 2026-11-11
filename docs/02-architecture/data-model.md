@@ -412,8 +412,16 @@ All examples run as `pinround_app` with the tenant set, and all add the [ticket 
 **Ticket list grouped by step — one query for all steps** (the list budget is ≤ 5 queries per page, so no query per step). A `LATERAL` subquery takes the first 51 rows of each step (51 = 50 shown + 1 to know there is more); "Show more" in one step then uses keyset pagination for that step only:
 
 ```sql
-SELECT s.id AS step_id, x.*
+SELECT s.id AS step_id, c.ticket_count, x.*
 FROM wf_step s
+CROSS JOIN LATERAL (                           -- the step's count, capped: at most 1,001 rows, in the index's order
+  SELECT count(*) AS ticket_count FROM (
+    SELECT 1 FROM tkt_ticket t
+    WHERE t.organization_id = :org AND t.project_id = ANY(:projects) AND t.step_id = s.id AND <visible(t)>
+    ORDER BY t.priority_rank, t.updated_at DESC, t.id DESC
+    LIMIT 1001
+  ) capped
+) c
 CROSS JOIN LATERAL (
   SELECT t.id, t.key, t.title, t.priority_rank, t.assignee_id, t.updated_at
   FROM tkt_ticket t
@@ -436,6 +444,8 @@ WHERE s.organization_id = :org AND s.id = ANY(:visible_step_ids);
 ORDER BY t.priority_rank, t.updated_at DESC, t.id DESC
 LIMIT 51;
 ```
+
+The step count is the same capped `LATERAL` on the first page and after a cursor. A count of 1,001 means more than 1,000, which the page shows as "1,000+", so a step that holds most of the table (Done) never reads all its rows.
 
 The cursor is sent to the browser as an opaque, signed string. The turn data for the rows is read in one batch from `ins_ticket_turn` by the Insight query service (the only allowed Ticketing + Insight join, through the view `tkt_ticket_list_v`).
 

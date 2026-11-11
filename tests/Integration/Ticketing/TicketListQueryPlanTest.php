@@ -22,9 +22,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 /**
  * The plan of the tickets list over 10,000 tickets of one organization, as pinround_app under row-level security: it
  * reads tkt_ticket through an index, never a sequential scan (performance-and-scale.md). Omar is a member of the Shop
- * team, so the visibility predicate is the full one, not an admin's. A step's count reads all its visible tickets, so
- * when one step holds a large share of the table the planner rightly prefers a sequential scan; the seed spreads the
- * open tickets over many steps, as an organization of several teams has them.
+ * team, so the visibility predicate is the full one, not an admin's. As in an organization that has worked for years,
+ * 70% of the tickets are in Done and the open ones sit in four core steps, so each step holds a large share of the table.
  */
 final class TicketListQueryPlanTest extends KernelTestCase
 {
@@ -33,11 +32,10 @@ final class TicketListQueryPlanTest extends KernelTestCase
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000072d1';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000072b1';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000072b2';
+    private const string IN_PROGRESS_STEP = '0197a3c0-0000-7000-8000-0000000072f1';
+    private const string CODE_REVIEW_STEP = '0197a3c0-0000-7000-8000-0000000072f2';
+    private const string NEEDS_INPUT_STEP = '0197a3c0-0000-7000-8000-0000000072f3';
     private const string DONE_STEP = '0197a3c0-0000-7000-8000-0000000072f0';
-    /** Open step n's id is this prefix and n in 12 hex digits. */
-    private const string OPEN_STEP_ID_PREFIX = '0197a3c0-0000-7000-8002-';
-    private const string FIRST_OPEN_STEP = '0197a3c0-0000-7000-8002-000000000001';
-    private const int OPEN_STEP_COUNT = 40;
     private const int TICKET_COUNT = 10_000;
 
     protected function setUp(): void
@@ -47,33 +45,33 @@ final class TicketListQueryPlanTest extends KernelTestCase
             self::LENA => ['Lena', 'lead', 'developer'],
             self::OMAR => ['Omar', 'member', 'developer'],
         ]);
-        // As in an organization of several teams, most tickets are done and the open ones spread over many steps: 14 of
-        // every 20 are in Done, the others in OPEN_STEP_COUNT company steps of the four open groups.
+        // Of every 20 tickets 14 are in Done, 3 in To do and 1 in each of In progress, Code review and Needs input.
         $this->asTenantMigrator(static function (Connection $migrator): void {
-            $migrator->executeStatement(
-                "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'Done', 'done', 'done', 'core', 0)",
-                [self::ACME_FOODS, self::DONE_STEP],
-            );
-            $migrator->executeStatement(
-                "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position)
-                 SELECT CAST(? AS uuid), CAST(? || lpad(to_hex(step_number), 12, '0') AS uuid), NULL, 'Step ' || step_number,
-                     (ARRAY['todo', 'doing', 'check', 'wait'])[step_number % 4 + 1], NULL, 'company', step_number
-                 FROM generate_series(1, ?) AS step_number",
-                [self::ACME_FOODS, self::OPEN_STEP_ID_PREFIX, self::OPEN_STEP_COUNT],
-            );
+            foreach ([
+                [self::IN_PROGRESS_STEP, 'In progress', 'doing', 'progress', 2],
+                [self::CODE_REVIEW_STEP, 'Code review', 'check', 'review', 3],
+                [self::NEEDS_INPUT_STEP, 'Needs input', 'wait', 'input', 5],
+                [self::DONE_STEP, 'Done', 'done', 'done', 7],
+            ] as $step) {
+                $migrator->executeStatement(
+                    "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, ?, ?, ?, 'core', ?)",
+                    [self::ACME_FOODS, ...$step],
+                );
+            }
             $migrator->executeStatement(
                 "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
                      step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
                  SELECT CAST(? AS uuid), CAST('0197a3c0-0000-7000-8001-' || lpad(to_hex(number), 12, '0') AS uuid), CAST(? AS uuid), CAST(? AS uuid),
                      number, 'SHOP-' || number, 'Checkout button is hidden', '', 'bug',
                      (ARRAY['blocker', 'critical', 'major', 'normal', 'minor'])[number % 5 + 1], number % 5,
-                     CASE WHEN number % 20 < 14 THEN CAST(? AS uuid) ELSE CAST(? || lpad(to_hex(number / 20 % CAST(? AS int) + 1), 12, '0') AS uuid) END,
+                     CASE WHEN number % 20 < 14 THEN CAST(? AS uuid) WHEN number % 20 < 17 THEN CAST(? AS uuid)
+                         WHEN number % 20 = 17 THEN CAST(? AS uuid) WHEN number % 20 = 18 THEN CAST(? AS uuid) ELSE CAST(? AS uuid) END,
                      CAST(? AS uuid), CASE WHEN number % 3 = 0 THEN 'team' ELSE 'all' END, '{}', '{}',
                      TIMESTAMPTZ '2027-03-15 08:00:00+00', TIMESTAMPTZ '2027-03-15 08:00:00+00' + number * INTERVAL '1 minute'
                  FROM generate_series(1, ?) AS number",
                 [
-                    self::ACME_FOODS, self::SHOP_PROJECT, self::SHOP_TEAM, self::DONE_STEP, self::OPEN_STEP_ID_PREFIX,
-                    self::OPEN_STEP_COUNT, self::LENA, self::TICKET_COUNT,
+                    self::ACME_FOODS, self::SHOP_PROJECT, self::SHOP_TEAM, self::DONE_STEP, ShopTeamRows::TO_DO_STEP, self::IN_PROGRESS_STEP,
+                    self::CODE_REVIEW_STEP, self::NEEDS_INPUT_STEP, self::LENA, self::TICKET_COUNT,
                 ],
             );
         });
@@ -92,24 +90,30 @@ final class TicketListQueryPlanTest extends KernelTestCase
     #[Test]
     public function theFirstPageReadsTicketsThroughAnIndex(): void
     {
-        $this->assertReadsTicketsThroughAnIndex($this->planOf(null, null));
+        $this->assertReadsTicketsThroughAnIndex($this->planOf(null, false, null));
     }
 
     #[Test]
-    public function oneProjectsFirstPageReadsTicketsThroughAnIndex(): void
+    public function theFirstPageWithDoneReadsTicketsThroughAnIndex(): void
     {
-        $this->assertReadsTicketsThroughAnIndex($this->planOf(self::SHOP_PROJECT, null));
+        $this->assertReadsTicketsThroughAnIndex($this->planOf(null, true, null));
+    }
+
+    #[Test]
+    public function oneProjectsFirstPageWithDoneReadsTicketsThroughAnIndex(): void
+    {
+        $this->assertReadsTicketsThroughAnIndex($this->planOf(self::SHOP_PROJECT, true, null));
     }
 
     /**
-     * After a cursor the step's count is a subquery over tkt_ticket of its own, which must use an index too.
+     * Done holds 7,000 of the 10,000 tickets, the step most likely to tempt the planner into a sequential scan.
      */
     #[Test]
-    public function aNextPageReadsTicketsThroughAnIndex(): void
+    public function aNextPageOfDoneReadsTicketsThroughAnIndex(): void
     {
-        $cursor = new Cursor(self::FIRST_OPEN_STEP, 2, new \DateTimeImmutable('2027-03-17 08:00:00 UTC'), new TicketId('0197a3c0-0000-7000-8001-000000000bb8'));
+        $cursor = new Cursor(self::DONE_STEP, 2, new \DateTimeImmutable('2027-03-17 08:02:00 UTC'), new TicketId('0197a3c0-0000-7000-8001-000000000b42'));
 
-        $this->assertReadsTicketsThroughAnIndex($this->planOf(null, $cursor));
+        $this->assertReadsTicketsThroughAnIndex($this->planOf(null, true, $cursor));
     }
 
     private function assertReadsTicketsThroughAnIndex(string $plan): void
@@ -121,14 +125,14 @@ final class TicketListQueryPlanTest extends KernelTestCase
     /**
      * The list's SQL and parameters as Omar's page sends them, explained in the same transaction under Acme Foods.
      */
-    private function planOf(?string $projectId, ?Cursor $cursor): string
+    private function planOf(?string $projectId, bool $showsDone, ?Cursor $cursor): string
     {
         $debugData = $this->debugData();
 
-        return $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $projectId, $cursor): string {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $projectId, $showsDone, $cursor): string {
             $visibility = $this->ticketVisibilities()->of(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR));
             $debugData->reset();
-            $this->ticketQueries()->list(new ListFilter($visibility, $projectId), $cursor);
+            $this->ticketQueries()->list(new ListFilter($visibility, $projectId, $showsDone), $cursor);
             [$sql, $parameters] = self::listQueryOf($debugData);
 
             $planLines = $this->connection()->fetchFirstColumn('EXPLAIN '.$sql, $parameters);

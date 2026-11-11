@@ -57,15 +57,16 @@ final readonly class DbalTicketQueries implements TicketQueries
     }
 
     /**
-     * Without a cursor the LATERAL counts the step's visible tickets with count(*) OVER (), as the window runs before
-     * its LIMIT; after a cursor the keyset condition narrows the LATERAL, so a subquery counts the whole step.
+     * The step's count is its own LATERAL, run once per step and the same with or without a cursor: it counts at most
+     * COUNT_CAP + 1 visible tickets in the row fetch's order, so it reads the same index and stops there.
      *
      * @return array{string, array<string, string|int>}
      */
     private function listQuery(ListFilter $filter, ?Cursor $cursor, string $organizationId): array
     {
         $visibleTicket = TicketVisibilitySql::of($filter->visibility, self::TICKET_ALIAS);
-        $parameters = ['organization' => $organizationId, ...$visibleTicket->parameters()];
+        $visibleCounted = TicketVisibilitySql::of($filter->visibility, self::COUNTED_ALIAS);
+        $parameters = ['organization' => $organizationId, ...$visibleTicket->parameters(), ...$visibleCounted->parameters()];
         $ticketConditions = 'ticket.organization_id = CAST(:organization AS uuid) AND ticket.step_id = step.id';
         $countedConditions = 'counted.organization_id = CAST(:organization AS uuid) AND counted.step_id = step.id';
         if (null !== $filter->projectId) {
@@ -82,14 +83,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         $stepConditions = 'step.organization_id = CAST(:organization AS uuid)'
             ." AND step.grp IN ('".implode("', '", $shownGroups)."')";
 
-        if (null === $cursor) {
-            $ticketCount = ', count(*) OVER () AS ticket_count';
-            $outerCount = 'page.ticket_count';
-        } else {
-            $visibleCounted = TicketVisibilitySql::of($filter->visibility, self::COUNTED_ALIAS);
-            $ticketCount = '';
-            $outerCount = '(SELECT count(*) FROM tkt_ticket AS counted WHERE '.$countedConditions.' AND '.$visibleCounted->sql().')';
-            $parameters = [...$parameters, ...$visibleCounted->parameters()];
+        if (null !== $cursor) {
             $ticketConditions .= ' AND (ticket.priority_rank > CAST(:after_rank AS smallint)'
                 .' OR (ticket.priority_rank = CAST(:after_rank AS smallint)'
                 .' AND (ticket.updated_at, ticket.id) < (CAST(:after_updated_at AS timestamptz), CAST(:after_id AS uuid))))';
@@ -102,11 +96,17 @@ final readonly class DbalTicketQueries implements TicketQueries
 
         $sql = 'SELECT step.id AS step_id, step.name AS step_name, step.grp, step.archived_at IS NOT NULL AS is_archived,'
             .' page.id, page.key, page.title, page.type, page.release, page.priority, page.priority_rank, page.assignee_id,'
-            .' page.updated_at, '.$outerCount.' AS ticket_count'
+            .' page.updated_at, step_count.ticket_count'
             .' FROM wf_step AS step'
+            .' CROSS JOIN LATERAL (SELECT count(*) AS ticket_count FROM ('
+            .'SELECT 1 FROM tkt_ticket AS counted'
+            .' WHERE '.$countedConditions.' AND '.$visibleCounted->sql()
+            .' ORDER BY counted.priority_rank, counted.updated_at DESC, counted.id DESC'
+            .' LIMIT '.(TicketListStep::COUNT_CAP + 1)
+            .') AS capped) AS step_count'
             .' CROSS JOIN LATERAL ('
             .'SELECT ticket.id, ticket.key, ticket.title, ticket.type, ticket.release, ticket.priority, ticket.priority_rank,'
-            .' ticket.assignee_id, ticket.updated_at'.$ticketCount
+            .' ticket.assignee_id, ticket.updated_at'
             .' FROM tkt_ticket AS ticket'
             .' WHERE '.$ticketConditions.' AND '.$visibleTicket->sql()
             .' ORDER BY ticket.priority_rank, ticket.updated_at DESC, ticket.id DESC'
@@ -163,7 +163,8 @@ final readonly class DbalTicketQueries implements TicketQueries
                 $stepId,
                 $name,
                 $isArchived,
-                $ticketCount,
+                min($ticketCount, TicketListStep::COUNT_CAP),
+                $ticketCount > TicketListStep::COUNT_CAP,
                 array_map(static function (array $row) use ($stepId, $turnUsers, $users): TicketListRow {
                     $ticketId = self::text($row['id'], 'ticket id');
                     $assigneeId = null === $row['assignee_id'] ? null : new UserId(self::text($row['assignee_id'], 'assignee id'));
