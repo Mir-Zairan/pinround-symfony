@@ -75,7 +75,8 @@ final class EmailInvitationLinkHandlerTest extends KernelTestCase
         $capturedLogRecords->clear();
 
         self::runTheWorkerUntilIdle('outbox');
-        // Not the last envelope: setUpShop's events share the second of the invite, and the outbox reads by available_at alone.
+        // Not the last envelope: setUpShop's events share the second of the invite, and the relay keeps no order within a
+        // second (see data-model.md, messenger_outbox).
         self::assertCount(1, $this->sentEnvelopesOf(MemberInvited::class));
         self::assertCount(0, self::getMailerMessages(), 'The relay only moves the event; worker-notify sends the email.');
 
