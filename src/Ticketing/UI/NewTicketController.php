@@ -106,7 +106,7 @@ final class NewTicketController extends AbstractController
             return $this->transactions->run(function (): Response {
                 $actor = $this->requestActor();
 
-                return $this->renderForm($actor, $this->creatableChoicesOf($actor), new TicketFormInput());
+                return $this->renderTicketForm($actor, $this->creatableChoicesOf($actor), new TicketFormInput());
             });
         }
 
@@ -119,7 +119,7 @@ final class NewTicketController extends AbstractController
                 $actor = $this->requestActor();
                 $choices = $this->creatableChoicesOf($actor);
                 if (!$this->isCsrfTokenValid(self::CSRF_ID, $csrfToken)) {
-                    throw new TicketFormRefused($this->renderForm($actor, $choices, $input, ['form' => self::FORM_EXPIRED]));
+                    throw new TicketFormRefused($this->renderTicketForm($actor, $choices, $input, ['form' => self::FORM_EXPIRED]));
                 }
                 $project = $this->chosenProject($choices, $input->projectId);
                 // Second line of defence: chosenProject only returns a choice the voter already granted.
@@ -133,7 +133,7 @@ final class NewTicketController extends AbstractController
                     $errors['assignee'] = self::ASSIGNEE_NOT_LED;
                 }
                 if ([] !== $errors) {
-                    throw new TicketFormRefused($this->renderForm($actor, $choices, $input, $errors));
+                    throw new TicketFormRefused($this->renderTicketForm($actor, $choices, $input, $errors));
                 }
 
                 try {
@@ -161,7 +161,7 @@ final class NewTicketController extends AbstractController
                     throw $this->createAccessDeniedException('You may not make tickets in that project.');
                 }
 
-                throw new TicketFormRefused($this->renderForm($actor, $choices, $input, $errors));
+                throw new TicketFormRefused($this->renderTicketForm($actor, $choices, $input, $errors));
             });
         } catch (TicketFormRefused $refused) {
             return $refused->formPage();
@@ -249,7 +249,7 @@ final class NewTicketController extends AbstractController
      * @param list<TeamProjectChoice> $choices
      * @param array<string, string>   $errors  by field, with "form" for the whole form
      */
-    private function renderForm(ActorContext $actor, array $choices, TicketFormInput $input, array $errors = []): Response
+    private function renderTicketForm(ActorContext $actor, array $choices, TicketFormInput $input, array $errors = []): Response
     {
         $assignableTeamIds = $this->assignableTeamIdsOf($choices);
 

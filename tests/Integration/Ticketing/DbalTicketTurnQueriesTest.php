@@ -139,7 +139,7 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         ));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The lead of a ticket\'s team is no user.');
+        $this->expectExceptionMessageIsOrContains('The lead of a ticket\'s team is no user.');
         $this->factsAs(self::ACME_FOODS, $ticketId);
     }
 
@@ -194,7 +194,7 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         $this->updateTicket('UPDATE tkt_ticket SET step_id = \''.self::UNKNOWN_STEP.'\' WHERE id = ?', $ticketId);
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('A ticket is in a step its organization does not have.');
+        $this->expectExceptionMessageIsOrContains('A ticket is in a step its organization does not have.');
         $this->factsAs(self::ACME_FOODS, $ticketId);
     }
 

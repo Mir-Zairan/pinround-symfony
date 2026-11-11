@@ -59,7 +59,7 @@ final class TicketTurnSnapshotTest extends TestCase
     public function aTeamLeadAndNameNotAllPresentOrAllAbsentAreRefused(bool $hasTeam, bool $hasLead, bool $hasLeadName): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A ticket has a team lead and their name exactly when it has a team.');
+        $this->expectExceptionMessageIsOrContains('A ticket has a team lead and their name exactly when it has a team.');
 
         self::snapshot($hasTeam, $hasLead, $hasLeadName, 'all');
     }
@@ -79,7 +79,7 @@ final class TicketTurnSnapshotTest extends TestCase
     public function aVisibilityOtherThanAllOrTeamIsRefused(string $visibility): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A ticket visibility must be all or team.');
+        $this->expectExceptionMessageIsOrContains('A ticket visibility must be all or team.');
 
         self::snapshot(true, true, true, $visibility);
     }
