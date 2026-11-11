@@ -58,15 +58,16 @@ test.describe('as the lead', () => {
   test.afterEach(async ({ page }) => {
     await openShopTeam(page);
     const removeStepButtons = page.getByRole('button', { name: 'Remove step Design check' });
-    while ((await removeStepButtons.count()) > 0) {
+    // Each click waits for one button less: the form posts through Turbo, so no page load marks the end.
+    for (let left = await removeStepButtons.count(); left > 0; left--) {
       await removeStepButtons.first().click();
-      await page.waitForLoadState('networkidle');
+      await expect(removeStepButtons).toHaveCount(left - 1);
     }
     await expect(teamSteps(page)).toHaveCount(0);
     const removeButtons = page.getByRole('button', { name: /^Remove (?!SHOP )\S+ from the team$/ });
-    while ((await removeButtons.count()) > 0) {
+    for (let left = await removeButtons.count(); left > 0; left--) {
       await removeButtons.first().click();
-      await page.waitForLoadState('networkidle');
+      await expect(removeButtons).toHaveCount(left - 1);
     }
     if ((await page.getByRole('button', { name: 'Remove SHOP from the team' }).count()) === 0) {
       await addProjects(page, ['SHOP']);
