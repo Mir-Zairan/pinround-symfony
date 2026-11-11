@@ -9,8 +9,8 @@ use Symfony\Component\HttpKernel\Attribute\AsController;
 use Twig\Environment;
 
 /**
- * Stands in, in the test environment only, for pages a later phase builds, so MainMenuTest sees their menu items as
- * links (config/routes/test_fixtures.yaml). It renders the shell with an empty main.
+ * The shell with an empty main, in the test environment only (test_menu_shell in config/routes/test_fixtures.yaml): a
+ * page's own query count is its count minus this one's, as the shell's menu reads the same for both.
  */
 #[AsController]
 final readonly class MenuPageStandInController

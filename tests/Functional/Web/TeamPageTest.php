@@ -178,7 +178,7 @@ final class TeamPageTest extends WebTestCase
         $page = $this->client->request('GET', '/teams/shop');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('/_test/menu/tickets?project=SHOP', $page->filter('.team__project-link')->attr('href'));
+        self::assertSame('/tickets?project=SHOP', $page->filter('.team__project-link')->attr('href'));
     }
 
     #[Test]

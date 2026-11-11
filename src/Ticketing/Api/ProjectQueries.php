@@ -53,4 +53,16 @@ interface ProjectQueries
      * @throws \LogicException when $teamIds is not empty and no transaction is open or no tenant is set, before any query
      */
     public function projectChoicesOfTeams(array $teamIds): array;
+
+    /**
+     * The organization's project with that key, for the tickets list's project filter: one query on tkt_project
+     * through tkt_project_organization_id_key_key, none for a key no project can have.
+     *
+     * @param string $key matched exactly, for example SHOP; a lowercase or malformed key finds nothing
+     *
+     * @return ProjectChoice|null null when the organization has no project with that key
+     *
+     * @throws \LogicException when no tenant is set, before any query
+     */
+    public function projectByKey(string $key): ?ProjectChoice;
 }

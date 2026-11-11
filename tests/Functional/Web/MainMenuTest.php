@@ -6,8 +6,8 @@ namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\TeamId;
-use App\Tests\Fixtures\Http\MenuPageStandInController;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Ticketing\UI\TicketListController;
 use App\Web\UI\Controller\TeamController;
 use App\Web\UI\Navigation\MainMenu;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -19,8 +19,8 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The header's main menu, "Report a problem" and the bell for each person of Acme Foods, which has the teams Shop and
- * Mobile, both led by Lena. Team links the team page by its slug; in the test environment, Tickets has a stand-in route
- * (MenuPageStandInController), so it is a link; My reports and Admin have no route yet, so they are inert.
+ * Mobile, both led by Lena. Team links the team page by its slug and Tickets the tickets list;
+ * My reports and Admin have no route yet, so they are inert.
  */
 final class MainMenuTest extends WebTestCase
 {
@@ -84,7 +84,7 @@ final class MainMenuTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $menu = $page->filter('header nav[aria-label="Main"]');
         self::assertSame(
-            ['Home → / (current)', 'Tickets → /_test/menu/tickets', 'Mobile → /teams/mobile', 'Shop → /teams/shop'],
+            ['Home → / (current)', 'Tickets → /tickets', 'Mobile → /teams/mobile', 'Shop → /teams/shop'],
             $menu->filter('a')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href').('page' === $link->attr('aria-current') ? ' (current)' : '')),
         );
         self::assertCount(2, $menu->filter('.nav-menu__list > a.menu__item[data-menu-target="item"]'), 'the team links are the disclosure\'s items');
@@ -126,11 +126,13 @@ final class MainMenuTest extends WebTestCase
     }
 
     #[Test]
-    public function theMenuStandInRoutesAreTheTestOnes(): void
+    public function theMenuRoutesAreTheRealPages(): void
     {
         $routes = self::getContainer()->get('router')->getRouteCollection();
 
-        self::assertSame(MenuPageStandInController::class.'::openPage', $routes->get(MainMenu::TICKETS_ROUTE)?->getDefault('_controller'), MainMenu::TICKETS_ROUTE.' has a real page now: delete its stand-in in config/routes/test_fixtures.yaml');
+        // RequestTransactionTest proves test_fixtures.yaml defines no route of this name, in any environment.
+        self::assertSame(TicketListController::class.'::list', $routes->get(MainMenu::TICKETS_ROUTE)?->getDefault('_controller'), 'the tickets list is the real one, not a stand-in');
+        self::assertSame('/tickets', $routes->get(MainMenu::TICKETS_ROUTE)?->getPath());
         self::assertSame(TeamController::class.'::show', $routes->get(MainMenu::TEAM_ROUTE)?->getDefault('_controller'), 'the team page is the real one, not a stand-in');
         foreach ([MainMenu::MY_REPORTS_ROUTE, MainMenu::ADMIN_ROUTE] as $routeName) {
             self::assertNull($routes->get($routeName), $routeName.' has a page now: MainMenuTest expects it inert');

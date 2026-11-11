@@ -123,11 +123,9 @@ when@test:
         controller: App\Tests\Fixtures\Http\TracingProbeController::dispatchAnEvent
         methods: [GET]
 
-    # A stand-in under the name MainMenu links, until P03.T3 builds the page. Delete it in the commit that adds the real
-    # route: two routes of one name do not clash, one silently replaces the other. If the real one wins,
-    # MainMenuTest::theMenuStandInRoutesAreTheTestOnes fails; if this one wins, the real page's tests do.
-    ticketing_tickets:
-        path: /_test/menu/tickets
+    # The shell with an empty main, so a page's query count can be measured as its own minus this one's.
+    test_menu_shell:
+        path: /_test/menu/shell
         controller: App\Tests\Fixtures\Http\MenuPageStandInController::openPage
         methods: [GET]
 

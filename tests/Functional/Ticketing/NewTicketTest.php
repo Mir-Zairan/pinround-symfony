@@ -80,7 +80,7 @@ final class NewTicketTest extends WebTestCase
             'priority' => 'major',
         ]);
 
-        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertResponseRedirects('/tickets?project=SHOP', 302);
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Ticket SHOP-1 made.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
@@ -122,7 +122,7 @@ final class NewTicketTest extends WebTestCase
         self::assertSame([], $this->committedTickets());
 
         $this->postTicket($projectId);
-        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertResponseRedirects('/tickets?project=SHOP', 302);
         self::assertSame(['SHOP-1'], array_column($this->committedTickets(), 'key'));
     }
 
@@ -144,7 +144,7 @@ final class NewTicketTest extends WebTestCase
         self::assertSame(['normal'], $form->filter('input[name="priority"][checked]')->extract(['value']));
         $this->client->submitForm('Make ticket', ['title' => 'Search shows no results']);
 
-        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertResponseRedirects('/tickets?project=SHOP', 302);
         self::assertSame([[
             'key' => 'SHOP-1',
             'title' => 'Search shows no results',
@@ -178,7 +178,7 @@ final class NewTicketTest extends WebTestCase
         self::assertNotContains($people['Raj']->id()->toString(), $offeredAssigneeIds);
         $this->client->submitForm('Make ticket', ['project_id' => $projectId, 'title' => 'Search shows no results', 'assignee_id' => $people['Omar']->id()->toString()]);
 
-        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertResponseRedirects('/tickets?project=SHOP', 302);
         self::assertSame($people['Omar']->id()->toString(), $this->committedTickets()[0]['assignee_id']);
         $stepsAndTimes = $this->coreStepsAndCreationTimes();
         self::assertSame(['SHOP-1'], array_keys($stepsAndTimes));
@@ -216,7 +216,7 @@ final class NewTicketTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $this->client->submitForm('Make ticket', ['project_id' => $projectId, 'title' => 'Prices show no currency']);
 
-        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertResponseRedirects('/tickets?project=SHOP', 302);
         self::assertSame(['SHOP-1'], array_column($this->committedTickets(), 'key'));
         self::assertSame($people['Mia']->id()->toString(), $this->committedTickets()[0]['reporter_id']);
     }
@@ -302,7 +302,7 @@ final class NewTicketTest extends WebTestCase
         self::assertSame([], $this->committedTickets());
 
         $this->postTicket($projectId);
-        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertResponseRedirects('/tickets?project=SHOP', 302);
         self::assertSame(['SHOP-1'], array_column($this->committedTickets(), 'key'));
     }
 
@@ -338,7 +338,7 @@ final class NewTicketTest extends WebTestCase
         self::assertSame([], $this->committedTickets());
 
         $this->postTicket($projectId);
-        self::assertResponseRedirects('/_test/menu/tickets?project=SHOP', 302);
+        self::assertResponseRedirects('/tickets?project=SHOP', 302);
         self::assertSame(['SHOP-1'], array_column($this->committedTickets(), 'key'));
     }
 

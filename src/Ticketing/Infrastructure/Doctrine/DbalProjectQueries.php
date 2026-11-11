@@ -23,6 +23,8 @@ use Doctrine\DBAL\Connection;
  */
 final readonly class DbalProjectQueries implements ProjectQueries
 {
+    private const string PROJECT_KEY = '/^[A-Z][A-Z0-9]{1,9}\z/';
+
     public function __construct(
         private Connection $connection,
         private OpenTicketCounts $openTicketCounts,
@@ -54,6 +56,21 @@ final readonly class DbalProjectQueries implements ProjectQueries
                 [$this->tenantContext->require()->toString(), $limit],
             ),
         );
+    }
+
+    public function projectByKey(string $key): ?ProjectChoice
+    {
+        $organizationId = $this->tenantContext->require();
+        // tkt_project_key_check's pattern: a key that cannot exist costs no query.
+        if (1 !== preg_match(self::PROJECT_KEY, $key)) {
+            return null;
+        }
+        $row = $this->connection->fetchAssociative(
+            'SELECT id, key, name FROM tkt_project WHERE organization_id = ? AND key = ?',
+            [$organizationId->toString(), $key],
+        );
+
+        return false === $row ? null : new ProjectChoice(self::text($row['id'], 'id'), self::text($row['key'], 'key'), self::text($row['name'], 'name'));
     }
 
     public function projectChoicesOfTeams(array $teamIds): array

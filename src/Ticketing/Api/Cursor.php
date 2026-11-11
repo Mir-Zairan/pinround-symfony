@@ -8,8 +8,9 @@ use App\SharedKernel\Domain\TicketId;
 
 /**
  * Where the next page of one step of the tickets list starts: after the last row shown, by the list's order
- * (priority rank, then updated_at newest first, then id highest first). The list page signs it before it reaches the
- * browser; this class trusts its values.
+ * (priority rank, then updated_at newest first, then id highest first). The list page carries it unsigned
+ * (TicketListCursorParameter), as a forged one only moves where the page starts; the list still reads only the
+ * tickets the viewer may see.
  */
 final readonly class Cursor
 {
