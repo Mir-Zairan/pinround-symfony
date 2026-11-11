@@ -56,4 +56,14 @@ final class FixedTeamQueries implements TeamQueries
     {
         throw new \LogicException('Only teamsOf is expected.');
     }
+
+    public function leadOf(TeamId $teamId): ?UserId
+    {
+        throw new \LogicException('Only teamsOf is expected.');
+    }
+
+    public function peopleByJob(TeamId $teamId): array
+    {
+        throw new \LogicException('Only teamsOf is expected.');
+    }
 }

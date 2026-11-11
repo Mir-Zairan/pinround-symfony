@@ -81,6 +81,39 @@ final readonly class DbalTeamQueries implements TeamQueries
             return null;
         }
 
+        return self::memberJob($job);
+    }
+
+    /**
+     * lead_user_id repeats the member with the team role Lead (see Domain\Team), so one row of org_team answers.
+     */
+    public function leadOf(TeamId $teamId): ?UserId
+    {
+        $leadId = $this->connection->fetchOne('SELECT lead_user_id FROM org_team WHERE id = ?', [$teamId->toString()]);
+        if (false === $leadId) {
+            return null;
+        }
+
+        return \is_string($leadId) ? new UserId($leadId) : throw new \LogicException('A team lead id from the database is not a uuid.');
+    }
+
+    public function peopleByJob(TeamId $teamId): array
+    {
+        $rows = $this->connection->fetchAllAssociative(
+            "SELECT user_id, job FROM org_team_member WHERE team_id = ? AND team_role IN ('lead', 'member') ORDER BY user_id",
+            [$teamId->toString()],
+        );
+        $people = [MemberJob::Developer->value => [], MemberJob::Tester->value => [], MemberJob::Other->value => []];
+        foreach ($rows as $row) {
+            $userId = \is_string($row['user_id']) ? new UserId($row['user_id']) : throw new \LogicException('A team member id from the database is not a uuid.');
+            $people[self::memberJob($row['job'])->value][] = $userId;
+        }
+
+        return $people;
+    }
+
+    private static function memberJob(mixed $job): MemberJob
+    {
         return (\is_string($job) ? MemberJob::tryFrom($job) : null) ?? throw new \LogicException('org_team_member holds an unknown job.');
     }
 

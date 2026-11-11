@@ -172,6 +172,16 @@ final class CreateProjectRaceTest extends KernelTestCase
             {
                 throw new \LogicException('CreateProject reads no jobs.');
             }
+
+            public function leadOf(TeamId $teamId): ?UserId
+            {
+                throw new \LogicException('CreateProject reads no leads.');
+            }
+
+            public function peopleByJob(TeamId $teamId): array
+            {
+                throw new \LogicException('CreateProject reads no jobs.');
+            }
         };
     }
 

@@ -149,6 +149,16 @@ final class LinkProjectRaceTest extends KernelTestCase
             {
                 throw new \LogicException('LinkProject reads no jobs.');
             }
+
+            public function leadOf(TeamId $teamId): ?UserId
+            {
+                throw new \LogicException('LinkProject reads no leads.');
+            }
+
+            public function peopleByJob(TeamId $teamId): array
+            {
+                throw new \LogicException('LinkProject reads no jobs.');
+            }
         };
     }
 
