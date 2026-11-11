@@ -7,6 +7,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
+    <meta name="csp-nonce" content="{{ csp_nonce() }}">
     <title>{% block title %}pinround{% endblock %}</title>
     <link rel="preload" as="font" type="font/woff2" crossorigin href="{{ asset('fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2') }}">
     <link rel="preload" as="font" type="font/woff2" crossorigin href="{{ asset('fonts/atkinson-hyperlegible-mono-latin-wght-normal.woff2') }}">

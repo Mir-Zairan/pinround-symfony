@@ -181,7 +181,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
             $assignee,
             $now,
         );
-        // The ticket is only in the unit of work until now; the UPDATE below must find its row.
+        // Clearing drops the managed Ticket so the raw UPDATE below is not overwritten by a later flush of stale state.
         $this->entityManager->flush();
         $this->entityManager->clear();
 

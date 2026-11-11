@@ -130,7 +130,25 @@ final class TicketListTextTest extends TestCase
     {
         $now = new \DateTimeImmutable('2026-03-15T10:30:00+00:00');
 
-        self::assertSame($expected, TicketListText::updatedOf(new \DateTimeImmutable($updatedAt), $now));
+        self::assertSame($expected, TicketListText::updatedOf(new \DateTimeImmutable($updatedAt), $now, new \DateTimeZone('UTC')));
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string, string}>
+     */
+    public static function updatedTimesInAViewerZone(): iterable
+    {
+        yield 'the date moves forward east of UTC' => ['2026-03-12T23:30:00+00:00', '2026-03-15T10:30:00+00:00', 'Europe/Berlin', '13 Mar'];
+        yield 'the date moves back west of UTC' => ['2026-03-13T01:30:00+00:00', '2026-03-15T10:30:00+00:00', 'America/New_York', '12 Mar'];
+        yield 'the year of an update is the viewer\'s' => ['2025-12-31T23:30:00+00:00', '2026-03-15T10:30:00+00:00', 'Asia/Tokyo', '1 Jan'];
+        yield 'the year of now is the viewer\'s' => ['2026-12-30T10:00:00+00:00', '2027-01-01T00:30:00+00:00', 'America/New_York', '30 Dec'];
+    }
+
+    #[Test]
+    #[DataProvider('updatedTimesInAViewerZone')]
+    public function theUpdatedDateIsPrintedInTheViewersTimeZone(string $updatedAt, string $now, string $zone, string $expected): void
+    {
+        self::assertSame($expected, TicketListText::updatedOf(new \DateTimeImmutable($updatedAt), new \DateTimeImmutable($now), new \DateTimeZone($zone)));
     }
 
     private static function stepOf(int $ticketCount, bool $isCountCapped): TicketListStep

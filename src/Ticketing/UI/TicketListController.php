@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\UI;
 
+use App\Identity\Api\CurrentTimeZone;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
@@ -50,6 +51,7 @@ final class TicketListController extends AbstractController
         private readonly ProjectQueries $projectQueries,
         private readonly TicketQueries $ticketQueries,
         private readonly ClockInterface $clock,
+        private readonly CurrentTimeZone $currentTimeZone,
     ) {
     }
 
@@ -108,6 +110,7 @@ final class TicketListController extends AbstractController
     private function groupViewsOf(array $groups, UserId $viewerId, ?ProjectChoice $project, bool $showsDone, ?Cursor $cursor, array $collapsedStepIds): array
     {
         $now = $this->clock->now();
+        $viewerTimeZone = $this->currentTimeZone->zone();
         $listQuery = array_filter([self::PROJECT_QUERY => $project?->key(), self::DONE_QUERY => $showsDone ? '1' : null], static fn (?string $value): bool => null !== $value);
 
         return array_map(fn (TicketListGroup $group): array => [
@@ -131,7 +134,7 @@ final class TicketListController extends AbstractController
                     'priority' => TicketListText::priorityOf($row),
                     'isUrgent' => TicketListText::isUrgent($row),
                     'assigneeName' => $row->assigneeName,
-                    'updated' => TicketListText::updatedOf($row->updatedAt, $now),
+                    'updated' => TicketListText::updatedOf($row->updatedAt, $now, $viewerTimeZone),
                     'updatedAt' => $row->updatedAt->format(\DateTimeInterface::ATOM),
                 ], $step->rows),
                 'moreUrl' => null === $step->nextCursor ? null : $this->generateUrl(self::ROUTE, [...$listQuery, ...TicketListCursorParameter::queryOf($step->nextCursor)]),

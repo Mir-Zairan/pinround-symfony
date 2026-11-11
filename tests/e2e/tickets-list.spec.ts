@@ -4,7 +4,7 @@ import { LENA_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
-// As Lena (auth.setup.ts), on the seeded stack (make seed gives SHOP 40 open tickets, fewer than one page per step). The
+// As Lena (auth.setup.ts), on the seeded stack (make seed gives SHOP 40 tickets, 35 open and 5 in Done, fewer than one page per step). The
 // specs make no tickets. The parts that need rows skip with a note only on an empty database; TicketListTest proves
 // "Show more" and its focus on the server, and the frame-missing case below injects a link because no seeded step
 // holds more than 50 rows.
@@ -49,6 +49,19 @@ test('the tickets list has no serious accessibility violations', async ({ page }
   await openTicketsWithRows(page);
 
   expect(await seriousViolations(page)).toEqual([]);
+});
+
+test('the tickets list raises no Content Security Policy violation in the console', async ({ page }) => {
+  const violations: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('Content Security Policy')) {
+      violations.push(message.text());
+    }
+  });
+
+  await openTicketsWithRows(page);
+
+  expect(violations).toEqual([]);
 });
 
 test('Lena collapses a step with the keyboard and finds it collapsed after a reload', async ({ page }) => {

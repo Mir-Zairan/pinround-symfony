@@ -83,9 +83,9 @@ final class TicketListText
 
     /**
      * "now" within a minute (or for a time ahead of $now), then "5 min ago", "3 h ago", and from a day on the date in
-     * UTC: "2 Nov", with the year when it is not $now's.
+     * the viewer's time zone: "2 Nov", with the year when it is not $now's in that zone.
      */
-    public static function updatedOf(\DateTimeImmutable $updatedAt, \DateTimeImmutable $now): string
+    public static function updatedOf(\DateTimeImmutable $updatedAt, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
         $seconds = $now->getTimestamp() - $updatedAt->getTimestamp();
         if ($seconds < 60) {
@@ -97,9 +97,8 @@ final class TicketListText
         if ($seconds < 86400) {
             return \sprintf('%d h ago', intdiv($seconds, 3600));
         }
-        $utc = new \DateTimeZone('UTC');
-        $updatedInUtc = $updatedAt->setTimezone($utc);
+        $updatedInZone = $updatedAt->setTimezone($viewerTimeZone);
 
-        return $updatedInUtc->format($updatedInUtc->format('Y') === $now->setTimezone($utc)->format('Y') ? 'j M' : 'j M Y');
+        return $updatedInZone->format($updatedInZone->format('Y') === $now->setTimezone($viewerTimeZone)->format('Y') ? 'j M' : 'j M Y');
     }
 }
