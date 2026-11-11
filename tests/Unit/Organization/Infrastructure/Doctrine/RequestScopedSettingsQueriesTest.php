@@ -36,8 +36,8 @@ final class RequestScopedSettingsQueriesTest extends TestCase
             {
             }
         });
-        $database = new class($this) implements SettingsQueries {
-            public function __construct(private readonly RequestScopedSettingsQueriesTest $test)
+        $database = new readonly class($this) implements SettingsQueries {
+            public function __construct(private RequestScopedSettingsQueriesTest $test)
             {
             }
 
