@@ -112,6 +112,31 @@ final readonly class DbalTeamQueries implements TeamQueries
         return $people;
     }
 
+    public function possibleAssigneesOf(array $teamIds): array
+    {
+        $assignees = [];
+        foreach ($teamIds as $teamId) {
+            $assignees[$teamId->toString()] = [];
+        }
+        if ([] === $assignees) {
+            return [];
+        }
+
+        // One array literal keeps the SQL text the same for any number of ids; a TeamId is a uuid, so needs no quoting.
+        $rows = $this->connection->fetchAllAssociative(
+            "SELECT team_id, user_id FROM org_team_member WHERE team_id = ANY(?::uuid[]) AND team_role IN ('lead', 'member') ORDER BY user_id",
+            ['{'.implode(',', array_keys($assignees)).'}'],
+        );
+        foreach ($rows as $row) {
+            $teamId = \is_string($row['team_id']) && \array_key_exists($row['team_id'], $assignees)
+                ? $row['team_id']
+                : throw new \LogicException('A team id from the database is not one of the asked teams.');
+            $assignees[$teamId][] = \is_string($row['user_id']) ? new UserId($row['user_id']) : throw new \LogicException('A team member id from the database is not a uuid.');
+        }
+
+        return $assignees;
+    }
+
     private static function memberJob(mixed $job): MemberJob
     {
         return (\is_string($job) ? MemberJob::tryFrom($job) : null) ?? throw new \LogicException('org_team_member holds an unknown job.');

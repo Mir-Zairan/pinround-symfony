@@ -9,12 +9,13 @@ use App\SharedKernel\Domain\TeamId;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
+use App\Ticketing\Api\TeamProjectChoice;
 use App\Ticketing\Application\OpenTicketCounts;
 use App\Ticketing\Domain\ProjectId;
 use Doctrine\DBAL\Connection;
 
 /**
- * Both queries name organization_id as well as row-level security, and match team_id (the unlinked ones through
+ * Every query names organization_id as well as row-level security, and matches team_id (the unlinked ones through
  * team_id IS NULL), so they read tkt_project_organization_id_team_id_idx.
  */
 final readonly class DbalProjectQueries implements ProjectQueries
@@ -45,6 +46,33 @@ final readonly class DbalProjectQueries implements ProjectQueries
             $this->connection->fetchAllAssociative(
                 'SELECT id, key, name FROM tkt_project WHERE organization_id = ? AND team_id IS NULL ORDER BY key LIMIT ?',
                 [$this->tenantContext->require()->toString(), $limit],
+            ),
+        );
+    }
+
+    public function projectChoicesOfTeams(array $teamIds): array
+    {
+        if ([] === $teamIds) {
+            return [];
+        }
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('Projects of teams are read in a transaction under the organization as tenant; none is open.');
+        }
+
+        // One array literal keeps the SQL text the same for any number of ids; a TeamId is a uuid, so needs no quoting.
+        return array_map(
+            static fn (array $row): TeamProjectChoice => new TeamProjectChoice(
+                self::text($row['id'], 'id'),
+                self::text($row['key'], 'key'),
+                self::text($row['name'], 'name'),
+                new TeamId(self::text($row['team_id'], 'team_id')),
+            ),
+            $this->connection->fetchAllAssociative(
+                'SELECT id, key, name, team_id FROM tkt_project WHERE organization_id = ? AND team_id = ANY(?::uuid[]) ORDER BY key',
+                [
+                    $this->tenantContext->require()->toString(),
+                    '{'.implode(',', array_map(static fn (TeamId $teamId): string => $teamId->toString(), $teamIds)).'}',
+                ],
             ),
         );
     }

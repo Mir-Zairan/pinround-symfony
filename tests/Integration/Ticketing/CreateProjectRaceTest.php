@@ -182,6 +182,11 @@ final class CreateProjectRaceTest extends KernelTestCase
             {
                 throw new \LogicException('CreateProject reads no jobs.');
             }
+
+            public function possibleAssigneesOf(array $teamIds): array
+            {
+                throw new \LogicException('CreateProject reads no assignees.');
+            }
         };
     }
 

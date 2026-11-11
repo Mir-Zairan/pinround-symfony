@@ -70,4 +70,15 @@ interface TeamQueries
      * @throws \LogicException when a stored job is not one of MemberJob's values
      */
     public function peopleByJob(TeamId $teamId): array;
+
+    /**
+     * One query, for an assignee picker over several teams: each team's lead and members, in user id order; viewers
+     * are left out, as they cannot move tickets. Every asked team is a key, with an empty list for a team that is
+     * unknown or belongs to another organization, and an empty $teamIds runs no query.
+     *
+     * @param list<TeamId> $teamIds
+     *
+     * @return array<string, list<UserId>> keyed by team id, in the order asked
+     */
+    public function possibleAssigneesOf(array $teamIds): array;
 }

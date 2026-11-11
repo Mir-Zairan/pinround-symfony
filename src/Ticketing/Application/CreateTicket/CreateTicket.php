@@ -16,10 +16,13 @@ use App\Ticketing\Application\OrganizationProjects;
 use App\Ticketing\Application\ProjectNotFound;
 use App\Ticketing\Application\TicketEvents;
 use App\Ticketing\Application\TicketHistory;
+use App\Ticketing\Domain\BlankTicketTitle;
 use App\Ticketing\Domain\Priority;
 use App\Ticketing\Domain\Ticket;
+use App\Ticketing\Domain\TicketDescriptionTooLong;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
+use App\Ticketing\Domain\TicketTitleTooLong;
 use App\Ticketing\Domain\TicketType;
 use App\Ticketing\Domain\Visibility;
 use App\Workflow\Api\StepQueries;
@@ -45,9 +48,13 @@ final readonly class CreateTicket
     }
 
     /**
-     * @throws ProjectNotFound   when the organization has no project with that id; nothing is saved
-     * @throws ProjectHasNoTeam  when no team owns the project; nothing is saved
-     * @throws AssigneeNotInTeam when the assignee is not a lead or member of the project's team; nothing is saved
+     * @throws ProjectNotFound            when the organization has no project with that id; nothing is saved
+     * @throws ProjectHasNoTeam           when no team owns the project; nothing is saved
+     * @throws AssigneeNotInTeam          when the assignee is not a lead or member of the project's team; nothing is saved
+     * @throws TicketTitleMissing         when nothing is left of the title after trimming
+     * @throws TicketTitleOverLimit       when the trimmed title has more than 200 characters
+     * @throws TicketDescriptionOverLimit when the description has more than 50,000 characters. For these three, the
+     *                                    ticket number is already taken and is given back only when the caller rolls back
      */
     public function create(
         OrganizationId $organizationId,
@@ -69,23 +76,31 @@ final readonly class CreateTicket
         }
         [$backlogStepId, $toDoStepId] = $this->backlogAndToDoStepIdsOf($team);
 
-        $ticket = Ticket::report(
-            $this->tickets->nextIdentity(),
-            $organizationId,
-            $project->id(),
-            new TicketKey($project->key(), $this->nextTicketNumber->takeFor($project->id())),
-            $title,
-            $description,
-            $ticketType,
-            $ticketPriority,
-            Visibility::All,
-            $reporter,
-            $assignee,
-            $team,
-            $backlogStepId,
-            $toDoStepId,
-            $reportedAt,
-        );
+        try {
+            $ticket = Ticket::report(
+                $this->tickets->nextIdentity(),
+                $organizationId,
+                $project->id(),
+                new TicketKey($project->key(), $this->nextTicketNumber->takeFor($project->id())),
+                $title,
+                $description,
+                $ticketType,
+                $ticketPriority,
+                Visibility::All,
+                $reporter,
+                $assignee,
+                $team,
+                $backlogStepId,
+                $toDoStepId,
+                $reportedAt,
+            );
+        } catch (BlankTicketTitle $blankTitle) {
+            throw new TicketTitleMissing($blankTitle->getMessage(), 0, $blankTitle);
+        } catch (TicketTitleTooLong $longTitle) {
+            throw new TicketTitleOverLimit($longTitle->getMessage(), 0, $longTitle);
+        } catch (TicketDescriptionTooLong $longDescription) {
+            throw new TicketDescriptionOverLimit($longDescription->getMessage(), 0, $longDescription);
+        }
         $this->tickets->add($ticket);
         $this->ticketHistory->recordCreated($organizationId, $ticket->id(), $reporter, $ticket->stepId(), $reportedAt);
         // Its fallback note comes only from choosing a reviewer (OrderedTurnRules), which no Backlog or To do ticket needs.

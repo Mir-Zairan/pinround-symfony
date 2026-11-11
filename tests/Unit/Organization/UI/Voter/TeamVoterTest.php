@@ -91,6 +91,11 @@ final class TeamVoterTest extends TestCase
                 throw new \LogicException('Only teamsOf is expected.');
             }
 
+            public function possibleAssigneesOf(array $teamIds): array
+            {
+                throw new \LogicException('Only teamsOf is expected.');
+            }
+
             public function teamsOf(OrganizationId $organizationId): array
             {
                 $this->teamsOfCalls[] = $organizationId->toString();

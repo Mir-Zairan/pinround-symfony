@@ -66,4 +66,9 @@ final class FixedTeamQueries implements TeamQueries
     {
         throw new \LogicException('Only teamsOf is expected.');
     }
+
+    public function possibleAssigneesOf(array $teamIds): array
+    {
+        throw new \LogicException('Only teamsOf is expected.');
+    }
 }

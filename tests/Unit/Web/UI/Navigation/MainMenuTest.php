@@ -97,6 +97,11 @@ final class MainMenuTest extends TestCase
                 throw new \LogicException('Only summariesOf is expected.');
             }
 
+            public function possibleAssigneesOf(array $teamIds): array
+            {
+                throw new \LogicException('Only summariesOf is expected.');
+            }
+
             public function summariesOf(OrganizationId $organizationId, array $teamIds): array
             {
                 ++$this->summariesOfCalls;

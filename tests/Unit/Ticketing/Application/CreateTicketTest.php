@@ -13,6 +13,9 @@ use App\Ticketing\Api\Event\TicketCreated;
 use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
 use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
+use App\Ticketing\Application\CreateTicket\TicketDescriptionOverLimit;
+use App\Ticketing\Application\CreateTicket\TicketTitleMissing;
+use App\Ticketing\Application\CreateTicket\TicketTitleOverLimit;
 use App\Ticketing\Application\OrganizationProjects;
 use App\Ticketing\Application\ProjectNotFound;
 use App\Ticketing\Domain\BlankTicketTitle;
@@ -20,6 +23,8 @@ use App\Ticketing\Domain\Priority;
 use App\Ticketing\Domain\Project;
 use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Domain\ProjectKey;
+use App\Ticketing\Domain\TicketDescriptionTooLong;
+use App\Ticketing\Domain\TicketTitleTooLong;
 use App\Ticketing\Domain\TicketType;
 use App\Ticketing\Domain\Visibility;
 use App\Workflow\Api\StepView;
@@ -188,15 +193,40 @@ final class CreateTicketTest extends TestCase
         self::assertSame([], $this->writes->writes);
     }
 
-    #[Test]
-    public function aBlankTitleSavesNothing(): void
+    /**
+     * @return iterable<string, array{string, string, class-string<\InvalidArgumentException>, class-string<\InvalidArgumentException>, string}>
+     */
+    public static function refusedTitlesAndDescriptions(): iterable
     {
-        $this->expectException(BlankTicketTitle::class);
+        yield 'a blank title' => ['   ', 'Steps: open the cart on a phone.', TicketTitleMissing::class, BlankTicketTitle::class, 'A ticket needs a title.'];
+        yield 'a title of 201 characters' => [str_repeat('a', 201), 'Steps: open the cart on a phone.', TicketTitleOverLimit::class, TicketTitleTooLong::class, 'A ticket title has at most 200 characters.'];
+        yield 'a description of 50,001 characters' => ['Checkout button is hidden', str_repeat('a', 50_001), TicketDescriptionOverLimit::class, TicketDescriptionTooLong::class, 'A ticket description has at most 50,000 characters.'];
+    }
+
+    /**
+     * @param class-string<\InvalidArgumentException> $applicationException
+     * @param class-string<\InvalidArgumentException> $domainException
+     */
+    #[Test]
+    #[DataProvider('refusedTitlesAndDescriptions')]
+    public function aRefusedTitleOrDescriptionIsRethrownAsTheApplicationsExceptionAndSavesNothing(
+        string $title,
+        string $description,
+        string $applicationException,
+        string $domainException,
+        string $message,
+    ): void {
         try {
-            $this->createTicket(self::shopProject(), null, title: '   ');
-        } finally {
-            self::assertSame([], $this->writes->writes);
+            $this->createTicket(self::shopProject(), null, title: $title, description: $description);
+            self::fail('A refused title or description was saved.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame(
+                [$applicationException, $message, $domainException],
+                [$refused::class, $refused->getMessage(), null === $refused->getPrevious() ? null : $refused->getPrevious()::class],
+            );
         }
+
+        self::assertSame([], $this->writes->writes);
     }
 
     #[Test]
@@ -218,8 +248,15 @@ final class CreateTicketTest extends TestCase
     /**
      * @param list<StepView>|null $steps the team's steps; null for Backlog, a team step and To do, all in To do
      */
-    private function createTicket(Project $project, ?UserId $assignee, string $type = 'story', string $priority = 'major', string $title = 'Checkout button is hidden', ?array $steps = null): string
-    {
+    private function createTicket(
+        Project $project,
+        ?UserId $assignee,
+        string $type = 'story',
+        string $priority = 'major',
+        string $title = 'Checkout button is hidden',
+        ?array $steps = null,
+        string $description = 'Steps: open the cart on a phone.',
+    ): string {
         $createTicket = new CreateTicket(
             new OrganizationProjects(new InMemoryProjects(false, $project)),
             self::shopTeamRoles(),
@@ -240,7 +277,7 @@ final class CreateTicketTest extends TestCase
             new UserId(self::LENA),
             self::SHOP_PROJECT,
             $title,
-            'Steps: open the cart on a phone.',
+            $description,
             $type,
             $priority,
             $assignee,

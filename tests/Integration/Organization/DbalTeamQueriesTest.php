@@ -12,6 +12,8 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
+use App\Tests\Integration\Ticketing\RecordedSql;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -276,6 +278,50 @@ final class DbalTeamQueriesTest extends KernelTestCase
         self::assertSame($noOne, $this->peopleByJobAs(null, self::ACME_SHOP));
     }
 
+    #[Test]
+    public function possibleAssigneesOfGiveEachAskedTeamsLeadAndMembersInIdOrderWithoutViewers(): void
+    {
+        // Payments has a lead_user_id but no team member rows, so it answers with an empty list.
+        self::assertSame(
+            [self::ACME_MOBILE => [self::OMAR], self::ACME_SHOP => [self::LENA, self::OMAR, self::MIA], self::ACME_PAYMENTS => []],
+            $this->possibleAssigneesAs(self::ACME_FOODS, [self::ACME_MOBILE, self::ACME_SHOP, self::ACME_PAYMENTS]),
+        );
+    }
+
+    #[Test]
+    public function possibleAssigneesOfFindNoOneForATeamOfAnotherOrganizationAnUnknownTeamOrNoTenant(): void
+    {
+        $unknownTeam = '0197a3c0-0000-7000-8000-0000000005df';
+        // Under Beta Bakery itself Mia develops in Checkout, so the empty lists below come from row-level security.
+        self::assertSame([self::BETA_CHECKOUT => [self::MIA]], $this->possibleAssigneesAs(self::BETA_BAKERY, [self::BETA_CHECKOUT]));
+        self::assertSame(
+            [self::BETA_CHECKOUT => [], $unknownTeam => []],
+            $this->possibleAssigneesAs(self::ACME_FOODS, [self::BETA_CHECKOUT, $unknownTeam]),
+        );
+        self::assertSame([self::ACME_SHOP => []], $this->possibleAssigneesAs(null, [self::ACME_SHOP]));
+    }
+
+    #[Test]
+    public function possibleAssigneesOfCostOneQueryAndNoneForNoTeams(): void
+    {
+        $recordedSql = new RecordedSql();
+
+        $teamCounts = new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackAs(
+            self::ACME_FOODS,
+            static function (Connection $connection) use ($recordedSql): array {
+                $queries = new DbalTeamQueries($connection);
+                $noTeams = $queries->possibleAssigneesOf([]);
+                $afterNoTeams = \count($recordedSql->statements);
+                $threeTeams = $queries->possibleAssigneesOf([new TeamId(self::ACME_SHOP), new TeamId(self::ACME_MOBILE), new TeamId(self::ACME_PAYMENTS)]);
+
+                return [[\count($noTeams), $afterNoTeams], [\count($threeTeams), \count($recordedSql->statements)]];
+            },
+            $recordedSql,
+        );
+
+        self::assertSame([[0, 0], [3, 1]], $teamCounts);
+    }
+
     /**
      * @param list<TeamSummary> $summaries
      *
@@ -311,6 +357,21 @@ final class DbalTeamQueriesTest extends KernelTestCase
         $read = fn (): array => array_map(
             static fn (array $userIds): array => array_map(static fn (UserId $userId): string => $userId->toString(), $userIds),
             $this->queries()->peopleByJob(new TeamId($teamId)),
+        );
+
+        return null === $tenantId ? $read() : $this->transactions()->rolledBackAs($tenantId, $read);
+    }
+
+    /**
+     * @param list<string> $teamIds
+     *
+     * @return array<string, list<string>> user id strings by team id
+     */
+    private function possibleAssigneesAs(?string $tenantId, array $teamIds): array
+    {
+        $read = fn (): array => array_map(
+            static fn (array $userIds): array => array_map(static fn (UserId $userId): string => $userId->toString(), $userIds),
+            $this->queries()->possibleAssigneesOf(array_map(static fn (string $teamId): TeamId => new TeamId($teamId), $teamIds)),
         );
 
         return null === $tenantId ? $read() : $this->transactions()->rolledBackAs($tenantId, $read);

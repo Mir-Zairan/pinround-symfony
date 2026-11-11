@@ -10,7 +10,7 @@ use App\SharedKernel\Domain\TeamId;
  * The projects of the current organization, for other modules. Each list costs one query on tkt_project and, when it
  * is not empty, one batch read of the open ticket counts. They read the organization of TenantContext under row-level
  * security, so they need an open transaction whose tenant is that organization; under any other tenant they find
- * nothing. unlinkedProjectChoices is the exception: one query and no counts.
+ * nothing. unlinkedProjectChoices and projectChoicesOfTeams are the exceptions: one query and no counts.
  */
 interface ProjectQueries
 {
@@ -36,4 +36,16 @@ interface ProjectQueries
      * @throws \LogicException           when no tenant is set, before any query
      */
     public function unlinkedProjectChoices(int $limit): array;
+
+    /**
+     * The projects the given teams own, by key, for a picker: one query on tkt_project, no ticket counts, and none when
+     * $teamIds is empty. A project no team owns is never among them.
+     *
+     * @param list<TeamId> $teamIds a team that is unknown, of another organization or owns no project adds nothing
+     *
+     * @return list<TeamProjectChoice>
+     *
+     * @throws \LogicException when $teamIds is not empty and no transaction is open or no tenant is set, before any query
+     */
+    public function projectChoicesOfTeams(array $teamIds): array;
 }
