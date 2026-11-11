@@ -132,6 +132,8 @@ services:
     # RoleTicketVisibilities itself, for ofActor.
     App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
+    App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
+    App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -204,6 +206,13 @@ when@test:
         # No page creates tickets before /tickets/new (P03.T1 step 4); CreateTicketTest gets it as a page would.
         test.ticketing_ticket_commands:
             alias: App\Ticketing\Api\TicketCommands
+            public: true
+        # No page lists tickets before /tickets (P03.T3 part B); the list tests get both as a page would.
+        test.ticketing_ticket_queries:
+            alias: App\Ticketing\Api\TicketQueries
+            public: true
+        test.insight_turn_user_queries:
+            alias: App\Insight\Api\TurnUserQueries
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
