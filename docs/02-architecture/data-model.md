@@ -412,12 +412,12 @@ All examples run as `pinround_app` with the tenant set, and all add the [ticket 
 **Ticket list grouped by step — one query for all steps** (the list budget is ≤ 5 queries per page, so no query per step). A `LATERAL` subquery takes the first 51 rows of each step (51 = 50 shown + 1 to know there is more); "Show more" in one step then uses keyset pagination for that step only:
 
 ```sql
-SELECT s.id AS step_id, c.ticket_count, x.*
-FROM wf_step s
+SELECT listed.step_id, c.ticket_count, x.*
+FROM unnest(CAST(:step_ids AS uuid[])) WITH ORDINALITY AS listed(step_id, list_position)  -- Workflow's cached StepQueries::listedSteps, in list order
 CROSS JOIN LATERAL (                           -- the step's count, capped: at most 1,001 rows, in the index's order
   SELECT count(*) AS ticket_count FROM (
     SELECT 1 FROM tkt_ticket t
-    WHERE t.organization_id = :org AND t.project_id = ANY(:projects) AND t.step_id = s.id AND <visible(t)>
+    WHERE t.organization_id = :org AND t.project_id = ANY(:projects) AND t.step_id = listed.step_id AND <visible(t)>
     ORDER BY t.priority_rank, t.updated_at DESC, t.id DESC
     LIMIT 1001
   ) capped
@@ -427,12 +427,12 @@ CROSS JOIN LATERAL (
   FROM tkt_ticket t
   WHERE t.organization_id = :org
     AND t.project_id = ANY(:projects)          -- one project, or all of the team's projects
-    AND t.step_id = s.id
+    AND t.step_id = listed.step_id
     AND <visible(t)>
   ORDER BY t.priority_rank, t.updated_at DESC, t.id DESC
   LIMIT 51
 ) x
-WHERE s.organization_id = :org AND s.id = ANY(:visible_step_ids);
+ORDER BY listed.list_position;
 ```
 
 **"Show more" in one step** (keyset, no `OFFSET`):
@@ -447,7 +447,9 @@ LIMIT 51;
 
 The step count is the same capped `LATERAL` on the first page and after a cursor. A count of 1,001 means more than 1,000, which the page shows as "1,000+", so a step that holds most of the table (Done) never reads all its rows.
 
-The cursor is sent to the browser as an opaque, signed string. The turn data for the rows is read in one batch from `ins_ticket_turn` by the Insight query service (the only allowed Ticketing + Insight join, through the view `tkt_ticket_list_v`).
+The list never joins `wf_step`: the step ids come from Workflow's `StepQueries::listedSteps`, cached per organization and dropped by any workflow change, so the first load after a step change reads one more query.
+
+The cursor is sent to the browser unsigned: it only names a position (the step, rank, time and id of the last row shown), and the visibility predicate still runs on the page it asks for, so a forged cursor shows nothing the viewer may not see. The turn users of the shown rows are read in one batch from `ins_ticket_turn` through Insight's `TurnUserQueries::turnUsersOf`, not through `tkt_ticket_list_v`.
 
 **Home "needs you"** — two index scans, no full read of the user's turns. The time part of the score is `LEAST(days_waiting, 60) × 0.5`, so it is at most 30 points. A row whose `base_score` is more than 30 below the 5th best `base_score` can never reach the top 5:
 
