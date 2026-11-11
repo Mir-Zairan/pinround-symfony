@@ -148,10 +148,10 @@
                         {% endfor %}
                     </ul>
                     {% if canChangeSteps %}
-                        <form class="team__add-step" method="post" action="{{ path(workflowForms.addStepRoute, {slug: team.slug}) }}" aria-labelledby="add-step-title">
+                        <form class="team__add-step" method="post" action="{{ path(workflowForms.addStepRoute, {slug: team.slug}) }}" aria-labelledby="add-step-title" {{ stimulus_controller('add-step') }}>
                             <h3 class="visually-hidden" id="add-step-title">Add a team step</h3>
                             <input type="hidden" name="{{ workflowForms.csrfField }}" value="{{ csrf_token(workflowForms.addStepCsrfId) }}">
-                            <input class="login__input team__add-step-name" type="text" name="{{ workflowForms.nameField }}" placeholder="New step, for example: Ready to merge" aria-label="Step name" maxlength="80" autocomplete="off" required>
+                            <input class="login__input team__add-step-name" type="text" name="{{ workflowForms.nameField }}" placeholder="New step, for example: Ready to merge" aria-label="Step name" maxlength="80" autocomplete="off" required {{ stimulus_target('add-step', 'name') }} data-action="input->add-step#update">
                             <fieldset class="team__add-step-groups">
                                 <legend>in</legend>
                                 {% for code, label in workflowForms.groupLabels %}
@@ -161,7 +161,7 @@
                                     </label>
                                 {% endfor %}
                             </fieldset>
-                            <twig:Button type="submit">Add step</twig:Button>
+                            <twig:Button type="submit" data-add-step-target="submit">Add step</twig:Button>
                         </form>
                     {% endif %}
                     <h3 class="team__rules-title">Rules</h3>
@@ -178,7 +178,7 @@
                                     <span>{{ label }}</span>
                                 {% else %}
                                     <strong class="team__rule-mark{{ ruleStates[code] ? ' team__rule-mark--on' }}">{{ ruleStates[code] ? 'On' : 'Off' }}</strong>
-                                    <span>{{ label }} · set by the admin</span>
+                                    <span>{{ label }} · set by the {{ stepPolicy == 'team' ? 'team lead' : 'admin' }}</span>
                                 {% endif %}
                             </li>
                         {% endfor %}

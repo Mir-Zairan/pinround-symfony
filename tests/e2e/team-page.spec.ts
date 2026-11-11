@@ -134,6 +134,25 @@ test.describe('as the lead', () => {
     await expect(projectRows(page)).toHaveCount(1);
   });
 
+  test('Add step is disabled while the name is empty and the "in" legend shares a row with the first group chip', async ({ page }) => {
+    await openShopTeam(page);
+    const form = page.getByRole('form', { name: 'Add a team step' });
+    const addStep = form.getByRole('button', { name: 'Add step', exact: true });
+
+    await expect(addStep).toBeDisabled();
+    await form.getByLabel('Step name').fill('   ');
+    await expect(addStep).toBeDisabled();
+    await form.getByLabel('Step name').fill('Design check');
+    await expect(addStep).toBeEnabled();
+
+    const legend = await form.locator('legend').boundingBox();
+    const firstChip = await form.locator('.chip').first().boundingBox();
+    expect(legend).not.toBeNull();
+    expect(firstChip).not.toBeNull();
+    expect(firstChip!.x).toBeGreaterThan(legend!.x + legend!.width - 1);
+    expect(Math.abs(firstChip!.y + firstChip!.height / 2 - (legend!.y + legend!.height / 2))).toBeLessThan(legend!.height);
+  });
+
   test('Add a team step puts Design check under Checking, highlighted, and its x removes it', async ({ page }) => {
     await openShopTeam(page);
     await expect(page.getByRole('form', { name: 'Add a team step' })).toBeVisible();

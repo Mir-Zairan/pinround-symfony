@@ -81,8 +81,8 @@ final class TeamController extends AbstractController
         ],
     ];
 
-    /** The five groups in the order the page shows them, by group code. */
-    private const array GROUP_ORDER = ['todo' => 'To do', 'doing' => 'Doing', 'check' => 'Checking', 'wait' => 'Waiting', 'done' => 'Done'];
+    /** The five groups in the order the page shows them, by group code; Done takes no team step, so it is not in groupLabels. */
+    private const array GROUP_ORDER = [...self::WORKFLOW_FORMS['groupLabels'], 'done' => 'Done'];
 
     public function __construct(
         private readonly TeamQueries $teamQueries,

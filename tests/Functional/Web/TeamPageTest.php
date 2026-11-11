@@ -431,21 +431,23 @@ final class TeamPageTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, ?StepPolicy}>
+     * @return iterable<string, array{string, StepPolicy, string}>
      */
     public static function peopleAndPoliciesWithNoRuleSwitch(): iterable
     {
-        yield 'Lena under extend' => ['Lena', StepPolicy::Extend];
-        yield 'Lena under locked' => ['Lena', StepPolicy::Locked];
-        yield 'Omar under team' => ['Omar', StepPolicy::Team];
-        yield 'Mia under team' => ['Mia', StepPolicy::Team];
-        yield 'Raj under team' => ['Raj', StepPolicy::Team];
-        yield 'Sara under team' => ['Sara', StepPolicy::Team];
+        yield 'Lena under extend' => ['Lena', StepPolicy::Extend, 'admin'];
+        yield 'Lena under locked' => ['Lena', StepPolicy::Locked, 'admin'];
+        yield 'Omar under extend' => ['Omar', StepPolicy::Extend, 'admin'];
+        yield 'Omar under locked' => ['Omar', StepPolicy::Locked, 'admin'];
+        yield 'Omar under team' => ['Omar', StepPolicy::Team, 'team lead'];
+        yield 'Mia under team' => ['Mia', StepPolicy::Team, 'team lead'];
+        yield 'Raj under team' => ['Raj', StepPolicy::Team, 'team lead'];
+        yield 'Sara under team' => ['Sara', StepPolicy::Team, 'team lead'];
     }
 
     #[Test]
     #[DataProvider('peopleAndPoliciesWithNoRuleSwitch')]
-    public function whoeverMayNotChangeRulesSeesOnMarksSetByTheAdmin(string $person, StepPolicy $stepPolicy): void
+    public function whoeverMayNotChangeRulesSeesOnMarksSetByWhoeverSetThem(string $person, StepPolicy $stepPolicy, string $setter): void
     {
         $this->logIn($this->client, $this->createAcmeFoodsPeople()[$person]);
         $this->setStepPolicy($stepPolicy);
@@ -456,13 +458,37 @@ final class TeamPageTest extends WebTestCase
         self::assertCount(0, $page->filter('.team__rule-form'));
         self::assertSame(
             [
-                'On Only the tester can move a ticket to Done · set by the admin',
-                'On Nobody approves their own code review · set by the admin',
-                'On Code review must happen before testing · set by the admin',
+                'On Only the tester can move a ticket to Done · set by the '.$setter,
+                'On Nobody approves their own code review · set by the '.$setter,
+                'On Code review must happen before testing · set by the '.$setter,
             ],
             $page->filter('.team__rule')->each(static fn ($rule): string => $rule->text()),
         );
         self::assertCount(3, $page->filter('.team__rule-mark--on'));
+    }
+
+    /**
+     * @return iterable<string, array{StepPolicy}>
+     */
+    public static function policiesThatLetTheLeadChangeSteps(): iterable
+    {
+        yield 'extend' => [StepPolicy::Extend];
+        yield 'team' => [StepPolicy::Team];
+    }
+
+    #[Test]
+    #[DataProvider('policiesThatLetTheLeadChangeSteps')]
+    public function theLeadSeesTheAddStepPanelAndARemoveOnHerTeamsStepUnderExtendAndTeam(StepPolicy $stepPolicy): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $this->setStepPolicy($stepPolicy);
+        $this->insertStep($this->shop, 'Ready to merge', 'team');
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Add a team step', $page->filter('.team__add-step h3')->text());
+        self::assertSame(['Remove step Ready to merge'], $page->filter('.team__step-remove')->each(static fn ($button): ?string => $button->attr('aria-label')));
     }
 
     #[Test]
@@ -506,6 +532,7 @@ final class TeamPageTest extends WebTestCase
         $this->logIn($this->client, $this->createAcmeFoodsPeople()['Omar']);
         $this->insertStep($this->shop, 'Ready to merge', 'team', 'doing');
         $this->insertStep(null, 'In progress', 'core', 'doing', 'progress');
+        $this->insertStep(null, 'Code review', 'company', 'doing');
         $this->insertStep(null, 'Backlog', 'core', 'todo', 'backlog');
         $this->insertStep(null, 'Done', 'core', 'done', 'done');
         $this->insertStep($this->mobile, 'Device check', 'team', 'doing');
@@ -514,7 +541,7 @@ final class TeamPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['To do Backlog', 'Doing In progress Ready to merge', 'Checking', 'Waiting', 'Done Done'],
+            ['To do Backlog', 'Doing In progress Code review Ready to merge', 'Checking', 'Waiting', 'Done Done'],
             $page->filter('.team__group')->each(static fn ($group): string => $group->text()),
         );
     }
