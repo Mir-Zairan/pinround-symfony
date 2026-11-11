@@ -46,7 +46,7 @@ final class CspNonceTwigFunctionTest extends KernelTestCase
         preg_match_all('#<script\b[^>]*>#', $html, $scriptTags);
         // The polyfill is off (asset_mapper.yaml), so only the importmap JSON and the entry script print.
         self::assertSame(
-            ['<script type="importmap" nonce="'.$nonce.'">', '<script type="module" nonce="'.$nonce.'">'],
+            ['<script type="importmap" nonce="'.$nonce.'" data-turbo-track="reload">', '<script type="module" nonce="'.$nonce.'" data-turbo-track="reload">'],
             $scriptTags[0],
         );
     }

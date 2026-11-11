@@ -37,13 +37,13 @@ test('the menu lists Lena\'s items in order and links Home and her team pages', 
 
   await expect(mainMenu(page).locator(':scope > a, :scope > span, :scope > div > button')).toHaveText([
     'Home',
-    'Tickets (not built yet)',
+    'Tickets',
     'My reports (not built yet)',
     'Teams',
     'Admin (not built yet)',
   ]);
   // The team links sit in the closed list, so they count only with hidden elements included.
-  await expect(mainMenu(page).getByRole('link', { includeHidden: true })).toHaveText(['Home', 'Mobile', 'Shop']);
+  await expect(mainMenu(page).getByRole('link', { includeHidden: true })).toHaveText(['Home', 'Tickets', 'Mobile', 'Shop']);
   await expect(teamList(page).locator('a[href="/teams/mobile"], a[href="/teams/shop"]')).toHaveCount(2);
 });
 
