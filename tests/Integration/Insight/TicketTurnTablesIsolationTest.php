@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Insight;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use PHPUnit\Framework\Attributes\Test;
@@ -31,6 +32,10 @@ final class TicketTurnTablesIsolationTest extends KernelTestCase
     protected function setUp(): void
     {
         $this->removeRowsOf(self::ACME_FOODS, self::BETA_BAKERY, self::THIRD_ORG);
+        $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY, self::THIRD_ORG);
+        foreach ([self::ACME_FOODS, self::BETA_BAKERY, self::THIRD_ORG] as $organizationId) {
+            $this->ticketRows()->addOf($organizationId, self::TICKET, self::SHOP_PROJECT, self::LENA);
+        }
         foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
             $this->transactions()->committedAs($organizationId, fn (): int|string => $this->connection()->executeStatement($this->insertOf($organizationId)));
         }
@@ -38,7 +43,7 @@ final class TicketTurnTablesIsolationTest extends KernelTestCase
 
     protected function tearDown(): void
     {
-        $this->removeRowsOf(self::ACME_FOODS, self::BETA_BAKERY, self::THIRD_ORG);
+        $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY, self::THIRD_ORG);
         parent::tearDown();
     }
 
@@ -131,5 +136,10 @@ final class TicketTurnTablesIsolationTest extends KernelTestCase
     private function transactions(): TenantTransactions
     {
         return new TenantTransactions(self::getContainer()->get('doctrine.orm.default_entity_manager'), self::getContainer()->get(TenantContext::class));
+    }
+
+    private function ticketRows(): TicketRows
+    {
+        return new TicketRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 }

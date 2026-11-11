@@ -370,6 +370,29 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * The ticket tables (Version20261111120000): the app reads, adds and changes tickets and summaries and removes
+     * neither; support reads under the tenant policy; nobody holds column rights.
+     */
+    #[Test]
+    public function theTicketTablesGrantTheAppNoDeleteAndSupportOnlyRead(): void
+    {
+        $connection = $this->connection();
+
+        foreach (['tkt_ticket', 'tkt_summary'] as $table) {
+            self::assertEqualsCanonicalizing(
+                ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+                $this->grantsToOthersThanTheOwner($connection, $table),
+                $table,
+            );
+            self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
+            self::assertSame([], $connection->fetchFirstColumn(
+                'SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)',
+                ['public.'.$table],
+            ), $table);
+        }
+    }
+
+    /**
      * Every index of an org_ table starts with organization_id but the documented exceptions: the global slug key, the
      * user_id index of resolve_user_orgs and the token_hash key of resolve_invitation, which run before the tenant is
      * known.
@@ -408,8 +431,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'tkt_summary', 'public.tkt_summary'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_event', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'tkt_ticket', 'tkt_summaries', 'tkt_project'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);

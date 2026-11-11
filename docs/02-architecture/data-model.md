@@ -251,7 +251,7 @@ Read models are owned by Insight and rebuilt from events if needed (`bin/console
 
 ### ins_ticket_turn (the most important table for speed)
 
-One row per **open** ticket. The row is deleted when the ticket is done. Created by `Version20261110160000`; a tenant table with `TenantTable::enableRls`, `pinround_app` has `SELECT, INSERT, UPDATE, DELETE`, `pinround_readonly` has `SELECT`. No entity maps it (hidden by `schema_filter`); `ticket_id` gets its foreign key to `tkt_ticket` in P03.T1.
+One row per **open** ticket. The row is deleted when the ticket is done. Created by `Version20261110160000`; a tenant table with `TenantTable::enableRls`, `pinround_app` has `SELECT, INSERT, UPDATE, DELETE`, `pinround_readonly` has `SELECT`. No entity maps it (hidden by `schema_filter`); `(organization_id, ticket_id)` has a foreign key to `tkt_ticket` with `ON DELETE CASCADE` (`ins_ticket_turn_ticket_fkey`, `Version20261111120000`).
 
 | Column | Meaning |
 |---|---|
@@ -505,7 +505,7 @@ ORDER BY at DESC LIMIT 6;
 - **Retention** is per organization. Because some orgs choose "always", partitions of `tkt_ticket_event` are normally **not dropped**; the purge deletes rows instead (below). Partitions of `ntf_notification` and `ast_usage` have one fixed lifetime for everyone and are dropped whole. A partition of `aud_event` or `tkt_ticket_event` may be dropped only when no org with a longer retention has rows in it (checked by the job).
 - **Ticket events follow the ticket:** events are deleted only together with their closed ticket (§10.3 rule: open tickets and their history are never deleted). The nightly job, as `pinround_retention`, finds closed tickets older than the org's cutoff and deletes, in chunks of 5,000 rows, their events, messages, rounds, pins and media references, then the tickets. Audit events are purged by `at < cutoff` per org, with a minimum of 1 year for security events.
 - The purge writes its own audit event per org and run.
-- Tables no entity maps are **excluded from the Doctrine schema diff** by the `schema_filter` regex on the default and migrator connections in `config/packages/doctrine.yaml`, and their DDL lives in hand-written migrations. Today it hides `processed_message`, `idn_login_attempt`, `web_home_focus`, `wf_rule_set`, `ins_ticket_turn`, `aud_event` and its partitions `aud_event_YYYYMM`; `tkt_ticket_event`, `ntf_notification` and `ast_usage` join it with their migrations. The Messenger tables stay visible: Messenger adds them to the expected schema. `DatabaseRolesTest::doctrineMigrationsDiffFindsNoChanges` runs the diff's comparison and fails on any difference.
+- Tables no entity maps are **excluded from the Doctrine schema diff** by the `schema_filter` regex on the default and migrator connections in `config/packages/doctrine.yaml`, and their DDL lives in hand-written migrations. Today it hides `processed_message`, `idn_login_attempt`, `web_home_focus`, `wf_rule_set`, `ins_ticket_turn`, `tkt_summary`, `aud_event` and its partitions `aud_event_YYYYMM`; `tkt_ticket_event`, `ntf_notification` and `ast_usage` join it with their migrations. The Messenger tables stay visible: Messenger adds them to the expected schema. `DatabaseRolesTest::doctrineMigrationsDiffFindsNoChanges` runs the diff's comparison and fails on any difference.
 - Open tickets are never deleted, whatever their age. Media is deleted from the bucket by a worker. Bucket lifecycle rules catch orphans after 7 days.
 - **Export** before deletion is the admin's job. pinround shows a warning 30 days before the first purge after a change.
 
