@@ -127,6 +127,19 @@ final class TicketListTest extends WebTestCase
     }
 
     #[Test]
+    public function anOlderUpdateShowsItsDateInTheViewersSavedTimeZone(): void
+    {
+        // 23:30 UTC on the 12th is already the 13th in Lena's Europe/Berlin (the test users' zone); 2020 keeps the year suffix whatever today is.
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['updatedAt' => '2020-03-12 23:30:00+00']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('13 Mar 2020', $page->filter('[data-ticket-key="SHOP-1"] .tickets__updated')->text());
+    }
+
+    #[Test]
     public function aProjectKeyShowsOnlyThatProjectUnderItsKeyAndName(): void
     {
         $appProject = $this->addProject($this->mobile, 'APP', 'Mobile app');
@@ -453,7 +466,7 @@ final class TicketListTest extends WebTestCase
     /**
      * A bug of Shop's team, visible to all, updated a minute later than the one added before it.
      *
-     * @param array{assignee?: string, turn?: string, type?: string, release?: string, visibility?: string, project?: string, key?: string} $details
+     * @param array{assignee?: string, turn?: string, type?: string, release?: string, visibility?: string, project?: string, key?: string, updatedAt?: string} $details
      */
     private function addTicket(string $groupCode, string $title, string $priority, array $details = []): void
     {
@@ -465,7 +478,7 @@ final class TicketListTest extends WebTestCase
             ($details['key'] ?? 'SHOP').'-'.$number, $title, $details['type'] ?? 'bug', $details['release'] ?? null, $priority,
             self::PRIORITY_RANKS[$priority], $this->steps[$groupCode], $this->people['Lena']->id()->toString(),
             $details['visibility'] ?? 'all', isset($details['assignee']) ? $this->people[$details['assignee']]->id()->toString() : null,
-            \sprintf('2027-03-15 10:%02d:00+00', $number),
+            $details['updatedAt'] ?? \sprintf('2027-03-15 10:%02d:00+00', $number),
         ];
         $turnUserId = isset($details['turn']) ? $this->people[$details['turn']]->id()->toString() : null;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters, $turnUserId, $groupCode, $ticketId): int {

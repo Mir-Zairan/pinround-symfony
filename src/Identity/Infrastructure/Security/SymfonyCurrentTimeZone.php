@@ -20,7 +20,7 @@ final readonly class SymfonyCurrentTimeZone implements CurrentTimeZone
     {
         $user = $this->tokenStorage->getToken()?->getUser();
         $savedZone = $user instanceof SecurityUser ? $user->timeZone() : null;
-        if (null === $savedZone || !\in_array($savedZone, \DateTimeZone::listIdentifiers(), true)) {
+        if (null === $savedZone || !\in_array($savedZone, \DateTimeZone::listIdentifiers(\DateTimeZone::ALL_WITH_BC), true)) {
             return new \DateTimeZone('UTC');
         }
 
