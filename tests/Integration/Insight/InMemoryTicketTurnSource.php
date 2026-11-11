@@ -10,7 +10,7 @@ use App\SharedKernel\Domain\TicketId;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
- * The test env's TicketTurnSource: tickets come in P03, so a test puts the facts it wants projected here.
+ * A TicketTurnSource a test puts the facts it wants projected into, with no ticket, team or user behind them.
  */
 final class InMemoryTicketTurnSource implements TicketTurnSource, ResetInterface
 {

@@ -5,14 +5,11 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Ticketing;
 
 use App\Insight\Api\TurnProjector;
-use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Organization\Api\MembershipQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
-use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use App\Tests\Integration\Insight\InMemoryTicketTurnSource;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Workflow\WorkflowRows;
@@ -30,8 +27,6 @@ use App\Ticketing\Infrastructure\Doctrine\DoctrineProjects;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
 use App\Ticketing\Infrastructure\Messenger\MessengerTicketEvents;
 use App\Workflow\Api\StepQueries;
-use App\Workflow\Api\TeamFacts;
-use App\Workflow\Api\TicketState;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -41,7 +36,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 /**
  * CreateTicket on the real tables, outbox and turn projector, as pinround_app under row-level security: the ticket,
  * its created row, its turn row and TicketCreated are written in the caller's transaction, so a rollback leaves none.
- * The turn facts come from InMemoryTicketTurnSource, so the ticket id is fixed to put them there before the create.
+ * The turn row comes from the real TicketTurnSource; the ticket id is fixed so the tests can find its rows.
  */
 final class CreateTicketTest extends KernelTestCase
 {
@@ -87,20 +82,18 @@ final class CreateTicketTest extends KernelTestCase
             $this->addTeam(self::BETA_BAKERY, self::OVENS_TEAM, 'ovens', self::BEN);
             $this->addTeamMember(self::BETA_BAKERY, self::OVENS_TEAM, self::BEN, 'lead');
         });
-        $this->turnSource()->put(new TicketTurnFacts(
-            new TicketId(self::TICKET),
-            self::SHOP_PROJECT,
-            new TicketState(self::TO_DO_STEP, 'todo', 'todo', new TeamId(self::SHOP_TEAM), assigneeId: new UserId(self::OMAR), reporterId: new UserId(self::MIA), priority: 'major'),
-            new TeamFacts(new UserId(self::LENA), 'Lena'),
-            'all',
-        ));
+        // The turn facts name the team's lead, so the lead needs a user row.
+        $this->migrator()->executeStatement(
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp)
+             VALUES (?, 'lena.c751@acme-foods.example', 'Lena', 'active', 'en', 'UTC', '2027-03-15 10:00:00+00', 'a-stamp')",
+            [self::LENA],
+        );
     }
 
     protected function tearDown(): void
     {
         self::getContainer()->get('doctrine')->resetManager();
         self::getContainer()->get(TenantContext::class)->reset();
-        $this->turnSource()->reset();
         $this->removeRows();
         parent::tearDown();
     }
@@ -116,7 +109,7 @@ final class CreateTicketTest extends KernelTestCase
             [['ticket_id' => self::TICKET, 'actor_id' => self::MIA, 'type' => 'created', 'to_step' => self::TO_DO_STEP, 'at' => '2027-03-15 10:00:00']],
             $this->storedCreatedRows(),
         );
-        self::assertSame(1, $this->storedTurnRows());
+        self::assertSame([['ticket_id' => self::TICKET, 'turn_user_id' => self::OMAR, 'kind' => 'build', 'grp' => 'todo']], $this->storedTurns());
         self::assertSame(self::SHOP_NEXT_NUMBER + 1, $this->storedNextNumber(self::SHOP_PROJECT));
         $outboxBodies = $this->outboxBodiesOf(TicketCreated::class);
         self::assertCount(1, $outboxBodies);
@@ -177,7 +170,7 @@ final class CreateTicketTest extends KernelTestCase
     }
 
     /**
-     * The container's Tickets gives a new id, so the source knows no facts for it and no turn row is asserted.
+     * The container's Tickets gives a new id, so the key finds the ticket; its turn row comes from the real source too.
      */
     #[Test]
     public function theContainersTicketCommandsCreatesTheTicket(): void
@@ -189,6 +182,7 @@ final class CreateTicketTest extends KernelTestCase
 
         self::assertSame('SHOP-'.self::SHOP_NEXT_NUMBER, $key);
         self::assertSame([['key' => $key, 'step_id' => self::TO_DO_STEP]], $this->storedTickets());
+        self::assertSame([[self::OMAR, 'build', 'todo']], array_map(static fn (array $turn): array => [$turn['turn_user_id'], $turn['kind'], $turn['grp']], $this->storedTurns()));
         self::assertCount(1, $this->outboxBodiesOf(TicketCreated::class));
     }
 
@@ -342,6 +336,17 @@ final class CreateTicketTest extends KernelTestCase
         ));
     }
 
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function storedTurns(): array
+    {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT ticket_id, turn_user_id, kind, grp FROM ins_ticket_turn WHERE organization_id = ? ORDER BY ticket_id',
+            [self::ACME_FOODS],
+        ));
+    }
+
     private function storedTurnRows(): int
     {
         return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->integerOf(
@@ -397,9 +402,15 @@ final class CreateTicketTest extends KernelTestCase
     {
         $this->ticketRows()->removeAllOf(self::ACME_FOODS);
         $this->workflowRows()->removeAllOf(self::ACME_FOODS);
-        new OrganizationRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class))
+        new OrganizationRows($this->migrator(), self::getContainer()->get(TenantContext::class))
             ->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->migrator()->executeStatement('DELETE FROM idn_user WHERE id = ?', [self::LENA]);
         $this->connection()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
+    }
+
+    private function migrator(): Connection
+    {
+        return self::getContainer()->get('doctrine.dbal.migrator_connection');
     }
 
     private function addMembership(string $organizationId, string $userId): void
@@ -424,14 +435,6 @@ final class CreateTicketTest extends KernelTestCase
             "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, ?, 'other', '2027-03-15 10:00:00+00')",
             [$organizationId, $teamId, $userId, $teamRole],
         );
-    }
-
-    private function turnSource(): InMemoryTicketTurnSource
-    {
-        $source = self::getContainer()->get(InMemoryTicketTurnSource::class);
-        self::assertInstanceOf(InMemoryTicketTurnSource::class, $source);
-
-        return $source;
     }
 
     private function connection(): Connection

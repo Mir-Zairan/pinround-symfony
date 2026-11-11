@@ -7,10 +7,10 @@ namespace App\Insight\Application\Turn;
 use App\SharedKernel\Domain\TicketId;
 
 /**
- * Where the turn projector reads one ticket's facts from. Insight implements it (P03): an Infrastructure adapter calls a
- * Ticketing Api query that returns SharedKernel-only data and builds TicketState, TeamFacts and TicketTurnFacts itself,
- * as Ticketing's Api may use SharedKernel only. Insight's Infrastructure cannot see Organization's Api, so the team's
- * lead and member loads come through that Ticketing query too, unless a new ADR widens deptrac.
+ * Where the turn projector reads one ticket's facts from. Insight implements it (Infrastructure\Doctrine\
+ * DbalTicketTurnSource): it calls Ticketing's TicketTurnQueries, which returns SharedKernel-only data, the team's lead
+ * and people included, as Insight cannot see Organization's or Identity's Api; it builds TicketState, TeamFacts and
+ * TicketTurnFacts itself and counts the member loads in its own ins_ticket_turn.
  */
 interface TicketTurnSource
 {
