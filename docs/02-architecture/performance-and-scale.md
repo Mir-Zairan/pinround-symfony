@@ -101,6 +101,7 @@ Result: ≤ 8 queries (the Home budget), all index-only or index-range scans.
 - Project rail counts come from the read model `ins_project_counts`, not from `count(*)` on tickets.
 - The steps come from Workflow's cached `StepQueries::listedSteps` (see [Caching](#caching)), not a join on `wf_step`; the first load after a step change reads them, one more query.
 - "Turn:" comes from one batched query on `ins_ticket_turn` for the shown rows (Insight's `TurnUserQueries::turnUsersOf`), separate from the rows query.
+- "To check by" (P06) comes from the same batched `ins_ticket_turn` read, with `turnUsersOf` widened to return the checker, not from another query.
 
 ### Whose turn view
 
