@@ -6,16 +6,19 @@ namespace App\Tests\Integration\Ticketing;
 
 use App\Insight\Api\TurnProjector;
 use App\Insight\Application\Turn\TicketTurnFacts;
+use App\Organization\Api\MembershipQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Insight\InMemoryTicketTurnSource;
+use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Workflow\WorkflowRows;
 use App\Ticketing\Api\Event\TicketCreated;
 use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
 use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
 use App\Ticketing\Application\OrganizationProjects;
@@ -31,6 +34,7 @@ use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -51,7 +55,12 @@ final class CreateTicketTest extends KernelTestCase
     private const string LENA = '0197a3c0-0000-7000-8000-00000000c751';
     private const string OMAR = '0197a3c0-0000-7000-8000-00000000c752';
     private const string MIA = '0197a3c0-0000-7000-8000-00000000c753';
+    private const string RAJ = '0197a3c0-0000-7000-8000-00000000c754';
+    private const string BEN = '0197a3c0-0000-7000-8000-00000000c755';
+    private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000c702';
+    private const string OVENS_TEAM = '0197a3c0-0000-7000-8000-00000000c712';
     private const string TITLE = 'Cart total shows the wrong sum';
+    private const string DESCRIPTION = 'The total adds the shipping twice.';
     private const int SHOP_NEXT_NUMBER = 7;
 
     protected function setUp(): void
@@ -65,6 +74,18 @@ final class CreateTicketTest extends KernelTestCase
                     [self::ACME_FOODS, $stepId, $name, $coreCode, $position],
                 );
             }
+            foreach ([self::LENA, self::OMAR, self::MIA, self::RAJ] as $userId) {
+                $this->addMembership(self::ACME_FOODS, $userId);
+            }
+            $this->addTeam(self::ACME_FOODS, self::SHOP_TEAM, 'shop', self::LENA);
+            $this->addTeamMember(self::ACME_FOODS, self::SHOP_TEAM, self::LENA, 'lead');
+            $this->addTeamMember(self::ACME_FOODS, self::SHOP_TEAM, self::OMAR, 'member');
+            $this->addTeamMember(self::ACME_FOODS, self::SHOP_TEAM, self::RAJ, 'viewer');
+        });
+        $this->transactions()->committedAs(self::BETA_BAKERY, function (): void {
+            $this->addMembership(self::BETA_BAKERY, self::BEN);
+            $this->addTeam(self::BETA_BAKERY, self::OVENS_TEAM, 'ovens', self::BEN);
+            $this->addTeamMember(self::BETA_BAKERY, self::OVENS_TEAM, self::BEN, 'lead');
         });
         $this->turnSource()->put(new TicketTurnFacts(
             new TicketId(self::TICKET),
@@ -91,12 +112,16 @@ final class CreateTicketTest extends KernelTestCase
 
         self::assertSame('SHOP-'.self::SHOP_NEXT_NUMBER, $key);
         self::assertSame([['key' => $key, 'step_id' => self::TO_DO_STEP]], $this->storedTickets());
-        self::assertSame([['type' => 'created', 'to_step' => self::TO_DO_STEP, 'at' => '2027-03-15 10:00:00']], $this->storedCreatedRows());
+        self::assertSame(
+            [['ticket_id' => self::TICKET, 'actor_id' => self::MIA, 'type' => 'created', 'to_step' => self::TO_DO_STEP, 'at' => '2027-03-15 10:00:00']],
+            $this->storedCreatedRows(),
+        );
         self::assertSame(1, $this->storedTurnRows());
         self::assertSame(self::SHOP_NEXT_NUMBER + 1, $this->storedNextNumber(self::SHOP_PROJECT));
         $outboxBodies = $this->outboxBodiesOf(TicketCreated::class);
         self::assertCount(1, $outboxBodies);
         self::assertStringNotContainsString(self::TITLE, $outboxBodies[0]);
+        self::assertStringNotContainsString(self::DESCRIPTION, $outboxBodies[0]);
         self::assertSame(1, $this->outboxRows());
     }
 
@@ -167,17 +192,94 @@ final class CreateTicketTest extends KernelTestCase
         self::assertCount(1, $this->outboxBodiesOf(TicketCreated::class));
     }
 
-    private function createdShopTicket(TicketCommands $ticketCommands): string
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function assigneesOutsideTheShopTeam(): iterable
+    {
+        yield 'a user of another organization' => [self::BEN];
+        yield 'a member of the organization with no role in the team' => [self::MIA];
+        yield 'a viewer of the team, who cannot move the ticket' => [self::RAJ];
+    }
+
+    #[Test]
+    #[DataProvider('assigneesOutsideTheShopTeam')]
+    public function anAssigneeOutsideTheProjectsTeamIsRefusedAndWritesNothing(string $assigneeId): void
+    {
+        $ticketCommands = self::getContainer()->get('test.ticketing_ticket_commands');
+        self::assertInstanceOf(TicketCommands::class, $ticketCommands);
+
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->createdShopTicket($ticketCommands, new UserId($assigneeId)));
+            self::fail('A ticket was given to someone outside the project\'s team.');
+        } catch (AssigneeNotInTeam $refused) {
+            self::assertSame('That person is not a lead or member of the project\'s team, so they cannot take the ticket.', $refused->getMessage());
+        }
+        self::getContainer()->get('doctrine')->resetManager();
+
+        self::assertSame([], $this->storedTickets());
+        self::assertSame([], $this->storedCreatedRows());
+        self::assertSame(0, $this->storedTurnRows());
+        self::assertSame(0, $this->outboxRows());
+        self::assertSame(self::SHOP_NEXT_NUMBER, $this->storedNextNumber(self::SHOP_PROJECT));
+    }
+
+    #[Test]
+    public function publishingTicketCreatedOutsideATransactionIsRefusedAndWritesNoOutboxRow(): void
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            new MessengerTicketEvents(self::getContainer()->get('event.bus'), $this->connection())
+                ->publish(new TicketCreated(self::ACME_FOODS, self::TICKET, self::SHOP_PROJECT, self::SHOP_TEAM, self::MIA, null));
+            self::fail('A ticket event was published with no transaction open.');
+        } catch (\LogicException $refused) {
+            self::assertSame('A ticket event is published in the transaction of its change; none is open.', $refused->getMessage());
+        } finally {
+            $tenantContext->clear();
+        }
+
+        self::assertSame(0, $this->outboxRows());
+    }
+
+    #[Test]
+    public function recordingACreatedRowOutsideATransactionIsRefusedAndWritesNoHistoryRow(): void
+    {
+        $this->ticketRows()->addOf(self::ACME_FOODS, self::TICKET, self::SHOP_PROJECT, self::MIA);
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            new DbalTicketHistory($this->connection())
+                ->recordCreated(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::MIA), self::TO_DO_STEP, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
+            self::fail('A ticket event was recorded with no transaction open.');
+        } catch (\LogicException $refused) {
+            self::assertSame('A ticket event is recorded in the transaction of its change; none is open.', $refused->getMessage());
+        } finally {
+            $tenantContext->clear();
+        }
+
+        self::assertSame([], $this->storedCreatedRows());
+    }
+
+    #[Test]
+    public function theTeamsLeadMayBeTheAssignee(): void
+    {
+        $key = $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->createdShopTicket($this->createTicket(), new UserId(self::LENA)));
+
+        self::assertSame([['key' => $key, 'step_id' => self::TO_DO_STEP]], $this->storedTickets());
+    }
+
+    private function createdShopTicket(TicketCommands|CreateTicket $ticketCommands, UserId $assignee = new UserId(self::OMAR)): string
     {
         return $ticketCommands->create(
             new OrganizationId(self::ACME_FOODS),
             new UserId(self::MIA),
             self::SHOP_PROJECT,
             self::TITLE,
-            'The total adds the shipping twice.',
+            self::DESCRIPTION,
             'bug',
             'major',
-            new UserId(self::OMAR),
+            $assignee,
             new \DateTimeImmutable('2027-03-15 10:00:00 UTC'),
         );
     }
@@ -189,6 +291,7 @@ final class CreateTicketTest extends KernelTestCase
 
         return new CreateTicket(
             new OrganizationProjects(new DoctrineProjects($this->entityManager())),
+            self::getContainer()->get(MembershipQueries::class),
             self::getContainer()->get(StepQueries::class),
             new DbalNextTicketNumber($this->connection()),
             $this->ticketsWithTheFixedId(),
@@ -234,7 +337,7 @@ final class CreateTicketTest extends KernelTestCase
     private function storedCreatedRows(): array
     {
         return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchAllAssociative(
-            "SELECT type, to_step, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS at FROM tkt_ticket_event WHERE organization_id = ?",
+            "SELECT ticket_id, actor_id, type, to_step, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS at FROM tkt_ticket_event WHERE organization_id = ?",
             [self::ACME_FOODS],
         ));
     }
@@ -294,7 +397,33 @@ final class CreateTicketTest extends KernelTestCase
     {
         $this->ticketRows()->removeAllOf(self::ACME_FOODS);
         $this->workflowRows()->removeAllOf(self::ACME_FOODS);
+        new OrganizationRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class))
+            ->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->connection()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
+    }
+
+    private function addMembership(string $organizationId, string $userId): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, '{}', '2027-03-15 10:00:00+00')",
+            [$organizationId, $userId],
+        );
+    }
+
+    private function addTeam(string $organizationId, string $teamId, string $slug, string $leadUserId): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
+            [$organizationId, $teamId, ucfirst($slug), $slug, $leadUserId],
+        );
+    }
+
+    private function addTeamMember(string $organizationId, string $teamId, string $userId, string $teamRole): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, ?, 'other', '2027-03-15 10:00:00+00')",
+            [$organizationId, $teamId, $userId, $teamRole],
+        );
     }
 
     private function turnSource(): InMemoryTicketTurnSource

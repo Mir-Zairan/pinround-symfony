@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Application\CreateTicket;
 
 use App\Insight\Api\TurnProjector;
+use App\Organization\Api\MembershipQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -24,15 +25,16 @@ use App\Ticketing\Domain\Visibility;
 use App\Workflow\Api\StepQueries;
 
 /**
- * TicketCommands::create; the contract is on {@see TicketCommands}.
+ * The use case behind {@see TicketCommands::create}, which carries the contract.
  */
-final readonly class CreateTicket implements TicketCommands
+final readonly class CreateTicket
 {
     private const string BACKLOG = 'backlog';
     private const string TO_DO = 'todo';
 
     public function __construct(
         private OrganizationProjects $organizationProjects,
+        private MembershipQueries $membershipQueries,
         private StepQueries $stepQueries,
         private NextTicketNumber $nextTicketNumber,
         private Tickets $tickets,
@@ -43,8 +45,9 @@ final readonly class CreateTicket implements TicketCommands
     }
 
     /**
-     * @throws ProjectNotFound  when the organization has no project with that id; nothing is saved
-     * @throws ProjectHasNoTeam when no team owns the project; nothing is saved
+     * @throws ProjectNotFound   when the organization has no project with that id; nothing is saved
+     * @throws ProjectHasNoTeam  when no team owns the project; nothing is saved
+     * @throws AssigneeNotInTeam when the assignee is not a lead or member of the project's team; nothing is saved
      */
     public function create(
         OrganizationId $organizationId,
@@ -61,6 +64,9 @@ final readonly class CreateTicket implements TicketCommands
         $ticketPriority = Priority::tryFrom($priority) ?? throw new \InvalidArgumentException('That priority is unknown.');
         $project = $this->organizationProjects->lockedProjectOf($organizationId, $projectId);
         $team = $project->owningTeam() ?? throw new ProjectHasNoTeam('That project has no team, so it takes no tickets.');
+        if (null !== $assignee) {
+            $this->refuseAnAssigneeOutside($team, $assignee, $organizationId);
+        }
         [$backlogStepId, $toDoStepId] = $this->backlogAndToDoStepIdsOf($team);
 
         $ticket = Ticket::report(
@@ -94,6 +100,18 @@ final readonly class CreateTicket implements TicketCommands
         ));
 
         return $ticket->key()->toString();
+    }
+
+    /**
+     * A viewer is refused too, as a viewer cannot move the ticket (ADR-0013); a user of another organization has no
+     * roles here.
+     */
+    private function refuseAnAssigneeOutside(TeamId $team, UserId $assignee, OrganizationId $organizationId): void
+    {
+        $roles = $this->membershipQueries->rolesOf($assignee, $organizationId);
+        if (!$roles->isLeadOf($team) && !$roles->isMemberOf($team)) {
+            throw new AssigneeNotInTeam('That person is not a lead or member of the project\'s team, so they cannot take the ticket.');
+        }
     }
 
     /**

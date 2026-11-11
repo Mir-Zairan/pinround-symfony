@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Ticketing;
 
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantNotSet;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Infrastructure\Workflow\TicketStepOccupancy;
 use PHPUnit\Framework\Attributes\Test;
@@ -59,9 +60,30 @@ final class TicketStepOccupancyTest extends KernelTestCase
         self::assertSame(0, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->stepOccupancy()->openTicketsIn(self::EMPTY_STEP)));
     }
 
+    #[Test]
+    public function withNoTransactionOpenTheCountIsRefusedRatherThanZero(): void
+    {
+        $this->expectExceptionObject(new \LogicException('Open tickets are counted in a transaction under the organization as tenant; none is open.'));
+
+        $this->stepOccupancy()->openTicketsIn(self::TICKET_ROWS_STEP);
+    }
+
+    #[Test]
+    public function inATransactionWithNoTenantTheCountIsRefusedRatherThanZero(): void
+    {
+        $connection = self::getContainer()->get('doctrine.dbal.default_connection');
+        $connection->beginTransaction();
+        try {
+            $this->expectException(TenantNotSet::class);
+            $this->stepOccupancy()->openTicketsIn(self::TICKET_ROWS_STEP);
+        } finally {
+            $connection->rollBack();
+        }
+    }
+
     private function stepOccupancy(): TicketStepOccupancy
     {
-        return new TicketStepOccupancy(self::getContainer()->get('doctrine.dbal.default_connection'));
+        return new TicketStepOccupancy(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function transactions(): TenantTransactions

@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Ticketing\Application;
 
+use App\Organization\Api\MembershipQueries;
+use App\Organization\Api\Roles;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\Event\TicketCreated;
+use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
 use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
 use App\Ticketing\Application\OrganizationProjects;
@@ -33,6 +36,10 @@ final class CreateTicketTest extends TestCase
     private const string TICKET = '0197a3c0-0000-7000-8000-0000000031e1';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000031f1';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000031f2';
+    private const string RAJ = '0197a3c0-0000-7000-8000-0000000031f3';
+    private const string MIA = '0197a3c0-0000-7000-8000-0000000031f4';
+    private const string BEN = '0197a3c0-0000-7000-8000-0000000031f5';
+    private const string OTHER_TEAM = '0197a3c0-0000-7000-8000-0000000031c2';
     private const string BACKLOG_STEP = '0197a3c0-0000-7000-8000-000000003101';
     private const string TO_DO_STEP = '0197a3c0-0000-7000-8000-000000003102';
     private const string TEAM_TRIAGE_STEP = '0197a3c0-0000-7000-8000-000000003103';
@@ -126,6 +133,39 @@ final class CreateTicketTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{string}>
+     */
+    public static function assigneesOutsideTheShopTeam(): iterable
+    {
+        yield 'a user of another organization, who has no roles in this one' => [self::BEN];
+        yield 'a member of another team only' => [self::MIA];
+        yield 'a viewer of the team' => [self::RAJ];
+    }
+
+    #[Test]
+    #[DataProvider('assigneesOutsideTheShopTeam')]
+    public function anAssigneeOutsideTheProjectsTeamIsRefusedBeforeANumberIsTaken(string $assigneeId): void
+    {
+        try {
+            $this->createTicket(self::shopProject(), new UserId($assigneeId));
+            self::fail('A ticket was given to someone outside the project\'s team.');
+        } catch (AssigneeNotInTeam $refused) {
+            self::assertSame('That person is not a lead or member of the project\'s team, so they cannot take the ticket.', $refused->getMessage());
+        }
+
+        self::assertSame([], $this->nextTicketNumber->takenFor);
+        self::assertSame([], $this->writes->writes);
+    }
+
+    #[Test]
+    public function theTeamsLeadMayBeTheAssignee(): void
+    {
+        $this->createTicket(self::shopProject(), new UserId(self::LENA));
+
+        self::assertSame(self::LENA, $this->writes->addedTickets[0]->assignee()?->toString());
+    }
+
+    /**
      * @return iterable<string, array{string, string}>
      */
     public static function unknownTypesAndPriorities(): iterable
@@ -182,6 +222,7 @@ final class CreateTicketTest extends TestCase
     {
         $createTicket = new CreateTicket(
             new OrganizationProjects(new InMemoryProjects(false, $project)),
+            self::shopTeamRoles(),
             new FixedStepQueries($steps ?? [
                 self::step(self::BACKLOG_STEP, 'todo', 'backlog'),
                 self::step(self::TEAM_TRIAGE_STEP, 'todo', null),
@@ -210,6 +251,46 @@ final class CreateTicketTest extends TestCase
     private static function shopProject(): Project
     {
         return new Project(new ProjectId(self::SHOP_PROJECT), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), new ProjectKey('SHOP'), 'Shop');
+    }
+
+    /**
+     * Lena leads the Shop team, Omar is a member, Raj a viewer and Mia a member of another team, all in Acme Foods;
+     * anyone else, or anyone asked about another organization, has no roles.
+     */
+    private static function shopTeamRoles(): MembershipQueries
+    {
+        return new readonly class(self::ACME_FOODS, self::SHOP_TEAM, self::OTHER_TEAM, self::LENA, self::OMAR, self::RAJ, self::MIA) implements MembershipQueries {
+            public function __construct(
+                private string $organizationId,
+                private string $shopTeamId,
+                private string $otherTeamId,
+                private string $leadId,
+                private string $memberId,
+                private string $viewerId,
+                private string $otherTeamMemberId,
+            ) {
+            }
+
+            public function organizationsOf(UserId $userId): array
+            {
+                throw new \LogicException('CreateTicket does not ask for organizations.');
+            }
+
+            public function rolesOf(UserId $userId, OrganizationId $organizationId): Roles
+            {
+                $shop = [new TeamId($this->shopTeamId)];
+                $other = [new TeamId($this->otherTeamId)];
+
+                return match (true) {
+                    $organizationId->toString() !== $this->organizationId => Roles::none(),
+                    $userId->toString() === $this->leadId => new Roles(false, false, $shop, [], []),
+                    $userId->toString() === $this->memberId => new Roles(false, false, [], $shop, []),
+                    $userId->toString() === $this->viewerId => new Roles(false, false, [], [], $shop),
+                    $userId->toString() === $this->otherTeamMemberId => new Roles(false, false, [], $other, []),
+                    default => Roles::none(),
+                };
+            }
+        };
     }
 
     private static function step(string $id, string $groupCode, ?string $coreCode): StepView

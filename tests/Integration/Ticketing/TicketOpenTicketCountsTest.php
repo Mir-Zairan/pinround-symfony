@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Ticketing;
 
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantNotSet;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Infrastructure\Doctrine\TicketOpenTicketCounts;
@@ -71,9 +72,30 @@ final class TicketOpenTicketCountsTest extends KernelTestCase
         self::assertSame([], $this->openTicketCounts()->openTicketsIn());
     }
 
+    #[Test]
+    public function withNoTransactionOpenTheCountIsRefusedRatherThanZero(): void
+    {
+        $this->expectExceptionObject(new \LogicException('Open tickets are counted in a transaction under the organization as tenant; none is open.'));
+
+        $this->openTicketCounts()->openTicketsIn(new ProjectId(self::SHOP_PROJECT));
+    }
+
+    #[Test]
+    public function inATransactionWithNoTenantTheCountIsRefusedRatherThanZero(): void
+    {
+        $connection = self::getContainer()->get('doctrine.dbal.default_connection');
+        $connection->beginTransaction();
+        try {
+            $this->expectException(TenantNotSet::class);
+            $this->openTicketCounts()->openTicketsIn(new ProjectId(self::SHOP_PROJECT));
+        } finally {
+            $connection->rollBack();
+        }
+    }
+
     private function openTicketCounts(): TicketOpenTicketCounts
     {
-        return new TicketOpenTicketCounts(self::getContainer()->get('doctrine.dbal.default_connection'));
+        return new TicketOpenTicketCounts(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function transactions(): TenantTransactions

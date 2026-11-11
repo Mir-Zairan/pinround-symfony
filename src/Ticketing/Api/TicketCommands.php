@@ -25,8 +25,9 @@ interface TicketCommands
      *
      * @return string the new ticket's key, for example "SHOP-12"
      *
-     * @throws \DomainException          when the organization has no project with that id, or no team owns the project;
-     *                                   nothing is saved
+     * @throws \DomainException          when the organization has no project with that id, no team owns the project, or
+     *                                   the assignee is not a lead or member of that team in the organization; nothing
+     *                                   is saved
      * @throws \InvalidArgumentException when the title is blank or over 200 characters, the description over 50,000
      *                                   characters, or the type or priority unknown; the number taken is given back only
      *                                   when the caller rolls back
