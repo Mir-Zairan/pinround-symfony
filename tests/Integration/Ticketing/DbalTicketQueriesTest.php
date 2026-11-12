@@ -8,6 +8,7 @@ use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
 use App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
@@ -17,6 +18,7 @@ use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\TicketListGroup;
 use App\Ticketing\Api\TicketListRow;
 use App\Ticketing\Api\TicketListStep;
+use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries;
@@ -568,6 +570,168 @@ final class DbalTicketQueriesTest extends KernelTestCase
         });
 
         self::assertSame(['The tickets list is read under the viewer\'s own organization as tenant.', 0], $refusal);
+    }
+
+    /**
+     * With the steps cached: the ticket with its project and parent in one query, the names of its reporter and
+     * assignee in one. The parent is a team-only ticket of Shop, which the admin may see.
+     */
+    #[Test]
+    public function aPageCarriesTheTicketItsProjectStepNamesAndVisibilityFactsInTwoQueries(): void
+    {
+        $parentKey = $this->addTicket(self::DOING_STEP, 2, '2027-03-15 10:00:00+00');
+        $key = $this->addTicket(self::CHECKING_STEP, 1, '2027-03-15 11:00:00+00');
+        $this->asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator) use ($parentKey, $key): void {
+            $migrator->executeStatement("UPDATE tkt_ticket SET visibility = 'team', team_id = ? WHERE key = ?", [self::SHOP_TEAM, $parentKey]);
+            $migrator->executeStatement(
+                "UPDATE tkt_ticket SET title = 'Search shows no results', description = ?, type = 'story', release = '2027.3',
+                     components = '{Checkout,\"Cart page\"}', parent_id = (SELECT id FROM tkt_ticket WHERE key = ?), team_id = ?,
+                     assignee_id = ?, reviewer_id = ?, created_at = '2027-03-14 23:30:00+00' WHERE key = ?",
+                ["Typing a product name finds nothing.\r\nIt worked last week.", $parentKey, self::SHOP_TEAM, self::OMAR, self::LENA, $key],
+            );
+        });
+        $debugData = $this->debugData();
+
+        [$page, $queryCount] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $key): array {
+            $this->stepQueries()->listedSteps();
+            $debugData->reset();
+            $page = $this->ticketQueries()->pageOf($key, self::adminOf(self::ACME_FOODS));
+
+            return [$page, self::queryCountOf($debugData)];
+        });
+
+        self::assertNotNull($page);
+        self::assertSame(2, $queryCount);
+        self::assertSame(
+            [
+                'SHOP-2', 'Search shows no results', "Typing a product name finds nothing.\r\nIt worked last week.", 'story', 'critical', '2027.3',
+                'SHOP-1', ['Checkout', 'Cart page'], '2027-03-14 23:30:00', 'Shop', 'Review', 'check', 'Checking', 'Lena', 'Omar', false,
+            ],
+            [
+                $page->key, $page->title, $page->description, $page->type, $page->priority, $page->release,
+                $page->parentKey, $page->components, $page->createdAt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'), $page->projectName,
+                $page->stepName, $page->groupCode, $page->groupLabel, $page->reporterName, $page->assigneeName, $page->isTeamOnly(),
+            ],
+        );
+        $facts = $page->visibilityFacts;
+        self::assertSame(
+            [self::ACME_FOODS, 'all', self::SHOP_TEAM, self::LENA, self::OMAR, null, self::LENA, null, null],
+            [
+                $facts->organizationId->toString(), $facts->visibility, $facts->teamId?->toString(), $facts->reporterId->toString(),
+                $facts->assigneeId?->toString(), $facts->pendingAssigneeId, $facts->reviewerId?->toString(), $facts->testerId, $facts->waitingOnUserId,
+            ],
+        );
+    }
+
+    #[Test]
+    public function aPageWithNoAssigneeReleaseParentOrComponentsHasNoneOfThem(): void
+    {
+        $key = $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+
+        $page = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketPageView => $this->ticketQueries()->pageOf($key, self::adminOf(self::ACME_FOODS)));
+
+        self::assertNotNull($page);
+        self::assertSame([null, null, [], null, null, 'To do', 'todo'], [$page->assigneeName, $page->release, $page->components, $page->parentKey, $page->visibilityFacts->assigneeId, $page->stepName, $page->groupCode]);
+    }
+
+    /**
+     * Omar, outside Shop with no link to the team-only parent, reads the child's page without the parent's key; the
+     * same viewer in Shop gets it.
+     */
+    #[Test]
+    public function aParentTheViewerMayNotSeeHasNoKeyOnThePage(): void
+    {
+        $parentKey = $this->addTicket(self::DOING_STEP, 2, '2027-03-15 10:00:00+00');
+        $key = $this->addTicket(self::DOING_STEP, 2, '2027-03-15 11:00:00+00');
+        $this->asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator) use ($parentKey, $key): void {
+            $migrator->executeStatement("UPDATE tkt_ticket SET visibility = 'team', team_id = ? WHERE key = ?", [self::SHOP_TEAM, $parentKey]);
+            $migrator->executeStatement('UPDATE tkt_ticket SET parent_id = (SELECT id FROM tkt_ticket WHERE key = ?) WHERE key = ?', [$parentKey, $key]);
+        });
+        $outsider = TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], false, null);
+        $teamMember = TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [new TeamId(self::SHOP_TEAM)], false, null);
+
+        $parentKeys = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => [
+            $this->ticketQueries()->pageOf($key, $outsider)?->parentKey,
+            $this->ticketQueries()->pageOf($key, $teamMember)?->parentKey,
+        ]);
+
+        self::assertSame([null, $parentKey], $parentKeys);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function keysThatCannotBeTicketKeys(): iterable
+    {
+        yield 'empty' => [''];
+        yield 'lower case' => ['shop-1'];
+        yield 'no number' => ['SHOP-'];
+        yield 'number zero' => ['SHOP-0'];
+        yield 'a leading zero' => ['SHOP-01'];
+        yield 'a trailing newline' => ["SHOP-1\n"];
+        yield 'a trailing CR LF' => ["SHOP-1\r\n"];
+        yield 'a leading BOM' => ["\u{FEFF}SHOP-1"];
+        yield 'a number past the integer range' => ['SHOP-99999999999999999999'];
+        yield 'a project key of eleven characters' => ['SHOPPINGCAR-1'];
+    }
+
+    #[Test]
+    #[DataProvider('keysThatCannotBeTicketKeys')]
+    public function aKeyThatCannotBeATicketKeyFindsNothingWithNoQuery(string $key): void
+    {
+        $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+        $debugData = $this->debugData();
+
+        $found = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $key): array {
+            $debugData->reset();
+
+            return [$this->ticketQueries()->pageOf($key, self::adminOf(self::ACME_FOODS)), self::queryCountOf($debugData)];
+        });
+
+        self::assertSame([null, 0], $found);
+    }
+
+    /**
+     * Beta Bakery's admin asks for Acme Foods' SHOP-1 under Beta Bakery: the SQL names the tenant, and row-level security
+     * hides the row as well.
+     */
+    #[Test]
+    public function anotherOrganizationsTicketIsNotFound(): void
+    {
+        $key = $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+        self::assertNotNull($this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketPageView => $this->ticketQueries()->pageOf($key, self::adminOf(self::ACME_FOODS))));
+
+        $page = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): ?TicketPageView => $this->ticketQueries()->pageOf($key, self::adminOf(self::BETA_BAKERY)));
+
+        self::assertNull($page);
+    }
+
+    #[Test]
+    public function aPageWithNoTransactionOrForAViewerOfAnotherOrganizationIsRefusedBeforeAnyQuery(): void
+    {
+        $debugData = $this->debugData();
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $debugData->reset();
+        try {
+            $this->ticketQueries()->pageOf('SHOP-1', self::adminOf(self::ACME_FOODS));
+            self::fail('A ticket page was read with no transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame(['A ticket page is read in a transaction under the organization as tenant; none is open.', 0], [$refusal->getMessage(), self::queryCountOf($debugData)]);
+        }
+        $this->tenantContext()->clear();
+
+        $refusal = $this->transactions()->rolledBackAs(self::BETA_BAKERY, function () use ($debugData): array {
+            $debugData->reset();
+            try {
+                $this->ticketQueries()->pageOf('SHOP-1', self::adminOf(self::ACME_FOODS));
+
+                return ['read', 0];
+            } catch (\LogicException $refusal) {
+                return [$refusal->getMessage(), self::queryCountOf($debugData)];
+            }
+        });
+
+        self::assertSame(['A ticket page is read under the viewer\'s own organization as tenant.', 0], $refusal);
     }
 
     private function filter(?string $projectId = null, bool $showsDone = false, ?string $searchText = null, ?string $assigneeId = null): ListFilter

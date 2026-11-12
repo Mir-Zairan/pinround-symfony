@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Api;
 
 /**
- * The tickets list, for the list page and other modules. It reads the organization of TenantContext under row-level
+ * The tickets list and one ticket's page, for those pages and other modules. It reads the organization of TenantContext under row-level
  * security, so it needs an open transaction whose tenant is the viewer's organization.
  */
 interface TicketQueries
@@ -36,4 +36,21 @@ interface TicketQueries
      *                                   other way round, before any query
      */
     public function list(ListFilter $filter, ?Cursor $cursor = null): array;
+
+    /**
+     * The ticket with that key, read whether or not the viewer may see it: the caller decides TicketPermission VIEW
+     * on its visibility facts before showing any of it. Two queries at most: the ticket with its project and its
+     * parent's key in one, and the names of its reporter and assignee in one; its step through Workflow's
+     * StepQueries::listedSteps adds one only while its cache is cold. A key that cannot be a ticket key (not
+     * PROJECT-number, a number from 1 up with no leading zero, case as stored) runs none.
+     *
+     * @param TicketVisibility $viewer decides only whether the parent's key is shown
+     *
+     * @return TicketPageView|null null when the tenant has no ticket with that key or the key cannot be one
+     *
+     * @throws \LogicException when no transaction is open, no tenant is set, or the viewer is of another organization
+     *                         than the tenant, before any query; when the ticket's step is not one of the
+     *                         organization's
+     */
+    public function pageOf(string $key, TicketVisibility $viewer): ?TicketPageView;
 }

@@ -10,7 +10,8 @@ use App\Ticketing\Api\TicketListRow;
 use App\Ticketing\Api\TicketListStep;
 
 /**
- * The words of the tickets list (tickets-list-and-whose-turn.md, List view) that depend on the rows.
+ * The words of the tickets list (tickets-list-and-whose-turn.md, List view) that depend on the rows, and the date the
+ * ticket page shares with it.
  */
 final class TicketListText
 {
@@ -97,8 +98,18 @@ final class TicketListText
         if ($seconds < 86400) {
             return \sprintf('%d h ago', intdiv($seconds, 3600));
         }
-        $updatedInZone = $updatedAt->setTimezone($viewerTimeZone);
 
-        return $updatedInZone->format($updatedInZone->format('Y') === $now->setTimezone($viewerTimeZone)->format('Y') ? 'j M' : 'j M Y');
+        return self::dateOf($updatedAt, $now, $viewerTimeZone);
+    }
+
+    /**
+     * The date in the viewer's time zone, however recent: "2 Nov", with the year when it is not $now's in that zone
+     * ("2 Nov 2025"). The ticket page prints its created date with it too.
+     */
+    public static function dateOf(\DateTimeImmutable $at, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
+    {
+        $atInZone = $at->setTimezone($viewerTimeZone);
+
+        return $atInZone->format($atInZone->format('Y') === $now->setTimezone($viewerTimeZone)->format('Y') ? 'j M' : 'j M Y');
     }
 }

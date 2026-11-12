@@ -1,0 +1,73 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}{{ ticket.key }} · {{ ticket.title }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
+{% endblock %}
+
+{% block main %}
+    <article class="ticket" data-ticket-key="{{ ticket.key }}">
+        <header class="ticket__header">
+            <a class="btn btn-text ticket__back" href="{{ path('ticketing_tickets') }}"><span aria-hidden="true">&lt;</span> Tickets</a>
+            <p class="ticket__key-line">
+                <span class="ticket__key">{{ ticket.key }}</span>
+                <span class="ticket__kind">{{ type }} · {{ ticket.projectName }}</span>
+                {% if ticket.isTeamOnly %}<twig:Tag class="ticket__team-only">ONLY THE TEAM AND ADMINS SEE THIS</twig:Tag>{% endif %}
+            </p>
+            <h1 class="ticket__title">{{ ticket.title }}</h1>
+            <div class="ticket__state">
+                <twig:StatusPill group="{{ pillGroup }}">{{ ticket.stepName }}</twig:StatusPill>
+                {# TODO(P03.T6 part 2): the Now and Next lines go in this slot. #}
+                <div class="ticket__turn"></div>
+            </div>
+            <p class="ticket__note">Reported in pinround · Group: {{ ticket.groupLabel }}</p>
+        </header>
+
+        <div class="ticket__columns">
+            <div class="ticket__main">
+                <section class="ticket__section" aria-labelledby="ticket-ask-heading">
+                    <h2 id="ticket-ask-heading" class="ticket__section-title">The ask</h2>
+                    {% if ticket.description is empty %}
+                        <p class="ticket__ask-none">The report came with no text.</p>
+                        <p class="ticket__asked">Asked by {{ reporter }} · {{ created }}</p>
+                    {% else %}
+                        <twig:Card tag="div" class="ticket__ask">
+                            <p class="ticket__ask-source"><strong>Original text from the report</strong> · not summarized yet</p>
+                            {% if shortAsk is null %}
+                                <div class="ticket__ask-text">{{ ticket.description }}</div>
+                            {% else %}
+                                <div class="ticket__ask-text ticket__ask-text--short">{{ shortAsk }}</div>
+                                {# A native disclosure: it opens without JavaScript, and the browser tells screen readers whether it is expanded. #}
+                                <details class="ticket__ask-more">
+                                    <summary class="btn btn-outline btn-sm"><span class="ticket__ask-show">Show the full ask</span><span class="ticket__ask-hide">Show less</span></summary>
+                                    <div class="ticket__ask-text ticket__ask-text--full">{{ ticket.description }}</div>
+                                </details>
+                            {% endif %}
+                            <p class="ticket__asked">Asked by {{ reporter }} · {{ created }}</p>
+                        </twig:Card>
+                    {% endif %}
+                </section>
+
+                <section class="ticket__section" aria-labelledby="ticket-rounds-heading">
+                    <h2 id="ticket-rounds-heading" class="ticket__section-title">Rounds</h2>
+                    <twig:EmptyState message="No rounds yet. The developer starts round 1 from Claude Code: it shoots the screens and puts them here." />
+                </section>
+            </div>
+
+            <aside class="ticket__aside">
+                <section class="ticket__section" aria-labelledby="ticket-details-heading">
+                    <h2 id="ticket-details-heading" class="ticket__section-title">Details</h2>
+                    <dl class="ticket__details">
+                        <div class="ticket__detail"><dt>Assignee</dt><dd>{{ assignee }}</dd></div>
+                        <div class="ticket__detail"><dt>Priority</dt><dd>{{ priority }}</dd></div>
+                        {% if ticket.release is not empty %}<div class="ticket__detail"><dt>Release</dt><dd>{{ ticket.release }}</dd></div>{% endif %}
+                        {% if ticket.parentKey is not null %}<div class="ticket__detail"><dt>Parent</dt><dd class="ticket__key">{{ ticket.parentKey }}</dd></div>{% endif %}
+                        {% if components is not empty %}<div class="ticket__detail"><dt>Components</dt><dd>{{ components }}</dd></div>{% endif %}
+                        <div class="ticket__detail"><dt>Created</dt><dd>{{ created }}</dd></div>
+                    </dl>
+                </section>
+            </aside>
+        </div>
+    </article>
+{% endblock %}

@@ -37,6 +37,7 @@ use Symfony\Component\Uid\Uuid;
  * ASSIGN). A person whose teams own no project, or who may create tickets in none of them, is denied, as is a project
  * that is not one of their choices or stops being one before the ticket is saved, and an assignee sent by someone who
  * leads none of the offered teams. A Lead who picks a project of a team they do not lead gets a field error instead.
+ * A made ticket opens on its own page with the toast CREATED.
  *
  * Without the request transaction: a refused create has already taken the project's next number, and only rolling
  * back the whole transaction gives it back. Transactions gives each request a transaction of its own; a refusal leaves
@@ -76,10 +77,6 @@ final class NewTicketController extends AbstractController
     public const string PRIORITY_UNKNOWN = 'Choose Critical, Major, Normal or Minor.';
     public const string ASSIGNEE_NOT_IN_TEAM = 'Choose someone in the project’s team, or no one.';
     public const string ASSIGNEE_NOT_LED = 'Only the team’s lead can give it to someone.';
-
-    /** The route of the ticket list, which takes the project key as PROJECT_QUERY. */
-    public const string TICKET_LIST_ROUTE = 'ticketing_tickets';
-    public const string PROJECT_QUERY = 'project';
 
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
@@ -169,7 +166,7 @@ final class NewTicketController extends AbstractController
 
         $this->addFlash(self::TOAST, \sprintf(self::CREATED, $key));
 
-        return $this->redirectToRoute(self::TICKET_LIST_ROUTE, [self::PROJECT_QUERY => explode('-', $key, 2)[0]]);
+        return $this->redirectToRoute(TicketShowController::ROUTE, ['key' => $key]);
     }
 
     /**

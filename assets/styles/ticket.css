@@ -1,0 +1,167 @@
+/* The ticket page (src/Ticketing/UI/templates/show.html.twig): the header, then the main column and the aside. */
+
+.ticket {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+}
+
+.ticket__header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+.ticket__back {
+  margin-left: calc(-1 * var(--space-12));
+}
+
+.ticket__key-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 13px;
+}
+
+.ticket__key {
+  font-family: var(--font-mono);
+}
+
+.ticket__team-only {
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
+.ticket__title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.ticket__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.ticket__note {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+/* The prototype's two columns: the main one grows first, the aside wraps under it when both do not fit. */
+.ticket__columns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-32);
+}
+
+.ticket__main {
+  display: flex;
+  flex: 999 1 560px;
+  flex-direction: column;
+  gap: var(--space-28);
+  min-width: 0;
+}
+
+.ticket__aside {
+  display: flex;
+  flex: 1 1 300px;
+  flex-direction: column;
+  gap: var(--space-24);
+  min-width: 0;
+}
+
+.ticket__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.ticket__section-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.ticket__ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.ticket__ask-source,
+.ticket__asked,
+.ticket__ask-none {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.ticket__ask-text {
+  max-width: 66ch;
+  font-size: 16px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ticket__ask-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.ticket__ask-more > summary {
+  align-self: flex-start;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ticket__ask-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ticket__ask-more:not([open]) .ticket__ask-hide,
+.ticket__ask-more[open] .ticket__ask-show {
+  display: none;
+}
+
+/* Open, the full text replaces the cut one. */
+.ticket__ask:has(.ticket__ask-more[open]) .ticket__ask-text--short {
+  display: none;
+}
+
+.ticket__details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.ticket__detail {
+  display: flex;
+  gap: var(--space-12);
+}
+
+.ticket__detail dt {
+  flex: none;
+  width: 110px;
+  color: var(--on-surface-var);
+}
+
+.ticket__detail dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

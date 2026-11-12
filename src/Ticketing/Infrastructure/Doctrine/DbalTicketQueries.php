@@ -7,6 +7,7 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\Identity\Api\UserQueries;
 use App\Insight\Api\TurnUserQueries;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -15,8 +16,13 @@ use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\TicketListGroup;
 use App\Ticketing\Api\TicketListRow;
 use App\Ticketing\Api\TicketListStep;
+use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketQueries;
+use App\Ticketing\Api\TicketVisibility;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use App\Ticketing\Api\TicketVisibilitySql;
+use App\Ticketing\Domain\InvalidTicketKey;
+use App\Ticketing\Domain\TicketKey;
 use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
@@ -27,12 +33,14 @@ use Doctrine\DBAL\Connection;
  * PAGE_SIZE + 1 rows, the extra one only saying there is more, through
  * tkt_ticket_step_id_priority_rank_updated_at_id_idx or, for one project,
  * tkt_ticket_project_id_step_id_priority_rank_updated_at_id_idx. With a search, the LATERALs read only the tickets
- * search_ticket_ids returns, in search order.
+ * search_ticket_ids returns, in search order. A ticket's page is read by (organization_id, key), the unique index
+ * tkt_ticket_organization_id_key_key.
  */
 final readonly class DbalTicketQueries implements TicketQueries
 {
     private const string TICKET_ALIAS = 'ticket';
     private const string COUNTED_ALIAS = 'counted';
+    private const string PARENT_ALIAS = 'parent';
 
     public function __construct(
         private Connection $connection,
@@ -71,6 +79,100 @@ final readonly class DbalTicketQueries implements TicketQueries
         $ticketRows = $this->connection->fetchAllAssociative(...$this->listQuery($filter, $cursor, $organizationId->toString(), array_keys($shownSteps)));
 
         return $this->groupsOf($ticketRows, $shownSteps);
+    }
+
+    public function pageOf(string $key, TicketVisibility $viewer): ?TicketPageView
+    {
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('A ticket page is read in a transaction under the organization as tenant; none is open.');
+        }
+        $organizationId = $this->tenantContext->require();
+        if (!$organizationId->equals($viewer->organizationId())) {
+            throw new \LogicException('A ticket page is read under the viewer\'s own organization as tenant.');
+        }
+        if (!self::canBeTicketKey($key)) {
+            return null;
+        }
+
+        $visibleParent = TicketVisibilitySql::of($viewer, self::PARENT_ALIAS);
+        $row = $this->connection->fetchAssociative(
+            'SELECT ticket.id, ticket.key, ticket.title, ticket.description, ticket.type, ticket.priority, ticket.release,'
+            .' to_json(ticket.components) AS components, ticket.created_at, ticket.step_id, ticket.team_id, ticket.visibility,'
+            .' ticket.reporter_id, ticket.assignee_id, ticket.pending_assignee_id, ticket.reviewer_id, ticket.tester_id,'
+            .' ticket.waiting_on_user_id, project.name AS project_name, parent.key AS parent_key'
+            .' FROM tkt_ticket AS ticket'
+            .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
+            .' LEFT JOIN tkt_ticket AS parent ON parent.organization_id = ticket.organization_id AND parent.id = ticket.parent_id'
+            .' AND '.$visibleParent->sql()
+            .' WHERE ticket.organization_id = CAST(:organization AS uuid) AND ticket.key = :key',
+            ['organization' => $organizationId->toString(), 'key' => $key, ...$visibleParent->parameters()],
+        );
+        if (false === $row) {
+            return null;
+        }
+
+        return $this->pageViewOf($row, $organizationId);
+    }
+
+    /**
+     * A key that cannot be stored costs no query: TicketKey's format, and the same text back, so a number past the
+     * integer range, which no ticket has, is refused too.
+     */
+    private static function canBeTicketKey(string $key): bool
+    {
+        try {
+            return TicketKey::fromString($key)->toString() === $key;
+        } catch (InvalidTicketKey) {
+            return false;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function pageViewOf(array $row, OrganizationId $organizationId): TicketPageView
+    {
+        $stepId = self::text($row['step_id'], 'step id');
+        $step = array_find($this->stepQueries->listedSteps(), static fn (ListedStepView $listed): bool => $listed->id === $stepId)
+            ?? throw new \LogicException('A ticket is in a step its organization does not have.');
+        $reporterId = new UserId(self::text($row['reporter_id'], 'reporter id'));
+        $assigneeId = self::userIdOrNull($row['assignee_id'], 'assignee id');
+        $users = $this->userQueries->byIds(null === $assigneeId ? [$reporterId] : [$reporterId, $assigneeId]);
+        $decodedComponents = json_decode(self::text($row['components'], 'components'), true, 2, \JSON_THROW_ON_ERROR);
+        if (!\is_array($decodedComponents) || !array_is_list($decodedComponents)) {
+            throw new \LogicException('A ticket\'s components from the database are not a list.');
+        }
+        $components = array_map(static fn (mixed $component): string => self::text($component, 'component'), $decodedComponents);
+
+        return new TicketPageView(
+            new TicketId(self::text($row['id'], 'ticket id')),
+            self::text($row['key'], 'key'),
+            self::text($row['title'], 'title'),
+            self::text($row['description'], 'description'),
+            self::text($row['type'], 'type'),
+            self::text($row['priority'], 'priority'),
+            self::textOrNull($row['release'], 'release'),
+            self::textOrNull($row['parent_key'], 'parent key'),
+            $components,
+            new \DateTimeImmutable(self::text($row['created_at'], 'created_at')),
+            self::text($row['project_name'], 'project name'),
+            $step->name,
+            $step->groupCode,
+            $step->groupLabel,
+            ($users[$reporterId->toString()] ?? null)?->displayName,
+            null === $assigneeId ? null : ($users[$assigneeId->toString()] ?? null)?->displayName,
+            new TicketVisibilityFacts(
+                $organizationId,
+                self::text($row['visibility'], 'visibility'),
+                null === $row['team_id'] ? null : new TeamId(self::text($row['team_id'], 'team id')),
+                $reporterId,
+                $assigneeId,
+                self::userIdOrNull($row['pending_assignee_id'], 'pending assignee id'),
+                self::userIdOrNull($row['reviewer_id'], 'reviewer id'),
+                self::userIdOrNull($row['tester_id'], 'tester id'),
+                self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
+            ),
+        );
     }
 
     /**
@@ -322,6 +424,16 @@ final readonly class DbalTicketQueries implements TicketQueries
         }
 
         return $value;
+    }
+
+    private static function textOrNull(mixed $value, string $column): ?string
+    {
+        return null === $value ? null : self::text($value, $column);
+    }
+
+    private static function userIdOrNull(mixed $value, string $column): ?UserId
+    {
+        return null === $value ? null : new UserId(self::text($value, $column));
     }
 
     private static function boolean(mixed $value, string $column): bool
