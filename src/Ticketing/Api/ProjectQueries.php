@@ -60,7 +60,8 @@ interface ProjectQueries
      *
      * @param string $key matched exactly, for example SHOP; a lowercase or malformed key finds nothing
      *
-     * @return ProjectChoice|null null when the organization has no project with that key
+     * @return ProjectChoice|null null when the organization has no project with that key; with the team that owns it,
+     *                            which decides the tickets page's rail
      *
      * @throws \LogicException when no tenant is set, before any query
      */

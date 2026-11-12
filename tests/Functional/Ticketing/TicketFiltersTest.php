@@ -480,7 +480,7 @@ final class TicketFiltersTest extends WebTestCase
     {
         $this->logIn($this->client, $user);
 
-        return $this->createLiveComponent('TicketFilters', $props, $this->client);
+        return $this->createLiveComponent('TicketFilters', ['team' => $this->shop->toString(), ...$props], $this->client);
     }
 
     /**

@@ -1,12 +1,13 @@
 import { Controller } from '@hotwired/stimulus';
 
-// The tickets list page. TicketFilters sends the list's URL after each change; this loads it into the list frame and
-// puts it in the address bar, so a reload or a shared link shows the same list. A chip adds a history entry, typing a
+// The tickets list page. TicketFilters sends the list's URL after each change; this loads it into the list frame and the
+// project rail's frame (each request gets only its own frame) and puts it in the address bar, so a reload or a shared
+// link shows the same list. A chip adds a history entry, typing a
 // search replaces the current one. Drive is off, so Back to an entry of this page that shows another list reloads it
 // rather than leaving the list out of step with the address bar; a move that changes only the hash (the skip link)
 // does not.
 export default class extends Controller {
-  static targets = ['frame', 'total'];
+  static targets = ['frame', 'total', 'rail'];
 
   connect() {
     this.shownList = listOf(window.location.href);
@@ -34,6 +35,10 @@ export default class extends Controller {
     }
     this.shownList = listOf(url.href);
     this.frameTarget.src = url.href;
+    // The rail's links keep every filter and its counts follow "Show done", so it reloads with the list.
+    if (this.hasRailTarget) {
+      this.railTarget.src = url.href;
+    }
   }
 
   // The count line sits outside the frame, in a live region, so each new list is announced once it has loaded.

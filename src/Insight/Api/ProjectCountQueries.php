@@ -28,4 +28,20 @@ interface ProjectCountQueries
      * @throws \LogicException when no transaction is open, before any query
      */
     public function countsOfTeam(TeamId $teamId, UserId $viewerId, bool $withDone): array;
+
+    /**
+     * The counts of the given projects as countsOfTeam counts them, for a caller that already holds the viewer's roles
+     * and the projects: one query, none when $projectIds is empty.
+     *
+     * @param list<string> $projectIds    project uuids; one of another organization, or unknown, counts zero
+     * @param bool         $viewerIsAdmin whether the viewer is an admin of the transaction's tenant, who counts every ticket
+     * @param list<TeamId> $viewerTeamIds the teams the viewer has any role in, whose team-only tickets they count
+     * @param bool         $withDone      whether to read the done counts too, for "Show done"
+     *
+     * @return list<ProjectCounts> one per asked project, in the asked order
+     *
+     * @throws \InvalidArgumentException when a project id is not a uuid, before any query
+     * @throws \LogicException           when no transaction is open, before any query
+     */
+    public function countsOfProjects(array $projectIds, bool $viewerIsAdmin, array $viewerTeamIds, bool $withDone): array;
 }

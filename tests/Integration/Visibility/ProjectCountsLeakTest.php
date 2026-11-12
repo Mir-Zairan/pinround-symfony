@@ -62,6 +62,37 @@ final class ProjectCountsLeakTest extends VisibilityLeakCast
     }
 
     /**
+     * The tickets page's rail reads the counts of projects it already holds with the viewer's roles from the request
+     * (countsOfProjects): each viewer's roles, as the cast gives them, count exactly what the team read counts. Ben, an
+     * admin of another organization, asks for Shop's project by id and counts nothing.
+     *
+     * @param list<string> $expectedRail
+     */
+    #[Test]
+    #[DataProvider('railViewers')]
+    public function theRailReadOfGivenProjectsNeverCountsATicketTheViewerMayNotSee(string $viewer, bool $seesTeamOnly, array $expectedRail): void
+    {
+        $viewerRoles = ['Lena' => [false, [new TeamId(self::SHOP_TEAM)]], 'Sara' => [true, []], 'Ben' => [true, []]][$viewer] ?? [false, []];
+
+        $rail = self::asViewer($viewer, static fn (): array => array_map(
+            static fn (ProjectCounts $counts): string => 'SHOP '.$counts->openCount,
+            self::projectCountQueries()->countsOfProjects([self::SHOP_PROJECT], $viewerRoles[0], $viewerRoles[1], false),
+        ));
+
+        self::assertSame([] === $expectedRail ? ['SHOP 0'] : $expectedRail, $rail);
+        self::assertTrue($seesTeamOnly || 'SHOP 1' !== $rail[0], 'A viewer who may not see the team-only ticket must not count it.');
+    }
+
+    #[Test]
+    public function theRailReadOfNoProjectRunsNoQueryAndRefusesAnIdThatIsNotAUuid(): void
+    {
+        self::assertSame([], self::asViewer('Lena', static fn (): array => self::projectCountQueries()->countsOfProjects([], false, [], true)));
+
+        $this->expectException(\InvalidArgumentException::class);
+        self::asViewer('Lena', static fn (): array => self::projectCountQueries()->countsOfProjects(["' OR true --"], false, [], true));
+    }
+
+    /**
      * A project with only done team-only Shop tickets moves to a team Noor leads: the tickets keep their Shop team, so
      * Noor, in the new team, counts none of them, while the Shop lead and the admin still count them.
      */

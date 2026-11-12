@@ -1,5 +1,95 @@
 /* The tickets list (src/Ticketing/UI/templates/list.html.twig): one section per step, in group order. */
 
+/* The page: the project rail on the left, the toolbar and list beside it; on a narrow screen the rail goes on top. */
+.tickets-page {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-24);
+}
+
+.project-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* The team name in capitals as the prototype shows it; the markup keeps its own case for screen readers. */
+.project-rail__team {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.project-rail__projects,
+.project-rail__switch ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-rail__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-card);
+  color: var(--on-surface);
+  text-decoration: none;
+}
+
+.project-rail__item:hover {
+  background: var(--s-high);
+}
+
+.project-rail__item[aria-current="true"] {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  font-weight: 600;
+}
+
+.project-rail__key {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.project-rail__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-rail__count {
+  color: var(--on-surface-var);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-rail__manage,
+.project-rail__switch summary,
+.project-rail__switch a {
+  padding: var(--space-4) var(--space-12);
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.project-rail__switch a[aria-current="true"] {
+  font-weight: 600;
+}
+
+@media (max-width: 52em) {
+  .tickets-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .tickets {
   display: flex;
   flex-direction: column;

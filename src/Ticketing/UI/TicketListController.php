@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\Identity\Api\CurrentTimeZone;
+use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\Cursor;
 use App\Ticketing\Api\ListFilter;
@@ -34,11 +36,15 @@ use Symfony\Component\Routing\Attribute\Route;
  * TicketListCursorParameter; a malformed one is a 400. SEARCH_QUERY, trimmed, keeps only the tickets that match it,
  * still grouped by step, each step in search order; a search longer than ListFilter::SEARCH_TEXT_MAX_LENGTH
  * characters, or not text, is a 400 before any query. PERSON_QUERY keeps only the tickets assigned to that person; an
- * id that is not a canonical uuid is a 404, like a project key of no project. The toolbar is TicketFilters.
+ * id that is not a canonical uuid is a 404, like a project key of no project. The toolbar is TicketFilters, the
+ * project rail ProjectRail, both for the team railTeamOf chooses; TEAM_QUERY picks one of the viewer's own teams for
+ * "All projects", and any other id is a 404.
  *
  * Five queries at most for the list whatever the number of tickets, with a search or without: the triager, the
  * project by key, then the list's rows, turn users and names (TicketQueries::list); the whole page's toolbar adds two
- * at most (TicketFilters), a request from one of the page's Turbo frames (TURBO_FRAME_HEADER) none.
+ * at most (TicketFilters) and the rail three (performance-and-scale.md: eight for the page, a decision of 2026-11-12).
+ * A request from the list's Turbo frames (TURBO_FRAME_HEADER) runs only the list's; one from the rail's frame
+ * (RAIL_FRAME_ID), sent after each filter change, only the project and the rail's.
  */
 final class TicketListController extends AbstractController
 {
@@ -47,7 +53,9 @@ final class TicketListController extends AbstractController
     public const string DONE_QUERY = 'done';
     public const string SEARCH_QUERY = 'q';
     public const string PERSON_QUERY = 'person';
+    public const string TEAM_QUERY = 'team';
     public const string TURBO_FRAME_HEADER = 'Turbo-Frame';
+    public const string RAIL_FRAME_ID = 'project-rail-frame';
 
     public const string ALL_TICKETS = 'All tickets';
     public const string NO_TICKETS = 'No tickets here yet.';
@@ -55,6 +63,7 @@ final class TicketListController extends AbstractController
     public const string SEARCH_TOO_LONG = 'The search is too long. Use '.ListFilter::SEARCH_TEXT_MAX_LENGTH.' characters or fewer.';
     public const string SEARCH_NOT_TEXT = 'The search is not valid text.';
     public const string SHOW_MORE_NOT_VALID = 'That "Show more" link is not valid.';
+    public const string NO_TEAM_OF_YOURS = 'You are in no team with that id.';
 
     public function __construct(
         private readonly TenantContext $tenantContext,
@@ -64,6 +73,7 @@ final class TicketListController extends AbstractController
         private readonly TicketQueries $ticketQueries,
         private readonly ClockInterface $clock,
         private readonly CurrentTimeZone $currentTimeZone,
+        private readonly ProjectRail $projectRail,
     ) {
     }
 
@@ -85,16 +95,34 @@ final class TicketListController extends AbstractController
         $showsDone = '1' === $request->query->getString(self::DONE_QUERY);
         $assigneeId = $this->assigneeIdOf($request);
 
+        $pickedTeamId = $this->pickedTeamIdOf($request, $actor);
+
         $visibility = $this->ticketVisibilities->ofActor($actor);
         $projectKey = $request->query->getString(self::PROJECT_QUERY);
         $project = '' === $projectKey ? null : ($this->projectQueries->projectByKey($projectKey) ?? throw $this->createNotFoundException('No project has that key.'));
+        $railTeamId = self::railTeamOf($actor, $project, $pickedTeamId);
+        $keptQuery = array_filter(
+            [self::PERSON_QUERY => $assigneeId, self::DONE_QUERY => $showsDone ? '1' : null, self::SEARCH_QUERY => $searchText],
+            static fn (?string $value): bool => null !== $value,
+        );
+        // The rail's frame, reloaded after a filter change, gets the rail alone and runs none of the list's queries.
+        if (self::RAIL_FRAME_ID === $request->headers->get(self::TURBO_FRAME_HEADER)) {
+            $response = $this->render('@Ticketing/_project_rail.html.twig', [
+                'rail' => $this->projectRail->viewOf($actor, $railTeamId, $project, $showsDone, $keptQuery),
+            ]);
+            $response->setVary(self::TURBO_FRAME_HEADER, false);
+
+            return $response;
+        }
+
         $groups = $this->ticketQueries->list(new ListFilter($visibility, $project?->id(), $showsDone, $searchText, $assigneeId), $cursor);
         $collapsedStepIds = CollapsedSteps::idsIn($request->getSession());
 
         // A frame of this page (the list after a filter change, or "Show more") replaces only its own frame, so it gets
-        // the list frame alone: no layout, menu or toolbar, and none of their queries.
+        // the list frame alone: no layout, menu, toolbar or rail, and none of their queries.
         $isFrameRequest = $request->headers->has(self::TURBO_FRAME_HEADER);
         $response = $this->render($isFrameRequest ? '@Ticketing/_list_frame.html.twig' : '@Ticketing/list.html.twig', [
+            'rail' => $isFrameRequest ? null : $this->projectRail->viewOf($actor, $railTeamId, $project, $showsDone, $keptQuery),
             'heading' => null === $project ? self::ALL_TICKETS : $project->key().' · '.$project->name(),
             'totalLine' => TicketListText::totalLineOf($groups),
             'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $searchText, $assigneeId, $cursor, $collapsedStepIds),
@@ -104,6 +132,9 @@ final class TicketListController extends AbstractController
                 'person' => $assigneeId ?? '',
                 'showsDone' => $showsDone,
                 'q' => $searchText ?? '',
+                'team' => $railTeamId?->toString() ?? '',
+                // A project's team is not kept in the toolbar's links: the project decides it, and the viewer may not be in it.
+                'pickedTeam' => null === $project ? ($pickedTeamId?->toString() ?? '') : '',
             ],
         ]);
         $response->setVary(self::TURBO_FRAME_HEADER, false);
@@ -126,6 +157,37 @@ final class TicketListController extends AbstractController
         }
 
         return null;
+    }
+
+    /**
+     * The one choice of team for both the rail and the toolbar's people chips: the picked project's team; for
+     * "All projects", or a project no team owns, the team picked with TEAM_QUERY, else the viewer's first team by id.
+     *
+     * @return TeamId|null null for a viewer in no team on "All projects"
+     */
+    private static function railTeamOf(ActorContext $viewer, ?ProjectChoice $project, ?TeamId $pickedTeamId): ?TeamId
+    {
+        return $project?->teamId() ?? $pickedTeamId ?? $viewer->roles()->teamIds()[0] ?? null;
+    }
+
+    /**
+     * Only a team the viewer is in may be picked; one of theirs is never another organization's, as the roles are of
+     * this one.
+     *
+     * @throws NotFoundHttpException when the team is sent but is not a canonical uuid or not a team of the viewer
+     */
+    private function pickedTeamIdOf(Request $request, ActorContext $viewer): ?TeamId
+    {
+        $pickedTeam = $request->query->getString(self::TEAM_QUERY);
+        if ('' === $pickedTeam) {
+            return null;
+        }
+        $pickedTeamId = ListFilter::isCanonicalUuid($pickedTeam) ? new TeamId($pickedTeam) : null;
+        if (null === $pickedTeamId || !$viewer->roles()->isInTeam($pickedTeamId)) {
+            throw $this->createNotFoundException(self::NO_TEAM_OF_YOURS);
+        }
+
+        return $pickedTeamId;
     }
 
     /**

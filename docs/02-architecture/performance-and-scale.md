@@ -57,7 +57,7 @@ Server time, p95, warm cache, measured at the app (see [ADR-0029](../03-adr/0029
 | Screen or action | Budget | Max SQL queries |
 |---|---|---|
 | Home | ≤ 250 ms | 8 |
-| Tickets list (50 rows) | ≤ 200 ms | 5 |
+| Tickets list (50 rows) | ≤ 200 ms | 8 for the page: 5 for the list, 3 for the project rail (a user decision of 2026-11-12) |
 | Ticket page | ≤ 250 ms | 10 |
 | Search | ≤ 300 ms | 3 |
 | Thumbnail first byte (object storage/CDN) | ≤ 150 ms | 0 |
@@ -96,9 +96,9 @@ Result: ≤ 8 queries (the Home budget), all index-only or index-range scans.
 - Filter by project, person, search, "show done", "to check".
 - Indexes: see [data-model.md › Index catalogue](data-model.md#index-catalogue) (one project, or "All projects" of a team).
 - Default hides done steps (most rows), so the scan stays small.
-- **One query for all steps:** a `LATERAL` subquery takes the first 51 rows of each step (50 shown + 1 to know there is more), so the page stays within its ≤ 5-query budget. "Show more" in one step uses keyset pagination for that step only.
+- **One query for all steps:** a `LATERAL` subquery takes the first 51 rows of each step (50 shown + 1 to know there is more), so the list stays within its ≤ 5-query budget. "Show more" in one step uses keyset pagination for that step only.
 - **Step counts are capped at 1,000:** each step counts at most 1,001 visible tickets in the row order, through the same index, so a big step (Done) never reads all its rows; past 1,000 the page shows "1,000+".
-- Project rail counts come from the read model `ins_project_counts`, not from `count(*)` on tickets.
+- Project rail counts come from the read model `ins_project_counts`, not from `count(*)` on tickets. The rail costs three queries beside the list's five, none per project: the team names, the team's projects, and their counts in one read that takes the viewer's roles from the request. The list's own five stay a separate check in `TicketListTest`.
 - The steps come from Workflow's cached `StepQueries::listedSteps` (see [Caching](#caching)), not a join on `wf_step`; the first load after a step change reads them, one more query.
 - The toolbar's "Assigned to" chips come from Organization's cached `TeamPeopleQueries::namedPossibleAssigneesOf` (the viewer's team's people with first names, see [Caching](#caching)), so a warm page reads none for them; the first load after a change of the team's people or of one of their names reads them again, two more queries (cold: 7 beyond the app shell for every project, 8 for one project).
 - "Turn:" comes from one batched query on `ins_ticket_turn` for the shown rows (Insight's `TurnUserQueries::turnUsersOf`), separate from the rows query.

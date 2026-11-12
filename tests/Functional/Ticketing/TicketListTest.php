@@ -35,6 +35,8 @@ final class TicketListTest extends WebTestCase
 
     private const string TICKETS = '/tickets';
     private const string SHELL = '/_test/menu/shell';
+    /** The project rail's reads: the team names, the team's projects and their counts. */
+    private const string RAIL_QUERIES = '/FROM org_team WHERE organization_id = \? AND id = ANY|FROM tkt_project WHERE organization_id = \? AND team_id = ANY|FROM ins_project_counts/';
     private const array PRIORITY_RANKS = ['blocker' => 0, 'critical' => 1, 'major' => 2, 'normal' => 3, 'minor' => 4];
 
     private KernelBrowser $client;
@@ -646,22 +648,26 @@ final class TicketListTest extends WebTestCase
     }
 
     /**
-     * The list's budget is five queries (performance-and-scale.md); the toolbar's people and names come from the team
-     * people cache, so a warm page adds none for them. The search runs inside the rows' query, so it adds none either.
+     * The page's budget is eight queries beyond the shell: the list's five (performance-and-scale.md) and the project
+     * rail's three, the team names, the team's projects and their counts. The toolbar's people and names come from the
+     * team people cache, so a warm page adds none for them. The search runs inside the rows' query, so it adds none.
      */
     #[Test]
-    public function aWarmSearchPageReadsAtMostFiveQueriesMoreThanTheShell(): void
+    public function aWarmSearchPageReadsTheListsFourQueriesAndTheRailsThree(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?q=checkout'));
+        [$pageQueryCount, $listQueryCount] = $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS.'?q=checkout', true);
+
+        self::assertLessThanOrEqual(5, $listQueryCount);
+        self::assertSame([7, 4], [$pageQueryCount, $listQueryCount]);
     }
 
     #[Test]
-    public function aWarmPageReadsAtMostFiveQueriesMoreThanTheShellFor200OpenTickets(): void
+    public function aWarmPageReadsTheListsFourQueriesAndTheRailsThreeFor200OpenTickets(): void
     {
         $this->client->disableReboot();
         foreach (['wait', 'check', 'doing', 'todo'] as $groupCode) {
@@ -670,23 +676,32 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS));
+        [$pageQueryCount, $listQueryCount] = $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS, true);
+
+        self::assertLessThanOrEqual(5, $listQueryCount);
+        self::assertSame([7, 4], [$pageQueryCount, $listQueryCount]);
     }
 
+    /**
+     * A project page reads the project too, which gives the rail its team: the list's five and the rail's three.
+     */
     #[Test]
-    public function aWarmProjectPageReadsAtMostFiveQueriesMoreThanTheShell(): void
+    public function aWarmProjectPageReadsTheListsFiveQueriesAndTheRailsThree(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
+        [$pageQueryCount, $listQueryCount] = $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS.'?project=SHOP', true);
+
+        self::assertLessThanOrEqual(5, $listQueryCount);
+        self::assertSame([8, 5], [$pageQueryCount, $listQueryCount]);
     }
 
     /**
      * The first load fills both caches: the steps (one query, inside the list's five) and the toolbar's team people
-     * and their names (two more), so 7.
+     * and their names (two more), beside the rail's three, so 10.
      */
     #[Test]
     public function aColdPageReadsTheStepsAndTheTeamsPeopleToo(): void
@@ -696,11 +711,12 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertSame(7, $this->queryCountMoreThanTheShellOf(self::TICKETS, false));
+        self::assertSame([10, 7], $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS, false));
     }
 
     /**
-     * A project page reads the project too: 6 cold for the list (performance-and-scale.md) and the team people's 2.
+     * A project page reads the project too: 6 cold for the list (performance-and-scale.md), the team people's 2 and
+     * the rail's 3.
      */
     #[Test]
     public function aColdProjectPageReadsTheStepsAndTheTeamsPeopleToo(): void
@@ -710,7 +726,7 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertSame(8, $this->queryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP', false));
+        self::assertSame([11, 8], $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS.'?project=SHOP', false));
     }
 
     /**
@@ -725,16 +741,17 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
         $warmQueryCount = $this->warmQueryCountMoreThanTheShellOf(self::TICKETS);
-        self::assertSame(4, $warmQueryCount);
+        self::assertSame(7, $warmQueryCount);
 
         self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow($this->shop);
 
-        self::assertSame([6, 4], [$this->queryCountOf(self::TICKETS) - $this->queryCountOf(self::SHELL), $this->queryCountOf(self::TICKETS) - $this->queryCountOf(self::SHELL)]);
+        self::assertSame([9, 7], [$this->queryCountOf(self::TICKETS) - $this->queryCountOf(self::SHELL), $this->queryCountOf(self::TICKETS) - $this->queryCountOf(self::SHELL)]);
     }
 
     /**
      * A filter change reloads only the list frame: the answer is that frame alone, with the list's own queries and
-     * neither the menu's teams nor the toolbar's people, which the whole page reads (from the cache when warm).
+     * neither the menu's teams, the toolbar's people nor the rail, which the whole page reads (people from the cache
+     * when warm).
      */
     #[Test]
     public function aFrameRequestGetsOnlyTheListFrameAndRunsOnlyTheListsQueries(): void
@@ -757,9 +774,12 @@ final class TicketListTest extends WebTestCase
         self::assertCount(30, $frame->filter('.tickets__row'));
         self::assertSame('30 tickets · grouped by step', $frame->filter('[data-total-line]')->attr('data-total-line'));
         $toolbarAndMenuQueries = '/FROM org_team_member WHERE team_id = ANY|FROM org_team WHERE/';
-        self::assertSame([1, 0], [self::countMatching($toolbarAndMenuQueries, $pageQueries), self::countMatching($toolbarAndMenuQueries, $frameQueries)]);
+        self::assertSame([2, 0], [self::countMatching($toolbarAndMenuQueries, $pageQueries), self::countMatching($toolbarAndMenuQueries, $frameQueries)]);
+        // The rail's three and the menu's team names, which match the rail's.
+        self::assertSame([4, 0], [self::countMatching(self::RAIL_QUERIES, $pageQueries), self::countMatching(self::RAIL_QUERIES, $frameQueries)]);
         self::assertSame([1, 1], [self::countMatching('/FROM idn_user WHERE id = ANY/', $pageQueries), self::countMatching('/FROM idn_user WHERE id = ANY/', $frameQueries)]);
-        self::assertCount(\count($pageQueries) - 1, $frameQueries);
+        // The menu's team names and the rail's three.
+        self::assertCount(\count($pageQueries) - 4, $frameQueries);
     }
 
     /**
@@ -790,6 +810,26 @@ final class TicketListTest extends WebTestCase
         }
 
         return $queries;
+    }
+
+    /**
+     * @return array{int, int} the page's queries beyond the shell's, and those without the rail's (RAIL_QUERIES): the
+     *                         list's own
+     */
+    private function pageAndListQueryCountsMoreThanTheShellOf(string $uri, bool $isStepCacheWarm): array
+    {
+        $this->queryCountOf(self::SHELL);
+        $shellQueries = $this->queriesOf(self::SHELL);
+        if ($isStepCacheWarm) {
+            $this->queryCountOf($uri);
+        }
+        $pageQueries = $this->queriesOf($uri);
+        self::assertGreaterThan(0, $this->client->getCrawler()->filter('.tickets__row .av[title]')->count());
+        $pageQueryCount = \count($pageQueries) - \count($shellQueries);
+        // The menu reads the same team names as the rail for a person in two teams, so the shell's are left out.
+        $railQueryCount = self::countMatching(self::RAIL_QUERIES, $pageQueries) - self::countMatching(self::RAIL_QUERIES, $shellQueries);
+
+        return [$pageQueryCount, $pageQueryCount - $railQueryCount];
     }
 
     private function warmQueryCountMoreThanTheShellOf(string $uri): int

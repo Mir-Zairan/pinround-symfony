@@ -7,17 +7,21 @@
 {% endblock %}
 
 {% block main %}
-    <div class="tickets" id="ticket-list" {{ stimulus_controller('ticket-list') }}
+    <div class="tickets-page" {{ stimulus_controller('ticket-list') }}
         data-action="ticket-filters:changed->ticket-list#show turbo:frame-load->ticket-list#announce">
-        <twig:TicketFilters project="{{ filters.project }}" person="{{ filters.person }}" :showsDone="filters.showsDone" q="{{ filters.q }}" />
+        {{ include('@Ticketing/_project_rail.html.twig') }}
 
-        <header class="tickets__header">
-            <h1 class="tickets__title">{{ heading }}</h1>
-            {# Outside the frame, so it stays in the page and screen readers hear each new count; ticket-list copies it from the loaded frame. #}
-            <p class="tickets__total" role="status" {{ stimulus_target('ticket-list', 'total') }}>{{ totalLine }}</p>
-        </header>
+        <div class="tickets" id="ticket-list">
+            <twig:TicketFilters project="{{ filters.project }}" person="{{ filters.person }}" :showsDone="filters.showsDone" q="{{ filters.q }}" team="{{ filters.team }}" pickedTeam="{{ filters.pickedTeam }}" />
 
-        {# TicketFilters sends the list's new URL after each change; ticket-list loads it into this frame. #}
-        {{ include('@Ticketing/_list_frame.html.twig') }}
+            <header class="tickets__header">
+                <h1 class="tickets__title">{{ heading }}</h1>
+                {# Outside the frame, so it stays in the page and screen readers hear each new count; ticket-list copies it from the loaded frame. #}
+                <p class="tickets__total" role="status" {{ stimulus_target('ticket-list', 'total') }}>{{ totalLine }}</p>
+            </header>
+
+            {# TicketFilters sends the list's new URL after each change; ticket-list loads it into this frame and the rail's. #}
+            {{ include('@Ticketing/_list_frame.html.twig') }}
+        </div>
     </div>
 {% endblock %}

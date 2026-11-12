@@ -9,6 +9,7 @@ use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Api\TeamPeopleQueries;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\ListFilter;
 use App\Ticketing\UI\TicketListController;
@@ -31,7 +32,7 @@ use Symfony\UX\LiveComponent\DefaultActionTrait;
  * LIST_CHANGED_EVENT with the list's new URL, which the page's ticket-list controller loads into the list frame and
  * the address bar. Every chip is a link to that URL and the search is a GET form, so the toolbar works without script.
  *
- * The people are the lead and members of the viewer's first team by id (viewers cannot be assignees): "Me" for a lead
+ * The people are the lead and members of the page's team, $team (viewers cannot be assignees): "Me" for a lead
  * or member of it, then each other one's first name while the team has at most MAX_NAMED_PEOPLE, else a "Person ▾"
  * chip, the person picker's hook. The team's people and names are one cached read (TeamPeopleQueries): no query when
  * warm, two after a change of the team.
@@ -58,6 +59,14 @@ final class TicketFilters
 
     #[LiveProp]
     public bool $showsDone = false;
+
+    /** The team whose people the chips show, as TicketListController::railTeamOf chose it; empty for none. */
+    #[LiveProp]
+    public string $team = '';
+
+    /** The team picked with TicketListController::TEAM_QUERY, kept in the list's URLs; empty when none was. */
+    #[LiveProp]
+    public string $pickedTeam = '';
 
     /** The search as typed, untrimmed; the list URL carries it trimmed. */
     #[LiveProp(writable: true)]
@@ -140,6 +149,7 @@ final class TicketFilters
     public function listUrl(array $changes = []): string
     {
         $query = [
+            TicketListController::TEAM_QUERY => '' === $this->pickedTeam ? null : $this->pickedTeam,
             TicketListController::PROJECT_QUERY => '' === $this->project ? null : $this->project,
             TicketListController::PERSON_QUERY => '' === $this->person ? null : $this->person,
             TicketListController::DONE_QUERY => $this->showsDone ? '1' : null,
@@ -156,6 +166,7 @@ final class TicketFilters
     public function searchFormFields(): array
     {
         return array_filter([
+            TicketListController::TEAM_QUERY => $this->pickedTeam,
             TicketListController::PROJECT_QUERY => $this->project,
             TicketListController::PERSON_QUERY => $this->person,
             TicketListController::DONE_QUERY => $this->showsDone ? '1' : '',
@@ -191,10 +202,10 @@ final class TicketFilters
     {
         $chips = ['viewerChip' => null, 'personChips' => [], 'pickerChip' => null];
         $actor = $this->currentActor->actorFor($this->security->getUser());
-        $teamId = null === $actor ? null : ($actor->roles()->teamIds()[0] ?? null);
-        if (null === $actor || null === $teamId) {
+        if (null === $actor || !ListFilter::isCanonicalUuid($this->team)) {
             return $chips;
         }
+        $teamId = new TeamId($this->team);
 
         $teamPeople = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
         $viewerId = $actor->userId();
