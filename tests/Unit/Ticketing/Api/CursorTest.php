@@ -20,7 +20,20 @@ final class CursorTest extends TestCase
     {
         $cursor = new Cursor(self::STEP, 4, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId(self::TICKET));
 
-        self::assertSame([self::STEP, 4, '2027-03-15 10:00:00', self::TICKET], [$cursor->stepId, $cursor->priorityRank, $cursor->updatedAt->format('Y-m-d H:i:s'), $cursor->ticketId->toString()]);
+        self::assertSame([self::STEP, 4, '2027-03-15 10:00:00', self::TICKET, null], [$cursor->stepId, $cursor->priorityRank, $cursor->updatedAt->format('Y-m-d H:i:s'), $cursor->ticketId->toString(), $cursor->matchPosition]);
+    }
+
+    #[Test]
+    public function underASearchItKeepsTheLastRowsMatchPosition(): void
+    {
+        self::assertSame(1, new Cursor(self::STEP, 4, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId(self::TICKET), 1)->matchPosition);
+    }
+
+    #[Test]
+    public function itRefusesAMatchPositionBelowOne(): void
+    {
+        $this->expectExceptionObject(new \InvalidArgumentException('A cursor\'s match position starts at 1.'));
+        new Cursor(self::STEP, 4, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId(self::TICKET), 0);
     }
 
     /**

@@ -454,6 +454,26 @@ The list never joins `wf_step`: the step ids come from Workflow's `StepQueries::
 
 The cursor is sent to the browser unsigned: it only names a position (the step, rank, time and id of the last row shown), and the visibility predicate still runs on the page it asks for, so a forged cursor shows nothing the viewer may not see. The turn users of the shown rows are read in one batch from `ins_ticket_turn` through Insight's `TurnUserQueries::turnUsersOf`, not through `tkt_ticket_list_v`.
 
+**Ticket list with a search** (`/tickets?q=`, P03.T4) — the same query with the matches of `search_ticket_ids` as a CTE, so the search adds no query to the budget. The function's return order, numbered `WITH ORDINALITY`, is the order inside each step and the keyset of "Show more", so no float rank travels in the cursor (`after=<rank>.<time>.<id>.<match position>`); the step count counts the step's matches, of the function's 1,000 at most. The ids are joined back to `tkt_ticket` under RLS and `<visible(t)>`, so they never show a row the list would not (`TicketSearchLeakTest`):
+
+```sql
+WITH matched AS MATERIALIZED (
+  SELECT ticket_id, match_position
+  FROM search_ticket_ids(:org, :q, :me, :team_ids, :is_admin, :is_triager) WITH ORDINALITY AS found(ticket_id, match_position)
+)
+... CROSS JOIN LATERAL (
+  SELECT t.id, ..., matched.match_position
+  FROM matched JOIN tkt_ticket t ON t.id = matched.ticket_id
+  WHERE t.organization_id = :org AND t.step_id = listed.step_id AND <visible(t)>
+    AND matched.match_position > :last_match_position   -- "Show more" only
+  ORDER BY matched.match_position
+  LIMIT 51
+) x
+ORDER BY listed.list_position, x.match_position;
+```
+
+`q` is trimmed; empty means no search, and more than 200 characters, invalid UTF-8 or a NUL is a 400 before any query.
+
 **Home "needs you"** — two index scans, no full read of the user's turns. The time part of the score is `LEAST(days_waiting, 60) × 0.5`, so it is at most 30 points. A row whose `base_score` is more than 30 below the 5th best `base_score` can never reach the top 5:
 
 ```sql

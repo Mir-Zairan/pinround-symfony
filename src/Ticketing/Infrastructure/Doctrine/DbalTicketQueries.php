@@ -7,6 +7,7 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\Identity\Api\UserQueries;
 use App\Insight\Api\TurnUserQueries;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\Cursor;
@@ -15,6 +16,7 @@ use App\Ticketing\Api\TicketListGroup;
 use App\Ticketing\Api\TicketListRow;
 use App\Ticketing\Api\TicketListStep;
 use App\Ticketing\Api\TicketQueries;
+use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Api\TicketVisibilitySql;
 use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\StepQueries;
@@ -25,7 +27,8 @@ use Doctrine\DBAL\Connection;
  * gives the steps in list order, and their ids, unnested WITH ORDINALITY, drive a LATERAL per step that takes
  * PAGE_SIZE + 1 rows, the extra one only saying there is more, through
  * tkt_ticket_step_id_priority_rank_updated_at_id_idx or, for one project,
- * tkt_ticket_project_id_step_id_priority_rank_updated_at_id_idx.
+ * tkt_ticket_project_id_step_id_priority_rank_updated_at_id_idx. With a search, the LATERALs read only the ids
+ * search_ticket_ids returns, in its order.
  */
 final readonly class DbalTicketQueries implements TicketQueries
 {
@@ -49,6 +52,9 @@ final readonly class DbalTicketQueries implements TicketQueries
         $organizationId = $this->tenantContext->require();
         if (!$organizationId->equals($filter->visibility->organizationId())) {
             throw new \LogicException('The tickets list is read under the viewer\'s own organization as tenant.');
+        }
+        if (null !== $cursor && (null === $filter->searchText) !== (null === $cursor->matchPosition)) {
+            throw new \InvalidArgumentException('A cursor has a match position exactly when the list has a search.');
         }
 
         $shownSteps = [];
@@ -95,6 +101,22 @@ final readonly class DbalTicketQueries implements TicketQueries
             $parameters['project'] = $filter->projectId;
         }
 
+        if (null === $filter->searchText) {
+            return $this->priorityListQuery($cursor, $parameters, $ticketConditions, $countedConditions, $visibleTicket, $visibleCounted);
+        }
+
+        return $this->searchListQuery($filter->visibility, $filter->searchText, $cursor, $parameters, $ticketConditions, $countedConditions, $visibleTicket, $visibleCounted);
+    }
+
+    /**
+     * Each step in priority order, keyset on (priority rank, updated_at, id).
+     *
+     * @param array<string, string|int> $parameters
+     *
+     * @return array{string, array<string, string|int>}
+     */
+    private function priorityListQuery(?Cursor $cursor, array $parameters, string $ticketConditions, string $countedConditions, TicketVisibilitySql $visibleTicket, TicketVisibilitySql $visibleCounted): array
+    {
         if (null !== $cursor) {
             $ticketConditions .= ' AND (ticket.priority_rank > CAST(:after_rank AS smallint)'
                 .' OR (ticket.priority_rank = CAST(:after_rank AS smallint)'
@@ -127,6 +149,54 @@ final readonly class DbalTicketQueries implements TicketQueries
     }
 
     /**
+     * Only the matches of search_ticket_ids, each step in the function's order (exact key, then rank, then id), keyset
+     * on the match position its WITH ORDINALITY gives, so no float rank travels in the cursor. The function runs once
+     * in the same statement, as a CTE both LATERALs read; its ids are joined back to tkt_ticket under row-level
+     * security and TicketVisibilitySql, so they never show a row the list would not.
+     *
+     * @param array<string, string|int> $parameters
+     *
+     * @return array{string, array<string, string|int>}
+     */
+    private function searchListQuery(TicketVisibility $visibility, string $searchText, ?Cursor $cursor, array $parameters, string $ticketConditions, string $countedConditions, TicketVisibilitySql $visibleTicket, TicketVisibilitySql $visibleCounted): array
+    {
+        $parameters['search_text'] = $searchText;
+        $parameters['search_viewer'] = $visibility->viewerId()->toString();
+        // As in TicketVisibilitySql: pdo_pgsql binds no arrays, and a uuid holds no comma or brace.
+        $parameters['search_team_ids'] = '{'.implode(',', array_map(static fn (TeamId $teamId): string => $teamId->toString(), $visibility->teamIds())).'}';
+        $parameters['search_is_admin'] = $visibility->isAdmin() ? 'true' : 'false';
+        $parameters['search_is_triager'] = $visibility->isTriager() ? 'true' : 'false';
+        if (null !== $cursor) {
+            $ticketConditions .= ' AND matched.match_position > CAST(:after_match_position AS bigint)';
+            $parameters['after_match_position'] = (string) $cursor->matchPosition;
+        }
+
+        $sql = 'WITH matched AS MATERIALIZED (SELECT found.ticket_id, found.match_position'
+            .' FROM search_ticket_ids(CAST(:organization AS uuid), CAST(:search_text AS text), CAST(:search_viewer AS uuid),'
+            .' CAST(:search_team_ids AS uuid[]), CAST(:search_is_admin AS boolean), CAST(:search_is_triager AS boolean))'
+            .' WITH ORDINALITY AS found(ticket_id, match_position))'
+            .' SELECT listed.step_id, page.id, page.key, page.title, page.type, page.release, page.priority, page.priority_rank,'
+            .' page.assignee_id, page.updated_at, page.match_position, step_count.ticket_count'
+            .' FROM unnest(CAST(:step_ids AS uuid[])) WITH ORDINALITY AS listed(step_id, list_position)'
+            .' CROSS JOIN LATERAL (SELECT count(*) AS ticket_count FROM ('
+            .'SELECT 1 FROM matched JOIN tkt_ticket AS counted ON counted.id = matched.ticket_id'
+            .' WHERE '.$countedConditions.' AND '.$visibleCounted->sql()
+            .' LIMIT '.(TicketListStep::COUNT_CAP + 1)
+            .') AS capped) AS step_count'
+            .' CROSS JOIN LATERAL ('
+            .'SELECT ticket.id, ticket.key, ticket.title, ticket.type, ticket.release, ticket.priority, ticket.priority_rank,'
+            .' ticket.assignee_id, ticket.updated_at, matched.match_position'
+            .' FROM matched JOIN tkt_ticket AS ticket ON ticket.id = matched.ticket_id'
+            .' WHERE '.$ticketConditions.' AND '.$visibleTicket->sql()
+            .' ORDER BY matched.match_position'
+            .' LIMIT '.(TicketListStep::PAGE_SIZE + 1)
+            .') AS page'
+            .' ORDER BY listed.list_position, page.match_position';
+
+        return [$sql, $parameters];
+    }
+
+    /**
      * @param list<array<string, mixed>>    $ticketRows PAGE_SIZE + 1 at most per step, in list order
      * @param array<string, ListedStepView> $shownSteps by id, in list order
      *
@@ -148,6 +218,7 @@ final readonly class DbalTicketQueries implements TicketQueries
                     self::integer($lastRow['priority_rank'], 'priority rank'),
                     new \DateTimeImmutable(self::text($lastRow['updated_at'], 'updated_at')),
                     new TicketId(self::text($lastRow['id'], 'ticket id')),
+                    \array_key_exists('match_position', $lastRow) ? self::integer($lastRow['match_position'], 'match position') : null,
                 );
                 continue;
             }

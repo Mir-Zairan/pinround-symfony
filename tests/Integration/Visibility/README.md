@@ -23,7 +23,7 @@ Its data provider `viewers()` yields `[viewer, seesTeamOnly, seesNoTeamTicket]`.
 | Team page project counts, step count | `TicketCountsLeakTest` | P03.T2 |
 | Ticket list | `TicketListLeakTest` | P03.T3 |
 | Search function `search_ticket_ids` (visibility written out in its migration): each viewer finds what `TicketVisibilitySql` lets them see, an outsider in any person column finds that ticket, no other organization's ticket | `TicketSearchFunctionLeakTest` | P03.T4 |
-| Ticket list search box | planned (adds its own case when the list calls the function) | P03.T4 |
+| Ticket list with a search (`/tickets?q=`): the function's matches joined back under `TicketVisibilitySql`, by title words and by key, no other organization's ticket | `TicketSearchLeakTest` | P03.T4 |
 | Ticket page | planned | P03.T6 |
 | Bell and email | planned | P04 |
 | Rounds | planned | P05 |

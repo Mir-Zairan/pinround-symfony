@@ -219,6 +219,9 @@ final class TicketListTest extends WebTestCase
         yield 'after without step' => ['after=3.1805000000.0197a3c0-0000-7000-8000-000000000001'];
         yield 'step without after' => ['step=0197a3c0-0000-7000-8000-00000000f0d0'];
         yield 'after as an array' => ['step=0197a3c0-0000-7000-8000-00000000f0d0&after[]=1'];
+        yield 'a search cursor without the search' => ['step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001.7'];
+        yield 'a priority cursor with a search' => ['q=checkout&step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001'];
+        yield 'a search as an array' => ['q[]=checkout'];
     }
 
     #[Test]
@@ -333,6 +336,164 @@ final class TicketListTest extends WebTestCase
         // Focus moves to the new rows after Turbo swaps the frame; the first page takes none.
         self::assertCount(1, $nextPage->filter('turbo-frame#'.$frameId.' ul.tickets__row-list[tabindex="-1"][autofocus]'));
         self::assertCount(0, $page->filter('[autofocus]'));
+    }
+
+    /**
+     * SHOP-40 matches by its title, is a blocker and newer, so the priority order would list it first; the exact key
+     * comes first. SHOP-42, in the same step, does not match; the In progress tickets do not either.
+     */
+    #[Test]
+    public function aSearchForAKeyShowsThatTicketFirstInItsStepAndOnlyMatches(): void
+    {
+        $this->addManyTickets('doing', 39);
+        $this->addTicket('todo', 'Shop 41 sale', 'blocker');
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->addTicket('todo', 'Add a gift wrap', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+        $unsearched = $this->client->request('GET', self::TICKETS);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-40', 'SHOP-42', 'SHOP-41'], $unsearched->filter('[data-group="todo"] .tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+
+        $page = $this->client->request('GET', self::TICKETS.'?q=+shop-41+');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['todo'], $page->filter('.tickets__step')->each(static fn (Crawler $step): ?string => $step->attr('data-group')));
+        self::assertSame(['SHOP-41', 'SHOP-40'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertSame(['2', '2 tickets · grouped by step'], [$page->filter('.tickets__step-count')->text(), $page->filter('.tickets__total')->text()]);
+    }
+
+    #[Test]
+    public function aSearchThatMatchesNothingSaysHowToFindMore(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?q=postcode');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.tickets__row'));
+        self::assertSame('No tickets match. Clear the search or pick another person.', $page->filter('.empty-state')->text());
+    }
+
+    #[Test]
+    public function aBlankSearchListsEveryTicket(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?q=+%09+');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+    }
+
+    /**
+     * The best match, "Checkout", is a minor ticket updated first, so the priority order would show it last; the 52
+     * others tie on the rank and come by id, highest first. The ticket without the word is not listed.
+     */
+    #[Test]
+    public function showMoreUnderASearchKeepsTheSearchAndGoesOnInSearchOrder(): void
+    {
+        $this->addManyTickets('todo', 52);
+        $this->addTicket('todo', 'Checkout', 'minor', ['updatedAt' => '2027-03-15 07:00:00+00']);
+        $this->addTicket('todo', 'Cart total shows the wrong sum', 'blocker');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?project=SHOP&q=checkout');
+
+        self::assertResponseStatusCodeSame(200);
+        $firstPageKeys = $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key'));
+        self::assertCount(50, $firstPageKeys);
+        self::assertSame(['SHOP-53', 'SHOP-52', 'SHOP-51'], \array_slice($firstPageKeys, 0, 3));
+        self::assertSame('SHOP-4', $firstPageKeys[49]);
+        self::assertSame('53', $page->filter('.tickets__step-count')->text());
+        $moreLink = $page->filter('[data-group="todo"] [data-step-more]');
+        parse_str((string) parse_url((string) $moreLink->attr('href'), \PHP_URL_QUERY), $moreQuery);
+        self::assertSame(['SHOP', 'checkout'], [$moreQuery['project'] ?? null, $moreQuery['q'] ?? null]);
+        $after = $moreQuery['after'] ?? null;
+        self::assertIsString($after);
+        self::assertStringEndsWith('.50', $after);
+
+        $nextPage = $this->client->click($moreLink->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-3', 'SHOP-2', 'SHOP-1'], $nextPage->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertCount(0, $nextPage->filter('[data-step-more]'));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function refusedSearches(): iterable
+    {
+        yield '201 characters' => [rawurlencode(str_repeat('é', 201)), 'The search is too long. Use 200 characters or fewer.'];
+        yield 'invalid UTF-8' => ['check%C3out', 'The search is not valid text.'];
+        yield 'a NUL inside' => ['check%00out', 'The search is not valid text.'];
+    }
+
+    #[Test]
+    #[DataProvider('refusedSearches')]
+    public function aRefusedSearchIsABadRequestWithItsReasonBeforeAnyTicketQuery(string $encodedSearch, string $reason): void
+    {
+        $this->client->disableReboot();
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertNotSame([], $this->ticketQueriesOf(self::TICKETS.'?q=gift'));
+        self::assertResponseStatusCodeSame(200);
+
+        $ticketQueries = $this->ticketQueriesOf(self::TICKETS.'?q='.$encodedSearch);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertSame($reason, $this->client->getResponse()->getContent());
+        self::assertSame([], $ticketQueries);
+    }
+
+    /**
+     * @return list<string> the SQL of the request's queries that read tickets, the search or the triager
+     */
+    private function ticketQueriesOf(string $uri): array
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $this->client->request('GET', $uri);
+
+        $ticketQueries = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            foreach ($queriesOfOneConnection as $query) {
+                $sql = \is_string($query['sql'] ?? null) ? $query['sql'] : '';
+                if (1 === preg_match('/tkt_ticket|search_ticket_ids|org_settings/', $sql)) {
+                    $ticketQueries[] = $sql;
+                }
+            }
+        }
+
+        return $ticketQueries;
+    }
+
+    #[Test]
+    public function aSearchOf200CharactersAroundSpacesIsTaken(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?q='.rawurlencode(' '.str_repeat('é', 200).' '));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('No tickets match. Clear the search or pick another person.', $page->filter('.empty-state')->text());
+    }
+
+    /**
+     * The search runs inside the rows' query, so it adds no query to the list's budget of five.
+     */
+    #[Test]
+    public function aWarmSearchPageReadsAtMostFiveQueriesMoreThanTheShell(): void
+    {
+        $this->client->disableReboot();
+        $this->addManyTickets('todo', 60);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?q=checkout'));
     }
 
     #[Test]

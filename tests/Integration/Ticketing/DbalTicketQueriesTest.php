@@ -8,6 +8,7 @@ use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
 use App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
@@ -22,6 +23,7 @@ use App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries;
 use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -280,6 +282,126 @@ final class DbalTicketQueriesTest extends KernelTestCase
         self::assertSame([], $groupsUnderAcmeContext);
     }
 
+    /**
+     * The description-only hit is a blocker updated last, so the priority order would list it first; the search order
+     * puts the title hit first. The ticket without the word is listed without a search and left out with one.
+     */
+    #[Test]
+    public function aSearchListsOnlyMatchesEachStepInSearchOrderWithATitleHitAboveADescriptionOnlyHit(): void
+    {
+        $titleHit = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 3, '2027-03-15 09:00:00+00', 'Refund form drops the postcode', '');
+        $descriptionOnlyHit = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 0, '2027-03-15 11:00:00+00', 'Gift note is cut short', 'The postcode field is empty after paying.');
+        $noHit = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 1, '2027-03-15 10:00:00+00', 'Cart total shows the wrong sum', '');
+        $doingHit = $this->addSearchableTicket(self::DOING_STEP, 2, '2027-03-15 10:00:00+00', 'Postcode lookup is slow', '');
+        self::assertSame([$descriptionOnlyHit, $noHit, $titleHit], self::keysOf($this->listedAs(self::ACME_FOODS, $this->filter())[1]->steps[0]));
+
+        $groups = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'postcode'));
+
+        self::assertSame(
+            [['doing', [$doingHit], 1], ['todo', [$titleHit, $descriptionOnlyHit], 2]],
+            array_map(static fn (TicketListGroup $group): array => [$group->code, self::keysOf($group->steps[0]), $group->steps[0]->ticketCount], $groups),
+        );
+        self::assertSame([], $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'nothing like this')));
+    }
+
+    /**
+     * 52 equal matches tie on the rank, so the function orders them by id, highest first; the best match is a minor
+     * ticket updated first, which the priority order would put last. The cursor carries the 50th row's match position
+     * and the next page goes on from there, the step still counting every match.
+     */
+    #[Test]
+    public function aSearchCursorContinuesTheStepInSearchOrder(): void
+    {
+        $ties = $this->addTickets(ShopTeamRows::TO_DO_STEP, 52);
+        $bestMatch = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 4, '2027-03-15 07:00:00+00', 'Checkout', '');
+        $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 0, '2027-03-15 12:00:00+00', 'Cart total shows the wrong sum', '');
+        $tiesHighestIdFirst = array_reverse($ties);
+
+        $firstPage = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout'))[0]->steps[0];
+        $cursor = $firstPage->nextCursor;
+        self::assertNotNull($cursor);
+        $nextPage = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout'), $cursor)[0]->steps[0];
+
+        self::assertSame([53, [$bestMatch, ...\array_slice($tiesHighestIdFirst, 0, 49)]], [$firstPage->ticketCount, self::keysOf($firstPage)]);
+        self::assertSame(50, $cursor->matchPosition);
+        self::assertSame([53, \array_slice($tiesHighestIdFirst, 49), false], [$nextPage->ticketCount, self::keysOf($nextPage), $nextPage->hasMore()]);
+    }
+
+    /**
+     * Omar, outside the Shop team, lists only the match for everyone; Sara, an admin, lists the team-only match too,
+     * so the search finds it and the visibility keeps it from Omar.
+     */
+    #[Test]
+    public function aSearchListsOnlyTheMatchesTheViewerMaySee(): void
+    {
+        $teamOnly = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00', 'Postcode rules for staff', '');
+        $forEveryone = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 11:00:00+00', 'Postcode is cut short', '');
+        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET visibility = 'team', team_id = ? WHERE key = ?",
+            [self::SHOP_TEAM, $teamOnly],
+        ));
+        $omar = TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], false, null);
+
+        [$adminKeys, $adminCount] = self::keysAndCountOf($this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'postcode')));
+
+        self::assertSame([[$forEveryone], 1], self::keysAndCountOf($this->listedAs(self::ACME_FOODS, new ListFilter($omar, searchText: 'postcode'))));
+        self::assertEqualsCanonicalizing([$forEveryone, $teamOnly], $adminKeys);
+        self::assertSame(2, $adminCount);
+    }
+
+    /**
+     * @return iterable<string, array{bool, bool}>
+     */
+    public static function cursorsThatDoNotFitTheSearch(): iterable
+    {
+        yield 'a search cursor without a search' => [false, true];
+        yield 'a priority cursor with a search' => [true, false];
+    }
+
+    #[Test]
+    #[DataProvider('cursorsThatDoNotFitTheSearch')]
+    public function aCursorThatDoesNotFitTheSearchIsRefusedBeforeAnyQuery(bool $hasSearch, bool $hasMatchPosition): void
+    {
+        $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+        $cursor = new Cursor(ShopTeamRows::TO_DO_STEP, 2, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId('0197a3c0-0000-7000-8000-000000710001'), $hasMatchPosition ? 1 : null);
+        $debugData = $this->debugData();
+
+        $refusal = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $cursor, $hasSearch): array {
+            $debugData->reset();
+            try {
+                $this->ticketQueries()->list($this->filter(searchText: $hasSearch ? 'checkout' : null), $cursor);
+
+                return ['listed', 0];
+            } catch (\InvalidArgumentException $refusal) {
+                return [$refusal->getMessage(), self::queryCountOf($debugData)];
+            }
+        });
+
+        self::assertSame(['A cursor has a match position exactly when the list has a search.', 0], $refusal);
+    }
+
+    #[Test]
+    public function aSearchListReadsAsManyQueriesAsTheListWithout(): void
+    {
+        $this->addTickets(ShopTeamRows::TO_DO_STEP, 3);
+        $debugData = $this->debugData();
+
+        $queryCounts = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData): array {
+            $this->ticketQueries()->list($this->filter());
+            $debugData->reset();
+            $this->ticketQueries()->list($this->filter());
+            $withoutSearch = self::queryCountOf($debugData);
+            $debugData->reset();
+            $groups = $this->ticketQueries()->list($this->filter(searchText: 'checkout'));
+            self::assertCount(3, $groups[0]->steps[0]->rows);
+
+            return [$withoutSearch, self::queryCountOf($debugData)];
+        });
+
+        // The rows and the turn users; the steps are cached by the first call, and no row has a person to name.
+        self::assertSame([2, 2], $queryCounts);
+    }
+
     #[Test]
     public function withNoTransactionItRefusesBeforeAnyQuery(): void
     {
@@ -317,9 +439,44 @@ final class DbalTicketQueriesTest extends KernelTestCase
         self::assertSame(['The tickets list is read under the viewer\'s own organization as tenant.', 0], $refusal);
     }
 
-    private function filter(?string $projectId = null, bool $showsDone = false): ListFilter
+    private function filter(?string $projectId = null, bool $showsDone = false, ?string $searchText = null): ListFilter
     {
-        return new ListFilter(self::adminOf(self::ACME_FOODS), $projectId, $showsDone);
+        return new ListFilter(self::adminOf(self::ACME_FOODS), $projectId, $showsDone, $searchText);
+    }
+
+    /**
+     * @param list<TicketListGroup> $groups
+     *
+     * @return array{list<string>, int} the keys of every listed row and the sum of the step counts
+     */
+    private static function keysAndCountOf(array $groups): array
+    {
+        $keys = [];
+        $ticketCount = 0;
+        foreach ($groups as $group) {
+            foreach ($group->steps as $step) {
+                $keys = [...$keys, ...self::keysOf($step)];
+                $ticketCount += $step->ticketCount;
+            }
+        }
+
+        return [$keys, $ticketCount];
+    }
+
+    /**
+     * Like addTicket, with that title and description.
+     *
+     * @return string the ticket's key
+     */
+    private function addSearchableTicket(string $stepId, int $priorityRank, string $updatedAt, string $title, string $description): string
+    {
+        $key = $this->addTicket($stepId, $priorityRank, $updatedAt);
+        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET title = ?, description = ? WHERE key = ?',
+            [$title, $description, $key],
+        ));
+
+        return $key;
     }
 
     private static function adminOf(string $organizationId): TicketVisibility

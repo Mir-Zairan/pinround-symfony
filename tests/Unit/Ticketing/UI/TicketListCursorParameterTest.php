@@ -30,6 +30,19 @@ final class TicketListCursorParameterTest extends TestCase
         self::assertSame(3, $readBack->priorityRank);
         self::assertSame(1773570600, $readBack->updatedAt->getTimestamp());
         self::assertSame(self::TICKET, $readBack->ticketId->toString());
+        self::assertNull($readBack->matchPosition);
+    }
+
+    #[Test]
+    public function aSearchCursorComesBackWithItsMatchPosition(): void
+    {
+        $cursor = new Cursor(self::STEP, 3, new \DateTimeImmutable('2026-03-15T10:30:00+00:00'), new TicketId(self::TICKET), 1000);
+
+        $query = TicketListCursorParameter::queryOf($cursor);
+        $readBack = TicketListCursorParameter::cursorOf($query[TicketListCursorParameter::STEP_QUERY], $query[TicketListCursorParameter::AFTER_QUERY]);
+
+        self::assertSame('3.1773570600.'.self::TICKET.'.1000', $query[TicketListCursorParameter::AFTER_QUERY]);
+        self::assertSame([1000, self::TICKET], [$readBack?->matchPosition, $readBack?->ticketId->toString()]);
     }
 
     /**
@@ -49,6 +62,11 @@ final class TicketListCursorParameterTest extends TestCase
         yield 'ticket id in capitals' => [self::STEP, '3.1773570600.'.strtoupper(self::TICKET)];
         yield 'a part missing' => [self::STEP, '3.'.self::TICKET];
         yield 'trailing newline' => [self::STEP, $after."\n"];
+        yield 'match position 0' => [self::STEP, $after.'.0'];
+        yield 'match position with a leading zero' => [self::STEP, $after.'.07'];
+        yield 'match position of five digits' => [self::STEP, $after.'.10000'];
+        yield 'match position empty' => [self::STEP, $after.'.'];
+        yield 'match position then a newline' => [self::STEP, $after.".7\n"];
     }
 
     #[Test]

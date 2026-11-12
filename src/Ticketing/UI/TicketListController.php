@@ -30,19 +30,26 @@ use Symfony\Component\Routing\Attribute\Route;
  * order, of every project or of the one in PROJECT_QUERY (404 for a key the organization has no project with), Done
  * only with DONE_QUERY=1. Every person of the organization may open it (OrganizationPermission::VIEW); the rows are
  * the ticket visibility predicate's (ADR-0013). A "Show more" link opens the next page of one step through
- * TicketListCursorParameter; a malformed one is a 400.
+ * TicketListCursorParameter; a malformed one is a 400. SEARCH_QUERY, trimmed, keeps only the tickets that match it,
+ * still grouped by step, each step in search order; a search longer than ListFilter::SEARCH_TEXT_MAX_LENGTH
+ * characters, or not text, is a 400 before any query.
  *
- * Five queries at most whatever the number of tickets: the triager, the project by key, then the list's rows, turn
- * users and names (TicketQueries::list).
+ * Five queries at most whatever the number of tickets, with a search or without: the triager, the project by key,
+ * then the list's rows, turn users and names (TicketQueries::list).
  */
 final class TicketListController extends AbstractController
 {
     public const string ROUTE = 'ticketing_tickets';
     public const string PROJECT_QUERY = 'project';
     public const string DONE_QUERY = 'done';
+    public const string SEARCH_QUERY = 'q';
 
     public const string ALL_TICKETS = 'All tickets';
     public const string NO_TICKETS = 'No tickets here yet.';
+    public const string NO_MATCHES = 'No tickets match. Clear the search or pick another person.';
+    public const string SEARCH_TOO_LONG = 'The search is too long. Use '.ListFilter::SEARCH_TEXT_MAX_LENGTH.' characters or fewer.';
+    public const string SEARCH_NOT_TEXT = 'The search is not valid text.';
+    public const string SHOW_MORE_NOT_VALID = 'That "Show more" link is not valid.';
 
     public function __construct(
         private readonly TenantContext $tenantContext,
@@ -59,22 +66,48 @@ final class TicketListController extends AbstractController
     public function list(Request $request): Response
     {
         $this->denyAccessUnlessGranted(OrganizationPermission::VIEW, $this->tenantContext->get());
-        $actor = $this->currentActor->actorFor($this->getUser()) ?? throw $this->createAccessDeniedException();
+        $searchText = trim($request->query->getString(self::SEARCH_QUERY));
+        $searchRefusal = self::searchRefusalOf($searchText);
+        if (null !== $searchRefusal) {
+            return new Response($searchRefusal, Response::HTTP_BAD_REQUEST, ['Content-Type' => 'text/plain; charset=UTF-8']);
+        }
+        $searchText = '' === $searchText ? null : $searchText;
         $cursor = $this->cursorOf($request);
+        if (null !== $cursor && (null === $searchText) !== (null === $cursor->matchPosition)) {
+            throw new BadRequestHttpException(self::SHOW_MORE_NOT_VALID);
+        }
+        $actor = $this->currentActor->actorFor($this->getUser()) ?? throw $this->createAccessDeniedException();
         $showsDone = '1' === $request->query->getString(self::DONE_QUERY);
 
         $visibility = $this->ticketVisibilities->ofActor($actor);
         $projectKey = $request->query->getString(self::PROJECT_QUERY);
         $project = '' === $projectKey ? null : ($this->projectQueries->projectByKey($projectKey) ?? throw $this->createNotFoundException('No project has that key.'));
-        $groups = $this->ticketQueries->list(new ListFilter($visibility, $project?->id(), $showsDone), $cursor);
+        $groups = $this->ticketQueries->list(new ListFilter($visibility, $project?->id(), $showsDone, $searchText), $cursor);
         $collapsedStepIds = CollapsedSteps::idsIn($request->getSession());
 
         return $this->render('@Ticketing/list.html.twig', [
             'heading' => null === $project ? self::ALL_TICKETS : $project->key().' · '.$project->name(),
             'totalLine' => TicketListText::totalLineOf($groups),
-            'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $cursor, $collapsedStepIds),
-            'noTickets' => self::NO_TICKETS,
+            'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $searchText, $cursor, $collapsedStepIds),
+            'noTickets' => null === $searchText ? self::NO_TICKETS : self::NO_MATCHES,
         ]);
+    }
+
+    /**
+     * @param string $searchText already trimmed; empty for no search
+     *
+     * @return string|null why the list refuses the search, or null when it takes it
+     */
+    private static function searchRefusalOf(string $searchText): ?string
+    {
+        if (!mb_check_encoding($searchText, 'UTF-8') || str_contains($searchText, "\0")) {
+            return self::SEARCH_NOT_TEXT;
+        }
+        if (mb_strlen($searchText, 'UTF-8') > ListFilter::SEARCH_TEXT_MAX_LENGTH) {
+            return self::SEARCH_TOO_LONG;
+        }
+
+        return null;
     }
 
     /**
@@ -89,7 +122,7 @@ final class TicketListController extends AbstractController
             return null;
         }
 
-        return TicketListCursorParameter::cursorOf($stepId, $after) ?? throw new BadRequestHttpException('That "Show more" link is not valid.');
+        return TicketListCursorParameter::cursorOf($stepId, $after) ?? throw new BadRequestHttpException(self::SHOW_MORE_NOT_VALID);
     }
 
     /**
@@ -107,11 +140,14 @@ final class TicketListController extends AbstractController
      *
      * @return list<array{code: string, label: string, hint: string|null, steps: list<array<string, mixed>>}>
      */
-    private function groupViewsOf(array $groups, UserId $viewerId, ?ProjectChoice $project, bool $showsDone, ?Cursor $cursor, array $collapsedStepIds): array
+    private function groupViewsOf(array $groups, UserId $viewerId, ?ProjectChoice $project, bool $showsDone, ?string $searchText, ?Cursor $cursor, array $collapsedStepIds): array
     {
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
-        $listQuery = array_filter([self::PROJECT_QUERY => $project?->key(), self::DONE_QUERY => $showsDone ? '1' : null], static fn (?string $value): bool => null !== $value);
+        $listQuery = array_filter(
+            [self::PROJECT_QUERY => $project?->key(), self::DONE_QUERY => $showsDone ? '1' : null, self::SEARCH_QUERY => $searchText],
+            static fn (?string $value): bool => null !== $value,
+        );
 
         return array_map(fn (TicketListGroup $group): array => [
             'code' => $group->code,
