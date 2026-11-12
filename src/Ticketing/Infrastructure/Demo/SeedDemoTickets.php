@@ -167,7 +167,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
         UserId $tester,
         UserId $reviewer,
     ): void {
-        $now = \DateTimeImmutable::createFromInterface($this->clock->now());
+        $now = $this->clock->now();
         $types = TicketType::cases();
         $priorities = Priority::cases();
         $key = $this->ticketCommands->create(

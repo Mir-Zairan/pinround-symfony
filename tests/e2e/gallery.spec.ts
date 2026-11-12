@@ -33,6 +33,21 @@ for (const scheme of ['light', 'dark'] as const) {
   });
 }
 
+test('the person picker opens with its sample rows and sends no request', async ({ page }) => {
+  await openGallery(page, 'light');
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(request.url()));
+
+  await page.locator('#gallery-person-picker ~ .gallery-row').getByRole('button', { name: 'Omar' }).click();
+
+  const picker = page.getByRole('dialog', { name: 'Show tickets of…' });
+  await expect(picker).toBeVisible();
+  await expect(picker.locator('.pick')).toHaveText([/Omar\s*3 open/, /Mia\s*1 open/, /Lena\s*0 open/]);
+  await picker.getByRole('button', { name: 'Cancel' }).click();
+  await expect(picker).toBeHidden();
+  expect(requests).toEqual([]);
+});
+
 // Sizes from docs/04-prototype/prototype-guide.md "Component classes".
 test.describe('component sizes match the prototype classes', () => {
   test.use({ viewport: { width: 1280, height: 800 } });

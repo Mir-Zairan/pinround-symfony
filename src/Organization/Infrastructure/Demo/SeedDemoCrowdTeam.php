@@ -27,7 +27,7 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 use Symfony\Component\DependencyInjection\Attribute\When;
 
 /**
- * Beta Bakery's team Crowd: Ben as lead and the PEOPLE_COUNT people Identity's SeedDemoCrowdPeople made
+ * Beta Bakery's team Crowd: Ben as lead and the PEOPLE_COUNT people (a test passes fewer) Identity's SeedDemoCrowdPeople made
  * (person0001@beta-bakery.example and on) as members, so the tickets toolbar shows the person picker for a team of
  * thousands. It runs after SeedDemoOrganizations, in one transaction under Beta Bakery; whoever is in the team stays.
  * Beta Bakery's team Ovens and Acme Foods are left as they are, so no other spec sees the crowd.
@@ -59,6 +59,7 @@ final readonly class SeedDemoCrowdTeam implements DemoSeedStep
         private EntityManagerInterface $entityManager,
         private Connection $connection,
         private ClockInterface $clock,
+        private int $peopleCount = self::PEOPLE_COUNT,
     ) {
     }
 
@@ -84,7 +85,7 @@ final readonly class SeedDemoCrowdTeam implements DemoSeedStep
             $this->tenantContext->clear();
         }
 
-        return \sprintf('Crowd team: added %d people, kept %d.', $added, self::PEOPLE_COUNT - $added);
+        return \sprintf('Crowd team: added %d people, kept %d.', $added, $this->peopleCount - $added);
     }
 
     /**
@@ -95,7 +96,7 @@ final readonly class SeedDemoCrowdTeam implements DemoSeedStep
     private function findPeople(): array
     {
         $people = [];
-        for ($number = 1; $number <= self::PEOPLE_COUNT; ++$number) {
+        for ($number = 1; $number <= $this->peopleCount; ++$number) {
             $email = \sprintf('person%04d@beta-bakery.example', $number);
             $people[] = $this->users->idByEmail($email)
                 ?? throw new DemoSeedRefused(\sprintf('The crowd person %s does not exist yet, so the Crowd team cannot be made. Seed the people first.', $email));

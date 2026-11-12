@@ -12,21 +12,6 @@
     {% elseif shown.rows is empty %}
         <p class="person-picker__note" role="status">{{ constant('NO_MATCHES', this) }}</p>
     {% else %}
-        <ul class="person-picker__rows" data-action="keydown->person-picker#moveBetweenRows">
-            {% for row in shown.rows %}
-                <li>
-                    <button type="button" class="pick" data-person-pick="{{ row.personId }}" data-person-picker-target="row"
-                        aria-pressed="{{ row.isPressed ? 'true' : 'false' }}"
-                        data-action="live#emitUp dialog#close" data-live-event-param="{{ pickedEvent }}" data-live-person-param="{{ row.personId }}">
-                        <twig:Avatar name="{{ row.name }}" aria-hidden="true"/>
-                        <span class="pick__name">{{ row.name }}</span>
-                        <span class="pick__side">{{ row.openCount }} open</span>
-                    </button>
-                </li>
-            {% endfor %}
-        </ul>
-        {% if shown.matchCount > shown.rows|length %}
-            <p class="person-picker__note" data-person-picker-hint>Showing {{ shown.rows|length }} of {{ shown.matchCount|number_format }}. Type a name to narrow the list.</p>
-        {% endif %}
+        <twig:PersonPickerRows :rows="shown.rows" :matchCount="shown.matchCount" :pickedEvent="pickedEvent"/>
     {% endif %}
 </div>

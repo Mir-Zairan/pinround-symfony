@@ -129,6 +129,14 @@ test('a project on the rail is marked current and filters the list to its ticket
   for (const key of keys) {
     expect(key).toMatch(/^SHOP-\d+$/);
   }
+
+  // Only SHOP has seeded tickets, so the check above holds even if the filter were ignored. APP has none and no team,
+  // so it is not on the rail: its list must be empty.
+  const response = await page.goto('/tickets?project=APP', { waitUntil: 'networkidle' });
+  expect(response?.status()).toBe(200);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('APP · Acme app');
+  await expect(page.locator('.tickets__row')).toHaveCount(0);
+  await expect(page.locator('.empty-state')).toHaveText('No tickets here yet.');
 });
 
 test('the skip link moves focus to the list without reloading the page', async ({ page }) => {

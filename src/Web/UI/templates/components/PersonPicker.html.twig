@@ -4,9 +4,8 @@
 <div class="person-picker__host" {{ stimulus_controller('person-picker', {pressedPerson: picker.pressedPerson}) }}>
     <twig:Dialog id="{{ picker.id }}" title="{{ picker.mode.title }}">
         <twig:block name="trigger">
-            <button type="button" class="chip" data-person-picker-trigger aria-haspopup="dialog"
-                aria-pressed="{{ picker.isTriggerPressed ? 'true' : 'false' }}"
-                data-action="dialog#open person-picker#open">{{ picker.triggerLabel }}</button>
+            <twig:Chip :pressed="picker.isTriggerPressed" data-person-picker-trigger aria-haspopup="dialog"
+                data-action="dialog#open person-picker#open">{{ picker.triggerLabel }}</twig:Chip>
         </twig:block>
         <twig:block name="content">
             <p class="person-picker__sub">{{ picker.mode.sub }}</p>

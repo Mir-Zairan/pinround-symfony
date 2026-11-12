@@ -13,15 +13,12 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Console\DemoSeedCommand;
 use App\SharedKernel\Infrastructure\Console\DemoSeedRefused;
 use App\Tests\Factory\Identity\UserFactory;
-use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ProjectRows;
 use App\Tests\Integration\Ticketing\TicketRows;
-use App\Tests\Integration\Workflow\WorkflowRows;
 use App\Ticketing\Infrastructure\Demo\SeedDemoProjects;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\RuleSet;
-use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -644,39 +641,18 @@ final class DemoSeedCommandTest extends KernelTestCase
 
     private function removeOrganizationOf(string $email): void
     {
-        $organizationIds = $this->organizationIdsOf($email);
-        $this->ticketRows()->removeAllOf(...$organizationIds);
-        $this->projectRows()->removeAllOf(...$organizationIds);
-        $this->workflowRows()->removeAllOf(...$organizationIds);
-        $this->rows()->removeAllOf(...$organizationIds);
+        $this->demoSeedRows()->removeOrganizations(...$this->organizationIdsOf($email));
     }
 
-    /**
-     * Removes what the seed made, wherever an earlier run left it: the organizations of the demo people with their
-     * projects and workflow, their outbox messages, credentials and the people themselves. The entity manager is
-     * emptied first, as the tenant may only change once it holds nothing.
-     */
     private function removeDemoRows(): void
     {
         self::getContainer()->get('doctrine')->resetManager();
-        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
-        $userIds = $migrator->fetchFirstColumn('SELECT id FROM idn_user WHERE email IN (?)', [self::EMAILS], [ArrayParameterType::STRING]);
-        $organizationIds = [];
-        foreach ($userIds as $userId) {
-            foreach ($this->connection()->fetchFirstColumn('SELECT organization_id FROM resolve_user_orgs(?)', [$userId]) as $organizationId) {
-                self::assertIsString($organizationId);
-                $organizationIds[$organizationId] = $organizationId;
-            }
-        }
-        $this->ticketRows()->removeAllOf(...array_values($organizationIds));
-        $this->projectRows()->removeAllOf(...array_values($organizationIds));
-        $this->workflowRows()->removeAllOf(...array_values($organizationIds));
-        $this->rows()->removeAllOf(...array_values($organizationIds));
-        $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
-        if ([] !== $userIds) {
-            $migrator->executeStatement('DELETE FROM idn_credential WHERE user_id IN (?)', [$userIds], [ArrayParameterType::STRING]);
-            $migrator->executeStatement('DELETE FROM idn_user WHERE id IN (?)', [$userIds], [ArrayParameterType::STRING]);
-        }
+        $this->demoSeedRows()->removePeopleAndTheirOrganizations(self::EMAILS);
+    }
+
+    private function demoSeedRows(): DemoSeedRows
+    {
+        return new DemoSeedRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), $this->connection(), self::getContainer()->get(TenantContext::class));
     }
 
     private function ticketRows(): TicketRows
@@ -687,16 +663,6 @@ final class DemoSeedCommandTest extends KernelTestCase
     private function projectRows(): ProjectRows
     {
         return new ProjectRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
-    }
-
-    private function workflowRows(): WorkflowRows
-    {
-        return new WorkflowRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
-    }
-
-    private function rows(): OrganizationRows
-    {
-        return new OrganizationRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function connection(): Connection

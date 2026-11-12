@@ -88,7 +88,7 @@ final readonly class SeedDemoCrowdTickets implements DemoSeedStep
                     }
                     $assignee = $this->userQueries->idByEmail($assigneeEmail)
                         ?? throw new DemoSeedRefused(\sprintf('The person %s does not exist yet, so the Crowd tickets cannot be made.', $assigneeEmail));
-                    $this->ticketCommands->create($organizationId, $ben, $projectId, $title, 'Seeded for the person picker.', 'task', 'normal', $assignee, \DateTimeImmutable::createFromInterface($this->clock->now()));
+                    $this->ticketCommands->create($organizationId, $ben, $projectId, $title, 'Seeded for the person picker.', 'task', 'normal', $assignee, $this->clock->now());
                     $this->entityManager->flush();
                     $this->entityManager->clear();
                     ++$created;

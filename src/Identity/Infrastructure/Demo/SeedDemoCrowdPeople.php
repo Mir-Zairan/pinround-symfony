@@ -14,7 +14,7 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 use Symfony\Component\DependencyInjection\Attribute\When;
 
 /**
- * COUNT made-up people for the big Crowd team of Beta Bakery, so the person picker's server-side search and capped
+ * COUNT (by default) made-up people for the big Crowd team of Beta Bakery, so the person picker's server-side search and capped
  * page can be tried with thousands of people (tests/e2e/person-picker.spec.ts). Each is named "Person0001" and so on,
  * one word, because the picker searches first names and a first name is the first word of the name. They have no
  * password and cannot log in. SeedDemoCrowdTeam adds them to the team.
@@ -29,25 +29,21 @@ final readonly class SeedDemoCrowdPeople implements DemoSeedStep
     public const int COUNT = 2000;
     private const int BATCH_SIZE = 200;
 
+    /**
+     * @param positive-int $count how many people to make; a test passes a small one
+     */
     public function __construct(
         private Users $users,
         private EntityManagerInterface $entityManager,
         private ClockInterface $clock,
+        private int $count = self::COUNT,
     ) {
-    }
-
-    /**
-     * @return list<string> the email of each crowd person, in number order
-     */
-    public static function emails(): array
-    {
-        return array_map(static fn (int $number): string => \sprintf('person%04d@beta-bakery.example', $number), range(1, self::COUNT));
     }
 
     public function seed(): string
     {
         $created = 0;
-        foreach (self::emails() as $index => $email) {
+        foreach ($this->emails() as $index => $email) {
             if (null === $this->users->byEmail(new Email($email))) {
                 $name = \sprintf('Person%04d', $index + 1);
                 $this->users->add(new User($this->users->nextIdentity(), new Email($email), $name, 'en', 'Europe/Berlin', $this->clock->now()));
@@ -60,6 +56,14 @@ final readonly class SeedDemoCrowdPeople implements DemoSeedStep
         }
         $this->entityManager->clear();
 
-        return \sprintf('Crowd people: created %d, kept %d.', $created, self::COUNT - $created);
+        return \sprintf('Crowd people: created %d, kept %d.', $created, $this->count - $created);
+    }
+
+    /**
+     * @return list<string> the email of each crowd person, in number order
+     */
+    private function emails(): array
+    {
+        return array_map(static fn (int $number): string => \sprintf('person%04d@beta-bakery.example', $number), range(1, $this->count));
     }
 }
