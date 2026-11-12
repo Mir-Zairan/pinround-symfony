@@ -5,35 +5,26 @@ declare(strict_types=1);
 namespace App\Organization\Infrastructure\Cache;
 
 use App\Organization\Api\PossibleAssignee;
-use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
-use Psr\Log\LoggerInterface;
+use App\SharedKernel\Infrastructure\Cache\AfterCommitTagInvalidation;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\Cache\ItemInterface;
 use Symfony\Contracts\Cache\TagAwareCacheInterface;
-use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * The cache.team_people pool for one team's people and their names (performance-and-scale.md, "Caching"). An entry is
  * keyed by the organization of the open transaction, so it is filled and read only under row-level security of that
- * organization; it is tagged by its team, and by each person in it, so a new name clears every team that shows it. A change
- * queues its tags with invalidate*AfterCommit(); TeamPeopleCacheTransactionMiddleware tells this class when the
- * outermost transaction begins and ends, and the tags are invalidated only once it has committed.
+ * organization; it is tagged by its team, and by each person in it, so a new name clears every team that shows it. A
+ * change of a team queues its tag with invalidateTeamAfterCommit(); SharedKernel's AfterCommitTagInvalidation
+ * invalidates it once the outermost transaction has committed.
  */
-final class TeamPeopleCache implements ResetInterface
+final readonly class TeamPeopleCache
 {
-    private bool $isTransactionOpen = false;
-
-    private ?OrganizationId $transactionTenant = null;
-
-    /** @var array<string, true> tag => true, invalidated when the open transaction commits */
-    private array $waitingTags = [];
-
     public function __construct(
         #[Autowire(service: 'cache.team_people')]
-        private readonly TagAwareCacheInterface $pool,
-        private readonly LoggerInterface $logger,
+        private TagAwareCacheInterface $pool,
+        private AfterCommitTagInvalidation $invalidation,
     ) {
     }
 
@@ -48,11 +39,12 @@ final class TeamPeopleCache implements ResetInterface
      */
     public function remember(TeamId $team, \Closure $load): array
     {
-        if (null === $this->transactionTenant || [] !== $this->waitingTags) {
+        $organization = $this->invalidation->tenantToCacheFor($this->pool);
+        if (null === $organization) {
             return $load();
         }
 
-        $key = \sprintf('org.%s.people.team.%s', $this->transactionTenant->toString(), $team->toString());
+        $key = \sprintf('org.%s.people.team.%s', $organization->toString(), $team->toString());
 
         return $this->pool->get($key, static function (ItemInterface $item) use ($load, $team): array {
             $people = $load();
@@ -73,17 +65,7 @@ final class TeamPeopleCache implements ResetInterface
      */
     public function invalidateTeamAfterCommit(TeamId $team): void
     {
-        $this->invalidateAfterCommit([self::teamTag($team)]);
-    }
-
-    /**
-     * Like invalidateTeamAfterCommit(), for every team the person is in, of any organization: their name changed.
-     *
-     * @throws \RuntimeException when no transaction is open and the pool could not invalidate the tag
-     */
-    public function invalidatePersonAfterCommit(UserId $person): void
-    {
-        $this->invalidateAfterCommit([self::personTag($person)]);
+        $this->invalidation->invalidateAfterCommit($this->pool, [self::teamTag($team)]);
     }
 
     /**
@@ -93,83 +75,17 @@ final class TeamPeopleCache implements ResetInterface
      */
     public function invalidateTeamNow(TeamId $team): void
     {
-        $this->invalidate([self::teamTag($team)]);
+        $this->invalidation->invalidateNow($this->pool, [self::teamTag($team)]);
     }
 
     /**
-     * @internal called by TeamPeopleCacheTransactionMiddleware right after an outermost BEGIN; tags a transaction that
-     *           ended without COMMIT or ROLLBACK reaching the driver (a closed connection) left behind are dropped
-     */
-    public function transactionBegan(?OrganizationId $tenant): void
-    {
-        $this->isTransactionOpen = true;
-        $this->transactionTenant = $tenant;
-        $this->waitingTags = [];
-    }
-
-    /**
-     * @internal called by TeamPeopleCacheTransactionMiddleware after the outermost COMMIT succeeded
+     * Invalidates now every team the person is in, of any organization: their name changed.
      *
-     * Never throws: the change is committed already. Entries of a team the pool failed to drop stay until the relayed
-     * TeamRoleChanged invalidates them again (InvalidateTeamPeopleCacheHandler); entries of a renamed person stay until
-     * they expire, at most a day.
+     * @throws \RuntimeException when the pool could not invalidate the tag, so a message handler is retried
      */
-    public function transactionCommitted(): void
+    public function invalidatePersonNow(UserId $person): void
     {
-        $tags = array_keys($this->waitingTags);
-        $this->transactionEnded();
-        if ([] === $tags) {
-            return;
-        }
-
-        try {
-            $this->invalidate($tags);
-        } catch (\RuntimeException $failure) {
-            $this->logger->warning('The team people cache kept entries of a committed change.', ['exception_class' => $failure::class]);
-        }
-    }
-
-    /**
-     * @internal called by TeamPeopleCacheTransactionMiddleware when the outermost transaction rolls back or its commit fails
-     */
-    public function transactionEnded(): void
-    {
-        $this->isTransactionOpen = false;
-        $this->transactionTenant = null;
-        $this->waitingTags = [];
-    }
-
-    public function reset(): void
-    {
-        $this->transactionEnded();
-    }
-
-    /**
-     * @param list<string> $tags
-     */
-    private function invalidateAfterCommit(array $tags): void
-    {
-        if (!$this->isTransactionOpen) {
-            $this->invalidate($tags);
-
-            return;
-        }
-
-        foreach ($tags as $tag) {
-            $this->waitingTags[$tag] = true;
-        }
-    }
-
-    /**
-     * @param list<string> $tags
-     *
-     * @throws \RuntimeException when the pool reports a failure
-     */
-    private function invalidate(array $tags): void
-    {
-        if (!$this->pool->invalidateTags($tags)) {
-            throw new \RuntimeException('The team people cache could not invalidate its tags.');
-        }
+        $this->invalidation->invalidateNow($this->pool, [self::personTag($person)]);
     }
 
     private static function teamTag(TeamId $team): string

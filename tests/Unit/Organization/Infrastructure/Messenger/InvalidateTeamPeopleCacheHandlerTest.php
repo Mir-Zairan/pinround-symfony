@@ -11,6 +11,7 @@ use App\Organization\Infrastructure\Messenger\InvalidateTeamPeopleCacheHandler;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Cache\AfterCommitTagInvalidation;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
@@ -31,8 +32,9 @@ final class InvalidateTeamPeopleCacheHandlerTest extends TestCase
     public function theRelayedEventDropsItsTeamAtOnceInsideAnOpenTransactionAndNoOtherTeam(): void
     {
         $pool = new TagAwareAdapter(new ArrayAdapter());
-        $cache = new TeamPeopleCache($pool, new NullLogger());
-        $cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $invalidation = new AfterCommitTagInvalidation(new NullLogger());
+        $cache = new TeamPeopleCache($pool, $invalidation);
+        $invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         foreach ([self::SHOP_TEAM, self::MOBILE_TEAM] as $team) {
             $cache->remember(new TeamId($team), static fn (): array => [new PossibleAssignee(new UserId(self::OMAR), 'Omar')]);
         }

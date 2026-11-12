@@ -9,6 +9,7 @@ use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Cache\AfterCommitTagInvalidation;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
@@ -32,6 +33,8 @@ final class TeamPeopleCacheTest extends TestCase
 
     private TagAwareAdapter $pool;
 
+    private AfterCommitTagInvalidation $invalidation;
+
     private TeamPeopleCache $cache;
 
     private int $loads = 0;
@@ -39,13 +42,14 @@ final class TeamPeopleCacheTest extends TestCase
     protected function setUp(): void
     {
         $this->pool = new TagAwareAdapter(new ArrayAdapter());
-        $this->cache = new TeamPeopleCache($this->pool, new NullLogger());
+        $this->invalidation = new AfterCommitTagInvalidation(new NullLogger());
+        $this->cache = new TeamPeopleCache($this->pool, $this->invalidation);
     }
 
     #[Test]
     public function underATenantTheTeamIsKeyedByOrganizationAndTeamAndLoadedOnce(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
 
         self::assertSame(['Omar1'], $this->firstNamesOfShop());
         self::assertSame(['Omar1'], $this->firstNamesOfShop());
@@ -56,7 +60,7 @@ final class TeamPeopleCacheTest extends TestCase
     #[Test]
     public function theEntryIsDroppedByItsTeamsTagOrItsPeoplesTagsAndNoOther(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->firstNamesOfShop();
 
         $this->pool->invalidateTags(['people-team-'.self::MOBILE_TEAM, 'people-user-'.self::MIA]);
@@ -76,7 +80,7 @@ final class TeamPeopleCacheTest extends TestCase
         self::assertSame(['Omar1'], $this->firstNamesOfShop());
         self::assertSame(['Omar2'], $this->firstNamesOfShop());
 
-        $this->cache->transactionBegan(null);
+        $this->invalidation->transactionBegan(null);
         self::assertSame(['Omar3'], $this->firstNamesOfShop());
         self::assertSame(['Omar4'], $this->firstNamesOfShop());
         self::assertFalse($this->pool->hasItem($this->shopKey()));
@@ -85,7 +89,7 @@ final class TeamPeopleCacheTest extends TestCase
     #[Test]
     public function aTeamChangeLoadsAfreshUntilItsCommitAndIsDroppedAtTheCommit(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->firstNamesOfShop();
 
         $this->cache->invalidateTeamAfterCommit(new TeamId(self::SHOP_TEAM));
@@ -93,27 +97,27 @@ final class TeamPeopleCacheTest extends TestCase
         self::assertSame(['Omar3'], $this->firstNamesOfShop(), 'An uncommitted change is never kept.');
         self::assertSame(['Omar1'], $this->cachedFirstNamesOfShop(), 'The entry stays until the commit.');
 
-        $this->cache->transactionCommitted();
+        $this->invalidation->transactionCommitted();
         self::assertNull($this->cachedFirstNamesOfShop());
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         self::assertSame(['Omar4'], $this->firstNamesOfShop());
         self::assertSame(['Omar4'], $this->firstNamesOfShop());
     }
 
     /**
-     * A name change comes from the profile page, whose transaction has no tenant; it still clears Omar's teams.
+     * The relayed UserRenamed is handled in the worker's own transaction, after the new name committed.
      */
     #[Test]
-    public function aNewNameDropsTheTeamsOfThatPersonAtTheCommitOfATransactionWithNoTenant(): void
+    public function aNewNameDropsTheTeamsOfThatPersonAtOnceInsideAnOpenTransaction(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->firstNamesOfShop();
-        $this->cache->transactionCommitted();
+        $this->invalidation->transactionCommitted();
 
-        $this->cache->transactionBegan(null);
-        $this->cache->invalidatePersonAfterCommit(new UserId(self::OMAR));
-        self::assertSame(['Omar1'], $this->cachedFirstNamesOfShop());
-        $this->cache->transactionCommitted();
+        $this->invalidation->transactionBegan(null);
+        $this->cache->invalidatePersonNow(new UserId(self::MIA));
+        self::assertSame(['Omar1'], $this->cachedFirstNamesOfShop(), 'Another person\'s new name keeps the entry.');
+        $this->cache->invalidatePersonNow(new UserId(self::OMAR));
 
         self::assertNull($this->cachedFirstNamesOfShop());
     }
@@ -121,26 +125,25 @@ final class TeamPeopleCacheTest extends TestCase
     #[Test]
     public function aRolledBackChangeInvalidatesNothing(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->firstNamesOfShop();
         $this->cache->invalidateTeamAfterCommit(new TeamId(self::SHOP_TEAM));
-        $this->cache->invalidatePersonAfterCommit(new UserId(self::OMAR));
-        $this->cache->transactionEnded();
+        $this->invalidation->transactionEnded();
 
         self::assertSame(['Omar1'], $this->cachedFirstNamesOfShop());
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         self::assertSame(['Omar1'], $this->firstNamesOfShop());
     }
 
     #[Test]
     public function aNewTransactionForgetsTheChangesOfOneThatNeverEnded(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->firstNamesOfShop();
         $this->cache->invalidateTeamAfterCommit(new TeamId(self::SHOP_TEAM));
 
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
-        $this->cache->transactionCommitted();
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionCommitted();
 
         self::assertSame(['Omar1'], $this->cachedFirstNamesOfShop());
     }
@@ -148,11 +151,11 @@ final class TeamPeopleCacheTest extends TestCase
     #[Test]
     public function resetEndsTheTransactionSoTheNextChangeIsInvalidatedAtOnce(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->firstNamesOfShop();
         $this->cache->invalidateTeamAfterCommit(new TeamId(self::MOBILE_TEAM));
 
-        $this->cache->reset();
+        $this->invalidation->reset();
 
         self::assertSame(['Omar2'], $this->firstNamesOfShop(), 'With no transaction a read loads and keeps nothing.');
         $this->cache->invalidateTeamAfterCommit(new TeamId(self::SHOP_TEAM));
@@ -176,23 +179,24 @@ final class TeamPeopleCacheTest extends TestCase
                 ($this->onLog)((string) $message, $context);
             }
         };
-        $cache = new TeamPeopleCache($this->failingPool(), $logger);
-        $cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $invalidation = new AfterCommitTagInvalidation($logger);
+        $cache = new TeamPeopleCache($this->failingPool(), $invalidation);
+        $invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $cache->invalidateTeamAfterCommit(new TeamId(self::SHOP_TEAM));
 
-        $cache->transactionCommitted();
+        $invalidation->transactionCommitted();
 
-        self::assertSame([['The team people cache kept entries of a committed change.', ['exception_class' => \RuntimeException::class]]], $records);
+        self::assertSame([['A cache kept entries of a committed change; its event handler drops them.', ['exception_class' => \RuntimeException::class]]], $records);
     }
 
     #[Test]
     public function aPoolThatFailsToInvalidateNowThrowsSoTheHandlerIsRetried(): void
     {
-        $cache = new TeamPeopleCache($this->failingPool(), new NullLogger());
+        $cache = new TeamPeopleCache($this->failingPool(), new AfterCommitTagInvalidation(new NullLogger()));
 
         $this->expectException(\RuntimeException::class);
 
-        $cache->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
+        $cache->invalidatePersonNow(new UserId(self::OMAR));
     }
 
     /**

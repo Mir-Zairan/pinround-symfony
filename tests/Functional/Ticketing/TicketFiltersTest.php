@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Api\CurrentUser;
+use App\Identity\Api\Event\UserRenamed;
 use App\Identity\Domain\User;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
@@ -23,6 +24,7 @@ use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\UI\Component\TicketFilters;
 use Doctrine\ORM\EntityManagerInterface;
@@ -33,6 +35,8 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 use Symfony\Contracts\Service\ResetInterface;
 use Symfony\UX\LiveComponent\Test\InteractsWithLiveComponents;
 use Symfony\UX\LiveComponent\Test\TestLiveComponent;
@@ -51,6 +55,7 @@ final class TicketFiltersTest extends WebTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
+    use RunsTheWorkerUntilIdle;
 
     private const string TICKETS = '/tickets';
 
@@ -129,16 +134,19 @@ final class TicketFiltersTest extends WebTestCase
     }
 
     /**
-     * Omar saves a new name on his profile page, which has no organization; Lena's cached Shop shows it at once.
+     * Omar saves a new name on his profile page, which has no organization; Lena's cached Shop shows it once the relay has
+     * moved UserRenamed from the outbox and worker-notify has handled it.
      */
     #[Test]
-    public function aNewNameIsOnTheNextLoad(): void
+    public function aNewNameIsOnTheFirstLoadAfterTheRelayedRenameIsHandled(): void
     {
         $this->client->disableReboot();
         $this->logIn($this->client, $this->people['Lena']);
         self::assertSame(['Everyone', 'Me', 'Omar'], $this->peopleChipLabelsOnTheTicketsPage());
         self::assertSame(['Everyone', 'Me', 'Omar'], $this->peopleChipLabelsOnTheTicketsPage());
 
+        // Only the rename is relayed and handled below, not the events of setting up the teams.
+        self::getContainer()->get('doctrine.dbal.default_connection')->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
         $this->logIn($this->client, $this->people['Omar']);
         $this->client->request('GET', '/me/profile');
         self::assertResponseStatusCodeSame(200);
@@ -146,6 +154,14 @@ final class TicketFiltersTest extends WebTestCase
         self::assertResponseStatusCodeSame(302);
 
         $this->logIn($this->client, $this->people['Lena']);
+        self::assertSame(['Everyone', 'Me', 'Omar'], $this->peopleChipLabelsOnTheTicketsPage(), 'The old name shows until the relayed event is handled.');
+
+        self::runTheWorkerUntilIdle('outbox');
+        $asyncNotify = self::getContainer()->get('messenger.transport.async_notify');
+        self::assertInstanceOf(InMemoryTransport::class, $asyncNotify);
+        self::assertSame([UserRenamed::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $asyncNotify->getSent()));
+        self::runTheWorkerUntilIdle('async_notify');
+
         self::assertSame(['Everyone', 'Me', 'Oskar'], $this->peopleChipLabelsOnTheTicketsPage());
     }
 

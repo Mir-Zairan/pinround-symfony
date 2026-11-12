@@ -50,7 +50,8 @@ when@test:
         controller: App\Tests\Fixtures\Http\WorkerResetProbeController::enterOrganizationThenFail
         methods: [POST]
 
-    # Without the request transaction, whose BEGIN would start WorkflowCache afresh and hide what the reset left.
+    # Without the request transaction, whose BEGIN would start AfterCommitTagInvalidation afresh and hide what the reset
+    # left, here and for the team people cache below.
     test_worker_reset_workflow_cache_close_then_fail:
         path: /_test/worker-reset/workflow-cache/{organizationId}/close-then-fail
         controller: App\Tests\Fixtures\Http\WorkflowCacheResetProbeController::rememberThenCloseTheConnectionThenFail
@@ -60,6 +61,18 @@ when@test:
     test_worker_reset_workflow_cache_invalidate:
         path: /_test/worker-reset/workflow-cache/{organizationId}/invalidate
         controller: App\Tests\Fixtures\Http\WorkflowCacheResetProbeController::invalidateTheTeamOutsideATransaction
+        methods: [POST]
+        defaults: { _request_transaction: false }
+
+    test_worker_reset_team_people_cache_close_then_fail:
+        path: /_test/worker-reset/team-people-cache/{organizationId}/close-then-fail
+        controller: App\Tests\Fixtures\Http\TeamPeopleCacheResetProbeController::rememberThenCloseTheConnectionThenFail
+        methods: [POST]
+        defaults: { _request_transaction: false }
+
+    test_worker_reset_team_people_cache_invalidate:
+        path: /_test/worker-reset/team-people-cache/invalidate
+        controller: App\Tests\Fixtures\Http\TeamPeopleCacheResetProbeController::invalidateTheTeamOutsideATransaction
         methods: [POST]
         defaults: { _request_transaction: false }
 

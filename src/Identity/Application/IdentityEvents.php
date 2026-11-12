@@ -7,7 +7,7 @@ namespace App\Identity\Application;
 use App\Identity\Api\Event\UserRenamed;
 
 /**
- * Tells other modules what changed about a person, in the transaction of the change.
+ * Tells other modules what changed about a person: the event goes to the outbox in the transaction of the change.
  */
 interface IdentityEvents
 {

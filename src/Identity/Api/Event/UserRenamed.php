@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Identity\Api\Event;
 
 /**
- * A person saved a new display name. Users are global, so it names no organization. It has no route to the outbox: it
- * is handled at once, inside the transaction of the change, by whoever keeps the name (the team people cache).
+ * A person saved a new display name. Whoever keeps the name (Organization's team people cache) learns of it once the
+ * relay has moved it from the outbox and worker-notify handles it, so the old name can show until then.
  */
-final readonly class UserRenamed
+final readonly class UserRenamed implements IdentityEvent
 {
     /**
      * @param string $userId a canonical UUID

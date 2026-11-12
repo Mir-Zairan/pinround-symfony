@@ -24,6 +24,7 @@ use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
 use App\Organization\Infrastructure\Messenger\MessengerOrganizationEvents;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Cache\AfterCommitTagInvalidation;
 use App\Tests\Unit\Organization\Application\RecordingInvitedPersonRegistration;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\NullLogger;
@@ -103,6 +104,6 @@ final readonly class OrganizationCommandsOnTheEventBus
      */
     private static function teamPeopleCache(): TeamPeopleCache
     {
-        return new TeamPeopleCache(new TagAwareAdapter(new ArrayAdapter()), new NullLogger());
+        return new TeamPeopleCache(new TagAwareAdapter(new ArrayAdapter()), new AfterCommitTagInvalidation(new NullLogger()));
     }
 }

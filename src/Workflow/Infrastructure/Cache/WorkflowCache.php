@@ -6,32 +6,24 @@ namespace App\Workflow\Infrastructure\Cache;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
-use Psr\Log\LoggerInterface;
+use App\SharedKernel\Infrastructure\Cache\AfterCommitTagInvalidation;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\Cache\ItemInterface;
 use Symfony\Contracts\Cache\TagAwareCacheInterface;
-use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * The cache.workflow pool for one team's steps and rules, and for the organization's whole list of steps
- * (performance-and-scale.md, "Caching"). An entry is keyed and
- * tagged by the organization of the open transaction, so it is filled and read only under row-level security of that
- * organization. A change queues its tags with invalidateAfterCommit(); WorkflowCacheTransactionMiddleware tells this
- * class when the outermost transaction begins and ends, and the tags are invalidated only once it has committed.
+ * (performance-and-scale.md, "Caching"). An entry is keyed and tagged by the organization of the open transaction, so
+ * it is filled and read only under row-level security of that organization. A change queues its tags with
+ * invalidateAfterCommit(); SharedKernel's AfterCommitTagInvalidation invalidates them once the outermost transaction
+ * has committed.
  */
-final class WorkflowCache implements ResetInterface
+final readonly class WorkflowCache
 {
-    private bool $isTransactionOpen = false;
-
-    private ?OrganizationId $transactionTenant = null;
-
-    /** @var array<string, true> tag => true, invalidated when the open transaction commits */
-    private array $waitingTags = [];
-
     public function __construct(
         #[Autowire(service: 'cache.workflow')]
-        private readonly TagAwareCacheInterface $pool,
-        private readonly LoggerInterface $logger,
+        private TagAwareCacheInterface $pool,
+        private AfterCommitTagInvalidation $invalidation,
     ) {
     }
 
@@ -50,11 +42,11 @@ final class WorkflowCache implements ResetInterface
      */
     public function remember(TeamId $team, string $entry, \Closure $load): mixed
     {
-        if (null === $this->transactionTenant || [] !== $this->waitingTags) {
+        $organization = $this->invalidation->tenantToCacheFor($this->pool);
+        if (null === $organization) {
             return $load();
         }
 
-        $organization = $this->transactionTenant;
         $key = \sprintf('org.%s.wf.team.%s.%s', $organization->toString(), $team->toString(), $entry);
         $tags = [self::teamTag($team), self::organizationTag($organization)];
 
@@ -79,11 +71,11 @@ final class WorkflowCache implements ResetInterface
      */
     public function rememberForOrganization(string $entry, \Closure $load): mixed
     {
-        if (null === $this->transactionTenant || [] !== $this->waitingTags) {
+        $organization = $this->invalidation->tenantToCacheFor($this->pool);
+        if (null === $organization) {
             return $load();
         }
 
-        $organization = $this->transactionTenant;
         $key = \sprintf('org.%s.wf.org.%s', $organization->toString(), $entry);
         $tags = [self::anyChangeTag($organization), self::organizationTag($organization)];
 
@@ -99,19 +91,12 @@ final class WorkflowCache implements ResetInterface
      * Queues the entries a change of the team's steps or rules (or, with no team, of the organization's own) makes
      * stale, the organization-wide ones of rememberForOrganization() included. They are invalidated when the open
      * transaction commits and kept when it rolls back. With no transaction open they are invalidated now.
+     *
+     * @throws \RuntimeException when no transaction is open and the pool could not invalidate the tags
      */
     public function invalidateAfterCommit(OrganizationId $organization, ?TeamId $team): void
     {
-        $tags = self::tagsOfAChange($organization, $team);
-        if (!$this->isTransactionOpen) {
-            $this->invalidate($tags);
-
-            return;
-        }
-
-        foreach ($tags as $tag) {
-            $this->waitingTags[$tag] = true;
-        }
+        $this->invalidation->invalidateAfterCommit($this->pool, self::tagsOfAChange($organization, $team));
     }
 
     /**
@@ -121,70 +106,11 @@ final class WorkflowCache implements ResetInterface
      */
     public function invalidateNow(OrganizationId $organization, ?TeamId $team): void
     {
-        $this->invalidate(self::tagsOfAChange($organization, $team));
+        $this->invalidation->invalidateNow($this->pool, self::tagsOfAChange($organization, $team));
     }
 
     /**
-     * @internal called by WorkflowCacheTransactionMiddleware right after an outermost BEGIN; tags a transaction that
-     *           ended without COMMIT or ROLLBACK reaching the driver (a closed connection) left behind are dropped
-     */
-    public function transactionBegan(?OrganizationId $tenant): void
-    {
-        $this->isTransactionOpen = true;
-        $this->transactionTenant = $tenant;
-        $this->waitingTags = [];
-    }
-
-    /**
-     * @internal called by WorkflowCacheTransactionMiddleware after the outermost COMMIT succeeded
-     *
-     * Never throws: the change is committed already. Entries the pool failed to drop stay until the event handler of
-     * the change invalidates them again (InvalidateWorkflowCacheHandler).
-     */
-    public function transactionCommitted(): void
-    {
-        $tags = array_keys($this->waitingTags);
-        $this->transactionEnded();
-        if ([] === $tags) {
-            return;
-        }
-
-        try {
-            $this->invalidate($tags);
-        } catch (\RuntimeException $failure) {
-            $this->logger->warning('The workflow cache kept entries of a committed change; its event handler drops them.', ['exception_class' => $failure::class]);
-        }
-    }
-
-    /**
-     * @internal called by WorkflowCacheTransactionMiddleware when the outermost transaction rolls back or its commit fails
-     */
-    public function transactionEnded(): void
-    {
-        $this->isTransactionOpen = false;
-        $this->transactionTenant = null;
-        $this->waitingTags = [];
-    }
-
-    public function reset(): void
-    {
-        $this->transactionEnded();
-    }
-
-    /**
-     * @param list<string> $tags
-     *
-     * @throws \RuntimeException when the pool reports a failure
-     */
-    private function invalidate(array $tags): void
-    {
-        if (!$this->pool->invalidateTags($tags)) {
-            throw new \RuntimeException('The workflow cache could not invalidate its tags.');
-        }
-    }
-
-    /**
-     * @return list<string>
+     * @return non-empty-list<string>
      */
     private static function tagsOfAChange(OrganizationId $organization, ?TeamId $team): array
     {

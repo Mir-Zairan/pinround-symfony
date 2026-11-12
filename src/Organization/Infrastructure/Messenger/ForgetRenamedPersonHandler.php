@@ -10,8 +10,9 @@ use App\SharedKernel\Domain\UserId;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 /**
- * Runs inside the transaction of the new name (UserRenamed has no outbox route), so the cached teams that show the old
- * name are cleared when it commits, and kept when it rolls back.
+ * Clears every cached team that shows the person, in worker-notify once the relayed UserRenamed arrives, so after the
+ * new name has committed. Until then a team's toolbar can show the old name. Invalidating is safe to repeat, so it does
+ * not go through OnceOnlyHandling.
  */
 #[AsMessageHandler(bus: 'event.bus')]
 final readonly class ForgetRenamedPersonHandler
@@ -20,8 +21,11 @@ final readonly class ForgetRenamedPersonHandler
     {
     }
 
+    /**
+     * @throws \RuntimeException when the pool could not invalidate, so the event is retried
+     */
     public function __invoke(UserRenamed $event): void
     {
-        $this->teamPeopleCache->invalidatePersonAfterCommit(new UserId($event->userId));
+        $this->teamPeopleCache->invalidatePersonNow(new UserId($event->userId));
     }
 }
