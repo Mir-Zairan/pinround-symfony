@@ -46,6 +46,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_sso_provider' => "resolve_sso_provider('https://login.acme-foods.example', 'acme-foods.example')",
         'resolve_jira_connection' => "resolve_jira_connection('".self::UNKNOWN_ID."'::uuid)",
         'resolve_laptop_package' => "resolve_laptop_package('".self::UNKNOWN_ID."'::uuid)",
+        'search_ticket_ids' => "search_ticket_ids('".self::UNKNOWN_ID."'::uuid, 'checkout', '".self::UNKNOWN_ID."'::uuid, '{}'::uuid[], true, true)",
     ];
 
     private const array OUTPUT_COLUMNS = [
@@ -55,6 +56,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_sso_provider' => ['provider_config_id', 'organization_id'],
         'resolve_jira_connection' => ['organization_id'],
         'resolve_laptop_package' => ['organization_id', 'user_id'],
+        'search_ticket_ids' => ['ticket_id'],
     ];
 
     /**
@@ -178,6 +180,36 @@ final class ResolverFunctionTest extends KernelTestCase
             );
         }
         self::assertTrue($connection->fetchOne(\sprintf("SELECT has_function_privilege('pinround_app', 'public.%s'::regproc, 'EXECUTE')", $name)));
+    }
+
+    /**
+     * search_ticket_ids reads tkt_ticket through resolver_read, and only the columns it matches on or returns: never
+     * the description, people beyond the visibility predicate's, dates or status.
+     */
+    #[Test]
+    public function theTicketSearchReadsOnlyTheColumnsItMatchesOnOrReturns(): void
+    {
+        self::assertEqualsCanonicalizing(
+            [
+                'organization_id', 'id', 'key', 'title', 'search', 'visibility', 'team_id', 'reporter_id', 'assignee_id',
+                'pending_assignee_id', 'reviewer_id', 'tester_id', 'waiting_on_user_id',
+            ],
+            $this->connection()->fetchFirstColumn(
+                "SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl
+                 WHERE a.attrelid = 'public.tkt_ticket'::regclass AND acl.grantee = 'pinround_resolver'::regrole AND acl.privilege_type = 'SELECT'",
+            ),
+        );
+        self::assertSame([], $this->connection()->fetchFirstColumn(
+            "SELECT privilege_type FROM pg_class c, aclexplode(c.relacl) acl
+             WHERE c.oid = 'public.tkt_ticket'::regclass AND acl.grantee = 'pinround_resolver'::regrole",
+        ));
+        self::assertSame(
+            [['policyname' => 'resolver_read', 'roles' => '{pinround_resolver}', 'cmd' => 'SELECT', 'qual' => 'true']],
+            $this->connection()->fetchAllAssociative(
+                "SELECT policyname, roles::text AS roles, cmd, qual FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'tkt_ticket' AND policyname <> 'tenant_isolation'",
+            ),
+        );
     }
 
     #[Test]

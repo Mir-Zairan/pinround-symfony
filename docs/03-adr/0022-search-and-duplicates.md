@@ -13,6 +13,7 @@ We find tickets and likely duplicates inside PostgreSQL. There is no separate se
 - [Confirmation](#confirmation): tests and budgets.
 - [Pros and cons of the options](#pros-and-cons-of-the-options): details per option.
 - [Clarifications (2026-11-06)](#clarifications-2026-11-06): indexes under RLS, candidate count, visibility.
+- [Clarifications (2026-11-12)](#clarifications-2026-11-12): index shape, the search function in use.
 - [More information](#more-information): links and when to revisit.
 
 ## Status and people
@@ -92,6 +93,11 @@ Chosen option: **1**.
 - **Indexes under RLS.** `@@`, `%`, `similarity()` and pgvector distance operators are not `LEAKPROOF`. Under row-level security the planner may then skip the GIN/HNSW index and scan the whole org. A CI `EXPLAIN` test, run as `pinround_app` with the tenant set, fails if the index is not used. Fallback: a `SECURITY DEFINER` search function (owner without login, fixed `search_path`) that takes the org and visibility inputs as explicit arguments, filters on them first, and returns ticket ids only ([data-model.md › Query patterns](../02-architecture/data-model.md#query-patterns)).
 - **Candidates before the rule.** Duplicate suggestions take the top 20 candidates by rank, apply the FR-INT-15 word rule, then keep the top 3. Taking 3 first could return none after the rule.
 - **Visibility.** Search and duplicates use the canonical [ticket visibility predicate](../02-architecture/data-model.md#ticket-visibility-predicate) inside the SQL. Embeddings are never made for team-only tickets unless the admin allows cloud AI for them.
+
+## Clarifications (2026-11-12)
+
+- **Index shape.** The GIN indexes lead with `organization_id`, as every index does, through the `btree_gin` extension: `(organization_id, search)` and `(organization_id, title gin_trgm_ops)` (see data-model.md's [index catalogue](../02-architecture/data-model.md#index-catalogue)).
+- **The fallback is in use for search.** `TicketSearchQueryPlanTest` showed the planner skips both GIN indexes under RLS and uses them without it. Search therefore runs in `search_ticket_ids`, the `SECURITY DEFINER` function the 2026-11-06 clarification describes ([data-model.md › Query patterns](../02-architecture/data-model.md#query-patterns)). It returns at most 1,000 ticket ids, best first, after the visibility filter. Duplicate candidates still run as `pinround_app` and still skip the indexes; P06 decides their function.
 
 ## More information
 

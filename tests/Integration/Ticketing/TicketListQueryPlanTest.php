@@ -24,6 +24,10 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  * reads tkt_ticket through an index, never a sequential scan (performance-and-scale.md). Omar is a member of the Shop
  * team, so the visibility predicate is the full one, not an admin's. As in an organization that has worked for years,
  * 70% of the tickets are in Done and the open ones sit in four core steps, so each step holds a large share of the table.
+ *
+ * As in production, the table holds other organizations too: Beta Bakery's 40,000 tickets. With Acme Foods alone, a
+ * sequential scan of its 10,000 rows is the cheaper plan for a step's count, and the plan then hung on how many dead
+ * rows earlier test classes had left in the table; the class vacuums it first, so every run plans the same table.
  */
 final class TicketListQueryPlanTest extends KernelTestCase
 {
@@ -37,16 +41,35 @@ final class TicketListQueryPlanTest extends KernelTestCase
     private const string NEEDS_INPUT_STEP = '0197a3c0-0000-7000-8000-0000000072f3';
     private const string DONE_STEP = '0197a3c0-0000-7000-8000-0000000072f0';
     private const int TICKET_COUNT = 10_000;
+    private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000073a2';
+    private const string BAKERY_TEAM = '0197a3c0-0000-7000-8000-0000000073c2';
+    private const string BAKERY_PROJECT = '0197a3c0-0000-7000-8000-0000000073d2';
+    private const string BEN = '0197a3c0-0000-7000-8000-0000000073b2';
+    private const int OTHER_ORGANIZATION_TICKET_COUNT = 40_000;
 
-    protected function setUp(): void
+    public static function setUpBeforeClass(): void
     {
-        $this->removeRows();
-        $this->shopTeamRows()->add(self::ACME_FOODS, self::SHOP_TEAM, self::SHOP_PROJECT, self::LENA, [
+        parent::setUpBeforeClass();
+        self::removeRows();
+        self::migrator()->executeStatement('VACUUM tkt_ticket, wf_step');
+        self::shopTeamRows()->add(self::ACME_FOODS, self::SHOP_TEAM, self::SHOP_PROJECT, self::LENA, [
             self::LENA => ['Lena', 'lead', 'developer'],
             self::OMAR => ['Omar', 'member', 'developer'],
         ]);
+        self::shopTeamRows()->add(self::BETA_BAKERY, self::BAKERY_TEAM, self::BAKERY_PROJECT, self::BEN, [
+            self::BEN => ['Ben', 'lead', 'developer'],
+        ]);
+        self::asTenantMigrator(self::BETA_BAKERY, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
+                 step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
+             SELECT CAST(? AS uuid), CAST('0197a3c0-0000-7000-8003-' || lpad(to_hex(number), 12, '0') AS uuid), CAST(? AS uuid), CAST(? AS uuid),
+                 number, 'SHOP-' || number, 'Bread slicer is jammed', '', 'bug', 'normal', 3, CAST(? AS uuid), CAST(? AS uuid), 'all', '{}', '{}',
+                 TIMESTAMPTZ '2027-03-15 08:00:00+00', TIMESTAMPTZ '2027-03-15 08:00:00+00' + number * INTERVAL '1 minute'
+             FROM generate_series(1, ?) AS number",
+            [self::BETA_BAKERY, self::BAKERY_PROJECT, self::BAKERY_TEAM, ShopTeamRows::TO_DO_STEP, self::BEN, self::OTHER_ORGANIZATION_TICKET_COUNT],
+        ));
         // Of every 20 tickets 14 are in Done, 3 in To do and 1 in each of In progress, Code review and Needs input.
-        $this->asTenantMigrator(static function (Connection $migrator): void {
+        self::asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator): void {
             foreach ([
                 [self::IN_PROGRESS_STEP, 'In progress', 'doing', 'progress', 2],
                 [self::CODE_REVIEW_STEP, 'Code review', 'check', 'review', 3],
@@ -75,15 +98,22 @@ final class TicketListQueryPlanTest extends KernelTestCase
                 ],
             );
         });
-        $this->migrator()->executeStatement('ANALYZE tkt_ticket, wf_step');
+        self::migrator()->executeStatement('ANALYZE tkt_ticket, wf_step');
+        self::ensureKernelShutdown();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::removeRows();
+        self::migrator()->executeStatement('ANALYZE tkt_ticket, wf_step');
+        self::ensureKernelShutdown();
+        parent::tearDownAfterClass();
     }
 
     protected function tearDown(): void
     {
         self::getContainer()->get('doctrine')->resetManager();
-        $this->tenantContext()->reset();
-        $this->removeRows();
-        $this->migrator()->executeStatement('ANALYZE tkt_ticket, wf_step');
+        self::tenantContext()->reset();
         parent::tearDown();
     }
 
@@ -169,13 +199,13 @@ final class TicketListQueryPlanTest extends KernelTestCase
     /**
      * @param \Closure(Connection): mixed $work
      */
-    private function asTenantMigrator(\Closure $work): void
+    private static function asTenantMigrator(string $organizationId, \Closure $work): void
     {
-        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        self::tenantContext()->set(new OrganizationId($organizationId));
         try {
-            $this->migrator()->transactional($work);
+            self::migrator()->transactional($work);
         } finally {
-            $this->tenantContext()->clear();
+            self::tenantContext()->clear();
         }
     }
 
@@ -200,17 +230,17 @@ final class TicketListQueryPlanTest extends KernelTestCase
         return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
-    private function removeRows(): void
+    private static function removeRows(): void
     {
-        $this->shopTeamRows()->removeAllOf([self::LENA, self::OMAR], self::ACME_FOODS);
+        self::shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::BEN], self::ACME_FOODS, self::BETA_BAKERY);
     }
 
-    private function shopTeamRows(): ShopTeamRows
+    private static function shopTeamRows(): ShopTeamRows
     {
-        return new ShopTeamRows($this->migrator(), $this->tenantContext());
+        return new ShopTeamRows(self::migrator(), self::tenantContext());
     }
 
-    private function migrator(): Connection
+    private static function migrator(): Connection
     {
         return self::getContainer()->get('doctrine.dbal.migrator_connection');
     }
@@ -222,7 +252,7 @@ final class TicketListQueryPlanTest extends KernelTestCase
 
     private function transactions(): TenantTransactions
     {
-        return new TenantTransactions($this->entityManager(), $this->tenantContext());
+        return new TenantTransactions($this->entityManager(), self::tenantContext());
     }
 
     private function entityManager(): EntityManagerInterface
@@ -230,7 +260,7 @@ final class TicketListQueryPlanTest extends KernelTestCase
         return self::getContainer()->get('doctrine.orm.default_entity_manager');
     }
 
-    private function tenantContext(): TenantContext
+    private static function tenantContext(): TenantContext
     {
         return self::getContainer()->get(TenantContext::class);
     }
