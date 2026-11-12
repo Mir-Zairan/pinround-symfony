@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Infrastructure\Demo;
 
 use App\Identity\Api\UserQueries;
+use App\Insight\Api\ProjectCountsRecount;
 use App\Insight\Api\TurnProjector;
 use App\Organization\Api\DemoOrganizations;
 use App\Organization\Api\TeamQueries;
@@ -35,7 +36,8 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
  * whose title SHOP already holds stays as it is.
  *
  * No command moves a ticket yet (P03.T7), so a ticket is made through TicketCommands::create, which starts it in
- * Backlog or To do, and then put in its step with one UPDATE; its turn row is refreshed after that.
+ * Backlog or To do, and then put in its step with one UPDATE; its turn row is refreshed after that, and the project
+ * counts are recounted once all are in place.
  */
 #[AsTaggedItem(priority: 30)]
 final readonly class SeedDemoTickets implements DemoSeedStep
@@ -98,6 +100,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
         private Projects $projects,
         private TicketCommands $ticketCommands,
         private TurnProjector $turnProjector,
+        private ProjectCountsRecount $projectCountsRecount,
         private TenantContext $tenantContext,
         private EntityManagerInterface $entityManager,
         private Connection $connection,
@@ -151,6 +154,8 @@ final readonly class SeedDemoTickets implements DemoSeedStep
             $this->seedTicket($organizationId, $projectId, $lena, $title, $index, $assignee, $targetStep, $stepsByCoreCode['progress'] ?? throw new DemoSeedRefused('The Shop team has no progress step.'), $mia, $lena);
             ++$created;
         }
+        // The raw UPDATE moves tickets past what the creation counted, so the project rail would count them in To do.
+        $this->projectCountsRecount->recount($organizationId);
 
         return $created;
     }

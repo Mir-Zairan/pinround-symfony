@@ -22,6 +22,7 @@ final class HandWrittenVisibilityConditions
         'src/Ticketing/Api/TicketVisibilitySql.php' => 'renders the canonical predicate',
         'src/Insight/Infrastructure/Doctrine/DbalTurnProjector.php' => 'copies the column into ins_ticket_turn (SET visibility = EXCLUDED.visibility); it writes the column and filters nothing',
         'src/Ticketing/Infrastructure/Demo/SeedDemoTickets.php' => 'sets the column of a demo ticket (SET visibility = ?); it writes the column and filters nothing',
+        'src/Insight/Infrastructure/Doctrine/DbalProjectCountQueries.php' => 'counts are per visibility, not per ticket, so the predicate cannot apply; a viewer outside the team reads only the visibility = \'all\' row, which undercounts and never leaks; ProjectCountsLeakTest proves it',
         'migrations/Version20261112120000.php' => 'search_ticket_ids, a SECURITY DEFINER function, needs the predicate in SQL and a migration must not change with src/; TicketSearchFunctionLeakTest proves it finds what TicketVisibilitySql shows',
     ];
 
