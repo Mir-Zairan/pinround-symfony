@@ -191,6 +191,40 @@ final class DbalProjectCountsProjectorTest extends KernelTestCase
     }
 
     /**
+     * PostgreSQL gives the project id back in lower case; a project asked for in upper case still gets its counts,
+     * under the id it was asked by.
+     */
+    #[Test]
+    public function theRailReadOfGivenProjectsFindsAProjectAskedForInUpperCase(): void
+    {
+        $this->refreshAs(self::ACME_FOODS, ...$this->seedTicketsInEveryMix());
+        $upperCaseProject = strtoupper(self::SHOP_PROJECT);
+
+        $counts = $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array => array_map(
+            static fn (ProjectCounts $counts): array => [$counts->projectId, $counts->openCount, $counts->doneCount],
+            self::projectCountQueries()->countsOfProjects([$upperCaseProject], false, [new TeamId(self::SHOP_TEAM)], true),
+        ));
+
+        self::assertSame([[$upperCaseProject, 2, 2]], $counts);
+    }
+
+    #[Test]
+    public function theRailReadOfGivenProjectsRefusesToRunOutsideATransactionBeforeAnyQuery(): void
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+
+        try {
+            self::projectCountQueries()->countsOfProjects([self::SHOP_PROJECT], true, [], true);
+            self::fail('The read ran outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('The project counts are read in a transaction under the organization as tenant; none is open.', $refusal->getMessage());
+        }
+
+        self::assertSame([], array_merge(...array_values($debugData->getData())));
+    }
+
+    /**
      * Stale rows in both organizations are replaced with what the refreshes kept, twice the same, and the caller's
      * tenant setting is put back.
      */

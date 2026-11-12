@@ -17,6 +17,7 @@
 /* The team name in capitals as the prototype shows it; the markup keeps its own case for screen readers. */
 .project-rail__team {
   margin: 0;
+  padding: 0 var(--space-16);
   color: var(--on-surface-var);
   font-size: 13px;
   font-weight: 700;
@@ -34,12 +35,16 @@
   list-style: none;
 }
 
+/* A 40 px full-width pill per row, the pressed one filled, as the prototype's rail. */
 .project-rail__item {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-8);
-  padding: var(--space-8) var(--space-12);
-  border-radius: var(--radius-card);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 var(--space-16);
+  border-radius: var(--radius-button);
   color: var(--on-surface);
   text-decoration: none;
 }

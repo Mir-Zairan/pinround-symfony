@@ -8,6 +8,7 @@ use App\Identity\Api\CurrentTimeZone;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
+use App\Organization\Api\TeamPermission;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -37,8 +38,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * still grouped by step, each step in search order; a search longer than ListFilter::SEARCH_TEXT_MAX_LENGTH
  * characters, or not text, is a 400 before any query. PERSON_QUERY keeps only the tickets assigned to that person; an
  * id that is not a canonical uuid is a 404, like a project key of no project. The toolbar is TicketFilters, the
- * project rail ProjectRail, both for the team railTeamOf chooses; TEAM_QUERY picks one of the viewer's own teams for
- * "All projects", and any other id is a 404.
+ * project rail ProjectRail, both for the team railTeamOf chooses, never one the viewer may not see; TEAM_QUERY picks
+ * one of the viewer's own teams for "All projects", and any other id is a 404.
  *
  * Five queries at most for the list whatever the number of tickets, with a search or without: the triager, the
  * project by key, then the list's rows, turn users and names (TicketQueries::list); the whole page's toolbar adds two
@@ -97,10 +98,10 @@ final class TicketListController extends AbstractController
 
         $pickedTeamId = $this->pickedTeamIdOf($request, $actor);
 
-        $visibility = $this->ticketVisibilities->ofActor($actor);
         $projectKey = $request->query->getString(self::PROJECT_QUERY);
         $project = '' === $projectKey ? null : ($this->projectQueries->projectByKey($projectKey) ?? throw $this->createNotFoundException('No project has that key.'));
-        $railTeamId = self::railTeamOf($actor, $project, $pickedTeamId);
+        $railTeamId = $this->railTeamOf($actor, $project, $pickedTeamId);
+        $isProjectsTeamOnRail = null !== $railTeamId && null !== $project?->teamId() && $railTeamId->equals($project->teamId());
         $keptQuery = array_filter(
             [self::PERSON_QUERY => $assigneeId, self::DONE_QUERY => $showsDone ? '1' : null, self::SEARCH_QUERY => $searchText],
             static fn (?string $value): bool => null !== $value,
@@ -115,6 +116,7 @@ final class TicketListController extends AbstractController
             return $response;
         }
 
+        $visibility = $this->ticketVisibilities->ofActor($actor);
         $groups = $this->ticketQueries->list(new ListFilter($visibility, $project?->id(), $showsDone, $searchText, $assigneeId), $cursor);
         $collapsedStepIds = CollapsedSteps::idsIn($request->getSession());
 
@@ -133,8 +135,9 @@ final class TicketListController extends AbstractController
                 'showsDone' => $showsDone,
                 'q' => $searchText ?? '',
                 'team' => $railTeamId?->toString() ?? '',
-                // A project's team is not kept in the toolbar's links: the project decides it, and the viewer may not be in it.
-                'pickedTeam' => null === $project ? ($pickedTeamId?->toString() ?? '') : '',
+                // When the project's own team is on the rail, the project decides it and the toolbar's links drop the
+                // pick; for a project of no team, or of one the viewer may not see, the picked team still decides it.
+                'pickedTeam' => $isProjectsTeamOnRail ? '' : ($pickedTeamId?->toString() ?? ''),
             ],
         ]);
         $response->setVary(self::TURBO_FRAME_HEADER, false);
@@ -160,14 +163,20 @@ final class TicketListController extends AbstractController
     }
 
     /**
-     * The one choice of team for both the rail and the toolbar's people chips: the picked project's team; for
-     * "All projects", or a project no team owns, the team picked with TEAM_QUERY, else the viewer's first team by id.
+     * The one choice of team for both the rail and the toolbar's people chips: the picked project's team when the
+     * viewer may see it (TeamPermission::VIEW); for "All projects", a project no team owns or one of a team the viewer
+     * may not see, the team picked with TEAM_QUERY, else the viewer's first team by id.
      *
-     * @return TeamId|null null for a viewer in no team on "All projects"
+     * @return TeamId|null null for a viewer in no team whom the project's team, if any, is not shown to
      */
-    private static function railTeamOf(ActorContext $viewer, ?ProjectChoice $project, ?TeamId $pickedTeamId): ?TeamId
+    private function railTeamOf(ActorContext $viewer, ?ProjectChoice $project, ?TeamId $pickedTeamId): ?TeamId
     {
-        return $project?->teamId() ?? $pickedTeamId ?? $viewer->roles()->teamIds()[0] ?? null;
+        $projectsTeamId = $project?->teamId();
+        if (null !== $projectsTeamId && $this->isGranted(TeamPermission::VIEW, $projectsTeamId)) {
+            return $projectsTeamId;
+        }
+
+        return $pickedTeamId ?? $viewer->roles()->teamIds()[0] ?? null;
     }
 
     /**

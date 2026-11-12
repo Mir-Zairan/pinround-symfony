@@ -84,12 +84,32 @@ final class ProjectCountsLeakTest extends VisibilityLeakCast
     }
 
     #[Test]
-    public function theRailReadOfNoProjectRunsNoQueryAndRefusesAnIdThatIsNotAUuid(): void
+    public function theRailReadOfNoProjectRunsNoQuery(): void
     {
-        self::assertSame([], self::asViewer('Lena', static fn (): array => self::projectCountQueries()->countsOfProjects([], false, [], true)));
+        $emptyRead = self::asViewer('Lena', static fn (): array => self::queriesRunBy(static fn (): array => self::projectCountQueries()->countsOfProjects([], false, [], true)));
+        $oneProjectRead = self::asViewer('Lena', static fn (): array => self::queriesRunBy(static fn (): array => self::projectCountQueries()->countsOfProjects([self::SHOP_PROJECT], false, [], true)));
 
-        $this->expectException(\InvalidArgumentException::class);
-        self::asViewer('Lena', static fn (): array => self::projectCountQueries()->countsOfProjects(["' OR true --"], false, [], true));
+        self::assertSame([[], []], $emptyRead);
+        self::assertCount(1, $oneProjectRead[1], 'The recorder sees the one read of a project.');
+    }
+
+    /**
+     * Every id is checked before the read, so a valid one before the bad one runs no query either.
+     */
+    #[Test]
+    public function theRailReadRefusesAnIdThatIsNotAUuidBeforeAnyQuery(): void
+    {
+        $refusedRead = self::asViewer('Lena', static fn (): array => self::queriesRunBy(static function (): string {
+            try {
+                self::projectCountQueries()->countsOfProjects([self::SHOP_PROJECT, "' OR true --"], true, [], true);
+            } catch (\InvalidArgumentException $refusal) {
+                return $refusal->getMessage();
+            }
+
+            return 'not refused';
+        }));
+
+        self::assertSame(['A project id is not a uuid.', []], $refusedRead);
     }
 
     /**
@@ -148,6 +168,24 @@ final class ProjectCountsLeakTest extends VisibilityLeakCast
             static fn (ProjectCounts $counts): string => (self::SHOP_PROJECT === $counts->projectId ? 'SHOP ' : 'other ').$counts->openCount.($withDone ? '/'.$counts->doneCount : ''),
             self::projectCountQueries()->countsOfTeam(new TeamId($teamId), new UserId(self::VIEWERS[$viewer][0]), $withDone),
         ));
+    }
+
+    /**
+     * @return array{mixed, list<string>} what the work returned, and the SQL of every query it ran
+     */
+    private static function queriesRunBy(\Closure $work): array
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $returned = $work();
+        $queries = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            foreach ($queriesOfOneConnection as $query) {
+                $queries[] = \is_string($query['sql'] ?? null) ? $query['sql'] : '';
+            }
+        }
+
+        return [$returned, $queries];
     }
 
     private static function projectCountQueries(): ProjectCountQueries

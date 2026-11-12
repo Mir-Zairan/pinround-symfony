@@ -83,9 +83,11 @@ final class TicketRailTest extends WebTestCase
 
         $rail = $page->filter('nav.project-rail[aria-label="Projects"]');
         self::assertCount(1, $rail);
-        self::assertSame('Shop', $rail->filter('.project-rail__team')->text());
-        self::assertSame(['All projects', 'CART Checkout 0', 'SHOP Shop 4'], self::railItemsOf($page));
-        self::assertSame(['All projects'], $rail->filter('.project-rail__item[aria-current="true"]')->each(static fn (Crawler $item): string => $item->text()));
+        self::assertSame('Shop', $rail->filter('p.project-rail__team')->text());
+        self::assertCount(0, $rail->filter('h1, h2, h3, h4, h5, h6'), 'The team is a label, so the page\'s first heading is its h1.');
+        self::assertSame(['All projects 4 open tickets', 'CART Checkout 0 open tickets', 'SHOP Shop 4 open tickets'], self::railItemsOf($page));
+        self::assertSame(['open tickets', 'open tickets', 'open tickets'], $rail->filter('.project-rail__count .visually-hidden')->each(static fn (Crawler $label): string => $label->text()));
+        self::assertSame(['All projects 4 open tickets'], $rail->filter('.project-rail__item[aria-current="true"]')->each(static fn (Crawler $item): string => $item->text()));
         self::assertSame('/tickets?project=SHOP', $rail->filter('[data-rail-project="SHOP"]')->attr('href'));
         self::assertSame('Manage projects', $rail->filter('.project-rail__manage')->text());
         self::assertSame('/teams/shop', $rail->filter('.project-rail__manage')->attr('href'));
@@ -97,7 +99,7 @@ final class TicketRailTest extends WebTestCase
     {
         $page = $this->pageAs('Lena', self::TICKETS.'?done=1');
 
-        self::assertSame(['All projects', 'CART Checkout 1', 'SHOP Shop 6'], self::railItemsOf($page));
+        self::assertSame(['All projects 7 tickets', 'CART Checkout 1 ticket', 'SHOP Shop 6 tickets'], self::railItemsOf($page));
         self::assertSame('/tickets?project=SHOP&done=1', $page->filter('[data-rail-project="SHOP"]')->attr('href'));
     }
 
@@ -108,7 +110,7 @@ final class TicketRailTest extends WebTestCase
 
         $page = $this->pageAs('Lena', self::TICKETS.'?project=CART&q=card');
 
-        self::assertSame(['CART Checkout 0'], $page->filter('.project-rail__item[aria-current="true"]')->each(static fn (Crawler $item): string => $item->text()));
+        self::assertSame(['CART Checkout 0 open tickets'], $page->filter('.project-rail__item[aria-current="true"]')->each(static fn (Crawler $item): string => $item->text()));
         self::assertSame(['CART-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): string => (string) $row->attr('data-ticket-key')));
         self::assertSame('/tickets?project=SHOP&q=card', $page->filter('[data-rail-project="SHOP"]')->attr('href'));
         self::assertSame('/tickets?team='.$this->shop->toString().'&q=card', $page->filter('[data-rail-project=""]')->attr('href'));
@@ -127,9 +129,12 @@ final class TicketRailTest extends WebTestCase
         $mobilePage = $this->pageAs('Lena', self::TICKETS.'?project=APP');
 
         self::assertSame('Mobile', $mobilePage->filter('.project-rail__team')->text());
-        self::assertSame(['All projects', 'APP Mobile app 4'], self::railItemsOf($mobilePage));
+        self::assertSame(['All projects 4 open tickets', 'APP Mobile app 4 open tickets'], self::railItemsOf($mobilePage));
         self::assertSame(['Everyone', 'Me'], self::peopleChipsOf($mobilePage));
         self::assertSame('/tickets?team='.$this->mobile->toString(), $mobilePage->filter('[data-rail-project=""]')->attr('href'));
+        $pickedShopPage = $this->pageAs('Lena', self::TICKETS.'?project=APP&team='.$this->shop->toString());
+        self::assertSame('Mobile', $pickedShopPage->filter('.project-rail__team')->text());
+        self::assertSame('/tickets?project=APP&done=1', $pickedShopPage->filter('[data-done-chip]')->attr('href'), 'The project\'s own team decides, so the toolbar drops the pick.');
 
         $allPage = $this->pageAs('Lena', self::TICKETS);
 
@@ -148,7 +153,7 @@ final class TicketRailTest extends WebTestCase
         $page = $this->pageAs('Lena', self::TICKETS.'?team='.$mobile);
 
         self::assertSame('Mobile', $page->filter('.project-rail__team')->text());
-        self::assertSame(['All projects'], $page->filter('.project-rail__item[aria-current="true"]')->each(static fn (Crawler $item): string => $item->text()));
+        self::assertSame(['All projects 4 open tickets'], $page->filter('.project-rail__item[aria-current="true"]')->each(static fn (Crawler $item): string => $item->text()));
         self::assertSame(['Everyone', 'Me'], self::peopleChipsOf($page));
         self::assertSame('/tickets?team='.$mobile.'&done=1', $page->filter('[data-done-chip]')->attr('href'));
         self::assertSame([$mobile], $page->filter('.ticket-filters__search input[name="team"]')->each(static fn (Crawler $field): string => (string) $field->attr('value')));
@@ -163,11 +168,15 @@ final class TicketRailTest extends WebTestCase
     {
         $this->addProject(null, 'OLD', 'Archive');
 
-        $page = $this->pageAs('Lena', self::TICKETS.'?project=OLD&team='.$this->mobile->toString());
+        $mobile = $this->mobile->toString();
+
+        $page = $this->pageAs('Lena', self::TICKETS.'?project=OLD&team='.$mobile);
 
         self::assertSame('OLD · Archive', $page->filter('.tickets__title')->text());
         self::assertSame('Mobile', $page->filter('.project-rail__team')->text());
         self::assertCount(0, $page->filter('.project-rail__item[aria-current="true"]'));
+        self::assertSame('/tickets?team='.$mobile.'&project=OLD&done=1', $page->filter('[data-done-chip]')->attr('href'), 'The picked team still decides the toolbar, so its links keep it.');
+        self::assertSame([$mobile], $page->filter('.ticket-filters__search input[name="team"]')->each(static fn (Crawler $field): string => (string) $field->attr('value')));
         self::assertSame('Shop', $this->pageAs('Lena', self::TICKETS.'?project=OLD')->filter('.project-rail__team')->text());
     }
 
@@ -212,12 +221,59 @@ final class TicketRailTest extends WebTestCase
         self::assertCount(0, $allPage->filter('.project-rail__team, .project-rail__switch'));
 
         $shopPage = $this->pageAs('Raj', self::TICKETS.'?project=SHOP');
-        self::assertSame(['All projects', 'CART Checkout 0', 'SHOP Shop 3'], self::railItemsOf($shopPage));
+        self::assertSame(['All projects 3 open tickets', 'CART Checkout 0 open tickets', 'SHOP Shop 3 open tickets'], self::railItemsOf($shopPage));
         self::assertSame('/tickets', $shopPage->filter('[data-rail-project=""]')->attr('href'), 'Raj is not in Shop, so "All projects" does not pick it.');
         self::assertCount(0, $shopPage->filter('.project-rail__switch'));
         self::assertSame('/teams/shop', $shopPage->filter('.project-rail__manage')->attr('href'), 'A manager may open the Team page.');
 
-        self::assertSame(['All projects', 'CART Checkout 0', 'SHOP Shop 4'], self::railItemsOf($this->pageAs('Sara', self::TICKETS.'?project=SHOP')));
+        self::assertSame(['All projects 4 open tickets', 'CART Checkout 0 open tickets', 'SHOP Shop 4 open tickets'], self::railItemsOf($this->pageAs('Sara', self::TICKETS.'?project=SHOP')));
+    }
+
+    /**
+     * Ben, a reporter of Acme Foods in no team and with no organization role, may not see Shop (TeamVoter's VIEW): on
+     * one of its projects the rail and toolbar show neither Shop's name, projects, Team page nor people, and the list
+     * keeps its own visibility rules.
+     */
+    #[Test]
+    public function aReporterOutsideTheTeamSeesNeitherTheProjectsTeamNorItsPeople(): void
+    {
+        $ben = $this->createUserWithoutOrganization('Ben');
+        $this->addMembership($ben, $this->acmeFoods);
+        $this->setOrgRoles($ben, $this->acmeFoods, '{}');
+        $this->people['Ben'] = $ben;
+
+        $page = $this->pageAs('Ben', self::TICKETS.'?project=SHOP');
+
+        self::assertSame('SHOP · Shop', $page->filter('.tickets__title')->text());
+        self::assertSame(['SHOP-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): string => (string) $row->attr('data-ticket-key')));
+        self::assertSame(['All projects'], self::railItemsOf($page));
+        self::assertCount(0, $page->filter('.project-rail__team, .project-rail__manage, .project-rail__switch'));
+        self::assertStringNotContainsString('Shop', $page->filter('nav.project-rail')->text());
+        self::assertSame(['Everyone'], self::peopleChipsOf($page));
+        self::assertStringNotContainsString('Lena', $page->filter('.ticket-filters')->text());
+    }
+
+    /**
+     * Omar is in Shop (member) and leads Data, but is not in Mobile: on Mobile's project he gets his own team, Shop
+     * first by id, or the one he picked, and never Mobile's name or projects.
+     */
+    #[Test]
+    public function aMemberOfOtherTeamsGetsTheirOwnTeamOnAProjectOfATeamTheyAreNotIn(): void
+    {
+        $data = $this->data->toString();
+
+        $appPage = $this->pageAs('Omar', self::TICKETS.'?project=APP');
+
+        self::assertSame('APP · Mobile app', $appPage->filter('.tickets__title')->text());
+        self::assertSame('Shop', $appPage->filter('.project-rail__team')->text());
+        self::assertSame(['All projects 4 open tickets', 'CART Checkout 0 open tickets', 'SHOP Shop 4 open tickets'], self::railItemsOf($appPage));
+        self::assertSame(['Everyone', 'Me', 'Lena'], self::peopleChipsOf($appPage));
+        self::assertStringNotContainsString('Mobile', $appPage->filter('nav.project-rail')->text());
+
+        $pickedPage = $this->pageAs('Omar', self::TICKETS.'?project=APP&team='.$data);
+
+        self::assertSame('Data', $pickedPage->filter('.project-rail__team')->text());
+        self::assertSame('/tickets?team='.$data.'&project=APP&done=1', $pickedPage->filter('[data-done-chip]')->attr('href'));
     }
 
     /**
@@ -235,7 +291,7 @@ final class TicketRailTest extends WebTestCase
         self::assertSame('Turbo-Frame', $this->client->getResponse()->headers->get('Vary'));
         self::assertCount(1, $frame->filter('turbo-frame#project-rail-frame[target="_top"] nav.project-rail'));
         self::assertCount(0, $frame->filter('turbo-frame#ticket-list-frame, .ticket-filters, header, title'));
-        self::assertSame(['All projects', 'CART Checkout 1', 'SHOP Shop 6'], self::railItemsOf($frame));
+        self::assertSame(['All projects 7 tickets', 'CART Checkout 1 ticket', 'SHOP Shop 6 tickets'], self::railItemsOf($frame));
     }
 
     private function pageAs(string $viewer, string $uri): Crawler

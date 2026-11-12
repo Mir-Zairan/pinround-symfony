@@ -10,6 +10,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Ticketing\UI\TicketListController;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -780,6 +781,53 @@ final class TicketListTest extends WebTestCase
         self::assertSame([1, 1], [self::countMatching('/FROM idn_user WHERE id = ANY/', $pageQueries), self::countMatching('/FROM idn_user WHERE id = ANY/', $frameQueries)]);
         // The menu's team names and the rail's three.
         self::assertCount(\count($pageQueries) - 4, $frameQueries);
+    }
+
+    /**
+     * The rail's frame reads the project of the URL and the rail's three, the team names, the team's projects and their
+     * counts: neither the triager, the steps, the rows, the turn users nor their names. Beyond them run only the
+     * request's own: the user and credential, its organizations, the transaction, the tenant and the actor's roles and
+     * teams.
+     */
+    #[Test]
+    public function theRailsFrameRequestRunsOnlyTheProjectAndTheRailsQueries(): void
+    {
+        $this->client->disableReboot();
+        $this->addManyTickets('todo', 60);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+        $railFrame = ['HTTP_TURBO_FRAME' => TicketListController::RAIL_FRAME_ID];
+        $this->queriesOf(self::TICKETS, $railFrame);
+
+        $warmQueries = $this->queriesOf(self::TICKETS, $railFrame);
+        $projectQueries = $this->queriesOf(self::TICKETS.'?project=SHOP', $railFrame);
+
+        self::assertCount(1, $this->client->getCrawler()->filter('turbo-frame#project-rail-frame nav.project-rail'));
+        self::assertSame(
+            [['org_team', 'tkt_project', 'ins_project_counts'], ['tkt_project', 'org_team', 'tkt_project', 'ins_project_counts']],
+            [self::tablesReadBeyondTheRequestsOwn($warmQueries), self::tablesReadBeyondTheRequestsOwn($projectQueries)],
+        );
+        self::assertSame([11, 12], [\count($warmQueries), \count($projectQueries)]);
+        self::assertSame(0, self::countMatching('/FROM tkt_ticket|FROM wf_step|FROM idn_user WHERE id = ANY|search_ticket_ids/', [...$warmQueries, ...$projectQueries]));
+    }
+
+    /**
+     * @param list<string> $queries
+     *
+     * @return list<string> the table each query reads first, leaving out the request's own (the user, the tenant and
+     *                      the actor)
+     */
+    private static function tablesReadBeyondTheRequestsOwn(array $queries): array
+    {
+        $requestsOwn = '/FROM idn_user t0 WHERE t0\.id = \?|FROM idn_credential|resolve_user_orgs|TRANSACTION|COMMIT|set_config|FROM org_membership|FROM org_team_member member/';
+        $tables = [];
+        foreach ($queries as $sql) {
+            if (1 !== preg_match($requestsOwn, $sql) && 1 === preg_match('/ FROM (\w+)/', $sql, $match)) {
+                $tables[] = $match[1];
+            }
+        }
+
+        return $tables;
     }
 
     /**
