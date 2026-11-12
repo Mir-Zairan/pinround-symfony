@@ -1,0 +1,32 @@
+{% set refusal = this.searchRefusal %}
+{% set shown = this.shownPeople %}
+<div{{ attributes.defaults({class: 'person-picker'}) }}>
+    <input class="person-picker__field" type="search" value="{{ search }}" autocomplete="off"
+        placeholder="{{ constant('SEARCH_LABEL', this) }}" aria-label="{{ constant('SEARCH_LABEL', this) }}"
+        {% if refusal is not null %}aria-invalid="true" aria-describedby="person-picker-refusal"{% endif %}
+        data-model="debounce(200)|search" data-person-picker-target="search" data-action="keydown->person-picker#moveFromSearch">
+    {% if refusal is not null %}
+        <p class="person-picker__refusal" id="person-picker-refusal" role="alert">{{ refusal }}</p>
+    {% elseif not isOpened %}
+        <p class="person-picker__note">Loading people…</p>
+    {% elseif shown.rows is empty %}
+        <p class="person-picker__note" role="status">{{ constant('NO_MATCHES', this) }}</p>
+    {% else %}
+        <ul class="person-picker__rows" data-action="keydown->person-picker#moveBetweenRows">
+            {% for row in shown.rows %}
+                <li>
+                    <a class="pick" href="{{ row.url }}" data-person-pick="{{ row.personId }}" data-person-picker-target="row"
+                        {% if row.isPressed %}aria-current="true"{% endif %}
+                        data-action="live#emitUp:prevent dialog#close" data-live-event-param="{{ pickedEvent }}" data-live-person-param="{{ row.personId }}">
+                        <twig:Avatar name="{{ row.name }}" aria-hidden="true"/>
+                        <span class="pick__name">{{ row.name }}</span>
+                        <span class="pick__side">{{ row.openCount }} open</span>
+                    </a>
+                </li>
+            {% endfor %}
+        </ul>
+        {% if shown.matchCount > shown.rows|length %}
+            <p class="person-picker__note" data-person-picker-hint>Showing {{ shown.rows|length }} of {{ shown.matchCount|number_format }}. Type a name to narrow the list.</p>
+        {% endif %}
+    {% endif %}
+</div>

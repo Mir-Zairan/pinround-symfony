@@ -15,11 +15,13 @@ use App\Ticketing\Api\ListFilter;
 use App\Ticketing\UI\TicketListController;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Symfony\UX\LiveComponent\Attribute\AsLiveComponent;
 use Symfony\UX\LiveComponent\Attribute\LiveAction;
 use Symfony\UX\LiveComponent\Attribute\LiveArg;
+use Symfony\UX\LiveComponent\Attribute\LiveListener;
 use Symfony\UX\LiveComponent\Attribute\LiveProp;
 use Symfony\UX\LiveComponent\Attribute\PostHydrate;
 use Symfony\UX\LiveComponent\Attribute\PreReRender;
@@ -34,8 +36,10 @@ use Symfony\UX\LiveComponent\DefaultActionTrait;
  *
  * The people are the lead and members of the page's team, $team (viewers cannot be assignees): "Me" for a lead
  * or member of it, then each other one's first name while the team has at most MAX_NAMED_PEOPLE, else a "Person ▾"
- * chip, the person picker's hook. The team's people and names are one cached read (TeamPeopleQueries): no query when
- * warm, two after a change of the team.
+ * chip that opens the person picker (Web's PersonPickerSearch in a Dialog), whose rows emit PERSON_PICKED_EVENT. The
+ * picker reads its people and counts in its own live request once opened, so the page pays nothing for it. The team's
+ * people and names are one cached read (TeamPeopleQueries): no query when warm, two after a change of the team. A
+ * person filter set by a chip or the picker must be a lead or member of the team.
  */
 #[AsLiveComponent(name: 'TicketFilters', template: '@Ticketing/components/TicketFilters.html.twig', method: 'post')]
 final class TicketFilters
@@ -48,6 +52,11 @@ final class TicketFilters
     public const string SEARCH_PLACEHOLDER = 'Search by key or words in the title';
     public const string PEOPLE_LABEL = 'Assigned to';
     public const string PERSON_PICKER_LABEL = 'Person ▾';
+    public const string PERSON_PICKER_TITLE = 'Show tickets of…';
+    public const string PERSON_PICKER_SUB = 'Sorted by open tickets assigned to them.';
+    /** The live event the person picker's rows emit up, with the picked person's id. */
+    public const string PERSON_PICKED_EVENT = 'personPicked';
+    public const string NO_SUCH_PERSON = 'No one in this team has that id.';
 
     /** A project key, as in TicketListController::PROJECT_QUERY; empty for every project. */
     #[LiveProp]
@@ -102,15 +111,22 @@ final class TicketFilters
     }
 
     /**
-     * @param string $person a canonical uuid, or empty for everyone
+     * A chip's action, and the person picker's PERSON_PICKED_EVENT.
      *
-     * @throws BadRequestHttpException when $person is neither
+     * @param string $person the canonical uuid of a lead or member of $team, or empty for everyone
+     *
+     * @throws BadRequestHttpException when $person is not a canonical uuid
+     * @throws NotFoundHttpException   when $person is no lead or member of $team
      */
     #[LiveAction]
+    #[LiveListener(self::PERSON_PICKED_EVENT)]
     public function filterByPerson(#[LiveArg] string $person): void
     {
         if ('' !== $person && !ListFilter::isCanonicalUuid($person)) {
             throw new BadRequestHttpException('That person is not valid.');
+        }
+        if ('' !== $person && !$this->isPersonOfTheTeam($person)) {
+            throw new NotFoundHttpException(self::NO_SUCH_PERSON);
         }
         $this->person = $person;
         $this->addsHistoryEntry = true;
@@ -188,7 +204,7 @@ final class TicketFilters
                 static fn (?array $chip): bool => null !== $chip && true === $chip['isPressed'],
             );
             if ('' !== $this->person && !$isPersonOnAChip && null === $this->peopleChips['pickerChip']) {
-                $this->peopleChips['pickerChip'] = ['label' => self::PERSON_PICKER_LABEL, 'isPressed' => true];
+                $this->peopleChips['pickerChip'] = ['label' => self::PERSON_PICKER_LABEL, 'isPressed' => true, 'opensPicker' => false];
             }
         }
 
@@ -226,9 +242,30 @@ final class TicketFilters
         }
 
         $pickedName = $this->pickedPersonAmong($otherPeople)?->firstName;
-        $chips['pickerChip'] = ['label' => $pickedName ?? self::PERSON_PICKER_LABEL, 'isPressed' => '' !== $this->person && !($chips['viewerChip']['isPressed'] ?? false)];
+        $chips['pickerChip'] = [
+            'label' => $pickedName ?? self::PERSON_PICKER_LABEL,
+            'isPressed' => '' !== $this->person && !($chips['viewerChip']['isPressed'] ?? false),
+            'opensPicker' => true,
+        ];
 
         return $chips;
+    }
+
+    /**
+     * From the team's cached people, so no query when warm; users are global, so an id alone never makes a person of it.
+     */
+    private function isPersonOfTheTeam(string $person): bool
+    {
+        if (!ListFilter::isCanonicalUuid($this->team)) {
+            return false;
+        }
+        foreach ($this->teamPeopleQueries->namedPossibleAssigneesOf(new TeamId($this->team)) as $teamPerson) {
+            if ($person === $teamPerson->userId->toString()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -339,6 +339,87 @@
   gap: 8px;
 }
 
+/* The person picker (PersonPickerSearch): a search field over rows of the prototype's .pick buttons. */
+.person-picker__sub {
+  color: var(--on-surface-var);
+}
+
+.person-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.person-picker__field {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--outline);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.person-picker__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.pick:hover {
+  background: var(--s-high);
+}
+
+.pick:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.pick[aria-current="true"] {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.pick__name {
+  overflow-wrap: anywhere;
+}
+
+.pick__side {
+  margin-left: auto;
+  color: var(--on-surface-var);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.pick[aria-current="true"] .pick__side {
+  color: inherit;
+}
+
+.person-picker__note,
+.person-picker__refusal {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.person-picker__refusal {
+  color: var(--error);
+}
+
 .menu {
   position: relative;
   display: inline-block;

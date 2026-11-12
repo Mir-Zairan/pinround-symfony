@@ -158,6 +158,12 @@
   color: var(--on-secondary-container);
 }
 
+/* The picker's wrappers hold controllers only, so the "Person ▾" chip lines up with the other chips. */
+.ticket-filters__picker,
+.ticket-filters__picker > [data-controller="dialog"] {
+  display: contents;
+}
+
 .ticket-filters .chip:disabled {
   cursor: default;
 }

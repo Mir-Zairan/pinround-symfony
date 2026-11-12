@@ -135,6 +135,7 @@ services:
     App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
     App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
+    App\Ticketing\Api\AssigneeTicketCounts: '@App\Ticketing\Infrastructure\Doctrine\DbalAssigneeTicketCounts'
     App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
     App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
 
@@ -221,6 +222,10 @@ when@test:
         # No page lists tickets before /tickets (P03.T3 part B); the list tests get both as a page would.
         test.ticketing_ticket_queries:
             alias: App\Ticketing\Api\TicketQueries
+            public: true
+        # PersonPickerCountsLeakTest reads the person picker's counts as the picker gets them.
+        test.ticketing_assignee_ticket_counts:
+            alias: App\Ticketing\Api\AssigneeTicketCounts
             public: true
         test.insight_turn_user_queries:
             alias: App\Insight\Api\TurnUserQueries
