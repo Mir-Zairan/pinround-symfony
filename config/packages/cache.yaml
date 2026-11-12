@@ -11,6 +11,11 @@ framework:
                 adapter: cache.adapter.redis
                 tags: true
                 default_lifetime: 86400
+            # Each team's people with their first names (TeamPeopleCache), the same way.
+            cache.team_people:
+                adapter: cache.adapter.redis
+                tags: true
+                default_lifetime: 86400
 
 when@test:
     framework:
@@ -20,5 +25,8 @@ when@test:
             pools:
                 # Replaces the adapter above (adapters do not merge); tags and lifetime stay.
                 cache.workflow:
+                    adapter: test.cache.adapter.array_kept_between_requests
+                    tags: true
+                cache.team_people:
                     adapter: test.cache.adapter.array_kept_between_requests
                     tags: true

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\Application;
 
+use App\Identity\Api\Event\UserRenamed;
 use App\Identity\Domain\BlankUserName;
 use App\Identity\Domain\InvalidProfile;
 use App\Identity\Domain\UnknownTheme;
@@ -21,12 +22,12 @@ final readonly class UpdateProfile
 {
     public const int MAXIMUM_NAME_LENGTH = User::MAXIMUM_NAME_LENGTH;
 
-    public function __construct(private Users $users)
+    public function __construct(private Users $users, private IdentityEvents $events)
     {
     }
 
     /**
-     * Saves all three fields or none.
+     * Saves all three fields or none. A new name publishes UserRenamed.
      *
      * @param string $theme a Theme value: "system", "light" or "dark"
      *
@@ -38,6 +39,7 @@ final readonly class UpdateProfile
     {
         // The firewall reloads the logged-in user on every request and logs the session out when it is gone.
         $user = $this->users->byId($userId) ?? throw new \LogicException('No user has this id.');
+        $nameBefore = $user->name();
         try {
             $user->changeProfile($name, $timeZone, $theme);
         } catch (InvalidProfile $invalidProfile) {
@@ -49,6 +51,9 @@ final readonly class UpdateProfile
             }, $invalidProfile->refusals);
         }
         $this->users->save($user);
+        if ($user->name() !== $nameBefore) {
+            $this->events->publish(new UserRenamed($userId->toString()));
+        }
 
         return [];
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
+use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -34,8 +35,6 @@ final class TicketListTest extends WebTestCase
 
     private const string TICKETS = '/tickets';
     private const string SHELL = '/_test/menu/shell';
-    /** Five for the list (performance-and-scale.md) and two for the toolbar's people chips (TicketFilters). */
-    private const int LIST_AND_TOOLBAR_QUERY_BUDGET = 7;
     private const array PRIORITY_RANKS = ['blocker' => 0, 'critical' => 1, 'major' => 2, 'normal' => 3, 'minor' => 4];
 
     private KernelBrowser $client;
@@ -342,6 +341,31 @@ final class TicketListTest extends WebTestCase
     }
 
     /**
+     * Turbo asks for Show more's URL as a request for the more frame, which it swaps for the frame of the same id in
+     * the answer; that frame holds the next rows, and nothing of the page around it comes back.
+     */
+    #[Test]
+    public function showMoreAsAFrameRequestGetsTheNextRowsInThatFrameAlone(): void
+    {
+        $this->addManyTickets('todo', 52);
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKETS.'?project=SHOP');
+        self::assertResponseStatusCodeSame(200);
+        $moreLink = $page->filter('[data-group="todo"] [data-step-more]');
+        $frameId = (string) $page->filter('[data-group="todo"] turbo-frame')->attr('id');
+        self::assertMatchesRegularExpression('/^step-[0-9a-f-]{36}-after-[0-9a-f]{16}$/', $frameId);
+
+        $frame = $this->client->request('GET', (string) $moreLink->attr('href'), server: ['HTTP_TURBO_FRAME' => $frameId]);
+
+        self::assertResponseStatusCodeSame(200);
+        // The oldest two by updated_at, newest first, after the 50 the first page showed.
+        self::assertSame(['SHOP-2', 'SHOP-1'], $frame->filter('turbo-frame#'.$frameId.' .tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertCount(2, $frame->filter('.tickets__row'));
+        self::assertCount(1, $frame->filter('turbo-frame#'.$frameId.' ul.tickets__row-list[tabindex="-1"][autofocus]'));
+        self::assertCount(0, $frame->filter('.ticket-filters, nav, header, title'));
+    }
+
+    /**
      * SHOP-40 matches by its title, is a blocker and newer, so the priority order would list it first; the exact key
      * comes first. SHOP-42, in the same step, does not match; the In progress tickets do not either.
      */
@@ -622,22 +646,22 @@ final class TicketListTest extends WebTestCase
     }
 
     /**
-     * The list's budget is five queries (performance-and-scale.md); the toolbar adds two, Lena's team's people and
-     * their names (TicketFilters). The search runs inside the rows' query, so it adds none.
+     * The list's budget is five queries (performance-and-scale.md); the toolbar's people and names come from the team
+     * people cache, so a warm page adds none for them. The search runs inside the rows' query, so it adds none either.
      */
     #[Test]
-    public function aWarmSearchPageReadsAtMostSevenQueriesMoreThanTheShell(): void
+    public function aWarmSearchPageReadsAtMostFiveQueriesMoreThanTheShell(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(self::LIST_AND_TOOLBAR_QUERY_BUDGET, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?q=checkout'));
+        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?q=checkout'));
     }
 
     #[Test]
-    public function aWarmPageReadsAtMostSevenQueriesMoreThanTheShellFor200OpenTickets(): void
+    public function aWarmPageReadsAtMostFiveQueriesMoreThanTheShellFor200OpenTickets(): void
     {
         $this->client->disableReboot();
         foreach (['wait', 'check', 'doing', 'todo'] as $groupCode) {
@@ -646,22 +670,26 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(self::LIST_AND_TOOLBAR_QUERY_BUDGET, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS));
+        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS));
     }
 
     #[Test]
-    public function aWarmProjectPageReadsAtMostSevenQueriesMoreThanTheShell(): void
+    public function aWarmProjectPageReadsAtMostFiveQueriesMoreThanTheShell(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(self::LIST_AND_TOOLBAR_QUERY_BUDGET, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
+        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
     }
 
+    /**
+     * The first load fills both caches: the steps (one query, inside the list's five) and the toolbar's team people
+     * and their names (two more), so 7.
+     */
     #[Test]
-    public function aColdPageReadsTheStepsToo(): void
+    public function aColdPageReadsTheStepsAndTheTeamsPeopleToo(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
@@ -671,8 +699,11 @@ final class TicketListTest extends WebTestCase
         self::assertSame(7, $this->queryCountMoreThanTheShellOf(self::TICKETS, false));
     }
 
+    /**
+     * A project page reads the project too: 6 cold for the list (performance-and-scale.md) and the team people's 2.
+     */
     #[Test]
-    public function aColdProjectPageReadsTheStepsToo(): void
+    public function aColdProjectPageReadsTheStepsAndTheTeamsPeopleToo(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
@@ -683,8 +714,27 @@ final class TicketListTest extends WebTestCase
     }
 
     /**
+     * A change of Shop's people (TeamRoleChanged) clears its cached people, so the next load reads them and their
+     * names again, two queries more than the warm page, and the one after is warm again.
+     */
+    #[Test]
+    public function theFirstLoadAfterAChangeOfTheTeamReadsItsPeopleAndNamesAgain(): void
+    {
+        $this->client->disableReboot();
+        $this->addManyTickets('todo', 60);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+        $warmQueryCount = $this->warmQueryCountMoreThanTheShellOf(self::TICKETS);
+        self::assertSame(4, $warmQueryCount);
+
+        self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow($this->shop);
+
+        self::assertSame([6, 4], [$this->queryCountOf(self::TICKETS) - $this->queryCountOf(self::SHELL), $this->queryCountOf(self::TICKETS) - $this->queryCountOf(self::SHELL)]);
+    }
+
+    /**
      * A filter change reloads only the list frame: the answer is that frame alone, with the list's own queries and
-     * neither the menu's teams nor the toolbar's people and names, which the whole page reads.
+     * neither the menu's teams nor the toolbar's people, which the whole page reads (from the cache when warm).
      */
     #[Test]
     public function aFrameRequestGetsOnlyTheListFrameAndRunsOnlyTheListsQueries(): void
@@ -707,9 +757,9 @@ final class TicketListTest extends WebTestCase
         self::assertCount(30, $frame->filter('.tickets__row'));
         self::assertSame('30 tickets · grouped by step', $frame->filter('[data-total-line]')->attr('data-total-line'));
         $toolbarAndMenuQueries = '/FROM org_team_member WHERE team_id = ANY|FROM org_team WHERE/';
-        self::assertSame([2, 0], [self::countMatching($toolbarAndMenuQueries, $pageQueries), self::countMatching($toolbarAndMenuQueries, $frameQueries)]);
-        self::assertSame(1, self::countMatching('/FROM idn_user WHERE id = ANY/', $frameQueries));
-        self::assertCount(\count($pageQueries) - 3, $frameQueries);
+        self::assertSame([1, 0], [self::countMatching($toolbarAndMenuQueries, $pageQueries), self::countMatching($toolbarAndMenuQueries, $frameQueries)]);
+        self::assertSame([1, 1], [self::countMatching('/FROM idn_user WHERE id = ANY/', $pageQueries), self::countMatching('/FROM idn_user WHERE id = ANY/', $frameQueries)]);
+        self::assertCount(\count($pageQueries) - 1, $frameQueries);
     }
 
     /**

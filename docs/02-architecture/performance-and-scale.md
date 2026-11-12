@@ -100,6 +100,7 @@ Result: ≤ 8 queries (the Home budget), all index-only or index-range scans.
 - **Step counts are capped at 1,000:** each step counts at most 1,001 visible tickets in the row order, through the same index, so a big step (Done) never reads all its rows; past 1,000 the page shows "1,000+".
 - Project rail counts come from the read model `ins_project_counts`, not from `count(*)` on tickets.
 - The steps come from Workflow's cached `StepQueries::listedSteps` (see [Caching](#caching)), not a join on `wf_step`; the first load after a step change reads them, one more query.
+- The toolbar's "Assigned to" chips come from Organization's cached `TeamPeopleQueries::namedPossibleAssigneesOf` (the viewer's team's people with first names, see [Caching](#caching)), so a warm page reads none for them; the first load after a change of the team's people or of one of their names reads them again, two more queries (cold: 7 beyond the app shell for every project, 8 for one project).
 - "Turn:" comes from one batched query on `ins_ticket_turn` for the shown rows (Insight's `TurnUserQueries::turnUsersOf`), separate from the rows query.
 - "To check by" (P06) comes from the same batched `ins_ticket_turn` read, with `turnUsersOf` widened to return the checker, not from another query.
 
@@ -145,6 +146,7 @@ All cache keys start with the org id. Pools are tag-aware (Symfony Cache with Va
 |---|---|---|---|
 | Steps and rules for a team (workflow config) | `org.{o}.wf.team.{t}.{entry}`, entry `steps`, `move-targets.{policy}` or `rules.{policy}` (Symfony keys refuse `:`) | 1 day | `wf-team-{t}` and `wf-org-{o}`: a team step or rule change clears its team; a company step or org rule change clears every team. Cleared after commit and again when the relayed event is handled. The policy is in the key, so a policy change needs no clear |
 | Every step of the organization, removed ones too, for the Tickets list | `org.{o}.wf.org.listed-steps` | 1 day | `wf-any-{o}` and `wf-org-{o}`: every workflow change of the organization clears it, a team's included, after commit and again when the relayed event is handled |
+| A team's people (lead and members) with their first names, for the Tickets list toolbar | `org.{o}.people.team.{t}` | 1 day | `people-team-{t}` when someone joins the team or changes role in it (TeamRoleChanged), after commit and again when the relayed event is handled; `people-user-{u}` for each person in it when they save a new name (UserRenamed, handled in the change's transaction), after commit |
 | Release progress bar | `org:{o}:rel:{team}:{release}` | 5 min | `ticket-team-{t}` on move |
 | Team stack and workload counts | `org:{o}:load:{team}` | 2 min | `turn-team-{t}` on turn change |
 | Manager team overview | `org:{o}:mgr` | 5 min | `turn-org-{o}` |

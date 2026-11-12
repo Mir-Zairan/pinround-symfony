@@ -9,6 +9,12 @@ use App\Identity\Domain\User;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\MembershipQueries;
+use App\Organization\Application\SetTeamRole;
+use App\Organization\Domain\Job;
+use App\Organization\Domain\TeamRole;
+use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
+use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
+use App\Organization\Infrastructure\Messenger\MessengerOrganizationEvents;
 use App\Organization\Infrastructure\Security\RequestScopedCurrentActor;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -17,7 +23,9 @@ use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\UI\Component\TicketFilters;
+use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Formatter\JsonFormatter;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\Test;
@@ -95,6 +103,50 @@ final class TicketFiltersTest extends WebTestCase
         self::assertSame(['Everyone', 'Me', 'Omar', 'Tom', 'Eva'], $this->peopleChipLabelsOf($page));
         self::assertSame(self::TICKETS.'?person='.$this->people['Tom']->id()->toString(), $page->filter('[data-person-chip="'.$this->people['Tom']->id()->toString().'"]')->attr('href'));
         self::assertCount(0, $page->filter('[data-person-picker-trigger]'));
+    }
+
+    /**
+     * The second load reads Shop's people from the cache; Tom joining through SetTeamRole clears it when it commits.
+     */
+    #[Test]
+    public function aPersonWhoJoinsTheTeamIsOnTheNextLoad(): void
+    {
+        $this->client->disableReboot();
+        $this->people['Tom'] = $this->createUserWithoutOrganization('Tom');
+        $this->addMembership($this->people['Tom'], $this->acmeFoods);
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertSame(['Everyone', 'Me', 'Omar'], $this->peopleChipLabelsOnTheTicketsPage());
+        self::assertSame(['Everyone', 'Me', 'Omar'], $this->peopleChipLabelsOnTheTicketsPage());
+
+        $entityManager = self::getContainer()->get(EntityManagerInterface::class);
+        $setTeamRole = new SetTeamRole(new DoctrineTeams($entityManager), new DoctrineMemberships($entityManager), self::getContainer()->get(MessengerOrganizationEvents::class));
+        new TenantTransactions($entityManager, self::getContainer()->get(TenantContext::class))->committedAs(
+            $this->acmeFoods->toString(),
+            fn () => $setTeamRole($this->shop, $this->people['Tom']->id(), TeamRole::Member, Job::Developer, $this->people['Lena']->id(), new \DateTimeImmutable('2026-03-04 10:00:00 UTC')),
+        );
+
+        self::assertSame(['Everyone', 'Me', 'Omar', 'Tom'], $this->peopleChipLabelsOnTheTicketsPage());
+    }
+
+    /**
+     * Omar saves a new name on his profile page, which has no organization; Lena's cached Shop shows it at once.
+     */
+    #[Test]
+    public function aNewNameIsOnTheNextLoad(): void
+    {
+        $this->client->disableReboot();
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertSame(['Everyone', 'Me', 'Omar'], $this->peopleChipLabelsOnTheTicketsPage());
+        self::assertSame(['Everyone', 'Me', 'Omar'], $this->peopleChipLabelsOnTheTicketsPage());
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('GET', '/me/profile');
+        self::assertResponseStatusCodeSame(200);
+        $this->client->submitForm('Save', ['name' => 'Oskar Lind', 'time_zone' => 'Europe/Berlin', 'theme' => 'system']);
+        self::assertResponseStatusCodeSame(302);
+
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertSame(['Everyone', 'Me', 'Oskar'], $this->peopleChipLabelsOnTheTicketsPage());
     }
 
     #[Test]
@@ -425,6 +477,17 @@ final class TicketFiltersTest extends WebTestCase
             $this->addMembership($this->people[$name], $this->acmeFoods);
             $this->addTeamRole($this->people[$name], $this->acmeFoods, $this->shop, 'member');
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function peopleChipLabelsOnTheTicketsPage(): array
+    {
+        $page = $this->client->request('GET', self::TICKETS);
+        self::assertResponseStatusCodeSame(200);
+
+        return $this->peopleChipLabelsOf($page);
     }
 
     /**

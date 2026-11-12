@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Ticketing\UI\Component;
 
-use App\Identity\Api\UserQueries;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
-use App\Organization\Api\TeamQueries;
+use App\Organization\Api\PossibleAssignee;
+use App\Organization\Api\TeamPeopleQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\ListFilter;
@@ -33,7 +33,8 @@ use Symfony\UX\LiveComponent\DefaultActionTrait;
  *
  * The people are the lead and members of the viewer's first team by id (viewers cannot be assignees): "Me" for a lead
  * or member of it, then each other one's first name while the team has at most MAX_NAMED_PEOPLE, else a "Person ▾"
- * chip, the person picker's hook. Two queries at most: the team's people, then the names it shows.
+ * chip, the person picker's hook. The team's people and names are one cached read (TeamPeopleQueries): no query when
+ * warm, two after a change of the team.
  */
 #[AsLiveComponent(name: 'TicketFilters', template: '@Ticketing/components/TicketFilters.html.twig', method: 'post')]
 final class TicketFilters
@@ -72,8 +73,7 @@ final class TicketFilters
         private readonly Security $security,
         private readonly TenantContext $tenantContext,
         private readonly CurrentActor $currentActor,
-        private readonly TeamQueries $teamQueries,
-        private readonly UserQueries $userQueries,
+        private readonly TeamPeopleQueries $teamPeopleQueries,
         private readonly UrlGeneratorInterface $urlGenerator,
     ) {
     }
@@ -196,26 +196,25 @@ final class TicketFilters
             return $chips;
         }
 
-        $teamPeople = $this->teamQueries->possibleAssigneesOf([$teamId])[$teamId->toString()] ?? [];
+        $teamPeople = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
         $viewerId = $actor->userId();
-        if (self::contains($teamPeople, $viewerId)) {
-            $chips['viewerChip'] = $this->chipOf('Me', $viewerId);
+        $otherPeople = [];
+        foreach ($teamPeople as $person) {
+            if ($person->userId->equals($viewerId)) {
+                $chips['viewerChip'] = $this->chipOf('Me', $viewerId);
+            } else {
+                $otherPeople[] = $person;
+            }
         }
-        $otherPeople = array_values(array_filter($teamPeople, static fn (UserId $userId): bool => !$userId->equals($viewerId)));
         if (\count($teamPeople) <= self::MAX_NAMED_PEOPLE) {
-            $names = $this->userQueries->byIds($otherPeople);
-            foreach ($otherPeople as $userId) {
-                $name = $names[$userId->toString()] ?? null;
-                if (null !== $name) {
-                    $chips['personChips'][] = $this->chipOf($name->firstName(), $userId);
-                }
+            foreach ($otherPeople as $person) {
+                $chips['personChips'][] = $this->chipOf($person->firstName, $person->userId);
             }
 
             return $chips;
         }
 
-        $pickedPerson = $this->pickedPersonAmong($otherPeople);
-        $pickedName = null === $pickedPerson ? null : ($this->userQueries->byIds([$pickedPerson])[$pickedPerson->toString()] ?? null)?->firstName();
+        $pickedName = $this->pickedPersonAmong($otherPeople)?->firstName;
         $chips['pickerChip'] = ['label' => $pickedName ?? self::PERSON_PICKER_LABEL, 'isPressed' => '' !== $this->person && !($chips['viewerChip']['isPressed'] ?? false)];
 
         return $chips;
@@ -235,32 +234,18 @@ final class TicketFilters
     }
 
     /**
-     * Only a person of the team is looked up by name: users are global, so an id from the URL alone is never named.
+     * Only a person of the team is named: users are global, so an id from the URL alone is never named.
      *
-     * @param list<UserId> $otherPeople
+     * @param list<PossibleAssignee> $otherPeople
      */
-    private function pickedPersonAmong(array $otherPeople): ?UserId
+    private function pickedPersonAmong(array $otherPeople): ?PossibleAssignee
     {
-        foreach ($otherPeople as $userId) {
-            if ($this->person === $userId->toString()) {
-                return $userId;
+        foreach ($otherPeople as $person) {
+            if ($this->person === $person->userId->toString()) {
+                return $person;
             }
         }
 
         return null;
-    }
-
-    /**
-     * @param list<UserId> $userIds
-     */
-    private static function contains(array $userIds, UserId $userId): bool
-    {
-        foreach ($userIds as $candidate) {
-            if ($candidate->equals($userId)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }
