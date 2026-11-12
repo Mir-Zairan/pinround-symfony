@@ -47,16 +47,13 @@ final class TicketTableTest extends KernelTestCase
         return new TicketRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 
-    /**
-     * The two GIN indexes have no key order to lead with; the search queries filter on the organization themselves.
-     */
     #[Test]
-    public function everyBtreeIndexStartsWithTheOrganizationAndTheListsSortByRankThenNewest(): void
+    public function everyIndexStartsWithTheOrganizationAndTheListsSortByRankThenNewest(): void
     {
         self::assertEqualsCanonicalizing(
             [
-                'CREATE INDEX tkt_ticket_search_idx ON public.tkt_ticket USING gin (search)',
-                'CREATE INDEX tkt_ticket_title_trgm_idx ON public.tkt_ticket USING gin (title gin_trgm_ops)',
+                'CREATE INDEX tkt_ticket_search_idx ON public.tkt_ticket USING gin (organization_id, search)',
+                'CREATE INDEX tkt_ticket_title_trgm_idx ON public.tkt_ticket USING gin (organization_id, title gin_trgm_ops)',
                 'CREATE UNIQUE INDEX tkt_ticket_pkey ON public.tkt_ticket USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX tkt_ticket_organization_id_project_id_number_key ON public.tkt_ticket USING btree (organization_id, project_id, number)',
                 'CREATE UNIQUE INDEX tkt_ticket_organization_id_key_key ON public.tkt_ticket USING btree (organization_id, key)',

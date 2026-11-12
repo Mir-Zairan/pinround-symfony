@@ -29,8 +29,8 @@ final class TicketSearchInSchema
         $event->setClassTable(
             $event->getClassTable()->edit()
                 ->addColumn(Column::editor()->setUnquotedName('search')->setTypeName(Types::TEXT)->setNotNull(false)->create())
-                ->addIndex(Index::editor()->setUnquotedName('tkt_ticket_search_idx')->setUnquotedColumnNames('search')->create())
-                ->addIndex(Index::editor()->setUnquotedName('tkt_ticket_title_trgm_idx')->setUnquotedColumnNames('title')->create())
+                ->addIndex(Index::editor()->setUnquotedName('tkt_ticket_search_idx')->setUnquotedColumnNames('organization_id', 'search')->create())
+                ->addIndex(Index::editor()->setUnquotedName('tkt_ticket_title_trgm_idx')->setUnquotedColumnNames('organization_id', 'title')->create())
                 ->create(),
         );
     }

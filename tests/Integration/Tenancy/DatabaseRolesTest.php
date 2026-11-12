@@ -527,7 +527,7 @@ final class DatabaseRolesTest extends KernelTestCase
     {
         // roles.sql re-owns tables but cannot re-own extensions, so only a migration run as the migrator makes it their owner.
         self::assertEqualsCanonicalizing(
-            ['citext', 'pg_trgm', 'pgcrypto', 'unaccent'],
+            ['btree_gin', 'citext', 'pg_trgm', 'pgcrypto', 'unaccent'],
             $this->connection()->fetchFirstColumn("SELECT extname FROM pg_extension WHERE extowner = 'pinround_migrator'::regrole"),
             'A test database migrated before the roles existed keeps the old owner: drop pinround_test, then run make db-roles migrate-test.',
         );

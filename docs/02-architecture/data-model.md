@@ -386,7 +386,7 @@ This is the **one canonical rule** for who may see a ticket with `visibility = '
 
 ## Index catalogue
 
-The single list of indexes on the hot tables. Other documents link here instead of repeating them. Every B-tree index starts with `organization_id`; a GIN index has no key order to lead with, so the tkt_ticket GIN indexes hold the searched column only and the query filters on `organization_id`.
+The single list of indexes on the hot tables. Other documents link here instead of repeating them. Every index starts with `organization_id`; a GIN index holds it through the `btree_gin` extension.
 
 | Table | Index | Serves |
 |---|---|---|
@@ -394,7 +394,7 @@ The single list of indexes on the hot tables. Other documents link here instead 
 | tkt_ticket | `(organization_id, step_id, priority_rank, updated_at DESC, id DESC)` | list across "All projects" of a team |
 | tkt_ticket | `(organization_id, reporter_id, created_at DESC, id DESC)` | My reports |
 | tkt_ticket | `(organization_id, assignee_id) WHERE closed_at IS NULL` | person filter, workload |
-| tkt_ticket | GIN `(search)` (`tkt_ticket_search_idx`); GIN `(title gin_trgm_ops)` (`tkt_ticket_title_trgm_idx`) | search and duplicates (see the RLS note under [Query patterns](#query-patterns)) |
+| tkt_ticket | GIN `(organization_id, search)` (`tkt_ticket_search_idx`); GIN `(organization_id, title gin_trgm_ops)` (`tkt_ticket_title_trgm_idx`), both through `btree_gin` | search and duplicates (see the RLS note under [Query patterns](#query-patterns)) |
 | tkt_ticket_event | `(organization_id, ticket_id, at DESC)` | "What happened" |
 | ins_ticket_turn | `(organization_id, turn_user_id, base_score DESC)` | Home, part 1 |
 | ins_ticket_turn | `(organization_id, check_user_id, base_score DESC) WHERE check_user_id IS NOT NULL` | Home, part 2 (checks) |
@@ -492,7 +492,7 @@ LIMIT 20;
 
 **RLS and these indexes (important).** The text-search operator `@@`, the trigram operator `%` and `similarity()`, and the pgvector distance operators are **not `LEAKPROOF`**. Under row-level security PostgreSQL may then refuse to use the GIN or HNSW index before the policy is applied, and scan the whole organization instead. So:
 
-1. A CI test runs `EXPLAIN` on the search, duplicate and embedding queries **as `pinround_app` with the tenant set**, on a seeded database, and fails if the plan does not use the GIN/HNSW index. For search and duplicates this is `TicketSearchQueryPlanTest` (50,000 tickets, the visibility predicate applied). Its first run (2026-11-12) showed the planner skips both GIN indexes under RLS and reads the organization by sequential or B-tree scan, so its tests are marked incomplete until the fallback below lands.
+1. A CI test runs `EXPLAIN` on the search, duplicate and embedding queries **as `pinround_app` with the tenant set**, on a seeded database, and fails if the plan does not use the GIN/HNSW index. For search and duplicates this is `TicketSearchQueryPlanTest` (50,000 tickets, the visibility predicate applied). It also explains each query as the table owner without RLS, where both GIN indexes must be used. Its first run (2026-11-12) showed that under RLS the planner skips both GIN indexes and reads the organization by sequential or B-tree scan, while without RLS it uses them, so the policy is the cause; the RLS case is marked incomplete until the fallback below lands.
 2. If it does not, the query moves into a `SECURITY DEFINER` function (owner `pinround_resolver`, fixed `search_path`) that takes the organization id and the visibility inputs as explicit `p_`-prefixed arguments (`p_organization_id`, never `organization_id`), filters on them first, and returns ticket ids only. It is listed with the resolver functions in [Row-level security](#row-level-security).
 
 The thresholds are tuned in phase 6. The text-search configuration ('simple' or a language) is chosen per org ([ADR-0022](../03-adr/0022-search-and-duplicates.md)).
