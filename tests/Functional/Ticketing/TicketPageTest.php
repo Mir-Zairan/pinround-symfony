@@ -701,6 +701,28 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
+     * The costliest page: a project list that does not hold the ticket (the project lookup and the plain list's
+     * position) and a saved turn of someone outside the ticket's people and team (one more names query).
+     */
+    #[Test]
+    public function theCostliestWarmPageStaysWithinTheTenQueryBudget(): void
+    {
+        $keys = $this->addTicketsToWalk();
+        $this->addTurnRow($keys['X'], 'Raj', 'decide');
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->queryCountOf(self::SHELL);
+        $shellQueryCount = $this->queryCountOf(self::SHELL);
+        $uri = '/t/'.$keys['X'].'?project=SHOP';
+        $this->queryCountOf($uri);
+
+        $pageQueryCount = $this->queryCountOf($uri) - $shellQueryCount;
+
+        self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
+        self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
+        self::assertSame(10, $pageQueryCount);
+    }
+
+    /**
      * Beyond the shell, with the steps and the rules cached: the settings (step policy and triager, one query), the
      * ticket, its team's lead and people, the names of everyone in one batch, the saved turn with the waiting turns in
      * one query, and the position in one; a project's list adds the project by key, and a list the ticket is not in

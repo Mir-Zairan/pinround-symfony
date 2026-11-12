@@ -218,7 +218,7 @@ final class DbalTeamLoadQueriesTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Waiting turns are read in a transaction under the organization as tenant; none is open.');
+        $this->expectExceptionMessageIsOrContains('Waiting turns are read in a transaction under the organization as tenant; none is open.');
 
         $this->queries()->waitingTurnsOf([new UserId(self::OMAR)], new TicketId(self::OWN_TICKET));
     }
