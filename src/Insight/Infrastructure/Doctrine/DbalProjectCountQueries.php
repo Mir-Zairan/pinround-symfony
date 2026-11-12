@@ -16,7 +16,7 @@ use Doctrine\DBAL\Connection;
 
 /**
  * ProjectCountQueries on ins_project_counts; the contract is on {@see ProjectCountQueries}. The counts are read through
- * the primary key (organization_id, project_id, visibility).
+ * the primary key (organization_id, project_id, team_id, visibility).
  */
 final readonly class DbalProjectCountQueries implements ProjectCountQueries
 {
@@ -40,15 +40,19 @@ final readonly class DbalProjectCountQueries implements ProjectCountQueries
             return [];
         }
         $viewer = $this->ticketVisibilities->of($organizationId, $viewerId);
-        $seesTeamOnly = $viewer->isAdmin() || array_any($viewer->teamIds(), static fn (TeamId $ownTeamId): bool => $ownTeamId->equals($teamId));
 
-        // One array literal keeps the SQL text the same for any number of ids; a project id is a uuid, so needs no quoting.
+        // team_id, not the queried team: a ticket keeps its team when its project moves. Uuid array literals need no quoting.
         $rows = $this->connection->fetchAllAssociativeIndexed(
             'SELECT project_id, sum(open_count) AS open_count, sum(done_count) AS done_count FROM ins_project_counts'
             .' WHERE organization_id = CAST(? AS uuid) AND project_id = ANY(CAST(? AS uuid[]))'
-            .($seesTeamOnly ? '' : " AND visibility = 'all'")
+            ." AND (visibility = 'all' OR CAST(? AS boolean) OR team_id = ANY(CAST(? AS uuid[])))"
             .' GROUP BY project_id',
-            [$organizationId->toString(), '{'.implode(',', $projectIds).'}'],
+            [
+                $organizationId->toString(),
+                '{'.implode(',', $projectIds).'}',
+                $viewer->isAdmin() ? 'true' : 'false',
+                '{'.implode(',', array_map(static fn (TeamId $ownTeamId): string => $ownTeamId->toString(), $viewer->teamIds())).'}',
+            ],
         );
 
         return array_map(static function (string $projectId) use ($rows, $withDone): ProjectCounts {

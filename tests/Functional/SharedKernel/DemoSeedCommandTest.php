@@ -344,6 +344,15 @@ final class DemoSeedCommandTest extends KernelTestCase
             $this->connection()->fetchOne('SELECT count(*) FROM tkt_ticket_event'),
             $this->connection()->fetchOne('SELECT count(*) FROM ins_ticket_turn'),
             $this->connection()->fetchOne('SELECT count(*) FROM tkt_ticket WHERE closed_at IS NOT NULL'),
+            $this->connection()->fetchAllNumeric(
+                "SELECT c.visibility, c.open_count, c.done_count FROM ins_project_counts c
+                 JOIN tkt_project p ON p.organization_id = c.organization_id AND p.id = c.project_id WHERE p.key = 'SHOP' ORDER BY c.visibility",
+            ),
+            $this->connection()->fetchAllNumeric(
+                "SELECT t.visibility, count(*) FILTER (WHERE s.grp <> 'done'), count(*) FILTER (WHERE s.grp = 'done') FROM tkt_ticket t
+                 JOIN wf_step s ON s.organization_id = t.organization_id AND s.id = t.step_id
+                 JOIN tkt_project p ON p.organization_id = t.organization_id AND p.id = t.project_id WHERE p.key = 'SHOP' GROUP BY t.visibility ORDER BY t.visibility",
+            ),
         ]);
         $afterFirstRun = $ticketFacts();
 
@@ -358,7 +367,11 @@ final class DemoSeedCommandTest extends KernelTestCase
         self::assertGreaterThan(0, $afterFirstRun[5]);
         self::assertLessThan(40, $afterFirstRun[5]);
         // The five done tickets are nobody's turn, so they hold no turn row.
-        self::assertSame([40, 35, 5], \array_slice($afterFirstRun, 6));
+        self::assertSame([40, 35, 5], \array_slice($afterFirstRun, 6, 3));
+        // The rail's stored counts follow the seed's raw step and visibility moves: both visibilities, five done.
+        self::assertCount(2, $afterFirstRun[10]);
+        self::assertSame(5, array_sum(array_column($afterFirstRun[10], 2)));
+        self::assertSame($afterFirstRun[10], $afterFirstRun[9]);
         self::assertStringContainsString('Tickets: created 0, kept 40.', $second->getDisplay());
         self::assertSame($afterFirstRun, $ticketFacts());
     }

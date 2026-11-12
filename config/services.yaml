@@ -135,7 +135,6 @@ services:
     App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
     App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
     App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
-    App\Insight\Api\ProjectCountsRecount: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountsRecount'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones

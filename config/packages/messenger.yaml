@@ -89,10 +89,6 @@ framework:
                     multiplier: 2
                     max_delay: 60000
                     jitter: 0
-            # ADR-0009's same-transaction listeners: a message sent here is handled at once on its own bus, inside the
-            # dispatcher's open transaction (doctrine_transaction makes it a savepoint), so a failure fails the change.
-            # Its handlers name it in fromTransport, so they skip the copy the outbox relays to async_notify.
-            same_transaction: 'sync://'
             # Its own table, so the outbox age alert (ADR-0009) reads only messages still to relay.
             failed:
                 dsn: 'doctrine://default?table_name=messenger_failed&queue_name=failed&auto_setup=0'
@@ -145,9 +141,6 @@ framework:
             App\Workflow\Api\Event\WorkflowEvent: outbox
             # Domain events of Ticketing, the same way.
             App\Ticketing\Api\Event\TicketEvent: outbox
-            # Also to the outbox through TicketEvent: the class route is sent first, so the count is written before the
-            # outbox row. ProjectCountsProjector keeps ins_project_counts.
-            App\Ticketing\Api\Event\TicketCreated: same_transaction
 
 when@test:
     parameters:

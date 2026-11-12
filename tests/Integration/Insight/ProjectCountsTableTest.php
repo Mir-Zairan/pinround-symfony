@@ -13,8 +13,8 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * The ins_project_counts table as Version20261112140000 creates it: who may do what, its key, and row-level security,
- * which alone keeps another organization's counts out of reach.
+ * The ins_project_counts and ins_project_count_ticket tables as Version20261112140000 creates them: who may do what,
+ * their keys, and row-level security, which alone keeps another organization's counts out of reach.
  */
 final class ProjectCountsTableTest extends KernelTestCase
 {
@@ -22,6 +22,8 @@ final class ProjectCountsTableTest extends KernelTestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000007502';
     private const string ACME_PROJECT = '0197a3c0-0000-7000-8000-000000007521';
     private const string BETA_PROJECT = '0197a3c0-0000-7000-8000-000000007522';
+    private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-000000007511';
+    private const array TABLES = ['ins_project_counts', 'ins_project_count_ticket'];
 
     protected function setUp(): void
     {
@@ -29,8 +31,8 @@ final class ProjectCountsTableTest extends KernelTestCase
         foreach ([[self::ACME_FOODS, self::ACME_PROJECT, 3], [self::BETA_BAKERY, self::BETA_PROJECT, 9]] as [$organizationId, $projectId, $openCount]) {
             $this->ticketRows()->addProjectOf($organizationId, $projectId);
             $this->transactions()->committedAs($organizationId, fn (): int|string => $this->connection()->executeStatement(
-                "INSERT INTO ins_project_counts (organization_id, project_id, visibility, open_count, done_count) VALUES (?, ?, 'all', ?, 0)",
-                [$organizationId, $projectId, $openCount],
+                "INSERT INTO ins_project_counts (organization_id, project_id, team_id, visibility, open_count, done_count) VALUES (?, ?, ?, 'all', ?, 0)",
+                [$organizationId, $projectId, self::SHOP_TEAM, $openCount],
             ));
         }
     }
@@ -43,43 +45,50 @@ final class ProjectCountsTableTest extends KernelTestCase
     }
 
     /**
-     * The app also deletes, as the recount replaces an organization's rows; support reads under the tenant policy.
+     * A count row is never removed by the app, only left at zero; a counted ticket is, when it loses its team. Support
+     * reads under the tenant policy.
      */
     #[Test]
-    public function theAppMayReadAddChangeAndRemoveRowsAndSupportOnlyRead(): void
+    public function theAppMayRemoveOnlyCountedTicketsAndSupportOnlyReads(): void
     {
         $connection = $this->connection();
-
-        self::assertEqualsCanonicalizing(
-            ['pinround_app DELETE', 'pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
-            $connection->fetchFirstColumn(
-                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type
-                 FROM pg_class c, aclexplode(c.relacl) acl
-                 WHERE c.oid = 'public.ins_project_counts'::regclass AND acl.grantee <> c.relowner",
-            ),
+        $grantsOf = static fn (string $table): array => $connection->fetchFirstColumn(
+            "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type
+             FROM pg_class c, aclexplode(c.relacl) acl
+             WHERE c.oid = ?::regclass AND acl.grantee <> c.relowner",
+            ['public.'.$table],
         );
-        self::assertSame('pinround_migrator', $connection->fetchOne("SELECT relowner::regrole::text FROM pg_class WHERE oid = 'public.ins_project_counts'::regclass"));
-        self::assertSame([], $connection->fetchFirstColumn(
-            "SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = 'public.ins_project_counts'::regclass",
-        ));
+
+        self::assertEqualsCanonicalizing(['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'], $grantsOf('ins_project_counts'));
+        self::assertEqualsCanonicalizing(['pinround_app DELETE', 'pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'], $grantsOf('ins_project_count_ticket'));
+        foreach (self::TABLES as $table) {
+            self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = ?::regclass', ['public.'.$table]));
+            self::assertSame([], $connection->fetchFirstColumn('SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = ?::regclass', ['public.'.$table]));
+        }
     }
 
     #[Test]
-    public function theOnlyIndexIsTheKeyStartingWithTheOrganization(): void
+    public function theOnlyIndexesAreTheKeysStartingWithTheOrganization(): void
     {
         self::assertSame(
-            ['CREATE UNIQUE INDEX ins_project_counts_pkey ON public.ins_project_counts USING btree (organization_id, project_id, visibility)'],
-            $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'ins_project_counts'"),
+            [
+                'CREATE UNIQUE INDEX ins_project_count_ticket_pkey ON public.ins_project_count_ticket USING btree (organization_id, ticket_id)',
+                'CREATE UNIQUE INDEX ins_project_counts_pkey ON public.ins_project_counts USING btree (organization_id, project_id, team_id, visibility)',
+            ],
+            $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('ins_project_counts', 'ins_project_count_ticket') ORDER BY indexname"),
         );
     }
 
     #[Test]
     public function rowLevelSecurityIsOnAndForced(): void
     {
-        self::assertSame(
-            ['relrowsecurity' => true, 'relforcerowsecurity' => true],
-            $this->connection()->fetchAssociative("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'public.ins_project_counts'::regclass"),
-        );
+        foreach (self::TABLES as $table) {
+            self::assertSame(
+                ['relrowsecurity' => true, 'relforcerowsecurity' => true],
+                $this->connection()->fetchAssociative('SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = ?::regclass', ['public.'.$table]),
+                $table,
+            );
+        }
     }
 
     /**

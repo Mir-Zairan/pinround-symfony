@@ -190,9 +190,9 @@ abstract class VisibilityLeakCast extends KernelTestCase
     }
 
     /**
-     * @param \Closure(Connection): void $work
+     * @param \Closure(Connection): mixed $work
      */
-    private static function asTenantMigrator(string $organizationId, \Closure $work): void
+    protected static function asTenantMigrator(string $organizationId, \Closure $work): void
     {
         self::tenantContext()->set(new OrganizationId($organizationId));
         try {
@@ -217,12 +217,12 @@ abstract class VisibilityLeakCast extends KernelTestCase
         return self::getContainer()->get('doctrine.orm.default_entity_manager');
     }
 
-    private static function migrator(): Connection
+    protected static function migrator(): Connection
     {
         return self::getContainer()->get('doctrine.dbal.migrator_connection');
     }
 
-    private static function tenantContext(): TenantContext
+    protected static function tenantContext(): TenantContext
     {
         return self::getContainer()->get(TenantContext::class);
     }

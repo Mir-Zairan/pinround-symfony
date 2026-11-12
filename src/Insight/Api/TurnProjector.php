@@ -18,14 +18,17 @@ interface TurnProjector
     /**
      * Reads the ticket's facts and writes its row with one upsert, or deletes the row when the ticket is done, is
      * nobody's turn or no longer exists. Reads no other ticket. waiting_since is kept while the turn's person or label
-     * stays the same and starts now when either changes.
+     * stays the same and starts now when either changes. Also moves the ticket's count on the project rail
+     * (ins_project_counts) to its project, team, visibility and done or open, done tickets included; a ticket with no
+     * team counts nowhere.
      *
      * @return string|null the turn's override note when a fallback chose the person, for the caller to write to the
      *                     ticket's activity, for example "Lena reviews their own code: no other developer in the
      *                     team"; returned on every refresh while that fallback holds, so the caller writes it only
      *                     when its change moved the turn. Null when no fallback was needed or the ticket has no row.
      *
-     * @throws \LogicException when no transaction is open: the row must share the fate of the change
+     * @throws \LogicException when no transaction is open: the row must share the fate of the change; or when the
+     *                         count row the ticket was in is missing, so the change must roll back
      */
     public function refresh(TicketId $ticketId): ?string;
 }
