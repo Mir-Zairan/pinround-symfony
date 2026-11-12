@@ -71,6 +71,28 @@ test('Show the full ask swaps the cut text for the whole ask and Show less swaps
   await expect(toggle).toHaveText('Show the full ask', { useInnerText: true });
 });
 
+test('a row of the SHOP list opens its ticket in that list, and Next opens the next row', async ({ page }) => {
+  await page.goto('/tickets?project=SHOP', { waitUntil: 'networkidle' });
+  const rowKeys = await page.locator('.tickets__row').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-ticket-key') ?? ''));
+  expect(rowKeys.length).toBeGreaterThanOrEqual(2);
+
+  await page.locator(`.tickets__row[data-ticket-key="${rowKeys[0]}"] .tickets__row-link`).click();
+
+  await expect(page).toHaveURL(new RegExp(`/t/${rowKeys[0]}\\?project=SHOP$`));
+  const positionLine = page.locator('.ticket__position-line');
+  await expect(positionLine).toHaveText(/^1 of [\d,]+\+?$/);
+  const total = ((await positionLine.textContent()) ?? '').replace(/^1 of /, '');
+  await expect(page.locator('.ticket__previous')).toHaveAttribute('aria-disabled', 'true');
+  expect(await seriousViolations(page)).toEqual([]);
+
+  await page.locator('.ticket__next-ticket').click();
+
+  await expect(page).toHaveURL(new RegExp(`/t/${rowKeys[1]}\\?project=SHOP$`));
+  await expect(page.locator('.ticket').first()).toHaveAttribute('data-ticket-key', rowKeys[1]);
+  await expect(positionLine).toHaveText(`2 of ${total}`);
+  await expect(page.locator('.ticket__back')).toHaveAttribute('href', '/tickets?project=SHOP');
+});
+
 test.describe('at 360 px', () => {
   test.use({ viewport: { width: 360, height: 800 } });
 

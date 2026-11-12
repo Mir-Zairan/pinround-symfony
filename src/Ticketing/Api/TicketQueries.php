@@ -58,4 +58,25 @@ interface TicketQueries
      *                         organization's
      */
     public function pageOf(string $key, TicketVisibility $viewer): ?TicketPageView;
+
+    /**
+     * Where the ticket with that key sits in the list the filter gives, in exactly list()'s order and under the same
+     * visibility and filters, in one query (none while Workflow's StepQueries caches the steps, plus that one when
+     * cold). Without a search it never sorts the whole organization: each step counts at most
+     * TicketListStep::COUNT_CAP tickets as list() does, and the neighbours are read by keyset over the list's index,
+     * crossing into the nearest earlier or later step that holds a ticket. With a search, only the matches list()
+     * would read are ranked.
+     *
+     * @param ListFilter       $filter the list the ticket is looked for in; its viewer must be $viewer
+     * @param TicketVisibility $viewer whose predicate decides the ticket, its neighbours and the count
+     *
+     * @return TicketPosition|null null when the ticket is not in that list: an unknown key, a ticket the viewer may not
+     *                             see, one the filter leaves out, a Done ticket of a list without Done, a key that
+     *                             cannot be one (no query), or a match past the search's cap
+     *
+     * @throws \LogicException           when no transaction is open, no tenant is set, or the viewer is of another
+     *                                   organization than the tenant, before any query
+     * @throws \InvalidArgumentException when the filter's viewer is not $viewer, before any query
+     */
+    public function positionOf(string $key, ListFilter $filter, TicketVisibility $viewer): ?TicketPosition;
 }

@@ -5,15 +5,21 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\Identity\Api\CurrentTimeZone;
+use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
+use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Api\TicketPosition;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Application\RoleTicketVisibilities;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Exception\BadRequestException;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
@@ -23,10 +29,15 @@ use Symfony\Component\Routing\Attribute\Route;
  * or malformed key, another organization's ticket (row-level security hides it) and one the viewer may not see all
  * answer the same 404, so the answer never tells that a hidden ticket exists.
  *
- * Six queries beyond the request's own when the steps and rules are cached (performance-and-scale.md: ten at most for
+ * The list a row's link came from travels in the list's own query (TicketListContext): "N of M" with Previous and Next
+ * walk that list (TicketQueries::positionOf). With no list, a filter the list would refuse, or a ticket that is not in
+ * it, they walk the plain open-tickets list; a Done ticket in neither has no position line.
+ *
+ * Seven queries beyond the request's own when the steps and rules are cached (performance-and-scale.md: ten at most for
  * the page): the settings (step policy and triager, one query), the ticket with its project and parent, its team's lead
- * and people, the names of everyone the page shows in one batch, and the saved turn with the waiting turns of
- * {@see NowNextSentences} in one. The Now and Next lines are left out for a ticket no team owns.
+ * and people, the names of everyone the page shows in one batch, the saved turn with the waiting turns of
+ * {@see NowNextSentences} in one, and the position in one. A list's project adds its lookup; a list the ticket is not
+ * in adds the plain list's position.
  */
 final class TicketShowController extends AbstractController
 {
@@ -52,23 +63,38 @@ final class TicketShowController extends AbstractController
         private readonly ClockInterface $clock,
         private readonly CurrentTimeZone $currentTimeZone,
         private readonly NowNextSentences $nowNextSentences,
+        private readonly ProjectQueries $projectQueries,
     ) {
     }
 
     #[Route('/t/{key}', name: self::ROUTE, methods: ['GET'])]
-    public function show(string $key): Response
+    public function show(string $key, Request $request): Response
     {
         $this->denyAccessUnlessGranted(OrganizationPermission::VIEW, $this->tenantContext->get());
         $actor = $this->currentActor->actorFor($this->getUser()) ?? throw $this->createAccessDeniedException();
-        $ticket = $this->ticketQueries->pageOf($key, $this->ticketVisibilities->ofActor($actor));
+        $visibility = $this->ticketVisibilities->ofActor($actor);
+        $ticket = $this->ticketQueries->pageOf($key, $visibility);
         if (null === $ticket || !$this->isGranted(TicketPermission::VIEW, $ticket->visibilityFacts)) {
             throw $this->createNotFoundException(self::NOT_FOUND);
+        }
+        $listContext = $this->listContextOf($request, $actor);
+        $position = $this->ticketQueries->positionOf($ticket->key, $listContext->filterFor($visibility), $visibility);
+        $positionContext = $listContext;
+        if (null === $position && !$listContext->isPlainList()) {
+            $positionContext = new TicketListContext();
+            $position = $this->ticketQueries->positionOf($ticket->key, $positionContext->filterFor($visibility), $visibility);
         }
 
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
 
         return $this->render('@Ticketing/show.html.twig', [
+            'backQuery' => $listContext->query(),
+            'position' => null === $position ? null : [
+                'line' => self::positionLineOf($position),
+                'previousUrl' => null === $position->previousKey ? null : $this->generateUrl(self::ROUTE, ['key' => $position->previousKey, ...$positionContext->query()]),
+                'nextUrl' => null === $position->nextKey ? null : $this->generateUrl(self::ROUTE, ['key' => $position->nextKey, ...$positionContext->query()]),
+            ],
             'ticket' => $ticket,
             'type' => ucfirst($ticket->type),
             'priority' => ucfirst($ticket->priority),
@@ -80,6 +106,27 @@ final class TicketShowController extends AbstractController
             'components' => implode(', ', $ticket->components),
             'turnLines' => $this->nowNextSentences->of($ticket),
         ]);
+    }
+
+    /**
+     * "3 of 61", with the list's capped counts: "1,000+" for a total past a step's cap, "1,003+" for a place past one.
+     */
+    public static function positionLineOf(TicketPosition $position): string
+    {
+        return TicketListText::countOf($position->index, $position->isIndexCapped).' of '.TicketListText::countOf($position->total, $position->isTotalCapped);
+    }
+
+    /**
+     * The list the viewer came from, from a list row's link; a filter the list would refuse here only drops the
+     * context, as the ticket itself is still there to show.
+     */
+    private function listContextOf(Request $request, ActorContext $viewer): TicketListContext
+    {
+        try {
+            return TicketListContext::fromRequest($request, $viewer, $this->projectQueries);
+        } catch (HttpExceptionInterface|BadRequestException) {
+            return new TicketListContext();
+        }
     }
 
     /**

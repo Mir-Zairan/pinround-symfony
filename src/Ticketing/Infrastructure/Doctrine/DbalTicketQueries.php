@@ -19,6 +19,7 @@ use App\Ticketing\Api\TicketListGroup;
 use App\Ticketing\Api\TicketListRow;
 use App\Ticketing\Api\TicketListStep;
 use App\Ticketing\Api\TicketPageView;
+use App\Ticketing\Api\TicketPosition;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Api\TicketVisibilityFacts;
@@ -37,13 +38,16 @@ use Doctrine\DBAL\Connection;
  * tkt_ticket_step_id_priority_rank_updated_at_id_idx or, for one project,
  * tkt_ticket_project_id_step_id_priority_rank_updated_at_id_idx. With a search, the LATERALs read only the tickets
  * search_ticket_ids returns, in search order. A ticket's page is read by (organization_id, key), the unique index
- * tkt_ticket_organization_id_key_key.
+ * tkt_ticket_organization_id_key_key; its place in a list (positionOf) by that index too, then by keyset over the
+ * list's indexes, the same capped step counts and, under a search, the same matches.
  */
 final readonly class DbalTicketQueries implements TicketQueries
 {
     private const string TICKET_ALIAS = 'ticket';
     private const string COUNTED_ALIAS = 'counted';
     private const string PARENT_ALIAS = 'parent';
+    private const string AHEAD_ALIAS = 'ahead';
+    private const string NEIGHBOUR_ALIAS = 'neighbour';
 
     public function __construct(
         private Connection $connection,
@@ -68,13 +72,9 @@ final readonly class DbalTicketQueries implements TicketQueries
             throw new \InvalidArgumentException('A cursor has a match position exactly when the list has a search.');
         }
 
-        $shownSteps = [];
-        foreach ($this->stepQueries->listedSteps() as $step) {
-            $isShown = ($filter->showsDone || TicketListGroup::DONE !== $step->groupCode)
-                && (null === $cursor || $cursor->stepId === $step->id);
-            if ($isShown) {
-                $shownSteps[$step->id] = $step;
-            }
+        $shownSteps = $this->shownStepsOf($filter);
+        if (null !== $cursor) {
+            $shownSteps = array_filter($shownSteps, static fn (ListedStepView $step): bool => $cursor->stepId === $step->id);
         }
         if ([] === $shownSteps) {
             return [];
@@ -83,6 +83,73 @@ final readonly class DbalTicketQueries implements TicketQueries
         $ticketRows = $this->connection->fetchAllAssociative(...$this->listQuery($filter, $cursor, $organizationId->toString(), array_keys($shownSteps)));
 
         return $this->groupsOf($ticketRows, $shownSteps);
+    }
+
+    public function positionOf(string $key, ListFilter $filter, TicketVisibility $viewer): ?TicketPosition
+    {
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('A ticket\'s place in a list is read in a transaction under the organization as tenant; none is open.');
+        }
+        $organizationId = $this->tenantContext->require();
+        if (!$organizationId->equals($viewer->organizationId())) {
+            throw new \LogicException('A ticket\'s place in a list is read under the viewer\'s own organization as tenant.');
+        }
+        if (!self::isSameViewer($filter->visibility, $viewer)) {
+            throw new \InvalidArgumentException('A ticket\'s place in a list is read under the list\'s own viewer.');
+        }
+        if (!self::canBeTicketKey($key)) {
+            return null;
+        }
+        $shownSteps = $this->shownStepsOf($filter);
+        if ([] === $shownSteps) {
+            return null;
+        }
+
+        $visibleTicket = TicketVisibilitySql::of($viewer, self::TICKET_ALIAS);
+        $parameters = [...self::listParametersOf($filter, $organizationId->toString(), array_keys($shownSteps), $visibleTicket), 'key' => $key];
+        $row = $this->connection->fetchAssociative(...(null === $filter->searchText
+            ? $this->priorityPositionQuery($filter, $parameters, $visibleTicket)
+            : $this->searchPositionQuery($filter, $filter->searchText, $parameters, $visibleTicket)));
+        if (false === $row) {
+            return null;
+        }
+
+        return new TicketPosition(
+            self::integer($row['list_index'], 'list index'),
+            self::integer($row['total_count'], 'total count'),
+            self::textOrNull($row['previous_key'], 'previous key'),
+            self::textOrNull($row['next_key'], 'next key'),
+            self::boolean($row['is_total_capped'], 'total capped'),
+            self::boolean($row['is_index_capped'], 'index capped'),
+        );
+    }
+
+    /**
+     * The steps the filter's list shows, by id in list order: every listed step, Done only when the filter shows it.
+     *
+     * @return array<string, ListedStepView>
+     */
+    private function shownStepsOf(ListFilter $filter): array
+    {
+        $shownSteps = [];
+        foreach ($this->stepQueries->listedSteps() as $step) {
+            if ($filter->showsDone || TicketListGroup::DONE !== $step->groupCode) {
+                $shownSteps[$step->id] = $step;
+            }
+        }
+
+        return $shownSteps;
+    }
+
+    private static function isSameViewer(TicketVisibility $one, TicketVisibility $other): bool
+    {
+        $teamIdsOf = static fn (TicketVisibility $visibility): array => array_map(static fn (TeamId $teamId): string => $teamId->toString(), $visibility->teamIds());
+
+        return $one->organizationId()->equals($other->organizationId())
+            && $one->viewerId()->equals($other->viewerId())
+            && $teamIdsOf($one) === $teamIdsOf($other)
+            && $one->isAdmin() === $other->isAdmin()
+            && $one->isTriager() === $other->isTriager();
     }
 
     public function pageOf(string $key, TicketVisibility $viewer): ?TicketPageView
@@ -222,6 +289,22 @@ final readonly class DbalTicketQueries implements TicketQueries
     private function listQuery(ListFilter $filter, ?Cursor $cursor, string $organizationId, array $stepIds): array
     {
         $visibleTicket = TicketVisibilitySql::of($filter->visibility, self::TICKET_ALIAS);
+        $parameters = self::listParametersOf($filter, $organizationId, $stepIds, $visibleTicket);
+
+        if (null === $filter->searchText) {
+            return $this->priorityListQuery($filter, $cursor, $parameters, $visibleTicket);
+        }
+
+        return $this->searchListQuery($filter, $filter->searchText, $cursor, $parameters, $visibleTicket);
+    }
+
+    /**
+     * @param non-empty-list<string> $stepIds in list order
+     *
+     * @return array<string, string>
+     */
+    private static function listParametersOf(ListFilter $filter, string $organizationId, array $stepIds, TicketVisibilitySql $visibleTicket): array
+    {
         $parameters = [
             'organization' => $organizationId,
             // The ids come from the database as canonical uuids, so they need no quoting inside the array literal.
@@ -235,11 +318,130 @@ final readonly class DbalTicketQueries implements TicketQueries
             $parameters['assignee'] = $filter->assigneeId;
         }
 
-        if (null === $filter->searchText) {
-            return $this->priorityListQuery($filter, $cursor, $parameters, $visibleTicket);
-        }
+        return $parameters;
+    }
 
-        return $this->searchListQuery($filter, $filter->searchText, $cursor, $parameters, $visibleTicket);
+    /**
+     * The visible tickets of the filter's project and assignee in one step, as a WHERE condition on the alias.
+     *
+     * @param string $stepId the SQL of the step's id, a column of the outer query
+     */
+    private static function stepTicketsConditionOf(ListFilter $filter, string $alias, TicketVisibilitySql $visible, string $stepId): string
+    {
+        return $alias.'.organization_id = CAST(:organization AS uuid) AND '.$alias.'.step_id = '.$stepId
+            .self::projectConditionOf($filter, $alias).self::assigneeConditionOf($filter, $alias).' AND '.$visible->sql();
+    }
+
+    /**
+     * A LATERAL's body that counts at most COUNT_CAP + 1 of a step's tickets in the row fetch's order, so it reads the
+     * list's index and stops there; one more than the cap says the step holds more than it counts.
+     */
+    private static function cappedStepCountOf(ListFilter $filter, TicketVisibilitySql $visibleCounted, string $stepId): string
+    {
+        return 'SELECT count(*) AS ticket_count FROM ('
+            .'SELECT 1 FROM tkt_ticket AS counted'
+            .' WHERE '.self::stepTicketsConditionOf($filter, self::COUNTED_ALIAS, $visibleCounted, $stepId)
+            .' ORDER BY counted.priority_rank, counted.updated_at DESC, counted.id DESC'
+            .' LIMIT '.(TicketListStep::COUNT_CAP + 1)
+            .') AS capped';
+    }
+
+    /**
+     * The ticket's place without a search, never sorting a whole step: the target by (organization_id, key); "N" as
+     * the capped counts of the earlier steps plus the tickets ahead of it in its own step, read in two index ranges
+     * (a higher priority; the same one, updated later or with a higher id), each stopping past the cap; "M" as the
+     * capped counts of every shown step. Each neighbour is the nearest row by keyset in its own step, first at the
+     * same priority, then at the next one, else the edge row of the nearest earlier or later step that holds one.
+     *
+     * @param array<string, string> $parameters
+     *
+     * @return array{string, array<string, string>}
+     */
+    private function priorityPositionQuery(ListFilter $filter, array $parameters, TicketVisibilitySql $visibleTicket): array
+    {
+        $visibleCounted = TicketVisibilitySql::of($filter->visibility, self::COUNTED_ALIAS);
+        $visibleAhead = TicketVisibilitySql::of($filter->visibility, self::AHEAD_ALIAS);
+        $visibleNeighbour = TicketVisibilitySql::of($filter->visibility, self::NEIGHBOUR_ALIAS);
+        $parameters = [...$parameters, ...$visibleCounted->parameters(), ...$visibleAhead->parameters(), ...$visibleNeighbour->parameters()];
+        $cap = TicketListStep::COUNT_CAP;
+        $aheadInStep = self::stepTicketsConditionOf($filter, self::AHEAD_ALIAS, $visibleAhead, 'target.step_id');
+        $neighbourInStep = self::stepTicketsConditionOf($filter, self::NEIGHBOUR_ALIAS, $visibleNeighbour, 'target.step_id');
+        $neighbourInListedStep = self::stepTicketsConditionOf($filter, self::NEIGHBOUR_ALIAS, $visibleNeighbour, 'other_step.step_id');
+        $listOrder = ' ORDER BY neighbour.priority_rank, neighbour.updated_at DESC, neighbour.id DESC LIMIT 1';
+        $reversedListOrder = ' ORDER BY neighbour.priority_rank DESC, neighbour.updated_at, neighbour.id LIMIT 1';
+
+        $sql = 'WITH listed AS MATERIALIZED (SELECT step_id, list_position'
+            .' FROM unnest(CAST(:step_ids AS uuid[])) WITH ORDINALITY AS listed(step_id, list_position)),'
+            .' target AS MATERIALIZED (SELECT ticket.id, ticket.step_id, ticket.priority_rank, ticket.updated_at, listed.list_position'
+            .' FROM tkt_ticket AS ticket JOIN listed ON listed.step_id = ticket.step_id'
+            .' WHERE ticket.organization_id = CAST(:organization AS uuid) AND ticket.key = :key'
+            .self::projectConditionOf($filter, self::TICKET_ALIAS).self::assigneeConditionOf($filter, self::TICKET_ALIAS)
+            .' AND '.$visibleTicket->sql().')'
+            // Past the cap in its own step the place is a lower bound that never passes the step's capped count.
+            .' SELECT CAST(totals.earlier_count + least(ahead.ticket_count + 1, '.$cap.') AS integer) AS list_index,'
+            .' CAST(totals.total_count AS integer) AS total_count, totals.is_total_capped,'
+            .' totals.is_earlier_capped OR ahead.ticket_count >= '.$cap.' AS is_index_capped,'
+            .' COALESCE('
+            .'(SELECT neighbour.key FROM tkt_ticket AS neighbour WHERE '.$neighbourInStep
+            .' AND neighbour.priority_rank = target.priority_rank AND (neighbour.updated_at, neighbour.id) > (target.updated_at, target.id)'
+            .' ORDER BY neighbour.updated_at, neighbour.id LIMIT 1),'
+            .' (SELECT neighbour.key FROM tkt_ticket AS neighbour WHERE '.$neighbourInStep
+            .' AND neighbour.priority_rank < target.priority_rank'.$reversedListOrder.'),'
+            .' (SELECT edge.key FROM listed AS other_step CROSS JOIN LATERAL ('
+            .'SELECT neighbour.key FROM tkt_ticket AS neighbour WHERE '.$neighbourInListedStep.$reversedListOrder.') AS edge'
+            .' WHERE other_step.list_position < target.list_position ORDER BY other_step.list_position DESC LIMIT 1)'
+            .') AS previous_key,'
+            .' COALESCE('
+            .'(SELECT neighbour.key FROM tkt_ticket AS neighbour WHERE '.$neighbourInStep
+            .' AND neighbour.priority_rank = target.priority_rank AND (neighbour.updated_at, neighbour.id) < (target.updated_at, target.id)'
+            .' ORDER BY neighbour.updated_at DESC, neighbour.id DESC LIMIT 1),'
+            .' (SELECT neighbour.key FROM tkt_ticket AS neighbour WHERE '.$neighbourInStep
+            .' AND neighbour.priority_rank > target.priority_rank'.$listOrder.'),'
+            .' (SELECT edge.key FROM listed AS other_step CROSS JOIN LATERAL ('
+            .'SELECT neighbour.key FROM tkt_ticket AS neighbour WHERE '.$neighbourInListedStep.$listOrder.') AS edge'
+            .' WHERE other_step.list_position > target.list_position ORDER BY other_step.list_position LIMIT 1)'
+            .') AS next_key'
+            .' FROM target'
+            .' CROSS JOIN LATERAL (SELECT'
+            .' COALESCE(sum(least(step_count.ticket_count, '.$cap.')) FILTER (WHERE listed.list_position < target.list_position), 0) AS earlier_count,'
+            .' COALESCE(bool_or(step_count.ticket_count > '.$cap.') FILTER (WHERE listed.list_position < target.list_position), false) AS is_earlier_capped,'
+            .' sum(least(step_count.ticket_count, '.$cap.')) AS total_count,'
+            .' bool_or(step_count.ticket_count > '.$cap.') AS is_total_capped'
+            .' FROM listed CROSS JOIN LATERAL ('.self::cappedStepCountOf($filter, $visibleCounted, 'listed.step_id').') AS step_count) AS totals'
+            .' CROSS JOIN LATERAL (SELECT count(*) AS ticket_count FROM ('
+            .'(SELECT 1 FROM tkt_ticket AS ahead WHERE '.$aheadInStep.' AND ahead.priority_rank < target.priority_rank'
+            .' ORDER BY ahead.priority_rank, ahead.updated_at DESC, ahead.id DESC LIMIT '.($cap + 1).')'
+            .' UNION ALL (SELECT 1 FROM tkt_ticket AS ahead WHERE '.$aheadInStep
+            .' AND ahead.priority_rank = target.priority_rank AND (ahead.updated_at, ahead.id) > (target.updated_at, target.id)'
+            .' ORDER BY ahead.updated_at DESC, ahead.id DESC LIMIT '.($cap + 1).')'
+            .') AS ahead_rows) AS ahead';
+
+        return [$sql, $parameters];
+    }
+
+    /**
+     * The ticket's place among the matches list() reads under a search, at most COUNT_CAP of them, ranked in its order:
+     * the steps' list order, then the exact key, the match score and the id, all highest first.
+     *
+     * @param array<string, string> $parameters
+     *
+     * @return array{string, array<string, string|int|null>}
+     */
+    private function searchPositionQuery(ListFilter $filter, string $searchText, array $parameters, TicketVisibilitySql $visibleTicket): array
+    {
+        [$searchedCtes, $parameters] = self::searchedCtesOf($filter, $searchText, $parameters, $visibleTicket);
+        $sql = $searchedCtes.','
+            .' ordered AS (SELECT searched.key, row_number() OVER list_order AS list_index,'
+            .' lag(searched.key) OVER list_order AS previous_key, lead(searched.key) OVER list_order AS next_key,'
+            .' count(*) OVER () AS total_count'
+            .' FROM searched JOIN unnest(CAST(:step_ids AS uuid[])) WITH ORDINALITY AS listed(step_id, list_position) ON listed.step_id = searched.step_id'
+            .' WINDOW list_order AS (ORDER BY listed.list_position, searched.is_exact_key_match DESC, searched.match_score DESC, searched.id DESC))'
+            .' SELECT CAST(ordered.list_index AS integer) AS list_index, CAST(ordered.total_count AS integer) AS total_count,'
+            .' ordered.previous_key, ordered.next_key,'
+            .' (SELECT count(*) FROM matched) > '.TicketListStep::COUNT_CAP.' AS is_total_capped, false AS is_index_capped'
+            .' FROM ordered WHERE ordered.key = :key';
+
+        return [$sql, $parameters];
     }
 
     /**
@@ -253,10 +455,7 @@ final readonly class DbalTicketQueries implements TicketQueries
     {
         $visibleCounted = TicketVisibilitySql::of($filter->visibility, self::COUNTED_ALIAS);
         $parameters = [...$parameters, ...$visibleCounted->parameters()];
-        $ticketConditions = 'ticket.organization_id = CAST(:organization AS uuid) AND ticket.step_id = listed.step_id'
-            .self::projectConditionOf($filter, self::TICKET_ALIAS).self::assigneeConditionOf($filter, self::TICKET_ALIAS);
-        $countedConditions = 'counted.organization_id = CAST(:organization AS uuid) AND counted.step_id = listed.step_id'
-            .self::projectConditionOf($filter, self::COUNTED_ALIAS).self::assigneeConditionOf($filter, self::COUNTED_ALIAS);
+        $ticketConditions = self::stepTicketsConditionOf($filter, self::TICKET_ALIAS, $visibleTicket, 'listed.step_id');
         if (null !== $cursor) {
             $ticketConditions .= ' AND (ticket.priority_rank > CAST(:after_rank AS smallint)'
                 .' OR (ticket.priority_rank = CAST(:after_rank AS smallint)'
@@ -269,17 +468,12 @@ final readonly class DbalTicketQueries implements TicketQueries
         $sql = 'SELECT listed.step_id, page.id, page.key, page.title, page.type, page.release, page.priority, page.priority_rank,'
             .' page.assignee_id, page.updated_at, step_count.ticket_count'
             .' FROM unnest(CAST(:step_ids AS uuid[])) WITH ORDINALITY AS listed(step_id, list_position)'
-            .' CROSS JOIN LATERAL (SELECT count(*) AS ticket_count FROM ('
-            .'SELECT 1 FROM tkt_ticket AS counted'
-            .' WHERE '.$countedConditions.' AND '.$visibleCounted->sql()
-            .' ORDER BY counted.priority_rank, counted.updated_at DESC, counted.id DESC'
-            .' LIMIT '.(TicketListStep::COUNT_CAP + 1)
-            .') AS capped) AS step_count'
+            .' CROSS JOIN LATERAL ('.self::cappedStepCountOf($filter, $visibleCounted, 'listed.step_id').') AS step_count'
             .' CROSS JOIN LATERAL ('
             .'SELECT ticket.id, ticket.key, ticket.title, ticket.type, ticket.release, ticket.priority, ticket.priority_rank,'
             .' ticket.assignee_id, ticket.updated_at'
             .' FROM tkt_ticket AS ticket'
-            .' WHERE '.$ticketConditions.' AND '.$visibleTicket->sql()
+            .' WHERE '.$ticketConditions
             .' ORDER BY ticket.priority_rank, ticket.updated_at DESC, ticket.id DESC'
             .' LIMIT '.(TicketListStep::PAGE_SIZE + 1)
             .') AS page'
@@ -302,15 +496,7 @@ final readonly class DbalTicketQueries implements TicketQueries
      */
     private function searchListQuery(ListFilter $filter, string $searchText, ?Cursor $cursor, array $parameters, TicketVisibilitySql $visibleTicket): array
     {
-        $visibility = $filter->visibility;
-        $parameters['search_text'] = $searchText;
-        $parameters['search_viewer'] = $visibility->viewerId()->toString();
-        // As in TicketVisibilitySql: pdo_pgsql binds no arrays, and a uuid holds no comma or brace.
-        $parameters['search_team_ids'] = '{'.implode(',', array_map(static fn (TeamId $teamId): string => $teamId->toString(), $visibility->teamIds())).'}';
-        $parameters['search_is_admin'] = $visibility->isAdmin() ? 'true' : 'false';
-        $parameters['search_is_triager'] = $visibility->isTriager() ? 'true' : 'false';
-        $parameters['search_project'] = $filter->projectId;
-        $parameters['search_assignee'] = $filter->assigneeId;
+        [$searchedCtes, $parameters] = self::searchedCtesOf($filter, $searchText, $parameters, $visibleTicket);
         $pageConditions = 'searched.step_id = listed.step_id';
         $searchOrderValues = $cursor?->searchOrderValues();
         if (null !== $cursor && null !== $searchOrderValues) {
@@ -320,6 +506,41 @@ final readonly class DbalTicketQueries implements TicketQueries
             $parameters['after_match_score'] = $searchOrderValues[1];
             $parameters['after_id'] = $cursor->ticketId->toString();
         }
+
+        $sql = $searchedCtes
+            .' SELECT listed.step_id, page.id, page.key, page.title, page.type, page.release, page.priority, page.priority_rank,'
+            .' page.assignee_id, page.updated_at, page.is_exact_key_match, page.match_score, step_count.ticket_count,'
+            .' (SELECT count(*) FROM matched) > '.TicketListStep::COUNT_CAP.' AS is_search_capped'
+            .' FROM unnest(CAST(:step_ids AS uuid[])) WITH ORDINALITY AS listed(step_id, list_position)'
+            .' CROSS JOIN LATERAL (SELECT count(*) AS ticket_count FROM searched WHERE searched.step_id = listed.step_id) AS step_count'
+            .' CROSS JOIN LATERAL (SELECT searched.* FROM searched WHERE '.$pageConditions
+            .' ORDER BY searched.is_exact_key_match DESC, searched.match_score DESC, searched.id DESC'
+            .' LIMIT '.(TicketListStep::PAGE_SIZE + 1).') AS page'
+            .' ORDER BY listed.list_position, page.is_exact_key_match DESC, page.match_score DESC, page.id DESC';
+
+        return [$sql, $parameters];
+    }
+
+    /**
+     * The WITH clause both search reads share: "matched", the ids search_ticket_ids returns, which applies the list's
+     * project, steps and assignee before its cap, and "searched", the first COUNT_CAP of them joined back to tkt_ticket
+     * under the filter's project, assignee and visibility, each with its exact-key flag and match score.
+     *
+     * @param array<string, string|int|null> $parameters
+     *
+     * @return array{string, array<string, string|int|null>}
+     */
+    private static function searchedCtesOf(ListFilter $filter, string $searchText, array $parameters, TicketVisibilitySql $visibleTicket): array
+    {
+        $visibility = $filter->visibility;
+        $parameters['search_text'] = $searchText;
+        $parameters['search_viewer'] = $visibility->viewerId()->toString();
+        // As in TicketVisibilitySql: pdo_pgsql binds no arrays, and a uuid holds no comma or brace.
+        $parameters['search_team_ids'] = '{'.implode(',', array_map(static fn (TeamId $teamId): string => $teamId->toString(), $visibility->teamIds())).'}';
+        $parameters['search_is_admin'] = $visibility->isAdmin() ? 'true' : 'false';
+        $parameters['search_is_triager'] = $visibility->isTriager() ? 'true' : 'false';
+        $parameters['search_project'] = $filter->projectId;
+        $parameters['search_assignee'] = $filter->assigneeId;
 
         // The score as search_ticket_ids orders by it; the function owns the formula, this only repeats it.
         $matchScore = "ts_rank(ticket.search, websearch_to_tsquery('simple', tkt_unaccent(CAST(:search_text AS text)))) * 0.6"
@@ -337,16 +558,7 @@ final readonly class DbalTicketQueries implements TicketQueries
             .' WHERE matched.found_position <= '.TicketListStep::COUNT_CAP
             .' AND ticket.organization_id = CAST(:organization AS uuid) AND ticket.step_id = ANY(CAST(:step_ids AS uuid[]))'
             .self::projectConditionOf($filter, self::TICKET_ALIAS).self::assigneeConditionOf($filter, self::TICKET_ALIAS)
-            .' AND '.$visibleTicket->sql().')'
-            .' SELECT listed.step_id, page.id, page.key, page.title, page.type, page.release, page.priority, page.priority_rank,'
-            .' page.assignee_id, page.updated_at, page.is_exact_key_match, page.match_score, step_count.ticket_count,'
-            .' (SELECT count(*) FROM matched) > '.TicketListStep::COUNT_CAP.' AS is_search_capped'
-            .' FROM unnest(CAST(:step_ids AS uuid[])) WITH ORDINALITY AS listed(step_id, list_position)'
-            .' CROSS JOIN LATERAL (SELECT count(*) AS ticket_count FROM searched WHERE searched.step_id = listed.step_id) AS step_count'
-            .' CROSS JOIN LATERAL (SELECT searched.* FROM searched WHERE '.$pageConditions
-            .' ORDER BY searched.is_exact_key_match DESC, searched.match_score DESC, searched.id DESC'
-            .' LIMIT '.(TicketListStep::PAGE_SIZE + 1).') AS page'
-            .' ORDER BY listed.list_position, page.is_exact_key_match DESC, page.match_score DESC, page.id DESC';
+            .' AND '.$visibleTicket->sql().')';
 
         return [$sql, $parameters];
     }

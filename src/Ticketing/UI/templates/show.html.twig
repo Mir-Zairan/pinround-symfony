@@ -14,12 +14,21 @@
 {% block main %}
     <article class="ticket" data-ticket-key="{{ ticket.key }}">
         <header class="ticket__header">
-            <twig:Button variant="text" href="{{ path('ticketing_tickets') }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Tickets</twig:Button>
-            <p class="ticket__key-line">
-                <span class="ticket__key">{{ ticket.key }}</span>
-                <span class="ticket__kind">{{ type }} · {{ ticket.projectName }}</span>
-                {% if ticket.isTeamOnly %}<twig:Tag class="ticket__team-only">Only the team and admins see this</twig:Tag>{% endif %}
-            </p>
+            <twig:Button variant="text" href="{{ path('ticketing_tickets', backQuery) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Tickets</twig:Button>
+            <div class="ticket__key-row">
+                <p class="ticket__key-line">
+                    <span class="ticket__key">{{ ticket.key }}</span>
+                    <span class="ticket__kind">{{ type }} · {{ ticket.projectName }}</span>
+                    {% if ticket.isTeamOnly %}<twig:Tag class="ticket__team-only">Only the team and admins see this</twig:Tag>{% endif %}
+                </p>
+                {% if position is not null %}
+                    <nav class="ticket__position" aria-label="Tickets in this list">
+                        <span class="ticket__position-line">{{ position.line }}</span>
+                        <twig:Button variant="outline" size="sm" href="{{ position.previousUrl ?? '' }}" :disabled="position.previousUrl is null" class="ticket__previous">Previous</twig:Button>
+                        <twig:Button variant="outline" size="sm" href="{{ position.nextUrl ?? '' }}" :disabled="position.nextUrl is null" class="ticket__next-ticket">Next</twig:Button>
+                    </nav>
+                {% endif %}
+            </div>
             <h1 class="ticket__title">{{ ticket.title }}</h1>
             <div class="ticket__state">
                 <twig:StatusPill group="{{ pillGroup }}">{{ ticket.stepName }}</twig:StatusPill>

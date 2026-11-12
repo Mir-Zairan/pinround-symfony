@@ -20,6 +20,7 @@ use App\Ticketing\Api\TicketListGroup;
 use App\Ticketing\Api\TicketListRow;
 use App\Ticketing\Api\TicketListStep;
 use App\Ticketing\Api\TicketPageView;
+use App\Ticketing\Api\TicketPosition;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries;
@@ -837,6 +838,188 @@ final class DbalTicketQueriesTest extends KernelTestCase
         });
 
         self::assertSame(['A ticket page is read under the viewer\'s own organization as tenant.', 0], $refusal);
+    }
+
+    /**
+     * In progress and Pairing hold no ticket, so Next from Review's last ticket skips them to To do's first, and
+     * Previous from there comes back; the first ticket of the list has no Previous and the last no Next.
+     */
+    #[Test]
+    public function aPositionCrossesIntoTheNearestStepThatHoldsATicket(): void
+    {
+        $reviewLater = $this->addTicket(self::CHECKING_STEP, 2, '2027-03-15 09:00:00+00');
+        $toDoSecond = $this->addTicket(ShopTeamRows::TO_DO_STEP, 3, '2027-03-15 10:00:00+00');
+        $toDoFirst = $this->addTicket(ShopTeamRows::TO_DO_STEP, 1, '2027-03-15 08:00:00+00');
+        $reviewFirst = $this->addTicket(self::CHECKING_STEP, 2, '2027-03-15 11:00:00+00');
+        $triage = $this->addTicket(self::COMPANY_TODO_STEP, 0, '2027-03-15 12:00:00+00');
+        $this->addTicket(self::DONE_STEP, 0, '2027-03-15 12:00:00+00');
+
+        $positions = array_map(fn (string $key): ?array => self::shapeOfPosition($this->positionAs(self::ACME_FOODS, $key, $this->filter())), [$reviewFirst, $reviewLater, $toDoFirst, $toDoSecond, $triage]);
+
+        self::assertSame([
+            [1, 5, null, $reviewLater, false, false],
+            [2, 5, $reviewFirst, $toDoFirst, false, false],
+            [3, 5, $reviewLater, $toDoSecond, false, false],
+            [4, 5, $toDoFirst, $triage, false, false],
+            [5, 5, $toDoSecond, null, false, false],
+        ], $positions);
+    }
+
+    /**
+     * Ties on the rank and updated_at go by id, highest first, as in the list; a newer ticket of the same rank comes
+     * before both, and a higher rank before all.
+     */
+    #[Test]
+    public function aPositionFollowsTheListsOrderInsideAStep(): void
+    {
+        $tiedLower = $this->addTicket(ShopTeamRows::TO_DO_STEP, 3, '2027-03-15 10:00:00+00');
+        $tiedHigher = $this->addTicket(ShopTeamRows::TO_DO_STEP, 3, '2027-03-15 10:00:00+00');
+        $newer = $this->addTicket(ShopTeamRows::TO_DO_STEP, 3, '2027-03-15 11:00:00+00');
+        $blocker = $this->addTicket(ShopTeamRows::TO_DO_STEP, 0, '2027-03-15 08:00:00+00');
+        $listed = self::keysOf($this->listedAs(self::ACME_FOODS, $this->filter())[0]->steps[0]);
+        self::assertSame([$blocker, $newer, $tiedHigher, $tiedLower], $listed);
+
+        $position = $this->positionAs(self::ACME_FOODS, $tiedHigher, $this->filter());
+
+        self::assertSame([3, 4, $newer, $tiedLower, false, false], self::shapeOfPosition($position));
+    }
+
+    /**
+     * To do holds one ticket past the cap, so the total is capped like the list's count; its first ticket's place is
+     * whole, and its last one's, a thousand tickets down, is the lower bound "1,001+" that never passes the total.
+     */
+    #[Test]
+    public function aPositionCountsAtMostTheCapPerStepAndSaysWhenItIsPastIt(): void
+    {
+        $doing = $this->addTicket(self::DOING_STEP, 2, '2027-03-15 10:00:00+00');
+        $firstNumber = $this->nextNumber;
+        $this->addManyTickets(ShopTeamRows::TO_DO_STEP, TicketListStep::COUNT_CAP + 1);
+        $newestToDo = 'SHOP-'.($firstNumber + TicketListStep::COUNT_CAP);
+        $secondNewestToDo = 'SHOP-'.($firstNumber + TicketListStep::COUNT_CAP - 1);
+
+        $first = $this->positionAs(self::ACME_FOODS, $newestToDo, $this->filter());
+        $last = $this->positionAs(self::ACME_FOODS, 'SHOP-'.$firstNumber, $this->filter());
+
+        self::assertSame([2, 1001, $doing, $secondNewestToDo, true, false], self::shapeOfPosition($first));
+        self::assertSame([1001, 1001, 'SHOP-'.($firstNumber + 1), null, true, true], self::shapeOfPosition($last));
+    }
+
+    /**
+     * Each filter the list has keeps its tickets out of the position as well: another project's ticket, one assigned
+     * to someone else, a Done ticket while Done is hidden, an unknown key.
+     */
+    #[Test]
+    public function aTicketNotInTheListHasNoPosition(): void
+    {
+        $shop = $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+        new TicketRows($this->migrator(), $this->tenantContext())->addKeyedProjectOf(self::ACME_FOODS, self::OPS_PROJECT, null, 'OPS', 1);
+        $ops = $this->addTicket(ShopTeamRows::TO_DO_STEP, 1, '2027-03-15 10:00:00+00', self::OPS_PROJECT);
+        $done = $this->addTicket(self::DONE_STEP, 2, '2027-03-15 10:00:00+00');
+        $assigned = $this->addTicket(ShopTeamRows::TO_DO_STEP, 3, '2027-03-15 10:00:00+00');
+        $this->assign([$assigned], self::OMAR);
+
+        self::assertSame([1, 2, null, $assigned, false, false], self::shapeOfPosition($this->positionAs(self::ACME_FOODS, $shop, $this->filter(self::SHOP_PROJECT))));
+        self::assertNull($this->positionAs(self::ACME_FOODS, $ops, $this->filter(self::SHOP_PROJECT)));
+        self::assertNull($this->positionAs(self::ACME_FOODS, $shop, $this->filter(assigneeId: self::OMAR)));
+        self::assertSame([1, 1, null, null, false, false], self::shapeOfPosition($this->positionAs(self::ACME_FOODS, $assigned, $this->filter(assigneeId: self::OMAR))));
+        self::assertNull($this->positionAs(self::ACME_FOODS, $done, $this->filter()));
+        self::assertSame([4, 4, $assigned, null, false, false], self::shapeOfPosition($this->positionAs(self::ACME_FOODS, $done, $this->filter(showsDone: true))));
+        self::assertNull($this->positionAs(self::ACME_FOODS, 'SHOP-99', $this->filter()));
+    }
+
+    /**
+     * The search's order: the exact key first, though it is the lowest priority, then the matches by score and id.
+     */
+    #[Test]
+    public function aSearchPositionFollowsTheSearchOrder(): void
+    {
+        $refundBlocker = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 0, '2027-03-15 10:00:00+00', 'Refund email is late', '');
+        $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 0, '2027-03-15 10:00:00+00', 'Add a gift note', '');
+        $refundMinor = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 4, '2027-03-15 10:00:00+00', 'Refund email is late', '');
+        $refundInReview = $this->addSearchableTicket(self::CHECKING_STEP, 2, '2027-03-15 10:00:00+00', 'Refund email is late', '');
+
+        $position = $this->positionAs(self::ACME_FOODS, $refundMinor, $this->filter(searchText: 'refund'));
+        $exactKey = $this->positionAs(self::ACME_FOODS, $refundBlocker, $this->filter(searchText: $refundBlocker));
+
+        self::assertSame([2, 3, $refundInReview, $refundBlocker, false, false], self::shapeOfPosition($position));
+        self::assertSame(1, $exactKey?->index);
+    }
+
+    #[Test]
+    public function aKeyThatCannotBeATicketKeyHasNoPositionWithNoQuery(): void
+    {
+        $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+        $debugData = $this->debugData();
+
+        $found = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData): array {
+            $this->stepQueries()->listedSteps();
+            $debugData->reset();
+
+            return [$this->ticketQueries()->positionOf('shop-1', $this->filter(), self::adminOf(self::ACME_FOODS)), self::queryCountOf($debugData)];
+        });
+
+        self::assertSame([null, 0], $found);
+    }
+
+    #[Test]
+    public function aPositionUnderAnotherViewerThanTheListsIsRefusedBeforeAnyQuery(): void
+    {
+        $debugData = $this->debugData();
+        $otherViewer = TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], true, null);
+
+        $refusal = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $otherViewer): array {
+            $debugData->reset();
+            try {
+                $this->ticketQueries()->positionOf('SHOP-1', $this->filter(), $otherViewer);
+
+                return ['read', 0];
+            } catch (\InvalidArgumentException $refusal) {
+                return [$refusal->getMessage(), self::queryCountOf($debugData)];
+            }
+        });
+
+        self::assertSame(['A ticket\'s place in a list is read under the list\'s own viewer.', 0], $refusal);
+    }
+
+    /**
+     * The SQL names Acme Foods while the transaction's tenant is Beta Bakery: row-level security alone hides the
+     * ticket, so it has no position.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTicketPosition(): void
+    {
+        $key = $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+        self::assertNotNull($this->positionAs(self::ACME_FOODS, $key, $this->filter()));
+        $acmeStepQueries = self::createStub(StepQueries::class);
+        $acmeStepQueries->method('listedSteps')->willReturn($this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->stepQueries()->listedSteps()));
+
+        $positionUnderAcmeContext = new OwnConnectionTransactions($this->entityManager()->getConnection(), $this->tenantContext())->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            fn (Connection $connection): ?TicketPosition => new DbalTicketQueries(
+                $connection,
+                $this->tenantContext(),
+                $acmeStepQueries,
+                new DbalTurnUserQueries($connection, $this->tenantContext()),
+                new DbalUserQueries($connection),
+                new DbalTeamQueries($connection),
+            )->positionOf($key, $this->filter(), self::adminOf(self::ACME_FOODS)),
+        );
+
+        self::assertNull($positionUnderAcmeContext);
+    }
+
+    private function positionAs(string $organizationId, string $key, ListFilter $filter): ?TicketPosition
+    {
+        return $this->transactions()->rolledBackAs($organizationId, fn (): ?TicketPosition => $this->ticketQueries()->positionOf($key, $filter, $filter->visibility));
+    }
+
+    /**
+     * @return array{int, int, string|null, string|null, bool, bool}|null
+     */
+    private static function shapeOfPosition(?TicketPosition $position): ?array
+    {
+        return null === $position ? null : [$position->index, $position->total, $position->previousKey, $position->nextKey, $position->isTotalCapped, $position->isIndexCapped];
     }
 
     private function filter(?string $projectId = null, bool $showsDone = false, ?string $searchText = null, ?string $assigneeId = null): ListFilter

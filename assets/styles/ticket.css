@@ -17,6 +17,14 @@
   margin-left: calc(-1 * var(--space-12));
 }
 
+.ticket__key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8) var(--space-16);
+}
+
 .ticket__key-line {
   display: flex;
   flex-wrap: wrap;
@@ -25,6 +33,20 @@
   margin: 0;
   color: var(--on-surface-var);
   font-size: 13px;
+}
+
+.ticket__position {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.ticket__position-line {
+  color: var(--on-surface-var);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .ticket__key {

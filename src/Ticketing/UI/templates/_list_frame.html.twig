@@ -26,7 +26,8 @@
                                     <li class="tickets__row" data-ticket-key="{{ row.key }}">
                                         <span class="tickets__key">{{ row.key }}</span>
                                         <span class="tickets__summary">
-                                            <span class="tickets__row-title">{{ row.title }}</span>
+                                            {# _top: a row inside a "Show more" frame must open the whole ticket page, not replace that frame. #}
+                                            <a class="tickets__row-title tickets__row-link" href="{{ path('ticket_show', {key: row.key}|merge(listQuery)) }}" data-turbo-frame="_top">{{ row.title }}</a>
                                             <span class="tickets__meta">{{ row.meta }}</span>
                                         </span>
                                         <span class="tickets__priority{% if row.isUrgent %} tickets__priority--urgent{% endif %}">{{ row.priority }}</span>

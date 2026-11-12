@@ -36,6 +36,7 @@ final class TicketPageTest extends WebTestCase
     private const string SHELL = '/_test/menu/shell';
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string CREATED_THIS_YEAR = '2026-11-04 23:30:00+00';
+    private const string UPDATED_AT = '2026-11-10 09:00:00+00';
     private const string ROUNDS_EMPTY = 'No rounds yet. The developer starts round 1 from Claude Code: it shoots the screens and puts them here.';
     /** The title and default text a refused viewer must never get a word of. */
     private const string HIDDEN_TITLE = 'Price rules for staff';
@@ -521,9 +522,178 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
+     * SHOP's list holds seven open tickets; the third is D, after A in Code review and F in In progress, so Previous
+     * crosses back into the earlier step. Following Next from A gives the list's whole order, with H before C and B
+     * (newer), C before B (tied, higher id) and the Done and OPS tickets left out.
+     */
+    #[Test]
+    public function aProjectsListShowsTheTicketsPlaceAndWalksItsOrderKeepingTheProject(): void
+    {
+        $keys = $this->addTicketsToWalk();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$keys['D'].'?project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['3 of 7', '/t/'.$keys['F'].'?project=SHOP', '/t/'.$keys['H'].'?project=SHOP'], $this->positionOf($page));
+        self::assertSame('/tickets?project=SHOP', $page->filter('.ticket__back')->attr('href'));
+        self::assertSame([$keys['A'], $keys['F'], $keys['D'], $keys['H'], $keys['C'], $keys['B'], $keys['E']], $this->keysWalkedFrom('/t/'.$keys['A'].'?project=SHOP'));
+    }
+
+    #[Test]
+    public function thePreviousOfTheFirstTicketAndTheNextOfTheLastAreDisabledWithNoWrapAround(): void
+    {
+        $keys = $this->addTicketsToWalk();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $first = $this->client->request('GET', '/t/'.$keys['A'].'?project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['1 of 7', null, '/t/'.$keys['F'].'?project=SHOP'], $this->positionOf($first));
+        self::assertSame(['true', 'link', 'Previous'], [$first->filter('.ticket__previous')->attr('aria-disabled'), $first->filter('.ticket__previous')->attr('role'), $first->filter('.ticket__previous')->text()]);
+
+        $last = $this->client->request('GET', '/t/'.$keys['E'].'?project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['7 of 7', '/t/'.$keys['B'].'?project=SHOP', null], $this->positionOf($last));
+        self::assertSame('true', $last->filter('.ticket__next-ticket')->attr('aria-disabled'));
+        self::assertNull($first->filter('.ticket__next-ticket')->attr('aria-disabled'));
+    }
+
+    /**
+     * R1 is critical, so the priority order would put it before R2; under the search the steps keep their order and
+     * equal matches go by id, highest first. N matches nothing.
+     */
+    #[Test]
+    public function aSearchListWalksTheSearchOrder(): void
+    {
+        $r1 = $this->addTicket('Refund email is late', ['priority' => 'critical']);
+        $this->addTicket('Add a gift note');
+        $r2 = $this->addTicket('Refund email is late', ['priority' => 'normal']);
+        $r3 = $this->addTicket('Refund email is late', ['core' => 'review']);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$r2.'?q=refund');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['2 of 3', '/t/'.$r3.'?q=refund', '/t/'.$r1.'?q=refund'], $this->positionOf($page));
+        self::assertSame('/tickets?q=refund', $page->filter('.ticket__back')->attr('href'));
+        self::assertSame([$r3, $r2, $r1], $this->keysWalkedFrom('/t/'.$r3.'?q=refund'));
+    }
+
+    /**
+     * The plain open list holds OPS-8, a blocker of another project, before D, and no Done ticket.
+     */
+    #[Test]
+    public function withNoListTheTicketsPlaceIsInThePlainOpenList(): void
+    {
+        $keys = $this->addTicketsToWalk();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$keys['D']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['4 of 8', '/t/'.$keys['X'], '/t/'.$keys['H']], $this->positionOf($page));
+        self::assertSame('/tickets', $page->filter('.ticket__back')->attr('href'));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function listQueriesTheListRefuses(): iterable
+    {
+        yield 'a project of no key' => ['project=NOPE'];
+        yield 'another organization\'s project' => ['project=BAKE'];
+        yield 'a malformed person' => ['person=nobody'];
+        yield 'a team of no one here' => ['team=0197a3c0-0000-7000-8000-00000000dead'];
+        yield 'a team that is no uuid' => ['team=SHOP'];
+        yield 'a search too long' => ['q='.str_repeat('a', 201)];
+        yield 'a search that is not text' => ['q=check%C3out'];
+        yield 'a search as an array' => ['q[]=refund'];
+    }
+
+    /**
+     * A filter the list would answer with a 404 or a 400 only drops the list: the ticket still opens, in the plain
+     * open list, and back goes to the plain list.
+     */
+    #[Test]
+    #[DataProvider('listQueriesTheListRefuses')]
+    public function aListQueryTheListRefusesFallsBackToThePlainOpenList(string $listQuery): void
+    {
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addProject(null, 'BAKE', 'Bakery', $betaBakery);
+        $keys = $this->addTicketsToWalk();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$keys['D'].'?'.$listQuery);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['4 of 8', '/t/'.$keys['X'], '/t/'.$keys['H']], $this->positionOf($page));
+        self::assertSame('/tickets', $page->filter('.ticket__back')->attr('href'));
+    }
+
+    /**
+     * OPS-8 is not in SHOP's list, so it walks the plain open list; back still goes to the list the viewer came from.
+     */
+    #[Test]
+    public function aTicketNotInItsListWalksThePlainOpenList(): void
+    {
+        $keys = $this->addTicketsToWalk();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$keys['X'].'?project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['3 of 8', '/t/'.$keys['F'], '/t/'.$keys['D']], $this->positionOf($page));
+        self::assertSame('/tickets?project=SHOP', $page->filter('.ticket__back')->attr('href'));
+    }
+
+    #[Test]
+    public function aDoneTicketHasAPlaceOnlyInAListWithDone(): void
+    {
+        $keys = $this->addTicketsToWalk();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$keys['G']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Footer links point nowhere', $page->filter('h1')->text());
+        self::assertCount(0, $page->filter('.ticket__position'));
+
+        $page = $this->client->request('GET', '/t/'.$keys['G'].'?done=1');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['9 of 9', '/t/'.$keys['E'].'?done=1', null], $this->positionOf($page));
+    }
+
+    /**
      * Beyond the shell, with the steps and the rules cached: the settings (step policy and triager, one query), the
-     * ticket, its team's lead and people, the names of everyone in one batch, and the saved turn with the waiting
-     * turns in one query.
+     * ticket, its team's lead and people, the names of everyone in one batch, the saved turn with the waiting turns in
+     * one query, and the position in one; a project's list adds the project by key, and a list the ticket is not in
+     * adds the plain list's position.
+     */
+    #[Test]
+    public function aWarmPageReadsOneQueryForItsPlaceInEachList(): void
+    {
+        $keys = $this->addTicketsToWalk();
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->queryCountOf(self::SHELL);
+        $shellQueryCount = $this->queryCountOf(self::SHELL);
+        $this->queryCountOf('/t/'.$keys['D']);
+
+        $queryCounts = [];
+        foreach (['/t/'.$keys['D'], '/t/'.$keys['D'].'?project=SHOP', '/t/'.$keys['D'].'?q=checkout', '/t/'.$keys['X'].'?project=SHOP'] as $uri) {
+            $queryCounts[] = $this->queryCountOf($uri) - $shellQueryCount;
+            self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'), $uri);
+        }
+
+        self::assertSame([7, 8, 7, 9], $queryCounts);
+    }
+
+    /**
+     * Beyond the shell, with the steps and the rules cached: the settings (step policy and triager, one query), the
+     * ticket, its team's lead and people, the names of everyone in one batch, the saved turn with the waiting turns in
+     * one query, and the ticket's place in the plain open list in one.
      */
     #[Test]
     public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
@@ -542,7 +712,65 @@ final class TicketPageTest extends WebTestCase
 
         self::assertSame([['Assignee', 'Omar'], ['Priority', 'Major'], ['Release', '2.4'], ['Parent', 'SHOP-1'], ['Components', 'Checkout'], ['Created', '5 Nov']], $this->detailsOf($this->client->getCrawler()));
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
-        self::assertSame(6, $pageQueryCount);
+        self::assertSame(7, $pageQueryCount);
+    }
+
+    /**
+     * Inserted out of list order. SHOP's open list: A (Code review), F (In progress), then To do: D (critical), H
+     * (major, newest), C and B (major, tied on updated_at, C with the higher id), E (minor). OPS-8, a blocker in To do
+     * of project OPS, is only in the plain list; G is in Done.
+     *
+     * @return array<string, string> each ticket's key by its letter
+     */
+    private function addTicketsToWalk(): array
+    {
+        $opsProject = $this->addProject($this->shop, 'OPS', 'Operations');
+        $keys = [];
+        $keys['E'] = $this->addTicket('Coupon field takes any text', ['priority' => 'minor', 'updatedAt' => '2026-11-10 12:00:00+00']);
+        $keys['H'] = $this->addTicket('Cart icon overlaps the menu', ['updatedAt' => '2026-11-10 10:00:00+00']);
+        $keys['B'] = $this->addTicket('Add a gift note');
+        $keys['F'] = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress']);
+        $keys['D'] = $this->addTicket('Checkout button is hidden', ['priority' => 'critical', 'updatedAt' => '2026-11-09 08:00:00+00']);
+        $keys['C'] = $this->addTicket('Add a gift wrap');
+        $keys['A'] = $this->addTicket('Search shows no results', ['core' => 'review']);
+        $keys['X'] = $this->addTicket('Stock count is off', ['priority' => 'blocker', 'project' => [$opsProject, 'OPS']]);
+        $keys['G'] = $this->addTicket('Footer links point nowhere', ['group' => 'done']);
+        self::assertSame('OPS-8', $keys['X']);
+
+        return $keys;
+    }
+
+    /**
+     * @return array{string, string|null, string|null} the "N of M" line and the Previous and Next links; null for a
+     *                                                 disabled one
+     */
+    private function positionOf(Crawler $page): array
+    {
+        $position = $page->filter('.ticket__position');
+        self::assertCount(1, $position, 'The page has no position line.');
+
+        return [
+            $position->filter('.ticket__position-line')->text(),
+            $position->filter('.ticket__previous')->attr('href'),
+            $position->filter('.ticket__next-ticket')->attr('href'),
+        ];
+    }
+
+    /**
+     * @return list<string> the key of each page from the first, following Next until it is disabled
+     */
+    private function keysWalkedFrom(string $uri): array
+    {
+        $keys = [];
+        $nextUri = $uri;
+        while (null !== $nextUri && \count($keys) < 20) {
+            $page = $this->client->request('GET', $nextUri);
+            self::assertResponseStatusCodeSame(200);
+            $keys[] = (string) $page->filter('.ticket')->attr('data-ticket-key');
+            $nextUri = $this->positionOf($page)[2];
+        }
+
+        return $keys;
     }
 
     /**
@@ -672,29 +900,32 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
-     * A major bug of Shop's team, for everyone, reported by Lena at CREATED_THIS_YEAR in To do.
+     * A major bug of Shop's team in project SHOP, for everyone, reported by Lena at CREATED_THIS_YEAR in To do and
+     * updated at UPDATED_AT. Its id is a uuid v7, so a later ticket has the higher id. Details' project is the id and
+     * key of another project.
      *
-     * @param array{group?: string, type?: string, priority?: string, description?: string, release?: string, parent?: string, components?: string, assignee?: string, reporter?: string, visibility?: string, createdAt?: string, core?: string} $details
+     * @param array{group?: string, type?: string, priority?: string, description?: string, release?: string, parent?: string, components?: string, assignee?: string, reporter?: string, visibility?: string, createdAt?: string, core?: string, updatedAt?: string, project?: array{string, string}} $details
      *
      * @return string the ticket's key
      */
     private function addTicket(string $title, array $details = []): string
     {
         $number = $this->nextNumber++;
-        $key = 'SHOP-'.$number;
+        [$projectId, $projectKey] = $details['project'] ?? [$this->shopProject, 'SHOP'];
+        $key = $projectKey.'-'.$number;
         $priority = $details['priority'] ?? 'major';
         $parameters = [
-            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), $number, $key, $title,
+            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $projectId, $this->shop->toString(), $number, $key, $title,
             $details['description'] ?? self::HIDDEN_DESCRIPTION, $details['type'] ?? 'bug', $details['release'] ?? null, $priority,
             self::PRIORITY_RANKS[$priority], isset($details['core']) ? $this->stepsByCore[$details['core']] : $this->steps[$details['group'] ?? 'todo'], $this->people[$details['reporter'] ?? 'Lena']->id()->toString(),
             $details['visibility'] ?? 'all', isset($details['assignee']) ? $this->people[$details['assignee']]->id()->toString() : null,
-            $details['parent'] ?? null, $details['components'] ?? '{}', $details['createdAt'] ?? self::CREATED_THIS_YEAR,
+            $details['parent'] ?? null, $details['components'] ?? '{}', $details['createdAt'] ?? self::CREATED_THIS_YEAR, $details['updatedAt'] ?? self::UPDATED_AT,
         ];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, release, priority,
                  priority_rank, step_id, reporter_id, visibility, assignee_id, parent_id, components, check_reasons, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                 (SELECT parent.id FROM tkt_ticket AS parent WHERE parent.key = ?), CAST(? AS text[]), '{}', CAST(? AS timestamptz), TIMESTAMPTZ '2026-11-10 09:00:00+00')",
+                 (SELECT parent.id FROM tkt_ticket AS parent WHERE parent.key = ?), CAST(? AS text[]), '{}', CAST(? AS timestamptz), CAST(? AS timestamptz))",
             $parameters,
         ));
 
