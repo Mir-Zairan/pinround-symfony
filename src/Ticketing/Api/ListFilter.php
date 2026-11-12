@@ -35,15 +35,23 @@ final readonly class ListFilter
         public ?string $searchText = null,
         public ?string $assigneeId = null,
     ) {
-        if (null !== $projectId && 1 !== preg_match(self::CANONICAL_UUID, $projectId)) {
+        if (null !== $projectId && !self::isCanonicalUuid($projectId)) {
             throw new \InvalidArgumentException('A list filter\'s project id must be a canonical lowercase uuid.');
         }
-        if (null !== $assigneeId && 1 !== preg_match(self::CANONICAL_UUID, $assigneeId)) {
+        if (null !== $assigneeId && !self::isCanonicalUuid($assigneeId)) {
             throw new \InvalidArgumentException('A list filter\'s assignee id must be a canonical lowercase uuid.');
         }
         if (null !== $searchText && !self::isSearchText($searchText)) {
             throw new \InvalidArgumentException('A list filter\'s search text must be trimmed, valid UTF-8 without NUL, and 1 to 200 characters.');
         }
+    }
+
+    /**
+     * True for the one spelling of a uuid that ids take here: lowercase, hyphenated, nothing around it.
+     */
+    public static function isCanonicalUuid(string $value): bool
+    {
+        return 1 === preg_match(self::CANONICAL_UUID, $value);
     }
 
     private static function isSearchText(string $searchText): bool

@@ -33,7 +33,7 @@ final class TicketSearchFunctionLeakTest extends VisibilityLeakCast
     private const string BETA_PROJECT = '0197a3c0-0000-7000-8000-0000000057d4';
     private const string PERSON_COLUMN_TICKET = '0197a3c0-0000-7000-8000-0000000057e5';
     private const string SEARCH_CALL = 'SELECT ticket_id FROM search_ticket_ids(CAST(:org AS uuid), CAST(:query AS text), CAST(:me AS uuid),
-        CAST(:teams AS uuid[]), CAST(:is_admin AS boolean), CAST(:is_triager AS boolean), NULL, NULL)';
+        CAST(:teams AS uuid[]), CAST(:is_admin AS boolean), CAST(:is_triager AS boolean), NULL, NULL, NULL)';
 
     public static function setUpBeforeClass(): void
     {

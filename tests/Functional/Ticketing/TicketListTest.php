@@ -682,6 +682,66 @@ final class TicketListTest extends WebTestCase
         self::assertSame(8, $this->queryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP', false));
     }
 
+    /**
+     * A filter change reloads only the list frame: the answer is that frame alone, with the list's own queries and
+     * neither the menu's teams nor the toolbar's people and names, which the whole page reads.
+     */
+    #[Test]
+    public function aFrameRequestGetsOnlyTheListFrameAndRunsOnlyTheListsQueries(): void
+    {
+        $this->client->disableReboot();
+        $this->addManyTickets('todo', 60);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+        $uri = self::TICKETS.'?person='.$this->people['Omar']->id()->toString();
+        $this->queriesOf($uri);
+        $pageQueries = $this->queriesOf($uri);
+        self::assertCount(1, $this->client->getCrawler()->filter('.ticket-filters'));
+
+        $frameQueries = $this->queriesOf($uri, ['HTTP_TURBO_FRAME' => 'ticket-list-frame']);
+
+        $frame = $this->client->getCrawler();
+        self::assertSame('Turbo-Frame', $this->client->getResponse()->headers->get('Vary'));
+        self::assertCount(1, $frame->filter('turbo-frame#ticket-list-frame'));
+        self::assertCount(0, $frame->filter('.ticket-filters, nav, header, title'));
+        self::assertCount(30, $frame->filter('.tickets__row'));
+        self::assertSame('30 tickets · grouped by step', $frame->filter('[data-total-line]')->attr('data-total-line'));
+        $toolbarAndMenuQueries = '/FROM org_team_member WHERE team_id = ANY|FROM org_team WHERE/';
+        self::assertSame([2, 0], [self::countMatching($toolbarAndMenuQueries, $pageQueries), self::countMatching($toolbarAndMenuQueries, $frameQueries)]);
+        self::assertSame(1, self::countMatching('/FROM idn_user WHERE id = ANY/', $frameQueries));
+        self::assertCount(\count($pageQueries) - 3, $frameQueries);
+    }
+
+    /**
+     * @param list<string> $queries
+     */
+    private static function countMatching(string $pattern, array $queries): int
+    {
+        return \count(array_filter($queries, static fn (string $sql): bool => 1 === preg_match($pattern, $sql)));
+    }
+
+    /**
+     * @param array<string, string> $server
+     *
+     * @return list<string> the SQL of every query the request ran
+     */
+    private function queriesOf(string $uri, array $server = []): array
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $this->client->request('GET', $uri, server: $server);
+        self::assertResponseStatusCodeSame(200);
+
+        $queries = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            foreach ($queriesOfOneConnection as $query) {
+                $queries[] = \is_string($query['sql'] ?? null) ? $query['sql'] : '';
+            }
+        }
+
+        return $queries;
+    }
+
     private function warmQueryCountMoreThanTheShellOf(string $uri): int
     {
         return $this->queryCountMoreThanTheShellOf($uri, true);

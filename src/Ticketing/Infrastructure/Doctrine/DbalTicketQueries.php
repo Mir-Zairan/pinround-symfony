@@ -151,9 +151,8 @@ final readonly class DbalTicketQueries implements TicketQueries
     }
 
     /**
-     * Only the matches of search_ticket_ids, which applies the list's project and steps before its cap, each step in
-     * search order (the assignee is applied after the cap, here, so a search capped at COUNT_CAP matches may show fewer
-     * of one person's tickets than they have): the exact key first, then the match score, then id, all highest first, the keyset of "Show more".
+     * Only the matches of search_ticket_ids, which applies the list's project, steps and assignee before its cap, each
+     * step in search order: the exact key first, then the match score, then id, all highest first, the keyset of "Show more".
      * The function returns ids only, so the score is worked out again here, as in its body, for its matches alone,
      * and kept as a numeric of 12 decimals, whose text reads back exactly in the cursor. The function runs once in
      * the same statement; its ids are joined back to tkt_ticket under row-level security and TicketVisibilitySql once,
@@ -173,6 +172,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         $parameters['search_is_admin'] = $visibility->isAdmin() ? 'true' : 'false';
         $parameters['search_is_triager'] = $visibility->isTriager() ? 'true' : 'false';
         $parameters['search_project'] = $filter->projectId;
+        $parameters['search_assignee'] = $filter->assigneeId;
         $pageConditions = 'searched.step_id = listed.step_id';
         $searchOrderValues = $cursor?->searchOrderValues();
         if (null !== $cursor && null !== $searchOrderValues) {
@@ -190,7 +190,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         $sql = 'WITH matched AS MATERIALIZED (SELECT found.ticket_id, found.found_position'
             .' FROM search_ticket_ids(CAST(:organization AS uuid), CAST(:search_text AS text), CAST(:search_viewer AS uuid),'
             .' CAST(:search_team_ids AS uuid[]), CAST(:search_is_admin AS boolean), CAST(:search_is_triager AS boolean),'
-            .' CAST(:search_project AS uuid), CAST(:step_ids AS uuid[])) WITH ORDINALITY AS found(ticket_id, found_position)),'
+            .' CAST(:search_project AS uuid), CAST(:step_ids AS uuid[]), CAST(:search_assignee AS uuid)) WITH ORDINALITY AS found(ticket_id, found_position)),'
             .' searched AS MATERIALIZED (SELECT ticket.id, ticket.step_id, ticket.key, ticket.title, ticket.type, ticket.release,'
             .' ticket.priority, ticket.priority_rank, ticket.assignee_id, ticket.updated_at,'
             .' ticket.key = upper(btrim(CAST(:search_text AS text))) AS is_exact_key_match,'

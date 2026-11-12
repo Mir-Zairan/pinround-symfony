@@ -46,7 +46,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_sso_provider' => "resolve_sso_provider('https://login.acme-foods.example', 'acme-foods.example')",
         'resolve_jira_connection' => "resolve_jira_connection('".self::UNKNOWN_ID."'::uuid)",
         'resolve_laptop_package' => "resolve_laptop_package('".self::UNKNOWN_ID."'::uuid)",
-        'search_ticket_ids' => "search_ticket_ids('".self::UNKNOWN_ID."'::uuid, 'checkout', '".self::UNKNOWN_ID."'::uuid, '{}'::uuid[], true, true, NULL, NULL)",
+        'search_ticket_ids' => "search_ticket_ids('".self::UNKNOWN_ID."'::uuid, 'checkout', '".self::UNKNOWN_ID."'::uuid, '{}'::uuid[], true, true, NULL, NULL, NULL)",
     ];
 
     private const array OUTPUT_COLUMNS = [

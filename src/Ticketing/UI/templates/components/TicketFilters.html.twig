@@ -6,7 +6,7 @@
             <input type="hidden" name="{{ name }}" value="{{ value }}">
         {% endfor %}
         <input class="ticket-filters__field" type="search" name="q" value="{{ q }}" maxlength="200"
-            placeholder="Search by key or words in the title" aria-label="Search by key or words in the title"
+            placeholder="{{ constant('SEARCH_PLACEHOLDER', this) }}" aria-label="{{ constant('SEARCH_PLACEHOLDER', this) }}"
             {% if searchRefusal is not null %}aria-invalid="true" aria-describedby="ticket-filters-refusal"{% endif %}
             data-model="debounce(300)|q">
     </form>
@@ -16,7 +16,7 @@
 
     {# Every chip is a link to the list it shows, so it works without script; with script the component takes the click. #}
     <div class="ticket-filters__people" role="group" aria-labelledby="ticket-filters-people-label">
-        <span class="ticket-filters__label" id="ticket-filters-people-label">Assigned to</span>
+        <span class="ticket-filters__label" id="ticket-filters-people-label">{{ constant('PEOPLE_LABEL', this) }}</span>
         <a class="chip" href="{{ this.listUrl({person: null}) }}" data-person-chip="everyone"
             {% if person == '' %}aria-current="true"{% endif %}
             data-action="live#action:prevent" data-live-action-param="filterByPerson" data-live-person-param="">Everyone</a>

@@ -14,6 +14,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
 use App\Tests\Factory\Ticketing\TicketFactory;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
@@ -203,7 +204,7 @@ final class DbalProjectCountsProjectorTest extends KernelTestCase
         self::assertNotSame($keptByRefreshes, $this->storedRowsOfBoth(), 'The stale rows differ from the kept ones.');
 
         $tenantAfter = $this->migrator()->transactional(function (Connection $migrator): mixed {
-            $migrator->executeQuery("SELECT set_config('app.org_id', ?, true)", [self::NO_ORGANIZATION]);
+            $migrator->executeQuery('SELECT set_config(?, ?, true)', [TenantSetting::NAME, self::NO_ORGANIZATION]);
             $this->runBackfill($migrator);
             $this->runBackfill($migrator);
 

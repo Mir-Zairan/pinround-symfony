@@ -376,6 +376,52 @@ final class DbalTicketQueriesTest extends KernelTestCase
     }
 
     /**
+     * Omar's tickets sit beside Lena's and an unassigned one in the same step; one of Omar's does not match the search.
+     */
+    #[Test]
+    public function anAssigneeKeepsOnlyTheirTicketsWithAndWithoutASearch(): void
+    {
+        $omarsMatch = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 09:00:00+00', 'Checkout drops the postcode', '');
+        $omarsOther = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 1, '2027-03-15 10:00:00+00', 'Cart total shows the wrong sum', '');
+        $lenasMatch = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 0, '2027-03-15 11:00:00+00', 'Checkout is slow', '');
+        $unassignedMatch = $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 0, '2027-03-15 12:00:00+00', 'Checkout button is grey', '');
+        $this->assign([$omarsMatch, $omarsOther], self::OMAR);
+        $this->assign([$lenasMatch], self::LENA);
+        self::assertSame([[$unassignedMatch, $lenasMatch, $omarsOther, $omarsMatch], 4], self::keysAndCountOf($this->listedAs(self::ACME_FOODS, $this->filter())));
+
+        self::assertSame([[$omarsOther, $omarsMatch], 2], self::keysAndCountOf($this->listedAs(self::ACME_FOODS, $this->filter(assigneeId: self::OMAR))));
+        self::assertSame([[$omarsMatch], 1], self::keysAndCountOf($this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout', assigneeId: self::OMAR))));
+        self::assertSame([[], 0], self::keysAndCountOf($this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout', assigneeId: self::SARA))));
+    }
+
+    /**
+     * Lena holds more matches than the cap, all with higher ids than Omar's three, so a cap taken before the assignee
+     * would fill up with hers and list none of Omar's.
+     */
+    #[Test]
+    public function theSearchCapComesAfterTheAssignee(): void
+    {
+        $omarsMatches = $this->addTickets(ShopTeamRows::TO_DO_STEP, 3);
+        $this->assign($omarsMatches, self::OMAR);
+        $this->addManyTickets(ShopTeamRows::TO_DO_STEP, TicketListStep::COUNT_CAP + 1);
+        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET assignee_id = CAST(? AS uuid) WHERE assignee_id IS NULL',
+            [self::LENA],
+        ));
+        self::assertSame([[TicketListStep::COUNT_CAP, true]], array_map(
+            static fn (TicketListGroup $group): array => [$group->steps[0]->ticketCount, $group->steps[0]->isCountCapped],
+            $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout')),
+        ));
+
+        $groups = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout', assigneeId: self::OMAR));
+
+        self::assertSame([['todo', array_reverse($omarsMatches), 3, false]], array_map(
+            static fn (TicketListGroup $group): array => [$group->code, self::keysOf($group->steps[0]), $group->steps[0]->ticketCount, $group->steps[0]->isCountCapped],
+            $groups,
+        ));
+    }
+
+    /**
      * 1,002 matches: the function's best 1,000 by id are the two Doing matches and 998 of To do's. Doing's count is
      * marked capped too, as more of its matches could lie past the cap.
      */
@@ -524,9 +570,20 @@ final class DbalTicketQueriesTest extends KernelTestCase
         self::assertSame(['The tickets list is read under the viewer\'s own organization as tenant.', 0], $refusal);
     }
 
-    private function filter(?string $projectId = null, bool $showsDone = false, ?string $searchText = null): ListFilter
+    private function filter(?string $projectId = null, bool $showsDone = false, ?string $searchText = null, ?string $assigneeId = null): ListFilter
     {
-        return new ListFilter(self::adminOf(self::ACME_FOODS), $projectId, $showsDone, $searchText);
+        return new ListFilter(self::adminOf(self::ACME_FOODS), $projectId, $showsDone, $searchText, $assigneeId);
+    }
+
+    /**
+     * @param list<string> $keys
+     */
+    private function assign(array $keys, string $assigneeId): void
+    {
+        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET assignee_id = CAST(? AS uuid) WHERE key = ANY(CAST(? AS text[]))',
+            [$assigneeId, '{'.implode(',', $keys).'}'],
+        ));
     }
 
     /**

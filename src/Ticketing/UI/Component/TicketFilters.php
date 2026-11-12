@@ -10,12 +10,12 @@ use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\ListFilter;
 use App\Ticketing\UI\TicketListController;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
-use Symfony\Component\Uid\Uuid;
 use Symfony\UX\LiveComponent\Attribute\AsLiveComponent;
 use Symfony\UX\LiveComponent\Attribute\LiveAction;
 use Symfony\UX\LiveComponent\Attribute\LiveArg;
@@ -100,7 +100,7 @@ final class TicketFilters
     #[LiveAction]
     public function filterByPerson(#[LiveArg] string $person): void
     {
-        if ('' !== $person && !self::isCanonicalUuid($person)) {
+        if ('' !== $person && !ListFilter::isCanonicalUuid($person)) {
             throw new BadRequestHttpException('That person is not valid.');
         }
         $this->person = $person;
@@ -169,7 +169,19 @@ final class TicketFilters
      */
     public function peopleChips(): array
     {
-        return $this->peopleChips ??= $this->readPeopleChips();
+        if (null === $this->peopleChips) {
+            $this->peopleChips = $this->readPeopleChips();
+            // A person from the URL whom no chip names still shows as the active filter, on the picker chip.
+            $isPersonOnAChip = [] !== array_filter(
+                [$this->peopleChips['viewerChip'], ...$this->peopleChips['personChips']],
+                static fn (?array $chip): bool => null !== $chip && true === $chip['isPressed'],
+            );
+            if ('' !== $this->person && !$isPersonOnAChip && null === $this->peopleChips['pickerChip']) {
+                $this->peopleChips['pickerChip'] = ['label' => self::PERSON_PICKER_LABEL, 'isPressed' => true];
+            }
+        }
+
+        return $this->peopleChips;
     }
 
     /**
@@ -204,7 +216,7 @@ final class TicketFilters
 
         $pickedPerson = $this->pickedPersonAmong($otherPeople);
         $pickedName = null === $pickedPerson ? null : ($this->userQueries->byIds([$pickedPerson])[$pickedPerson->toString()] ?? null)?->firstName();
-        $chips['pickerChip'] = ['label' => $pickedName ?? self::PERSON_PICKER_LABEL, 'isPressed' => null !== $pickedName];
+        $chips['pickerChip'] = ['label' => $pickedName ?? self::PERSON_PICKER_LABEL, 'isPressed' => '' !== $this->person && !($chips['viewerChip']['isPressed'] ?? false)];
 
         return $chips;
     }
@@ -250,10 +262,5 @@ final class TicketFilters
         }
 
         return false;
-    }
-
-    private static function isCanonicalUuid(string $value): bool
-    {
-        return Uuid::isValid($value) && Uuid::fromString($value)->toRfc4122() === $value;
     }
 }

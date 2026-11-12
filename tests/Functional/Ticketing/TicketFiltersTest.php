@@ -4,8 +4,14 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Ticketing;
 
+use App\Identity\Api\CurrentUser;
 use App\Identity\Domain\User;
+use App\Organization\Api\ActorContext;
+use App\Organization\Api\CurrentActor;
+use App\Organization\Api\MembershipQueries;
+use App\Organization\Infrastructure\Security\RequestScopedCurrentActor;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Logging\RedactionProcessor;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -18,8 +24,8 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
-use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
-use Symfony\Component\Security\Core\Exception\AccessDeniedException;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Contracts\Service\ResetInterface;
 use Symfony\UX\LiveComponent\Test\InteractsWithLiveComponents;
 use Symfony\UX\LiveComponent\Test\TestLiveComponent;
 use Zenstruck\Foundry\Test\Factories;
@@ -131,7 +137,45 @@ final class TicketFiltersTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['Everyone', 'Me', 'Person ▾'], $this->peopleChipLabelsOf($page));
+        self::assertSame('true', $page->filter('[data-person-picker-trigger]')->attr('aria-pressed'));
+        self::assertSame([], $page->filter('.ticket-filters a.chip[aria-current="true"]')->each(static fn (Crawler $chip): string => $chip->text()));
+    }
+
+    #[Test]
+    public function aTeamOfFivePressesMeNotThePersonChipForTheViewer(): void
+    {
+        $this->addShopMembers(['Tom', 'Eva', 'Ana']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Lena']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Me'], $page->filter('.ticket-filters a.chip[aria-current="true"]')->each(static fn (Crawler $chip): string => $chip->text()));
         self::assertSame('false', $page->filter('[data-person-picker-trigger]')->attr('aria-pressed'));
+    }
+
+    /**
+     * Raj is in no team, so neither Lena's chips nor his own toolbar name anyone: the filter still shows as pressed.
+     */
+    #[Test]
+    public function aPersonNoChipNamesShowsAsAPressedPersonChip(): void
+    {
+        $raj = $this->people['Raj']->id()->toString();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $lenasPage = $this->client->request('GET', self::TICKETS.'?person='.$raj);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Everyone', 'Me', 'Omar', 'Person ▾'], $this->peopleChipLabelsOf($lenasPage));
+        self::assertSame('true', $lenasPage->filter('[data-person-picker-trigger]')->attr('aria-pressed'));
+        self::assertNull($lenasPage->filter('[data-person-chip="everyone"]')->attr('aria-current'));
+
+        $this->logIn($this->client, $this->people['Raj']);
+        $rajsPage = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Omar']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Everyone', 'Person ▾'], $this->peopleChipLabelsOf($rajsPage));
+        self::assertSame('true', $rajsPage->filter('[data-person-picker-trigger]')->attr('aria-pressed'));
     }
 
     #[Test]
@@ -223,11 +267,37 @@ final class TicketFiltersTest extends WebTestCase
     public function aMalformedPersonInAChipActionIsABadRequest(): void
     {
         $toolbar = $this->toolbarAs($this->people['Lena']);
-        $toolbar->render();
-
-        $this->expectException(BadRequestHttpException::class);
+        self::assertSame('', $this->livePropsOf($toolbar->render()->crawler())['person'] ?? null);
+        $this->client->catchExceptions(true);
 
         $toolbar->call('filterByPerson', ['person' => 'nobody']);
+
+        $response = $toolbar->response();
+        self::assertSame(400, $response->getStatusCode());
+        $this->assertRefusalCarriesNoNewFilters($response, 'That person is not valid.');
+    }
+
+    /**
+     * A refused live request answers with the error page alone: no props, so the page keeps the filters it had, and no
+     * browser event, so the list is not reloaded.
+     */
+    private function assertRefusalCarriesNoNewFilters(Response $response, string $refusal): void
+    {
+        $errorPage = new Crawler((string) $response->getContent());
+        self::assertSame($refusal, $errorPage->filter('h1.exception-message')->text());
+        self::assertCount(0, $errorPage->filter('[data-live-props-value]'));
+        self::assertCount(0, $errorPage->filter('[data-live-events-to-dispatch-value]'));
+    }
+
+    /**
+     * @return array<mixed>
+     */
+    private function livePropsOf(Crawler $component): array
+    {
+        $props = json_decode((string) $component->filter('[data-live-props-value]')->attr('data-live-props-value'), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertIsArray($props);
+
+        return $props;
     }
 
     /**
@@ -262,29 +332,51 @@ final class TicketFiltersTest extends WebTestCase
     }
 
     /**
-     * The hook every live request runs before an action: with no tenant, or a tenant but no one logged in, the list's
-     * permission is refused, and the filters stay as they were.
+     * After the toolbar renders, Lena's actor turns out to be of another organization than the request's, so
+     * OrganizationVoter refuses her VIEW: the action is refused before it runs, with no toolbar and no new list URL.
      */
     #[Test]
-    public function aLiveRequestWithoutTheListPermissionIsRefusedBeforeAnyAction(): void
+    public function aLiveActionWithoutTheListPermissionIsRefusedBeforeItRuns(): void
     {
-        $toolbar = self::getContainer()->get(TicketFilters::class);
-        $tenantContext = self::getContainer()->get(TenantContext::class);
-        $tenantContext->reset();
+        $this->client->disableReboot();
+        $realActors = new RequestScopedCurrentActor(
+            self::getContainer()->get(CurrentUser::class),
+            self::getContainer()->get(TenantContext::class),
+            self::getContainer()->get(MembershipQueries::class),
+        );
+        $actors = new class($realActors) implements CurrentActor, ResetInterface {
+            public bool $isOfAnotherOrganization = false;
 
-        foreach ([null, $this->acmeFoods] as $organizationId) {
-            if (null !== $organizationId) {
-                $tenantContext->set($organizationId);
+            public function __construct(private readonly RequestScopedCurrentActor $realActors)
+            {
             }
-            try {
-                $toolbar->denyUnlessListIsOpen();
-                self::fail('The toolbar answered without the list permission.');
-            } catch (AccessDeniedException $refusal) {
-                self::assertSame('The tickets list is not open to this person here.', $refusal->getMessage());
+
+            public function reset(): void
+            {
+                $this->realActors->reset();
             }
-        }
-        self::assertSame(['', false], [$toolbar->person, $toolbar->showsDone]);
-        $tenantContext->reset();
+
+            public function actorFor(mixed $tokenUser): ?ActorContext
+            {
+                $actor = $this->realActors->actorFor($tokenUser);
+                if (null === $actor || !$this->isOfAnotherOrganization) {
+                    return $actor;
+                }
+
+                return new ActorContext($actor->userId(), new OrganizationId('0197a3c0-0000-7000-8fff-000000000001'), $actor->roles());
+            }
+        };
+        self::getContainer()->set(CurrentActor::class, $actors);
+        $toolbar = $this->toolbarAs($this->people['Lena']);
+        self::assertNull($toolbar->render()->crawler()->filter('[data-done-chip]')->attr('aria-current'));
+        $actors->isOfAnotherOrganization = true;
+        $this->client->catchExceptions(true);
+
+        $toolbar->call('toggleDone');
+
+        $response = $toolbar->response();
+        self::assertSame(403, $response->getStatusCode());
+        $this->assertRefusalCarriesNoNewFilters($response, 'The tickets list is not open to this person here.');
     }
 
     /**

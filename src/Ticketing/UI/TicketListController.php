@@ -25,7 +25,6 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Uid\Uuid;
 
 /**
  * The tickets list at /tickets (FR-TKT-02, FR-TKT-18, P03.T3): the tickets the viewer may see, one section per step in group
@@ -38,8 +37,8 @@ use Symfony\Component\Uid\Uuid;
  * id that is not a canonical uuid is a 404, like a project key of no project. The toolbar is TicketFilters.
  *
  * Five queries at most for the list whatever the number of tickets, with a search or without: the triager, the
- * project by key, then the list's rows, turn users and names (TicketQueries::list); the toolbar adds two at most
- * (TicketFilters).
+ * project by key, then the list's rows, turn users and names (TicketQueries::list); the whole page's toolbar adds two
+ * at most (TicketFilters), a request from one of the page's Turbo frames (TURBO_FRAME_HEADER) none.
  */
 final class TicketListController extends AbstractController
 {
@@ -48,6 +47,7 @@ final class TicketListController extends AbstractController
     public const string DONE_QUERY = 'done';
     public const string SEARCH_QUERY = 'q';
     public const string PERSON_QUERY = 'person';
+    public const string TURBO_FRAME_HEADER = 'Turbo-Frame';
 
     public const string ALL_TICKETS = 'All tickets';
     public const string NO_TICKETS = 'No tickets here yet.';
@@ -91,7 +91,10 @@ final class TicketListController extends AbstractController
         $groups = $this->ticketQueries->list(new ListFilter($visibility, $project?->id(), $showsDone, $searchText, $assigneeId), $cursor);
         $collapsedStepIds = CollapsedSteps::idsIn($request->getSession());
 
-        return $this->render('@Ticketing/list.html.twig', [
+        // A frame of this page (the list after a filter change, or "Show more") replaces only its own frame, so it gets
+        // the list frame alone: no layout, menu or toolbar, and none of their queries.
+        $isFrameRequest = $request->headers->has(self::TURBO_FRAME_HEADER);
+        $response = $this->render($isFrameRequest ? '@Ticketing/_list_frame.html.twig' : '@Ticketing/list.html.twig', [
             'heading' => null === $project ? self::ALL_TICKETS : $project->key().' · '.$project->name(),
             'totalLine' => TicketListText::totalLineOf($groups),
             'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $searchText, $assigneeId, $cursor, $collapsedStepIds),
@@ -103,6 +106,9 @@ final class TicketListController extends AbstractController
                 'q' => $searchText ?? '',
             ],
         ]);
+        $response->setVary(self::TURBO_FRAME_HEADER, false);
+
+        return $response;
     }
 
     /**
@@ -131,7 +137,7 @@ final class TicketListController extends AbstractController
         if ('' === $assigneeId) {
             return null;
         }
-        if (!Uuid::isValid($assigneeId) || Uuid::fromString($assigneeId)->toRfc4122() !== $assigneeId) {
+        if (!ListFilter::isCanonicalUuid($assigneeId)) {
             throw $this->createNotFoundException('No person has that id.');
         }
 

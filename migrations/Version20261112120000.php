@@ -17,8 +17,8 @@ use Doctrine\Migrations\AbstractMigration;
  *
  * Contract: ids only, best first (the exact key, then ts_rank * 0.6 + similarity * 0.4, then id), at most 1,001: the
  * best 1,000 and one more that tells the caller the cap was hit. The list's own filters, p_project_id (NULL for every
- * project) and p_step_ids (the steps the list shows, NULL for every step), and the visibility condition all come
- * before that cap, so tickets the list would not show never push a match it shows out. p_organization_id must equal
+ * project), p_step_ids (the steps the list shows, NULL for every step) and p_assignee_id (NULL for any assignee or
+ * none), and the visibility condition all come before that cap, so tickets the list would not show never push a match it shows out. p_organization_id must equal
  * the tenant of the transaction (app.org_id): a caller that passes another organization, or sets none, gets no row.
  *
  * The visibility condition is the one of TicketVisibilitySql, written out once here since a migration must not change
@@ -27,7 +27,7 @@ use Doctrine\Migrations\AbstractMigration;
  */
 final class Version20261112120000 extends AbstractMigration
 {
-    private const string SIGNATURE = 'public.search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean, uuid, uuid[])';
+    private const string SIGNATURE = 'public.search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean, uuid, uuid[], uuid)';
 
     /** The columns the body matches on, filters on or returns; never returned: title and search, which only match. */
     private const array READ_COLUMNS = [
@@ -49,7 +49,7 @@ final class Version20261112120000 extends AbstractMigration
         // upper(btrim(p_query)) finds the key through its btree index; keys are upper case by tkt_project_key_check.
         $this->addSql(<<<'SQL'
             CREATE FUNCTION public.search_ticket_ids(p_organization_id uuid, p_query text, p_viewer_id uuid,
-                p_team_ids uuid[], p_is_admin boolean, p_is_triager boolean, p_project_id uuid, p_step_ids uuid[])
+                p_team_ids uuid[], p_is_admin boolean, p_is_triager boolean, p_project_id uuid, p_step_ids uuid[], p_assignee_id uuid)
             RETURNS TABLE (ticket_id uuid) LANGUAGE sql STABLE SECURITY DEFINER
             SET search_path = pg_catalog, public, pg_temp AS $resolver$
             SELECT t.id
@@ -58,6 +58,7 @@ final class Version20261112120000 extends AbstractMigration
               AND p_organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid
               AND (p_project_id IS NULL OR t.project_id = p_project_id)
               AND (p_step_ids IS NULL OR t.step_id = ANY(p_step_ids))
+              AND (p_assignee_id IS NULL OR t.assignee_id = p_assignee_id)
               AND (t.search @@ websearch_to_tsquery('simple', public.tkt_unaccent(p_query))
                    OR t.title % p_query
                    OR t.key = upper(btrim(p_query)))
