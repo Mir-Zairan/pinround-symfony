@@ -559,6 +559,26 @@ final class TicketPageTest extends WebTestCase
      * crosses back into the earlier step. Following Next from A gives the list's whole order, with H before C and B
      * (newer), C before B (tied, higher id) and the Done and OPS tickets left out.
      */
+    /**
+     * One wrapping row: the back button, then the key with a dot, the type and the project, then the position last,
+     * so it sits on the right edge.
+     */
+    #[Test]
+    public function theBackButtonTheKeyLineAndThePositionShareOneRowInThatOrder(): void
+    {
+        $keys = $this->addTicketsToWalk();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$keys['D'].'?project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        $row = $page->filter('.ticket__key-row');
+        self::assertCount(1, $row);
+        self::assertSame(['ticket__back', 'ticket__key-line', 'ticket__position'], $row->children()->each(static fn (Crawler $child): string => preg_replace('/^.*?(ticket__(?:back|key-line|position))\b.*$/', '$1', (string) $child->attr('class'))));
+        self::assertSame('SHOP-5 · Bug · Shop', preg_replace('/\s+/', ' ', $row->filter('.ticket__key-line')->text()));
+        self::assertSame('false', $row->filter('.ticket__position')->attr('data-turbo-prefetch'));
+    }
+
     #[Test]
     public function aProjectsListShowsTheTicketsPlaceAndWalksItsOrderKeepingTheProject(): void
     {

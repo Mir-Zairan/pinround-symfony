@@ -14,10 +14,12 @@
 {% block main %}
     <article class="ticket" data-ticket-key="{{ ticket.key }}">
         <header class="ticket__header">
-            <twig:Button variant="text" href="{{ path('ticketing_tickets', backQuery) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Tickets</twig:Button>
+            {# One wrapping row, as the prototype has it: back, key · type · project, tags, then the position on the right edge. #}
             <div class="ticket__key-row">
+                <twig:Button variant="text" href="{{ path('ticketing_tickets', backQuery) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Tickets</twig:Button>
                 <p class="ticket__key-line">
                     <span class="ticket__key">{{ ticket.key }}</span>
+                    <span aria-hidden="true">·</span>
                     <span class="ticket__kind">{{ type }} · {{ ticket.projectName }}</span>
                     {% if ticket.isTeamOnly %}<twig:Tag class="ticket__team-only">Only the team and admins see this</twig:Tag>{% endif %}
                 </p>

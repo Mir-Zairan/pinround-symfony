@@ -14,15 +14,15 @@
 }
 
 .ticket__back {
-  margin-left: calc(-1 * var(--space-12));
+  margin-left: calc(-1 * var(--space-8));
 }
 
 .ticket__key-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-8) var(--space-16);
+  align-self: stretch;
+  gap: var(--space-8) var(--space-12);
 }
 
 .ticket__key-line {
@@ -38,6 +38,7 @@
 .ticket__position {
   display: flex;
   flex: none;
+  margin-left: auto;
   align-items: center;
   gap: var(--space-8);
 }

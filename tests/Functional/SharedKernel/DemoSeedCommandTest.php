@@ -374,6 +374,10 @@ final class DemoSeedCommandTest extends KernelTestCase
         self::assertSame($afterFirstRun, $ticketFacts());
         $longAskLength = $this->underTenant($acmeFoods, fn (): mixed => $this->connection()->fetchOne('SELECT length(description) FROM tkt_ticket WHERE title = ?', [SeedDemoTickets::LONG_ASK_TITLE]));
         self::assertGreaterThan(700, $longAskLength);
+        $inputLabels = $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchFirstColumn(
+            "SELECT DISTINCT t.waiting_on_label FROM tkt_ticket t JOIN wf_step s ON s.organization_id = t.organization_id AND s.id = t.step_id WHERE s.core_code = 'input'",
+        ));
+        self::assertSame(['Customer'], $inputLabels, 'A waiting label says who, as workflow-engine.md describes it.');
     }
 
     #[Test]

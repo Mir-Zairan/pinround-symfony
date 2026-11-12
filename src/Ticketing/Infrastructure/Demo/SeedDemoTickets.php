@@ -211,7 +211,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
                 3 === $index % 5 ? Visibility::Team->value : Visibility::All->value,
                 'review' === $coreCode ? $reviewer->toString() : null,
                 'test' === $coreCode ? $tester->toString() : null,
-                $isWaiting ? ('input' === $coreCode ? 'Answer from the shopper' : 'Supplier delivery') : null,
+                $isWaiting ? ('input' === $coreCode ? 'Customer' : 'Supplier delivery') : null,
                 'done' === $coreCode ? $now->format(\DateTimeInterface::ATOM) : null,
                 $organizationId->toString(),
                 $ticketId,
