@@ -10,7 +10,8 @@ namespace App\Tests\Unit\Architecture;
  * not, or switches on it with CASE; a 'visibility' key in the first argument of a findBy, findOneBy or count method
  * call; and 'visibility' or 'alias.visibility' as the first argument of an expression method such as eq or in.
  * Comments and other PHP code are not read, so `$this->visibility = $visibility`, a sort key, a CAST in a SELECT list
- * and PHP's own count() pass. Migrations live outside src/ and are not scanned.
+ * and PHP's own count() pass. Migrations live outside src/ and are not scanned; one that writes the predicate out in
+ * SQL is still listed in ALLOWED, so every copy of the rule has a reason here and a test that it holds a condition.
  */
 final class HandWrittenVisibilityConditions
 {
@@ -21,6 +22,9 @@ final class HandWrittenVisibilityConditions
         'src/Ticketing/Api/TicketVisibilitySql.php' => 'renders the canonical predicate',
         'src/Insight/Infrastructure/Doctrine/DbalTurnProjector.php' => 'copies the column into ins_ticket_turn (SET visibility = EXCLUDED.visibility); it writes the column and filters nothing',
         'src/Ticketing/Infrastructure/Demo/SeedDemoTickets.php' => 'sets the column of a demo ticket (SET visibility = ?); it writes the column and filters nothing',
+        'src/Insight/Infrastructure/Doctrine/DbalProjectCountsProjector.php' => 'copies the column into ins_project_count_ticket and finds the ticket\'s count row by its key (visibility = ?); it writes counts and filters no reader',
+        'src/Insight/Infrastructure/Doctrine/DbalProjectCountQueries.php' => 'counts are per team and visibility, not per ticket, so the per-person predicate cannot apply; a \'team\' row counts only for its own team\'s people and admins, which undercounts and never leaks; ProjectCountsLeakTest proves it',
+        'migrations/Version20261112120000.php' => 'search_ticket_ids, a SECURITY DEFINER function, needs the predicate in SQL and a migration must not change with src/; TicketSearchFunctionLeakTest proves it finds what TicketVisibilitySql shows',
     ];
 
     private const string SQL_CONDITION = '/\bvisibility(?:\s*::\s*\w+)?\s*(?:=|<>|!=|\bNOT\s+IN\b|\bIN\b|\bIS\b)'

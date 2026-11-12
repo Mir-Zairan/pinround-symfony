@@ -17,7 +17,7 @@ use Symfony\Contracts\Cache\TagAwareCacheInterface;
 
 /**
  * Test-only endpoints (config/routes/test_fixtures.yaml), both without the request transaction: the first leaves
- * WorkflowCache inside a transaction whose connection was closed, which no COMMIT or ROLLBACK ends; the second shows
+ * AfterCommitTagInvalidation inside a transaction whose connection was closed, which no COMMIT or ROLLBACK ends; the second shows
  * whether the next request on the same worker still finds that transaction there.
  */
 #[AsController]
@@ -53,7 +53,7 @@ final readonly class WorkflowCacheResetProbeController
 
     /**
      * Fills an entry under the team's tag, then invalidates the team with no transaction open, which drops it at once
-     * unless WorkflowCache still believes a transaction is open and queues the tag for its commit.
+     * unless AfterCommitTagInvalidation still believes a transaction is open and queues the tag for its commit.
      */
     public function invalidateTheTeamOutsideATransaction(string $organizationId): JsonResponse
     {

@@ -1,0 +1,44 @@
+{# The project rail, as the whole page holds it and as a request from its own frame gets it after a filter change. Every item is a link, so it works without script; the frame sends them to the whole page (_top). #}
+<turbo-frame id="{{ constant('App\\Ticketing\\UI\\TicketListController::RAIL_FRAME_ID') }}" class="project-rail-frame" target="_top" {{ stimulus_target('ticket-list', 'rail') }}>
+    <nav class="project-rail" aria-label="Projects">
+        {# A label, not a heading: the page's h1 comes after the rail. #}
+        {% if rail.teamName is not null %}
+            <p class="project-rail__team">{{ rail.teamName }}</p>
+        {% endif %}
+        <ul class="project-rail__projects">
+            <li>
+                <a class="project-rail__item" href="{{ rail.allProjectsUrl }}" data-rail-project=""
+                    {% if rail.isAllProjectsPressed %}aria-current="true"{% endif %}>
+                    <span class="project-rail__name">{{ constant('App\\Ticketing\\UI\\ProjectRail::ALL_PROJECTS') }}</span>
+                    {% if rail.allProjectsCount is not null %}
+                        <span class="project-rail__count">{{ rail.allProjectsCount.number }}<span class="visually-hidden"> {{ rail.allProjectsCount.label }}</span></span>
+                    {% endif %}
+                </a>
+            </li>
+            {% for project in rail.projects %}
+                <li>
+                    <a class="project-rail__item" href="{{ project.url }}" data-rail-project="{{ project.key }}"
+                        {% if project.isPressed %}aria-current="true"{% endif %}>
+                        <span class="project-rail__key">{{ project.key }}</span>
+                        <span class="project-rail__name">{{ project.name }}</span>
+                        <span class="project-rail__count">{{ project.count.number }}<span class="visually-hidden"> {{ project.count.label }}</span></span>
+                    </a>
+                </li>
+            {% endfor %}
+        </ul>
+        {% if rail.manageUrl is not null %}
+            <a class="project-rail__manage" href="{{ rail.manageUrl }}">{{ constant('App\\Ticketing\\UI\\ProjectRail::MANAGE_PROJECTS') }}</a>
+        {% endif %}
+        {% if rail.teamSwitch is not empty %}
+            {# A disclosure of links: keyboard usable and working without script. #}
+            <details class="project-rail__switch">
+                <summary>{{ constant('App\\Ticketing\\UI\\ProjectRail::SWITCH_TEAM') }}</summary>
+                <ul>
+                    {% for team in rail.teamSwitch %}
+                        <li><a href="{{ team.url }}" data-rail-team{% if team.isCurrent %} aria-current="true"{% endif %}>{{ team.name }}</a></li>
+                    {% endfor %}
+                </ul>
+            </details>
+        {% endif %}
+    </nav>
+</turbo-frame>

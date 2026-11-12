@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity\Application;
 
+use App\Identity\Api\Event\UserRenamed;
 use App\Identity\Application\ProfileProblem;
 use App\Identity\Application\UpdateProfile;
 use App\Identity\Domain\Email;
@@ -24,8 +25,9 @@ final class UpdateProfileTest extends TestCase
         $user = self::lena();
         $stampBefore = $user->sessionStamp();
         $users = new RecordingUsers($user);
+        $events = new RecordingIdentityEvents();
 
-        $problems = new UpdateProfile($users)(new UserId(self::ID), '  Lena Lund ', 'Asia/Kolkata', 'dark');
+        $problems = new UpdateProfile($users, $events)(new UserId(self::ID), '  Lena Lund ', 'Asia/Kolkata', 'dark');
 
         self::assertSame([], $problems);
         self::assertSame('Lena Lund', $user->name());
@@ -33,6 +35,25 @@ final class UpdateProfileTest extends TestCase
         self::assertSame(Theme::Dark, $user->theme());
         self::assertSame($stampBefore, $user->sessionStamp());
         self::assertSame([$user], $users->savedUsers);
+        self::assertEquals([new UserRenamed(self::ID)], $events->publishedEvents);
+    }
+
+    /**
+     * Only the spaces around the name change, so the saved name is the old one: no team shows a new name.
+     */
+    #[Test]
+    public function keepingTheNamePublishesNoRename(): void
+    {
+        $user = self::lena();
+        $users = new RecordingUsers($user);
+        $events = new RecordingIdentityEvents();
+
+        $problems = new UpdateProfile($users, $events)(new UserId(self::ID), ' Lena Berg ', 'Asia/Kolkata', 'dark');
+
+        self::assertSame([], $problems);
+        self::assertSame('Asia/Kolkata', $user->timeZone());
+        self::assertSame([$user], $users->savedUsers);
+        self::assertSame([], $events->publishedEvents);
     }
 
     /**
@@ -56,14 +77,16 @@ final class UpdateProfileTest extends TestCase
     {
         $user = self::lena();
         $users = new RecordingUsers($user);
+        $events = new RecordingIdentityEvents();
 
-        $problems = new UpdateProfile($users)(new UserId(self::ID), $name, $timeZone, $theme);
+        $problems = new UpdateProfile($users, $events)(new UserId(self::ID), $name, $timeZone, $theme);
 
         self::assertSame($expectedProblems, $problems);
         self::assertSame('Lena Berg', $user->name());
         self::assertSame('Europe/Berlin', $user->timeZone());
         self::assertSame(Theme::System, $user->theme());
         self::assertSame([], $users->savedUsers);
+        self::assertSame([], $events->publishedEvents);
     }
 
     #[Test]
@@ -71,7 +94,7 @@ final class UpdateProfileTest extends TestCase
     {
         $this->expectException(\LogicException::class);
 
-        new UpdateProfile(new RecordingUsers(null))(new UserId(self::ID), 'Lena Lund', 'Asia/Kolkata', 'dark');
+        new UpdateProfile(new RecordingUsers(null), new RecordingIdentityEvents())(new UserId(self::ID), 'Lena Lund', 'Asia/Kolkata', 'dark');
     }
 
     private static function lena(): User

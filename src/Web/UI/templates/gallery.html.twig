@@ -166,4 +166,35 @@
             </div>
         </div>
     </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-person-picker">
+        <h2 id="gallery-person-picker">Person picker</h2>
+        {# PersonPicker's dialog with fixed sample rows: the real picker reads a team's people in a live request, which the server refuses for a made-up team, so the search box here filters nothing. #}
+        {% set pickerMode = constant('App\\Web\\UI\\Component\\PersonPickerMode::Filter') %}
+        {% set searchLabel = constant('App\\Web\\UI\\Component\\PersonPickerSearch::SEARCH_LABEL') %}
+        <div class="gallery-row">
+            <twig:Chip>Person ▾</twig:Chip>
+            <div class="person-picker__host">
+                <twig:Dialog id="gallery-person-picker-demo" title="{{ pickerMode.title }}">
+                    <twig:block name="trigger">
+                        <twig:Chip pressed aria-haspopup="dialog" data-action="dialog#open">Omar</twig:Chip>
+                    </twig:block>
+                    <twig:block name="content">
+                        <p class="person-picker__sub">{{ pickerMode.sub }}</p>
+                        <div class="person-picker">
+                            <input class="person-picker__field" type="search" autocomplete="off" placeholder="{{ searchLabel }}" aria-label="{{ searchLabel }}">
+                            <twig:PersonPickerRows :matchCount="3":rows="[
+                                {personId: '00000000-0000-4000-8000-000000000001', name: 'Omar', openCount: 3, isPressed: true},
+                                {personId: '00000000-0000-4000-8000-000000000002', name: 'Mia', openCount: 1, isPressed: false},
+                                {personId: '00000000-0000-4000-8000-000000000003', name: 'Lena', openCount: 0, isPressed: false},
+                            ]"/>
+                        </div>
+                    </twig:block>
+                    <twig:block name="actions">
+                        <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+                    </twig:block>
+                </twig:Dialog>
+            </div>
+        </div>
+    </section>
 {% endblock %}

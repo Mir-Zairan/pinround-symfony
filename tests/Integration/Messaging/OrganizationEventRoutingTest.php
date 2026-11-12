@@ -8,6 +8,7 @@ use App\Organization\Api\Event\MemberJoined;
 use App\Organization\Api\Event\OrgRolesChanged;
 use App\Organization\Api\Event\TeamCreated;
 use App\Organization\Api\Event\TeamRoleChanged;
+use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\Organization\Infrastructure\Messenger\MessengerOrganizationEvents;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -95,7 +96,7 @@ final class OrganizationEventRoutingTest extends KernelTestCase
     {
         $tenantContext = self::getContainer()->get(TenantContext::class);
         $tenantContext->set(new OrganizationId(self::ACME_FOODS));
-        $events = new MessengerOrganizationEvents(self::getContainer()->get('event.bus'), $this->connection());
+        $events = new MessengerOrganizationEvents(self::getContainer()->get('event.bus'), $this->connection(), self::getContainer()->get(TeamPeopleCache::class));
 
         try {
             $events->publish(new MemberJoined(self::ACME_FOODS, OrganizationCommandsOnTheEventBus::OMAR, [], null, self::now()));

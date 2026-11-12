@@ -13,15 +13,12 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Console\DemoSeedCommand;
 use App\SharedKernel\Infrastructure\Console\DemoSeedRefused;
 use App\Tests\Factory\Identity\UserFactory;
-use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ProjectRows;
 use App\Tests\Integration\Ticketing\TicketRows;
-use App\Tests\Integration\Workflow\WorkflowRows;
 use App\Ticketing\Infrastructure\Demo\SeedDemoProjects;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\RuleSet;
-use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -344,6 +341,15 @@ final class DemoSeedCommandTest extends KernelTestCase
             $this->connection()->fetchOne('SELECT count(*) FROM tkt_ticket_event'),
             $this->connection()->fetchOne('SELECT count(*) FROM ins_ticket_turn'),
             $this->connection()->fetchOne('SELECT count(*) FROM tkt_ticket WHERE closed_at IS NOT NULL'),
+            $this->connection()->fetchAllNumeric(
+                "SELECT c.visibility, c.open_count, c.done_count FROM ins_project_counts c
+                 JOIN tkt_project p ON p.organization_id = c.organization_id AND p.id = c.project_id WHERE p.key = 'SHOP' ORDER BY c.visibility",
+            ),
+            $this->connection()->fetchAllNumeric(
+                "SELECT t.visibility, count(*) FILTER (WHERE s.grp <> 'done'), count(*) FILTER (WHERE s.grp = 'done') FROM tkt_ticket t
+                 JOIN wf_step s ON s.organization_id = t.organization_id AND s.id = t.step_id
+                 JOIN tkt_project p ON p.organization_id = t.organization_id AND p.id = t.project_id WHERE p.key = 'SHOP' GROUP BY t.visibility ORDER BY t.visibility",
+            ),
         ]);
         $afterFirstRun = $ticketFacts();
 
@@ -358,7 +364,11 @@ final class DemoSeedCommandTest extends KernelTestCase
         self::assertGreaterThan(0, $afterFirstRun[5]);
         self::assertLessThan(40, $afterFirstRun[5]);
         // The five done tickets are nobody's turn, so they hold no turn row.
-        self::assertSame([40, 35, 5], \array_slice($afterFirstRun, 6));
+        self::assertSame([40, 35, 5], \array_slice($afterFirstRun, 6, 3));
+        // The rail's stored counts follow the seed's raw step and visibility moves: both visibilities, five done.
+        self::assertCount(2, $afterFirstRun[10]);
+        self::assertSame(5, array_sum(array_column($afterFirstRun[10], 2)));
+        self::assertSame($afterFirstRun[10], $afterFirstRun[9]);
         self::assertStringContainsString('Tickets: created 0, kept 40.', $second->getDisplay());
         self::assertSame($afterFirstRun, $ticketFacts());
     }
@@ -631,39 +641,18 @@ final class DemoSeedCommandTest extends KernelTestCase
 
     private function removeOrganizationOf(string $email): void
     {
-        $organizationIds = $this->organizationIdsOf($email);
-        $this->ticketRows()->removeAllOf(...$organizationIds);
-        $this->projectRows()->removeAllOf(...$organizationIds);
-        $this->workflowRows()->removeAllOf(...$organizationIds);
-        $this->rows()->removeAllOf(...$organizationIds);
+        $this->demoSeedRows()->removeOrganizations(...$this->organizationIdsOf($email));
     }
 
-    /**
-     * Removes what the seed made, wherever an earlier run left it: the organizations of the demo people with their
-     * projects and workflow, their outbox messages, credentials and the people themselves. The entity manager is
-     * emptied first, as the tenant may only change once it holds nothing.
-     */
     private function removeDemoRows(): void
     {
         self::getContainer()->get('doctrine')->resetManager();
-        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
-        $userIds = $migrator->fetchFirstColumn('SELECT id FROM idn_user WHERE email IN (?)', [self::EMAILS], [ArrayParameterType::STRING]);
-        $organizationIds = [];
-        foreach ($userIds as $userId) {
-            foreach ($this->connection()->fetchFirstColumn('SELECT organization_id FROM resolve_user_orgs(?)', [$userId]) as $organizationId) {
-                self::assertIsString($organizationId);
-                $organizationIds[$organizationId] = $organizationId;
-            }
-        }
-        $this->ticketRows()->removeAllOf(...array_values($organizationIds));
-        $this->projectRows()->removeAllOf(...array_values($organizationIds));
-        $this->workflowRows()->removeAllOf(...array_values($organizationIds));
-        $this->rows()->removeAllOf(...array_values($organizationIds));
-        $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
-        if ([] !== $userIds) {
-            $migrator->executeStatement('DELETE FROM idn_credential WHERE user_id IN (?)', [$userIds], [ArrayParameterType::STRING]);
-            $migrator->executeStatement('DELETE FROM idn_user WHERE id IN (?)', [$userIds], [ArrayParameterType::STRING]);
-        }
+        $this->demoSeedRows()->removePeopleAndTheirOrganizations(self::EMAILS);
+    }
+
+    private function demoSeedRows(): DemoSeedRows
+    {
+        return new DemoSeedRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), $this->connection(), self::getContainer()->get(TenantContext::class));
     }
 
     private function ticketRows(): TicketRows
@@ -674,16 +663,6 @@ final class DemoSeedCommandTest extends KernelTestCase
     private function projectRows(): ProjectRows
     {
         return new ProjectRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
-    }
-
-    private function workflowRows(): WorkflowRows
-    {
-        return new WorkflowRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
-    }
-
-    private function rows(): OrganizationRows
-    {
-        return new OrganizationRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function connection(): Connection

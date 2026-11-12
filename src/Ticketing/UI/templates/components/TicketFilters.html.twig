@@ -1,0 +1,42 @@
+{% set chips = this.peopleChips %}
+{% set searchRefusal = this.searchRefusal %}
+<div{{ attributes.defaults({class: 'ticket-filters'}) }}>
+    <form class="ticket-filters__search" method="get" action="{{ path('ticketing_tickets') }}" role="search">
+        {% for name, value in this.searchFormFields %}
+            <input type="hidden" name="{{ name }}" value="{{ value }}">
+        {% endfor %}
+        <input class="ticket-filters__field" type="search" name="q" value="{{ q }}" maxlength="200"
+            placeholder="{{ constant('SEARCH_PLACEHOLDER', this) }}" aria-label="{{ constant('SEARCH_PLACEHOLDER', this) }}"
+            {% if searchRefusal is not null %}aria-invalid="true" aria-describedby="ticket-filters-refusal"{% endif %}
+            data-model="debounce(300)|q">
+    </form>
+    {% if searchRefusal is not null %}
+        <p class="ticket-filters__refusal" id="ticket-filters-refusal" role="alert">{{ searchRefusal }}</p>
+    {% endif %}
+
+    {# Every chip is a link to the list it shows, so it works without script; with script the component takes the click. #}
+    <div class="ticket-filters__people" role="group" aria-labelledby="ticket-filters-people-label">
+        <span class="ticket-filters__label" id="ticket-filters-people-label">{{ constant('PEOPLE_LABEL', this) }}</span>
+        <a class="chip" href="{{ this.listUrl({person: null}) }}" data-person-chip="everyone"
+            {% if person == '' %}aria-current="true"{% endif %}
+            data-action="live#action:prevent" data-live-action-param="filterByPerson" data-live-person-param="">Everyone</a>
+        {% for chip in (chips.viewerChip is null ? [] : [chips.viewerChip])|merge(chips.personChips) %}
+            <a class="chip" href="{{ chip.url }}" data-person-chip="{{ chip.personId }}"
+                {% if chip.isPressed %}aria-current="true"{% endif %}
+                data-action="live#action:prevent" data-live-action-param="filterByPerson" data-live-person-param="{{ chip.personId }}">{{ chip.label }}</a>
+        {% endfor %}
+        {% if chips.pickerChip is not null and chips.pickerChip.opensPicker %}
+            <twig:PersonPicker mode="filter" id="ticket-filters-person-picker" team="{{ team }}" projectId="{{ projectId }}"
+                pressedPerson="{{ person }}" triggerLabel="{{ chips.pickerChip.label }}" :isTriggerPressed="chips.pickerChip.isPressed"
+                pickedEvent="{{ constant('PERSON_PICKED_EVENT', this) }}"/>
+        {% elseif chips.pickerChip is not null %}
+            {# A small team names everyone on a chip, so this one only shows that the filter is someone no chip names. #}
+            <button type="button" class="chip" data-person-picker-trigger disabled
+                aria-pressed="{{ chips.pickerChip.isPressed ? 'true' : 'false' }}">{{ chips.pickerChip.label }}</button>
+        {% endif %}
+    </div>
+
+    <a class="chip" href="{{ this.listUrl({done: showsDone ? null : '1'}) }}" data-done-chip
+        {% if showsDone %}aria-current="true"{% endif %}
+        data-action="live#action:prevent" data-live-action-param="toggleDone">Show done</a>
+</div>

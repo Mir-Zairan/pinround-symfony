@@ -68,6 +68,7 @@
         "symfony/twig-bridge": "8.1.*",
         "symfony/twig-bundle": "8.1.*",
         "symfony/uid": "8.1.*",
+        "symfony/ux-live-component": "^3.7",
         "symfony/ux-turbo": "^3.7",
         "symfony/ux-twig-component": "^3.7",
         "symfony/yaml": "8.1.*",
@@ -129,7 +130,10 @@
             "assets:install %PUBLIC_DIR%": "symfony-cmd",
             "importmap:install": "symfony-cmd"
         },
-        "test": "phpunit",
+        "test": [
+            "Composer\\Config::disableProcessTimeout",
+            "phpunit"
+        ],
         "test:unit": "phpunit --testsuite unit",
         "test:integration": "phpunit --testsuite integration",
         "test:functional": "phpunit --testsuite functional",

@@ -14,6 +14,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Cache\AfterCommitTagInvalidation;
 use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
@@ -366,7 +367,7 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
     public function theKernelResetBetweenRequestsForgetsTheTransactionsTenant(): void
     {
         $workflowCache = self::getContainer()->get(WorkflowCache::class);
-        $workflowCache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        self::getContainer()->get(AfterCommitTagInvalidation::class)->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $loads = 0;
         $load = static function () use (&$loads): int {
             return ++$loads;
@@ -390,13 +391,14 @@ final class CachedWorkflowQueriesTest extends KernelTestCase
         self::assertSame(1, $workflowCache->rememberForOrganization('probe', $load));
         self::assertSame(2, $workflowCache->rememberForOrganization('probe', $load), 'With no transaction nothing is kept.');
 
-        $workflowCache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $invalidation = self::getContainer()->get(AfterCommitTagInvalidation::class);
+        $invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         self::assertSame(3, $workflowCache->rememberForOrganization('probe', $load));
         self::assertSame(3, $workflowCache->rememberForOrganization('probe', $load));
 
         $workflowCache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM));
         self::assertSame(4, $workflowCache->rememberForOrganization('probe', $load), 'A change waiting for its commit is read from the rows.');
-        $workflowCache->transactionEnded();
+        $invalidation->transactionEnded();
     }
 
     #[Test]

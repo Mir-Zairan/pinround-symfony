@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Workflow;
 
 use App\Organization\Api\OrganizationSetupStep;
 use App\Organization\Application\CreateOrganization;
+use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrgSettingsStore;
@@ -145,7 +146,7 @@ final class SetUpOrganizationWorkflowTest extends KernelTestCase
             new DoctrineOrganizations($this->entityManager()),
             new DoctrineMemberships($this->entityManager()),
             new DoctrineOrgSettingsStore($this->entityManager()),
-            new MessengerOrganizationEvents(self::getContainer()->get('event.bus'), $this->connection()),
+            new MessengerOrganizationEvents(self::getContainer()->get('event.bus'), $this->connection(), self::getContainer()->get(TeamPeopleCache::class)),
             $setupSteps,
         );
     }

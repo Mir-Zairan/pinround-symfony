@@ -275,6 +275,22 @@ final class CatalogTest extends KernelTestCase
         );
     }
 
+    /**
+     * The ticket search is a SECURITY DEFINER function too (data-model.md › Query patterns), so the list holds it and
+     * the check misses it when it is gone.
+     */
+    #[Test]
+    public function theTicketSearchIsAListedResolverThatIsReportedWhenMissing(): void
+    {
+        self::assertSame(
+            ['search_ticket_ids: 0 SECURITY DEFINER functions in public, expected 1'],
+            $this->inRolledBackFixture(
+                ['SET LOCAL ROLE pinround_resolver', 'DROP FUNCTION search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean, uuid, uuid[], uuid)', 'RESET ROLE'],
+                static fn (TenancyCatalog $catalog): array => $catalog->securityDefinerFunctionsOutsideTheResolvers(),
+            ),
+        );
+    }
+
     #[Test]
     public function resolverRightsBeyondColumnReadsOnResolverReadTablesAreReported(): void
     {

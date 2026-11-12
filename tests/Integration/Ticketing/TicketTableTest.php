@@ -14,8 +14,9 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * The tkt_ticket and tkt_summary tables as Version20261111120000 creates them: their indexes, row-level security, the
- * checks the database keeps on its own and the foreign keys that tie summaries and turn rows to their ticket.
+ * The tkt_ticket and tkt_summary tables as Version20261111120000 creates them, with the search column of
+ * Version20261112100000: their indexes, row-level security, the checks the database keeps on its own and the foreign
+ * keys that tie summaries and turn rows to their ticket.
  */
 final class TicketTableTest extends KernelTestCase
 {
@@ -51,6 +52,8 @@ final class TicketTableTest extends KernelTestCase
     {
         self::assertEqualsCanonicalizing(
             [
+                'CREATE INDEX tkt_ticket_search_idx ON public.tkt_ticket USING gin (organization_id, search)',
+                'CREATE INDEX tkt_ticket_title_trgm_idx ON public.tkt_ticket USING gin (organization_id, title gin_trgm_ops)',
                 'CREATE UNIQUE INDEX tkt_ticket_pkey ON public.tkt_ticket USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX tkt_ticket_organization_id_project_id_number_key ON public.tkt_ticket USING btree (organization_id, project_id, number)',
                 'CREATE UNIQUE INDEX tkt_ticket_organization_id_key_key ON public.tkt_ticket USING btree (organization_id, key)',
@@ -68,6 +71,78 @@ final class TicketTableTest extends KernelTestCase
                 'CREATE UNIQUE INDEX tkt_summary_ticket_id_current_key ON public.tkt_summary USING btree (organization_id, ticket_id) WHERE is_current',
             ],
             $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tkt_summary'"),
+        );
+    }
+
+    #[Test]
+    public function theSearchColumnIsGeneratedFromKeyAndTitleAboveDescription(): void
+    {
+        self::assertSame(
+            [
+                'type' => 'tsvector',
+                'generated' => 's',
+                'expression' => "((setweight(to_tsvector('simple'::regconfig, tkt_unaccent(key)), 'A'::\"char\")"
+                    ." || setweight(to_tsvector('simple'::regconfig, tkt_unaccent(title)), 'A'::\"char\"))"
+                    ." || setweight(to_tsvector('simple'::regconfig, tkt_unaccent(description)), 'B'::\"char\"))",
+            ],
+            $this->connection()->fetchAssociative(
+                "SELECT format_type(a.atttypid, a.atttypmod) AS type, a.attgenerated::text AS generated, pg_get_expr(d.adbin, d.adrelid) AS expression
+                 FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                 WHERE a.attrelid = 'public.tkt_ticket'::regclass AND a.attname = 'search'",
+            ),
+        );
+    }
+
+    /**
+     * A generated column may only call IMMUTABLE functions, and unaccent() is STABLE because it finds its dictionary
+     * through search_path; tkt_unaccent names the dictionary and fixes search_path, so its answer depends on the text alone.
+     */
+    #[Test]
+    public function theUnaccentWrapperIsImmutableWithAFixedSearchPathAndOwnedByTheMigrator(): void
+    {
+        self::assertSame(
+            ['owner' => 'pinround_migrator', 'volatility' => 'i', 'is_security_definer' => false, 'config' => '{"search_path=pg_catalog, pg_temp"}'],
+            $this->connection()->fetchAssociative(
+                "SELECT proowner::regrole::text AS owner, provolatile::text AS volatility, prosecdef AS is_security_definer, proconfig::text AS config
+                 FROM pg_proc WHERE oid = 'public.tkt_unaccent(text)'::regprocedure",
+            ),
+        );
+        // Both roles that search call it; like unaccent() itself it keeps the default EXECUTE for PUBLIC.
+        self::assertSame(
+            [true, true],
+            [
+                $this->connection()->fetchOne("SELECT has_function_privilege('pinround_app', 'public.tkt_unaccent(text)', 'EXECUTE')"),
+                $this->connection()->fetchOne("SELECT has_function_privilege('pinround_readonly', 'public.tkt_unaccent(text)', 'EXECUTE')"),
+            ],
+        );
+    }
+
+    /**
+     * Written as the app, which must be able to compute the column: key and title weigh A, description B, accents go.
+     */
+    #[Test]
+    public function aTicketIsFoundByItsWordsWithoutAccents(): void
+    {
+        $search = $this->rolledBackAsTheApp(function (Connection $connection): mixed {
+            $this->insertTicket($connection, ['title' => 'Café menu is hidden', 'description' => 'Señor García saw it.']);
+
+            return $connection->fetchAssociative(
+                "SELECT search::text AS terms,
+                        search @@ websearch_to_tsquery('simple', public.tkt_unaccent('cafe GARCIA shop-12')) AS is_found,
+                        search @@ websearch_to_tsquery('simple', public.tkt_unaccent('cafe pizza')) AS is_found_by_another_word
+                 FROM tkt_ticket WHERE id = ?",
+                [self::TICKET],
+            );
+        });
+
+        self::assertSame(
+            [
+                // The simple parser reads SHOP-12 as the word shop and the signed number -12.
+                'terms' => "'-12':2A 'cafe':3A 'garcia':8B 'hidden':6A 'is':5A 'it':10B 'menu':4A 'saw':9B 'senor':7B 'shop':1A",
+                'is_found' => true,
+                'is_found_by_another_word' => false,
+            ],
+            $search,
         );
     }
 

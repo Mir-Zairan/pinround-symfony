@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Insight;
 
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TurnRowResolver;
+use App\Insight\Infrastructure\Doctrine\DbalProjectCountsProjector;
 use App\Insight\Infrastructure\Doctrine\DbalTurnProjector;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -282,6 +283,7 @@ final class DbalTurnProjectorTest extends KernelTestCase
         return new DbalTurnProjector(
             $this->source(),
             new TurnRowResolver($this->turnRules(), $this->needsYouScore()),
+            new DbalProjectCountsProjector($this->connection(), self::getContainer()->get(TenantContext::class)),
             $this->connection(),
             self::getContainer()->get(TenantContext::class),
             $this->clock,

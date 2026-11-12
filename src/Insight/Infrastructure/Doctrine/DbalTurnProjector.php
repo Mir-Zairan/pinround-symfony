@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Insight\Infrastructure\Doctrine;
 
 use App\Insight\Api\TurnProjector;
+use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TicketTurnRow;
 use App\Insight\Application\Turn\TicketTurnSource;
 use App\Insight\Application\Turn\TurnRowResolver;
@@ -16,7 +17,8 @@ use Psr\Clock\ClockInterface;
 /**
  * TurnProjector on ins_ticket_turn; the contract is on {@see TurnProjector}. Row-level security keeps the row in the
  * transaction's tenant: another organization's row with the same ticket id is invisible, so it is neither updated
- * nor deleted.
+ * nor deleted. Each refresh also moves the ticket's project count (ins_project_counts), done tickets included, since
+ * every change of its project, team, visibility or step group refreshes it.
  */
 final readonly class DbalTurnProjector implements TurnProjector
 {
@@ -36,6 +38,7 @@ final readonly class DbalTurnProjector implements TurnProjector
     public function __construct(
         private TicketTurnSource $source,
         private TurnRowResolver $resolver,
+        private DbalProjectCountsProjector $projectCountsProjector,
         private Connection $connection,
         private TenantContext $tenantContext,
         private ClockInterface $clock,
@@ -51,6 +54,7 @@ final readonly class DbalTurnProjector implements TurnProjector
 
         $organizationId = $this->tenantContext->require()->toString();
         $facts = $this->source->factsFor($ticketId);
+        $this->projectCountsProjector->moveTicket($ticketId, null === $facts ? null : self::countedTicketOf($facts));
         $row = null === $facts ? null : $this->resolver->rowFor($facts);
 
         if (null === $row) {
@@ -65,6 +69,16 @@ final readonly class DbalTurnProjector implements TurnProjector
         $this->connection->executeStatement(self::UPSERT, $this->valuesOf($row, $organizationId));
 
         return $row->overrideNote;
+    }
+
+    /**
+     * A ticket with facts always has a team: the source gives none for a ticket no team owns.
+     */
+    private static function countedTicketOf(TicketTurnFacts $facts): ?CountedTicket
+    {
+        $teamId = $facts->ticket->teamId;
+
+        return null === $teamId ? null : new CountedTicket($facts->projectId, $teamId, $facts->visibility, 'done' === $facts->ticket->groupCode);
     }
 
     /**

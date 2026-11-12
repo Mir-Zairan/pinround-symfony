@@ -30,6 +30,19 @@ final class TicketListCursorParameterTest extends TestCase
         self::assertSame(3, $readBack->priorityRank);
         self::assertSame(1773570600, $readBack->updatedAt->getTimestamp());
         self::assertSame(self::TICKET, $readBack->ticketId->toString());
+        self::assertNull($readBack->matchPosition);
+    }
+
+    #[Test]
+    public function aSearchCursorComesBackWithItsMatchPosition(): void
+    {
+        $cursor = new Cursor(self::STEP, 3, new \DateTimeImmutable('2026-03-15T10:30:00+00:00'), new TicketId(self::TICKET), Cursor::matchPositionOf(true, '0.169808963686'));
+
+        $query = TicketListCursorParameter::queryOf($cursor);
+        $readBack = TicketListCursorParameter::cursorOf($query[TicketListCursorParameter::STEP_QUERY], $query[TicketListCursorParameter::AFTER_QUERY]);
+
+        self::assertSame('3.1773570600.'.self::TICKET.'.1_0.169808963686', $query[TicketListCursorParameter::AFTER_QUERY]);
+        self::assertSame([[true, '0.169808963686'], self::TICKET], [$readBack?->searchOrderValues(), $readBack?->ticketId->toString()]);
     }
 
     /**
@@ -49,6 +62,14 @@ final class TicketListCursorParameterTest extends TestCase
         yield 'ticket id in capitals' => [self::STEP, '3.1773570600.'.strtoupper(self::TICKET)];
         yield 'a part missing' => [self::STEP, '3.'.self::TICKET];
         yield 'trailing newline' => [self::STEP, $after."\n"];
+        yield 'an old ordinal match position' => [self::STEP, $after.'.7'];
+        yield 'match position without its flag' => [self::STEP, $after.'.0.169808963686'];
+        yield 'match position with a flag of 2' => [self::STEP, $after.'.2_0.169808963686'];
+        yield 'match score with an exponent' => [self::STEP, $after.'.0_1.69808963686e-01'];
+        yield 'match score of 13 decimals' => [self::STEP, $after.'.0_0.1698089636861'];
+        yield 'match score negative' => [self::STEP, $after.'.0_-0.169808963686'];
+        yield 'match position empty' => [self::STEP, $after.'.'];
+        yield 'match position then a newline' => [self::STEP, $after.".1_0.169808963686\n"];
     }
 
     #[Test]

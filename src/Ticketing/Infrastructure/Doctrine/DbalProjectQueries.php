@@ -66,11 +66,19 @@ final readonly class DbalProjectQueries implements ProjectQueries
             return null;
         }
         $row = $this->connection->fetchAssociative(
-            'SELECT id, key, name FROM tkt_project WHERE organization_id = ? AND key = ?',
+            'SELECT id, key, name, team_id FROM tkt_project WHERE organization_id = ? AND key = ?',
             [$organizationId->toString(), $key],
         );
+        if (false === $row) {
+            return null;
+        }
 
-        return false === $row ? null : new ProjectChoice(self::text($row['id'], 'id'), self::text($row['key'], 'key'), self::text($row['name'], 'name'));
+        return new ProjectChoice(
+            self::text($row['id'], 'id'),
+            self::text($row['key'], 'key'),
+            self::text($row['name'], 'name'),
+            null === $row['team_id'] ? null : new TeamId(self::text($row['team_id'], 'team_id')),
+        );
     }
 
     public function projectChoicesOfTeams(array $teamIds): array

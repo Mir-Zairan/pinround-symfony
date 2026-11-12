@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Web;
 use App\Tests\Functional\Identity\LogsInUsers;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\DomCrawler\Crawler;
 use Zenstruck\Foundry\Test\Factories;
 
 final class ComponentGalleryTest extends WebTestCase
@@ -22,13 +23,14 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
         // 4 variants x 2 sizes x (normal, disabled, link)
-        // plus the one action button inside the empty-state example and the dialog's trigger, Cancel and Confirm
-        self::assertCount(28, $crawler->filter('main .btn'));
+        // plus the one action button inside the empty-state example, the dialog's trigger, Cancel and Confirm, and the
+        // person picker's Cancel
+        self::assertCount(29, $crawler->filter('main .btn'));
         self::assertCount(9, $crawler->filter('main a.btn[href]'));
         self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
-        self::assertCount(3, $crawler->filter('main button.btn.btn-text:not([disabled])'));
+        self::assertCount(4, $crawler->filter('main button.btn.btn-text:not([disabled])'));
     }
 
     #[Test]
@@ -38,8 +40,8 @@ final class ComponentGalleryTest extends WebTestCase
         $crawler = $client->request('GET', '/_gallery');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertCount(1, $crawler->filter('main button.chip[aria-pressed="true"]'));
-        self::assertCount(1, $crawler->filter('main button.chip[aria-pressed="false"]'));
+        self::assertCount(1, $crawler->filter('#gallery-chip ~ .gallery-row button.chip[aria-pressed="true"]'));
+        self::assertCount(1, $crawler->filter('#gallery-chip ~ .gallery-row button.chip[aria-pressed="false"]'));
         // 2 view groups + 3 team groups, each with exactly one pressed option
         self::assertCount(5, $crawler->filter('main [role="group"][aria-label]'));
         self::assertCount(5, $crawler->filter('main .seg[aria-pressed="true"]'));
@@ -82,10 +84,38 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Open dialog', $crawler->filter('main [data-controller="dialog"] > button[data-action="dialog#open"]')->text());
-        self::assertSame(['Cancel', 'Confirm'], $crawler->filter('main dialog .dialog__actions .btn')->each(static fn ($button): string => $button->text()));
+        self::assertSame(['Cancel', 'Confirm'], $crawler->filter('main dialog#gallery-dialog-demo .dialog__actions .btn')->each(static fn ($button): string => $button->text()));
         self::assertCount(1, $crawler->filter('main button[aria-haspopup="menu"][aria-expanded="false"][aria-controls="gallery-menu-list"]'));
         self::assertCount(1, $crawler->filter('main #gallery-menu-list[role="menu"][hidden]'));
         self::assertCount(3, $crawler->filter('main #gallery-menu-list [role="menuitem"]'));
+    }
+
+    /**
+     * The real picker reads a team's people in a live request, which the server refuses for the page's made-up team,
+     * so the gallery's dialog holds fixed rows and nothing in it talks to the server.
+     */
+    #[Test]
+    public function theGalleryShowsThePersonPickerDialogWithSampleRowsAndSendsNoLiveRequest(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        $picker = $crawler->filter('#gallery-person-picker ~ .gallery-row');
+        self::assertSame([['Person ▾', 'false'], ['Omar', 'true']], $picker->filter('button.chip')->each(static fn (Crawler $chip): array => [$chip->text(), $chip->attr('aria-pressed')]));
+        self::assertSame('dialog#open', $picker->filter('button.chip[aria-pressed="true"]')->attr('data-action'));
+        $dialog = $picker->filter('dialog#gallery-person-picker-demo');
+        self::assertSame('Show tickets of…', $dialog->filter('.dialog__title')->text());
+        self::assertSame('Sorted by open tickets assigned to them.', $dialog->filter('.person-picker__sub')->text());
+        self::assertSame('Find a person', $dialog->filter('input.person-picker__field[type="search"]')->attr('aria-label'));
+        self::assertSame(
+            [['Omar', '3 open', 'true'], ['Mia', '1 open', 'false'], ['Lena', '0 open', 'false']],
+            $dialog->filter('button.pick')->each(static fn (Crawler $row): array => [$row->filter('.pick__name')->text(), $row->filter('.pick__side')->text(), $row->attr('aria-pressed')]),
+        );
+        self::assertCount(0, $dialog->filter('[data-person-picker-hint]'));
+        self::assertSame(['Cancel'], $dialog->filter('.dialog__actions .btn')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertCount(0, $picker->filter('[data-model], [data-controller~="person-picker"], [data-action*="live#"]'));
+        self::assertCount(0, $crawler->filter('[data-live-name-value]'));
     }
 
     #[Test]

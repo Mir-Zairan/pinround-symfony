@@ -120,6 +120,8 @@ services:
     # Other modules read steps and rules through WorkflowCache (performance-and-scale.md, "Caching").
     App\Workflow\Api\StepQueries: '@App\Workflow\Infrastructure\Cache\CachedStepQueries'
     App\Workflow\Api\RuleQueries: '@App\Workflow\Infrastructure\Cache\CachedRuleQueries'
+    # And a team's people with their names through TeamPeopleCache, the same way.
+    App\Organization\Api\TeamPeopleQueries: '@App\Organization\Infrastructure\Cache\CachedTeamPeopleQueries'
     App\Workflow\Api\TransitionPolicy: '@App\Workflow\Application\Transition\CatalogueTransitionPolicy'
     App\Workflow\Api\TurnRules: '@App\Workflow\Application\Turn\OrderedTurnRules'
     App\Workflow\Api\NeedsYouScore: '@App\Workflow\Application\Turn\WeightedNeedsYouScore'
@@ -133,7 +135,9 @@ services:
     App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
     App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
+    App\Ticketing\Api\AssigneeTicketCounts: '@App\Ticketing\Infrastructure\Doctrine\DbalAssigneeTicketCounts'
     App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
+    App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -162,7 +166,7 @@ when@test:
             class: Symfony\Component\HttpFoundation\Session\Storage\MockFileSessionStorageFactory
             arguments: ['%kernel.cache_dir%/sessions', '%app.session_cookie_name%']
 
-        # cache.workflow's test adapter (cache.yaml). Valkey keeps entries between requests, but cache.adapter.array is
+        # The test adapter of cache.workflow and cache.team_people (cache.yaml). Valkey keeps entries between requests, but cache.adapter.array is
         # emptied by every kernel reset, so a warm page could not be measured; each test still boots a new, empty one.
         test.cache.adapter.array_kept_between_requests:
             class: Symfony\Component\Cache\Adapter\ArrayAdapter
@@ -219,8 +223,16 @@ when@test:
         test.ticketing_ticket_queries:
             alias: App\Ticketing\Api\TicketQueries
             public: true
+        # PersonPickerCountsLeakTest reads the person picker's counts as the picker gets them.
+        test.ticketing_assignee_ticket_counts:
+            alias: App\Ticketing\Api\AssigneeTicketCounts
+            public: true
         test.insight_turn_user_queries:
             alias: App\Insight\Api\TurnUserQueries
+            public: true
+        # No page shows the project rail before P03.T5 step 2; the count tests get it as a page would.
+        test.insight_project_count_queries:
+            alias: App\Insight\Api\ProjectCountQueries
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

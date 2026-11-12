@@ -22,7 +22,10 @@ Its data provider `viewers()` yields `[viewer, seesTeamOnly, seesNoTeamTicket]`.
 | TicketVoter VIEW | `TicketVoterViewLeakTest` | P03.T2 |
 | Team page project counts, step count | `TicketCountsLeakTest` | P03.T2 |
 | Ticket list | `TicketListLeakTest` | P03.T3 |
-| Search | planned | P03 task 6 |
+| Search function `search_ticket_ids` (visibility written out in its migration): each viewer finds what `TicketVisibilitySql` lets them see, an outsider in any person column finds that ticket, no other organization's ticket | `TicketSearchFunctionLeakTest` | P03.T4 |
+| Ticket list with a search (`/tickets?q=`): the function's matches joined back under `TicketVisibilitySql`, by title words and by key, no other organization's ticket | `TicketSearchLeakTest` | P03.T4 |
+| Project rail counts (`ProjectCountQueries::countsOfTeam`, from `ins_project_counts`): the ticket's own team and admins count the team-only ticket, anyone else (its outside reporter, a new team of its project) does not | `ProjectCountsLeakTest` | P03.T5 |
+| Person picker "N open" (`AssigneeTicketCounts::openTicketsAssignedTo`): both cast tickets assigned to one person, each viewer counts exactly those they may see | `PersonPickerCountsLeakTest` | P03.T5 |
 | Ticket page | planned | P03.T6 |
 | Bell and email | planned | P04 |
 | Rounds | planned | P05 |

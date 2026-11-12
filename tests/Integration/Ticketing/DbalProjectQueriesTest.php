@@ -344,10 +344,10 @@ final class DbalProjectQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function projectByKeyFindsTheOrganizationsProjectLinkedOrNot(): void
+    public function projectByKeyFindsTheOrganizationsProjectLinkedOrNotWithItsTeam(): void
     {
         self::assertSame(
-            [[self::SHOP, 'SHOP', 'Web shop'], [self::OPS, 'OPS', 'Archive'], [self::BETA_CAKE, 'CAKE', 'Cake orders']],
+            [[self::SHOP, 'SHOP', 'Web shop', self::SHOP_TEAM], [self::OPS, 'OPS', 'Archive', null], [self::BETA_CAKE, 'CAKE', 'Cake orders', null]],
             [$this->foundByKey(self::ACME_FOODS, 'SHOP'), $this->foundByKey(self::ACME_FOODS, 'OPS'), $this->foundByKey(self::BETA_BAKERY, 'CAKE')],
         );
     }
@@ -373,7 +373,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
         );
 
         self::assertSame([null, []], [$project, $recordedSql->statements]);
-        self::assertSame([self::SHOP, 'SHOP', 'Web shop'], $this->foundByKey(self::ACME_FOODS, 'SHOP'));
+        self::assertSame([self::SHOP, 'SHOP', 'Web shop', self::SHOP_TEAM], $this->foundByKey(self::ACME_FOODS, 'SHOP'));
     }
 
     /**
@@ -481,14 +481,14 @@ final class DbalProjectQueriesTest extends KernelTestCase
     }
 
     /**
-     * @return array{string, string, string}|null id, key and name of the project with $key
+     * @return array{string, string, string, string|null}|null id, key, name and team id of the project with $key
      */
     private function foundByKey(string $organizationId, string $key): ?array
     {
         return $this->transactions()->rolledBackAs($organizationId, function () use ($key): ?array {
             $project = $this->queries(new RecordedOpenTicketCounts(self::OPEN_TICKETS))->projectByKey($key);
 
-            return null === $project ? null : [$project->id(), $project->key(), $project->name()];
+            return null === $project ? null : [$project->id(), $project->key(), $project->name(), $project->teamId()?->toString()];
         });
     }
 

@@ -1,0 +1,22 @@
+{# The person picker's rows, most open tickets first, and the hint when more people match than are shown. PersonPickerSearch passes the live event a row emits up with the person's id; without one (the gallery's sample) a row only closes the dialog. #}
+{% props rows, matchCount, pickedEvent = '' %}
+<ul class="person-picker__rows" data-action="keydown->person-picker#moveBetweenRows">
+    {% for row in rows %}
+        <li>
+            <button type="button" class="pick" data-person-pick="{{ row.personId }}" data-person-picker-target="row"
+                aria-pressed="{{ row.isPressed ? 'true' : 'false' }}"
+                {% if pickedEvent is not empty %}
+                    data-action="live#emitUp dialog#close" data-live-event-param="{{ pickedEvent }}" data-live-person-param="{{ row.personId }}"
+                {% else %}
+                    data-action="dialog#close"
+                {% endif %}>
+                <twig:Avatar name="{{ row.name }}" aria-hidden="true"/>
+                <span class="pick__name">{{ row.name }}</span>
+                <span class="pick__side">{{ row.openCount }} open</span>
+            </button>
+        </li>
+    {% endfor %}
+</ul>
+{% if matchCount > rows|length %}
+    <p class="person-picker__note" data-person-picker-hint>Showing {{ rows|length }} of {{ matchCount|number_format }}. Type a name to narrow the list.</p>
+{% endif %}

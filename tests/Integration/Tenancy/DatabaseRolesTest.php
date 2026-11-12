@@ -371,22 +371,32 @@ final class DatabaseRolesTest extends KernelTestCase
 
     /**
      * The ticket tables (Version20261111120000): the app reads, adds and changes tickets and summaries and removes
-     * neither; support reads under the tenant policy; nobody holds column rights.
+     * neither; support reads under the tenant policy. The only column rights are pinround_resolver's SELECT on the
+     * tkt_ticket columns search_ticket_ids matches on, filters on or returns (Version20261112120000).
      */
     #[Test]
     public function theTicketTablesGrantTheAppNoDeleteAndSupportOnlyRead(): void
     {
         $connection = $this->connection();
+        $expectedColumnGrants = [
+            'tkt_ticket' => array_map(
+                static fn (string $column): string => 'pinround_resolver SELECT '.$column,
+                ['organization_id', 'id', 'project_id', 'step_id', 'key', 'title', 'search', 'visibility', 'team_id', 'reporter_id',
+                    'assignee_id', 'pending_assignee_id', 'reviewer_id', 'tester_id', 'waiting_on_user_id'],
+            ),
+            'tkt_summary' => [],
+        ];
 
-        foreach (['tkt_ticket', 'tkt_summary'] as $table) {
+        foreach ($expectedColumnGrants as $table => $columnGrants) {
             self::assertEqualsCanonicalizing(
                 ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
                 $this->grantsToOthersThanTheOwner($connection, $table),
                 $table,
             );
             self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
-            self::assertSame([], $connection->fetchFirstColumn(
-                'SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)',
+            self::assertEqualsCanonicalizing($columnGrants, $connection->fetchFirstColumn(
+                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
+                 FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)",
                 ['public.'.$table],
             ), $table);
         }
@@ -455,8 +465,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'tkt_ticket', 'tkt_summaries', 'tkt_project'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);
@@ -527,7 +537,7 @@ final class DatabaseRolesTest extends KernelTestCase
     {
         // roles.sql re-owns tables but cannot re-own extensions, so only a migration run as the migrator makes it their owner.
         self::assertEqualsCanonicalizing(
-            ['citext', 'pg_trgm', 'pgcrypto'],
+            ['btree_gin', 'citext', 'pg_trgm', 'pgcrypto', 'unaccent'],
             $this->connection()->fetchFirstColumn("SELECT extname FROM pg_extension WHERE extowner = 'pinround_migrator'::regrole"),
             'A test database migrated before the roles existed keeps the old owner: drop pinround_test, then run make db-roles migrate-test.',
         );

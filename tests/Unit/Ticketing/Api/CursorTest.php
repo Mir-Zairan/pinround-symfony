@@ -20,7 +20,47 @@ final class CursorTest extends TestCase
     {
         $cursor = new Cursor(self::STEP, 4, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId(self::TICKET));
 
-        self::assertSame([self::STEP, 4, '2027-03-15 10:00:00', self::TICKET], [$cursor->stepId, $cursor->priorityRank, $cursor->updatedAt->format('Y-m-d H:i:s'), $cursor->ticketId->toString()]);
+        self::assertSame([self::STEP, 4, '2027-03-15 10:00:00', self::TICKET, null], [$cursor->stepId, $cursor->priorityRank, $cursor->updatedAt->format('Y-m-d H:i:s'), $cursor->ticketId->toString(), $cursor->matchPosition]);
+    }
+
+    #[Test]
+    public function underASearchItKeepsTheLastRowsSearchOrderValuesExactly(): void
+    {
+        $matchPosition = Cursor::matchPositionOf(true, '0.169808963686');
+        $cursor = new Cursor(self::STEP, 4, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId(self::TICKET), $matchPosition);
+
+        self::assertSame(['1_0.169808963686', [true, '0.169808963686']], [$cursor->matchPosition, $cursor->searchOrderValues()]);
+        self::assertSame([false, '12.000000000000'], new Cursor(self::STEP, 4, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId(self::TICKET), Cursor::matchPositionOf(false, '12.000000000000'))->searchOrderValues());
+    }
+
+    #[Test]
+    public function withoutASearchItHasNoSearchOrderValues(): void
+    {
+        self::assertNull(new Cursor(self::STEP, 4, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId(self::TICKET))->searchOrderValues());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function refusedMatchPositions(): iterable
+    {
+        yield 'empty' => [''];
+        yield 'a flag other than 0 or 1' => ['2_0.169808963686'];
+        yield 'no score' => ['1_'];
+        yield 'a negative score' => ['0_-0.169808963686'];
+        yield 'a score rounded to fewer decimals' => ['0_0.1698'];
+        yield 'a score with an exponent' => ['0_1.698089636860e-01'];
+        yield 'a score with a leading zero' => ['0_01.000000000000'];
+        yield 'a trailing newline' => ["0_0.169808963686\n"];
+        yield 'an old ordinal position' => ['50'];
+    }
+
+    #[Test]
+    #[DataProvider('refusedMatchPositions')]
+    public function itRefusesAMatchPositionTheDatabaseCannotHaveWritten(string $matchPosition): void
+    {
+        $this->expectExceptionObject(new \InvalidArgumentException('A cursor\'s match position is the exact-key flag and the match score as the database writes them.'));
+        new Cursor(self::STEP, 4, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId(self::TICKET), $matchPosition);
     }
 
     /**

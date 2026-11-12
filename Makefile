@@ -85,5 +85,8 @@ migrate-test: ## Run the database migrations on the test database (as pinround_m
 check-compose: ## Validate compose.yaml and the service list
 	sh tests/shell/compose-config-check.sh
 
+# --no-debug: in debug mode Doctrine and Messenger keep every query and message of the 2,000-person Crowd team in memory.
+# A non-debug kernel never checks its cached container against the code, so the cache is rebuilt first or an old one runs.
 seed: ## Load the demo people, organizations and teams into the dev database (needs DEMO_PASSWORD, 12+ characters; safe to re-run)
-	$(COMPOSE) exec $(if $(DEMO_PASSWORD),-e DEMO_PASSWORD) app bin/console app:demo:seed
+	$(COMPOSE) exec app bin/console cache:clear --no-debug
+	$(COMPOSE) exec $(if $(DEMO_PASSWORD),-e DEMO_PASSWORD) app bin/console app:demo:seed --no-debug

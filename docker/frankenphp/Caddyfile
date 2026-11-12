@@ -13,6 +13,9 @@
 }
 
 {$SERVER_NAME:localhost} {
+	# No `log` directive on purpose: Caddy writes no access log, so no request URI (the tickets list's ?q= holds search
+	# words, ADR-0027) reaches one. A `log` added here must drop it, for example with
+	# `format filter { request>uri query { replace q [removed] } }` (security.md "Logging without leaking").
 	root * /app/public
 
 	# Compressed SSE streams cost memory per subscriber and enable BREACH-style attacks.

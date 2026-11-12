@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
+use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Ticketing\UI\TicketListController;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -34,6 +36,8 @@ final class TicketListTest extends WebTestCase
 
     private const string TICKETS = '/tickets';
     private const string SHELL = '/_test/menu/shell';
+    /** The project rail's reads: the team names, the team's projects and their counts. */
+    private const string RAIL_QUERIES = '/FROM org_team WHERE organization_id = \? AND id = ANY|FROM tkt_project WHERE organization_id = \? AND team_id = ANY|FROM ins_project_counts/';
     private const array PRIORITY_RANKS = ['blocker' => 0, 'critical' => 1, 'major' => 2, 'normal' => 3, 'minor' => 4];
 
     private KernelBrowser $client;
@@ -219,6 +223,10 @@ final class TicketListTest extends WebTestCase
         yield 'after without step' => ['after=3.1805000000.0197a3c0-0000-7000-8000-000000000001'];
         yield 'step without after' => ['step=0197a3c0-0000-7000-8000-00000000f0d0'];
         yield 'after as an array' => ['step=0197a3c0-0000-7000-8000-00000000f0d0&after[]=1'];
+        yield 'a search cursor without the search' => ['step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001.0_0.169808963686'];
+        yield 'an old ordinal match position with the search' => ['q=checkout&step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001.7'];
+        yield 'a priority cursor with a search' => ['q=checkout&step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001'];
+        yield 'a search as an array' => ['q[]=checkout'];
     }
 
     #[Test]
@@ -335,8 +343,332 @@ final class TicketListTest extends WebTestCase
         self::assertCount(0, $page->filter('[autofocus]'));
     }
 
+    /**
+     * Turbo asks for Show more's URL as a request for the more frame, which it swaps for the frame of the same id in
+     * the answer; that frame holds the next rows, and nothing of the page around it comes back.
+     */
     #[Test]
-    public function aWarmPageReadsAtMostFiveQueriesMoreThanTheShellFor200OpenTickets(): void
+    public function showMoreAsAFrameRequestGetsTheNextRowsInThatFrameAlone(): void
+    {
+        $this->addManyTickets('todo', 52);
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKETS.'?project=SHOP');
+        self::assertResponseStatusCodeSame(200);
+        $moreLink = $page->filter('[data-group="todo"] [data-step-more]');
+        $frameId = (string) $page->filter('[data-group="todo"] turbo-frame')->attr('id');
+        self::assertMatchesRegularExpression('/^step-[0-9a-f-]{36}-after-[0-9a-f]{16}$/', $frameId);
+
+        $frame = $this->client->request('GET', (string) $moreLink->attr('href'), server: ['HTTP_TURBO_FRAME' => $frameId]);
+
+        self::assertResponseStatusCodeSame(200);
+        // The oldest two by updated_at, newest first, after the 50 the first page showed.
+        self::assertSame(['SHOP-2', 'SHOP-1'], $frame->filter('turbo-frame#'.$frameId.' .tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertCount(2, $frame->filter('.tickets__row'));
+        self::assertCount(1, $frame->filter('turbo-frame#'.$frameId.' ul.tickets__row-list[tabindex="-1"][autofocus]'));
+        self::assertCount(0, $frame->filter('.ticket-filters, nav, header, title'));
+    }
+
+    /**
+     * SHOP-40 matches by its title, is a blocker and newer, so the priority order would list it first; the exact key
+     * comes first. SHOP-42, in the same step, does not match; the In progress tickets do not either.
+     */
+    #[Test]
+    public function aSearchForAKeyShowsThatTicketFirstInItsStepAndOnlyMatches(): void
+    {
+        $this->addManyTickets('doing', 39);
+        $this->addTicket('todo', 'Shop 41 sale', 'blocker');
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->addTicket('todo', 'Add a gift wrap', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+        $unsearched = $this->client->request('GET', self::TICKETS);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-40', 'SHOP-42', 'SHOP-41'], $unsearched->filter('[data-group="todo"] .tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+
+        $page = $this->client->request('GET', self::TICKETS.'?q=+shop-41+');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['todo'], $page->filter('.tickets__step')->each(static fn (Crawler $step): ?string => $step->attr('data-group')));
+        self::assertSame(['SHOP-41', 'SHOP-40'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertSame(['2', '2 tickets · grouped by step'], [$page->filter('.tickets__step-count')->text(), $page->filter('.tickets__total')->text()]);
+    }
+
+    #[Test]
+    public function aSearchThatMatchesNothingSaysHowToFindMore(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?q=postcode');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.tickets__row'));
+        self::assertSame('No tickets match. Clear the search or pick another person.', $page->filter('.empty-state')->text());
+    }
+
+    #[Test]
+    public function aBlankSearchListsEveryTicket(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?q=+%09+');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+    }
+
+    /**
+     * Omar's tickets sit in two steps among Lena's and an unassigned one, so a filter on the reporter, the turn or no
+     * filter at all would list more.
+     */
+    #[Test]
+    public function aPersonKeepsOnlyTheTicketsAssignedToThem(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->addTicket('todo', 'Add a gift wrap', 'normal', ['assignee' => 'Lena', 'turn' => 'Omar']);
+        $this->addTicket('doing', 'Cart total shows the wrong sum', 'critical', ['assignee' => 'Omar']);
+        $this->addTicket('doing', 'Coupon field takes any text', 'minor');
+        $this->logIn($this->client, $this->people['Lena']);
+        $omar = $this->people['Omar']->id()->toString();
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$omar);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-3', 'SHOP-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertSame(['1', '1'], $page->filter('.tickets__step-count')->each(static fn (Crawler $count): string => $count->text()));
+        self::assertSame('2 tickets · grouped by step', $page->filter('.tickets__total')->text());
+        self::assertSame(['Omar'], $page->filter('.ticket-filters a.chip[aria-current="true"]')->each(static fn (Crawler $chip): string => $chip->text()));
+    }
+
+    #[Test]
+    public function aPersonWithNoTicketHereSaysHowToFindMore(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.tickets__row'));
+        self::assertSame('No tickets match. Clear the search or pick another person.', $page->filter('.empty-state')->text());
+    }
+
+    #[Test]
+    public function aPersonOutsideTheTeamFilteringByAnAssigneeStillSeesNoTeamOnlyTicket(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->addTicket('todo', 'Price rules for staff', 'normal', ['visibility' => 'team', 'assignee' => 'Omar']);
+        $this->addTicket('todo', 'Add a gift wrap', 'normal', ['assignee' => 'Lena']);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Omar']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertSame('1', $page->filter('.tickets__step-count')->text());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function malformedPeople(): iterable
+    {
+        yield 'a word' => ['nobody'];
+        yield 'an uppercase uuid' => ['0197A3C0-0000-7000-8002-000000000001'];
+        yield 'a uuid in braces' => ['%7B0197a3c0-0000-7000-8002-000000000001%7D'];
+        yield 'a uuid and a NUL' => ['0197a3c0-0000-7000-8002-000000000001%00'];
+        yield 'a uuid without hyphens' => ['0197a3c0000070008002000000000001'];
+    }
+
+    #[Test]
+    #[DataProvider('malformedPeople')]
+    public function aMalformedPersonIsNotFoundBeforeAnyTicketQuery(string $encodedPerson): void
+    {
+        $this->client->disableReboot();
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertNotSame([], $this->ticketQueriesOf(self::TICKETS.'?person='.$this->people['Omar']->id()->toString()));
+        self::assertResponseStatusCodeSame(200);
+
+        $ticketQueries = $this->ticketQueriesOf(self::TICKETS.'?person='.$encodedPerson);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame([], $ticketQueries);
+    }
+
+    #[Test]
+    public function theShowDoneChipAddsDoneAndKeepsThePerson(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->addTicket('done', 'Pay button is hidden on small screens', 'major', ['assignee' => 'Omar']);
+        $this->addTicket('done', 'Coupon field takes any text', 'minor', ['assignee' => 'Lena']);
+        $this->logIn($this->client, $this->people['Lena']);
+        $omar = $this->people['Omar']->id()->toString();
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$omar);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['todo'], $page->filter('.tickets__step')->each(static fn (Crawler $step): ?string => $step->attr('data-group')));
+        self::assertNull($page->filter('[data-done-chip]')->attr('aria-current'));
+
+        $withDone = $this->client->click($page->filter('[data-done-chip]')->link());
+
+        self::assertResponseStatusCodeSame(200);
+        parse_str((string) parse_url($this->client->getRequest()->getUri(), \PHP_URL_QUERY), $query);
+        self::assertEquals(['person' => $omar, 'done' => '1'], $query);
+        self::assertSame(['SHOP-1', 'SHOP-2'], $withDone->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertSame('true', $withDone->filter('[data-done-chip]')->attr('aria-current'));
+
+        $withoutDone = $this->client->click($withDone->filter('[data-done-chip]')->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-1'], $withoutDone->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+    }
+
+    /**
+     * Omar is the assignee of every even ticket, Mia of every odd one: 52 of Omar's match, so his first page is 50.
+     */
+    #[Test]
+    public function showMoreKeepsTheSearchThePersonAndDone(): void
+    {
+        $this->addManyTickets('todo', 104);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+        $omar = $this->people['Omar']->id()->toString();
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$omar.'&done=1&q=checkout');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(50, $page->filter('.tickets__row'));
+        self::assertSame('52', $page->filter('.tickets__step-count')->text());
+        $moreLink = $page->filter('[data-group="todo"] [data-step-more]');
+        parse_str((string) parse_url((string) $moreLink->attr('href'), \PHP_URL_QUERY), $moreQuery);
+        self::assertSame([$omar, '1', 'checkout'], [$moreQuery['person'] ?? null, $moreQuery['done'] ?? null, $moreQuery['q'] ?? null]);
+
+        $nextPage = $this->client->click($moreLink->link());
+
+        self::assertResponseStatusCodeSame(200);
+        $nextKeys = $nextPage->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key'));
+        self::assertCount(2, $nextKeys);
+        foreach ($nextKeys as $key) {
+            self::assertSame(0, (int) substr((string) $key, 5) % 2, $key.' is not one of Omar\'s tickets.');
+        }
+    }
+
+    /**
+     * The best match, "Checkout", is a minor ticket updated first, so the priority order would show it last; the 52
+     * others tie on the rank and come by id, highest first. The ticket without the word is not listed.
+     */
+    #[Test]
+    public function showMoreUnderASearchKeepsTheSearchAndGoesOnInSearchOrder(): void
+    {
+        $this->addManyTickets('todo', 52);
+        $this->addTicket('todo', 'Checkout', 'minor', ['updatedAt' => '2027-03-15 07:00:00+00']);
+        $this->addTicket('todo', 'Cart total shows the wrong sum', 'blocker');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?project=SHOP&q=checkout');
+
+        self::assertResponseStatusCodeSame(200);
+        $firstPageKeys = $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key'));
+        self::assertCount(50, $firstPageKeys);
+        self::assertSame(['SHOP-53', 'SHOP-52', 'SHOP-51'], \array_slice($firstPageKeys, 0, 3));
+        self::assertSame('SHOP-4', $firstPageKeys[49]);
+        self::assertSame('53', $page->filter('.tickets__step-count')->text());
+        $moreLink = $page->filter('[data-group="todo"] [data-step-more]');
+        parse_str((string) parse_url((string) $moreLink->attr('href'), \PHP_URL_QUERY), $moreQuery);
+        self::assertSame(['SHOP', 'checkout'], [$moreQuery['project'] ?? null, $moreQuery['q'] ?? null]);
+        $after = $moreQuery['after'] ?? null;
+        self::assertIsString($after);
+        self::assertMatchesRegularExpression('/^\d\.\d+\.[0-9a-f-]{36}\.0_0\.\d{12}\z/', $after);
+
+        $nextPage = $this->client->click($moreLink->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-3', 'SHOP-2', 'SHOP-1'], $nextPage->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertCount(0, $nextPage->filter('[data-step-more]'));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function refusedSearches(): iterable
+    {
+        yield '201 characters' => [rawurlencode(str_repeat('é', 201)), 'The search is too long. Use 200 characters or fewer.'];
+        yield 'invalid UTF-8' => ['check%C3out', 'The search is not valid text.'];
+        yield 'a NUL inside' => ['check%00out', 'The search is not valid text.'];
+    }
+
+    #[Test]
+    #[DataProvider('refusedSearches')]
+    public function aRefusedSearchIsABadRequestWithItsReasonBeforeAnyTicketQuery(string $encodedSearch, string $reason): void
+    {
+        $this->client->disableReboot();
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertNotSame([], $this->ticketQueriesOf(self::TICKETS.'?q=gift'));
+        self::assertResponseStatusCodeSame(200);
+
+        $ticketQueries = $this->ticketQueriesOf(self::TICKETS.'?q='.$encodedSearch);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertSame($reason, $this->client->getResponse()->getContent());
+        self::assertSame([], $ticketQueries);
+    }
+
+    /**
+     * @return list<string> the SQL of the request's queries that read tickets, the search or the triager
+     */
+    private function ticketQueriesOf(string $uri): array
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $this->client->request('GET', $uri);
+
+        $ticketQueries = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            foreach ($queriesOfOneConnection as $query) {
+                $sql = \is_string($query['sql'] ?? null) ? $query['sql'] : '';
+                if (1 === preg_match('/tkt_ticket|search_ticket_ids|org_settings/', $sql)) {
+                    $ticketQueries[] = $sql;
+                }
+            }
+        }
+
+        return $ticketQueries;
+    }
+
+    #[Test]
+    public function aSearchOf200CharactersAroundSpacesIsTaken(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?q='.rawurlencode(' '.str_repeat('é', 200).' '));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('No tickets match. Clear the search or pick another person.', $page->filter('.empty-state')->text());
+    }
+
+    /**
+     * The page's budget is eight queries beyond the shell: the list's five (performance-and-scale.md) and the project
+     * rail's three, the team names, the team's projects and their counts. The toolbar's people and names come from the
+     * team people cache, so a warm page adds none for them. The search runs inside the rows' query, so it adds none.
+     */
+    #[Test]
+    public function aWarmSearchPageReadsTheListsFourQueriesAndTheRailsThree(): void
+    {
+        $this->client->disableReboot();
+        $this->addManyTickets('todo', 60);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        [$pageQueryCount, $listQueryCount] = $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS.'?q=checkout', true);
+
+        self::assertLessThanOrEqual(5, $listQueryCount);
+        self::assertSame([7, 4], [$pageQueryCount, $listQueryCount]);
+    }
+
+    #[Test]
+    public function aWarmPageReadsTheListsFourQueriesAndTheRailsThreeFor200OpenTickets(): void
     {
         $this->client->disableReboot();
         foreach (['wait', 'check', 'doing', 'todo'] as $groupCode) {
@@ -345,40 +677,207 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS));
+        [$pageQueryCount, $listQueryCount] = $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS, true);
+
+        self::assertLessThanOrEqual(5, $listQueryCount);
+        self::assertSame([7, 4], [$pageQueryCount, $listQueryCount]);
     }
 
+    /**
+     * A project page reads the project too, which gives the rail its team: the list's five and the rail's three.
+     */
     #[Test]
-    public function aWarmProjectPageReadsAtMostFiveQueriesMoreThanTheShell(): void
+    public function aWarmProjectPageReadsTheListsFiveQueriesAndTheRailsThree(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
+        [$pageQueryCount, $listQueryCount] = $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS.'?project=SHOP', true);
+
+        self::assertLessThanOrEqual(5, $listQueryCount);
+        self::assertSame([8, 5], [$pageQueryCount, $listQueryCount]);
     }
 
+    /**
+     * The first load fills both caches: the steps (one query, inside the list's five) and the toolbar's team people
+     * and their names (two more), beside the rail's three, so 10.
+     */
     #[Test]
-    public function aColdPageReadsTheStepsToo(): void
+    public function aColdPageReadsTheStepsAndTheTeamsPeopleToo(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertSame(5, $this->queryCountMoreThanTheShellOf(self::TICKETS, false));
+        self::assertSame([10, 7], $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS, false));
     }
 
+    /**
+     * A project page reads the project too: 6 cold for the list (performance-and-scale.md), the team people's 2 and
+     * the rail's 3.
+     */
     #[Test]
-    public function aColdProjectPageReadsTheStepsToo(): void
+    public function aColdProjectPageReadsTheStepsAndTheTeamsPeopleToo(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertSame(6, $this->queryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP', false));
+        self::assertSame([11, 8], $this->pageAndListQueryCountsMoreThanTheShellOf(self::TICKETS.'?project=SHOP', false));
+    }
+
+    /**
+     * A change of Shop's people (TeamRoleChanged) clears its cached people, so the next load reads them and their
+     * names again, two queries more than the warm page, and the one after is warm again.
+     */
+    #[Test]
+    public function theFirstLoadAfterAChangeOfTheTeamReadsItsPeopleAndNamesAgain(): void
+    {
+        $this->client->disableReboot();
+        $this->addManyTickets('todo', 60);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+        $warmQueryCount = $this->warmQueryCountMoreThanTheShellOf(self::TICKETS);
+        self::assertSame(7, $warmQueryCount);
+
+        self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow($this->shop);
+
+        self::assertSame([9, 7], [$this->queryCountOf(self::TICKETS) - $this->queryCountOf(self::SHELL), $this->queryCountOf(self::TICKETS) - $this->queryCountOf(self::SHELL)]);
+    }
+
+    /**
+     * A filter change reloads only the list frame: the answer is that frame alone, with the list's own queries and
+     * neither the menu's teams, the toolbar's people nor the rail, which the whole page reads (people from the cache
+     * when warm).
+     */
+    #[Test]
+    public function aFrameRequestGetsOnlyTheListFrameAndRunsOnlyTheListsQueries(): void
+    {
+        $this->client->disableReboot();
+        $this->addManyTickets('todo', 60);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+        $uri = self::TICKETS.'?person='.$this->people['Omar']->id()->toString();
+        $this->queriesOf($uri);
+        $pageQueries = $this->queriesOf($uri);
+        self::assertCount(1, $this->client->getCrawler()->filter('.ticket-filters'));
+
+        $frameQueries = $this->queriesOf($uri, ['HTTP_TURBO_FRAME' => 'ticket-list-frame']);
+
+        $frame = $this->client->getCrawler();
+        self::assertSame('Turbo-Frame', $this->client->getResponse()->headers->get('Vary'));
+        self::assertCount(1, $frame->filter('turbo-frame#ticket-list-frame'));
+        self::assertCount(0, $frame->filter('.ticket-filters, nav, header, title'));
+        self::assertCount(30, $frame->filter('.tickets__row'));
+        self::assertSame('30 tickets · grouped by step', $frame->filter('[data-total-line]')->attr('data-total-line'));
+        $toolbarAndMenuQueries = '/FROM org_team_member WHERE team_id = ANY|FROM org_team WHERE/';
+        self::assertSame([2, 0], [self::countMatching($toolbarAndMenuQueries, $pageQueries), self::countMatching($toolbarAndMenuQueries, $frameQueries)]);
+        // The rail's three and the menu's team names, which match the rail's.
+        self::assertSame([4, 0], [self::countMatching(self::RAIL_QUERIES, $pageQueries), self::countMatching(self::RAIL_QUERIES, $frameQueries)]);
+        self::assertSame([1, 1], [self::countMatching('/FROM idn_user WHERE id = ANY/', $pageQueries), self::countMatching('/FROM idn_user WHERE id = ANY/', $frameQueries)]);
+        // The menu's team names and the rail's three.
+        self::assertCount(\count($pageQueries) - 4, $frameQueries);
+    }
+
+    /**
+     * The rail's frame reads the project of the URL and the rail's three, the team names, the team's projects and their
+     * counts: neither the triager, the steps, the rows, the turn users nor their names. Beyond them run only the
+     * request's own: the user and credential, its organizations, the transaction, the tenant and the actor's roles and
+     * teams.
+     */
+    #[Test]
+    public function theRailsFrameRequestRunsOnlyTheProjectAndTheRailsQueries(): void
+    {
+        $this->client->disableReboot();
+        $this->addManyTickets('todo', 60);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+        $railFrame = ['HTTP_TURBO_FRAME' => TicketListController::RAIL_FRAME_ID];
+        $this->queriesOf(self::TICKETS, $railFrame);
+
+        $warmQueries = $this->queriesOf(self::TICKETS, $railFrame);
+        $projectQueries = $this->queriesOf(self::TICKETS.'?project=SHOP', $railFrame);
+
+        self::assertCount(1, $this->client->getCrawler()->filter('turbo-frame#project-rail-frame nav.project-rail'));
+        self::assertSame(
+            [['org_team', 'tkt_project', 'ins_project_counts'], ['tkt_project', 'org_team', 'tkt_project', 'ins_project_counts']],
+            [self::tablesReadBeyondTheRequestsOwn($warmQueries), self::tablesReadBeyondTheRequestsOwn($projectQueries)],
+        );
+        self::assertSame([11, 12], [\count($warmQueries), \count($projectQueries)]);
+        self::assertSame(0, self::countMatching('/FROM tkt_ticket|FROM wf_step|FROM idn_user WHERE id = ANY|search_ticket_ids/', [...$warmQueries, ...$projectQueries]));
+    }
+
+    /**
+     * @param list<string> $queries
+     *
+     * @return list<string> the table each query reads first, leaving out the request's own (the user, the tenant and
+     *                      the actor)
+     */
+    private static function tablesReadBeyondTheRequestsOwn(array $queries): array
+    {
+        $requestsOwn = '/FROM idn_user t0 WHERE t0\.id = \?|FROM idn_credential|resolve_user_orgs|TRANSACTION|COMMIT|set_config|FROM org_membership|FROM org_team_member member/';
+        $tables = [];
+        foreach ($queries as $sql) {
+            if (1 !== preg_match($requestsOwn, $sql) && 1 === preg_match('/ FROM (\w+)/', $sql, $match)) {
+                $tables[] = $match[1];
+            }
+        }
+
+        return $tables;
+    }
+
+    /**
+     * @param list<string> $queries
+     */
+    private static function countMatching(string $pattern, array $queries): int
+    {
+        return \count(array_filter($queries, static fn (string $sql): bool => 1 === preg_match($pattern, $sql)));
+    }
+
+    /**
+     * @param array<string, string> $server
+     *
+     * @return list<string> the SQL of every query the request ran
+     */
+    private function queriesOf(string $uri, array $server = []): array
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $this->client->request('GET', $uri, server: $server);
+        self::assertResponseStatusCodeSame(200);
+
+        $queries = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            foreach ($queriesOfOneConnection as $query) {
+                $queries[] = \is_string($query['sql'] ?? null) ? $query['sql'] : '';
+            }
+        }
+
+        return $queries;
+    }
+
+    /**
+     * @return array{int, int} the page's queries beyond the shell's, and those without the rail's (RAIL_QUERIES): the
+     *                         list's own
+     */
+    private function pageAndListQueryCountsMoreThanTheShellOf(string $uri, bool $isStepCacheWarm): array
+    {
+        $this->queryCountOf(self::SHELL);
+        $shellQueries = $this->queriesOf(self::SHELL);
+        if ($isStepCacheWarm) {
+            $this->queryCountOf($uri);
+        }
+        $pageQueries = $this->queriesOf($uri);
+        self::assertGreaterThan(0, $this->client->getCrawler()->filter('.tickets__row .av[title]')->count());
+        $pageQueryCount = \count($pageQueries) - \count($shellQueries);
+        // The menu reads the same team names as the rail for a person in two teams, so the shell's are left out.
+        $railQueryCount = self::countMatching(self::RAIL_QUERIES, $pageQueries) - self::countMatching(self::RAIL_QUERIES, $shellQueries);
+
+        return [$pageQueryCount, $pageQueryCount - $railQueryCount];
     }
 
     private function warmQueryCountMoreThanTheShellOf(string $uri): int

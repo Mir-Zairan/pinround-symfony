@@ -103,7 +103,8 @@ final class WorkerResetTest extends WebTestCase
 
     /**
      * Closing the connection ends its transaction without a ROLLBACK reaching the driver, so only the reset can tell
-     * WorkflowCache the transaction is over; until it does, an invalidation outside a transaction waits for a commit.
+     * AfterCommitTagInvalidation the transaction is over; until it does, an invalidation outside a transaction waits for
+     * a commit.
      */
     #[Test]
     public function theNextRequestInvalidatesTheWorkflowCacheAtOnceAfterARequestClosedTheConnectionInsideATransaction(): void
@@ -116,6 +117,23 @@ final class WorkerResetTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['entry' => 'gone after the invalidation'], $this->responseJson());
+    }
+
+    /**
+     * The same for the team people cache, which shares the transaction bookkeeping: a tenant left behind would also let
+     * the next request cache a read with no transaction open, under the failed request's organization.
+     */
+    #[Test]
+    public function theNextRequestInvalidatesTheTeamPeopleCacheAtOnceAndCachesNothingAfterARequestClosedTheConnectionInsideATransaction(): void
+    {
+        $this->client->request('POST', '/_test/worker-reset/team-people-cache/'.self::ORG_A.'/close-then-fail');
+        self::assertResponseStatusCodeSame(500);
+        self::assertFalse($this->client->getContainer()->get('doctrine.dbal.default_connection')->isConnected());
+
+        $this->client->request('POST', '/_test/worker-reset/team-people-cache/invalidate');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['entry' => 'gone after the invalidation', 'loads' => 2], $this->responseJson());
     }
 
     #[Test]

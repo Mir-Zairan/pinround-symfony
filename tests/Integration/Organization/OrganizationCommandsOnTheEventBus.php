@@ -15,6 +15,7 @@ use App\Organization\Domain\Job;
 use App\Organization\Domain\OrgRole;
 use App\Organization\Domain\OrgRoles;
 use App\Organization\Domain\TeamRole;
+use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\Organization\Infrastructure\Doctrine\DoctrineInvitations;
 use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrganizations;
@@ -23,8 +24,12 @@ use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
 use App\Organization\Infrastructure\Messenger\MessengerOrganizationEvents;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Cache\AfterCommitTagInvalidation;
 use App\Tests\Unit\Organization\Application\RecordingInvitedPersonRegistration;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\NullLogger;
+use Symfony\Component\Cache\Adapter\ArrayAdapter;
+use Symfony\Component\Cache\Adapter\TagAwareAdapter;
 use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
@@ -51,7 +56,7 @@ final readonly class OrganizationCommandsOnTheEventBus
      */
     public function setUpShop(string $organizationId, string $slug, \DateTimeImmutable $now): void
     {
-        $events = new MessengerOrganizationEvents($this->eventBus, $this->entityManager->getConnection());
+        $events = new MessengerOrganizationEvents($this->eventBus, $this->entityManager->getConnection(), self::teamPeopleCache());
         $memberships = new DoctrineMemberships($this->entityManager);
         $teams = new DoctrineTeams($this->entityManager);
         $organization = new OrganizationId($organizationId);
@@ -88,9 +93,17 @@ final readonly class OrganizationCommandsOnTheEventBus
             new DoctrineTeams($this->entityManager),
             new DbalUserQueries($connection),
             new RecordingInvitedPersonRegistration(),
-            new MessengerOrganizationEvents($this->eventBus, $connection),
+            new MessengerOrganizationEvents($this->eventBus, $connection, self::teamPeopleCache()),
         );
 
         return $inviteMember(new OrganizationId($organizationId), $email, new OrgRoles(), null, null, new UserId(self::SARA), $now)->toString();
+    }
+
+    /**
+     * A cache of its own: these commands are not read back through the team people cache.
+     */
+    private static function teamPeopleCache(): TeamPeopleCache
+    {
+        return new TeamPeopleCache(new TagAwareAdapter(new ArrayAdapter()), new AfterCommitTagInvalidation(new NullLogger()));
     }
 }

@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Workflow\Infrastructure\Cache;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Infrastructure\Cache\AfterCommitTagInvalidation;
 use App\Workflow\Infrastructure\Cache\WorkflowCache;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -24,6 +25,8 @@ final class WorkflowCacheTest extends TestCase
 
     private TagAwareAdapter $pool;
 
+    private AfterCommitTagInvalidation $invalidation;
+
     private WorkflowCache $cache;
 
     private int $loads = 0;
@@ -31,13 +34,14 @@ final class WorkflowCacheTest extends TestCase
     protected function setUp(): void
     {
         $this->pool = new TagAwareAdapter(new ArrayAdapter());
-        $this->cache = new WorkflowCache($this->pool, new NullLogger());
+        $this->invalidation = new AfterCommitTagInvalidation(new NullLogger());
+        $this->cache = new WorkflowCache($this->pool, $this->invalidation);
     }
 
     #[Test]
     public function underATenantTheEntryIsKeyedByOrganizationTeamAndEntryAndReadOnce(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
 
         self::assertSame('load 1', $this->rememberShop());
         self::assertSame('load 1', $this->rememberShop());
@@ -47,7 +51,7 @@ final class WorkflowCacheTest extends TestCase
     #[Test]
     public function theEntryCarriesTheTeamTagAndTheOrganizationTagAndNoOther(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $key = 'org.'.self::ACME_FOODS.'.wf.team.'.self::SHOP_TEAM.'.steps';
 
         $this->rememberShop();
@@ -68,7 +72,7 @@ final class WorkflowCacheTest extends TestCase
         self::assertSame('load 1', $this->rememberShop());
         self::assertSame('load 2', $this->rememberShop());
 
-        $this->cache->transactionBegan(null);
+        $this->invalidation->transactionBegan(null);
         self::assertSame('load 3', $this->rememberShop());
         self::assertSame('load 4', $this->rememberShop());
     }
@@ -76,61 +80,61 @@ final class WorkflowCacheTest extends TestCase
     #[Test]
     public function whileAChangeWaitsForItsCommitEveryReadLoadsAndTheCommitInvalidatesIt(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->rememberShop();
 
         $this->cache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM));
         self::assertSame('load 2', $this->rememberShop());
         self::assertSame('load 3', $this->rememberShop(), 'An uncommitted change is never kept.');
 
-        $this->cache->transactionCommitted();
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionCommitted();
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         self::assertSame('load 4', $this->rememberShop());
     }
 
     #[Test]
     public function aChangeOfTheOrganizationsOwnStepsOrRulesInvalidatesEveryTeamOfItAtCommit(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->rememberShop();
         $this->cache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), null);
-        $this->cache->transactionCommitted();
+        $this->invalidation->transactionCommitted();
 
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         self::assertSame('load 2', $this->rememberShop());
     }
 
     #[Test]
     public function aRolledBackChangeInvalidatesNothing(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->rememberShop();
         $this->cache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM));
-        $this->cache->transactionEnded();
+        $this->invalidation->transactionEnded();
 
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         self::assertSame('load 1', $this->rememberShop());
-        $this->cache->transactionCommitted();
+        $this->invalidation->transactionCommitted();
         self::assertSame('load 1', $this->cachedShopValue(), 'The dropped tags are not invalidated by a later commit.');
     }
 
     #[Test]
     public function aNewTransactionDropsTagsAClosedConnectionLeftWaiting(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->rememberShop();
         $this->cache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM));
 
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         self::assertSame('load 1', $this->rememberShop());
     }
 
     #[Test]
     public function withNoTransactionOpenAChangeInvalidatesAtOnce(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->rememberShop();
-        $this->cache->transactionEnded();
+        $this->invalidation->transactionEnded();
 
         $this->cache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM));
 
@@ -140,7 +144,7 @@ final class WorkflowCacheTest extends TestCase
     #[Test]
     public function invalidateNowDropsTheTeamsEntryInsideATransactionToo(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->rememberShop();
 
         $this->cache->invalidateNow(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM));
@@ -153,15 +157,15 @@ final class WorkflowCacheTest extends TestCase
     #[Test]
     public function resetForgetsTheTenantAndTheWaitingTags(): void
     {
-        $this->cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $this->invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $this->rememberShop();
         $this->cache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM));
 
-        $this->cache->reset();
+        $this->invalidation->reset();
 
         self::assertSame('load 2', $this->rememberShop(), 'With no transaction the read loads.');
         self::assertSame('load 1', $this->cachedShopValue(), 'The reset dropped the waiting tags without invalidating.');
-        $this->cache->transactionCommitted();
+        $this->invalidation->transactionCommitted();
         self::assertSame('load 1', $this->cachedShopValue());
     }
 
@@ -182,19 +186,20 @@ final class WorkflowCacheTest extends TestCase
                 ($this->onLog)((string) $message);
             }
         };
-        $cache = new WorkflowCache($this->failingPool(), $logger);
-        $cache->transactionBegan(new OrganizationId(self::ACME_FOODS));
+        $invalidation = new AfterCommitTagInvalidation($logger);
+        $cache = new WorkflowCache($this->failingPool(), $invalidation);
+        $invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         $cache->invalidateAfterCommit(new OrganizationId(self::ACME_FOODS), null);
 
-        $cache->transactionCommitted();
+        $invalidation->transactionCommitted();
 
-        self::assertSame(['The workflow cache kept entries of a committed change; its event handler drops them.'], $messages);
+        self::assertSame(['A cache kept entries of a committed change; its event handler drops them.'], $messages);
     }
 
     #[Test]
     public function aPoolThatFailsToInvalidateNowThrowsSoTheHandlerIsRetried(): void
     {
-        $cache = new WorkflowCache($this->failingPool(), new NullLogger());
+        $cache = new WorkflowCache($this->failingPool(), new AfterCommitTagInvalidation(new NullLogger()));
 
         $this->expectException(\RuntimeException::class);
 

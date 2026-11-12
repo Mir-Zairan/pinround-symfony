@@ -1,9 +1,173 @@
 /* The tickets list (src/Ticketing/UI/templates/list.html.twig): one section per step, in group order. */
 
+/* The page: the project rail on the left, the toolbar and list beside it; on a narrow screen the rail goes on top. */
+.tickets-page {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-24);
+}
+
+.project-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* The team name in capitals as the prototype shows it; the markup keeps its own case for screen readers. */
+.project-rail__team {
+  margin: 0;
+  padding: 0 var(--space-16);
+  color: var(--on-surface-var);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.project-rail__projects,
+.project-rail__switch ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A 40 px full-width pill per row, the pressed one filled, as the prototype's rail. */
+.project-rail__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 var(--space-16);
+  border-radius: var(--radius-button);
+  color: var(--on-surface);
+  text-decoration: none;
+}
+
+.project-rail__item:hover {
+  background: var(--s-high);
+}
+
+.project-rail__item[aria-current="true"] {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  font-weight: 600;
+}
+
+.project-rail__key {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.project-rail__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-rail__count {
+  color: var(--on-surface-var);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-rail__manage,
+.project-rail__switch summary,
+.project-rail__switch a {
+  padding: var(--space-4) var(--space-12);
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.project-rail__switch a[aria-current="true"] {
+  font-weight: 600;
+}
+
+@media (max-width: 52em) {
+  .tickets-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .tickets {
   display: flex;
   flex-direction: column;
   gap: var(--space-24);
+}
+
+/* The toolbar (TicketFilters): search pill, the "Assigned to" chips and "Show done". */
+.ticket-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.ticket-filters__search {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.ticket-filters__field {
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--space-16);
+  border: 1px solid var(--outline-var);
+  border-radius: 999px;
+  background: var(--s-low);
+  color: var(--on-surface);
+  font: inherit;
+}
+
+.ticket-filters__field[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.ticket-filters__refusal {
+  flex-basis: 100%;
+  color: var(--error);
+  font-size: 14px;
+}
+
+.ticket-filters__people {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.ticket-filters__label {
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+/* Chips that are links: the shown filter is the current one, as a pressed toggle chip looks. */
+.ticket-filters a.chip {
+  text-decoration: none;
+}
+
+.ticket-filters a.chip[aria-current="true"] {
+  background: var(--secondary-container);
+  border-color: transparent;
+  color: var(--on-secondary-container);
+}
+
+.ticket-filters .chip:disabled {
+  cursor: default;
+}
+
+.ticket-filters .chip:disabled:hover {
+  background: transparent;
+}
+
+.ticket-filters .chip[aria-pressed="true"]:disabled:hover {
+  background: var(--secondary-container);
 }
 
 .tickets__header {

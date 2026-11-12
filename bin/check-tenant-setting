@@ -34,6 +34,8 @@ const ALLOWED_SET_CONFIG_FILES = [
     'src/SharedKernel/Infrastructure/Doctrine/TenantMiddleware.php',
     // Runs in SQL with no TenantContext, and writes each organization's core steps under that organization.
     'migrations/Version20261110140000.php',
+    // The same, counting each organization's tickets into ins_project_counts; it puts the caller's setting back after.
+    'migrations/Version20261112140100.php',
     'tests/Unit/SharedKernel/Infrastructure/Doctrine/TenantMiddlewareTest.php',
     'tests/Integration/Tenancy/SetTenantFailsOnceMiddleware.php',
     'tests/Fixtures/Http/RequestTransactionProbeController.php',
