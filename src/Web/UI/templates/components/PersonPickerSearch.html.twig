@@ -15,13 +15,13 @@
         <ul class="person-picker__rows" data-action="keydown->person-picker#moveBetweenRows">
             {% for row in shown.rows %}
                 <li>
-                    <a class="pick" href="{{ row.url }}" data-person-pick="{{ row.personId }}" data-person-picker-target="row"
-                        {% if row.isPressed %}aria-current="true"{% endif %}
-                        data-action="live#emitUp:prevent dialog#close" data-live-event-param="{{ pickedEvent }}" data-live-person-param="{{ row.personId }}">
+                    <button type="button" class="pick" data-person-pick="{{ row.personId }}" data-person-picker-target="row"
+                        aria-pressed="{{ row.isPressed ? 'true' : 'false' }}"
+                        data-action="live#emitUp dialog#close" data-live-event-param="{{ pickedEvent }}" data-live-person-param="{{ row.personId }}">
                         <twig:Avatar name="{{ row.name }}" aria-hidden="true"/>
                         <span class="pick__name">{{ row.name }}</span>
                         <span class="pick__side">{{ row.openCount }} open</span>
-                    </a>
+                    </button>
                 </li>
             {% endfor %}
         </ul>

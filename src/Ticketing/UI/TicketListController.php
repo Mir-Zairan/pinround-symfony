@@ -131,6 +131,7 @@ final class TicketListController extends AbstractController
             'noTickets' => null === $searchText && null === $assigneeId ? self::NO_TICKETS : self::NO_MATCHES,
             'filters' => [
                 'project' => $project?->key() ?? '',
+                'projectId' => $project?->id() ?? '',
                 'person' => $assigneeId ?? '',
                 'showsDone' => $showsDone,
                 'q' => $searchText ?? '',

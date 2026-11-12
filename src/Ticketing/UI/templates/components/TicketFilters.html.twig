@@ -26,25 +26,9 @@
                 data-action="live#action:prevent" data-live-action-param="filterByPerson" data-live-person-param="{{ chip.personId }}">{{ chip.label }}</a>
         {% endfor %}
         {% if chips.pickerChip is not null and chips.pickerChip.opensPicker %}
-            {% set pickerChip = chips.pickerChip %}
-            {% set pickUrl = this.listUrl({person: null}) %}
-            <div class="ticket-filters__picker" {{ stimulus_controller('person-picker') }}>
-                <twig:Dialog id="ticket-filters-person-picker" title="{{ constant('PERSON_PICKER_TITLE', this) }}">
-                    <twig:block name="trigger">
-                        <button type="button" class="chip" data-person-picker-trigger aria-haspopup="dialog"
-                            aria-pressed="{{ pickerChip.isPressed ? 'true' : 'false' }}"
-                            data-action="dialog#open person-picker#open">{{ pickerChip.label }}</button>
-                    </twig:block>
-                    <twig:block name="content">
-                        <p class="person-picker__sub">{{ constant('App\\Ticketing\\UI\\Component\\TicketFilters::PERSON_PICKER_SUB') }}</p>
-                        <twig:PersonPickerSearch team="{{ team }}" pressedPerson="{{ person }}" pickUrl="{{ pickUrl }}"
-                            pickQuery="person" pickedEvent="{{ constant('App\\Ticketing\\UI\\Component\\TicketFilters::PERSON_PICKED_EVENT') }}"/>
-                    </twig:block>
-                    <twig:block name="actions">
-                        <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
-                    </twig:block>
-                </twig:Dialog>
-            </div>
+            <twig:PersonPicker mode="filter" id="ticket-filters-person-picker" team="{{ team }}" projectId="{{ projectId }}"
+                pressedPerson="{{ person }}" triggerLabel="{{ chips.pickerChip.label }}" :isTriggerPressed="chips.pickerChip.isPressed"
+                pickedEvent="{{ constant('PERSON_PICKED_EVENT', this) }}"/>
         {% elseif chips.pickerChip is not null %}
             {# A small team names everyone on a chip, so this one only shows that the filter is someone no chip names. #}
             <button type="button" class="chip" data-person-picker-trigger disabled

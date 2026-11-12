@@ -198,32 +198,181 @@ final class PersonPickerTest extends WebTestCase
     #[Test]
     public function aTooLongSearchIsRefusedWithoutReadingThePeople(): void
     {
+        $this->addTicket('todo', 'Omar');
         $picker = $this->openedPickerAs($this->people['Lena']);
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
 
         $picker->set('search', str_repeat('é', PersonPickerSearch::SEARCH_MAX_LENGTH + 1));
 
         self::assertSame(200, $picker->response()->getStatusCode());
         self::assertSame('The search is too long. Use 100 characters or fewer.', $picker->render()->crawler()->filter('[role="alert"]')->text());
         self::assertCount(0, $picker->render()->crawler()->filter('.pick'));
+        self::assertSame(0, self::countMatching(self::COUNT_QUERY, self::queriesIn($debugData->getData())));
     }
 
     /**
-     * Each row is a link to the list filtered by that person, so it works without script, and emits the toolbar's
-     * event with script; the person the list shows is pressed.
+     * 100 characters is the cap, however many bytes they take: a search of 100 "é" is taken, and only finds no one.
      */
     #[Test]
-    public function eachRowLinksToTheListOfThatPersonAndTheCurrentOneIsPressed(): void
+    public function aSearchOfTheMostCharactersIsTakenWhateverItsBytes(): void
+    {
+        $picker = $this->openedPickerAs($this->people['Lena']);
+
+        $picker->set('search', str_repeat('é', PersonPickerSearch::SEARCH_MAX_LENGTH));
+
+        self::assertSame(200, $picker->response()->getStatusCode());
+        self::assertCount(0, $picker->render()->crawler()->filter('[role="alert"]'));
+        self::assertSame(PersonPickerSearch::NO_MATCHES, $picker->render()->crawler()->filter('.person-picker__note[role="status"]')->text());
+    }
+
+    #[Test]
+    public function aSearchWithANulIsRefusedWithoutReadingThePeople(): void
+    {
+        $this->addTicket('todo', 'Omar');
+        $picker = $this->openedPickerAs($this->people['Lena']);
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+
+        $picker->set('search', "Om\0ar");
+
+        self::assertSame(200, $picker->response()->getStatusCode());
+        self::assertSame(PersonPickerSearch::SEARCH_NOT_TEXT, $picker->render()->crawler()->filter('[role="alert"]')->text());
+        self::assertCount(0, $picker->render()->crawler()->filter('.pick'));
+        self::assertSame(0, self::countMatching(self::COUNT_QUERY, self::queriesIn($debugData->getData())));
+    }
+
+    /**
+     * A live request is JSON, which cannot carry invalid UTF-8, so the component is given such a search directly: it
+     * refuses it and reads no one.
+     */
+    #[Test]
+    public function aSearchOfInvalidUtf8IsRefusedWithoutReadingThePeople(): void
+    {
+        $factory = self::getContainer()->get('ux.twig_component.component_factory');
+        $picker = $factory->get('PersonPickerSearch');
+        \assert($picker instanceof PersonPickerSearch);
+        $picker->team = $this->shop->toString();
+        $picker->isOpened = true;
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+
+        foreach (["Om\xffar", "\xc3", "Om\0ar"] as $search) {
+            $picker->search = $search;
+
+            self::assertSame(PersonPickerSearch::SEARCH_NOT_TEXT, $picker->searchRefusal());
+            self::assertSame(['rows' => [], 'matchCount' => 0], $picker->shownPeople());
+        }
+        self::assertSame([], self::queriesIn($debugData->getData()));
+    }
+
+    /**
+     * Eva has two open tickets in APP and Omar one in SHOP: on ?project=SHOP the page hands the picker SHOP's id, so
+     * the counts are the rows the list shows filtered by each; on every project they are all of them.
+     */
+    #[Test]
+    public function theCountsFollowTheProjectTheListShows(): void
+    {
+        $appProject = $this->addProject($this->shop, 'APP', 'App');
+        $this->addTicket('todo', 'Omar');
+        $this->addTicket('todo', 'Eva', project: $appProject);
+        $this->addTicket('doing', 'Eva', project: $appProject);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        $pickerProps = json_decode((string) $page->filter('[data-live-name-value="PersonPickerSearch"]')->attr('data-live-props-value'), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertIsArray($pickerProps);
+        self::assertSame($this->shopProject, $pickerProps['projectId'] ?? null);
+        self::assertSame(
+            [['Omar', '1 open'], ['Ana', '0 open'], ['Eva', '0 open'], ['Lena', '0 open'], ['Tom', '0 open']],
+            $this->rowsOf($this->openedPickerAs($this->people['Lena'], ['projectId' => $this->shopProject])->render()->crawler()),
+        );
+        self::assertSame(
+            [['Eva', '2 open'], ['Omar', '1 open'], ['Ana', '0 open'], ['Lena', '0 open'], ['Tom', '0 open']],
+            $this->rowsOf($this->openedPickerAs($this->people['Lena'])->render()->crawler()),
+        );
+    }
+
+    /**
+     * The client sends the picker's fingerprint with each toolbar request, as the browser does. A search, "Show done"
+     * or a chip must give back the bare placeholder: any new prop from the parent would make the browser send the
+     * closed picker a request of its own.
+     */
+    #[Test]
+    public function aChangeOfTheToolbarSendsThePickerNoRequest(): void
+    {
+        $toolbar = $this->toolbarAs($this->people['Lena'], ['project' => 'SHOP', 'projectId' => $this->shopProject]);
+        $page = $toolbar->render()->crawler();
+        $search = $page->filter('[data-live-name-value="PersonPickerSearch"]');
+        $childId = (string) $search->attr('id');
+        self::assertNotSame('', $childId);
+        $children = [$childId => ['fingerprint' => $search->attr('data-live-fingerprint-value') ?? '', 'tag' => 'div']];
+        $toolbarProps = json_decode((string) $page->filter('[data-live-name-value="TicketFilters"]')->attr('data-live-props-value'), true, flags: \JSON_THROW_ON_ERROR);
+        $changes = [
+            'A search' => [null, ['updated' => ['q' => 'checkout']], '[data-model="debounce(300)|q"][value="checkout"]'],
+            'Show done' => ['toggleDone', ['args' => []], '[data-done-chip][aria-current="true"]'],
+            'A person chip' => ['filterByPerson', ['args' => ['person' => $this->people['Eva']->id()->toString()]], 'button[data-person-picker-trigger][aria-pressed="true"]'],
+        ];
+
+        foreach ($changes as $change => [$action, $content, $changedToolbar]) {
+            $this->client->request('POST', $this->liveUrlOf('TicketFilters', $action), [
+                'data' => json_encode([...$content, 'props' => $toolbarProps, 'children' => $children], \JSON_THROW_ON_ERROR),
+            ]);
+
+            self::assertResponseStatusCodeSame(200);
+            $response = $this->client->getCrawler();
+            self::assertCount(1, $response->filter($changedToolbar), $change.' did not change the toolbar.');
+            $placeholder = $response->filter('[id="'.$childId.'"]');
+            self::assertCount(1, $placeholder, $change);
+            self::assertNull($placeholder->attr('data-live-props-updated-from-parent-value'), $change.' sends the picker new props, so a request of its own.');
+            self::assertSame('', $placeholder->html(), $change.' renders the picker again.');
+        }
+    }
+
+    /**
+     * Each row is a button that emits the toolbar's event and closes the dialog; the person the page filters by, handed
+     * over as the dialog opens, is pressed.
+     */
+    #[Test]
+    public function eachRowEmitsThePickAndThePersonThePageShowsIsPressed(): void
     {
         $eva = $this->people['Eva']->id()->toString();
-        $picker = $this->openedPickerAs($this->people['Lena'], ['pressedPerson' => $eva, 'pickUrl' => self::TICKETS.'?done=1']);
+        $picker = $this->openedPickerAs($this->people['Lena'], pressedPerson: $eva);
 
         $row = $picker->render()->crawler()->filter('.pick[data-person-pick="'.$eva.'"]');
 
         self::assertSame(
-            [self::TICKETS.'?done=1&person='.$eva, 'true', TicketFilters::PERSON_PICKED_EVENT, $eva],
-            [$row->attr('href'), $row->attr('aria-current'), $row->attr('data-live-event-param'), $row->attr('data-live-person-param')],
+            ['button', 'button', 'true', 'live#emitUp dialog#close', TicketFilters::PERSON_PICKED_EVENT, $eva],
+            [$row->nodeName(), $row->attr('type'), $row->attr('aria-pressed'), $row->attr('data-action'), $row->attr('data-live-event-param'), $row->attr('data-live-person-param')],
         );
-        self::assertSame(['Eva'], $picker->render()->crawler()->filter('.pick[aria-current="true"] .pick__name')->each(static fn (Crawler $name): string => $name->text()));
+        self::assertSame(['Eva'], $picker->render()->crawler()->filter('.pick[aria-pressed="true"] .pick__name')->each(static fn (Crawler $name): string => $name->text()));
+        self::assertCount(4, $picker->render()->crawler()->filter('.pick[aria-pressed="false"]'));
+        self::assertCount(0, $picker->render()->crawler()->filter('.pick[href], a.pick'));
+
+        $picker->call('open');
+
+        self::assertCount(0, $picker->render()->crawler()->filter('.pick[aria-pressed="true"]'), 'Opened with everyone shown, no row is pressed.');
+    }
+
+    /**
+     * A pressed person that is no uuid is refused, and the picker keeps the one it had.
+     */
+    #[Test]
+    public function anOpenWithAPressedPersonThatIsNoUuidIsRefused(): void
+    {
+        $eva = $this->people['Eva']->id()->toString();
+        $picker = $this->openedPickerAs($this->people['Lena'], pressedPerson: $eva);
+        $this->client->catchExceptions(true);
+
+        $picker->call('open', ['pressedPerson' => strtoupper($eva)]);
+
+        $response = $picker->response();
+        self::assertSame(400, $response->getStatusCode());
+        $this->assertRefusalCarriesNoNewFilters($response, PersonPickerSearch::PRESSED_PERSON_NOT_VALID);
+        $picker = $this->openedPickerAs($this->people['Lena'], pressedPerson: $eva);
+        self::assertSame(['Eva'], $picker->render()->crawler()->filter('.pick[aria-pressed="true"] .pick__name')->each(static fn (Crawler $name): string => $name->text()));
     }
 
     #[Test]
@@ -341,6 +490,28 @@ final class PersonPickerTest extends WebTestCase
         return \count(array_filter($queries, static fn (string $sql): bool => 1 === preg_match($pattern, $sql)));
     }
 
+    /**
+     * @param array<mixed> $debugData doctrine.debug_data_holder's queries by connection
+     *
+     * @return list<string>
+     */
+    private static function queriesIn(array $debugData): array
+    {
+        $queries = [];
+        foreach ($debugData as $queriesOfOneConnection) {
+            foreach (\is_array($queriesOfOneConnection) ? $queriesOfOneConnection : [] as $query) {
+                $queries[] = \is_array($query) && \is_string($query['sql'] ?? null) ? $query['sql'] : '';
+            }
+        }
+
+        return $queries;
+    }
+
+    private function liveUrlOf(string $component, ?string $action): string
+    {
+        return self::getContainer()->get('router')->generate('ux_live_component', array_filter(['_live_component' => $component, '_live_action' => $action], static fn (?string $value): bool => null !== $value));
+    }
+
     private function assertRefusalCarriesNoNewFilters(Response $response, string $refusal): void
     {
         $errorPage = new Crawler((string) $response->getContent());
@@ -352,11 +523,11 @@ final class PersonPickerTest extends WebTestCase
     /**
      * @param array<string, mixed> $props
      */
-    private function openedPickerAs(User $user, array $props = []): TestLiveComponent
+    private function openedPickerAs(User $user, array $props = [], string $pressedPerson = ''): TestLiveComponent
     {
         $this->logIn($this->client, $user);
         $picker = $this->createLiveComponent('PersonPickerSearch', [...$this->pickerProps(), ...$props], $this->client);
-        $picker->call('open');
+        $picker->call('open', ['pressedPerson' => $pressedPerson]);
         self::assertSame(200, $picker->response()->getStatusCode());
 
         return $picker;
@@ -367,7 +538,7 @@ final class PersonPickerTest extends WebTestCase
      */
     private function pickerProps(): array
     {
-        return ['team' => $this->shop->toString(), 'pickUrl' => self::TICKETS, 'pickQuery' => 'person', 'pickedEvent' => TicketFilters::PERSON_PICKED_EVENT];
+        return ['team' => $this->shop->toString(), 'pickedEvent' => TicketFilters::PERSON_PICKED_EVENT];
     }
 
     /**
@@ -431,13 +602,14 @@ final class PersonPickerTest extends WebTestCase
     }
 
     /**
-     * A bug of Shop's project assigned to the person, of $team (Shop when null) and for everyone unless $visibility says.
+     * A bug of $project (Shop's when null) assigned to the person, of $team (Shop when null) and for everyone unless
+     * $visibility says.
      */
-    private function addTicket(string $groupCode, string $assignee, ?TeamId $team = null, string $visibility = 'all', string $reporter = 'Lena'): void
+    private function addTicket(string $groupCode, string $assignee, ?TeamId $team = null, string $visibility = 'all', string $reporter = 'Lena', ?string $project = null): void
     {
         $number = $this->nextNumber++;
         $parameters = [
-            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, ($team ?? $this->shop)->toString(), $number, 'SHOP-'.$number,
+            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $project ?? $this->shopProject, ($team ?? $this->shop)->toString(), $number, 'SHOP-'.$number,
             $this->steps[$groupCode], $this->people[$reporter]->id()->toString(), $visibility, $this->people[$assignee]->id()->toString(),
         ];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(

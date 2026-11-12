@@ -36,7 +36,7 @@ use Symfony\UX\LiveComponent\DefaultActionTrait;
  *
  * The people are the lead and members of the page's team, $team (viewers cannot be assignees): "Me" for a lead
  * or member of it, then each other one's first name while the team has at most MAX_NAMED_PEOPLE, else a "Person ▾"
- * chip that opens the person picker (Web's PersonPickerSearch in a Dialog), whose rows emit PERSON_PICKED_EVENT. The
+ * chip that opens the person picker (Web's PersonPicker in filter mode), whose rows emit PERSON_PICKED_EVENT. The
  * picker reads its people and counts in its own live request once opened, so the page pays nothing for it. The team's
  * people and names are one cached read (TeamPeopleQueries): no query when warm, two after a change of the team. A
  * person filter set by a chip or the picker must be a lead or member of the team.
@@ -52,8 +52,6 @@ final class TicketFilters
     public const string SEARCH_PLACEHOLDER = 'Search by key or words in the title';
     public const string PEOPLE_LABEL = 'Assigned to';
     public const string PERSON_PICKER_LABEL = 'Person ▾';
-    public const string PERSON_PICKER_TITLE = 'Show tickets of…';
-    public const string PERSON_PICKER_SUB = 'Sorted by open tickets assigned to them.';
     /** The live event the person picker's rows emit up, with the picked person's id. */
     public const string PERSON_PICKED_EVENT = 'personPicked';
     public const string NO_SUCH_PERSON = 'No one in this team has that id.';
@@ -61,6 +59,10 @@ final class TicketFilters
     /** A project key, as in TicketListController::PROJECT_QUERY; empty for every project. */
     #[LiveProp]
     public string $project = '';
+
+    /** The uuid of $project, the person picker's counts follow it as the list does; empty for every project. */
+    #[LiveProp]
+    public string $projectId = '';
 
     /** The assignee's canonical uuid; empty for everyone. */
     #[LiveProp]

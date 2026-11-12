@@ -12,7 +12,7 @@
         {{ include('@Ticketing/_project_rail.html.twig') }}
 
         <div class="tickets" id="ticket-list">
-            <twig:TicketFilters project="{{ filters.project }}" person="{{ filters.person }}" :showsDone="filters.showsDone" q="{{ filters.q }}" team="{{ filters.team }}" pickedTeam="{{ filters.pickedTeam }}" />
+            <twig:TicketFilters project="{{ filters.project }}" projectId="{{ filters.projectId }}" person="{{ filters.person }}" :showsDone="filters.showsDone" q="{{ filters.q }}" team="{{ filters.team }}" pickedTeam="{{ filters.pickedTeam }}" />
 
             <header class="tickets__header">
                 <h1 class="tickets__title">{{ heading }}</h1>

@@ -166,4 +166,13 @@
             </div>
         </div>
     </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-person-picker">
+        <h2 id="gallery-person-picker">Person picker</h2>
+        {# Closed only: its rows are a real team's people, read by a live request that this page's made-up team is refused. #}
+        <div class="gallery-row">
+            <twig:PersonPicker mode="filter" id="gallery-person-picker-demo" team="0197a3c0-0000-7000-8000-00000000aaa1"
+                triggerLabel="Person ▾" pickedEvent="personPicked"/>
+        </div>
+    </section>
 {% endblock %}

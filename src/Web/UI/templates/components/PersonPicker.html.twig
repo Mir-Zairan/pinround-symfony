@@ -1,0 +1,19 @@
+{# Inside the Dialog's blocks "this" is the Dialog, so the picker's props go in as plain variables. #}
+{% set picker = this %}
+{# The person-picker controller hands the search the pressed person as the dialog opens, from this value, which follows the parent's re-renders. #}
+<div class="person-picker__host" {{ stimulus_controller('person-picker', {pressedPerson: picker.pressedPerson}) }}>
+    <twig:Dialog id="{{ picker.id }}" title="{{ picker.mode.title }}">
+        <twig:block name="trigger">
+            <button type="button" class="chip" data-person-picker-trigger aria-haspopup="dialog"
+                aria-pressed="{{ picker.isTriggerPressed ? 'true' : 'false' }}"
+                data-action="dialog#open person-picker#open">{{ picker.triggerLabel }}</button>
+        </twig:block>
+        <twig:block name="content">
+            <p class="person-picker__sub">{{ picker.mode.sub }}</p>
+            <twig:PersonPickerSearch team="{{ picker.team }}" projectId="{{ picker.projectId }}" pickedEvent="{{ picker.pickedEvent }}"/>
+        </twig:block>
+        <twig:block name="actions">
+            <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+        </twig:block>
+    </twig:Dialog>
+</div>

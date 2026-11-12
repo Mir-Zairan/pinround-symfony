@@ -6,6 +6,7 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
 use App\Ticketing\Api\AssigneeTicketCounts;
+use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\TicketListGroup;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Api\TicketVisibilitySql;
@@ -13,7 +14,8 @@ use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 
 /**
- * One grouped count over tkt_ticket by assignee, filtered by the open steps and the visibility predicate.
+ * One grouped count over tkt_ticket by assignee, filtered by the open steps, the project when there is one and the
+ * visibility predicate.
  */
 final readonly class DbalAssigneeTicketCounts implements AssigneeTicketCounts
 {
@@ -23,8 +25,11 @@ final readonly class DbalAssigneeTicketCounts implements AssigneeTicketCounts
     {
     }
 
-    public function openTicketsAssignedTo(TicketVisibility $viewer, array $assigneeIds): array
+    public function openTicketsAssignedTo(TicketVisibility $viewer, array $assigneeIds, ?string $projectId): array
     {
+        if (null !== $projectId && !ListFilter::isCanonicalUuid($projectId)) {
+            throw new \InvalidArgumentException('Open tickets are counted in a project given by its canonical lowercase uuid.');
+        }
         $counts = [];
         foreach ($assigneeIds as $assigneeId) {
             $counts[$assigneeId->toString()] = 0;
@@ -57,10 +62,12 @@ final readonly class DbalAssigneeTicketCounts implements AssigneeTicketCounts
             .' WHERE ticket.organization_id = CAST(:organization AS uuid)'
             .' AND ticket.assignee_id = ANY(CAST(:assignees AS uuid[]))'
             .' AND ticket.step_id = ANY(CAST(:open_steps AS uuid[]))'
+            .(null === $projectId ? '' : ' AND ticket.project_id = CAST(:project AS uuid)')
             .' AND '.$visibleTicket->sql()
             .' GROUP BY ticket.assignee_id',
             [
                 'organization' => $organizationId->toString(),
+                ...(null === $projectId ? [] : ['project' => $projectId]),
                 'assignees' => '{'.implode(',', array_keys($counts)).'}',
                 'open_steps' => '{'.implode(',', $openStepIds).'}',
                 ...$visibleTicket->parameters(),
