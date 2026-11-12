@@ -35,4 +35,16 @@ final class DbalTeamQueriesTest extends TestCase
 
         new DbalTeamQueries($connection)->jobOf(new TeamId('0197a3c0-0000-7000-8000-0000000005d1'), new UserId('0197a3c0-0000-7000-8000-0000000005c3'));
     }
+
+    #[Test]
+    public function peopleByJobRefusesAJobThatIsNotAMemberJob(): void
+    {
+        $connection = self::createStub(Connection::class);
+        $connection->method('fetchAllAssociative')->willReturn([['user_id' => '0197a3c0-0000-7000-8000-0000000005c3', 'job' => 'designer']]);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageIsOrContains('org_team_member holds an unknown job.');
+
+        new DbalTeamQueries($connection)->peopleByJob(new TeamId('0197a3c0-0000-7000-8000-0000000005d1'));
+    }
 }

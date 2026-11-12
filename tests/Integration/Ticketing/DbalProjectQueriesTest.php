@@ -8,13 +8,18 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
 use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
+use App\Ticketing\Api\TeamProjectChoice;
+use App\Ticketing\Api\TicketVisibilities;
+use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Infrastructure\Doctrine\DbalProjectQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
@@ -42,6 +47,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
     private const string DATA = '0197a3c0-0000-7000-8000-000000006226';
     private const string BETA_BREAD = '0197a3c0-0000-7000-8000-000000006231';
     private const string BETA_CAKE = '0197a3c0-0000-7000-8000-000000006232';
+    private const string VIEWER = '0197a3c0-0000-7000-8000-000000006241';
 
     private const array OPEN_TICKETS = [
         self::SHOP => 4,
@@ -88,11 +94,11 @@ final class DbalProjectQueriesTest extends KernelTestCase
                 [self::CART, 'CART', 'Checkout', 0],
                 [self::SHOP, 'SHOP', 'Web shop', 4],
             ],
-            $this->listed(self::ACME_FOODS, static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM))),
+            $this->listed(self::ACME_FOODS, static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER))),
         );
         self::assertSame(
             [[self::IOS, 'IOS', 'iPhone app', 7]],
-            $this->listed(self::ACME_FOODS, static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::MOBILE_TEAM))),
+            $this->listed(self::ACME_FOODS, static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::MOBILE_TEAM), new UserId(self::VIEWER))),
         );
     }
 
@@ -121,7 +127,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
 
         try {
             $this->onRecordedConnection(self::ACME_FOODS, $recordedSql, function (Connection $connection): void {
-                new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), $this->tenantContext())->unlinkedProjectChoices(0);
+                new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext())->unlinkedProjectChoices(0);
             });
             self::fail('A limit of 0 was accepted.');
         } catch (\InvalidArgumentException) {
@@ -136,9 +142,90 @@ final class DbalProjectQueriesTest extends KernelTestCase
 
         self::assertSame([], $this->transactions()->rolledBackAs(
             self::ACME_FOODS,
-            fn (): array => $this->queries($openTicketCounts)->projectsOf(new TeamId(self::EMPTY_TEAM)),
+            fn (): array => $this->queries($openTicketCounts)->projectsOf(new TeamId(self::EMPTY_TEAM), new UserId(self::VIEWER)),
         ));
         self::assertSame([], $openTicketCounts->calls);
+    }
+
+    #[Test]
+    public function projectChoicesOfTeamsGiveTheAskedTeamsProjectsByKeyWithTheirTeamAndNoUnlinkedOne(): void
+    {
+        self::assertSame(
+            [
+                [self::APP, 'APP', 'Mobile app', self::SHOP_TEAM],
+                [self::CART, 'CART', 'Checkout', self::SHOP_TEAM],
+                [self::IOS, 'IOS', 'iPhone app', self::MOBILE_TEAM],
+                [self::SHOP, 'SHOP', 'Web shop', self::SHOP_TEAM],
+            ],
+            $this->teamChoices(self::ACME_FOODS, [self::MOBILE_TEAM, self::EMPTY_TEAM, self::SHOP_TEAM]),
+        );
+        self::assertSame([[self::IOS, 'IOS', 'iPhone app', self::MOBILE_TEAM]], $this->teamChoices(self::ACME_FOODS, [self::MOBILE_TEAM]));
+        self::assertSame([], $this->teamChoices(self::ACME_FOODS, [self::EMPTY_TEAM]));
+    }
+
+    #[Test]
+    public function projectChoicesOfNoTeamsAreEmptyWithoutAnyQuery(): void
+    {
+        $recordedSql = new RecordedSql();
+
+        $choices = $this->onRecordedConnection(
+            self::ACME_FOODS,
+            $recordedSql,
+            fn (Connection $connection): array => new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext())->projectChoicesOfTeams([]),
+        );
+
+        self::assertSame([[], []], [$choices, $recordedSql->statements]);
+    }
+
+    #[Test]
+    public function projectChoicesOfTeamsCostOneQueryAndNoCount(): void
+    {
+        $openTicketCounts = new RecordedOpenTicketCounts(self::OPEN_TICKETS);
+        $recordedSql = new RecordedSql();
+
+        $choiceCount = $this->onRecordedConnection(self::ACME_FOODS, $recordedSql, fn (Connection $connection): int => \count(
+            new DbalProjectQueries($connection, $openTicketCounts, self::ticketVisibilities(), $this->tenantContext())->projectChoicesOfTeams([new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)]),
+        ));
+
+        self::assertSame([4, 1, []], [$choiceCount, \count($recordedSql->statements), $openTicketCounts->calls]);
+    }
+
+    #[Test]
+    public function projectChoicesOfTeamsAreRefusedWithNoTransactionOpenBeforeAnyQuery(): void
+    {
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $recordedSql = new RecordedSql();
+        $connection = new CloseOnFailedBeginConnection($this->connection()->getParams(), $recordedSql->wrap(new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver())));
+
+        try {
+            new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext())->projectChoicesOfTeams([new TeamId(self::SHOP_TEAM)]);
+            self::fail('Projects of teams were read with no transaction open.');
+        } catch (\LogicException $refused) {
+            self::assertSame(
+                [\LogicException::class, 'Projects of teams are read in a transaction under the organization as tenant; none is open.', []],
+                [$refused::class, $refused->getMessage(), $recordedSql->statements],
+            );
+        } finally {
+            $connection->close();
+        }
+    }
+
+    #[Test]
+    public function projectChoicesOfTeamsAreRefusedInATransactionWithNoTenantBeforeAnyQuery(): void
+    {
+        $recordedSql = new RecordedSql();
+        $connection = new CloseOnFailedBeginConnection($this->connection()->getParams(), $recordedSql->wrap(new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver())));
+        $connection->beginTransaction();
+
+        try {
+            new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext())->projectChoicesOfTeams([new TeamId(self::SHOP_TEAM)]);
+            self::fail('Projects of teams were read with no tenant set.');
+        } catch (TenantNotSet) {
+            self::assertSame([], $recordedSql->statements);
+        } finally {
+            $connection->rollBack();
+            $connection->close();
+        }
     }
 
     #[Test]
@@ -156,11 +243,15 @@ final class DbalProjectQueriesTest extends KernelTestCase
     {
         self::assertSame(
             [[self::BETA_BREAD, 'BREAD', 'Bread orders', 5]],
-            $this->listed(self::BETA_BAKERY, static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM))),
+            $this->listed(self::BETA_BAKERY, static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER))),
         );
         self::assertSame(
             [[self::BETA_CAKE, 'CAKE', 'Cake orders']],
             $this->chosen(self::BETA_BAKERY, 10),
+        );
+        self::assertSame(
+            [[self::BETA_BREAD, 'BREAD', 'Bread orders', self::SHOP_TEAM]],
+            $this->teamChoices(self::BETA_BAKERY, [self::SHOP_TEAM, self::MOBILE_TEAM]),
         );
     }
 
@@ -171,8 +262,8 @@ final class DbalProjectQueriesTest extends KernelTestCase
         $recordedSql = new RecordedSql();
 
         $countsAfterEachList = $this->onRecordedConnection(self::ACME_FOODS, $recordedSql, function (Connection $connection) use ($openTicketCounts, $recordedSql): array {
-            $queries = new DbalProjectQueries($connection, $openTicketCounts, $this->tenantContext());
-            $projectsOf = $queries->projectsOf(new TeamId(self::SHOP_TEAM));
+            $queries = new DbalProjectQueries($connection, $openTicketCounts, self::ticketVisibilities(), $this->tenantContext());
+            $projectsOf = $queries->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER));
             $afterProjectsOf = [\count($projectsOf), \count($recordedSql->statements), $openTicketCounts->calls];
             $unlinkedChoices = $queries->unlinkedProjectChoices(10);
 
@@ -186,6 +277,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
             ],
             $countsAfterEachList,
         );
+        self::assertSame([self::VIEWER], $openTicketCounts->viewerIds);
     }
 
     /**
@@ -195,15 +287,17 @@ final class DbalProjectQueriesTest extends KernelTestCase
      * The rows and the statistics are rolled back with the transaction.
      */
     #[Test]
-    public function bothQueriesUseTheOrganizationAndTeamIndex(): void
+    public function everyQueryUsesTheOrganizationAndTeamIndex(): void
     {
         $recordedSql = new RecordedSql();
         $this->onRecordedConnection(self::ACME_FOODS, $recordedSql, function (Connection $connection): void {
-            $queries = new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), $this->tenantContext());
-            $queries->projectsOf(new TeamId(self::SHOP_TEAM));
+            $queries = new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext());
+            $queries->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER));
             $queries->unlinkedProjectChoices(ProjectQueries::CHOICE_LIMIT);
+            $queries->projectChoicesOfTeams([new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)]);
         });
-        [$projectsOfSql, $unlinkedProjectsSql] = $recordedSql->statements;
+        [$projectsOfSql, $unlinkedProjectsSql, $teamChoicesSql] = $recordedSql->statements;
+        $askedTeams = '{'.self::SHOP_TEAM.','.self::MOBILE_TEAM.'}';
 
         $migrator = $this->migrator();
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
@@ -221,6 +315,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
             $migrator->executeStatement('SET LOCAL enable_seqscan = off');
             $projectsOfPlan = $this->planOf($migrator, $projectsOfSql, [self::ACME_FOODS, self::SHOP_TEAM]);
             $unlinkedProjectsPlan = $this->planOf($migrator, $unlinkedProjectsSql, [self::ACME_FOODS, (string) ProjectQueries::CHOICE_LIMIT]);
+            $teamChoicesPlan = $this->planOf($migrator, $teamChoicesSql, [self::ACME_FOODS, $askedTeams]);
         } finally {
             $migrator->rollBack();
             $this->tenantContext()->clear();
@@ -230,6 +325,8 @@ final class DbalProjectQueriesTest extends KernelTestCase
         self::assertStringContainsString(\sprintf("Index Cond: ((organization_id = '%s'::uuid) AND (team_id = '%s'::uuid))", self::ACME_FOODS, self::SHOP_TEAM), $projectsOfPlan);
         self::assertMatchesRegularExpression('/Index Scan (using|on) tkt_project_organization_id_team_id_idx\b/', $unlinkedProjectsPlan);
         self::assertStringContainsString(\sprintf("Index Cond: ((organization_id = '%s'::uuid) AND (team_id IS NULL))", self::ACME_FOODS), $unlinkedProjectsPlan);
+        self::assertMatchesRegularExpression('/Index Scan (using|on) tkt_project_organization_id_team_id_idx\b/', $teamChoicesPlan);
+        self::assertStringContainsString(\sprintf("Index Cond: ((organization_id = '%s'::uuid) AND (team_id = ANY ('%s'::uuid[])))", self::ACME_FOODS, $askedTeams), $teamChoicesPlan);
     }
 
     #[Test]
@@ -242,8 +339,41 @@ final class DbalProjectQueriesTest extends KernelTestCase
 
         $this->transactions()->rolledBackAs(
             self::ACME_FOODS,
-            fn (): array => $this->queries(new RecordedOpenTicketCounts($countsWithoutApp))->projectsOf(new TeamId(self::SHOP_TEAM)),
+            fn (): array => $this->queries(new RecordedOpenTicketCounts($countsWithoutApp))->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER)),
         );
+    }
+
+    #[Test]
+    public function projectByKeyFindsTheOrganizationsProjectLinkedOrNot(): void
+    {
+        self::assertSame(
+            [[self::SHOP, 'SHOP', 'Web shop'], [self::OPS, 'OPS', 'Archive'], [self::BETA_CAKE, 'CAKE', 'Cake orders']],
+            [$this->foundByKey(self::ACME_FOODS, 'SHOP'), $this->foundByKey(self::ACME_FOODS, 'OPS'), $this->foundByKey(self::BETA_BAKERY, 'CAKE')],
+        );
+    }
+
+    #[Test]
+    public function projectByKeyFindsNoneForAKeyTheOrganizationHasNot(): void
+    {
+        self::assertSame([null, null], [$this->foundByKey(self::ACME_FOODS, 'NOPE'), $this->foundByKey(self::ACME_FOODS, 'BREAD')]);
+    }
+
+    /**
+     * Keys are upper case (tkt_project_key_check), so a lowercase one is no project and is not even asked for.
+     */
+    #[Test]
+    public function projectByKeyFindsNoneForALowercaseKeyWithoutAnyQuery(): void
+    {
+        $recordedSql = new RecordedSql();
+
+        $project = $this->onRecordedConnection(
+            self::ACME_FOODS,
+            $recordedSql,
+            fn (Connection $connection): ?ProjectChoice => new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext())->projectByKey('shop'),
+        );
+
+        self::assertSame([null, []], [$project, $recordedSql->statements]);
+        self::assertSame([self::SHOP, 'SHOP', 'Web shop'], $this->foundByKey(self::ACME_FOODS, 'SHOP'));
     }
 
     /**
@@ -255,29 +385,35 @@ final class DbalProjectQueriesTest extends KernelTestCase
     {
         $this->entityManager()->getFilters()->disable(TenantFilter::NAME);
 
-        $listsUnderAcmeContext = $this->onRecordedConnection(self::BETA_BAKERY, new RecordedSql(), function (Connection $connection): array {
-            $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
-            $queries = new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), $this->tenantContext());
+        $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
+        $listsUnderAcmeContext = $ownConnectionTransactions->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, function (Connection $connection): array {
+            $queries = new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext());
 
-            return [$queries->projectsOf(new TeamId(self::SHOP_TEAM)), $queries->unlinkedProjectChoices(10)];
+            return [
+                $queries->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER)),
+                $queries->unlinkedProjectChoices(10),
+                $queries->projectChoicesOfTeams([new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)]),
+                $queries->projectByKey('SHOP'),
+            ];
         });
 
         self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
-        self::assertSame([[], []], $listsUnderAcmeContext);
+        self::assertSame([[], [], [], null], $listsUnderAcmeContext);
     }
 
     #[Test]
-    public function withNoTenantBothQueriesRefuseBeforeAnyQuery(): void
+    public function withNoTenantEveryQueryRefusesBeforeAnyQuery(): void
     {
         $refusals = [];
         foreach ([
-            static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM)),
+            static fn (DbalProjectQueries $queries): array => $queries->projectsOf(new TeamId(self::SHOP_TEAM), new UserId(self::VIEWER)),
             static fn (DbalProjectQueries $queries): array => $queries->unlinkedProjectChoices(10),
+            static fn (DbalProjectQueries $queries): ?ProjectChoice => $queries->projectByKey('SHOP'),
         ] as $list) {
             $recordedSql = new RecordedSql();
             $connection = new CloseOnFailedBeginConnection($this->connection()->getParams(), $recordedSql->wrap(new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver())));
             try {
-                $list(new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), $this->tenantContext()));
+                $list(new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext()));
             } catch (TenantNotSet) {
                 $refusals[] = $recordedSql->statements;
             } finally {
@@ -285,7 +421,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
             }
         }
 
-        self::assertSame([[], []], $refusals);
+        self::assertSame([[], [], []], $refusals);
     }
 
     /**
@@ -317,19 +453,7 @@ final class DbalProjectQueriesTest extends KernelTestCase
      */
     private function onRecordedConnection(string $organizationId, RecordedSql $recordedSql, \Closure $work): mixed
     {
-        $this->tenantContext()->set(new OrganizationId($organizationId));
-        $connection = new CloseOnFailedBeginConnection(
-            $this->connection()->getParams(),
-            $recordedSql->wrap(new TenantMiddleware($this->tenantContext())->wrap(new PgSQLDriver())),
-        );
-        $connection->beginTransaction();
-        try {
-            return $work($connection);
-        } finally {
-            $connection->rollBack();
-            $connection->close();
-            $this->tenantContext()->clear();
-        }
+        return new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackAs($organizationId, $work, $recordedSql);
     }
 
     /**
@@ -356,6 +480,31 @@ final class DbalProjectQueriesTest extends KernelTestCase
         ));
     }
 
+    /**
+     * @return array{string, string, string}|null id, key and name of the project with $key
+     */
+    private function foundByKey(string $organizationId, string $key): ?array
+    {
+        return $this->transactions()->rolledBackAs($organizationId, function () use ($key): ?array {
+            $project = $this->queries(new RecordedOpenTicketCounts(self::OPEN_TICKETS))->projectByKey($key);
+
+            return null === $project ? null : [$project->id(), $project->key(), $project->name()];
+        });
+    }
+
+    /**
+     * @param list<string> $teamIds
+     *
+     * @return list<array{string, string, string, string}> id, key, name and team id of each project offered
+     */
+    private function teamChoices(string $organizationId, array $teamIds): array
+    {
+        return $this->transactions()->rolledBackAs($organizationId, fn (): array => array_map(
+            static fn (TeamProjectChoice $project): array => [$project->id(), $project->key(), $project->name(), $project->teamId()->toString()],
+            $this->queries(new RecordedOpenTicketCounts(self::OPEN_TICKETS))->projectChoicesOfTeams(array_map(static fn (string $teamId): TeamId => new TeamId($teamId), $teamIds)),
+        ));
+    }
+
     private function addProject(string $organizationId, string $projectId, ?string $teamId, string $key, string $name): void
     {
         $this->connection()->executeStatement(
@@ -366,7 +515,20 @@ final class DbalProjectQueriesTest extends KernelTestCase
 
     private function queries(RecordedOpenTicketCounts $openTicketCounts): DbalProjectQueries
     {
-        return new DbalProjectQueries($this->connection(), $openTicketCounts, $this->tenantContext());
+        return new DbalProjectQueries($this->connection(), $openTicketCounts, self::ticketVisibilities(), $this->tenantContext());
+    }
+
+    /**
+     * Gives every viewer a visibility of no team, so the counts the queries pass on come from RecordedOpenTicketCounts.
+     */
+    private static function ticketVisibilities(): TicketVisibilities
+    {
+        return new class implements TicketVisibilities {
+            public function of(OrganizationId $organizationId, UserId $viewerId): TicketVisibility
+            {
+                return TicketVisibility::for($organizationId, $viewerId, [], false, null);
+            }
+        };
     }
 
     private function tenantContext(): TenantContext

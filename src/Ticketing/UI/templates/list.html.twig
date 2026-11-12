@@ -1,0 +1,69 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}{{ heading }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/tickets.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="tickets" id="ticket-list">
+        <header class="tickets__header">
+            <h1 class="tickets__title">{{ heading }}</h1>
+            <p class="tickets__total">{{ totalLine }}</p>
+        </header>
+
+        {# "Show more" is a link inside a Turbo frame named by the page it opens; the response holds a frame of the same id around that page's rows, so only they replace the link. Without script the link opens the whole page. #}
+        <div class="tickets__results" id="ticket-list-results">
+            {% for group in groups %}
+                {% for step in group.steps %}
+                    <section class="tickets__step" id="step-{{ step.id }}" data-group="{{ group.code }}" data-step-id="{{ step.id }}"
+                        {{ stimulus_controller('step-collapse', {url: step.collapseUrl, token: csrf_token(step.csrfId)}) }}>
+                        <h2 class="tickets__step-heading">
+                            <button type="button" class="tickets__step-toggle" aria-expanded="{{ step.isCollapsed ? 'false' : 'true' }}" aria-controls="step-{{ step.id }}-rows"
+                                {{ stimulus_target('step-collapse', 'toggle') }} data-step-toggle data-action="step-collapse#toggle">
+                                <span class="tickets__chevron" aria-hidden="true">▾</span>
+                                <span class="tickets__dot tickets__dot--{{ group.code }}" aria-hidden="true"></span>
+                                <span class="tickets__step-name">{{ step.name }}</span>
+                                <span class="tickets__step-count">{{ step.count }}</span>
+                                <twig:Tag>{{ group.label }}</twig:Tag>
+                            </button>
+                            {% if group.hint is not null %}
+                                <span class="tickets__hint">{{ group.hint }}</span>
+                            {% endif %}
+                        </h2>
+                        <div class="tickets__rows" id="step-{{ step.id }}-rows" {{ stimulus_target('step-collapse', 'rows') }}{% if step.isCollapsed %} hidden{% endif %}>
+                            {% if step.pageFrameId is not null %}<turbo-frame id="{{ step.pageFrameId }}">{% endif %}
+                            <ul class="tickets__row-list"{% if step.pageFrameId is not null %} tabindex="-1" autofocus{% endif %}>
+                                {% for row in step.rows %}
+                                    <li class="tickets__row" data-ticket-key="{{ row.key }}">
+                                        <span class="tickets__key">{{ row.key }}</span>
+                                        <span class="tickets__summary">
+                                            <span class="tickets__row-title">{{ row.title }}</span>
+                                            <span class="tickets__meta">{{ row.meta }}</span>
+                                        </span>
+                                        <span class="tickets__priority{% if row.isUrgent %} tickets__priority--urgent{% endif %}">{{ row.priority }}</span>
+                                        {% if row.assigneeName is not null %}
+                                            <twig:Avatar name="{{ row.assigneeName }}" title="Assigned to {{ row.assigneeName }}" class="tickets__assignee" />
+                                        {% else %}
+                                            <span class="av tickets__assignee tickets__assignee--nobody" role="img" aria-label="Nobody assigned">–</span>
+                                        {% endif %}
+                                        <time class="tickets__updated" datetime="{{ row.updatedAt }}">{{ row.updated }}</time>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                            {% if step.moreUrl is not null %}
+                                <turbo-frame id="{{ step.moreFrameId }}">
+                                    <a class="tickets__more" href="{{ step.moreUrl }}" data-step-more>Show more</a>
+                                </turbo-frame>
+                            {% endif %}
+                            {% if step.pageFrameId is not null %}</turbo-frame>{% endif %}
+                        </div>
+                    </section>
+                {% endfor %}
+            {% else %}
+                <twig:EmptyState message="{{ noTickets }}" />
+            {% endfor %}
+        </div>
+    </div>
+{% endblock %}

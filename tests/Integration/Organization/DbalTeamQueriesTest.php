@@ -12,6 +12,8 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
+use App\Tests\Integration\Ticketing\RecordedSql;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -34,13 +36,15 @@ final class DbalTeamQueriesTest extends KernelTestCase
     private const string BETA_CHECKOUT = '0197a3c0-0000-7000-8000-0000000005d5';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000005c2';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000005c3';
+    private const string SARA = '0197a3c0-0000-7000-8000-0000000005c4';
+    private const string BEN = '0197a3c0-0000-7000-8000-0000000005c5';
 
     protected function setUp(): void
     {
         $this->rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->transactions()->committedAs(self::BETA_BAKERY, function (): void {
             $this->addMembership(self::BETA_BAKERY);
-            $this->addTeam(self::BETA_BAKERY, self::BETA_CHECKOUT, 'Checkout');
+            $this->addTeam(self::BETA_BAKERY, self::BETA_CHECKOUT, 'Checkout', self::BEN);
             // Mia works in both organizations, with another job in Beta Bakery.
             $this->addTeamMember(self::BETA_BAKERY, self::BETA_CHECKOUT, self::MIA, 'developer');
         });
@@ -53,6 +57,9 @@ final class DbalTeamQueriesTest extends KernelTestCase
             $this->addTeamMember(self::ACME_FOODS, self::ACME_SHOP, self::MIA, 'tester');
             $this->addTeamMember(self::ACME_FOODS, self::ACME_SHOP, self::OMAR, 'developer');
             $this->addTeamMember(self::ACME_FOODS, self::ACME_MOBILE, self::OMAR, 'other');
+            // Added after Omar, though Lena's id is lower; Sara views Shop with a job that would make her its second tester.
+            $this->addTeamMember(self::ACME_FOODS, self::ACME_SHOP, self::LENA, 'developer', 'lead');
+            $this->addTeamMember(self::ACME_FOODS, self::ACME_SHOP, self::SARA, 'tester', 'viewer');
         });
     }
 
@@ -235,6 +242,86 @@ final class DbalTeamQueriesTest extends KernelTestCase
         self::assertNull($this->queries()->jobOf(new TeamId(self::ACME_SHOP), new UserId(self::MIA)));
     }
 
+    #[Test]
+    public function leadOfGivesTheTeamsLead(): void
+    {
+        self::assertSame(self::LENA, $this->leadAs(self::ACME_FOODS, self::ACME_SHOP));
+        self::assertSame(self::BEN, $this->leadAs(self::BETA_BAKERY, self::BETA_CHECKOUT));
+    }
+
+    #[Test]
+    public function leadOfIsNullForATeamOfAnotherOrganizationAnUnknownTeamOrNoTenant(): void
+    {
+        self::assertNull($this->leadAs(self::ACME_FOODS, self::BETA_CHECKOUT));
+        self::assertNull($this->leadAs(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000005df'));
+        self::assertNull($this->leadAs(null, self::ACME_SHOP));
+    }
+
+    #[Test]
+    public function peopleByJobGivesTheLeadAndMembersByJobInIdOrderWithoutViewers(): void
+    {
+        self::assertSame(
+            ['developer' => [self::LENA, self::OMAR], 'tester' => [self::MIA], 'other' => []],
+            $this->peopleByJobAs(self::ACME_FOODS, self::ACME_SHOP),
+        );
+        self::assertSame(['developer' => [], 'tester' => [], 'other' => [self::OMAR]], $this->peopleByJobAs(self::ACME_FOODS, self::ACME_MOBILE));
+    }
+
+    #[Test]
+    public function peopleByJobFindsNoOneForATeamOfAnotherOrganizationAnUnknownTeamOrNoTenant(): void
+    {
+        $noOne = ['developer' => [], 'tester' => [], 'other' => []];
+        // Under Beta Bakery itself Mia develops in Checkout, so the empty lists below come from row-level security.
+        self::assertSame(['developer' => [self::MIA], 'tester' => [], 'other' => []], $this->peopleByJobAs(self::BETA_BAKERY, self::BETA_CHECKOUT));
+        self::assertSame($noOne, $this->peopleByJobAs(self::ACME_FOODS, self::BETA_CHECKOUT));
+        self::assertSame($noOne, $this->peopleByJobAs(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000005df'));
+        self::assertSame($noOne, $this->peopleByJobAs(null, self::ACME_SHOP));
+    }
+
+    #[Test]
+    public function possibleAssigneesOfGiveEachAskedTeamsLeadAndMembersInIdOrderWithoutViewers(): void
+    {
+        // Payments has a lead_user_id but no team member rows, so it answers with an empty list.
+        self::assertSame(
+            [self::ACME_MOBILE => [self::OMAR], self::ACME_SHOP => [self::LENA, self::OMAR, self::MIA], self::ACME_PAYMENTS => []],
+            $this->possibleAssigneesAs(self::ACME_FOODS, [self::ACME_MOBILE, self::ACME_SHOP, self::ACME_PAYMENTS]),
+        );
+    }
+
+    #[Test]
+    public function possibleAssigneesOfFindNoOneForATeamOfAnotherOrganizationAnUnknownTeamOrNoTenant(): void
+    {
+        $unknownTeam = '0197a3c0-0000-7000-8000-0000000005df';
+        // Under Beta Bakery itself Mia develops in Checkout, so the empty lists below come from row-level security.
+        self::assertSame([self::BETA_CHECKOUT => [self::MIA]], $this->possibleAssigneesAs(self::BETA_BAKERY, [self::BETA_CHECKOUT]));
+        self::assertSame(
+            [self::BETA_CHECKOUT => [], $unknownTeam => []],
+            $this->possibleAssigneesAs(self::ACME_FOODS, [self::BETA_CHECKOUT, $unknownTeam]),
+        );
+        self::assertSame([self::ACME_SHOP => []], $this->possibleAssigneesAs(null, [self::ACME_SHOP]));
+    }
+
+    #[Test]
+    public function possibleAssigneesOfCostOneQueryAndNoneForNoTeams(): void
+    {
+        $recordedSql = new RecordedSql();
+
+        $teamCounts = new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackAs(
+            self::ACME_FOODS,
+            static function (Connection $connection) use ($recordedSql): array {
+                $queries = new DbalTeamQueries($connection);
+                $noTeams = $queries->possibleAssigneesOf([]);
+                $afterNoTeams = \count($recordedSql->statements);
+                $threeTeams = $queries->possibleAssigneesOf([new TeamId(self::ACME_SHOP), new TeamId(self::ACME_MOBILE), new TeamId(self::ACME_PAYMENTS)]);
+
+                return [[\count($noTeams), $afterNoTeams], [\count($threeTeams), \count($recordedSql->statements)]];
+            },
+            $recordedSql,
+        );
+
+        self::assertSame([[0, 0], [3, 1]], $teamCounts);
+    }
+
     /**
      * @param list<TeamSummary> $summaries
      *
@@ -262,11 +349,46 @@ final class DbalTeamQueriesTest extends KernelTestCase
         return $this->transactions()->rolledBackAs($tenantId, fn (): ?MemberJob => $this->queries()->jobOf(new TeamId($teamId), new UserId($userId)));
     }
 
-    private function addTeamMember(string $organizationId, string $teamId, string $userId, string $job): void
+    /**
+     * @return array<string, list<string>> user id strings by job
+     */
+    private function peopleByJobAs(?string $tenantId, string $teamId): array
+    {
+        $read = fn (): array => array_map(
+            static fn (array $userIds): array => array_map(static fn (UserId $userId): string => $userId->toString(), $userIds),
+            $this->queries()->peopleByJob(new TeamId($teamId)),
+        );
+
+        return null === $tenantId ? $read() : $this->transactions()->rolledBackAs($tenantId, $read);
+    }
+
+    /**
+     * @param list<string> $teamIds
+     *
+     * @return array<string, list<string>> user id strings by team id
+     */
+    private function possibleAssigneesAs(?string $tenantId, array $teamIds): array
+    {
+        $read = fn (): array => array_map(
+            static fn (array $userIds): array => array_map(static fn (UserId $userId): string => $userId->toString(), $userIds),
+            $this->queries()->possibleAssigneesOf(array_map(static fn (string $teamId): TeamId => new TeamId($teamId), $teamIds)),
+        );
+
+        return null === $tenantId ? $read() : $this->transactions()->rolledBackAs($tenantId, $read);
+    }
+
+    private function leadAs(?string $tenantId, string $teamId): ?string
+    {
+        $read = fn (): ?string => $this->queries()->leadOf(new TeamId($teamId))?->toString();
+
+        return null === $tenantId ? $read() : $this->transactions()->rolledBackAs($tenantId, $read);
+    }
+
+    private function addTeamMember(string $organizationId, string $teamId, string $userId, string $job, string $teamRole = 'member'): void
     {
         $this->connection()->executeStatement(
-            "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, 'member', ?, '2027-03-15 10:00:00+00')",
-            [$organizationId, $teamId, $userId, $job],
+            "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
+            [$organizationId, $teamId, $userId, $teamRole, $job],
         );
     }
 
@@ -306,11 +428,11 @@ final class DbalTeamQueriesTest extends KernelTestCase
         );
     }
 
-    private function addTeam(string $organizationId, string $teamId, string $name): void
+    private function addTeam(string $organizationId, string $teamId, string $name, string $leadId = self::LENA): void
     {
         $this->connection()->executeStatement(
             "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
-            [$organizationId, $teamId, $name, TeamSlug::fromName($name)->toString(), self::LENA],
+            [$organizationId, $teamId, $name, TeamSlug::fromName($name)->toString(), $leadId],
         );
     }
 

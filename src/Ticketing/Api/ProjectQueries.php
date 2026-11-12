@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Ticketing\Api;
 
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 
 /**
- * The projects of the current organization, for other modules. Each list costs one query on tkt_project and, when it
- * is not empty, one batch read of the open ticket counts. They read the organization of TenantContext under row-level
- * security, so they need an open transaction whose tenant is that organization; under any other tenant they find
- * nothing. unlinkedProjectChoices is the exception: one query and no counts.
+ * The projects of the current organization, for other modules. They read the organization of TenantContext under
+ * row-level security, so they need an open transaction whose tenant is that organization; under any other tenant they
+ * find nothing.
  */
 interface ProjectQueries
 {
@@ -18,12 +18,17 @@ interface ProjectQueries
     public const int CHOICE_LIMIT = 200;
 
     /**
+     * One query on tkt_project and, when the team owns projects, the viewer's ticket visibility (TicketVisibilities::of)
+     * and one batch count of the open tickets that viewer may see, for all the projects at once.
+     *
+     * @param UserId $viewerId whose open-ticket counts: a ticket they may not see is not counted (ADR-0013)
+     *
      * @return list<ProjectSummary> the projects the team owns, by key; empty when it owns none or is unknown or of
      *                              another organization
      *
      * @throws \LogicException when no tenant is set, before any query
      */
-    public function projectsOf(TeamId $teamId): array;
+    public function projectsOf(TeamId $teamId, UserId $viewerId): array;
 
     /**
      * The organization's projects that no team owns, by key, for a picker: one query on tkt_project, no ticket counts.
@@ -36,4 +41,28 @@ interface ProjectQueries
      * @throws \LogicException           when no tenant is set, before any query
      */
     public function unlinkedProjectChoices(int $limit): array;
+
+    /**
+     * The projects the given teams own, by key, for a picker: one query on tkt_project, no ticket counts, and none when
+     * $teamIds is empty. A project no team owns is never among them.
+     *
+     * @param list<TeamId> $teamIds a team that is unknown, of another organization or owns no project adds nothing
+     *
+     * @return list<TeamProjectChoice>
+     *
+     * @throws \LogicException when $teamIds is not empty and no transaction is open or no tenant is set, before any query
+     */
+    public function projectChoicesOfTeams(array $teamIds): array;
+
+    /**
+     * The organization's project with that key, for the tickets list's project filter: one query on tkt_project
+     * through tkt_project_organization_id_key_key, none for a key no project can have.
+     *
+     * @param string $key matched exactly, for example SHOP; a lowercase or malformed key finds nothing
+     *
+     * @return ProjectChoice|null null when the organization has no project with that key
+     *
+     * @throws \LogicException when no tenant is set, before any query
+     */
+    public function projectByKey(string $key): ?ProjectChoice;
 }

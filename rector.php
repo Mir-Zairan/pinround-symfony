@@ -18,13 +18,17 @@ return RectorConfig::configure()
         __DIR__.'/config/reference.php',
         __DIR__.'/tests/Fixtures', // deliberate violations, see tests/Fixtures/Deptrac
         // The locking repositories refresh these entities, and Doctrine then sets their dates again: they stay writable.
+        // A ticket's title, assignee and updatedAt stay writable: the move and assign commands still to be built
+        // will change them after construction.
         ClassPropertyAssignToConstructorPromotionRector::class => [
             __DIR__.'/src/Organization/Domain/Membership.php',
             __DIR__.'/src/Organization/Domain/Team.php',
+            __DIR__.'/src/Ticketing/Domain/Ticket.php',
         ],
         ReadOnlyPropertyRector::class => [
             __DIR__.'/src/Organization/Domain/Membership.php',
             __DIR__.'/src/Organization/Domain/Team.php',
+            __DIR__.'/src/Ticketing/Domain/Ticket.php',
         ],
     ])
     ->withPhpSets()

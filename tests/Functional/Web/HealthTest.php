@@ -10,6 +10,8 @@ use App\SharedKernel\Infrastructure\Health\DatabaseAnswers;
 use App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent;
 use App\SharedKernel\Infrastructure\Health\ReadinessCheck;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
+use App\Ticketing\Infrastructure\Health\NextTicketEventPartitionExists;
+use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\DBAL\Exception\ConnectionException;
@@ -41,20 +43,33 @@ final class HealthTest extends WebTestCase
         DatabaseAnswers::class => 'database',
         MigrationsAreCurrent::class => 'migrations',
         NextAuditPartitionExists::class => 'next_audit_partition',
+        NextTicketEventPartitionExists::class => 'next_ticket_event_partition',
         'health.cache_valkey_answers' => 'cache_valkey',
         'health.state_valkey_answers' => 'state_valkey',
         ObjectStorageIsReachable::class => 'object_storage',
     ];
 
-    // Inside the months the migrations created partitions for (2026-11 to 2027-12), so next month always has one.
+    // Inside the months the aud_event and tkt_ticket_event migrations created partitions for (2026-11 to 2027-12), so
+    // next month always has one.
     private const string NOW = '2027-03-15 10:00:00 UTC';
 
     private KernelBrowser $client;
+
+    /** @var list<string> */
+    private array $addedTicketEventPartitions = [];
 
     protected function setUp(): void
     {
         self::ensureKernelShutdown();
         $this->client = self::createClient();
+    }
+
+    protected function tearDown(): void
+    {
+        foreach ($this->addedTicketEventPartitions as $partition) {
+            self::getContainer()->get('doctrine.dbal.migrator_connection')->executeStatement('DROP TABLE '.$partition);
+        }
+        parent::tearDown();
     }
 
     /**
@@ -176,7 +191,7 @@ final class HealthTest extends WebTestCase
     #[Test]
     public function readyAnswersOkWhenEveryDependencyAnswers(): void
     {
-        self::freezeTheClockAt(self::NOW);
+        $this->freezeTheClockAt(self::NOW);
 
         $this->client->request('GET', '/health/ready');
 
@@ -187,7 +202,9 @@ final class HealthTest extends WebTestCase
     #[Test]
     public function readyAnswersFailWhenNextMonthHasNoAuditPartition(): void
     {
-        self::freezeTheClockAt('2027-12-15 10:00:00 UTC');
+        $this->freezeTheClockAt('2027-12-15 10:00:00 UTC');
+        // So only the audit check fails: tkt_ticket_event's migrated months end with 2027-12 too.
+        $this->runTheTicketEventPartitionJobAt('2027-12-15 10:00:00 UTC');
         $capturedLogRecords = $this->capturedLogRecords();
         $capturedLogRecords->clear();
 
@@ -205,7 +222,7 @@ final class HealthTest extends WebTestCase
     #[Test]
     public function readyAnswersOkWhenTheMigrationsTableIsReadAsTheAppRoleAsInProd(): void
     {
-        self::freezeTheClockAt(self::NOW);
+        $this->freezeTheClockAt(self::NOW);
         // Prod has no migrator connection: the migrations DependencyFactory uses the app's (Version20261107180000).
         $configuration = new Configuration();
         $configuration->setMetadataStorageConfiguration(new TableMetadataStorageConfiguration());
@@ -250,7 +267,7 @@ final class HealthTest extends WebTestCase
     #[Test]
     public function neitherRouteOpensATransactionOrStartsASession(): void
     {
-        self::freezeTheClockAt(self::NOW);
+        $this->freezeTheClockAt(self::NOW);
         $this->client->disableReboot();
         $observed = [];
         $connection = $this->defaultConnection();
@@ -301,12 +318,23 @@ final class HealthTest extends WebTestCase
     }
 
     /**
-     * NextAuditPartitionExists reads this clock. Call it before the test's first request: the client reboots the
-     * kernel after it, which drops the frozen clock unless the test disabled reboots.
+     * NextAuditPartitionExists and NextTicketEventPartitionExists read this clock. Call it before the test's first
+     * request: the client reboots the kernel after it, which drops the frozen clock unless the test disabled reboots.
      */
-    private static function freezeTheClockAt(string $now): void
+    private function freezeTheClockAt(string $now): void
     {
         self::getContainer()->set('clock', new MockClock($now));
+    }
+
+    /**
+     * For a clock past the migrations' tkt_ticket_event months; tearDown drops what the job added.
+     */
+    private function runTheTicketEventPartitionJobAt(string $now): void
+    {
+        $this->addedTicketEventPartitions = [
+            ...$this->addedTicketEventPartitions,
+            ...new AddTicketEventPartitions(self::getContainer()->get('doctrine.dbal.migrator_connection'), new MockClock($now))(),
+        ];
     }
 
     private function capturedLogRecords(): CapturedLogRecords

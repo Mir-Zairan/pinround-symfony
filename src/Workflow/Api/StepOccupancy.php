@@ -13,11 +13,13 @@ interface StepOccupancy
 {
     /**
      * Reads under row-level security, so it needs an open transaction whose tenant is the step's organization; under
-     * any other tenant, or none, it counts nothing.
+     * another tenant it counts nothing.
      *
      * @param string $stepId a step's uuid, lowercase
      *
      * @return int the open tickets in the step, zero or more
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
      */
     public function openTicketsIn(string $stepId): int;
 }

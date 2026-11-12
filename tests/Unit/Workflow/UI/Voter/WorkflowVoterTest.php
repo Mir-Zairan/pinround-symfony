@@ -144,6 +144,11 @@ final class WorkflowVoterTest extends TestCase
             {
                 throw new \LogicException('The step policy was read for someone who does not lead the team.');
             }
+
+            public function triagerOf(OrganizationId $organizationId): ?UserId
+            {
+                return null;
+            }
         });
 
         foreach ([[self::LENA, self::MOBILE], [self::OMAR, self::SHOP], [self::SARA, self::SHOP], [self::BETA_LEAD, self::SHOP]] as [$userId, $teamId]) {
@@ -176,6 +181,11 @@ final class WorkflowVoterTest extends TestCase
             public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
             {
                 return $this->stepPolicyByOrganization[$organizationId->toString()] ?? StepPolicy::Extend;
+            }
+
+            public function triagerOf(OrganizationId $organizationId): ?UserId
+            {
+                return null;
             }
         });
     }

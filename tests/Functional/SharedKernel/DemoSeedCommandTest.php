@@ -16,6 +16,7 @@ use App\Tests\Factory\Identity\UserFactory;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ProjectRows;
+use App\Tests\Integration\Ticketing\TicketRows;
 use App\Tests\Integration\Workflow\WorkflowRows;
 use App\Ticketing\Infrastructure\Demo\SeedDemoProjects;
 use App\Workflow\Domain\CoreStep;
@@ -25,6 +26,7 @@ use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\Attribute\When;
@@ -324,12 +326,51 @@ final class DemoSeedCommandTest extends KernelTestCase
     }
 
     #[Test]
+    public function itCreatesFortyShopTicketsInEveryCoreStepWithTheirEventAndTurnRowsAndASecondRunAddsNone(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $first = $this->runSeed();
+        $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
+        $omar = $this->userIdOf('omar@acme-foods.example');
+        $ticketFacts = fn (): array => $this->underTenant($acmeFoods, fn (): array => [
+            $this->connection()->fetchFirstColumn(
+                'SELECT s.core_code FROM tkt_ticket t JOIN wf_step s ON s.organization_id = t.organization_id AND s.id = t.step_id GROUP BY s.core_code, s.position ORDER BY s.position',
+            ),
+            $this->connection()->fetchOne("SELECT count(*) FROM tkt_ticket WHERE key LIKE 'SHOP-%'"),
+            $this->connection()->fetchOne('SELECT count(DISTINCT type) FROM tkt_ticket'),
+            $this->connection()->fetchOne('SELECT count(DISTINCT priority) FROM tkt_ticket'),
+            $this->connection()->fetchOne('SELECT count(*) FROM tkt_ticket WHERE assignee_id = ?', [$omar]),
+            $this->connection()->fetchOne("SELECT count(*) FROM tkt_ticket WHERE visibility = 'team'"),
+            $this->connection()->fetchOne('SELECT count(*) FROM tkt_ticket_event'),
+            $this->connection()->fetchOne('SELECT count(*) FROM ins_ticket_turn'),
+            $this->connection()->fetchOne('SELECT count(*) FROM tkt_ticket WHERE closed_at IS NOT NULL'),
+        ]);
+        $afterFirstRun = $ticketFacts();
+
+        $second = $this->runSeed();
+
+        self::assertSame(Command::SUCCESS, $first->getStatusCode());
+        self::assertStringContainsString('Tickets: created 40, kept 0.', $first->getDisplay());
+        self::assertSame(['backlog', 'todo', 'progress', 'review', 'test', 'input', 'hold', 'done'], $afterFirstRun[0]);
+        self::assertSame([40, 3, 5], \array_slice($afterFirstRun, 1, 3));
+        self::assertGreaterThan(0, $afterFirstRun[4]);
+        self::assertLessThan(40, $afterFirstRun[4]);
+        self::assertGreaterThan(0, $afterFirstRun[5]);
+        self::assertLessThan(40, $afterFirstRun[5]);
+        // The five done tickets are nobody's turn, so they hold no turn row.
+        self::assertSame([40, 35, 5], \array_slice($afterFirstRun, 6));
+        self::assertStringContainsString('Tickets: created 0, kept 40.', $second->getDisplay());
+        self::assertSame($afterFirstRun, $ticketFacts());
+    }
+
+    #[Test]
     public function theProjectStepRefusesWhenTheShopTeamIsMissing(): void
     {
         $this->startWithPassword(self::PASSWORD);
         $this->runSeed();
         $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
         self::getContainer()->get('doctrine')->resetManager();
+        $this->ticketRows()->removeAllOf($acmeFoods);
         $this->projectRows()->removeAllOf($acmeFoods);
         $this->committedUnderTenant($acmeFoods, function (): void {
             $this->connection()->executeStatement("UPDATE org_team SET name = 'Webshop' WHERE name = 'Shop'");
@@ -463,12 +504,14 @@ final class DemoSeedCommandTest extends KernelTestCase
     }
 
     /**
-     * Boots a fresh kernel, because the container keeps the DEMO_PASSWORD it first resolved.
+     * Boots a fresh kernel, because the container keeps the DEMO_PASSWORD it first resolved. Its clock stands inside
+     * the tkt_ticket_event partitions, which the migrations made only through 2027-12, for the seeded tickets' history.
      */
     private function startWithPassword(?string $password): void
     {
         null === $password ? putenv('DEMO_PASSWORD') : putenv('DEMO_PASSWORD='.$password);
         self::bootKernel();
+        self::getContainer()->set('clock', new MockClock(new \DateTimeImmutable('2027-03-15 10:00:00 UTC')));
     }
 
     private function runSeed(): CommandTester
@@ -589,6 +632,7 @@ final class DemoSeedCommandTest extends KernelTestCase
     private function removeOrganizationOf(string $email): void
     {
         $organizationIds = $this->organizationIdsOf($email);
+        $this->ticketRows()->removeAllOf(...$organizationIds);
         $this->projectRows()->removeAllOf(...$organizationIds);
         $this->workflowRows()->removeAllOf(...$organizationIds);
         $this->rows()->removeAllOf(...$organizationIds);
@@ -611,6 +655,7 @@ final class DemoSeedCommandTest extends KernelTestCase
                 $organizationIds[$organizationId] = $organizationId;
             }
         }
+        $this->ticketRows()->removeAllOf(...array_values($organizationIds));
         $this->projectRows()->removeAllOf(...array_values($organizationIds));
         $this->workflowRows()->removeAllOf(...array_values($organizationIds));
         $this->rows()->removeAllOf(...array_values($organizationIds));
@@ -619,6 +664,11 @@ final class DemoSeedCommandTest extends KernelTestCase
             $migrator->executeStatement('DELETE FROM idn_credential WHERE user_id IN (?)', [$userIds], [ArrayParameterType::STRING]);
             $migrator->executeStatement('DELETE FROM idn_user WHERE id IN (?)', [$userIds], [ArrayParameterType::STRING]);
         }
+    }
+
+    private function ticketRows(): TicketRows
+    {
+        return new TicketRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function projectRows(): ProjectRows

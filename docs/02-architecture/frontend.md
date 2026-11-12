@@ -139,7 +139,7 @@ Every controller is small, stays under about 150 lines, and has a test (Playwrig
 
 ## Turbo and real-time updates
 
-- **Navigation:** Turbo Drive for all links. Pages set `<meta name="turbo-cache-control" content="no-cache">` where data must be fresh (Home, ticket page).
+- **Navigation:** Turbo is installed (`symfony/ux-turbo`) but Drive is off app-wide (`Turbo.session.drive = false` in `assets/app.js`), so links are full page loads and only frames (the tickets list's "Show more") use Turbo; ADR-0007 stays the target, and a change turns Drive on together with an e2e sweep. Pages set `<meta name="turbo-cache-control" content="no-cache">` where data must be fresh (Home, ticket page).
 - **Frames:**
   - the ticket list results;
   - the ticket page's action box, thread and rounds;

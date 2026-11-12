@@ -10,8 +10,10 @@ use App\Organization\Api\StepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Workflow\Infrastructure\Cache\WorkflowCache;
 use Doctrine\DBAL\Connection;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
 use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
@@ -46,6 +48,7 @@ final class TeamPageTest extends WebTestCase
 
     protected function tearDown(): void
     {
+        $this->removeCommittedTickets();
         $this->removeCommittedProjects();
         $this->removeCommittedWorkflow();
         $this->removeUsersAndOrganizations();
@@ -143,6 +146,30 @@ final class TeamPageTest extends WebTestCase
         self::assertStringNotContainsString('Mobile app', $page->filter('main')->text());
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function viewersOfOneTeamOnlyTicket(): iterable
+    {
+        yield 'Lena, lead of Shop, sees it' => ['Lena', '1 open ticket'];
+        yield 'Raj, a Manager with no team role, does not' => ['Raj', '0 open tickets'];
+    }
+
+    #[Test]
+    #[DataProvider('viewersOfOneTeamOnlyTicket')]
+    public function theOpenTicketCountHoldsATeamOnlyTicketOnlyForThoseWhoMaySeeIt(string $person, string $openTickets): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Web shop');
+        $this->addTeamOnlyTicket($projectId, $this->shop, $people['Omar']);
+        $this->logIn($this->client, $people[$person]);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($openTickets, $page->filter('.team__project-tickets')->text());
+    }
+
     #[Test]
     public function seeTicketsOpensTheTicketsListOfThatProject(): void
     {
@@ -152,7 +179,7 @@ final class TeamPageTest extends WebTestCase
         $page = $this->client->request('GET', '/teams/shop');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('/_test/menu/tickets?project=SHOP', $page->filter('.team__project-link')->attr('href'));
+        self::assertSame('/tickets?project=SHOP', $page->filter('.team__project-link')->attr('href'));
     }
 
     #[Test]
@@ -569,6 +596,9 @@ final class TeamPageTest extends WebTestCase
         foreach ([1, 2, 3, 4] as $number) {
             $this->insertStep($this->shop, 'Step '.$number, 'team', ['todo', 'doing', 'check', 'wait'][$number - 1]);
         }
+        // Refills the workflow cache the inserts dropped, so both counted loads read it warm.
+        $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
         $spansBeforeFive = \count(ExportedSpans::of($exporter));
         $page = $this->client->request('GET', '/teams/shop');
         self::assertResponseStatusCodeSame(200);
@@ -593,6 +623,11 @@ final class TeamPageTest extends WebTestCase
                 ++$this->reads;
 
                 return StepPolicy::Team;
+            }
+
+            public function triagerOf(OrganizationId $organizationId): ?UserId
+            {
+                return null;
             }
         };
         self::getContainer()->set(DbalSettingsQueries::class, $settings);
@@ -661,6 +696,30 @@ final class TeamPageTest extends WebTestCase
         self::assertResponseRedirects('/login', 302);
     }
 
+    /**
+     * An open bug SHOP-1 only its team may see, written straight into tkt_ticket: the count reads no other table.
+     */
+    private function addTeamOnlyTicket(string $projectId, TeamId $teamId, User $reporter): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
+                 step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 1, 'SHOP-1', 'Checkout button is hidden', '', 'bug', 'major', 2, ?, ?, 'team', '{}', '{}', '2027-03-15 10:00:00+00', '2027-03-15 10:00:00+00')",
+            [$organizationId, Uuid::v7()->toRfc4122(), $projectId, $teamId->toString(), Uuid::v7()->toRfc4122(), $reporter->id()->toString()],
+        ));
+    }
+
+    private function removeCommittedTickets(): void
+    {
+        foreach ($this->createdOrganizationIds as $organizationId) {
+            $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                'DELETE FROM tkt_ticket WHERE organization_id = ?',
+                [$organizationId],
+            ));
+        }
+    }
+
     private function setStepPolicy(StepPolicy $stepPolicy): void
     {
         $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
@@ -680,6 +739,8 @@ final class TeamPageTest extends WebTestCase
             'INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)',
             [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $teamId?->toString(), $name, $groupCode, $coreCode, $origin],
         ));
+        // The cache.workflow pool outlives the request, so the direct write drops the entries as AddStep's event would.
+        self::getContainer()->get(WorkflowCache::class)->invalidateNow($this->acmeFoods, $teamId);
     }
 
     /**

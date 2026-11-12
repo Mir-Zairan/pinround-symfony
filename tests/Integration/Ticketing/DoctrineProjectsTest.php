@@ -208,6 +208,31 @@ final class DoctrineProjectsTest extends KernelTestCase
         );
     }
 
+    /**
+     * With the tenant filter off, the lock's SQL names only the project's id: what still hides Acme Foods' project
+     * from the other organization's transaction is row-level security alone.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsProjectFromLockByIdWithTheTenantFilterOff(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->projects()->add(
+            new Project(new ProjectId(self::SHOP_PROJECT), new OrganizationId(self::ACME_FOODS), new TeamId(self::SHOP_TEAM), new ProjectKey('SHOP'), 'Shop'),
+        ));
+        $this->entityManager()->clear();
+        $this->entityManager()->getFilters()->disable(TenantFilter::NAME);
+
+        $lockedIdOf = fn (string $organizationId): ?string => $this->transactions()->rolledBackAs(
+            $organizationId,
+            fn (): ?string => $this->projects()->lockById(new ProjectId(self::SHOP_PROJECT))?->id()->toString(),
+        );
+
+        self::assertSame(
+            [self::ACME_FOODS => self::SHOP_PROJECT, self::OTHER_ORGANIZATION => null],
+            [self::ACME_FOODS => $lockedIdOf(self::ACME_FOODS), self::OTHER_ORGANIZATION => $lockedIdOf(self::OTHER_ORGANIZATION)],
+        );
+        self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
+    }
+
     #[Test]
     public function lockByIdRefusesToRunOutsideATransaction(): void
     {

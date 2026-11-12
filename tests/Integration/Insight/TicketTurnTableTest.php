@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Insight;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -25,8 +26,15 @@ final class TicketTurnTableTest extends KernelTestCase
     private const string LENA = '0197a3c0-0000-7000-8000-0000000016f1';
     private const string CHECK_VIOLATION = '23514';
 
+    protected function setUp(): void
+    {
+        $this->ticketRows()->removeAllOf(self::ACME_FOODS);
+        $this->ticketRows()->addOf(self::ACME_FOODS, self::TICKET, self::SHOP_PROJECT, self::LENA);
+    }
+
     protected function tearDown(): void
     {
+        $this->ticketRows()->removeAllOf(self::ACME_FOODS);
         self::getContainer()->get(TenantContext::class)->reset();
         parent::tearDown();
     }
@@ -183,5 +191,10 @@ final class TicketTurnTableTest extends KernelTestCase
     private function connection(): Connection
     {
         return self::getContainer()->get('doctrine.dbal.default_connection');
+    }
+
+    private function ticketRows(): TicketRows
+    {
+        return new TicketRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 }

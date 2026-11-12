@@ -10,6 +10,7 @@ use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
@@ -467,6 +468,11 @@ final class TeamWorkflowControllerTest extends WebTestCase
                 $this->wasRead = true;
 
                 return $stepPolicy;
+            }
+
+            public function triagerOf(OrganizationId $organizationId): ?UserId
+            {
+                return null;
             }
         };
     }

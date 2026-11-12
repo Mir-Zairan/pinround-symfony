@@ -1,0 +1,103 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}New ticket · pinround{% endblock %}
+
+{# The form fields and errors of the profile page, which this form shares. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="profile">
+        <h1 class="profile__title">New ticket</h1>
+        {% if errors.form is defined %}
+            <p class="login__error" role="alert">{{ errors.form }}</p>
+        {% endif %}
+
+        <twig:Card>
+            <form class="login__form" method="post" action="{{ path('ticketing_ticket_new') }}">
+                <div class="profile__field">
+                    <label class="login__field">
+                        Project
+                        <select class="login__input" name="project_id" required>
+                            {% for project in projects %}
+                                <option value="{{ project.id }}"{% if project.id == input.projectId %} selected{% endif %}>{{ project.key }} · {{ project.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                </div>
+                <div class="profile__field">
+                    <label class="login__field">
+                        Title
+                        <input class="login__input" type="text" name="title" value="{{ input.title }}" maxlength="{{ titleMaxLength }}" required
+                            {%- if errors.title is defined %} aria-invalid="true" aria-describedby="ticket-title-error"{% endif %}>
+                    </label>
+                    {% if errors.title is defined %}
+                        <p class="profile__error" id="ticket-title-error">{{ errors.title }}</p>
+                    {% endif %}
+                </div>
+                <div class="profile__field">
+                    <label class="login__field">
+                        Description
+                        <textarea class="login__input" name="description" rows="6" maxlength="{{ descriptionMaxLength }}"
+                            {%- if errors.description is defined %} aria-invalid="true" aria-describedby="ticket-description-error"{% endif %}>{{ input.description }}</textarea>
+                    </label>
+                    {% if errors.description is defined %}
+                        <p class="profile__error" id="ticket-description-error">{{ errors.description }}</p>
+                    {% endif %}
+                </div>
+                <fieldset class="profile__themes"{% if errors.type is defined %} aria-describedby="ticket-type-error"{% endif %}>
+                    <legend class="profile__legend">Type</legend>
+                    {% for value, typeLabel in typeLabels %}
+                        <label class="profile__theme">
+                            <input type="radio" name="type" value="{{ value }}"{% if value == input.type %} checked{% endif %} required>
+                            {{ typeLabel }}
+                        </label>
+                    {% endfor %}
+                    {% if errors.type is defined %}
+                        <p class="profile__error" id="ticket-type-error">{{ errors.type }}</p>
+                    {% endif %}
+                </fieldset>
+                <fieldset class="profile__themes"{% if errors.priority is defined %} aria-describedby="ticket-priority-error"{% endif %}>
+                    <legend class="profile__legend">Priority</legend>
+                    {% for value, priorityLabel in priorityLabels %}
+                        <label class="profile__theme">
+                            <input type="radio" name="priority" value="{{ value }}"{% if value == input.priority %} checked{% endif %} required>
+                            {{ priorityLabel }}
+                        </label>
+                    {% endfor %}
+                    {% if errors.priority is defined %}
+                        <p class="profile__error" id="ticket-priority-error">{{ errors.priority }}</p>
+                    {% endif %}
+                </fieldset>
+                {# Only a Lead may give a ticket to someone, so the people are those of the teams they lead. #}
+                {% if mayAssign %}
+                    <div class="profile__field">
+                        <label class="login__field">
+                            Give it to
+                            <select class="login__input" name="assignee_id"
+                                {%- if errors.assignee is defined %} aria-invalid="true" aria-describedby="ticket-assignee-error"{% endif %}>
+                                <option value="">No one yet</option>
+                                {% for group in assigneeGroups %}
+                                    <optgroup label="{{ group.teamName }}">
+                                        {% for assignee in group.assignees %}
+                                            <option value="{{ assignee.id.toString }}"{% if assignee.id.toString == input.assigneeId %} selected{% endif %}>{{ assignee.displayName }}</option>
+                                        {% endfor %}
+                                    </optgroup>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        {% if errors.assignee is defined %}
+                            <p class="profile__error" id="ticket-assignee-error">{{ errors.assignee }}</p>
+                        {% endif %}
+                    </div>
+                {% endif %}
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
+                <div>
+                    <twig:Button type="submit">Make ticket</twig:Button>
+                </div>
+            </form>
+        </twig:Card>
+    </div>
+{% endblock %}

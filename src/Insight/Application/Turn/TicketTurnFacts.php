@@ -6,6 +6,7 @@ namespace App\Insight\Application\Turn;
 
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 
@@ -15,7 +16,7 @@ use App\Workflow\Api\TicketState;
  */
 final readonly class TicketTurnFacts
 {
-    private const array VISIBILITIES = ['all', 'team'];
+    private const array VISIBILITIES = [TicketVisibilityFacts::FOR_EVERYONE, TicketVisibilityFacts::TEAM_ONLY];
 
     /**
      * @param string      $projectId      the uuid of the ticket's project

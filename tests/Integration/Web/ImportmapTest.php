@@ -28,7 +28,7 @@ final class ImportmapTest extends KernelTestCase
             self::assertNotNull($mapper->getAssetFromSourcePath((string) realpath($sourcePath)), $entry->importName.' is not found by the asset mapper');
         }
 
-        self::assertEqualsCanonicalizing(['app', '@hotwired/stimulus', '@symfony/stimulus-bundle'], $names);
+        self::assertEqualsCanonicalizing(['app', '@hotwired/stimulus', '@hotwired/turbo', '@symfony/stimulus-bundle'], $names);
     }
 
     #[Test]

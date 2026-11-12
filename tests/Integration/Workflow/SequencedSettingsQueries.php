@@ -7,9 +7,10 @@ namespace App\Tests\Integration\Workflow;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 
 /**
- * Answers the step policy from a fixed list, one per read, and counts the reads.
+ * Answers the step policy from a fixed list, one per read, and counts the reads; no organization has a triager.
  */
 final class SequencedSettingsQueries implements SettingsQueries
 {
@@ -25,5 +26,10 @@ final class SequencedSettingsQueries implements SettingsQueries
     public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
     {
         return $this->answers[$this->reads++] ?? throw new \LogicException('The step policy was read more often than the test expects.');
+    }
+
+    public function triagerOf(OrganizationId $organizationId): ?UserId
+    {
+        return null;
     }
 }

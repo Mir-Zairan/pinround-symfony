@@ -1,0 +1,212 @@
+/* The tickets list (src/Ticketing/UI/templates/list.html.twig): one section per step, in group order. */
+
+.tickets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+}
+
+.tickets__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.tickets__title {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.tickets__total,
+.tickets__hint,
+.tickets__meta,
+.tickets__updated {
+  color: var(--on-surface-var);
+}
+
+.tickets__total {
+  font-size: 16px;
+}
+
+.tickets__results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.tickets__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.tickets__step-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+  font-size: 16px;
+}
+
+.tickets__step-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tickets__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+}
+
+.tickets__dot--wait { background: var(--group-wait); }
+.tickets__dot--check { background: var(--group-check); }
+.tickets__dot--doing { background: var(--group-doing); }
+.tickets__dot--todo { background: var(--group-todo); }
+.tickets__dot--done { background: var(--group-done); }
+
+.tickets__step-count {
+  font-weight: 400;
+  color: var(--on-surface-var);
+}
+
+.tickets__hint {
+  margin-left: auto;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.tickets__rows {
+  border: 1px solid var(--outline-var);
+  border-radius: var(--radius-card);
+  background: var(--s-lowest);
+  overflow: hidden;
+}
+
+.tickets__row-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tickets__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  padding: var(--space-12) var(--space-16);
+}
+
+.tickets__row + .tickets__row {
+  border-top: 1px solid var(--outline-var);
+}
+
+.tickets__key {
+  flex: none;
+  width: 92px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.tickets__summary {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.tickets__row-title {
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tickets__meta,
+.tickets__priority,
+.tickets__updated {
+  font-size: 14px;
+}
+
+.tickets__priority {
+  flex: none;
+  width: 72px;
+}
+
+.tickets__priority--urgent {
+  font-weight: 700;
+  color: var(--error);
+}
+
+.tickets__assignee--nobody {
+  background: var(--s-high);
+  color: var(--on-surface-var);
+}
+
+.tickets__updated {
+  flex: none;
+  width: 72px;
+  text-align: right;
+}
+
+.tickets__more {
+  display: block;
+  padding: var(--space-12) var(--space-16);
+  border-top: 1px solid var(--outline-var);
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.tickets__rows turbo-frame > .tickets__row-list {
+  border-top: 1px solid var(--outline-var);
+}
+
+/* On a narrow screen or a zoomed one the five cells do not fit a line: the title takes the first line and the key,
+   priority, assignee and time wrap together on the second. */
+@media (max-width: 40em) {
+  .tickets__row {
+    flex-wrap: wrap;
+    gap: var(--space-8) var(--space-12);
+  }
+
+  .tickets__summary {
+    flex: 1 0 100%;
+    order: -1;
+  }
+
+  .tickets__key,
+  .tickets__priority {
+    width: auto;
+  }
+
+  .tickets__updated {
+    width: auto;
+    margin-left: auto;
+  }
+}
+
+.tickets__row-list:focus {
+  outline: none;
+}
+
+.tickets__rows[hidden] {
+  display: none;
+}
+
+.tickets__step-toggle[aria-expanded="false"] .tickets__chevron {
+  transform: rotate(-90deg);
+}
+
+.tickets__rows turbo-frame {
+  display: block;
+}

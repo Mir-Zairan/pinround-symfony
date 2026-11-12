@@ -11,7 +11,8 @@ use App\Workflow\Api\StepQueries;
 use App\Workflow\Infrastructure\Doctrine\DbalStepQueries;
 
 /**
- * DbalStepQueries through WorkflowCache. groupOf() is not cached: it is one query by primary key.
+ * DbalStepQueries through WorkflowCache. groupOf() is not cached: it is one query by primary key. listedSteps() is an
+ * organization-wide entry, dropped by a change of any team's steps, as a stale list would hide the tickets of a new step.
  */
 final readonly class CachedStepQueries implements StepQueries
 {
@@ -35,6 +36,11 @@ final readonly class CachedStepQueries implements StepQueries
         $stepPolicy = $this->settingsQueries->stepPolicyOf($this->tenantContext->require());
 
         return $this->workflowCache->remember($teamId, 'move-targets.'.$stepPolicy->value, fn (): array => $this->stepQueries->moveTargetsUnder($teamId, $stepPolicy));
+    }
+
+    public function listedSteps(): array
+    {
+        return $this->workflowCache->rememberForOrganization('listed-steps', fn (): array => $this->stepQueries->listedSteps());
     }
 
     public function groupOf(string $stepId): ?string

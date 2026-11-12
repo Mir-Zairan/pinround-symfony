@@ -97,8 +97,11 @@ Result: ≤ 8 queries (the Home budget), all index-only or index-range scans.
 - Indexes: see [data-model.md › Index catalogue](data-model.md#index-catalogue) (one project, or "All projects" of a team).
 - Default hides done steps (most rows), so the scan stays small.
 - **One query for all steps:** a `LATERAL` subquery takes the first 51 rows of each step (50 shown + 1 to know there is more), so the page stays within its ≤ 5-query budget. "Show more" in one step uses keyset pagination for that step only.
+- **Step counts are capped at 1,000:** each step counts at most 1,001 visible tickets in the row order, through the same index, so a big step (Done) never reads all its rows; past 1,000 the page shows "1,000+".
 - Project rail counts come from the read model `ins_project_counts`, not from `count(*)` on tickets.
-- "Turn:" and "To check by" come from the joined `ins_ticket_turn` row (same query).
+- The steps come from Workflow's cached `StepQueries::listedSteps` (see [Caching](#caching)), not a join on `wf_step`; the first load after a step change reads them, one more query.
+- "Turn:" comes from one batched query on `ins_ticket_turn` for the shown rows (Insight's `TurnUserQueries::turnUsersOf`), separate from the rows query.
+- "To check by" (P06) comes from the same batched `ins_ticket_turn` read, with `turnUsersOf` widened to return the checker, not from another query.
 
 ### Whose turn view
 
@@ -141,6 +144,7 @@ All cache keys start with the org id. Pools are tag-aware (Symfony Cache with Va
 | What | Key | TTL | Invalidated by tag |
 |---|---|---|---|
 | Steps and rules for a team (workflow config) | `org.{o}.wf.team.{t}.{entry}`, entry `steps`, `move-targets.{policy}` or `rules.{policy}` (Symfony keys refuse `:`) | 1 day | `wf-team-{t}` and `wf-org-{o}`: a team step or rule change clears its team; a company step or org rule change clears every team. Cleared after commit and again when the relayed event is handled. The policy is in the key, so a policy change needs no clear |
+| Every step of the organization, removed ones too, for the Tickets list | `org.{o}.wf.org.listed-steps` | 1 day | `wf-any-{o}` and `wf-org-{o}`: every workflow change of the organization clears it, a team's included, after commit and again when the relayed event is handled |
 | Release progress bar | `org:{o}:rel:{team}:{release}` | 5 min | `ticket-team-{t}` on move |
 | Team stack and workload counts | `org:{o}:load:{team}` | 2 min | `turn-team-{t}` on turn change |
 | Manager team overview | `org:{o}:mgr` | 5 min | `turn-org-{o}` |

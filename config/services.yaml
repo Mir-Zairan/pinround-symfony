@@ -125,10 +125,15 @@ services:
     App\Workflow\Api\NeedsYouScore: '@App\Workflow\Application\Turn\WeightedNeedsYouScore'
     App\Workflow\Api\NowNext: '@App\Workflow\Application\Turn\PlainNowNext'
     App\Workflow\Api\VerbFor: '@App\Workflow\Application\Turn\PlainVerbFor'
-    # Its TicketTurnSource comes in P03 as an Insight Infrastructure adapter over a Ticketing Api query; until a module
-    # calls TurnProjector, the container drops both, so dev and prod compile without a source. The test env gives it an
-    # in-memory one below.
     App\Insight\Api\TurnProjector: '@App\Insight\Infrastructure\Doctrine\DbalTurnProjector'
+    App\Insight\Application\Turn\TicketTurnSource: '@App\Insight\Infrastructure\Doctrine\DbalTicketTurnSource'
+    App\Ticketing\Api\TicketTurnQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries'
+    # A viewer's ticket visibility predicate (ADR-0013), for the list queries of every module. TicketVoter takes
+    # RoleTicketVisibilities itself, for ofActor.
+    App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
+    App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
+    App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
+    App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -157,6 +162,14 @@ when@test:
             class: Symfony\Component\HttpFoundation\Session\Storage\MockFileSessionStorageFactory
             arguments: ['%kernel.cache_dir%/sessions', '%app.session_cookie_name%']
 
+        # cache.workflow's test adapter (cache.yaml). Valkey keeps entries between requests, but cache.adapter.array is
+        # emptied by every kernel reset, so a warm page could not be measured; each test still boots a new, empty one.
+        test.cache.adapter.array_kept_between_requests:
+            class: Symfony\Component\Cache\Adapter\ArrayAdapter
+            abstract: true
+            arguments: [0]
+            tags: [{ name: cache.pool, clearer: cache.default_clearer }]
+
         # No module reads steps, rules or verbs yet, so the compiled container would drop them; CachedWorkflowQueriesTest
         # and TransitionPolicyWiringTest read them as another module would get them.
         test.workflow_step_queries:
@@ -180,13 +193,34 @@ when@test:
         test.workflow_verb_for:
             alias: App\Workflow\Api\VerbFor
             public: true
-        # No ticket exists before P03, so DbalTurnProjectorTest puts the facts it projects into this source.
+        # DbalTurnProjectorTest projects facts it makes up through this source, so they need no ticket, team or user.
         App\Tests\Integration\Insight\InMemoryTicketTurnSource:
             autoconfigure: true
             public: true
-        App\Insight\Application\Turn\TicketTurnSource: '@App\Tests\Integration\Insight\InMemoryTicketTurnSource'
+        # DbalTicketTurnSourceTest reads the real source and its Ticketing query as the projector would get them.
+        test.insight_ticket_turn_source:
+            alias: App\Insight\Application\Turn\TicketTurnSource
+            public: true
+        test.ticketing_ticket_turn_queries:
+            alias: App\Ticketing\Api\TicketTurnQueries
+            public: true
         test.insight_turn_projector:
             alias: App\Insight\Api\TurnProjector
+            public: true
+        # No other module calls it yet; TicketVisibilitySqlTest gets it as another module would.
+        test.ticketing_ticket_visibilities:
+            alias: App\Ticketing\Api\TicketVisibilities
+            public: true
+        # No page creates tickets before /tickets/new (P03.T1 step 4); CreateTicketTest gets it as a page would.
+        test.ticketing_ticket_commands:
+            alias: App\Ticketing\Api\TicketCommands
+            public: true
+        # No page lists tickets before /tickets (P03.T3 part B); the list tests get both as a page would.
+        test.ticketing_ticket_queries:
+            alias: App\Ticketing\Api\TicketQueries
+            public: true
+        test.insight_turn_user_queries:
+            alias: App\Insight\Api\TurnUserQueries
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

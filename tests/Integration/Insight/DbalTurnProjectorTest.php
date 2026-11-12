@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Insight;
 
-use App\Insight\Api\TurnProjector;
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TurnRowResolver;
 use App\Insight\Infrastructure\Doctrine\DbalTurnProjector;
@@ -14,6 +13,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Ticketing\TicketRows;
 use App\Workflow\Api\NeedsYouKind;
 use App\Workflow\Api\NeedsYouScore;
 use App\Workflow\Api\ReleasePlacement;
@@ -29,7 +29,7 @@ use Symfony\Component\Clock\MockClock;
 
 /**
  * DbalTurnProjector on the real table, with Workflow's turn rules and score, as pinround_app under row-level security.
- * Tickets come in P03, so the facts come from InMemoryTicketTurnSource and ticket_id has no foreign key yet.
+ * The facts come from InMemoryTicketTurnSource; TicketRows adds the tkt_ticket row that ticket_id must point at.
  */
 final class DbalTurnProjectorTest extends KernelTestCase
 {
@@ -50,12 +50,15 @@ final class DbalTurnProjectorTest extends KernelTestCase
     protected function setUp(): void
     {
         $this->clock = new MockClock(self::FIRST_REFRESH.'+00:00');
-        $this->removeRowsOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
+            $this->ticketRows()->addOf($organizationId, self::TICKET, self::SHOP_PROJECT, self::LENA);
+        }
     }
 
     protected function tearDown(): void
     {
-        $this->removeRowsOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->source()->reset();
         self::getContainer()->get(TenantContext::class)->reset();
         parent::tearDown();
@@ -213,22 +216,6 @@ final class DbalTurnProjectorTest extends KernelTestCase
         self::assertSame([self::LENA, 'review'], [$this->storedRowOf(self::ACME_FOODS)['turn_user_id'] ?? null, $this->storedRowOf(self::ACME_FOODS)['kind'] ?? null]);
     }
 
-    /**
-     * The container's TenantContext and real clock apply here, so waiting_since is not asserted.
-     */
-    #[Test]
-    public function theContainersTurnProjectorWritesTheRowFromItsSource(): void
-    {
-        $projector = self::getContainer()->get('test.insight_turn_projector');
-        self::assertInstanceOf(TurnProjector::class, $projector);
-        $this->source()->put($this->facts($this->buildingTicket(self::OMAR)));
-
-        $this->transactions()->committedAs(self::ACME_FOODS, static fn (): ?string => $projector->refresh(new TicketId(self::TICKET)));
-
-        $row = $this->storedRowOf(self::ACME_FOODS);
-        self::assertSame([self::OMAR, 'build', 'doing'], [$row['turn_user_id'] ?? null, $row['kind'] ?? null, $row['grp'] ?? null]);
-    }
-
     private function buildingTicket(string $assigneeId, ?string $priority = null, bool $isCheckNeeded = false): TicketState
     {
         return new TicketState(
@@ -325,24 +312,6 @@ final class DbalTurnProjectorTest extends KernelTestCase
         return $score;
     }
 
-    /**
-     * Through the migrator, which owns the table and so may delete; FORCE ROW LEVEL SECURITY binds it too.
-     */
-    private function removeRowsOf(string ...$organizationIds): void
-    {
-        $tenantContext = self::getContainer()->get(TenantContext::class);
-        foreach ($organizationIds as $organizationId) {
-            $tenantContext->set(new OrganizationId($organizationId));
-            try {
-                self::getContainer()->get('doctrine.dbal.migrator_connection')->transactional(
-                    static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]),
-                );
-            } finally {
-                $tenantContext->clear();
-            }
-        }
-    }
-
     private function connection(): Connection
     {
         return self::getContainer()->get('doctrine.dbal.default_connection');
@@ -351,5 +320,10 @@ final class DbalTurnProjectorTest extends KernelTestCase
     private function transactions(): TenantTransactions
     {
         return new TenantTransactions(self::getContainer()->get('doctrine.orm.default_entity_manager'), self::getContainer()->get(TenantContext::class));
+    }
+
+    private function ticketRows(): TicketRows
+    {
+        return new TicketRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
     }
 }

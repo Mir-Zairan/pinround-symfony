@@ -20,6 +20,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -49,7 +50,8 @@ use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
  *
  * Acme Foods: Lena is an Admin and leads Shop and Mobile (as the demo seed has it); Omar is a member of both; Mia is a
  * member (tester) of Shop and a viewer of Support; Raj is a Manager and a viewer of Shop; Sara is an Admin with no team
- * role; Noor has no org role and leads Support. Beta Bakery: Ben is its Admin and leads its one team, Checkout.
+ * role; Noor has no org role, leads Support and is the organization's triager. Beta Bakery: Ben is its Admin and leads
+ * its one team, Checkout.
  */
 final class VoterMatrixTest extends KernelTestCase
 {
@@ -81,6 +83,12 @@ final class VoterMatrixTest extends KernelTestCase
 
     private const array TEAMS = ['Shop' => self::SHOP, 'Mobile' => self::MOBILE, 'Support' => self::SUPPORT, 'Checkout' => self::CHECKOUT];
 
+    /** Each team-only ticket of Acme Foods by its team, null for a ticket with no team yet. */
+    private const array TICKETS = ['Team-only Shop ticket' => self::SHOP, 'Team-only ticket with no team' => null];
+
+    /** Reported both tickets and is none of PEOPLE, so no row's actor sees a ticket as its reporter. */
+    private const string REPORTER = '0197a3c0-0000-7000-8000-0000000009c9';
+
     private const string ROLES_DOC = __DIR__.'/../../../docs/00-product/personas-and-roles.md';
 
     /** Not the wall clock's time, so a check that ignores the app clock decides differently. */
@@ -107,6 +115,10 @@ final class VoterMatrixTest extends KernelTestCase
             self::addTeamMember(self::ACME_FOODS, self::MOBILE, 'Omar', 'member', 'developer');
             self::addTeamMember(self::ACME_FOODS, self::SUPPORT, 'Noor', 'lead', 'developer');
             self::addTeamMember(self::ACME_FOODS, self::SUPPORT, 'Mia', 'viewer', 'tester');
+            self::connection()->executeStatement(
+                "INSERT INTO org_settings (organization_id, data, created_at) VALUES (?, jsonb_build_object('triager_id', ?::text), '2027-03-15 10:00:00+00')",
+                [self::ACME_FOODS, self::PEOPLE['Noor'][0]],
+            );
         });
         self::transactions()->committedAs(self::BETA_BAKERY, static function (): void {
             self::addMembership(self::BETA_BAKERY, 'Ben', '{admin}');
@@ -224,10 +236,20 @@ final class VoterMatrixTest extends KernelTestCase
         ));
     }
 
-    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink
+    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts
     {
         if (isset(self::ORGANIZATIONS[$name])) {
             return new OrganizationId(self::ORGANIZATIONS[$name]);
+        }
+        if (\array_key_exists($name, self::TICKETS)) {
+            $teamId = self::TICKETS[$name];
+
+            return new TicketVisibilityFacts(
+                new OrganizationId(self::ACME_FOODS),
+                TicketVisibilityFacts::TEAM_ONLY,
+                null === $teamId ? null : new TeamId($teamId),
+                new UserId(self::REPORTER),
+            );
         }
         if (\array_key_exists($name, self::INVITATIONS)) {
             $invitee = self::INVITATIONS[$name];
@@ -240,7 +262,7 @@ final class VoterMatrixTest extends KernelTestCase
                 null === $invitee ? null : new UserId(self::PEOPLE[$invitee][0]),
             );
         }
-        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team or an invitation of VoterMatrixTest.');
+        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team, an invitation or a ticket of VoterMatrixTest.');
 
         return new TeamId(self::TEAMS[$name]);
     }

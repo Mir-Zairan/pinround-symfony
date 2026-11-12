@@ -20,5 +20,5 @@ when@test:
             pools:
                 # Replaces the adapter above (adapters do not merge); tags and lifetime stay.
                 cache.workflow:
-                    adapter: cache.adapter.array
+                    adapter: test.cache.adapter.array_kept_between_requests
                     tags: true

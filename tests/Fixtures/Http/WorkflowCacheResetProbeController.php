@@ -53,8 +53,7 @@ final readonly class WorkflowCacheResetProbeController
 
     /**
      * Fills an entry under the team's tag, then invalidates the team with no transaction open, which drops it at once
-     * unless WorkflowCache still believes a transaction is open and queues the tag for its commit. The array pool of
-     * the test kernel is itself reset between requests, so the entry is filled here rather than by the request before.
+     * unless WorkflowCache still believes a transaction is open and queues the tag for its commit.
      */
     public function invalidateTheTeamOutsideATransaction(string $organizationId): JsonResponse
     {

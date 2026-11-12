@@ -117,22 +117,21 @@ test.describe('as the lead', () => {
     await expect(projectRows(page).filter({ hasText: 'DOCS' })).toHaveCount(1);
   });
 
+  // DOCS has no tickets, so it can be unlinked; an open ticket blocks unlinking SHOP, which the seed gives 40 tickets, 35 of them open.
   test('Remove unlinks a project and the dialog then lists it', async ({ page }) => {
     await openShopTeam(page);
+    await addProjects(page, ['DOCS']);
+    await expect(page.getByText('Added DOCS')).toBeVisible();
+    await expect(projectRows(page)).toHaveCount(2);
 
-    await page.getByRole('button', { name: 'Remove SHOP from the team' }).click();
+    await page.getByRole('button', { name: 'Remove DOCS from the team' }).click();
 
-    await expect(page.getByText('SHOP removed from the team')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Remove SHOP from the team' })).toHaveCount(0);
-    await expect(page.getByText('No projects yet.')).toBeVisible();
-    const dialog = await openAddProjectDialog(page);
-    await expect(dialog.getByRole('checkbox', { name: /^SHOP / })).toBeVisible();
-    await dialog.getByRole('button', { name: 'Cancel' }).click();
-
-    await addProjects(page, ['SHOP']);
-
-    await expect(page.getByText('Added SHOP')).toBeVisible();
+    await expect(page.getByText('DOCS removed from the team')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove DOCS from the team' })).toHaveCount(0);
     await expect(projectRows(page)).toHaveCount(1);
+    const dialog = await openAddProjectDialog(page);
+    await expect(dialog.getByRole('checkbox', { name: /^DOCS / })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
   });
 
   test('Add step is disabled while the name is empty and the "in" legend shares a row with the first group chip', async ({ page }) => {

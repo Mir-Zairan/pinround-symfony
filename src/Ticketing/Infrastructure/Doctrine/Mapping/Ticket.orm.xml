@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <!-- The DESC order of updated_at, id and created_at in the list indexes is in the migration only: DBAL neither
+         expresses nor reads back a column's order. -->
+    <entity name="App\Ticketing\Domain\Ticket" table="tkt_ticket">
+        <indexes>
+            <index name="tkt_ticket_project_id_step_id_priority_rank_updated_at_id_idx" columns="organization_id,project_id,step_id,priority_rank,updated_at,id"/>
+            <index name="tkt_ticket_step_id_priority_rank_updated_at_id_idx" columns="organization_id,step_id,priority_rank,updated_at,id"/>
+            <index name="tkt_ticket_reporter_id_created_at_id_idx" columns="organization_id,reporter_id,created_at,id"/>
+            <index name="tkt_ticket_assignee_id_idx" columns="organization_id,assignee_id">
+                <options>
+                    <option name="where">(closed_at IS NULL)</option>
+                </options>
+            </index>
+        </indexes>
+        <unique-constraints>
+            <unique-constraint name="tkt_ticket_organization_id_project_id_number_key" columns="organization_id,project_id,number"/>
+            <unique-constraint name="tkt_ticket_organization_id_key_key" columns="organization_id,key"/>
+        </unique-constraints>
+
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
+
+        <field name="projectId" type="guid" column="project_id"/>
+        <field name="number" type="integer" column="number"/>
+        <field name="key" type="text" column="key"/>
+        <field name="title" type="text" column="title"/>
+        <field name="description" type="text" column="description"/>
+        <field name="type" type="text" column="type" enum-type="App\Ticketing\Domain\TicketType"/>
+        <field name="priority" type="text" column="priority" enum-type="App\Ticketing\Domain\Priority"/>
+        <field name="priorityRank" type="smallint" column="priority_rank"/>
+        <field name="stepId" type="guid" column="step_id"/>
+        <field name="previousStepId" type="guid" column="previous_step_id" nullable="true"/>
+        <field name="assigneeId" type="guid" column="assignee_id" nullable="true"/>
+        <field name="pendingAssigneeId" type="guid" column="pending_assignee_id" nullable="true"/>
+        <field name="reviewerId" type="guid" column="reviewer_id" nullable="true"/>
+        <field name="testerId" type="guid" column="tester_id" nullable="true"/>
+        <field name="waitingOnUserId" type="guid" column="waiting_on_user_id" nullable="true"/>
+        <field name="waitingOnLabel" type="text" column="waiting_on_label" nullable="true"/>
+        <field name="reporterId" type="guid" column="reporter_id"/>
+        <field name="teamId" type="guid" column="team_id" nullable="true"/>
+        <field name="visibility" type="text" column="visibility" enum-type="App\Ticketing\Domain\Visibility"/>
+        <field name="release" type="text" column="release" nullable="true"/>
+        <field name="parentId" type="guid" column="parent_id" nullable="true"/>
+        <field name="components" type="text_array" column="components"/>
+        <field name="checkReasons" type="text_array" column="check_reasons"/>
+        <field name="checkedAt" type="datetimetz_immutable" column="checked_at" nullable="true"/>
+        <field name="checkedBy" type="guid" column="checked_by" nullable="true"/>
+        <field name="closedAsDuplicateOf" type="guid" column="closed_as_duplicate_of" nullable="true"/>
+        <field name="closedAt" type="datetimetz_immutable" column="closed_at" nullable="true"/>
+        <field name="version" type="integer" column="version" version="true"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+        <field name="updatedAt" type="datetimetz_immutable" column="updated_at"/>
+    </entity>
+</doctrine-mapping>

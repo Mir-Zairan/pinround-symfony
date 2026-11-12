@@ -304,9 +304,9 @@ deptrac:
     Ticketing_Api: [SharedKernel]
     Ticketing_Event: [SharedKernel]
     Ticketing_Domain: [SharedKernel]
-    Ticketing_Application: [Ticketing_Domain, Ticketing_Api, SharedKernel, Workflow_Api, Organization_Api, Media_Api, Insight_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    Ticketing_Infrastructure: [Ticketing_Domain, Ticketing_Application, Ticketing_Api, SharedKernel, Vendor, Workflow_Api, Organization_Api, Media_Api, Insight_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    Ticketing_UI: [Ticketing_Application, Ticketing_Api, SharedKernel, Vendor, Workflow_Api, Organization_Api, Media_Api, Insight_Api]
+    Ticketing_Application: [Ticketing_Domain, Ticketing_Api, SharedKernel, Workflow_Api, Organization_Api, Identity_Api, Media_Api, Insight_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Ticketing_Infrastructure: [Ticketing_Domain, Ticketing_Application, Ticketing_Api, SharedKernel, Vendor, Workflow_Api, Organization_Api, Identity_Api, Media_Api, Insight_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Ticketing_UI: [Ticketing_Application, Ticketing_Api, SharedKernel, Vendor, Workflow_Api, Organization_Api, Identity_Api, Media_Api, Insight_Api]
 
     Conversation_Api: [SharedKernel]
     Conversation_Event: [SharedKernel]

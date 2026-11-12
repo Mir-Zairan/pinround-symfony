@@ -8,11 +8,12 @@ use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * Readers get the step policy read once per request (ADR-0008 reset between requests). AddStep and SetRule read it
+ * Readers get the step policy and the triager read once per request (ADR-0008 reset between requests). AddStep and SetRule read it
  * fresh in their transaction, which TeamWorkflowControllerTest proves with a policy changed after the voter read it.
  */
 final class SettingsQueriesWiringTest extends KernelTestCase
@@ -32,6 +33,11 @@ final class SettingsQueriesWiringTest extends KernelTestCase
 
                 return StepPolicy::Team;
             }
+
+            public function triagerOf(OrganizationId $organizationId): ?UserId
+            {
+                return null;
+            }
         };
         $container->set(DbalSettingsQueries::class, $database);
         $settingsQueries = $container->get(SettingsQueries::class);
@@ -43,5 +49,36 @@ final class SettingsQueriesWiringTest extends KernelTestCase
         $container->get('services_resetter')->reset();
         $settingsQueries->stepPolicyOf(new OrganizationId(self::ACME_FOODS));
         self::assertSame(2, $database->reads);
+    }
+
+    #[Test]
+    public function theAutowiredSettingsQueriesReadNoTriagerOncePerRequestAndAgainAfterTheKernelReset(): void
+    {
+        $container = self::getContainer();
+        $database = new class implements SettingsQueries {
+            public int $triagerReads = 0;
+
+            public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
+            {
+                return StepPolicy::Team;
+            }
+
+            public function triagerOf(OrganizationId $organizationId): ?UserId
+            {
+                ++$this->triagerReads;
+
+                return null;
+            }
+        };
+        $container->set(DbalSettingsQueries::class, $database);
+        $settingsQueries = $container->get(SettingsQueries::class);
+
+        self::assertNull($settingsQueries->triagerOf(new OrganizationId(self::ACME_FOODS)));
+        $settingsQueries->triagerOf(new OrganizationId(self::ACME_FOODS));
+        self::assertSame(1, $database->triagerReads);
+
+        $container->get('services_resetter')->reset();
+        $settingsQueries->triagerOf(new OrganizationId(self::ACME_FOODS));
+        self::assertSame(2, $database->triagerReads);
     }
 }

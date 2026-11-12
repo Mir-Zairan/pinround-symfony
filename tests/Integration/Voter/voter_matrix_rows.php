@@ -6,6 +6,7 @@ use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamPermission;
 use App\Ticketing\Api\ProjectPermission;
+use App\Ticketing\Api\TicketPermission;
 use App\Workflow\Api\WorkflowPermission;
 
 /*
@@ -17,6 +18,8 @@ use App\Workflow\Api\WorkflowPermission;
  * subject:   an organization (Acme Foods, Beta Bakery), a team (Shop, Mobile, Support of Acme Foods; Checkout of Beta
  *            Bakery) or an open invitation link to Acme Foods ("Invitation of Omar" for Omar's email; "Invitation of a
  *            new email" for an email nobody has an account with). Nobody-logged-in cases are in InvitationVoterTest.
+ *            Or a team-only ticket of Acme Foods: "Team-only Shop ticket", or "Team-only ticket with no team"; both
+ *            reported by someone who is no actor here.
  * expected:  granted or denied.
  * twoStepProof: optional; decides for a person whose two-step login is on. true: they typed a code in this session 30
  *            minutes ago, within the 1 hour admin pages allow; an int: the code is that many seconds old; 'noCode': no
@@ -27,8 +30,13 @@ use App\Workflow\Api\WorkflowPermission;
  * Raj is a Manager, so their TEAM_VIEW rows cite the org-role text; Noor (Lead) and Mia (Member, Viewer) carry the
  * team-role rules.
  *
- * Neither organization has a settings row, so both have the default step policy, extend: the STEP_CHANGE_TEAM and
- * RULES_CHANGE_TEAM rows hold under extend only. WorkflowVoterTest has the locked and team cases.
+ * TICKET_CREATE is the team ticket form's, which needs a team role on the team (ADR-0038), so its rows cite the
+ * team-role text and the matrix row "New ticket form", not "Report a problem", which lets every role report through
+ * the intake.
+ *
+ * Acme Foods' settings row holds only its triager, Noor, and Beta Bakery has none, so both have the default step policy,
+ * extend: the STEP_CHANGE_TEAM and RULES_CHANGE_TEAM rows hold under extend only. WorkflowVoterTest has the locked and
+ * team cases.
  */
 
 $isAUser = 'Every person in an organization is a **user** of it.';
@@ -46,6 +54,12 @@ $leadLinksProjects = 'link projects.';
 $leadLinksAndUnlinksProjects = '| Link / unlink Jira projects to the team | — | — | ✅ | — | — | — |';
 $leadChangesTeamSteps = '| Add / remove team steps | — | — | ⚠️ policy extend or team | — | — | — |';
 $leadChangesTeamRules = '| Change team rules | — | — | ⚠️ policy team | — | — | — |';
+$adminWithTeamRole = 'An admin who is also a member or lead of the team gets that team role\'s rights too.';
+$newTicketFormNeedsTeamRole = '| New ticket form (create ticket on the team\'s board) ⁷ | ⚠️ only with a role on the team | ⚠️ only with a role on the team | ✅ | ✅ | ✅ | — |';
+$adminMayNotEditTickets = 'may not move tickets or edit ticket fields';
+$teamOnlyTickets = 'visible to members of the ticket\'s team, to admins, and to the people working on that ticket';
+$triagerOfANoTeamTicket = 'and to the triager while it has no team';
+$managersOutsideTheTeam = 'Not to managers outside the team.';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
 return [
@@ -206,4 +220,54 @@ return [
     ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $leadChangesTeamRules, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => WorkflowPermission::RULES_CHANGE_TEAM, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
+
+    ['source' => $memberRights, 'attribute' => TicketPermission::CREATE, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $leadRights, 'attribute' => TicketPermission::CREATE, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $teamRoles, 'attribute' => TicketPermission::CREATE, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $teamRoles, 'attribute' => TicketPermission::CREATE, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $adminWithTeamRole, 'attribute' => TicketPermission::CREATE, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $adminWithTeamRole, 'attribute' => TicketPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
+    ['source' => $newTicketFormNeedsTeamRole, 'attribute' => TicketPermission::CREATE, 'actor' => 'Raj', 'subject' => 'Mobile', 'expected' => 'denied'],
+    ['source' => $newTicketFormNeedsTeamRole, 'attribute' => TicketPermission::CREATE, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $newTicketFormNeedsTeamRole, 'attribute' => TicketPermission::CREATE, 'actor' => 'Sara', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $newTicketFormNeedsTeamRole, 'attribute' => TicketPermission::CREATE, 'actor' => 'Noor', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CREATE, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
+    ['source' => $leadRights, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Noor', 'subject' => 'Support', 'expected' => 'granted'],
+    ['source' => $leadRights, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
+    ['source' => $leadRights, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Ben', 'subject' => 'Checkout', 'expected' => 'granted'],
+    ['source' => $memberRights, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Omar', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $memberRights, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Mia', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $viewerRights, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Mia', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Raj', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Raj', 'subject' => 'Mobile', 'expected' => 'denied'],
+    ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Sara', 'subject' => 'Shop', 'expected' => 'denied'],
+    ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Lena', 'subject' => 'Support', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Lena', 'subject' => 'Checkout', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Ben', 'subject' => 'Shop', 'expected' => 'denied'],
+
+    ['source' => $teamOnlyTickets, 'attribute' => TicketPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $teamOnlyTickets, 'attribute' => TicketPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $adminWithoutTeamRole, 'attribute' => TicketPermission::VIEW, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $triagerOfANoTeamTicket, 'attribute' => TicketPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::VIEW, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $triagerOfANoTeamTicket, 'attribute' => TicketPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Team-only ticket with no team', 'expected' => 'granted'],
+    ['source' => $triagerOfANoTeamTicket, 'attribute' => TicketPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+    ['source' => $managersOutsideTheTeam, 'attribute' => TicketPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+
+    ['source' => $memberRights, 'attribute' => TicketPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $leadRights, 'attribute' => TicketPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $adminMayNotEditTickets, 'attribute' => TicketPermission::EDIT, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $viewerRights, 'attribute' => TicketPermission::EDIT, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+
+    ['source' => $memberRights, 'attribute' => TicketPermission::MOVE, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $adminMayNotEditTickets, 'attribute' => TicketPermission::MOVE, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $viewerRights, 'attribute' => TicketPermission::MOVE, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::MOVE, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+
+    ['source' => $leadRights, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Lena', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
 ];

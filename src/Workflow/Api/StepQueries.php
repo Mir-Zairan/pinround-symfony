@@ -37,6 +37,18 @@ interface StepQueries
     public function moveTargetsFor(TeamId $teamId): array;
 
     /**
+     * Cached per organization; at most one query, and any committed change of the organization's steps is seen by the
+     * next read, as the tickets list reads a ticket only through a step this gives. Every step of the organization: of
+     * every team, and removed ones too, as a ticket may still be in one.
+     *
+     * @return list<ListedStepView> in the order of stepsFor: by group, then core, company and team steps, each by
+     *                              position, then by id
+     *
+     * @throws \LogicException when no tenant is set
+     */
+    public function listedSteps(): array;
+
+    /**
      * One query, never cached. A removed step still answers, as a ticket may still be in it.
      *
      * @param string $stepId a step's uuid, in any case

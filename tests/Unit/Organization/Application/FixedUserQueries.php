@@ -25,4 +25,9 @@ final readonly class FixedUserQueries implements UserQueries
 
         return null === $userId ? null : new UserId($userId);
     }
+
+    public function byIds(array $userIds): array
+    {
+        throw new \LogicException('Only idByEmail is expected.');
+    }
 }

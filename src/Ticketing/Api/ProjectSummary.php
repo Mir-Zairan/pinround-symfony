@@ -12,7 +12,7 @@ final readonly class ProjectSummary
     /**
      * @param string $id              the project's uuid
      * @param string $key             the ticket key prefix, for example SHOP
-     * @param int    $openTicketCount the project's tickets not yet done
+     * @param int    $openTicketCount the project's tickets not yet done that the viewer may see
      */
     public function __construct(
         private string $id,
