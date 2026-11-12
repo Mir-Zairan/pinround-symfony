@@ -22,7 +22,7 @@
                     {% if ticket.isTeamOnly %}<twig:Tag class="ticket__team-only">Only the team and admins see this</twig:Tag>{% endif %}
                 </p>
                 {% if position is not null %}
-                    <nav class="ticket__position" aria-label="Tickets in this list">
+                    <nav class="ticket__position" aria-label="Tickets in this list" data-turbo-prefetch="false">
                         <span class="ticket__position-line">{{ position.line }}</span>
                         <twig:Button variant="outline" size="sm" href="{{ position.previousUrl ?? '' }}" :disabled="position.previousUrl is null" class="ticket__previous">Previous</twig:Button>
                         <twig:Button variant="outline" size="sm" href="{{ position.nextUrl ?? '' }}" :disabled="position.nextUrl is null" class="ticket__next-ticket">Next</twig:Button>

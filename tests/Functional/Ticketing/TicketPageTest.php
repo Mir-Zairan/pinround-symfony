@@ -537,6 +537,7 @@ final class TicketPageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['3 of 7', '/t/'.$keys['F'].'?project=SHOP', '/t/'.$keys['H'].'?project=SHOP'], $this->positionOf($page));
         self::assertSame('/tickets?project=SHOP', $page->filter('.ticket__back')->attr('href'));
+        self::assertSame('false', $page->filter('.ticket__position')->attr('data-turbo-prefetch'));
         self::assertSame([$keys['A'], $keys['F'], $keys['D'], $keys['H'], $keys['C'], $keys['B'], $keys['E']], $this->keysWalkedFrom('/t/'.$keys['A'].'?project=SHOP'));
     }
 

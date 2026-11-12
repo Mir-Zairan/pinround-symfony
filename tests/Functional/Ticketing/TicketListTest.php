@@ -173,6 +173,7 @@ final class TicketListTest extends WebTestCase
         $plain = $this->client->request('GET', self::TICKETS);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['/t/SHOP-2', '/t/SHOP-1'], $plain->filter('.tickets__row a.tickets__row-link')->each(static fn (Crawler $link): ?string => $link->attr('href')));
+        self::assertSame(['false'], $plain->filter('ul.tickets__row-list')->each(static fn (Crawler $rows): ?string => $rows->attr('data-turbo-prefetch')));
 
         $page = $this->client->request('GET', self::TICKETS.'?team='.$team.'&q=gift&done=1&person='.$omar.'&project=SHOP');
 

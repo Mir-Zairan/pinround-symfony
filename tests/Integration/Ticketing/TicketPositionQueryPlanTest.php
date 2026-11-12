@@ -193,7 +193,7 @@ final class TicketPositionQueryPlanTest extends KernelTestCase
             $visibility = $this->ticketVisibilities()->of(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR));
             $scansBefore = self::scansOfTicketTable($connection);
             $debugData->reset();
-            $position = $this->ticketQueries()->positionOf($key, new ListFilter($visibility, $projectId, $showsDone, $searchText), $visibility);
+            $position = $this->ticketQueries()->positionOf($key, new ListFilter($visibility, $projectId, $showsDone, $searchText));
             $scansAfter = self::scansOfTicketTable($connection);
             self::assertNotNull($position, 'The ticket has no position, so its plan proves little.');
             [$sql, $parameters] = self::positionQueryOf($debugData);

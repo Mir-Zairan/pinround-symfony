@@ -16,14 +16,22 @@ use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
- * The tickets list's filters as its URL carries them (TicketListController's PROJECT_QUERY, PERSON_QUERY, DONE_QUERY,
- * SEARCH_QUERY and TEAM_QUERY), read and checked in this one place for the list and for the ticket page, which gets
- * them from a list row's link to walk that list with Previous and Next.
+ * The tickets list's filters as its URL carries them, read and checked in this one place for the list, its toolbar
+ * and the ticket page, which gets them from a list row's link to walk that list with Previous and Next.
  */
 final readonly class TicketListContext
 {
+    public const string PROJECT_QUERY = 'project';
+    public const string DONE_QUERY = 'done';
+    public const string SEARCH_QUERY = 'q';
+    public const string PERSON_QUERY = 'person';
+    public const string TEAM_QUERY = 'team';
+
     public const string NO_PERSON = 'No person has that id.';
     public const string NO_PROJECT = 'No project has that key.';
+    public const string NO_TEAM_OF_YOURS = 'You are in no team with that id.';
+    public const string SEARCH_TOO_LONG = 'The search is too long. Use '.ListFilter::SEARCH_TEXT_MAX_LENGTH.' characters or fewer.';
+    public const string SEARCH_NOT_TEXT = 'The search is not valid text.';
 
     /**
      * @param string|null $searchText   trimmed, one the list takes; null for no search
@@ -43,7 +51,7 @@ final readonly class TicketListContext
      * Checks in the list's order: the search, then the person, the team and the project, the only one that costs a
      * query (ProjectQueries::projectByKey).
      *
-     * @throws BadRequestHttpException with TicketListController::searchRefusalOf's reason as its message, for a search
+     * @throws BadRequestHttpException with searchRefusalOf's reason as its message, for a search
      *                                 the list refuses, before any query
      * @throws NotFoundHttpException   for a person that is not a canonical uuid, a team that is not one of the
      *                                 viewer's, or a project key the organization has no project with
@@ -51,29 +59,46 @@ final readonly class TicketListContext
      */
     public static function fromRequest(Request $request, ActorContext $viewer, ProjectQueries $projectQueries): self
     {
-        $searchText = trim($request->query->getString(TicketListController::SEARCH_QUERY));
-        $searchRefusal = TicketListController::searchRefusalOf($searchText);
+        $searchText = trim($request->query->getString(self::SEARCH_QUERY));
+        $searchRefusal = self::searchRefusalOf($searchText);
         if (null !== $searchRefusal) {
             throw new BadRequestHttpException($searchRefusal);
         }
-        $assigneeId = $request->query->getString(TicketListController::PERSON_QUERY);
+        $assigneeId = $request->query->getString(self::PERSON_QUERY);
         if ('' !== $assigneeId && !ListFilter::isCanonicalUuid($assigneeId)) {
             throw new NotFoundHttpException(self::NO_PERSON);
         }
-        $pickedTeam = $request->query->getString(TicketListController::TEAM_QUERY);
+        $pickedTeam = $request->query->getString(self::TEAM_QUERY);
         $pickedTeamId = '' !== $pickedTeam && ListFilter::isCanonicalUuid($pickedTeam) ? new TeamId($pickedTeam) : null;
         if ('' !== $pickedTeam && (null === $pickedTeamId || !$viewer->roles()->isInTeam($pickedTeamId))) {
-            throw new NotFoundHttpException(TicketListController::NO_TEAM_OF_YOURS);
+            throw new NotFoundHttpException(self::NO_TEAM_OF_YOURS);
         }
-        $projectKey = $request->query->getString(TicketListController::PROJECT_QUERY);
+        $projectKey = $request->query->getString(self::PROJECT_QUERY);
 
         return new self(
             '' === $projectKey ? null : ($projectQueries->projectByKey($projectKey) ?? throw new NotFoundHttpException(self::NO_PROJECT)),
-            '1' === $request->query->getString(TicketListController::DONE_QUERY),
+            '1' === $request->query->getString(self::DONE_QUERY),
             '' === $searchText ? null : $searchText,
             '' === $assigneeId ? null : $assigneeId,
             $pickedTeamId,
         );
+    }
+
+    /**
+     * @param string $searchText already trimmed; empty for no search
+     *
+     * @return string|null why the list refuses the search, or null when it takes it
+     */
+    public static function searchRefusalOf(string $searchText): ?string
+    {
+        if (!mb_check_encoding($searchText, 'UTF-8') || str_contains($searchText, "\0")) {
+            return self::SEARCH_NOT_TEXT;
+        }
+        if (mb_strlen($searchText, 'UTF-8') > ListFilter::SEARCH_TEXT_MAX_LENGTH) {
+            return self::SEARCH_TOO_LONG;
+        }
+
+        return null;
     }
 
     public function filterFor(TicketVisibility $visibility): ListFilter
@@ -96,11 +121,11 @@ final readonly class TicketListContext
     public function query(): array
     {
         return array_filter([
-            TicketListController::PROJECT_QUERY => $this->project?->key(),
-            TicketListController::PERSON_QUERY => $this->assigneeId,
-            TicketListController::DONE_QUERY => $this->showsDone ? '1' : null,
-            TicketListController::SEARCH_QUERY => $this->searchText,
-            TicketListController::TEAM_QUERY => $this->pickedTeamId?->toString(),
+            self::PROJECT_QUERY => $this->project?->key(),
+            self::PERSON_QUERY => $this->assigneeId,
+            self::DONE_QUERY => $this->showsDone ? '1' : null,
+            self::SEARCH_QUERY => $this->searchText,
+            self::TEAM_QUERY => $this->pickedTeamId?->toString(),
         ], static fn (?string $value): bool => null !== $value);
     }
 }

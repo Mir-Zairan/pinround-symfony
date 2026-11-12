@@ -955,30 +955,73 @@ final class DbalTicketQueriesTest extends KernelTestCase
             $this->stepQueries()->listedSteps();
             $debugData->reset();
 
-            return [$this->ticketQueries()->positionOf('shop-1', $this->filter(), self::adminOf(self::ACME_FOODS)), self::queryCountOf($debugData)];
+            return [$this->ticketQueries()->positionOf('shop-1', $this->filter()), self::queryCountOf($debugData)];
         });
 
         self::assertSame([null, 0], $found);
     }
 
+    /**
+     * Waiting on customer, the first step of the list, holds one ticket past the cap, so a ticket of a later step has
+     * the place just past the capped count, marked as a lower bound, and the total is capped too.
+     */
     #[Test]
-    public function aPositionUnderAnotherViewerThanTheListsIsRefusedBeforeAnyQuery(): void
+    public function aStepPastTheCapBeforeTheTicketMakesItsPlaceALowerBound(): void
+    {
+        $firstNumber = $this->nextNumber;
+        $this->addManyTickets(self::WAITING_STEP, TicketListStep::COUNT_CAP + 1);
+        $doing = $this->addTicket(self::DOING_STEP, 2, '2027-03-15 10:00:00+00');
+
+        $position = $this->positionAs(self::ACME_FOODS, $doing, $this->filter());
+
+        self::assertSame([TicketListStep::COUNT_CAP + 1, TicketListStep::COUNT_CAP + 1, 'SHOP-'.$firstNumber, null, true, true], self::shapeOfPosition($position));
+    }
+
+    /**
+     * 1,002 matches, as in pastTheSearchCapEveryStepsCountIsMarkedCapped: the best 1,000 by id are Doing's two and To
+     * do's 998 newest, so the total is capped, and To do's two oldest matches, past the cap, have no position.
+     */
+    #[Test]
+    public function aSearchPositionIsCappedLikeTheSearchAndAMatchPastTheCapHasNone(): void
+    {
+        $firstNumber = $this->nextNumber;
+        $this->addManyTickets(ShopTeamRows::TO_DO_STEP, TicketListStep::COUNT_CAP);
+        $doingMatches = $this->addTickets(self::DOING_STEP, 2);
+        $search = $this->filter(searchText: 'checkout');
+
+        $newestToDo = $this->positionAs(self::ACME_FOODS, 'SHOP-'.($firstNumber + TicketListStep::COUNT_CAP - 1), $search);
+        $pastTheCap = $this->positionAs(self::ACME_FOODS, 'SHOP-'.$firstNumber, $search);
+
+        self::assertSame([3, TicketListStep::COUNT_CAP, $doingMatches[0], 'SHOP-'.($firstNumber + TicketListStep::COUNT_CAP - 2), true, false], self::shapeOfPosition($newestToDo));
+        self::assertNull($pastTheCap);
+    }
+
+    #[Test]
+    public function aPositionWithNoTransactionOrForAViewerOfAnotherOrganizationIsRefusedBeforeAnyQuery(): void
     {
         $debugData = $this->debugData();
-        $otherViewer = TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], true, null);
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $debugData->reset();
+        try {
+            $this->ticketQueries()->positionOf('SHOP-1', $this->filter());
+            self::fail('A position was read with no transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame(['A ticket\'s place in a list is read in a transaction under the organization as tenant; none is open.', 0], [$refusal->getMessage(), self::queryCountOf($debugData)]);
+        }
+        $this->tenantContext()->clear();
 
-        $refusal = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $otherViewer): array {
+        $refusal = $this->transactions()->rolledBackAs(self::BETA_BAKERY, function () use ($debugData): array {
             $debugData->reset();
             try {
-                $this->ticketQueries()->positionOf('SHOP-1', $this->filter(), $otherViewer);
+                $this->ticketQueries()->positionOf('SHOP-1', $this->filter());
 
                 return ['read', 0];
-            } catch (\InvalidArgumentException $refusal) {
+            } catch (\LogicException $refusal) {
                 return [$refusal->getMessage(), self::queryCountOf($debugData)];
             }
         });
 
-        self::assertSame(['A ticket\'s place in a list is read under the list\'s own viewer.', 0], $refusal);
+        self::assertSame(['A ticket\'s place in a list is read under the viewer\'s own organization as tenant.', 0], $refusal);
     }
 
     /**
@@ -1003,7 +1046,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
                 new DbalTeamQueries($connection),
-            )->positionOf($key, $this->filter(), self::adminOf(self::ACME_FOODS)),
+            )->positionOf($key, $this->filter()),
         );
 
         self::assertNull($positionUnderAcmeContext);
@@ -1011,7 +1054,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
 
     private function positionAs(string $organizationId, string $key, ListFilter $filter): ?TicketPosition
     {
-        return $this->transactions()->rolledBackAs($organizationId, fn (): ?TicketPosition => $this->ticketQueries()->positionOf($key, $filter, $filter->visibility));
+        return $this->transactions()->rolledBackAs($organizationId, fn (): ?TicketPosition => $this->ticketQueries()->positionOf($key, $filter));
     }
 
     /**

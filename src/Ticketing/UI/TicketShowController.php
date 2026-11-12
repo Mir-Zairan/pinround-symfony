@@ -78,11 +78,11 @@ final class TicketShowController extends AbstractController
             throw $this->createNotFoundException(self::NOT_FOUND);
         }
         $listContext = $this->listContextOf($request, $actor);
-        $position = $this->ticketQueries->positionOf($ticket->key, $listContext->filterFor($visibility), $visibility);
+        $position = $this->ticketQueries->positionOf($ticket->key, $listContext->filterFor($visibility));
         $positionContext = $listContext;
         if (null === $position && !$listContext->isPlainList()) {
             $positionContext = new TicketListContext();
-            $position = $this->ticketQueries->positionOf($ticket->key, $positionContext->filterFor($visibility), $visibility);
+            $position = $this->ticketQueries->positionOf($ticket->key, $positionContext->filterFor($visibility));
         }
 
         $now = $this->clock->now();

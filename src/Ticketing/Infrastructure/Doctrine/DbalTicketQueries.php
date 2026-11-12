@@ -85,17 +85,14 @@ final readonly class DbalTicketQueries implements TicketQueries
         return $this->groupsOf($ticketRows, $shownSteps);
     }
 
-    public function positionOf(string $key, ListFilter $filter, TicketVisibility $viewer): ?TicketPosition
+    public function positionOf(string $key, ListFilter $filter): ?TicketPosition
     {
         if (!$this->connection->isTransactionActive()) {
             throw new \LogicException('A ticket\'s place in a list is read in a transaction under the organization as tenant; none is open.');
         }
         $organizationId = $this->tenantContext->require();
-        if (!$organizationId->equals($viewer->organizationId())) {
+        if (!$organizationId->equals($filter->visibility->organizationId())) {
             throw new \LogicException('A ticket\'s place in a list is read under the viewer\'s own organization as tenant.');
-        }
-        if (!self::isSameViewer($filter->visibility, $viewer)) {
-            throw new \InvalidArgumentException('A ticket\'s place in a list is read under the list\'s own viewer.');
         }
         if (!self::canBeTicketKey($key)) {
             return null;
@@ -105,7 +102,7 @@ final readonly class DbalTicketQueries implements TicketQueries
             return null;
         }
 
-        $visibleTicket = TicketVisibilitySql::of($viewer, self::TICKET_ALIAS);
+        $visibleTicket = TicketVisibilitySql::of($filter->visibility, self::TICKET_ALIAS);
         $parameters = [...self::listParametersOf($filter, $organizationId->toString(), array_keys($shownSteps), $visibleTicket), 'key' => $key];
         $row = $this->connection->fetchAssociative(...(null === $filter->searchText
             ? $this->priorityPositionQuery($filter, $parameters, $visibleTicket)
@@ -139,17 +136,6 @@ final readonly class DbalTicketQueries implements TicketQueries
         }
 
         return $shownSteps;
-    }
-
-    private static function isSameViewer(TicketVisibility $one, TicketVisibility $other): bool
-    {
-        $teamIdsOf = static fn (TicketVisibility $visibility): array => array_map(static fn (TeamId $teamId): string => $teamId->toString(), $visibility->teamIds());
-
-        return $one->organizationId()->equals($other->organizationId())
-            && $one->viewerId()->equals($other->viewerId())
-            && $teamIdsOf($one) === $teamIdsOf($other)
-            && $one->isAdmin() === $other->isAdmin()
-            && $one->isTriager() === $other->isTriager();
     }
 
     public function pageOf(string $key, TicketVisibility $viewer): ?TicketPageView

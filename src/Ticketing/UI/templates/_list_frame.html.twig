@@ -21,7 +21,8 @@
                         </h2>
                         <div class="tickets__rows" id="step-{{ step.id }}-rows" {{ stimulus_target('step-collapse', 'rows') }}{% if step.isCollapsed %} hidden{% endif %}>
                             {% if step.pageFrameId is not null %}<turbo-frame id="{{ step.pageFrameId }}">{% endif %}
-                            <ul class="tickets__row-list"{% if step.pageFrameId is not null %} tabindex="-1" autofocus{% endif %}>
+                            {# No hover prefetch: inside a frame Turbo prefetches links even with Drive off, and each would cost a ticket page's queries. #}
+                            <ul class="tickets__row-list" data-turbo-prefetch="false"{% if step.pageFrameId is not null %} tabindex="-1" autofocus{% endif %}>
                                 {% for row in step.rows %}
                                     <li class="tickets__row" data-ticket-key="{{ row.key }}">
                                         <span class="tickets__key">{{ row.key }}</span>

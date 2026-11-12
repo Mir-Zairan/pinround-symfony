@@ -97,7 +97,7 @@ final class TicketPageLeakTest extends VisibilityLeakCast
             $ticketQueries = self::getContainer()->get('test.ticketing_ticket_queries');
             \assert($ticketQueries instanceof TicketQueries);
             $visibility = self::getContainer()->get(RoleTicketVisibilities::class)->ofActor($actor);
-            $positionOf = static fn (string $key): ?TicketPosition => $ticketQueries->positionOf($key, new ListFilter($visibility), $visibility);
+            $positionOf = static fn (string $key): ?TicketPosition => $ticketQueries->positionOf($key, new ListFilter($visibility));
             $before = $positionOf($beforeKey);
             $after = $positionOf($afterKey);
             $neighbourKeys = array_filter([$before?->previousKey, $before?->nextKey, $after?->previousKey, $after?->nextKey], static fn (?string $key): bool => null !== $key);

@@ -50,21 +50,18 @@ use Symfony\Component\Routing\Attribute\Route;
 final class TicketListController extends AbstractController
 {
     public const string ROUTE = 'ticketing_tickets';
-    public const string PROJECT_QUERY = 'project';
-    public const string DONE_QUERY = 'done';
-    public const string SEARCH_QUERY = 'q';
-    public const string PERSON_QUERY = 'person';
-    public const string TEAM_QUERY = 'team';
+    // TicketListContext names the filters; ProjectRail still reads these.
+    public const string PROJECT_QUERY = TicketListContext::PROJECT_QUERY;
+    public const string DONE_QUERY = TicketListContext::DONE_QUERY;
+    public const string SEARCH_QUERY = TicketListContext::SEARCH_QUERY;
+    public const string TEAM_QUERY = TicketListContext::TEAM_QUERY;
     public const string TURBO_FRAME_HEADER = 'Turbo-Frame';
     public const string RAIL_FRAME_ID = 'project-rail-frame';
 
     public const string ALL_TICKETS = 'All tickets';
     public const string NO_TICKETS = 'No tickets here yet.';
     public const string NO_MATCHES = 'No tickets match. Clear the search or pick another person.';
-    public const string SEARCH_TOO_LONG = 'The search is too long. Use '.ListFilter::SEARCH_TEXT_MAX_LENGTH.' characters or fewer.';
-    public const string SEARCH_NOT_TEXT = 'The search is not valid text.';
     public const string SHOW_MORE_NOT_VALID = 'That "Show more" link is not valid.';
-    public const string NO_TEAM_OF_YOURS = 'You are in no team with that id.';
 
     public function __construct(
         private readonly TenantContext $tenantContext,
@@ -100,7 +97,7 @@ final class TicketListController extends AbstractController
         $railTeamId = $this->railTeamOf($actor, $project, $pickedTeamId);
         $isProjectsTeamOnRail = null !== $railTeamId && null !== $project?->teamId() && $railTeamId->equals($project->teamId());
         $keptQuery = array_filter(
-            [self::PERSON_QUERY => $assigneeId, self::DONE_QUERY => $showsDone ? '1' : null, self::SEARCH_QUERY => $searchText],
+            [TicketListContext::PERSON_QUERY => $assigneeId, TicketListContext::DONE_QUERY => $showsDone ? '1' : null, TicketListContext::SEARCH_QUERY => $searchText],
             static fn (?string $value): bool => null !== $value,
         );
         // The rail's frame, reloaded after a filter change, gets the rail alone and runs none of the list's queries.
@@ -143,23 +140,6 @@ final class TicketListController extends AbstractController
         $response->setVary(self::TURBO_FRAME_HEADER, false);
 
         return $response;
-    }
-
-    /**
-     * @param string $searchText already trimmed; empty for no search
-     *
-     * @return string|null why the list refuses the search, or null when it takes it
-     */
-    public static function searchRefusalOf(string $searchText): ?string
-    {
-        if (!mb_check_encoding($searchText, 'UTF-8') || str_contains($searchText, "\0")) {
-            return self::SEARCH_NOT_TEXT;
-        }
-        if (mb_strlen($searchText, 'UTF-8') > ListFilter::SEARCH_TEXT_MAX_LENGTH) {
-            return self::SEARCH_TOO_LONG;
-        }
-
-        return null;
     }
 
     /**
@@ -214,7 +194,7 @@ final class TicketListController extends AbstractController
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
         $listQuery = array_filter(
-            [self::PROJECT_QUERY => $project?->key(), self::PERSON_QUERY => $assigneeId, self::DONE_QUERY => $showsDone ? '1' : null, self::SEARCH_QUERY => $searchText],
+            [TicketListContext::PROJECT_QUERY => $project?->key(), TicketListContext::PERSON_QUERY => $assigneeId, TicketListContext::DONE_QUERY => $showsDone ? '1' : null, TicketListContext::SEARCH_QUERY => $searchText],
             static fn (?string $value): bool => null !== $value,
         );
 

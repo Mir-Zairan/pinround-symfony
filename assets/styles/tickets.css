@@ -335,6 +335,12 @@
   color: var(--error);
 }
 
+/* Above the row link's overlay, so hovering the avatar still shows its "Assigned to …" title. */
+.tickets__assignee {
+  position: relative;
+  z-index: 1;
+}
+
 .tickets__assignee--nobody {
   background: var(--s-high);
   color: var(--on-surface-var);

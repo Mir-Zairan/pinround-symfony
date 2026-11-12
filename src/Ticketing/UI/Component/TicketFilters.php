@@ -12,6 +12,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\ListFilter;
+use App\Ticketing\UI\TicketListContext;
 use App\Ticketing\UI\TicketListController;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
@@ -56,7 +57,7 @@ final class TicketFilters
     public const string PERSON_PICKED_EVENT = 'personPicked';
     public const string NO_SUCH_PERSON = 'No one in this team has that id.';
 
-    /** A project key, as in TicketListController::PROJECT_QUERY; empty for every project. */
+    /** A project key, as in TicketListContext::PROJECT_QUERY; empty for every project. */
     #[LiveProp]
     public string $project = '';
 
@@ -75,7 +76,7 @@ final class TicketFilters
     #[LiveProp]
     public string $team = '';
 
-    /** The team picked with TicketListController::TEAM_QUERY, kept in the list's URLs; empty when none was. */
+    /** The team picked with TicketListContext::TEAM_QUERY, kept in the list's URLs; empty when none was. */
     #[LiveProp]
     public string $pickedTeam = '';
 
@@ -158,7 +159,7 @@ final class TicketFilters
      */
     public function searchRefusal(): ?string
     {
-        return TicketListController::searchRefusalOf(trim($this->q));
+        return TicketListContext::searchRefusalOf(trim($this->q));
     }
 
     /**
@@ -167,11 +168,11 @@ final class TicketFilters
     public function listUrl(array $changes = []): string
     {
         $query = [
-            TicketListController::TEAM_QUERY => '' === $this->pickedTeam ? null : $this->pickedTeam,
-            TicketListController::PROJECT_QUERY => '' === $this->project ? null : $this->project,
-            TicketListController::PERSON_QUERY => '' === $this->person ? null : $this->person,
-            TicketListController::DONE_QUERY => $this->showsDone ? '1' : null,
-            TicketListController::SEARCH_QUERY => '' === trim($this->q) || null !== $this->searchRefusal() ? null : trim($this->q),
+            TicketListContext::TEAM_QUERY => '' === $this->pickedTeam ? null : $this->pickedTeam,
+            TicketListContext::PROJECT_QUERY => '' === $this->project ? null : $this->project,
+            TicketListContext::PERSON_QUERY => '' === $this->person ? null : $this->person,
+            TicketListContext::DONE_QUERY => $this->showsDone ? '1' : null,
+            TicketListContext::SEARCH_QUERY => '' === trim($this->q) || null !== $this->searchRefusal() ? null : trim($this->q),
             ...$changes,
         ];
 
@@ -184,10 +185,10 @@ final class TicketFilters
     public function searchFormFields(): array
     {
         return array_filter([
-            TicketListController::TEAM_QUERY => $this->pickedTeam,
-            TicketListController::PROJECT_QUERY => $this->project,
-            TicketListController::PERSON_QUERY => $this->person,
-            TicketListController::DONE_QUERY => $this->showsDone ? '1' : '',
+            TicketListContext::TEAM_QUERY => $this->pickedTeam,
+            TicketListContext::PROJECT_QUERY => $this->project,
+            TicketListContext::PERSON_QUERY => $this->person,
+            TicketListContext::DONE_QUERY => $this->showsDone ? '1' : '',
         ], static fn (string $value): bool => '' !== $value);
     }
 
@@ -273,7 +274,7 @@ final class TicketFilters
         return [
             'label' => $label,
             'personId' => $userId->toString(),
-            'url' => $this->listUrl([TicketListController::PERSON_QUERY => $userId->toString()]),
+            'url' => $this->listUrl([TicketListContext::PERSON_QUERY => $userId->toString()]),
             'isPressed' => $this->person === $userId->toString(),
         ];
     }
