@@ -31,9 +31,11 @@
   font-family: var(--font-mono);
 }
 
+/* Capitals as the prototype shows them; the markup keeps sentence case for screen readers. */
 .ticket__team-only {
   background: var(--error-container);
   color: var(--on-error-container);
+  text-transform: uppercase;
 }
 
 .ticket__title {

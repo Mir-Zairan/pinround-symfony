@@ -706,6 +706,64 @@ final class DbalTicketQueriesTest extends KernelTestCase
         self::assertNull($page);
     }
 
+    /**
+     * The SQL names Acme Foods, the organization of TenantContext, while the transaction's tenant is Beta Bakery: what
+     * still hides Acme Foods' ticket is row-level security alone.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTicketPage(): void
+    {
+        $key = $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
+        self::assertNotNull($this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketPageView => $this->ticketQueries()->pageOf($key, self::adminOf(self::ACME_FOODS))));
+        $acmeStepQueries = self::createStub(StepQueries::class);
+        $acmeStepQueries->method('listedSteps')->willReturn($this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->stepQueries()->listedSteps()));
+
+        $pageUnderAcmeContext = new OwnConnectionTransactions($this->entityManager()->getConnection(), $this->tenantContext())->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            fn (Connection $connection): ?TicketPageView => new DbalTicketQueries(
+                $connection,
+                $this->tenantContext(),
+                $acmeStepQueries,
+                new DbalTurnUserQueries($connection, $this->tenantContext()),
+                new DbalUserQueries($connection),
+            )->pageOf($key, self::adminOf(self::ACME_FOODS)),
+        );
+
+        self::assertNull($pageUnderAcmeContext);
+    }
+
+    /**
+     * Omar, outside Shop with no link to the team-only ticket, gets no page, as for an unknown key, in the one query;
+     * named as its tester, he gets it.
+     */
+    #[Test]
+    public function aTicketTheViewerMayNotSeeHasNoPage(): void
+    {
+        $key = $this->addTicket(self::DOING_STEP, 2, '2027-03-15 10:00:00+00');
+        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET visibility = 'team', team_id = ? WHERE key = ?",
+            [self::SHOP_TEAM, $key],
+        ));
+        $outsider = TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], false, null);
+        $debugData = $this->debugData();
+
+        $hidden = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $key, $outsider): array {
+            $this->stepQueries()->listedSteps();
+            $debugData->reset();
+
+            return [$this->ticketQueries()->pageOf($key, $outsider), self::queryCountOf($debugData)];
+        });
+        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET tester_id = ? WHERE key = ?',
+            [self::OMAR, $key],
+        ));
+        $asTester = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?string => $this->ticketQueries()->pageOf($key, $outsider)?->key);
+
+        self::assertSame([null, 1], $hidden);
+        self::assertSame($key, $asTester);
+    }
+
     #[Test]
     public function aPageWithNoTransactionOrForAViewerOfAnotherOrganizationIsRefusedBeforeAnyQuery(): void
     {

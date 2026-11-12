@@ -94,6 +94,7 @@ final readonly class DbalTicketQueries implements TicketQueries
             return null;
         }
 
+        $visibleTicket = TicketVisibilitySql::of($viewer, self::TICKET_ALIAS);
         $visibleParent = TicketVisibilitySql::of($viewer, self::PARENT_ALIAS);
         $row = $this->connection->fetchAssociative(
             'SELECT ticket.id, ticket.key, ticket.title, ticket.description, ticket.type, ticket.priority, ticket.release,'
@@ -104,8 +105,8 @@ final readonly class DbalTicketQueries implements TicketQueries
             .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
             .' LEFT JOIN tkt_ticket AS parent ON parent.organization_id = ticket.organization_id AND parent.id = ticket.parent_id'
             .' AND '.$visibleParent->sql()
-            .' WHERE ticket.organization_id = CAST(:organization AS uuid) AND ticket.key = :key',
-            ['organization' => $organizationId->toString(), 'key' => $key, ...$visibleParent->parameters()],
+            .' WHERE ticket.organization_id = CAST(:organization AS uuid) AND ticket.key = :key AND '.$visibleTicket->sql(),
+            ['organization' => $organizationId->toString(), 'key' => $key, ...$visibleTicket->parameters(), ...$visibleParent->parameters()],
         );
         if (false === $row) {
             return null;

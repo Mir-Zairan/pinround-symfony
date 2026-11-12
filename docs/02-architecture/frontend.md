@@ -239,7 +239,7 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Home (lead, tester, developer, manager, admin, mixed roles) | `GET /` (`web_home`) | Web | `home/index.html.twig`: FocusChips, NeedItem ×5, GroupedList, PingCard, release GroupBar, AvatarStack, Admin card, All teams |
 | Tickets · List | `GET /tickets?project=&team=&person=&q=&done=&check=` (`ticketing_tickets`) | Ticketing | `ticket/list.html.twig` + `TicketFilters` |
 | Tickets · Whose turn? | `GET /tickets/turn?project=` (`ticket_turn`) | Insight | `insight/whose_turn.html.twig` |
-| Ticket page | `GET /t/{key}` (`ticket_show`) | Ticketing | `ticket/show.html.twig`: QueueBar, StatusPill, NextStepBox, Thread, rounds, people, activity |
+| Ticket page | `GET /t/{key}` (`ticket_show`) | Ticketing | `@Ticketing/show.html.twig`: QueueBar, StatusPill, NextStepBox, Thread, rounds, people, activity |
 | Verb buttons | `POST /t/{key}/move/{verb}` (`ticket_move`) | Ticketing | Turbo Stream |
 | Check box actions | `POST /t/{key}/check/{action}` (`ticket_check`) | Ticketing | Turbo Stream |
 | Comment / question / reply / resolve | `POST /t/{key}/thread…` | Conversation | Turbo Stream |

@@ -18,10 +18,10 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * One ticket's page at /t/{key} (FR-TKT-08, P03.T6, ticket-page.md): the header, The ask, the Rounds empty state and
- * Details. Every person of the organization may ask for it (OrganizationPermission::VIEW); the ticket shows only when
- * TicketPermission VIEW is granted on its visibility facts. An unknown or malformed key, another organization's
- * ticket (row-level security hides it) and one the viewer may not see all answer the same 404, so the answer never
- * tells that a hidden ticket exists.
+ * Details. Every person of the organization may ask for it (OrganizationPermission::VIEW); TicketQueries::pageOf reads
+ * only a ticket the viewer may see, and TicketPermission VIEW on its visibility facts is the second guard. An unknown
+ * or malformed key, another organization's ticket (row-level security hides it) and one the viewer may not see all
+ * answer the same 404, so the answer never tells that a hidden ticket exists.
  *
  * Three queries beyond the request's own when the steps are cached: the triager, the ticket with its project and
  * parent, and the names of its reporter and assignee (performance-and-scale.md: ten at most for the page).

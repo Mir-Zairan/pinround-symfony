@@ -2,6 +2,11 @@
 
 {% block title %}{{ ticket.key }} · {{ ticket.title }} · pinround{% endblock %}
 
+{% block head %}
+    {# Turbo must not show a cached copy of a ticket, whose step and people change (frontend.md, Turbo and real-time updates). #}
+    <meta name="turbo-cache-control" content="no-cache">
+{% endblock %}
+
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
 {% endblock %}
@@ -9,11 +14,11 @@
 {% block main %}
     <article class="ticket" data-ticket-key="{{ ticket.key }}">
         <header class="ticket__header">
-            <a class="btn btn-text ticket__back" href="{{ path('ticketing_tickets') }}"><span aria-hidden="true">&lt;</span> Tickets</a>
+            <twig:Button variant="text" href="{{ path('ticketing_tickets') }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Tickets</twig:Button>
             <p class="ticket__key-line">
                 <span class="ticket__key">{{ ticket.key }}</span>
                 <span class="ticket__kind">{{ type }} · {{ ticket.projectName }}</span>
-                {% if ticket.isTeamOnly %}<twig:Tag class="ticket__team-only">ONLY THE TEAM AND ADMINS SEE THIS</twig:Tag>{% endif %}
+                {% if ticket.isTeamOnly %}<twig:Tag class="ticket__team-only">Only the team and admins see this</twig:Tag>{% endif %}
             </p>
             <h1 class="ticket__title">{{ ticket.title }}</h1>
             <div class="ticket__state">

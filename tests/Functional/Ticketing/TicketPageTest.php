@@ -93,7 +93,8 @@ final class TicketPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('SHOP-2', $key);
-        self::assertSame(['< Tickets', '/tickets'], [$page->filter('.ticket__back')->text(), $page->filter('.ticket__back')->attr('href')]);
+        self::assertSame('no-cache', $page->filter('head meta[name="turbo-cache-control"]')->attr('content'));
+        self::assertSame(['< Tickets', '/tickets', 'btn btn-text ticket__back'], [$page->filter('.ticket__back')->text(), $page->filter('.ticket__back')->attr('href'), $page->filter('.ticket__back')->attr('class')]);
         self::assertSame(['SHOP-2', 'Story · Shop'], [$page->filter('.ticket__key-line .ticket__key')->text(), $page->filter('.ticket__kind')->text()]);
         self::assertCount(0, $page->filter('.ticket__team-only'));
         self::assertSame('Search shows no results', $page->filter('h1')->text());
@@ -269,7 +270,7 @@ final class TicketPageTest extends WebTestCase
             return;
         }
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('ONLY THE TEAM AND ADMINS SEE THIS', $page->filter('.ticket__key-line .ticket__team-only')->text());
+        self::assertSame('Only the team and admins see this', $page->filter('.ticket__key-line .ticket__team-only')->text());
         self::assertSame(self::HIDDEN_TITLE, $page->filter('h1')->text());
     }
 
@@ -280,7 +281,7 @@ final class TicketPageTest extends WebTestCase
     {
         yield 'a number no ticket has' => ['SHOP-99'];
         yield 'the key in lower case' => ['shop-1'];
-        yield 'no number' => ['shop-'];
+        yield 'no number' => ['SHOP-'];
         yield 'number zero' => ['SHOP-0'];
         yield 'a leading zero' => ['SHOP-01'];
         yield 'a trailing newline' => ['SHOP-1%0A'];
@@ -346,7 +347,6 @@ final class TicketPageTest extends WebTestCase
         $pageQueryCount = $this->queryCountOf('/t/'.$key) - $shellQueryCount;
 
         self::assertSame([['Assignee', 'Omar'], ['Priority', 'Major'], ['Release', '2.4'], ['Parent', 'SHOP-1'], ['Components', 'Checkout'], ['Created', '5 Nov']], $this->detailsOf($this->client->getCrawler()));
-        self::assertLessThanOrEqual(6, $pageQueryCount);
         self::assertSame(3, $pageQueryCount);
     }
 

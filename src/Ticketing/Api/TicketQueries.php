@@ -38,15 +38,18 @@ interface TicketQueries
     public function list(ListFilter $filter, ?Cursor $cursor = null): array;
 
     /**
-     * The ticket with that key, read whether or not the viewer may see it: the caller decides TicketPermission VIEW
-     * on its visibility facts before showing any of it. Two queries at most: the ticket with its project and its
-     * parent's key in one, and the names of its reporter and assignee in one; its step through Workflow's
-     * StepQueries::listedSteps adds one only while its cache is cold. A key that cannot be a ticket key (not
-     * PROJECT-number, a number from 1 up with no leading zero, case as stored) runs none.
+     * The ticket with that key, only when the viewer may see it (ADR-0013): a ticket hidden from them answers null,
+     * exactly as an unknown key does, so a caller never learns that it exists. Its parent's key is there only when the
+     * viewer may see the parent too. A page still decides TicketPermission VIEW on the visibility facts, as a second
+     * guard. Two queries at most: the ticket with its project and its parent's key in one, and the names of its
+     * reporter and assignee in one; its step through Workflow's StepQueries::listedSteps adds one only while its cache
+     * is cold. A key that cannot be a ticket key (not PROJECT-number, a number from 1 up with no leading zero, case as
+     * stored) runs none.
      *
-     * @param TicketVisibility $viewer decides only whether the parent's key is shown
+     * @param TicketVisibility $viewer whose ticket visibility predicate the ticket and its parent are read under
      *
-     * @return TicketPageView|null null when the tenant has no ticket with that key or the key cannot be one
+     * @return TicketPageView|null null when the tenant has no ticket with that key the viewer may see, or the key
+     *                             cannot be one
      *
      * @throws \LogicException when no transaction is open, no tenant is set, or the viewer is of another organization
      *                         than the tenant, before any query; when the ticket's step is not one of the
