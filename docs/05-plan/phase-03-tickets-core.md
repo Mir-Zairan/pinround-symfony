@@ -60,10 +60,10 @@ FR-TKT-01, FR-TKT-02, FR-TKT-03, FR-TKT-04, FR-TKT-05, FR-TKT-06, FR-TKT-07, FR-
 6. Foundry factories and demo seed: 40 tickets in SHOP across all steps with neutral titles.
 **Files:** `src/Ticketing/**`, migrations, `tests/Factory/TicketFactory.php`.
 **Acceptance criteria:**
-- [ ] A created ticket has key SHOP-n, an event "created", and a turn row.
-- [ ] A pure manager cannot create tickets through the form (voter) unless they also have a team role.
-- [ ] Org B cannot read SHOP tickets by URL, list or search (isolation tests).
-- [ ] An admin without a team role cannot create or edit tickets (voter rows).
+- [x] A created ticket has key SHOP-n, an event "created", and a turn row (`CreateTicketTest`).
+- [x] A pure manager cannot create tickets through the form (voter) unless they also have a team role (`TicketCreationVoterTest`, `VoterMatrixTest`, `NewTicketTest`; [ADR-0038](../03-adr/0038-create-ticket-team-form-needs-team-role.md)).
+- [ ] Org B cannot read SHOP tickets by URL, list or search (isolation tests). URL (voter `VIEW`, `TicketVoterViewLeakTest`) and list (`TicketListLeakTest`, `TicketIsolationTest`) are done; search comes with P03.T4.
+- [x] An admin without a team role cannot create or edit tickets (voter rows in `TicketCreationVoterTest` and `TicketVoterTest`).
 **Tests:** domain unit tests; voter matrix rows; isolation tests; functional create test.
 **Prototype check:** field labels and defaults follow [Report a problem: fields and copy](../04-prototype/screens/report-a-problem.md#fields-and-copy) where they overlap (Type, Priority).
 **Size:** L
@@ -76,9 +76,9 @@ FR-TKT-01, FR-TKT-02, FR-TKT-03, FR-TKT-04, FR-TKT-05, FR-TKT-06, FR-TKT-07, FR-
 3. Create the **visibility leak suite** `tests/Integration/Visibility/`: a team-only ticket with a marker title, an outside reporter, an outside admin, a triager, a manager without team role, and a user of another org. One test per read path; this task adds list, search, ticket page, counts and the voter. Later phases add their paths (P04 bell and email, P05 rounds, P06 duplicates, P07 Home, Whose turn and My reports, P08 AI candidates, P09 MCP, P11 export).
 **Files:** `src/Ticketing/Api/TicketVisibility.php`, `src/Ticketing/Api/TicketVisibilitySql.php`, `src/Ticketing/Api/TicketVisibilities.php`, `src/Ticketing/Application/RoleTicketVisibilities.php`, `tests/Integration/Visibility/*`.
 **Acceptance criteria:**
-- [ ] An outside reporter of a team-only ticket sees it in the list, search and ticket page; an outside user with no link to it does not.
-- [ ] A triager sees a team-only ticket that has no team; a manager without a team role does not.
-- [ ] Every query of this phase passes the leak suite; the check for hand-written visibility conditions passes.
+- [ ] An outside reporter of a team-only ticket sees it in the list, search and ticket page; an outside user with no link to it does not. List (`TicketListLeakTest`, first and cursor pages) and voter `VIEW` (`TicketVoterViewLeakTest`) are done; search comes with P03.T4 and the ticket page with P03.T6.
+- [x] A triager sees a team-only ticket that has no team; a manager without a team role does not (`VisibilityLeakCast` viewers in `TicketVoterViewLeakTest`, `TicketListLeakTest` and `TicketCountsLeakTest`).
+- [ ] Every query of this phase passes the leak suite; the check for hand-written visibility conditions passes. Counts, voter `VIEW`, list and cursor pages pass, and `HandWrittenVisibilityConditionTest` passes; search (P03.T4) and the ticket page (P03.T6) still have to add their cases.
 **Tests:** the leak suite; unit tests for each branch of the predicate.
 **Prototype check:** none (backend task).
 **Size:** S
