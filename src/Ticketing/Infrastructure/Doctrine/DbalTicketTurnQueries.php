@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Ticketing\Infrastructure\Doctrine;
 
 use App\Identity\Api\UserQueries;
-use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
@@ -26,7 +25,7 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         private Connection $connection,
         private TenantContext $tenantContext,
         private StepQueries $stepQueries,
-        private TeamQueries $teamQueries,
+        private TicketTeamLookup $teamLookup,
         private UserQueries $userQueries,
     ) {
     }
@@ -58,10 +57,9 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
      */
     private function groupAndCoreCodeOf(string $stepId, ?TeamId $teamId): array
     {
-        foreach (null === $teamId ? [] : $this->stepQueries->stepsFor($teamId) as $step) {
-            if ($step->id() === $stepId) {
-                return [$step->groupCode(), $step->coreCode()];
-            }
+        $teamStep = $this->teamLookup->stepOf($stepId, $teamId);
+        if (null !== $teamStep) {
+            return [$teamStep->groupCode(), $teamStep->coreCode()];
         }
 
         return [$this->stepQueries->groupOf($stepId) ?? throw new \LogicException('A ticket is in a step its organization does not have.'), null];
@@ -72,11 +70,10 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
      */
     private function peopleOf(TeamId $teamId): array
     {
-        $leadId = $this->teamQueries->leadOf($teamId) ?? throw new \LogicException('A ticket\'s team is not a team of its organization.');
-        $peopleByJob = $this->teamQueries->peopleByJob($teamId);
+        [$leadId, $developerIds, $testerIds] = $this->teamLookup->peopleOf($teamId);
         $lead = $this->userQueries->byIds([$leadId])[$leadId->toString()] ?? throw new \LogicException('The lead of a ticket\'s team is no user.');
 
-        return [$leadId, $lead->displayName, $peopleByJob['developer'], $peopleByJob['tester']];
+        return [$leadId, $lead->displayName, $developerIds, $testerIds];
     }
 
     private static function text(mixed $value, string $column): string

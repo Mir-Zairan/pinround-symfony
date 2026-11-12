@@ -4,7 +4,7 @@ import { LENA_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
-// As Lena (auth.setup.ts), on the seeded stack (make seed gives SHOP 40 tickets, 35 open and 5 in Done, fewer than one page per step). The
+// As Lena (auth.setup.ts), on the seeded stack (make seed gives SHOP 41 tickets, 36 open and 5 in Done, fewer than one page per step). The
 // specs make no tickets. The parts that need rows skip with a note only on an empty database; TicketListTest proves
 // "Show more" and its focus on the server, and the frame-missing case below injects a link because no seeded step
 // holds more than 50 rows.

@@ -427,12 +427,45 @@ final class TicketPageTest extends WebTestCase
             'UPDATE tkt_ticket SET waiting_on_user_id = ? WHERE key = ?',
             [$this->people['Raj']->id()->toString(), $key],
         ));
+        $this->addTurnRow($key, 'Raj', 'input');
         $this->logIn($this->client, $this->people['Sara']);
 
         $page = $this->client->request('GET', '/t/'.$key);
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Waiting for input from Raj', $this->turnLineOf($page, 'now'));
+    }
+
+    #[Test]
+    public function aNeedsInputTicketWhoseSavedTurnIsALabelNamesTheLabel(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'input', 'assignee' => 'Omar']);
+        $this->addTurnRow($key, null, 'input', 'Customer');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Waiting for input from Customer', $this->turnLineOf($page, 'now'));
+    }
+
+    /**
+     * Raj is a Manager with no role in Shop and no part in the ticket, so the page holds no name for him and reads it
+     * in one more query.
+     */
+    #[Test]
+    public function aSavedTurnOfSomeoneOutsideTheTicketAndItsTeamNamesThemByFirstName(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'hold', 'assignee' => 'Omar']);
+        $this->addTurnRow($key, 'Raj', 'decide');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Raj decides if it goes on', $this->turnLineOf($page, 'now'));
     }
 
     /**
@@ -839,13 +872,13 @@ final class TicketPageTest extends WebTestCase
     /**
      * The row Insight keeps for a ticket's turn, as the turn projector would have written it.
      */
-    private function addTurnRow(string $ticketKey, string $turnPerson, string $kind): void
+    private function addTurnRow(string $ticketKey, ?string $turnPerson, string $kind, ?string $turnLabel = null): void
     {
         $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, kind, base_score, waiting_since, visibility, reporter_id, assignee_id)
-             SELECT organization_id, id, team_id, project_id, 'check', ?, ?, 100, TIMESTAMPTZ '2026-11-05 10:00:00+00', visibility, reporter_id, assignee_id
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id)
+             SELECT organization_id, id, team_id, project_id, 'check', ?, ?, ?, 100, TIMESTAMPTZ '2026-11-05 10:00:00+00', visibility, reporter_id, assignee_id
              FROM tkt_ticket WHERE key = ?",
-            [$this->people[$turnPerson]->id()->toString(), $kind, $ticketKey],
+            [null === $turnPerson ? null : $this->people[$turnPerson]->id()->toString(), $turnLabel, $kind, $ticketKey],
         ));
     }
 

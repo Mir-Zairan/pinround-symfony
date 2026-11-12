@@ -24,6 +24,7 @@ use App\Ticketing\Api\TicketPosition;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries;
+use App\Ticketing\Infrastructure\Doctrine\TicketTeamLookup;
 use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -280,7 +281,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new DbalTeamQueries($connection),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
             )->list($this->filter()),
         );
 
@@ -774,7 +775,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new DbalTeamQueries($connection),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
             )->pageOf($key, self::adminOf(self::ACME_FOODS)),
         );
 
@@ -1045,7 +1046,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new DbalTeamQueries($connection),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
             )->positionOf($key, $this->filter()),
         );
 

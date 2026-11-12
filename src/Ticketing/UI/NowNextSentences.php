@@ -23,7 +23,7 @@ use App\Workflow\Api\TurnRules;
  * only a ticket with no saved turn (a done one) gets it from {@see TurnRules}. The ticket, its team and the names come
  * with the page's own read; this adds one query on ins_ticket_turn (the saved turn and the reviews and tests waiting),
  * and none for the rules' step policy, which the request already holds. Needs an open transaction under the organization as
- * tenant. The page names people by first name, never "you", as the tickets list's rows do not either.
+ * tenant. The page names people by first name and passes no viewer, so it never says "you"; the lists keep "you" for the viewer.
  */
 final readonly class NowNextSentences
 {

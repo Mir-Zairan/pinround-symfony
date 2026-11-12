@@ -50,11 +50,6 @@ use Symfony\Component\Routing\Attribute\Route;
 final class TicketListController extends AbstractController
 {
     public const string ROUTE = 'ticketing_tickets';
-    // TicketListContext names the filters; ProjectRail still reads these.
-    public const string PROJECT_QUERY = TicketListContext::PROJECT_QUERY;
-    public const string DONE_QUERY = TicketListContext::DONE_QUERY;
-    public const string SEARCH_QUERY = TicketListContext::SEARCH_QUERY;
-    public const string TEAM_QUERY = TicketListContext::TEAM_QUERY;
     public const string TURBO_FRAME_HEADER = 'Turbo-Frame';
     public const string RAIL_FRAME_ID = 'project-rail-frame';
 

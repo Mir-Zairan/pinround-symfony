@@ -94,6 +94,24 @@ final class TicketRailTest extends WebTestCase
         self::assertCount(0, $page->filter('turbo-frame#ticket-list-frame nav.project-rail'), 'The rail sits outside the list frame.');
     }
 
+    /**
+     * The links sit in a Turbo frame, which prefetches a link on hover even with Drive off; the page and the frame's own
+     * answer both keep every link of the rail under a prefetch-off element.
+     */
+    #[Test]
+    public function everyLinkOfTheRailIsClearOfTurboPrefetchOnThePageAndInItsFrame(): void
+    {
+        $page = $this->pageAs('Lena', self::TICKETS);
+        $frame = $this->client->request('GET', self::TICKETS.'?done=1', server: ['HTTP_TURBO_FRAME' => TicketListController::RAIL_FRAME_ID]);
+        self::assertResponseStatusCodeSame(200);
+
+        foreach ([$page, $frame] as $crawler) {
+            $links = $crawler->filter('nav.project-rail a');
+            self::assertGreaterThanOrEqual(4, $links->count(), 'All projects, two projects and Manage projects.');
+            self::assertCount($links->count(), $crawler->filter('nav.project-rail[data-turbo-prefetch="false"] a'));
+        }
+    }
+
     #[Test]
     public function showDoneCountsTheDoneTicketsToo(): void
     {

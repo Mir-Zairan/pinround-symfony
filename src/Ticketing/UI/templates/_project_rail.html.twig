@@ -1,6 +1,7 @@
 {# The project rail, as the whole page holds it and as a request from its own frame gets it after a filter change. Every item is a link, so it works without script; the frame sends them to the whole page (_top). #}
 <turbo-frame id="{{ constant('App\\Ticketing\\UI\\TicketListController::RAIL_FRAME_ID') }}" class="project-rail-frame" target="_top" {{ stimulus_target('ticket-list', 'rail') }}>
-    <nav class="project-rail" aria-label="Projects">
+    {# The links sit in a Turbo frame, so Turbo would prefetch them on hover even with Drive off; a click should be the only request. #}
+    <nav class="project-rail" aria-label="Projects" data-turbo-prefetch="false">
         {# A label, not a heading: the page's h1 comes after the rail. #}
         {% if rail.teamName is not null %}
             <p class="project-rail__team">{{ rail.teamName }}</p>

@@ -7,7 +7,6 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\Identity\Api\UserQueries;
 use App\Identity\Api\UserView;
 use App\Insight\Api\TurnUserQueries;
-use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -28,7 +27,6 @@ use App\Ticketing\Domain\InvalidTicketKey;
 use App\Ticketing\Domain\TicketKey;
 use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\StepQueries;
-use App\Workflow\Api\StepView;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -55,7 +53,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         private StepQueries $stepQueries,
         private TurnUserQueries $turnUserQueries,
         private UserQueries $userQueries,
-        private TeamQueries $teamQueries,
+        private TicketTeamLookup $teamLookup,
     ) {
     }
 
@@ -154,11 +152,9 @@ final readonly class DbalTicketQueries implements TicketQueries
         $visibleTicket = TicketVisibilitySql::of($viewer, self::TICKET_ALIAS);
         $visibleParent = TicketVisibilitySql::of($viewer, self::PARENT_ALIAS);
         $row = $this->connection->fetchAssociative(
-            'SELECT ticket.id, ticket.key, ticket.title, ticket.description, ticket.type, ticket.priority, ticket.release,'
-            .' to_json(ticket.components) AS components, ticket.created_at, ticket.step_id, ticket.team_id, ticket.visibility,'
-            .' ticket.reporter_id, ticket.assignee_id, ticket.pending_assignee_id, ticket.reviewer_id, ticket.tester_id,'
-            .' ticket.waiting_on_user_id, ticket.project_id, ticket.previous_step_id, ticket.waiting_on_label,'
-            ." 'risk' = ANY (ticket.check_reasons) AS is_risk_check, project.name AS project_name, parent.key AS parent_key"
+            'SELECT ticket.id, ticket.key, ticket.title, ticket.description, ticket.type, ticket.created_at,'
+            .' to_json(ticket.components) AS components, '.TurnSnapshotRow::COLUMNS.','
+            .' project.name AS project_name, parent.key AS parent_key'
             .' FROM tkt_ticket AS ticket'
             .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
             .' LEFT JOIN tkt_ticket AS parent ON parent.organization_id = ticket.organization_id AND parent.id = ticket.parent_id'
@@ -197,13 +193,12 @@ final readonly class DbalTicketQueries implements TicketQueries
         $reporterId = new UserId(self::text($row['reporter_id'], 'reporter id'));
         $assigneeId = self::userIdOrNull($row['assignee_id'], 'assignee id');
         $teamId = TurnSnapshotRow::teamIdOf($row);
-        $coreCode = null === $teamId ? null : array_find($this->stepQueries->stepsFor($teamId), static fn (StepView $teamStep): bool => $teamStep->id() === $stepId)?->coreCode();
-        $leadId = null === $teamId ? null : ($this->teamQueries->leadOf($teamId) ?? throw new \LogicException('A ticket\'s team is not a team of its organization.'));
-        $peopleByJob = null === $teamId ? ['developer' => [], 'tester' => []] : $this->teamQueries->peopleByJob($teamId);
+        $coreCode = $this->teamLookup->stepOf($stepId, $teamId)?->coreCode();
+        [$leadId, $developerIds, $testerIds] = null === $teamId ? [null, [], []] : $this->teamLookup->peopleOf($teamId);
         $users = $this->userQueries->byIds(self::distinctUserIds([
             $reporterId, $assigneeId, self::userIdOrNull($row['pending_assignee_id'], 'pending assignee id'), self::userIdOrNull($row['reviewer_id'], 'reviewer id'),
             self::userIdOrNull($row['tester_id'], 'tester id'), self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
-            $leadId, ...$peopleByJob['developer'], ...$peopleByJob['tester'],
+            $leadId, ...$developerIds, ...$testerIds,
         ]));
         $lead = null === $leadId ? null : ($users[$leadId->toString()] ?? throw new \LogicException('The lead of a ticket\'s team is no user.'));
         $displayNames = array_map(static fn (UserView $user): string => $user->displayName, $users);
@@ -241,7 +236,7 @@ final readonly class DbalTicketQueries implements TicketQueries
                 self::userIdOrNull($row['tester_id'], 'tester id'),
                 self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
             ),
-            TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $lead?->displayName, $peopleByJob['developer'], $peopleByJob['tester']),
+            TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $lead?->displayName, $developerIds, $testerIds),
             $displayNames,
         );
     }

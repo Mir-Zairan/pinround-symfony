@@ -6,12 +6,14 @@ namespace App\Tests\Integration\Insight;
 
 use App\Insight\Api\TeamLoadQueries;
 use App\Insight\Api\TeamLoads;
+use App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
@@ -150,6 +152,29 @@ final class DbalTeamLoadQueriesTest extends KernelTestCase
         $this->addTurn(self::BETA_BAKERY, self::BETA_BAKERY_TICKET, self::OMAR, 'review');
 
         $loads = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): TeamLoads => $this->queries()->loadsAndSavedTurnOf([new UserId(self::OMAR)], new TicketId(self::BETA_BAKERY_TICKET)));
+
+        self::assertSame([[], null], [$loads->waitingTurns, $loads->savedTurn]);
+    }
+
+    /**
+     * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
+     * is another one: what still hides Acme Foods' turn rows from Beta Bakery's transaction is row-level security alone.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsSavedTurnAndLoads(): void
+    {
+        $this->addTurn(self::ACME_FOODS, self::OWN_TICKET, self::OMAR, 'review');
+        $this->addTurn(self::ACME_FOODS, self::SECOND_TICKET, self::OMAR, 'review');
+        $loadsUnderAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): TeamLoads => $this->queries()->loadsAndSavedTurnOf([new UserId(self::OMAR)], new TicketId(self::OWN_TICKET)));
+        self::assertNotNull($loadsUnderAcme->savedTurn);
+        self::assertNotSame([], $loadsUnderAcme->waitingTurns);
+
+        $loads = new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            fn (Connection $connection): TeamLoads => new DbalTeamLoadQueries($connection, $this->tenantContext())
+                ->loadsAndSavedTurnOf([new UserId(self::OMAR)], new TicketId(self::OWN_TICKET)),
+        );
 
         self::assertSame([[], null], [$loads->waitingTurns, $loads->savedTurn]);
     }

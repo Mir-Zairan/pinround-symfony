@@ -4,12 +4,11 @@ import { LENA_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
-// The demo seed's asks are short, so this spec makes one SHOP ticket with an ask past the 700-character cut through the
-// new ticket form, as Lena (auth.setup.ts), and opens the page the form redirects to. Each run adds one Backlog
-// ticket to the dev database.
-const WHOLE_WORDS = 'pay now '.repeat(87);
-const LONG_ASK = `${WHOLE_WORDS}checkout total is wrong`;
-const SHORT_ASK = `${WHOLE_WORDS.trimEnd()} …`;
+// The demo seed (SeedDemoTickets) holds one SHOP ticket whose ask is past the 700-character cut. The spec finds it by its
+// title in the SHOP list, as Lena (auth.setup.ts), and makes no tickets.
+const LONG_ASK_TITLE = 'Pay button does nothing on a long basket';
+const SENTENCE = 'Pay now does nothing once the basket holds many items. ';
+const LONG_ASK = `${SENTENCE.repeat(14)}The checkout total is wrong.`;
 
 test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 800 } });
 
@@ -18,14 +17,11 @@ let ticketPath = '';
 test.beforeAll(async ({ browser }) => {
   const context = await browser.newContext({ storageState: LENA_STORAGE_STATE, ignoreHTTPSErrors: true });
   const page = await context.newPage();
-  await page.goto('/tickets/new');
-  const shopProjectId = await page.locator('select[name="project_id"] option', { hasText: /^SHOP · / }).getAttribute('value');
-  await page.getByLabel('Project').selectOption(shopProjectId ?? '');
-  await page.getByLabel('Title').fill('Pay button does nothing on a long cart');
-  await page.getByLabel('Description').fill(LONG_ASK);
-  await page.getByRole('button', { name: 'Make ticket' }).click();
-  await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
-  ticketPath = new URL(page.url()).pathname;
+  await page.goto('/tickets?project=SHOP');
+  const link = page.locator('.tickets__row-link', { hasText: LONG_ASK_TITLE });
+  await expect(link, 'the seeded long-ask ticket is missing: run make seed').toHaveCount(1);
+  const href = await link.getAttribute('href');
+  ticketPath = new URL(href ?? '', page.url()).pathname;
   await context.close();
 });
 
@@ -39,7 +35,7 @@ async function seriousViolations(page: Page): Promise<string[]> {
 async function openTicket(page: Page): Promise<void> {
   await page.goto(ticketPath, { waitUntil: 'networkidle' });
   await page.evaluate(() => document.fonts.ready);
-  await expect(page.getByRole('heading', { level: 1, name: 'Pay button does nothing on a long cart' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: LONG_ASK_TITLE })).toBeVisible();
 }
 
 test('the ticket page has no serious accessibility violations', async ({ page }) => {
@@ -54,7 +50,12 @@ test('Show the full ask swaps the cut text for the whole ask and Show less swaps
   const fullAsk = page.locator('.ticket__ask-text--full');
   const toggle = page.locator('.ticket__ask-more > summary');
 
-  await expect(shortAsk).toHaveText(SHORT_ASK);
+  await expect(shortAsk).toHaveText(/ …$/);
+  const shortText = ((await shortAsk.textContent()) ?? '').replace(/ …$/, '');
+  expect(shortText.length).toBeLessThanOrEqual(700);
+  expect(shortText.length).toBeGreaterThan(600);
+  expect(LONG_ASK.startsWith(shortText)).toBe(true);
+  expect(LONG_ASK.charAt(shortText.length)).toBe(' ');
   await expect(fullAsk).toBeHidden();
   await expect(toggle).toHaveText('Show the full ask', { useInnerText: true });
 

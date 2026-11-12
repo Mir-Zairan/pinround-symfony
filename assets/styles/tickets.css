@@ -306,8 +306,8 @@
   text-decoration: none;
 }
 
-/* The title's link covers the whole row, so a click anywhere on it opens the ticket; the row stays one link for a
-   screen reader. */
+/* The title's link covers the whole row, so a click anywhere except the assignee avatar opens the ticket; the row
+   stays one link for a screen reader. */
 .tickets__row-link::after {
   position: absolute;
   inset: 0;
