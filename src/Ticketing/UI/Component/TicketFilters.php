@@ -261,13 +261,8 @@ final class TicketFilters
         if (!ListFilter::isCanonicalUuid($this->team)) {
             return false;
         }
-        foreach ($this->teamPeopleQueries->namedPossibleAssigneesOf(new TeamId($this->team)) as $teamPerson) {
-            if ($person === $teamPerson->userId->toString()) {
-                return true;
-            }
-        }
 
-        return false;
+        return array_any($this->teamPeopleQueries->namedPossibleAssigneesOf(new TeamId($this->team)), static fn ($teamPerson) => $person === $teamPerson->userId->toString());
     }
 
     /**

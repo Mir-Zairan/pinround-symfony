@@ -47,5 +47,6 @@
 
     <extensions>
         <bootstrap class="Zenstruck\Foundry\PHPUnit\FoundryExtension" />
+        <bootstrap class="App\Tests\PHPUnit\RestoreUuidV7TimeExtension" />
     </extensions>
 </phpunit>

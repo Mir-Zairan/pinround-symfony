@@ -110,7 +110,7 @@ final readonly class SeedDemoCrowdTeam implements DemoSeedStep
      */
     private function addMissingMemberships(OrganizationId $organizationId, array $people, \DateTimeImmutable $now): void
     {
-        $members = array_fill_keys(array_filter($this->connection->fetchFirstColumn('SELECT user_id FROM org_membership'), 'is_string'), true);
+        $members = array_fill_keys(array_filter($this->connection->fetchFirstColumn('SELECT user_id FROM org_membership'), is_string(...)), true);
         $added = 0;
         foreach ($people as $person) {
             if (isset($members[$person->toString()])) {

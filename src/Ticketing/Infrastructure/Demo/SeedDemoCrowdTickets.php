@@ -79,7 +79,7 @@ final readonly class SeedDemoCrowdTickets implements DemoSeedStep
                 // so the unit of work is written and emptied before each ticket.
                 $this->entityManager->flush();
                 $this->entityManager->clear();
-                $existingTitles = array_fill_keys(array_filter($this->connection->fetchFirstColumn('SELECT title FROM tkt_ticket WHERE project_id = ?', [$projectId]), 'is_string'), true);
+                $existingTitles = array_fill_keys(array_filter($this->connection->fetchFirstColumn('SELECT title FROM tkt_ticket WHERE project_id = ?', [$projectId]), is_string(...)), true);
 
                 $created = 0;
                 foreach (self::TICKETS as $title => $assigneeEmail) {
