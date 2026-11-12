@@ -118,6 +118,8 @@ Live Components re-render on the server as the user types or clicks. Use them on
 
 Everything else is plain Twig + Turbo: links, forms that POST and answer with a Turbo Stream.
 
+`TicketFilters` (`src/Ticketing/UI/Component`, `symfony/ux-live-component` 3.7) is built for the search, the "Assigned to" chips and "Show done"; project and "New · to check" come with the rail and the check filter. Its live requests are POSTs, so the search words never sit in a component URL, and each first asks `OrganizationPermission::VIEW` on the request's organization. After each change it sends the browser event `ticket-filters:changed` with the list's URL (`?project=&person=&done=&q=`, `q` trimmed); the `ticket-list` controller puts that URL in the address bar (a chip adds a history entry, typing replaces it; Back reloads the page, as Drive is off) and loads it into the `ticket-list-frame` Turbo frame, which holds the title, the count line and the steps with their own "Show more" frames. Without script every chip is a link to that URL and the search is a GET form. The people are the lead and members of the viewer's first team by id (viewers are no assignees): `Me` for a lead or member of it, each other one's first name while the team has at most 4, else a disabled `Person ▾` chip (`data-person-picker-trigger`) that P03.T5's person picker opens. The chips cost the page two queries beside the list's five.
+
 ## Stimulus controllers
 
 Every controller is small, stays under about 150 lines, and has a test (Playwright for behaviour). Names are kebab-case.
@@ -127,6 +129,7 @@ Every controller is small, stays under about 150 lines, and has a test (Playwrig
 | `pin-placer` | On a screenshot: a click adds a pin at `x_pct = (clientX - left) / width × 100` (same for y), rounded to 0.1 and limited to 0–100. Keyboard: "Add pin" puts a pin in the centre; arrow keys move it by 1 % (Shift: 5 %); Enter confirms. It sends the pin to the Live Component or posts it. |
 | `presigned-upload` | Asks the server for an upload slot, PUTs the file straight to storage with progress, then calls "complete". It checks type and size in the browser first (server checks again). Paste from clipboard (Ctrl+V) is supported ([media-pipeline.md](media-pipeline.md)). |
 | `person-picker` | Opens the dialog, keyboard navigation in the list, returns the chosen id |
+| `ticket-list` | The tickets list page: loads the URL `TicketFilters` sends into the list frame and the address bar |
 | `focus-chips` | Shows and hides Home sections without a reload and saves the choice |
 | `local-ai` | Laptop AI ([ADR-0019](../03-adr/0019-browser-local-ai.md)): on the user's click it checks `GET http://localhost:11434/api/tags`; it fetches a prompt package from the server; it calls `POST /api/generate` (non-streaming, `format: "json"` when JSON is expected); it posts the result back. It never runs on page load (browsers may show a local-network permission prompt). |
 | `menu` | The "⋯" menus, the avatar menu and the bell popover: open/close, Escape, click outside, roving focus (the avatar menu is a disclosure and keeps its items in the Tab order) |
@@ -139,7 +142,7 @@ Every controller is small, stays under about 150 lines, and has a test (Playwrig
 
 ## Turbo and real-time updates
 
-- **Navigation:** Turbo is installed (`symfony/ux-turbo`) but Drive is off app-wide (`Turbo.session.drive = false` in `assets/app.js`), so links are full page loads and only frames (the tickets list's "Show more") use Turbo; ADR-0007 stays the target, and a change turns Drive on together with an e2e sweep. Pages set `<meta name="turbo-cache-control" content="no-cache">` where data must be fresh (Home, ticket page).
+- **Navigation:** Turbo is installed (`symfony/ux-turbo`) but Drive is off app-wide (`Turbo.session.drive = false` in `assets/app.js`), so links are full page loads and only frames (the tickets list's "Show more" and its list frame, which `TicketFilters` reloads) use Turbo; ADR-0007 stays the target, and a change turns Drive on together with an e2e sweep. Pages set `<meta name="turbo-cache-control" content="no-cache">` where data must be fresh (Home, ticket page).
 - **Frames:**
   - the ticket list results;
   - the ticket page's action box, thread and rounds;

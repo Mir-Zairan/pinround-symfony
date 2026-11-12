@@ -93,6 +93,9 @@ final readonly class DbalTicketQueries implements TicketQueries
         if (null !== $filter->projectId) {
             $parameters['project'] = $filter->projectId;
         }
+        if (null !== $filter->assigneeId) {
+            $parameters['assignee'] = $filter->assigneeId;
+        }
 
         if (null === $filter->searchText) {
             return $this->priorityListQuery($filter, $cursor, $parameters, $visibleTicket);
@@ -113,9 +116,9 @@ final readonly class DbalTicketQueries implements TicketQueries
         $visibleCounted = TicketVisibilitySql::of($filter->visibility, self::COUNTED_ALIAS);
         $parameters = [...$parameters, ...$visibleCounted->parameters()];
         $ticketConditions = 'ticket.organization_id = CAST(:organization AS uuid) AND ticket.step_id = listed.step_id'
-            .self::projectConditionOf($filter, self::TICKET_ALIAS);
+            .self::projectConditionOf($filter, self::TICKET_ALIAS).self::assigneeConditionOf($filter, self::TICKET_ALIAS);
         $countedConditions = 'counted.organization_id = CAST(:organization AS uuid) AND counted.step_id = listed.step_id'
-            .self::projectConditionOf($filter, self::COUNTED_ALIAS);
+            .self::projectConditionOf($filter, self::COUNTED_ALIAS).self::assigneeConditionOf($filter, self::COUNTED_ALIAS);
         if (null !== $cursor) {
             $ticketConditions .= ' AND (ticket.priority_rank > CAST(:after_rank AS smallint)'
                 .' OR (ticket.priority_rank = CAST(:after_rank AS smallint)'
@@ -149,7 +152,8 @@ final readonly class DbalTicketQueries implements TicketQueries
 
     /**
      * Only the matches of search_ticket_ids, which applies the list's project and steps before its cap, each step in
-     * search order: the exact key first, then the match score, then id, all highest first, the keyset of "Show more".
+     * search order (the assignee is applied after the cap, here, so a search capped at COUNT_CAP matches may show fewer
+     * of one person's tickets than they have): the exact key first, then the match score, then id, all highest first, the keyset of "Show more".
      * The function returns ids only, so the score is worked out again here, as in its body, for its matches alone,
      * and kept as a numeric of 12 decimals, whose text reads back exactly in the cursor. The function runs once in
      * the same statement; its ids are joined back to tkt_ticket under row-level security and TicketVisibilitySql once,
@@ -194,7 +198,8 @@ final readonly class DbalTicketQueries implements TicketQueries
             .' FROM matched JOIN tkt_ticket AS ticket ON ticket.id = matched.ticket_id'
             .' WHERE matched.found_position <= '.TicketListStep::COUNT_CAP
             .' AND ticket.organization_id = CAST(:organization AS uuid) AND ticket.step_id = ANY(CAST(:step_ids AS uuid[]))'
-            .self::projectConditionOf($filter, self::TICKET_ALIAS).' AND '.$visibleTicket->sql().')'
+            .self::projectConditionOf($filter, self::TICKET_ALIAS).self::assigneeConditionOf($filter, self::TICKET_ALIAS)
+            .' AND '.$visibleTicket->sql().')'
             .' SELECT listed.step_id, page.id, page.key, page.title, page.type, page.release, page.priority, page.priority_rank,'
             .' page.assignee_id, page.updated_at, page.is_exact_key_match, page.match_score, step_count.ticket_count,'
             .' (SELECT count(*) FROM matched) > '.TicketListStep::COUNT_CAP.' AS is_search_capped'
@@ -211,6 +216,11 @@ final readonly class DbalTicketQueries implements TicketQueries
     private static function projectConditionOf(ListFilter $filter, string $alias): string
     {
         return null === $filter->projectId ? '' : ' AND '.$alias.'.project_id = CAST(:project AS uuid)';
+    }
+
+    private static function assigneeConditionOf(ListFilter $filter, string $alias): string
+    {
+        return null === $filter->assigneeId ? '' : ' AND '.$alias.'.assignee_id = CAST(:assignee AS uuid)';
     }
 
     /**

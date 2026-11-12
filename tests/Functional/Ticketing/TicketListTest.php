@@ -34,6 +34,8 @@ final class TicketListTest extends WebTestCase
 
     private const string TICKETS = '/tickets';
     private const string SHELL = '/_test/menu/shell';
+    /** Five for the list (performance-and-scale.md) and two for the toolbar's people chips (TicketFilters). */
+    private const int LIST_AND_TOOLBAR_QUERY_BUDGET = 7;
     private const array PRIORITY_RANKS = ['blocker' => 0, 'critical' => 1, 'major' => 2, 'normal' => 3, 'minor' => 4];
 
     private KernelBrowser $client;
@@ -389,6 +391,142 @@ final class TicketListTest extends WebTestCase
     }
 
     /**
+     * Omar's tickets sit in two steps among Lena's and an unassigned one, so a filter on the reporter, the turn or no
+     * filter at all would list more.
+     */
+    #[Test]
+    public function aPersonKeepsOnlyTheTicketsAssignedToThem(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->addTicket('todo', 'Add a gift wrap', 'normal', ['assignee' => 'Lena', 'turn' => 'Omar']);
+        $this->addTicket('doing', 'Cart total shows the wrong sum', 'critical', ['assignee' => 'Omar']);
+        $this->addTicket('doing', 'Coupon field takes any text', 'minor');
+        $this->logIn($this->client, $this->people['Lena']);
+        $omar = $this->people['Omar']->id()->toString();
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$omar);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-3', 'SHOP-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertSame(['1', '1'], $page->filter('.tickets__step-count')->each(static fn (Crawler $count): string => $count->text()));
+        self::assertSame('2 tickets · grouped by step', $page->filter('.tickets__total')->text());
+        self::assertSame(['Omar'], $page->filter('.ticket-filters a.chip[aria-current="true"]')->each(static fn (Crawler $chip): string => $chip->text()));
+    }
+
+    #[Test]
+    public function aPersonWithNoTicketHereSaysHowToFindMore(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.tickets__row'));
+        self::assertSame('No tickets match. Clear the search or pick another person.', $page->filter('.empty-state')->text());
+    }
+
+    #[Test]
+    public function aPersonOutsideTheTeamFilteringByAnAssigneeStillSeesNoTeamOnlyTicket(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->addTicket('todo', 'Price rules for staff', 'normal', ['visibility' => 'team', 'assignee' => 'Omar']);
+        $this->addTicket('todo', 'Add a gift wrap', 'normal', ['assignee' => 'Lena']);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Omar']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertSame('1', $page->filter('.tickets__step-count')->text());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function malformedPeople(): iterable
+    {
+        yield 'a word' => ['nobody'];
+        yield 'an uppercase uuid' => ['0197A3C0-0000-7000-8002-000000000001'];
+        yield 'a uuid in braces' => ['%7B0197a3c0-0000-7000-8002-000000000001%7D'];
+        yield 'a uuid and a NUL' => ['0197a3c0-0000-7000-8002-000000000001%00'];
+        yield 'a uuid without hyphens' => ['0197a3c0000070008002000000000001'];
+    }
+
+    #[Test]
+    #[DataProvider('malformedPeople')]
+    public function aMalformedPersonIsNotFoundBeforeAnyTicketQuery(string $encodedPerson): void
+    {
+        $this->client->disableReboot();
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertNotSame([], $this->ticketQueriesOf(self::TICKETS.'?person='.$this->people['Omar']->id()->toString()));
+        self::assertResponseStatusCodeSame(200);
+
+        $ticketQueries = $this->ticketQueriesOf(self::TICKETS.'?person='.$encodedPerson);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame([], $ticketQueries);
+    }
+
+    #[Test]
+    public function theShowDoneChipAddsDoneAndKeepsThePerson(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->addTicket('done', 'Pay button is hidden on small screens', 'major', ['assignee' => 'Omar']);
+        $this->addTicket('done', 'Coupon field takes any text', 'minor', ['assignee' => 'Lena']);
+        $this->logIn($this->client, $this->people['Lena']);
+        $omar = $this->people['Omar']->id()->toString();
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$omar);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['todo'], $page->filter('.tickets__step')->each(static fn (Crawler $step): ?string => $step->attr('data-group')));
+        self::assertNull($page->filter('[data-done-chip]')->attr('aria-current'));
+
+        $withDone = $this->client->click($page->filter('[data-done-chip]')->link());
+
+        self::assertResponseStatusCodeSame(200);
+        parse_str((string) parse_url($this->client->getRequest()->getUri(), \PHP_URL_QUERY), $query);
+        self::assertEquals(['person' => $omar, 'done' => '1'], $query);
+        self::assertSame(['SHOP-1', 'SHOP-2'], $withDone->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+        self::assertSame('true', $withDone->filter('[data-done-chip]')->attr('aria-current'));
+
+        $withoutDone = $this->client->click($withDone->filter('[data-done-chip]')->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-1'], $withoutDone->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')));
+    }
+
+    /**
+     * Omar is the assignee of every even ticket, Mia of every odd one: 52 of Omar's match, so his first page is 50.
+     */
+    #[Test]
+    public function showMoreKeepsTheSearchThePersonAndDone(): void
+    {
+        $this->addManyTickets('todo', 104);
+        $this->addTurnsAndAssignees();
+        $this->logIn($this->client, $this->people['Lena']);
+        $omar = $this->people['Omar']->id()->toString();
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$omar.'&done=1&q=checkout');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(50, $page->filter('.tickets__row'));
+        self::assertSame('52', $page->filter('.tickets__step-count')->text());
+        $moreLink = $page->filter('[data-group="todo"] [data-step-more]');
+        parse_str((string) parse_url((string) $moreLink->attr('href'), \PHP_URL_QUERY), $moreQuery);
+        self::assertSame([$omar, '1', 'checkout'], [$moreQuery['person'] ?? null, $moreQuery['done'] ?? null, $moreQuery['q'] ?? null]);
+
+        $nextPage = $this->client->click($moreLink->link());
+
+        self::assertResponseStatusCodeSame(200);
+        $nextKeys = $nextPage->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key'));
+        self::assertCount(2, $nextKeys);
+        foreach ($nextKeys as $key) {
+            self::assertSame(0, (int) substr((string) $key, 5) % 2, $key.' is not one of Omar\'s tickets.');
+        }
+    }
+
+    /**
      * The best match, "Checkout", is a minor ticket updated first, so the priority order would show it last; the 52
      * others tie on the rank and come by id, highest first. The ticket without the word is not listed.
      */
@@ -484,21 +622,22 @@ final class TicketListTest extends WebTestCase
     }
 
     /**
-     * The search runs inside the rows' query, so it adds no query to the list's budget of five.
+     * The list's budget is five queries (performance-and-scale.md); the toolbar adds two, Lena's team's people and
+     * their names (TicketFilters). The search runs inside the rows' query, so it adds none.
      */
     #[Test]
-    public function aWarmSearchPageReadsAtMostFiveQueriesMoreThanTheShell(): void
+    public function aWarmSearchPageReadsAtMostSevenQueriesMoreThanTheShell(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?q=checkout'));
+        self::assertLessThanOrEqual(self::LIST_AND_TOOLBAR_QUERY_BUDGET, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?q=checkout'));
     }
 
     #[Test]
-    public function aWarmPageReadsAtMostFiveQueriesMoreThanTheShellFor200OpenTickets(): void
+    public function aWarmPageReadsAtMostSevenQueriesMoreThanTheShellFor200OpenTickets(): void
     {
         $this->client->disableReboot();
         foreach (['wait', 'check', 'doing', 'todo'] as $groupCode) {
@@ -507,18 +646,18 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS));
+        self::assertLessThanOrEqual(self::LIST_AND_TOOLBAR_QUERY_BUDGET, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS));
     }
 
     #[Test]
-    public function aWarmProjectPageReadsAtMostFiveQueriesMoreThanTheShell(): void
+    public function aWarmProjectPageReadsAtMostSevenQueriesMoreThanTheShell(): void
     {
         $this->client->disableReboot();
         $this->addManyTickets('todo', 60);
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertLessThanOrEqual(5, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
+        self::assertLessThanOrEqual(self::LIST_AND_TOOLBAR_QUERY_BUDGET, $this->warmQueryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP'));
     }
 
     #[Test]
@@ -529,7 +668,7 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertSame(5, $this->queryCountMoreThanTheShellOf(self::TICKETS, false));
+        self::assertSame(7, $this->queryCountMoreThanTheShellOf(self::TICKETS, false));
     }
 
     #[Test]
@@ -540,7 +679,7 @@ final class TicketListTest extends WebTestCase
         $this->addTurnsAndAssignees();
         $this->logIn($this->client, $this->people['Lena']);
 
-        self::assertSame(6, $this->queryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP', false));
+        self::assertSame(8, $this->queryCountMoreThanTheShellOf(self::TICKETS.'?project=SHOP', false));
     }
 
     private function warmQueryCountMoreThanTheShellOf(string $uri): int

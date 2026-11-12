@@ -7,7 +7,12 @@
 {% endblock %}
 
 {% block main %}
-    <div class="tickets" id="ticket-list">
+    <div class="tickets" id="ticket-list" {{ stimulus_controller('ticket-list') }}
+        data-action="ticket-filters:changed->ticket-list#show">
+        <twig:TicketFilters project="{{ filters.project }}" person="{{ filters.person }}" :showsDone="filters.showsDone" q="{{ filters.q }}" />
+
+        {# TicketFilters sends the list's new URL after each change; this frame loads it. Links inside leave the page (_top) unless a nested frame owns them. #}
+        <turbo-frame id="ticket-list-frame" target="_top" {{ stimulus_target('ticket-list', 'frame') }}>
         <header class="tickets__header">
             <h1 class="tickets__title">{{ heading }}</h1>
             <p class="tickets__total">{{ totalLine }}</p>
@@ -65,5 +70,6 @@
                 <twig:EmptyState message="{{ noTickets }}" />
             {% endfor %}
         </div>
+        </turbo-frame>
     </div>
 {% endblock %}

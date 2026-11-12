@@ -23,7 +23,9 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Uid\Uuid;
 
 /**
  * The tickets list at /tickets (FR-TKT-02, FR-TKT-18, P03.T3): the tickets the viewer may see, one section per step in group
@@ -32,10 +34,12 @@ use Symfony\Component\Routing\Attribute\Route;
  * the ticket visibility predicate's (ADR-0013). A "Show more" link opens the next page of one step through
  * TicketListCursorParameter; a malformed one is a 400. SEARCH_QUERY, trimmed, keeps only the tickets that match it,
  * still grouped by step, each step in search order; a search longer than ListFilter::SEARCH_TEXT_MAX_LENGTH
- * characters, or not text, is a 400 before any query.
+ * characters, or not text, is a 400 before any query. PERSON_QUERY keeps only the tickets assigned to that person; an
+ * id that is not a canonical uuid is a 404, like a project key of no project. The toolbar is TicketFilters.
  *
- * Five queries at most whatever the number of tickets, with a search or without: the triager, the project by key,
- * then the list's rows, turn users and names (TicketQueries::list).
+ * Five queries at most for the list whatever the number of tickets, with a search or without: the triager, the
+ * project by key, then the list's rows, turn users and names (TicketQueries::list); the toolbar adds two at most
+ * (TicketFilters).
  */
 final class TicketListController extends AbstractController
 {
@@ -43,6 +47,7 @@ final class TicketListController extends AbstractController
     public const string PROJECT_QUERY = 'project';
     public const string DONE_QUERY = 'done';
     public const string SEARCH_QUERY = 'q';
+    public const string PERSON_QUERY = 'person';
 
     public const string ALL_TICKETS = 'All tickets';
     public const string NO_TICKETS = 'No tickets here yet.';
@@ -78,18 +83,25 @@ final class TicketListController extends AbstractController
         }
         $actor = $this->currentActor->actorFor($this->getUser()) ?? throw $this->createAccessDeniedException();
         $showsDone = '1' === $request->query->getString(self::DONE_QUERY);
+        $assigneeId = $this->assigneeIdOf($request);
 
         $visibility = $this->ticketVisibilities->ofActor($actor);
         $projectKey = $request->query->getString(self::PROJECT_QUERY);
         $project = '' === $projectKey ? null : ($this->projectQueries->projectByKey($projectKey) ?? throw $this->createNotFoundException('No project has that key.'));
-        $groups = $this->ticketQueries->list(new ListFilter($visibility, $project?->id(), $showsDone, $searchText), $cursor);
+        $groups = $this->ticketQueries->list(new ListFilter($visibility, $project?->id(), $showsDone, $searchText, $assigneeId), $cursor);
         $collapsedStepIds = CollapsedSteps::idsIn($request->getSession());
 
         return $this->render('@Ticketing/list.html.twig', [
             'heading' => null === $project ? self::ALL_TICKETS : $project->key().' · '.$project->name(),
             'totalLine' => TicketListText::totalLineOf($groups),
-            'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $searchText, $cursor, $collapsedStepIds),
-            'noTickets' => null === $searchText ? self::NO_TICKETS : self::NO_MATCHES,
+            'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $searchText, $assigneeId, $cursor, $collapsedStepIds),
+            'noTickets' => null === $searchText && null === $assigneeId ? self::NO_TICKETS : self::NO_MATCHES,
+            'filters' => [
+                'project' => $project?->key() ?? '',
+                'person' => $assigneeId ?? '',
+                'showsDone' => $showsDone,
+                'q' => $searchText ?? '',
+            ],
         ]);
     }
 
@@ -98,7 +110,7 @@ final class TicketListController extends AbstractController
      *
      * @return string|null why the list refuses the search, or null when it takes it
      */
-    private static function searchRefusalOf(string $searchText): ?string
+    public static function searchRefusalOf(string $searchText): ?string
     {
         if (!mb_check_encoding($searchText, 'UTF-8') || str_contains($searchText, "\0")) {
             return self::SEARCH_NOT_TEXT;
@@ -108,6 +120,22 @@ final class TicketListController extends AbstractController
         }
 
         return null;
+    }
+
+    /**
+     * @throws NotFoundHttpException when the person is sent but is not a canonical uuid
+     */
+    private function assigneeIdOf(Request $request): ?string
+    {
+        $assigneeId = $request->query->getString(self::PERSON_QUERY);
+        if ('' === $assigneeId) {
+            return null;
+        }
+        if (!Uuid::isValid($assigneeId) || Uuid::fromString($assigneeId)->toRfc4122() !== $assigneeId) {
+            throw $this->createNotFoundException('No person has that id.');
+        }
+
+        return $assigneeId;
     }
 
     /**
@@ -140,12 +168,12 @@ final class TicketListController extends AbstractController
      *
      * @return list<array{code: string, label: string, hint: string|null, steps: list<array<string, mixed>>}>
      */
-    private function groupViewsOf(array $groups, UserId $viewerId, ?ProjectChoice $project, bool $showsDone, ?string $searchText, ?Cursor $cursor, array $collapsedStepIds): array
+    private function groupViewsOf(array $groups, UserId $viewerId, ?ProjectChoice $project, bool $showsDone, ?string $searchText, ?string $assigneeId, ?Cursor $cursor, array $collapsedStepIds): array
     {
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
         $listQuery = array_filter(
-            [self::PROJECT_QUERY => $project?->key(), self::DONE_QUERY => $showsDone ? '1' : null, self::SEARCH_QUERY => $searchText],
+            [self::PROJECT_QUERY => $project?->key(), self::PERSON_QUERY => $assigneeId, self::DONE_QUERY => $showsDone ? '1' : null, self::SEARCH_QUERY => $searchText],
             static fn (?string $value): bool => null !== $value,
         );
 

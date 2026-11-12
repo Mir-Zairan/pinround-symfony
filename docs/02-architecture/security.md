@@ -296,6 +296,12 @@ Logs are JSON in every environment; in production they go to stdout (ADR-0029); 
 
 `LogLeakMarkerTest` sends a unique marker in a request body to a test-only endpoint that logs it under an unlisted key, under `description`, as a bound SQL value and in an exception message, and fails if the marker appears in what the log handler wrote. It also fails if `RedactionProcessor` is not the last processor of every channel.
 
+Search words count as ticket text. The tickets list carries them in its URL (`/tickets?q=`), so no log keeps a request URI with its query:
+
+- App logs: Symfony's router logs the URI as `request_uri`, which the allow-list drops; `TicketFiltersTest::aLoggedListRequestHoldsNoSearchWords` proves the record holds the words and the redacted line does not. Tracing keeps the route name, never the path or query (`SpanAttributes`).
+- The `TicketFilters` Live Component sends its props in a POST body, never in its URL.
+- Caddy (`docker/frankenphp/Caddyfile`) has no `log` directive, so it writes no access log. One added later must drop the query, for example `format filter { request>uri query { replace q [removed] } }`.
+
 ## Incident response basics
 
 1. **Detect:** alerts on error spikes, repeated permission denials, unusual export or token activity, RLS violations (should be zero).

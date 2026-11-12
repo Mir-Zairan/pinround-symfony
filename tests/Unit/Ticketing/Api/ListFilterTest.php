@@ -15,13 +15,14 @@ use PHPUnit\Framework\TestCase;
 final class ListFilterTest extends TestCase
 {
     private const string PROJECT = '0197a3c0-0000-7000-8000-00000000c011';
+    private const string ASSIGNEE = '0197a3c0-0000-7000-8000-0000000000a1';
 
     #[Test]
     public function byDefaultItShowsEveryProjectWithoutDone(): void
     {
         $filter = new ListFilter(self::visibility());
 
-        self::assertSame([null, false], [$filter->projectId, $filter->showsDone]);
+        self::assertSame([null, false, null], [$filter->projectId, $filter->showsDone, $filter->assigneeId]);
     }
 
     #[Test]
@@ -37,6 +38,33 @@ final class ListFilterTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
         new ListFilter(self::visibility(), 'SHOP');
+    }
+
+    #[Test]
+    public function itKeepsOneAssignee(): void
+    {
+        $filter = new ListFilter(self::visibility(), assigneeId: self::ASSIGNEE);
+
+        self::assertSame(self::ASSIGNEE, $filter->assigneeId);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function assigneeIdsThatAreNoCanonicalUuid(): iterable
+    {
+        yield 'a word' => ['Omar'];
+        yield 'uppercase' => [strtoupper(self::ASSIGNEE)];
+        yield 'with a newline after' => [self::ASSIGNEE."\n"];
+        yield 'empty' => [''];
+    }
+
+    #[Test]
+    #[DataProvider('assigneeIdsThatAreNoCanonicalUuid')]
+    public function anAssigneeIdThatIsNoCanonicalUuidIsRefused(string $assigneeId): void
+    {
+        $this->expectExceptionObject(new \InvalidArgumentException('A list filter\'s assignee id must be a canonical lowercase uuid.'));
+        new ListFilter(self::visibility(), assigneeId: $assigneeId);
     }
 
     #[Test]
