@@ -371,22 +371,32 @@ final class DatabaseRolesTest extends KernelTestCase
 
     /**
      * The ticket tables (Version20261111120000): the app reads, adds and changes tickets and summaries and removes
-     * neither; support reads under the tenant policy; nobody holds column rights.
+     * neither; support reads under the tenant policy. The only column rights are pinround_resolver's SELECT on the
+     * tkt_ticket columns search_ticket_ids matches on or returns (Version20261112120000).
      */
     #[Test]
     public function theTicketTablesGrantTheAppNoDeleteAndSupportOnlyRead(): void
     {
         $connection = $this->connection();
+        $expectedColumnGrants = [
+            'tkt_ticket' => array_map(
+                static fn (string $column): string => 'pinround_resolver SELECT '.$column,
+                ['organization_id', 'id', 'key', 'title', 'search', 'visibility', 'team_id', 'reporter_id', 'assignee_id',
+                    'pending_assignee_id', 'reviewer_id', 'tester_id', 'waiting_on_user_id'],
+            ),
+            'tkt_summary' => [],
+        ];
 
-        foreach (['tkt_ticket', 'tkt_summary'] as $table) {
+        foreach ($expectedColumnGrants as $table => $columnGrants) {
             self::assertEqualsCanonicalizing(
                 ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
                 $this->grantsToOthersThanTheOwner($connection, $table),
                 $table,
             );
             self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
-            self::assertSame([], $connection->fetchFirstColumn(
-                'SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)',
+            self::assertEqualsCanonicalizing($columnGrants, $connection->fetchFirstColumn(
+                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
+                 FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)",
                 ['public.'.$table],
             ), $table);
         }

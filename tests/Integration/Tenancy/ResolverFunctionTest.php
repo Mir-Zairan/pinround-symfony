@@ -212,6 +212,29 @@ final class ResolverFunctionTest extends KernelTestCase
         );
     }
 
+    /**
+     * resolver_read lets pinround_resolver read every organization's tickets, so a function of it that reads tkt_ticket
+     * keeps to the transaction's tenant itself: p_organization_id must equal app.org_id, or no row matches.
+     */
+    #[Test]
+    public function everyResolverFunctionThatReadsTicketsKeepsToTheTenantOfTheTransaction(): void
+    {
+        /** @var array<string, string> $bodiesByName */
+        $bodiesByName = $this->connection()->fetchAllKeyValue(
+            "SELECT p.proname, p.prosrc FROM pg_proc p
+             WHERE p.pronamespace = 'public'::regnamespace AND p.proowner = 'pinround_resolver'::regrole AND p.prosrc ~ '\\mtkt_ticket\\M'",
+        );
+
+        self::assertContains('search_ticket_ids', array_keys($bodiesByName));
+        foreach ($bodiesByName as $name => $body) {
+            self::assertMatchesRegularExpression(
+                "/\\bp_organization_id\\s*=\\s*NULLIF\\(\\s*current_setting\\('app\\.org_id',\\s*true\\),\\s*''\\s*\\)::uuid/",
+                $body,
+                $name,
+            );
+        }
+    }
+
     #[Test]
     public function aResolverFindsAnotherOrganizationsRowWhileTheAppRoleSeesOnlyItsOwn(): void
     {

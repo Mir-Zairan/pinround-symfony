@@ -30,7 +30,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  * The titles combine 17 subjects, 13 problems and 11 places, so each word sits in a few percent of the tickets, as in
  * an organization that has reported the same screens for years. 70% of the tickets are closed and were filed against
  * the old app, which their titles say. Every sixth ticket belongs to the Bakery team's project BAKE and only its team
- * may see it, which leaves out Omar; the Shop team's own team-only tickets he sees.
+ * may see it, which leaves out Omar; the Shop team's own team-only tickets he sees. Lena leads both teams.
  */
 final class TicketSearchQueryPlanTest extends KernelTestCase
 {
@@ -66,6 +66,10 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
         self::asTenantMigrator(static function (Connection $migrator): void {
             $migrator->executeStatement(
                 "INSERT INTO org_team (organization_id, id, name, slug, lead_user_id, created_at) VALUES (?, ?, 'Bakery', 'bakery', ?, '2027-03-15 10:00:00+00')",
+                [self::ACME_FOODS, self::BAKERY_TEAM, self::LENA],
+            );
+            $migrator->executeStatement(
+                "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, 'lead', 'developer', '2027-03-15 10:00:00+00')",
                 [self::ACME_FOODS, self::BAKERY_TEAM, self::LENA],
             );
         });
@@ -167,12 +171,18 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
         self::assertReadsTicketsThroughIndexes($plan, $scans, ['tkt_ticket_organization_id_key_key' => 'key = ']);
     }
 
+    /**
+     * BAKE-42 is team-only in Bakery: Omar finds nothing by its key, Lena, who leads Bakery, finds it first.
+     */
     #[Test]
     public function aKeyOfATicketTheViewerMayNotSeeFindsNothing(): void
     {
-        [$rows] = $this->searchAsOmar('bake-42');
+        [$rowsOfOmar] = $this->searchAsOmar('bake-42');
+        [$rowsOfLena] = $this->searchAs(self::LENA, [self::SHOP_TEAM, self::BAKERY_TEAM], 'bake-42');
 
-        self::assertSame([], $rows);
+        self::assertSame([], $rowsOfOmar);
+        self::assertNotSame([], $rowsOfLena);
+        self::assertSame('BAKE-42', $rowsOfLena[0][0]);
     }
 
     /**
@@ -310,16 +320,26 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
     }
 
     /**
-     * search_ticket_ids called as pinround_app under Acme Foods with Omar's visibility, in one rolled-back transaction,
-     * and the plan of its body for the same arguments.
+     * @return array{list<array{string, string}>, array<string, int>, string} as searchAs
+     */
+    private function searchAsOmar(string $query): array
+    {
+        return $this->searchAs(self::OMAR, [self::SHOP_TEAM], $query);
+    }
+
+    /**
+     * search_ticket_ids called as pinround_app under Acme Foods with the viewer's visibility, in one rolled-back
+     * transaction, and the plan of its body for the same arguments.
+     *
+     * @param list<string> $teamIds the teams the viewer's TicketVisibility gives, in id order
      *
      * @return array{list<array{string, string}>, array<string, int>, string} the key and title of each ticket found,
      *                                                                        best first, the scans of tkt_ticket the
      *                                                                        call made, and the plan
      */
-    private function searchAsOmar(string $query): array
+    private function searchAs(string $viewerId, array $teamIds, string $query): array
     {
-        $arguments = [...$this->searchArgumentsOfOmar(), 'query' => $query];
+        $arguments = [...$this->searchArgumentsOf($viewerId, $teamIds), 'query' => $query];
         [$rows, $scans] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($arguments): array {
             $connection = $this->connection();
             self::assertSame(['pinround_app', 'on'], [$connection->fetchOne('SELECT current_user'), $connection->fetchOne('SHOW row_security')]);
@@ -339,7 +359,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
             ) as $ticket) {
                 $ticketsById[self::textOf($ticket['id'])] = [self::textOf($ticket['key']), self::textOf($ticket['title'])];
             }
-            self::assertCount(\count($ticketIds), $ticketsById, 'The function returned an id twice or one Omar cannot read.');
+            self::assertCount(\count($ticketIds), $ticketsById, 'The function returned an id twice or one the viewer cannot read.');
             $scansOfTheCall = [];
             foreach ($scansAfter as $scanned => $count) {
                 $scansOfTheCall[$scanned] = $count - ($scansBefore[$scanned] ?? 0);
@@ -352,15 +372,18 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
     }
 
     /**
-     * The arguments of search_ticket_ids that Omar's TicketVisibility gives, read under Acme Foods as a request would.
+     * The arguments of search_ticket_ids that the viewer's TicketVisibility gives, read under Acme Foods as a request
+     * would; the viewer is neither admin nor triager.
+     *
+     * @param list<string> $teamIds
      *
      * @return array{org: string, me: string, teams: string, is_admin: string, is_triager: string}
      */
-    private function searchArgumentsOfOmar(): array
+    private function searchArgumentsOf(string $viewerId, array $teamIds): array
     {
         $visibility = $this->transactions()->rolledBackAs(
             self::ACME_FOODS,
-            fn (): TicketVisibility => $this->ticketVisibilities()->of(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR)),
+            fn (): TicketVisibility => $this->ticketVisibilities()->of(new OrganizationId(self::ACME_FOODS), new UserId($viewerId)),
         );
         $arguments = [
             'org' => $visibility->organizationId()->toString(),
@@ -369,7 +392,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
             'is_admin' => $visibility->isAdmin() ? 'true' : 'false',
             'is_triager' => $visibility->isTriager() ? 'true' : 'false',
         ];
-        self::assertSame(['{'.self::SHOP_TEAM.'}', 'false', 'false'], [$arguments['teams'], $arguments['is_admin'], $arguments['is_triager']]);
+        self::assertSame(['{'.implode(',', $teamIds).'}', 'false', 'false'], [$arguments['teams'], $arguments['is_admin'], $arguments['is_triager']]);
 
         return $arguments;
     }
