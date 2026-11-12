@@ -323,8 +323,93 @@ final class DbalTicketQueriesTest extends KernelTestCase
         $nextPage = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout'), $cursor)[0]->steps[0];
 
         self::assertSame([53, [$bestMatch, ...\array_slice($tiesHighestIdFirst, 0, 49)]], [$firstPage->ticketCount, self::keysOf($firstPage)]);
-        self::assertSame(50, $cursor->matchPosition);
+        self::assertSame($firstPage->rows[49]->id->toString(), $cursor->ticketId->toString());
+        self::assertFalse($cursor->searchOrderValues()[0] ?? true);
         self::assertSame([53, \array_slice($tiesHighestIdFirst, 49), false], [$nextPage->ticketCount, self::keysOf($nextPage), $nextPage->hasMore()]);
+    }
+
+    /**
+     * Between the first page and "Show more" a better match is added and one of the next page's ties stops matching.
+     * A cursor by place among the matches would then repeat the first page's last row; one by search order values goes
+     * on right after it, so each original match still shows exactly once and the one that stopped matching not at all.
+     */
+    #[Test]
+    public function aSearchCursorNeitherRepeatsNorSkipsARowWhenTheMatchesChangeBetweenPages(): void
+    {
+        $ties = $this->addTickets(ShopTeamRows::TO_DO_STEP, 55);
+        $tiesHighestIdFirst = array_reverse($ties);
+        $firstPage = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout'))[0]->steps[0];
+        $cursor = $firstPage->nextCursor;
+        self::assertNotNull($cursor);
+        self::assertSame(\array_slice($tiesHighestIdFirst, 0, 50), self::keysOf($firstPage));
+
+        $this->addSearchableTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 07:00:00+00', 'Checkout', '');
+        $stoppedMatching = $tiesHighestIdFirst[52];
+        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET title = 'Cart total shows the wrong sum' WHERE key = ?",
+            [$stoppedMatching],
+        ));
+        $nextPage = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout'), $cursor)[0]->steps[0];
+
+        self::assertSame([$tiesHighestIdFirst[50], $tiesHighestIdFirst[51], $tiesHighestIdFirst[53], $tiesHighestIdFirst[54]], self::keysOf($nextPage));
+        self::assertSame([55, false], [$nextPage->ticketCount, $nextPage->hasMore()]);
+    }
+
+    /**
+     * Done and the Ops project hold more matches than the cap, all with higher ids than the three open Shop matches,
+     * so a cap taken before the list's filters would fill up with them and list no Shop match at all.
+     */
+    #[Test]
+    public function theSearchCapComesAfterTheListsProjectAndDoneFilters(): void
+    {
+        $openShopMatches = $this->addTickets(ShopTeamRows::TO_DO_STEP, 3);
+        new TicketRows($this->migrator(), $this->tenantContext())->addKeyedProjectOf(self::ACME_FOODS, self::OPS_PROJECT, null, 'OPS', 1);
+        $this->addManyTickets(self::DONE_STEP, TicketListStep::COUNT_CAP + 1);
+        $this->addManyTickets(ShopTeamRows::TO_DO_STEP, TicketListStep::COUNT_CAP + 1, self::OPS_PROJECT);
+
+        $groups = $this->listedAs(self::ACME_FOODS, $this->filter(self::SHOP_PROJECT, searchText: 'checkout'));
+
+        self::assertSame([['todo', array_reverse($openShopMatches), 3, false]], array_map(
+            static fn (TicketListGroup $group): array => [$group->code, self::keysOf($group->steps[0]), $group->steps[0]->ticketCount, $group->steps[0]->isCountCapped],
+            $groups,
+        ));
+    }
+
+    /**
+     * 1,002 matches: the function's best 1,000 by id are the two Doing matches and 998 of To do's. Doing's count is
+     * marked capped too, as more of its matches could lie past the cap.
+     */
+    #[Test]
+    public function pastTheSearchCapEveryStepsCountIsMarkedCapped(): void
+    {
+        $this->addManyTickets(ShopTeamRows::TO_DO_STEP, TicketListStep::COUNT_CAP);
+        $doingMatches = $this->addTickets(self::DOING_STEP, 2);
+
+        $groups = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout'));
+
+        self::assertSame([['doing', 2, true], ['todo', 998, true]], self::codesCountsAndCapsOf($groups));
+        self::assertSame(array_reverse($doingMatches), self::keysOf($groups[0]->steps[0]));
+    }
+
+    #[Test]
+    public function exactlyAtTheSearchCapNoCountIsMarkedCapped(): void
+    {
+        $this->addManyTickets(ShopTeamRows::TO_DO_STEP, TicketListStep::COUNT_CAP - 2);
+        $this->addTickets(self::DOING_STEP, 2);
+
+        $groups = $this->listedAs(self::ACME_FOODS, $this->filter(searchText: 'checkout'));
+
+        self::assertSame([['doing', 2, false], ['todo', 998, false]], self::codesCountsAndCapsOf($groups));
+    }
+
+    /**
+     * @param list<TicketListGroup> $groups
+     *
+     * @return list<array{string, int, bool}> each group's code with its first step's count and whether it is capped
+     */
+    private static function codesCountsAndCapsOf(array $groups): array
+    {
+        return array_map(static fn (TicketListGroup $group): array => [$group->code, $group->steps[0]->ticketCount, $group->steps[0]->isCountCapped], $groups);
     }
 
     /**
@@ -363,7 +448,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
     public function aCursorThatDoesNotFitTheSearchIsRefusedBeforeAnyQuery(bool $hasSearch, bool $hasMatchPosition): void
     {
         $this->addTicket(ShopTeamRows::TO_DO_STEP, 2, '2027-03-15 10:00:00+00');
-        $cursor = new Cursor(ShopTeamRows::TO_DO_STEP, 2, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId('0197a3c0-0000-7000-8000-000000710001'), $hasMatchPosition ? 1 : null);
+        $cursor = new Cursor(ShopTeamRows::TO_DO_STEP, 2, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), new TicketId('0197a3c0-0000-7000-8000-000000710001'), $hasMatchPosition ? Cursor::matchPositionOf(false, '0.100000000000') : null);
         $debugData = $this->debugData();
 
         $refusal = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $cursor, $hasSearch): array {
@@ -555,7 +640,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
     /**
      * Normal tickets in one statement, as a thousand inserts one by one would be slow; their order does not matter.
      */
-    private function addManyTickets(string $stepId, int $count): void
+    private function addManyTickets(string $stepId, int $count, string $projectId = self::SHOP_PROJECT): void
     {
         $firstNumber = $this->nextNumber;
         $this->nextNumber += $count;
@@ -566,7 +651,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                  number, 'SHOP-' || number, 'Checkout button is hidden', '', 'bug', 'normal', 3, CAST(? AS uuid), CAST(? AS uuid), 'all',
                  '{}', '{}', TIMESTAMPTZ '2027-03-15 08:00:00+00', TIMESTAMPTZ '2027-03-15 08:00:00+00' + number * INTERVAL '1 minute'
              FROM generate_series(CAST(? AS int), CAST(? AS int)) AS number",
-            [self::ACME_FOODS, self::SHOP_PROJECT, $stepId, self::LENA, $firstNumber, $firstNumber + $count - 1],
+            [self::ACME_FOODS, $projectId, $stepId, self::LENA, $firstNumber, $firstNumber + $count - 1],
         ));
     }
 

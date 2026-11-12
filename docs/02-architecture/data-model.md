@@ -352,7 +352,7 @@ Some lookups must find a row before the app knows which organization the request
 | `resolve_sso_provider(p_issuer text, p_domain text)` | issuer or email domain at login | `provider_config_id, organization_id` | company login start and callback |
 | `resolve_jira_connection(p_connection_id uuid)` | id from the webhook URL | `organization_id` | Jira webhook intake |
 | `resolve_laptop_package(p_package_id uuid)` | id of a laptop-AI package | `organization_id, user_id` | laptop AI result intake |
-| `search_ticket_ids(p_organization_id uuid, p_query text, p_viewer_id uuid, p_team_ids uuid[], p_is_admin boolean, p_is_triager boolean)` | the tenant, the search text and the viewer's visibility inputs | `ticket_id`, at most 1,000, best first | ticket search (see [Query patterns](#query-patterns)); not a pre-tenant lookup, it returns nothing unless `p_organization_id` is the transaction's tenant |
+| `search_ticket_ids(p_organization_id uuid, p_query text, p_viewer_id uuid, p_team_ids uuid[], p_is_admin boolean, p_is_triager boolean, p_project_id uuid, p_step_ids uuid[])` | the tenant, the search text, the viewer's visibility inputs, and the list's project and steps (each NULL for all), applied before the cap | `ticket_id`, at most 1,001 (the best 1,000 and one that says the cap was hit), best first | ticket search (see [Query patterns](#query-patterns)); not a pre-tenant lookup, it returns nothing unless `p_organization_id` is the transaction's tenant |
 
 - **Where they live:** migration `Version20261106140000` creates the six lookups as stubs that return no row, with these signatures; `Version20261112120000` creates `search_ticket_ids` whole, with its body. The names are listed once in PHP, `App\SharedKernel\Infrastructure\Doctrine\Migration\ResolverFunctions::NAMES`, which the tests read. The phase that adds a function's table replaces its body with `CREATE OR REPLACE FUNCTION`, keeping the signature (and so the `EXECUTE` grants). `resolve_user_orgs` got its body in `Version20261108140000`: the `organization_id` of every `org_membership` row of the user, in id order (`ResolveUserOrgsTest`). `resolve_invitation` got its body in `Version20261109100000`: the ids of the open `org_invitation` row with that token hash, that is not accepted and with `expires_at > now()` (`ResolveInvitationTest`).
 - **How a resolver reads under `FORCE ROW LEVEL SECURITY`:** `pinround_resolver` has no `BYPASSRLS`, so the tenant policy applies to it too. The migration that creates a table a resolver reads adds the statements of `TenantTable::allowResolverRead('<table>', [<columns>])` after `enableRls`: an opt-in policy `resolver_read ... FOR SELECT TO pinround_resolver USING (true)` and `GRANT SELECT (<columns>)` to `pinround_resolver`. Grant only the columns a resolver returns or matches on, and on a partitioned table the parent only. A text column may be granted only to match on, never to return, and only to a function that keeps to the transaction's tenant: `tkt_ticket.title` and `search` for `search_ticket_ids` are the one case.
@@ -454,22 +454,30 @@ The list never joins `wf_step`: the step ids come from Workflow's `StepQueries::
 
 The cursor is sent to the browser unsigned: it only names a position (the step, rank, time and id of the last row shown), and the visibility predicate still runs on the page it asks for, so a forged cursor shows nothing the viewer may not see. The turn users of the shown rows are read in one batch from `ins_ticket_turn` through Insight's `TurnUserQueries::turnUsersOf`, not through `tkt_ticket_list_v`.
 
-**Ticket list with a search** (`/tickets?q=`, P03.T4) — the same query with the matches of `search_ticket_ids` as a CTE, so the search adds no query to the budget. The function's return order, numbered `WITH ORDINALITY`, is the order inside each step and the keyset of "Show more", so no float rank travels in the cursor (`after=<rank>.<time>.<id>.<match position>`); the step count counts the step's matches, of the function's 1,000 at most. The ids are joined back to `tkt_ticket` under RLS and `<visible(t)>`, so they never show a row the list would not (`TicketSearchLeakTest`):
+**Ticket list with a search** (`/tickets?q=`, P03.T4) — the same query with the matches of `search_ticket_ids` as a CTE, so the search adds no query to the budget. The function gets the list's project (or NULL) and the ids of the shown steps (Done only when the list shows it; the cursor's step alone on "Show more"), so its cap of 1,000 counts only tickets the list would show. It returns one id past the cap; when it does, every step's count is marked capped ("41+", "1,000+"), and that extra id is never shown. The ids are joined back to `tkt_ticket` under RLS and `<visible(t)>` once, in a second CTE that also works out the search order values again (the function returns ids only): the exact-key flag and the score `ts_rank × 0.6 + similarity × 0.4` rounded to a `numeric` of 12 decimals. Each step is ordered by (exact key, score, id), all descending, and "Show more" is a keyset on those values (`after=<rank>.<time>.<id>.<0|1>_<score>`): the score's text reads back exactly, and a match added or changed between pages neither repeats nor skips a row. The joined rows never show a row the list would not (`TicketSearchLeakTest`); `TicketListQueryPlanTest` proves the function and the join back read `tkt_ticket` through indexes:
 
 ```sql
 WITH matched AS MATERIALIZED (
-  SELECT ticket_id, match_position
-  FROM search_ticket_ids(:org, :q, :me, :team_ids, :is_admin, :is_triager) WITH ORDINALITY AS found(ticket_id, match_position)
-)
-... CROSS JOIN LATERAL (
-  SELECT t.id, ..., matched.match_position
+  SELECT ticket_id, found_position
+  FROM search_ticket_ids(:org, :q, :me, :team_ids, :is_admin, :is_triager, :project_or_null, :step_ids)
+       WITH ORDINALITY AS found(ticket_id, found_position)
+), searched AS MATERIALIZED (
+  SELECT t.id, t.step_id, ..., t.key = upper(btrim(:q)) AS is_exact_key_match,
+         round(CAST(<score of t> AS numeric), 12) AS match_score
   FROM matched JOIN tkt_ticket t ON t.id = matched.ticket_id
-  WHERE t.organization_id = :org AND t.step_id = listed.step_id AND <visible(t)>
-    AND matched.match_position > :last_match_position   -- "Show more" only
-  ORDER BY matched.match_position
+  WHERE matched.found_position <= 1000
+    AND t.organization_id = :org AND t.step_id = ANY(:step_ids) [AND t.project_id = :project] AND <visible(t)>
+)
+SELECT listed.step_id, x.*, step_count.ticket_count, (SELECT count(*) FROM matched) > 1000 AS is_search_capped
+FROM unnest(:step_ids) WITH ORDINALITY AS listed(step_id, list_position)
+CROSS JOIN LATERAL (SELECT count(*) AS ticket_count FROM searched WHERE searched.step_id = listed.step_id) step_count
+CROSS JOIN LATERAL (
+  SELECT * FROM searched WHERE searched.step_id = listed.step_id
+    AND (is_exact_key_match, match_score, id) < (:after_exact, :after_score, :after_id)   -- "Show more" only
+  ORDER BY is_exact_key_match DESC, match_score DESC, id DESC
   LIMIT 51
 ) x
-ORDER BY listed.list_position, x.match_position;
+ORDER BY listed.list_position, x.is_exact_key_match DESC, x.match_score DESC, x.id DESC;
 ```
 
 `q` is trimmed; empty means no search, and more than 200 characters, invalid UTF-8 or a NUL is a 400 before any query.
@@ -517,7 +525,7 @@ LIMIT 20;
 
 1. A CI test runs `EXPLAIN` on the search, duplicate and embedding queries **as `pinround_app` with the tenant set**, on a seeded database, and fails if the plan does not use the GIN/HNSW index. For search and duplicates this is `TicketSearchQueryPlanTest` (50,000 tickets, the visibility predicate applied). It also explains each query as the table owner without RLS, where both GIN indexes must be used. Its first run (2026-11-12) showed that under RLS the planner skips both GIN indexes and reads the organization by sequential or B-tree scan, while without RLS it uses them, so the policy is the cause; the RLS case is marked incomplete until the fallback below lands.
 2. If it does not, the query moves into a `SECURITY DEFINER` function (owner `pinround_resolver`, fixed `search_path`) that takes the organization id and the visibility inputs as explicit `p_`-prefixed arguments (`p_organization_id`, never `organization_id`), filters on them first, and returns ticket ids only. It is listed with the resolver functions in [Row-level security](#row-level-security).
-3. Search uses this fallback (2026-11-12): `search_ticket_ids` (`Version20261112120000`) matches `search @@ websearch_to_tsquery('simple', tkt_unaccent(p_query))`, `title % p_query` or the exact key (`upper(btrim(p_query))`), applies the visibility predicate written out in SQL, then keeps the best 1,000 (exact key, then `ts_rank × 0.6 + similarity × 0.4`, then id). It reads tkt_ticket through `resolver_read` with `SELECT` on the matched and predicate columns only, `title` and `search` included as match columns, never returned. `TicketSearchQueryPlanTest` proves the GIN and key indexes are used (the body explained as `pinround_resolver`, and the real call's scan counts from `pg_stat_get_xact_numscans`); `TicketSearchFunctionLeakTest` proves it finds what `TicketVisibilitySql` shows for each viewer of the cast. Duplicate candidates still run as `pinround_app` (incomplete in the test, P06).
+3. Search uses this fallback (2026-11-12): `search_ticket_ids` (`Version20261112120000`) matches `search @@ websearch_to_tsquery('simple', tkt_unaccent(p_query))`, `title % p_query` or the exact key (`upper(btrim(p_query))`), applies the visibility predicate written out in SQL and the list's project and steps, then keeps the best 1,000 and one more (exact key, then `ts_rank × 0.6 + similarity × 0.4`, then id). It reads tkt_ticket through `resolver_read` with `SELECT` on the matched, filter (`project_id`, `step_id`) and predicate columns only, `title` and `search` included as match columns, never returned. `TicketSearchQueryPlanTest` proves the GIN and key indexes are used (the body explained as `pinround_resolver`, and the real call's scan counts from `pg_stat_get_xact_numscans`); `TicketSearchFunctionLeakTest` proves it finds what `TicketVisibilitySql` shows for each viewer of the cast. Duplicate candidates still run as `pinround_app` (incomplete in the test, P06).
 
 The thresholds are tuned in phase 6. The text-search configuration ('simple' or a language) is chosen per org ([ADR-0022](../03-adr/0022-search-and-duplicates.md)).
 

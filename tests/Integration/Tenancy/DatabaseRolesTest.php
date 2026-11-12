@@ -372,7 +372,7 @@ final class DatabaseRolesTest extends KernelTestCase
     /**
      * The ticket tables (Version20261111120000): the app reads, adds and changes tickets and summaries and removes
      * neither; support reads under the tenant policy. The only column rights are pinround_resolver's SELECT on the
-     * tkt_ticket columns search_ticket_ids matches on or returns (Version20261112120000).
+     * tkt_ticket columns search_ticket_ids matches on, filters on or returns (Version20261112120000).
      */
     #[Test]
     public function theTicketTablesGrantTheAppNoDeleteAndSupportOnlyRead(): void
@@ -381,8 +381,8 @@ final class DatabaseRolesTest extends KernelTestCase
         $expectedColumnGrants = [
             'tkt_ticket' => array_map(
                 static fn (string $column): string => 'pinround_resolver SELECT '.$column,
-                ['organization_id', 'id', 'key', 'title', 'search', 'visibility', 'team_id', 'reporter_id', 'assignee_id',
-                    'pending_assignee_id', 'reviewer_id', 'tester_id', 'waiting_on_user_id'],
+                ['organization_id', 'id', 'project_id', 'step_id', 'key', 'title', 'search', 'visibility', 'team_id', 'reporter_id',
+                    'assignee_id', 'pending_assignee_id', 'reviewer_id', 'tester_id', 'waiting_on_user_id'],
             ),
             'tkt_summary' => [],
         ];

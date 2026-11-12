@@ -46,6 +46,9 @@ final class TicketListQueryPlanTest extends KernelTestCase
     private const string BAKERY_PROJECT = '0197a3c0-0000-7000-8000-0000000073d2';
     private const string BEN = '0197a3c0-0000-7000-8000-0000000073b2';
     private const int OTHER_ORGANIZATION_TICKET_COUNT = 40_000;
+    private const string SEARCH_TEXT = 'refund';
+    private const string SEQUENTIAL_SCANS = 'sequential';
+    private const string INDEX_SCANS = 'index';
 
     public static function setUpBeforeClass(): void
     {
@@ -68,7 +71,8 @@ final class TicketListQueryPlanTest extends KernelTestCase
              FROM generate_series(1, ?) AS number",
             [self::BETA_BAKERY, self::BAKERY_PROJECT, self::BAKERY_TEAM, ShopTeamRows::TO_DO_STEP, self::BEN, self::OTHER_ORGANIZATION_TICKET_COUNT],
         ));
-        // Of every 20 tickets 14 are in Done, 3 in To do and 1 in each of In progress, Code review and Needs input.
+        // Of every 20 tickets 14 are in Done, 3 in To do and 1 in each of In progress, Code review and Needs input; 2 of
+        // every 40 match the search "refund", 250 in To do and 250 in In progress.
         self::asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator): void {
             foreach ([
                 [self::IN_PROGRESS_STEP, 'In progress', 'doing', 'progress', 2],
@@ -85,7 +89,8 @@ final class TicketListQueryPlanTest extends KernelTestCase
                 "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
                      step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
                  SELECT CAST(? AS uuid), CAST('0197a3c0-0000-7000-8001-' || lpad(to_hex(number), 12, '0') AS uuid), CAST(? AS uuid), CAST(? AS uuid),
-                     number, 'SHOP-' || number, 'Checkout button is hidden', '', 'bug',
+                     number, 'SHOP-' || number,
+                     CASE WHEN number % 40 IN (15, 17) THEN 'Refund email is late' ELSE 'Checkout button is hidden' END, '', 'bug',
                      (ARRAY['blocker', 'critical', 'major', 'normal', 'minor'])[number % 5 + 1], number % 5,
                      CASE WHEN number % 20 < 14 THEN CAST(? AS uuid) WHEN number % 20 < 17 THEN CAST(? AS uuid)
                          WHEN number % 20 = 17 THEN CAST(? AS uuid) WHEN number % 20 = 18 THEN CAST(? AS uuid) ELSE CAST(? AS uuid) END,
@@ -146,6 +151,45 @@ final class TicketListQueryPlanTest extends KernelTestCase
         $this->assertReadsTicketsThroughAnIndex($this->planOf(null, true, $cursor));
     }
 
+    /**
+     * The plan shows search_ticket_ids only as a Function Scan, so the scans the call made, its body's included, are
+     * read from the statistics: none sequential, and some through an index.
+     */
+    #[Test]
+    public function aSearchsFirstPageReadsTicketsThroughAnIndexInsideTheFunctionAndInTheJoinBack(): void
+    {
+        [$plan, $scans] = $this->planAndScansOf(null, false, null, self::SEARCH_TEXT);
+
+        $this->assertReadsTicketsThroughAnIndex($plan);
+        self::assertSame(0, $scans[self::SEQUENTIAL_SCANS], $plan);
+        self::assertGreaterThan(0, $scans[self::INDEX_SCANS], $plan);
+    }
+
+    /**
+     * To do holds 250 matches, so its first page has a next cursor; the next page is read with it.
+     */
+    #[Test]
+    public function aSearchsNextPageReadsTicketsThroughAnIndexInsideTheFunctionAndInTheJoinBack(): void
+    {
+        $firstPage = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->ticketQueries()->list(
+            new ListFilter($this->ticketVisibilities()->of(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR)), searchText: self::SEARCH_TEXT),
+        ));
+        $cursor = null;
+        foreach ($firstPage as $group) {
+            foreach ($group->steps as $step) {
+                $cursor = ShopTeamRows::TO_DO_STEP === $step->stepId ? $step->nextCursor : $cursor;
+            }
+        }
+        self::assertNotNull($cursor, 'To do has no next page to read.');
+        self::assertNotNull($cursor->matchPosition);
+
+        [$plan, $scans] = $this->planAndScansOf(null, false, $cursor, self::SEARCH_TEXT);
+
+        $this->assertReadsTicketsThroughAnIndex($plan);
+        self::assertSame(0, $scans[self::SEQUENTIAL_SCANS], $plan);
+        self::assertGreaterThan(0, $scans[self::INDEX_SCANS], $plan);
+    }
+
     private function assertReadsTicketsThroughAnIndex(string $plan): void
     {
         self::assertMatchesRegularExpression('/(Index Scan|Index Only Scan|Bitmap Index Scan) (Backward )?using tkt_ticket_\w+ on tkt_ticket|Bitmap Index Scan on tkt_ticket_/', $plan, $plan);
@@ -157,18 +201,59 @@ final class TicketListQueryPlanTest extends KernelTestCase
      */
     private function planOf(?string $projectId, bool $showsDone, ?Cursor $cursor): string
     {
+        return $this->planAndScansOf($projectId, $showsDone, $cursor, null)[0];
+    }
+
+    /**
+     * The list read as Omar's page reads it, as pinround_app under Acme Foods, and its SQL explained in the same
+     * transaction.
+     *
+     * @return array{string, array{sequential: int, index: int}} the plan, and the scans of tkt_ticket the list made
+     */
+    private function planAndScansOf(?string $projectId, bool $showsDone, ?Cursor $cursor, ?string $searchText): array
+    {
         $debugData = $this->debugData();
 
-        return $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $projectId, $showsDone, $cursor): string {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $projectId, $showsDone, $cursor, $searchText): array {
+            $connection = $this->connection();
+            self::assertSame(['pinround_app', 'on'], [$connection->fetchOne('SELECT current_user'), $connection->fetchOne('SHOW row_security')]);
             $visibility = $this->ticketVisibilities()->of(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR));
+            $scansBefore = self::scansOfTicketTable($connection);
             $debugData->reset();
-            $this->ticketQueries()->list(new ListFilter($visibility, $projectId, $showsDone), $cursor);
+            $groups = $this->ticketQueries()->list(new ListFilter($visibility, $projectId, $showsDone, $searchText), $cursor);
+            $scansAfter = self::scansOfTicketTable($connection);
+            self::assertNotSame([], $groups, 'The list found no ticket, so its plan proves little.');
             [$sql, $parameters] = self::listQueryOf($debugData);
 
-            $planLines = $this->connection()->fetchFirstColumn('EXPLAIN '.$sql, $parameters);
+            $planLines = $connection->fetchFirstColumn('EXPLAIN '.$sql, $parameters);
 
-            return implode("\n", array_map(static fn (mixed $line): string => \is_string($line) ? $line : '', $planLines));
+            return [
+                implode("\n", array_map(static fn (mixed $line): string => \is_string($line) ? $line : '', $planLines)),
+                [
+                    self::SEQUENTIAL_SCANS => $scansAfter[self::SEQUENTIAL_SCANS] - $scansBefore[self::SEQUENTIAL_SCANS],
+                    self::INDEX_SCANS => $scansAfter[self::INDEX_SCANS] - $scansBefore[self::INDEX_SCANS],
+                ],
+            ];
         });
+    }
+
+    /**
+     * The scans of tkt_ticket so far in this transaction: pg_stat_get_xact_numscans counts what this backend has not
+     * reported yet, a SECURITY DEFINER function's included, so a call's own scans are the difference of two readings.
+     *
+     * @return array{sequential: int, index: int}
+     */
+    private static function scansOfTicketTable(Connection $connection): array
+    {
+        $scans = $connection->fetchAssociative(
+            "SELECT pg_stat_get_xact_numscans('public.tkt_ticket'::regclass) AS sequential,
+                 (SELECT sum(pg_stat_get_xact_numscans(i.indexrelid)) FROM pg_index i WHERE i.indrelid = 'public.tkt_ticket'::regclass)::bigint AS index",
+        );
+        self::assertIsArray($scans);
+        self::assertIsInt($scans[self::SEQUENTIAL_SCANS]);
+        self::assertIsInt($scans[self::INDEX_SCANS]);
+
+        return [self::SEQUENTIAL_SCANS => $scans[self::SEQUENTIAL_SCANS], self::INDEX_SCANS => $scans[self::INDEX_SCANS]];
     }
 
     /**
@@ -183,7 +268,7 @@ final class TicketListQueryPlanTest extends KernelTestCase
             self::assertIsArray($queriesOfOneConnection);
             foreach ($queriesOfOneConnection as $query) {
                 self::assertIsArray($query);
-                if (\is_string($query['sql'] ?? null) && str_contains($query['sql'], 'FROM tkt_ticket AS ticket')) {
+                if (\is_string($query['sql'] ?? null) && str_contains($query['sql'], 'tkt_ticket AS ticket')) {
                     self::assertIsArray($query['params']);
 
                     /** @var array<string, mixed> $parameters */

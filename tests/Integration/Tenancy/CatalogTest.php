@@ -285,7 +285,7 @@ final class CatalogTest extends KernelTestCase
         self::assertSame(
             ['search_ticket_ids: 0 SECURITY DEFINER functions in public, expected 1'],
             $this->inRolledBackFixture(
-                ['SET LOCAL ROLE pinround_resolver', 'DROP FUNCTION search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean)', 'RESET ROLE'],
+                ['SET LOCAL ROLE pinround_resolver', 'DROP FUNCTION search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean, uuid, uuid[])', 'RESET ROLE'],
                 static fn (TenancyCatalog $catalog): array => $catalog->securityDefinerFunctionsOutsideTheResolvers(),
             ),
         );

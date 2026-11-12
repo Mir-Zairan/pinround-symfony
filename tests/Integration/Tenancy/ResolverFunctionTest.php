@@ -46,7 +46,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_sso_provider' => "resolve_sso_provider('https://login.acme-foods.example', 'acme-foods.example')",
         'resolve_jira_connection' => "resolve_jira_connection('".self::UNKNOWN_ID."'::uuid)",
         'resolve_laptop_package' => "resolve_laptop_package('".self::UNKNOWN_ID."'::uuid)",
-        'search_ticket_ids' => "search_ticket_ids('".self::UNKNOWN_ID."'::uuid, 'checkout', '".self::UNKNOWN_ID."'::uuid, '{}'::uuid[], true, true)",
+        'search_ticket_ids' => "search_ticket_ids('".self::UNKNOWN_ID."'::uuid, 'checkout', '".self::UNKNOWN_ID."'::uuid, '{}'::uuid[], true, true, NULL, NULL)",
     ];
 
     private const array OUTPUT_COLUMNS = [
@@ -184,15 +184,16 @@ final class ResolverFunctionTest extends KernelTestCase
 
     /**
      * search_ticket_ids reads tkt_ticket through resolver_read, and only the columns it matches on or returns: never
-     * the description, people beyond the visibility predicate's, dates or status.
+     * the description, people beyond the visibility predicate's, dates or status. Project and step are the list's own
+     * filters, applied before the cap.
      */
     #[Test]
     public function theTicketSearchReadsOnlyTheColumnsItMatchesOnOrReturns(): void
     {
         self::assertEqualsCanonicalizing(
             [
-                'organization_id', 'id', 'key', 'title', 'search', 'visibility', 'team_id', 'reporter_id', 'assignee_id',
-                'pending_assignee_id', 'reviewer_id', 'tester_id', 'waiting_on_user_id',
+                'organization_id', 'id', 'project_id', 'step_id', 'key', 'title', 'search', 'visibility', 'team_id', 'reporter_id',
+                'assignee_id', 'pending_assignee_id', 'reviewer_id', 'tester_id', 'waiting_on_user_id',
             ],
             $this->connection()->fetchFirstColumn(
                 "SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl

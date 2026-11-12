@@ -187,14 +187,15 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
 
     /**
      * About 7,000 tickets mention checkout, a sixth of them Bakery's, which Omar may not see. Were the cap taken before
-     * the visibility condition, those would take places among the best 1,000 and leave fewer for him.
+     * the visibility condition, those would take places among the best 1,000 and leave fewer for him. The function
+     * returns one past the cap, which says the cap was hit.
      */
     #[Test]
     public function aCommonWordGivesTheViewerTheCapOfTicketsHeMaySee(): void
     {
         [$rows] = $this->searchAsOmar('checkout');
 
-        self::assertCount(1_000, $rows);
+        self::assertCount(1_001, $rows);
         foreach ($rows as [$key]) {
             self::assertStringStartsWith('SHOP-', $key);
         }
@@ -347,7 +348,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
             $scansBefore = self::scansOfTicketTable($connection);
             $ticketIds = $connection->fetchFirstColumn(
                 'SELECT ticket_id FROM search_ticket_ids(CAST(:org AS uuid), CAST(:query AS text), CAST(:me AS uuid),
-                     CAST(:teams AS uuid[]), CAST(:is_admin AS boolean), CAST(:is_triager AS boolean))',
+                     CAST(:teams AS uuid[]), CAST(:is_admin AS boolean), CAST(:is_triager AS boolean), NULL, NULL)',
                 $arguments,
             );
             $scansAfter = self::scansOfTicketTable($connection);
@@ -436,8 +437,10 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
             'p_team_ids' => 'CAST('.$migrator->quote($arguments['teams']).' AS uuid[])',
             'p_is_admin' => 'CAST('.$migrator->quote($arguments['is_admin']).' AS boolean)',
             'p_is_triager' => 'CAST('.$migrator->quote($arguments['is_triager']).' AS boolean)',
+            'p_project_id' => 'CAST(NULL AS uuid)',
+            'p_step_ids' => 'CAST(NULL AS uuid[])',
         ];
-        $body = $migrator->fetchOne("SELECT prosrc FROM pg_proc WHERE oid = 'public.search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean)'::regprocedure");
+        $body = $migrator->fetchOne("SELECT prosrc FROM pg_proc WHERE oid = 'public.search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean, uuid, uuid[])'::regprocedure");
         self::assertIsString($body);
         $sql = preg_replace_callback(
             '/\bp_[a-z_]+\b/',

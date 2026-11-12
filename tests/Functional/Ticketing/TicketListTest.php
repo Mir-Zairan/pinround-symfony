@@ -219,7 +219,8 @@ final class TicketListTest extends WebTestCase
         yield 'after without step' => ['after=3.1805000000.0197a3c0-0000-7000-8000-000000000001'];
         yield 'step without after' => ['step=0197a3c0-0000-7000-8000-00000000f0d0'];
         yield 'after as an array' => ['step=0197a3c0-0000-7000-8000-00000000f0d0&after[]=1'];
-        yield 'a search cursor without the search' => ['step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001.7'];
+        yield 'a search cursor without the search' => ['step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001.0_0.169808963686'];
+        yield 'an old ordinal match position with the search' => ['q=checkout&step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001.7'];
         yield 'a priority cursor with a search' => ['q=checkout&step=0197a3c0-0000-7000-8000-00000000f0d0&after=3.1805000000.0197a3c0-0000-7000-8000-000000000001'];
         yield 'a search as an array' => ['q[]=checkout'];
     }
@@ -412,7 +413,7 @@ final class TicketListTest extends WebTestCase
         self::assertSame(['SHOP', 'checkout'], [$moreQuery['project'] ?? null, $moreQuery['q'] ?? null]);
         $after = $moreQuery['after'] ?? null;
         self::assertIsString($after);
-        self::assertStringEndsWith('.50', $after);
+        self::assertMatchesRegularExpression('/^\d\.\d+\.[0-9a-f-]{36}\.0_0\.\d{12}\z/', $after);
 
         $nextPage = $this->client->click($moreLink->link());
 
