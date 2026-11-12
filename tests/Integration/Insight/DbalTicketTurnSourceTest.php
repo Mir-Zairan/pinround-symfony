@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Insight;
 use App\Insight\Api\TurnProjector;
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TicketTurnSource;
+use App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries;
 use App\Insight\Infrastructure\Doctrine\DbalTicketTurnSource;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -191,7 +192,7 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         $snapshotUnderAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketTurnSnapshot => $this->turnQueries()->factsOf($ticketId));
         self::assertNotNull($snapshotUnderAcme);
 
-        $factsUnderAcmeContext = $this->ownConnectionTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, fn (Connection $connection): ?TicketTurnFacts => new DbalTicketTurnSource(self::turnQueriesReturning($snapshotUnderAcme), $connection, $this->tenantContext())->factsFor($ticketId));
+        $factsUnderAcmeContext = $this->ownConnectionTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, fn (Connection $connection): ?TicketTurnFacts => new DbalTicketTurnSource(self::turnQueriesReturning($snapshotUnderAcme), new DbalTeamLoadQueries($connection, $this->tenantContext()), $connection)->factsFor($ticketId));
 
         self::assertNotNull($factsUnderAcmeContext);
         self::assertSame([self::LENA => [0, 0], self::OMAR => [0, 0]], self::loadsOf($factsUnderAcmeContext->team->developers));
@@ -211,7 +212,7 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         $debugData->reset();
 
         try {
-            new DbalTicketTurnSource(self::turnQueriesReturning($snapshotUnderAcme), $this->connection(), $this->tenantContext())->factsFor($ticketId);
+            new DbalTicketTurnSource(self::turnQueriesReturning($snapshotUnderAcme), new DbalTeamLoadQueries($this->connection(), $this->tenantContext()), $this->connection())->factsFor($ticketId);
             self::fail('The turn facts were read with no transaction.');
         } catch (\LogicException $refusal) {
             self::assertSame(

@@ -8,6 +8,8 @@ use App\Identity\Domain\User;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
+use App\Organization\Infrastructure\Doctrine\StoredSettings;
+use App\Organization\Infrastructure\Doctrine\StoredSettingsQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -615,7 +617,7 @@ final class TeamPageTest extends WebTestCase
     public function theTeamPageReadsTheStepPolicyOnce(): void
     {
         $this->client->disableReboot();
-        $settings = new class implements SettingsQueries {
+        $settings = new class implements SettingsQueries, StoredSettingsQueries {
             public int $reads = 0;
 
             public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
@@ -628,6 +630,11 @@ final class TeamPageTest extends WebTestCase
             public function triagerOf(OrganizationId $organizationId): ?UserId
             {
                 return null;
+            }
+
+            public function settingsOf(OrganizationId $organizationId): StoredSettings
+            {
+                return new StoredSettings($this->stepPolicyOf($organizationId), $this->triagerOf($organizationId));
             }
         };
         self::getContainer()->set(DbalSettingsQueries::class, $settings);

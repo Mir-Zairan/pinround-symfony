@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Ticketing;
 
 use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
 use App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries;
+use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -278,6 +279,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
+                new DbalTeamQueries($connection),
             )->list($this->filter()),
         );
 
@@ -573,11 +575,11 @@ final class DbalTicketQueriesTest extends KernelTestCase
     }
 
     /**
-     * With the steps cached: the ticket with its project and parent in one query, the names of its reporter and
-     * assignee in one. The parent is a team-only ticket of Shop, which the admin may see.
+     * With the steps cached: the ticket with its project and parent in one query, its team's lead and its people in
+     * two, the names of everyone in one. The parent is a team-only ticket of Shop, which the admin may see.
      */
     #[Test]
-    public function aPageCarriesTheTicketItsProjectStepNamesAndVisibilityFactsInTwoQueries(): void
+    public function aPageCarriesTheTicketItsProjectStepNamesVisibilityAndTurnFactsInFourQueries(): void
     {
         $parentKey = $this->addTicket(self::DOING_STEP, 2, '2027-03-15 10:00:00+00');
         $key = $this->addTicket(self::CHECKING_STEP, 1, '2027-03-15 11:00:00+00');
@@ -594,6 +596,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
 
         [$page, $queryCount] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $key): array {
             $this->stepQueries()->listedSteps();
+            $this->stepQueries()->stepsFor(new TeamId(self::SHOP_TEAM));
             $debugData->reset();
             $page = $this->ticketQueries()->pageOf($key, self::adminOf(self::ACME_FOODS));
 
@@ -601,7 +604,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
         });
 
         self::assertNotNull($page);
-        self::assertSame(2, $queryCount);
+        self::assertSame(4, $queryCount);
         self::assertSame(
             [
                 'SHOP-2', 'Search shows no results', "Typing a product name finds nothing.\r\nIt worked last week.", 'story', 'critical', '2027.3',
@@ -621,6 +624,49 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $facts->assigneeId?->toString(), $facts->pendingAssigneeId, $facts->reviewerId?->toString(), $facts->testerId, $facts->waitingOnUserId,
             ],
         );
+    }
+
+    /**
+     * The turn facts come from the page's own row: its step's core code, the team's lead and people and the ticket's
+     * people, each named once in the page's batch.
+     */
+    #[Test]
+    public function aPageCarriesTheTurnFactsAndNamesOfTheTicketAndItsTeam(): void
+    {
+        $key = $this->addTicket(ShopTeamRows::TO_DO_STEP, 1, '2027-03-15 11:00:00+00');
+        $this->asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator) use ($key): void {
+            $migrator->executeStatement(
+                "UPDATE tkt_ticket SET team_id = ?, assignee_id = ?, reviewer_id = ?, waiting_on_label = 'Supplier', waiting_on_user_id = ?,
+                     check_reasons = '{risk}' WHERE key = ?",
+                [self::SHOP_TEAM, self::OMAR, self::LENA, self::OMAR, $key],
+            );
+        });
+
+        $page = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketPageView => $this->ticketQueries()->pageOf($key, self::adminOf(self::ACME_FOODS)));
+
+        self::assertNotNull($page);
+        $snapshot = $page->turnSnapshot;
+        self::assertSame(
+            ['todo', 'todo', self::SHOP_TEAM, self::LENA, 'Lena', self::OMAR, self::LENA, 'Supplier', self::OMAR, true],
+            [$snapshot->coreCode, $snapshot->groupCode, $snapshot->teamId?->toString(), $snapshot->leadId?->toString(), $snapshot->leadDisplayName, $snapshot->assigneeId?->toString(), $snapshot->reviewerId?->toString(), $snapshot->waitingOnLabel, $snapshot->waitingOnUserId?->toString(), $snapshot->isRiskCheck],
+        );
+        self::assertSame('Lena', $page->displayNames[self::LENA] ?? null);
+        self::assertSame('Omar', $page->displayNames[self::OMAR] ?? null);
+    }
+
+    #[Test]
+    public function aPageOfATicketNoTeamOwnsHasNoLeadAndNoPeopleInItsTurnFacts(): void
+    {
+        $key = $this->addTicket(self::CHECKING_STEP, 1, '2027-03-15 11:00:00+00');
+        $this->asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator) use ($key): void {
+            $migrator->executeStatement('UPDATE tkt_ticket SET team_id = NULL WHERE key = ?', [$key]);
+        });
+
+        $page = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketPageView => $this->ticketQueries()->pageOf($key, self::adminOf(self::ACME_FOODS)));
+
+        self::assertNotNull($page);
+        $snapshot = $page->turnSnapshot;
+        self::assertSame([null, null, [], [], null], [$snapshot->teamId, $snapshot->leadId, $snapshot->developerIds, $snapshot->testerIds, $snapshot->coreCode]);
     }
 
     #[Test]
@@ -727,6 +773,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
+                new DbalTeamQueries($connection),
             )->pageOf($key, self::adminOf(self::ACME_FOODS)),
         );
 

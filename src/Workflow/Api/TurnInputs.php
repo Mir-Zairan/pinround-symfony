@@ -14,6 +14,10 @@ use App\SharedKernel\Domain\UserId;
  */
 final class TurnInputs
 {
+    /** The kinds of a waiting turn that teamFacts counts; they are the values of Insight's TeamLoadQueries::KIND_REVIEW and KIND_TEST. */
+    public const string WAITING_REVIEW = 'review';
+    public const string WAITING_TEST = 'test';
+
     private function __construct()
     {
     }
@@ -62,15 +66,15 @@ final class TurnInputs
      * @param list<UserId>                      $developerIds the team's developers; the lead may be among them
      * @param list<UserId>                      $testerIds    the team's testers
      * @param array<string, array<string, int>> $waitingTurns review and test turns waiting, by user id string and kind
-     *                                                        ("review", "test"); a person or kind left out counts 0
+     *                                                        (WAITING_REVIEW, WAITING_TEST); a person or kind left out counts 0
      */
     public static function teamFacts(UserId $leadId, string $leadDisplayName, array $developerIds, array $testerIds, array $waitingTurns): TeamFacts
     {
         return new TeamFacts(
             $leadId,
             $leadDisplayName,
-            array_map(static fn (UserId $developerId): TeamMemberLoad => new TeamMemberLoad($developerId, openReviews: $waitingTurns[$developerId->toString()]['review'] ?? 0), $developerIds),
-            array_map(static fn (UserId $testerId): TeamMemberLoad => new TeamMemberLoad($testerId, ticketsInTesting: $waitingTurns[$testerId->toString()]['test'] ?? 0), $testerIds),
+            array_map(static fn (UserId $developerId): TeamMemberLoad => new TeamMemberLoad($developerId, openReviews: $waitingTurns[$developerId->toString()][self::WAITING_REVIEW] ?? 0), $developerIds),
+            array_map(static fn (UserId $testerId): TeamMemberLoad => new TeamMemberLoad($testerId, ticketsInTesting: $waitingTurns[$testerId->toString()][self::WAITING_TEST] ?? 0), $testerIds),
         );
     }
 }

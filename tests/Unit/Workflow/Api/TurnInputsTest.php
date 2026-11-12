@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Workflow\Api;
 
+use App\Insight\Api\TeamLoadQueries;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\TurnInputs;
@@ -76,6 +77,23 @@ final class TurnInputsTest extends TestCase
             [[self::MIA, 0, 1]],
             array_map(static fn ($load): array => [$load->userId->toString(), $load->openReviews, $load->ticketsInTesting], $team->testers),
         );
+    }
+
+    /**
+     * The kinds are keyed by the values of Insight's constants, as TeamLoadQueries returns them.
+     */
+    #[Test]
+    public function theLoadsInsightCountsByItsOwnKindNamesAreTheOnesTheTeamFactsCarry(): void
+    {
+        $team = TurnInputs::teamFacts(
+            new UserId(self::LENA),
+            'Lena',
+            [new UserId(self::OMAR)],
+            [new UserId(self::MIA)],
+            [self::OMAR => [TeamLoadQueries::KIND_REVIEW => 3], self::MIA => [TeamLoadQueries::KIND_TEST => 4]],
+        );
+
+        self::assertSame([3, 4], [$team->developers[0]->openReviews, $team->testers[0]->ticketsInTesting]);
     }
 
     #[Test]

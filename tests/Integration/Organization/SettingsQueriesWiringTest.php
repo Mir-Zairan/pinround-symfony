@@ -7,8 +7,9 @@ namespace App\Tests\Integration\Organization;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
+use App\Organization\Infrastructure\Doctrine\StoredSettings;
+use App\Organization\Infrastructure\Doctrine\StoredSettingsQueries;
 use App\SharedKernel\Domain\OrganizationId;
-use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -24,19 +25,14 @@ final class SettingsQueriesWiringTest extends KernelTestCase
     public function theAutowiredSettingsQueriesReadOncePerRequestAndAgainAfterTheKernelReset(): void
     {
         $container = self::getContainer();
-        $database = new class implements SettingsQueries {
+        $database = new class implements StoredSettingsQueries {
             public int $reads = 0;
 
-            public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
+            public function settingsOf(OrganizationId $organizationId): StoredSettings
             {
                 ++$this->reads;
 
-                return StepPolicy::Team;
-            }
-
-            public function triagerOf(OrganizationId $organizationId): ?UserId
-            {
-                return null;
+                return new StoredSettings(StepPolicy::Team, null);
             }
         };
         $container->set(DbalSettingsQueries::class, $database);
@@ -55,19 +51,14 @@ final class SettingsQueriesWiringTest extends KernelTestCase
     public function theAutowiredSettingsQueriesReadNoTriagerOncePerRequestAndAgainAfterTheKernelReset(): void
     {
         $container = self::getContainer();
-        $database = new class implements SettingsQueries {
+        $database = new class implements StoredSettingsQueries {
             public int $triagerReads = 0;
 
-            public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
-            {
-                return StepPolicy::Team;
-            }
-
-            public function triagerOf(OrganizationId $organizationId): ?UserId
+            public function settingsOf(OrganizationId $organizationId): StoredSettings
             {
                 ++$this->triagerReads;
 
-                return null;
+                return new StoredSettings(StepPolicy::Team, null);
             }
         };
         $container->set(DbalSettingsQueries::class, $database);

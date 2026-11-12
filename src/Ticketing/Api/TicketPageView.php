@@ -24,6 +24,12 @@ final readonly class TicketPageView
      * @param string|null           $assigneeName    null when nobody is assigned, or no user has the assignee's id any more
      * @param TicketVisibilityFacts $visibilityFacts what TicketPermission VIEW is decided on; the page is shown only
      *                                               when it is granted
+     * @param TicketTurnSnapshot    $turnSnapshot    the ticket's turn facts, read with the page so the turn needs no second
+     *                                               read of the ticket
+     * @param array<string, string> $displayNames    display names by user id string of the ticket's people (reporter,
+     *                                               assignee, reviewer, tester, pending assignee, waiting-on) and of its
+     *                                               team's lead, developers and testers; a person Identity does not know
+     *                                               is left out
      */
     public function __construct(
         public TicketId $id,
@@ -43,6 +49,8 @@ final readonly class TicketPageView
         public ?string $reporterName,
         public ?string $assigneeName,
         public TicketVisibilityFacts $visibilityFacts,
+        public TicketTurnSnapshot $turnSnapshot,
+        public array $displayNames,
     ) {
     }
 

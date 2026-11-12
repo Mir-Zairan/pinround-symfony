@@ -41,10 +41,12 @@ interface TicketQueries
      * The ticket with that key, only when the viewer may see it (ADR-0013): a ticket hidden from them answers null,
      * exactly as an unknown key does, so a caller never learns that it exists. Its parent's key is there only when the
      * viewer may see the parent too. A page still decides TicketPermission VIEW on the visibility facts, as a second
-     * guard. Two queries at most: the ticket with its project and its parent's key in one, and the names of its
-     * reporter and assignee in one; its step through Workflow's StepQueries::listedSteps adds one only while its cache
-     * is cold. A key that cannot be a ticket key (not PROJECT-number, a number from 1 up with no leading zero, case as
-     * stored) runs none.
+     * guard. Four queries at most: the ticket with its project and its parent's key in one, its team's lead and its people
+     * by job (none for a ticket no team owns), and the names of everyone the page shows in one batch (reporter,
+     * assignee, reviewer, tester, pending assignee, waiting-on and the team's lead, developers and testers); its step
+     * through Workflow's StepQueries::listedSteps and the team's steps add queries only while their cache is cold. The
+     * view carries the ticket's turn facts, so the turn needs no second read of the ticket. A key that cannot
+     * be a ticket key (not PROJECT-number, a number from 1 up with no leading zero, case as stored) runs none.
      *
      * @param TicketVisibility $viewer whose ticket visibility predicate the ticket and its parent are read under
      *

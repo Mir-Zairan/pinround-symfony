@@ -23,9 +23,10 @@ use Symfony\Component\Routing\Attribute\Route;
  * or malformed key, another organization's ticket (row-level security hides it) and one the viewer may not see all
  * answer the same 404, so the answer never tells that a hidden ticket exists.
  *
- * Ten queries beyond the request's own when the steps and rules are cached (performance-and-scale.md: ten at most for
- * the page): the triager, the ticket with its project and parent, the names of its reporter and assignee, and the seven
- * of {@see NowNextSentences}. The Now and Next lines are left out for a ticket no team owns.
+ * Six queries beyond the request's own when the steps and rules are cached (performance-and-scale.md: ten at most for
+ * the page): the settings (step policy and triager, one query), the ticket with its project and parent, its team's lead
+ * and people, the names of everyone the page shows in one batch, and the saved turn with the waiting turns of
+ * {@see NowNextSentences} in one. The Now and Next lines are left out for a ticket no team owns.
  */
 final class TicketShowController extends AbstractController
 {
@@ -77,7 +78,7 @@ final class TicketShowController extends AbstractController
             'reporter' => $ticket->reporterName ?? self::UNKNOWN_PERSON,
             'assignee' => null === $ticket->visibilityFacts->assigneeId ? self::NOBODY : ($ticket->assigneeName ?? ucfirst(self::UNKNOWN_PERSON)),
             'components' => implode(', ', $ticket->components),
-            'turnLines' => $this->nowNextSentences->of($ticket->id, $ticket->stepName, $actor->userId()),
+            'turnLines' => $this->nowNextSentences->of($ticket),
         ]);
     }
 

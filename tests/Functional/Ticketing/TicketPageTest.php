@@ -71,6 +71,7 @@ final class TicketPageTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
+                $migrator->executeStatement('DELETE FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]);
                 $migrator->executeStatement('DELETE FROM tkt_ticket WHERE organization_id = ?', [$organizationId]);
                 $migrator->executeStatement('DELETE FROM wf_step WHERE organization_id = ?', [$organizationId]);
 
@@ -395,8 +396,11 @@ final class TicketPageTest extends WebTestCase
         self::assertCount(1, $page->filter('.ticket__state .ticket__now'));
     }
 
+    /**
+     * The page names people by first name, never "you", whoever looks: the viewer is Mia, whose turn it is, and then Omar.
+     */
     #[Test]
-    public function theViewersOwnTurnReadsYouAndAnotherPersonsReadsTheirFirstName(): void
+    public function thePersonWhoseTurnItIsReadsTheirFirstNameEvenForThemselves(): void
     {
         $this->makeShopPeopleDevelopersAndTester();
         $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'test', 'assignee' => 'Omar']);
@@ -410,8 +414,91 @@ final class TicketPageTest extends WebTestCase
         $omarsPage = $this->client->request('GET', '/t/'.$key);
         self::assertResponseStatusCodeSame(200);
 
-        self::assertSame('You test it', $miasNow);
-        self::assertSame('Mia tests it', $this->turnLineOf($omarsPage, 'now'));
+        self::assertSame(['Mia tests it', 'Mia tests it'], [$miasNow, $this->turnLineOf($omarsPage, 'now')]);
+    }
+
+    #[Test]
+    public function aNeedsInputTicketWaitingOnAnOutsideUserNamesThem(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'input', 'assignee' => 'Omar']);
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET waiting_on_user_id = ? WHERE key = ?',
+            [$this->people['Raj']->id()->toString(), $key],
+        ));
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Waiting for input from Raj', $this->turnLineOf($page, 'now'));
+    }
+
+    /**
+     * Omar is the assignee, so Lena is the reviewer when the turn is worked out; the turn row Insight saved says Omar,
+     * and Home shows Omar, so the page must name Omar.
+     */
+    #[Test]
+    public function nowNamesThePersonOfTheSavedTurnNotOneWorkedOutAgain(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'review', 'assignee' => 'Omar']);
+        $this->addTurnRow($key, 'Omar', 'review');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Omar reviews the code', 'Mia tests it'], [$this->turnLineOf($page, 'now'), $this->turnLineOf($page, 'next')]);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}> the tester with a test waiting, the tester Next names
+     */
+    public static function busyTesters(): iterable
+    {
+        yield 'Mia is busy' => ['Mia', 'Noor tests it'];
+        yield 'Noor is busy' => ['Noor', 'Mia tests it'];
+    }
+
+    /**
+     * Two testers could test it; the one with a test already waiting in the turn rows is the busier, so Next names the
+     * other. Swapping who is busy swaps the answer, so a choice that ignored the waiting work fails one of the two.
+     */
+    #[Test]
+    #[DataProvider('busyTesters')]
+    public function nextNamesTheTesterWithTheFewerTestsWaiting(string $busyTester, string $expectedNext): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $this->addSecondShopTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'review', 'assignee' => 'Omar']);
+        $waitingKey = $this->addTicket('Cart page is slow', ['core' => 'test', 'assignee' => 'Omar']);
+        $this->addTurnRow($waitingKey, $busyTester, 'test');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($expectedNext, $this->turnLineOf($page, 'next'));
+    }
+
+    /**
+     * Lena wrote it, so Omar or Pia reviews, whoever has fewer reviews waiting. The ticket's own row is a review for
+     * Omar and no other ticket waits for anyone: counted, it would make Omar the busier and send the review to Pia.
+     */
+    #[Test]
+    public function theTicketsOwnTurnRowIsNoLoadOnItsReviewer(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $this->addSecondShopDeveloper();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'assignee' => 'Lena']);
+        $this->addTurnRow($key, 'Omar', 'review');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Omar reviews the code, then Mia tests it', $this->turnLineOf($page, 'next'));
     }
 
     #[Test]
@@ -434,10 +521,9 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
-     * Beyond the shell, with the steps, the team's people and the rules cached: the triager, the ticket with its
-     * project and parent, the names of its reporter and assignee, then the ticket's turn facts (the ticket, the team's
-     * lead, its people and the lead's name), the reviews and tests waiting, the names of the team and the step policy
-     * of the rules.
+     * Beyond the shell, with the steps and the rules cached: the settings (step policy and triager, one query), the
+     * ticket, its team's lead and people, the names of everyone in one batch, and the saved turn with the waiting
+     * turns in one query.
      */
     #[Test]
     public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
@@ -455,8 +541,8 @@ final class TicketPageTest extends WebTestCase
         $pageQueryCount = $this->queryCountOf('/t/'.$key) - $shellQueryCount;
 
         self::assertSame([['Assignee', 'Omar'], ['Priority', 'Major'], ['Release', '2.4'], ['Parent', 'SHOP-1'], ['Components', 'Checkout'], ['Created', '5 Nov']], $this->detailsOf($this->client->getCrawler()));
-        self::assertSame('You review the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
-        self::assertSame(10, $pageQueryCount);
+        self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
+        self::assertSame(6, $pageQueryCount);
     }
 
     /**
@@ -495,6 +581,43 @@ final class TicketPageTest extends WebTestCase
 
             return (int) $migrator->executeStatement("UPDATE org_team_member SET team_role = 'member', job = 'tester' WHERE team_id = ? AND user_id = ?", [$this->shop->toString(), $this->people['Mia']->id()->toString()]);
         });
+    }
+
+    private function addSecondShopTester(): void
+    {
+        $this->people['Noor'] = $this->createUserWithoutOrganization('Noor');
+        $this->addMembership($this->people['Noor'], $this->acmeFoods);
+        $this->addTeamRole($this->people['Noor'], $this->acmeFoods, $this->shop, 'member');
+        $this->setShopJob('Noor', 'tester');
+    }
+
+    private function addSecondShopDeveloper(): void
+    {
+        $this->people['Pia'] = $this->createUserWithoutOrganization('Pia');
+        $this->addMembership($this->people['Pia'], $this->acmeFoods);
+        $this->addTeamRole($this->people['Pia'], $this->acmeFoods, $this->shop, 'member');
+        $this->setShopJob('Pia', 'developer');
+    }
+
+    private function setShopJob(string $person, string $job): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE org_team_member SET job = ? WHERE team_id = ? AND user_id = ?',
+            [$job, $this->shop->toString(), $this->people[$person]->id()->toString()],
+        ));
+    }
+
+    /**
+     * The row Insight keeps for a ticket's turn, as the turn projector would have written it.
+     */
+    private function addTurnRow(string $ticketKey, string $turnPerson, string $kind): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, kind, base_score, waiting_since, visibility, reporter_id, assignee_id)
+             SELECT organization_id, id, team_id, project_id, 'check', ?, ?, 100, TIMESTAMPTZ '2026-11-05 10:00:00+00', visibility, reporter_id, assignee_id
+             FROM tkt_ticket WHERE key = ?",
+            [$this->people[$turnPerson]->id()->toString(), $kind, $ticketKey],
+        ));
     }
 
     private function queryCountOf(string $uri): int

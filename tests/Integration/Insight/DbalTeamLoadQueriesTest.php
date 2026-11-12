@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Insight;
 
 use App\Insight\Api\TeamLoadQueries;
+use App\Insight\Api\TeamLoads;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -35,6 +37,7 @@ final class DbalTeamLoadQueriesTest extends KernelTestCase
     private const string THIRD_TICKET = '0197a3c0-0000-7000-8000-00000000d733';
     private const string FOURTH_TICKET = '0197a3c0-0000-7000-8000-00000000d734';
     private const string FIFTH_TICKET = '0197a3c0-0000-7000-8000-00000000d736';
+    private const string SIXTH_TICKET = '0197a3c0-0000-7000-8000-00000000d737';
     private const string BETA_BAKERY_TICKET = '0197a3c0-0000-7000-8000-00000000d735';
 
     protected function setUp(): void
@@ -47,7 +50,7 @@ final class DbalTeamLoadQueriesTest extends KernelTestCase
             self::RAJ => ['Raj', 'viewer', 'other'],
         ]);
         $ticketRows = $this->ticketRows();
-        foreach ([self::OWN_TICKET, self::SECOND_TICKET, self::THIRD_TICKET, self::FOURTH_TICKET, self::FIFTH_TICKET] as $index => $ticketId) {
+        foreach ([self::OWN_TICKET, self::SECOND_TICKET, self::THIRD_TICKET, self::FOURTH_TICKET, self::FIFTH_TICKET, self::SIXTH_TICKET] as $index => $ticketId) {
             $ticketRows->addOf(self::ACME_FOODS, $ticketId, self::SHOP_PROJECT, self::MIA, $index + 1);
         }
         $ticketRows->addOf(self::BETA_BAKERY, self::BETA_BAKERY_TICKET, self::SHOP_PROJECT, self::MIA);
@@ -63,7 +66,7 @@ final class DbalTeamLoadQueriesTest extends KernelTestCase
 
     /**
      * Omar has two other reviews and the asked ticket's own, which is left out; Mia one test; Lena only a build turn,
-     * which is no load; Beta Bakery's review for Omar belongs to another organization.
+     * which is no load; Raj's review is for someone not asked about; Beta Bakery's review for Omar belongs to another organization.
      */
     #[Test]
     public function itCountsReviewsAndTestsPerAskedPersonLeavingOutTheTicketItselfAndOtherKinds(): void
@@ -73,6 +76,7 @@ final class DbalTeamLoadQueriesTest extends KernelTestCase
         $this->addTurn(self::ACME_FOODS, self::THIRD_TICKET, self::OMAR, 'review');
         $this->addTurn(self::ACME_FOODS, self::FOURTH_TICKET, self::MIA, 'test');
         $this->addTurn(self::ACME_FOODS, self::FIFTH_TICKET, self::LENA, 'build');
+        $this->addTurn(self::ACME_FOODS, self::SIXTH_TICKET, self::RAJ, 'review');
         $this->addTurn(self::BETA_BAKERY, self::BETA_BAKERY_TICKET, self::OMAR, 'review');
 
         $waitingTurns = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->waitingTurnsOf(
@@ -92,6 +96,95 @@ final class DbalTeamLoadQueriesTest extends KernelTestCase
         $waitingTurns = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->waitingTurnsOf([], new TicketId(self::OWN_TICKET)));
 
         self::assertSame([], $waitingTurns);
+    }
+
+    /**
+     * The ticket's own row comes back as its saved turn and is no load; the loads are the other tickets' rows.
+     */
+    #[Test]
+    public function theSavedTurnOfTheTicketComesWithTheLoadsOfOthersAndNoneOfItsOwn(): void
+    {
+        $this->addTurn(self::ACME_FOODS, self::OWN_TICKET, self::OMAR, 'review');
+        $this->addTurn(self::ACME_FOODS, self::SECOND_TICKET, self::OMAR, 'review');
+        $this->addTurn(self::ACME_FOODS, self::THIRD_TICKET, self::MIA, 'test');
+        $this->addTurn(self::ACME_FOODS, self::SIXTH_TICKET, self::RAJ, 'review');
+
+        $loads = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): TeamLoads => $this->queries()->loadsAndSavedTurnOf(
+            [new UserId(self::OMAR), new UserId(self::MIA)],
+            new TicketId(self::OWN_TICKET),
+        ));
+
+        $waitingTurns = $loads->waitingTurns;
+        ksort($waitingTurns);
+        self::assertSame([self::OMAR => ['review' => 1], self::MIA => ['test' => 1]], $waitingTurns);
+        self::assertSame([self::OMAR, null, 'review'], [$loads->savedTurn?->userId?->toString(), $loads->savedTurn?->label, $loads->savedTurn?->kind]);
+    }
+
+    #[Test]
+    public function aTicketWithNoTurnRowHasNoSavedTurnAndStillGetsTheLoadsOfOthers(): void
+    {
+        $this->addTurn(self::ACME_FOODS, self::SECOND_TICKET, self::OMAR, 'review');
+
+        $loads = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): TeamLoads => $this->queries()->loadsAndSavedTurnOf([new UserId(self::OMAR)], new TicketId(self::OWN_TICKET)));
+
+        self::assertSame([[self::OMAR => ['review' => 1]], null], [$loads->waitingTurns, $loads->savedTurn]);
+    }
+
+    #[Test]
+    public function aSavedTurnOfALabelHasNoUserAndNoPeopleAskedStillReadsIt(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id)
+             VALUES (?, ?, NULL, ?, 'wait', NULL, 'Customer', 'input', 100, '2027-03-15 10:00:00+00', 'all', ?)",
+            [self::ACME_FOODS, self::OWN_TICKET, self::SHOP_PROJECT, self::MIA],
+        ));
+
+        $loads = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): TeamLoads => $this->queries()->loadsAndSavedTurnOf([], new TicketId(self::OWN_TICKET)));
+
+        self::assertSame([[], null, 'Customer', 'input'], [$loads->waitingTurns, $loads->savedTurn?->userId, $loads->savedTurn?->label, $loads->savedTurn?->kind]);
+    }
+
+    #[Test]
+    public function anotherOrganizationsSavedTurnIsNeverRead(): void
+    {
+        $this->addTurn(self::BETA_BAKERY, self::BETA_BAKERY_TICKET, self::OMAR, 'review');
+
+        $loads = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): TeamLoads => $this->queries()->loadsAndSavedTurnOf([new UserId(self::OMAR)], new TicketId(self::BETA_BAKERY_TICKET)));
+
+        self::assertSame([[], null], [$loads->waitingTurns, $loads->savedTurn]);
+    }
+
+    /**
+     * The transaction is open but no tenant is set: the tenant check refuses before any query, the two reads alike.
+     */
+    #[Test]
+    public function withATransactionButNoTenantItRefusesBeforeAnyQuery(): void
+    {
+        $this->tenantContext()->reset();
+        $connection = $this->connection();
+        $connection->beginTransaction();
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $refused = [];
+
+        try {
+            foreach ([
+                fn () => $this->queries()->waitingTurnsOf([new UserId(self::OMAR)], new TicketId(self::OWN_TICKET)),
+                fn () => $this->queries()->loadsAndSavedTurnOf([new UserId(self::OMAR)], new TicketId(self::OWN_TICKET)),
+            ] as $read) {
+                try {
+                    $read();
+                } catch (\LogicException $refusal) {
+                    $refused[] = $refusal::class;
+                }
+            }
+            $selects = array_filter(array_merge(...array_values($debugData->getData())), static fn (array $query): bool => \is_string($query['sql']) && str_contains($query['sql'], 'ins_ticket_turn'));
+        } finally {
+            $connection->rollBack();
+        }
+
+        self::assertSame([TenantNotSet::class, TenantNotSet::class], $refused);
+        self::assertSame([], $selects);
     }
 
     #[Test]

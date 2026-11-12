@@ -232,11 +232,11 @@ when@test:
             alias: App\Insight\Api\TurnUserQueries
             public: true
         # No page shows the project rail before P03.T5 step 2; the count tests get it as a page would.
-        test.insight_team_load_queries:
-            alias: App\Insight\Api\TeamLoadQueries
-            public: true
         test.insight_project_count_queries:
             alias: App\Insight\Api\ProjectCountQueries
+            public: true
+        test.insight_team_load_queries:
+            alias: App\Insight\Api\TeamLoadQueries
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

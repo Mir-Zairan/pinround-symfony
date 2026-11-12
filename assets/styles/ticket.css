@@ -54,10 +54,12 @@
   gap: var(--space-12);
 }
 
+/* The pill, Now and Next sit side by side and wrap under each other on a narrow screen. */
 .ticket__turn {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-4) var(--space-12);
 }
 
 .ticket__now,

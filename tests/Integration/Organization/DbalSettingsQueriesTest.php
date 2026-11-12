@@ -9,6 +9,7 @@ use App\Organization\Application\ChangeStepPolicy;
 use App\Organization\Domain\OrgSettings;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\Organization\Infrastructure\Doctrine\DoctrineOrgSettingsStore;
+use App\Organization\Infrastructure\Doctrine\StoredSettings;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -155,6 +156,47 @@ final class DbalSettingsQueriesTest extends KernelTestCase
 
             return $this->queries()->triagerOf(new OrganizationId(self::ACME_FOODS));
         });
+    }
+
+    /**
+     * Locked is not the default and Sara is not null, so a settings read that mixed the two keys up or fell back to
+     * the defaults would differ; the query log shows one query for both.
+     */
+    #[Test]
+    public function theStepPolicyAndTheTriagerComeInOneQuery(): void
+    {
+        $this->changeStepPolicy(self::ACME_FOODS, StepPolicy::Locked);
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+
+        $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData): StoredSettings {
+            $debugData->reset();
+
+            return $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS));
+        });
+
+        self::assertSame([StepPolicy::Locked, self::SARA], [$settings->stepPolicy, $settings->triagerId?->toString()]);
+        $selects = array_filter(array_merge(...array_values($debugData->getData())), static fn (array $query): bool => \is_string($query['sql']) && str_contains($query['sql'], 'org_settings'));
+        self::assertCount(1, $selects);
+    }
+
+    #[Test]
+    public function anotherOrganizationsSettingsAreNeverReadTogether(): void
+    {
+        $this->changeStepPolicy(self::BETA_BAKERY, StepPolicy::Team);
+
+        $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): StoredSettings => $this->queries()->settingsOf(new OrganizationId(self::BETA_BAKERY)));
+
+        self::assertSame([StepPolicy::Extend, null], [$settings->stepPolicy, $settings->triagerId]);
+    }
+
+    #[Test]
+    public function anOrganizationWithoutSettingsHasTheDefaultsTogether(): void
+    {
+        $this->rows()->removeAllOf(self::ACME_FOODS);
+
+        $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): StoredSettings => $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS)));
+
+        self::assertSame([StepPolicy::Extend, null], [$settings->stepPolicy, $settings->triagerId]);
     }
 
     private function triagerAs(string $tenantId, string $askedId): ?UserId

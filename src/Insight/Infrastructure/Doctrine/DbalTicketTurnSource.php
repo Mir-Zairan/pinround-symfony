@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Insight\Infrastructure\Doctrine;
 
+use App\Insight\Api\TeamLoadQueries;
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TicketTurnSource;
-use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketTurnSnapshot;
@@ -16,19 +16,16 @@ use Doctrine\DBAL\Connection;
 
 /**
  * The ticket, its step and its team's people come from Ticketing's {@see TicketTurnQueries}; how many reviews and tests
- * wait for each developer and tester comes from {@see DbalTeamLoadQueries}, in one query for the whole team. A ticket no team owns
+ * wait for each developer and tester comes from {@see TeamLoadQueries}, in one query for the whole team. A ticket no team owns
  * gets no facts, so no turn row: the turn rules choose among a team's people and fall back to its lead.
  */
 final readonly class DbalTicketTurnSource implements TicketTurnSource
 {
-    private DbalTeamLoadQueries $teamLoadQueries;
-
     public function __construct(
         private TicketTurnQueries $ticketTurnQueries,
+        private TeamLoadQueries $teamLoadQueries,
         private Connection $connection,
-        TenantContext $tenantContext,
     ) {
-        $this->teamLoadQueries = new DbalTeamLoadQueries($connection, $tenantContext);
     }
 
     public function factsFor(TicketId $ticketId): ?TicketTurnFacts
@@ -58,20 +55,20 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
     private function ticketStateOf(TicketTurnSnapshot $snapshot): TicketState
     {
         return TurnInputs::ticketState(
-            $snapshot->stepId,
-            $snapshot->coreCode,
-            $snapshot->groupCode,
-            $snapshot->teamId,
-            $snapshot->assigneeId,
-            $snapshot->reviewerId,
-            $snapshot->testerId,
-            $snapshot->pendingAssigneeId,
-            $snapshot->previousStepId,
-            $snapshot->reporterId,
-            $snapshot->waitingOnUserId,
-            $snapshot->waitingOnLabel,
-            $snapshot->priority,
-            $snapshot->release,
+            stepId: $snapshot->stepId,
+            coreCode: $snapshot->coreCode,
+            groupCode: $snapshot->groupCode,
+            teamId: $snapshot->teamId,
+            assigneeId: $snapshot->assigneeId,
+            reviewerId: $snapshot->reviewerId,
+            testerId: $snapshot->testerId,
+            pendingAssigneeId: $snapshot->pendingAssigneeId,
+            previousStepId: $snapshot->previousStepId,
+            reporterId: $snapshot->reporterId,
+            waitingOnUserId: $snapshot->waitingOnUserId,
+            waitingOnLabel: $snapshot->waitingOnLabel,
+            priority: $snapshot->priority,
+            release: $snapshot->release,
         );
     }
 }

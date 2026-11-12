@@ -5,27 +5,29 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\Identity\Api\UserQueries;
+use App\Insight\Api\SavedTurn;
 use App\Insight\Api\TeamLoadQueries;
-use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\TicketPageView;
+use App\Workflow\Api\NeedsYouKind;
 use App\Workflow\Api\NowNext;
 use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\RuleQueries;
+use App\Workflow\Api\Turn;
 use App\Workflow\Api\TurnInputs;
 use App\Workflow\Api\TurnRules;
 
 /**
- * The "Now" and "Next" lines under a ticket's title (ticket-page.md, Header). The turn and the sentences are Workflow's
- * ({@see TurnRules}, {@see NowNext}); this reads what they need from the other modules' Apis: the ticket and its team
- * from Ticketing, the reviews and tests waiting for each person from Insight, the first names from Identity and the
- * team's rule from Workflow. Seven queries when Workflow's rules are cached: Ticketing's four, the waiting turns, the
- * names and the rules' step policy. Needs an open transaction under the organization as tenant.
+ * The "Now" and "Next" lines under a ticket's title (ticket-page.md, Header). The sentences are Workflow's
+ * ({@see NowNext}); the turn is the one Insight saved for Home and Whose turn, so the page names the same person, and
+ * only a ticket with no saved turn (a done one) gets it from {@see TurnRules}. The ticket, its team and the names come
+ * with the page's own read; this adds one query on ins_ticket_turn (the saved turn and the reviews and tests waiting),
+ * and none for the rules' step policy, which the request already holds. Needs an open transaction under the organization as
+ * tenant. The page names people by first name, never "you", as the tickets list's rows do not either.
  */
 final readonly class NowNextSentences
 {
     public function __construct(
-        private TicketTurnQueries $ticketTurnQueries,
         private TeamLoadQueries $teamLoadQueries,
         private UserQueries $userQueries,
         private RuleQueries $ruleQueries,
@@ -35,54 +37,43 @@ final readonly class NowNextSentences
     }
 
     /**
-     * @param string $stepName the name of the ticket's current step, as the page shows it
-     *
-     * @return array{now: string, next: string|null}|null null when the ticket has no team, or the tenant no such ticket:
-     *                                                    no turn is chosen for it, so the page shows no lines; next is
-     *                                                    null when nothing comes next, as in Done
+     * @return array{now: string, next: string|null}|null null when the ticket has no team: no turn is chosen for it, so
+     *                                                    the page shows no lines; next is null when nothing comes next,
+     *                                                    as in Done
      *
      * @throws \LogicException when no transaction is open or no tenant is set
      */
-    public function of(TicketId $ticketId, string $stepName, ?UserId $viewerId): ?array
+    public function of(TicketPageView $page): ?array
     {
-        $snapshot = $this->ticketTurnQueries->factsOf($ticketId);
-        if (null === $snapshot || null === $snapshot->teamId || null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
+        $snapshot = $page->turnSnapshot;
+        if (null === $snapshot->teamId || null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
             return null;
         }
 
         $ticket = TurnInputs::ticketState(
-            $snapshot->stepId,
-            $snapshot->coreCode,
-            $snapshot->groupCode,
-            $snapshot->teamId,
-            $snapshot->assigneeId,
-            $snapshot->reviewerId,
-            $snapshot->testerId,
-            $snapshot->pendingAssigneeId,
-            $snapshot->previousStepId,
-            $snapshot->reporterId,
-            $snapshot->waitingOnUserId,
-            $snapshot->waitingOnLabel,
-            $snapshot->priority,
-            $snapshot->release,
+            stepId: $snapshot->stepId,
+            coreCode: $snapshot->coreCode,
+            groupCode: $snapshot->groupCode,
+            teamId: $snapshot->teamId,
+            assigneeId: $snapshot->assigneeId,
+            reviewerId: $snapshot->reviewerId,
+            testerId: $snapshot->testerId,
+            pendingAssigneeId: $snapshot->pendingAssigneeId,
+            previousStepId: $snapshot->previousStepId,
+            reporterId: $snapshot->reporterId,
+            waitingOnUserId: $snapshot->waitingOnUserId,
+            waitingOnLabel: $snapshot->waitingOnLabel,
+            priority: $snapshot->priority,
+            release: $snapshot->release,
         );
-        $team = TurnInputs::teamFacts(
-            $snapshot->leadId,
-            $snapshot->leadDisplayName,
-            $snapshot->developerIds,
-            $snapshot->testerIds,
-            $this->teamLoadQueries->waitingTurnsOf([...$snapshot->developerIds, ...$snapshot->testerIds], $ticketId),
-        );
-        $turn = $this->turnRules->turnFor($ticket, $team);
+        $loads = $this->teamLoadQueries->loadsAndSavedTurnOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId);
+        $team = TurnInputs::teamFacts($snapshot->leadId, $snapshot->leadDisplayName, $snapshot->developerIds, $snapshot->testerIds, $loads->waitingTurns);
+        $turn = null === $loads->savedTurn ? $this->turnRules->turnFor($ticket, $team) : self::turnOf($loads->savedTurn);
         $context = new NowNextContext(
-            $stepName,
-            $this->displayNamesOf($snapshot->leadId, $snapshot->leadDisplayName, [
-                ...$snapshot->developerIds, ...$snapshot->testerIds, $turn->userId, $snapshot->assigneeId, $snapshot->pendingAssigneeId,
-                $snapshot->reviewerId, $snapshot->testerId,
-            ]),
+            $page->stepName,
+            $this->displayNamesWith($page->displayNames, $turn->userId),
             $team,
             $this->ruleQueries->rulesFor($snapshot->teamId)->reviewBeforeTest,
-            $viewerId,
         );
 
         return [
@@ -92,24 +83,28 @@ final readonly class NowNextSentences
     }
 
     /**
-     * @param list<UserId|null> $userIds
-     *
-     * @return array<string, string> display names by user id string; the lead's is already known
+     * @throws \ValueError when the saved kind is not one of NeedsYouKind's
      */
-    private function displayNamesOf(UserId $leadId, string $leadDisplayName, array $userIds): array
+    private static function turnOf(SavedTurn $savedTurn): Turn
     {
-        $toRead = [];
-        foreach ($userIds as $userId) {
-            if (null !== $userId && !$userId->equals($leadId)) {
-                $toRead[$userId->toString()] = $userId;
-            }
+        return new Turn($savedTurn->userId, $savedTurn->label, NeedsYouKind::from($savedTurn->kind));
+    }
+
+    /**
+     * @param array<string, string> $displayNames
+     *
+     * @return array<string, string> the page's names, and the turn user's when the page does not hold it: one more
+     *                               query, for a turn that went to someone outside the ticket's people and its team
+     */
+    private function displayNamesWith(array $displayNames, ?UserId $turnUserId): array
+    {
+        if (null === $turnUserId || isset($displayNames[$turnUserId->toString()])) {
+            return $displayNames;
+        }
+        foreach ($this->userQueries->byIds([$turnUserId]) as $userKey => $user) {
+            $displayNames[$userKey] = $user->displayName;
         }
 
-        $names = [$leadId->toString() => $leadDisplayName];
-        foreach ($this->userQueries->byIds(array_values($toRead)) as $userKey => $user) {
-            $names[$userKey] = $user->displayName;
-        }
-
-        return $names;
+        return $displayNames;
     }
 }
