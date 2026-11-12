@@ -555,11 +555,6 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
-     * SHOP's list holds seven open tickets; the third is D, after A in Code review and F in In progress, so Previous
-     * crosses back into the earlier step. Following Next from A gives the list's whole order, with H before C and B
-     * (newer), C before B (tied, higher id) and the Done and OPS tickets left out.
-     */
-    /**
      * One wrapping row: the back button, then the key with a dot, the type and the project, then the position last,
      * so it sits on the right edge.
      */
@@ -574,11 +569,16 @@ final class TicketPageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $row = $page->filter('.ticket__key-row');
         self::assertCount(1, $row);
-        self::assertSame(['ticket__back', 'ticket__key-line', 'ticket__position'], $row->children()->each(static fn (Crawler $child): string => preg_replace('/^.*?(ticket__(?:back|key-line|position))\b.*$/', '$1', (string) $child->attr('class'))));
+        self::assertSame(['ticket__back', 'ticket__key-line', 'ticket__position'], $row->children()->each(static fn (Crawler $child): string => preg_replace('/^.*?(ticket__(?:back|key-line|position))\b.*$/', '$1', (string) $child->attr('class')) ?? self::fail('The class of a header child could not be read.')));
         self::assertSame('SHOP-5 · Bug · Shop', preg_replace('/\s+/', ' ', $row->filter('.ticket__key-line')->text()));
         self::assertSame('false', $row->filter('.ticket__position')->attr('data-turbo-prefetch'));
     }
 
+    /**
+     * SHOP's list holds seven open tickets; the third is D, after A in Code review and F in In progress, so Previous
+     * crosses back into the earlier step. Following Next from A gives the list's whole order, with H before C and B
+     * (newer), C before B (tied, higher id) and the Done and OPS tickets left out.
+     */
     #[Test]
     public function aProjectsListShowsTheTicketsPlaceAndWalksItsOrderKeepingTheProject(): void
     {
