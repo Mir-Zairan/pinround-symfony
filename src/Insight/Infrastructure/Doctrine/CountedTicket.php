@@ -29,4 +29,16 @@ final readonly class CountedTicket
         return $this->projectId === $other->projectId && $this->teamId->equals($other->teamId)
             && $this->visibility === $other->visibility && $this->isDone === $other->isDone;
     }
+
+    /**
+     * Orders count rows by project, team and visibility, byte by byte; whether done or open does not matter, as both
+     * are counted in one row.
+     *
+     * @return int below 0, 0 or above 0 when this row comes before, is, or comes after the other
+     */
+    public function compareCountRow(self $other): int
+    {
+        return [strtolower($this->projectId), strtolower($this->teamId->toString()), $this->visibility]
+            <=> [strtolower($other->projectId), strtolower($other->teamId->toString()), $other->visibility];
+    }
 }

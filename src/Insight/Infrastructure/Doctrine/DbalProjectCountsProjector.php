@@ -12,7 +12,8 @@ use Doctrine\DBAL\Connection;
 /**
  * Keeps ins_project_counts in step with one ticket, for DbalTurnProjector in the transaction of the change.
  * ins_project_count_ticket holds the count row each ticket is in; the write to it locks that ticket's row and returns
- * where it was (PostgreSQL 18's RETURNING old), so two changes of one ticket move its count once each, in turn.
+ * where it was (PostgreSQL 18's RETURNING old), so two changes of one ticket move its count once each, in turn. The two
+ * count rows of a move are then written in CountedTicket::compareCountRow order, whichever way the ticket goes.
  */
 final readonly class DbalProjectCountsProjector
 {
@@ -56,17 +57,24 @@ final readonly class DbalProjectCountsProjector
         if (null !== $wasCountedAs && null !== $countedAs && $wasCountedAs->equals($countedAs)) {
             return;
         }
+        $writes = [];
         if (null !== $wasCountedAs) {
-            self::requireOneRow($this->connection->executeStatement(self::SUBTRACT, [
+            $writes[] = [$wasCountedAs, self::SUBTRACT, [
                 $wasCountedAs->isDone ? 0 : 1, $wasCountedAs->isDone ? 1 : 0,
                 $organizationId, $wasCountedAs->projectId, $wasCountedAs->teamId->toString(), $wasCountedAs->visibility,
-            ]), 'The project count row of a ticket it counts is missing.');
+            ], 'The project count row of a ticket it counts is missing.'];
         }
         if (null !== $countedAs) {
-            self::requireOneRow($this->connection->executeStatement(self::ADD, [
+            $writes[] = [$countedAs, self::ADD, [
                 $organizationId, $countedAs->projectId, $countedAs->teamId->toString(), $countedAs->visibility,
                 $countedAs->isDone ? 0 : 1, $countedAs->isDone ? 1 : 0,
-            ]), 'A ticket was not added to its project count row.');
+            ], 'A ticket was not added to its project count row.'];
+        }
+        // Two tickets moving opposite ways would each lock one count row and wait on the other's: a deadlock. Every
+        // move locks its count rows in one key order instead.
+        usort($writes, static fn (array $first, array $second): int => $first[0]->compareCountRow($second[0]));
+        foreach ($writes as [, $statement, $parameters, $refusal]) {
+            self::requireOneRow($this->connection->executeStatement($statement, $parameters), $refusal);
         }
     }
 

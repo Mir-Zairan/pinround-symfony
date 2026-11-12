@@ -19,7 +19,8 @@ final readonly class TicketListStep
     /**
      * @param string              $stepId        the step's uuid
      * @param int                 $ticketCount   the step's tickets the viewer may see, on any page, at most COUNT_CAP
-     * @param bool                $isCountCapped true when the step holds more than COUNT_CAP of them
+     * @param bool                $isCountCapped true when the step holds more than COUNT_CAP of them, or the search hit
+     *                                           its cap of COUNT_CAP matches across all steps
      * @param list<TicketListRow> $rows          at most PAGE_SIZE, in list order
      * @param Cursor|null         $nextCursor    null when no row follows the last one
      */

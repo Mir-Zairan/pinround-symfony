@@ -14,6 +14,7 @@ use App\Ticketing\UI\Component\TicketFilters;
 use App\Web\UI\Component\PersonPickerSearch;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
@@ -199,16 +200,16 @@ final class PersonPickerTest extends WebTestCase
     public function aTooLongSearchIsRefusedWithoutReadingThePeople(): void
     {
         $this->addTicket('todo', 'Omar');
+        $this->client->disableReboot();
         $picker = $this->openedPickerAs($this->people['Lena']);
-        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
-        $debugData->reset();
+        $debugData = $this->forgetTheTeamPeopleAndTheQueries();
 
         $picker->set('search', str_repeat('é', PersonPickerSearch::SEARCH_MAX_LENGTH + 1));
 
         self::assertSame(200, $picker->response()->getStatusCode());
         self::assertSame('The search is too long. Use 100 characters or fewer.', $picker->render()->crawler()->filter('[role="alert"]')->text());
         self::assertCount(0, $picker->render()->crawler()->filter('.pick'));
-        self::assertSame(0, self::countMatching(self::COUNT_QUERY, self::queriesIn($debugData->getData())));
+        self::assertNoPeopleWereRead(self::queriesIn($debugData->getData()));
     }
 
     /**
@@ -230,16 +231,16 @@ final class PersonPickerTest extends WebTestCase
     public function aSearchWithANulIsRefusedWithoutReadingThePeople(): void
     {
         $this->addTicket('todo', 'Omar');
+        $this->client->disableReboot();
         $picker = $this->openedPickerAs($this->people['Lena']);
-        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
-        $debugData->reset();
+        $debugData = $this->forgetTheTeamPeopleAndTheQueries();
 
         $picker->set('search', "Om\0ar");
 
         self::assertSame(200, $picker->response()->getStatusCode());
         self::assertSame(PersonPickerSearch::SEARCH_NOT_TEXT, $picker->render()->crawler()->filter('[role="alert"]')->text());
         self::assertCount(0, $picker->render()->crawler()->filter('.pick'));
-        self::assertSame(0, self::countMatching(self::COUNT_QUERY, self::queriesIn($debugData->getData())));
+        self::assertNoPeopleWereRead(self::queriesIn($debugData->getData()));
     }
 
     /**
@@ -480,6 +481,29 @@ final class PersonPickerTest extends WebTestCase
         self::assertSame(0, self::countMatching('/FROM wf_step|FROM org_team_member WHERE team_id|FROM idn_user WHERE id = ANY/', $queries), 'The steps and the team people come from their caches.');
         self::assertSame(1, self::countMatching('/FROM org_settings/', $queries));
         self::assertSame(12, \count($queries));
+    }
+
+    /**
+     * Empties the team people cache, which the open filled, so a read of the people would show as queries, and the
+     * query log. The client must not reboot, or its requests would log to another container's holder.
+     */
+    private function forgetTheTeamPeopleAndTheQueries(): DebugDataHolder
+    {
+        self::assertTrue(self::getContainer()->get('cache.team_people')->clear());
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+
+        return $debugData;
+    }
+
+    /**
+     * @param list<string> $queries the refused search's request, which must have run queries of its own
+     */
+    private static function assertNoPeopleWereRead(array $queries): void
+    {
+        self::assertNotSame([], $queries, 'The request logged no query, so it cannot show that none read the people.');
+        self::assertSame(0, self::countMatching('/FROM org_team_member WHERE team_id|FROM idn_user WHERE id = ANY/', $queries), 'The team\'s people were read.');
+        self::assertSame(0, self::countMatching(self::COUNT_QUERY, $queries));
     }
 
     /**

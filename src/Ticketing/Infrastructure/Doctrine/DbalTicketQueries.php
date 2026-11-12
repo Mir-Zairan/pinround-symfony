@@ -74,8 +74,9 @@ final readonly class DbalTicketQueries implements TicketQueries
     }
 
     /**
-     * The step's count is its own LATERAL, run once per step and the same with or without a cursor: it counts at most
-     * COUNT_CAP + 1 visible tickets in the row fetch's order, so it reads the same index and stops there.
+     * The step's count is its own LATERAL, run once per step and the same with or without a cursor. Without a search it
+     * counts at most COUNT_CAP + 1 visible tickets in the row fetch's order, so it reads the same index and stops there;
+     * with one it is the step's share of the COUNT_CAP matches search_ticket_ids keeps (searchListQuery).
      *
      * @param non-empty-list<string> $stepIds in list order
      *

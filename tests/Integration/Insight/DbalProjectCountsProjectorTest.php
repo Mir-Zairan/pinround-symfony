@@ -141,6 +141,36 @@ final class DbalProjectCountsProjectorTest extends KernelTestCase
         self::assertSame([[self::SHOP_PROJECT, self::SHOP_TEAM, 'all', 1, 0]], $this->storedCountsOf(self::ACME_FOODS));
     }
 
+    /**
+     * Two tickets moving opposite ways between the same two count rows would deadlock if each locked the row it left
+     * first; every move writes the row with the lower key ('all' before 'team') first, whichever way it goes.
+     */
+    #[Test]
+    public function aMoveWritesItsTwoCountRowsInKeyOrderWhicheverWayItGoes(): void
+    {
+        $ticketId = $this->ticketFactory()->createOne(self::ACME_FOODS, self::SHOP_PROJECT, self::LENA);
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $countWritesOfMoveTo = function (string $visibility) use ($ticketId, $debugData): array {
+            $debugData->reset();
+            $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->countsProjector()->moveTicket($ticketId, new CountedTicket(self::SHOP_PROJECT, new TeamId(self::SHOP_TEAM), $visibility, false)));
+            $writes = [];
+            foreach (array_merge(...array_values($debugData->getData())) as $query) {
+                \assert(\is_string($query['sql']) && \is_array($query['params']));
+                if (str_starts_with($query['sql'], 'INSERT INTO ins_project_counts ')) {
+                    $writes[] = ['add', $query['params'][3]];
+                } elseif (str_starts_with($query['sql'], 'UPDATE ins_project_counts ')) {
+                    $writes[] = ['subtract', $query['params'][5]];
+                }
+            }
+
+            return $writes;
+        };
+
+        self::assertSame([['subtract', 'all'], ['add', 'team']], $countWritesOfMoveTo('team'));
+        self::assertSame([['add', 'all'], ['subtract', 'team']], $countWritesOfMoveTo('all'));
+        self::assertSame([[self::SHOP_PROJECT, self::SHOP_TEAM, 'all', 1, 0], [self::SHOP_PROJECT, self::SHOP_TEAM, 'team', 0, 0]], $this->storedCountsOf(self::ACME_FOODS));
+    }
+
     #[Test]
     public function aTicketThatLosesItsTeamIsCountedNowhere(): void
     {

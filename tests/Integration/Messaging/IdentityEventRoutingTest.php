@@ -73,6 +73,29 @@ final class IdentityEventRoutingTest extends KernelTestCase
         self::assertSame([false, true], $this->hasTeamEntries());
     }
 
+    /**
+     * The relay delivers at least once, so worker-notify may get the same rename twice: the second is handled without
+     * failing and leaves the person's team cleared and the other team cached.
+     */
+    #[Test]
+    public function aRelayedRenameDeliveredTwiceIsHandledTwiceWithoutHarm(): void
+    {
+        $this->fillTeamEntry('omar-team', self::OMAR);
+        $this->fillTeamEntry('mia-team', self::MIA);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->identityEvents()->publish(new UserRenamed(self::OMAR)));
+        self::runTheWorkerUntilIdle('outbox');
+        $relayed = $this->asyncNotify()->getSent();
+        self::assertCount(1, $relayed);
+
+        $this->asyncNotify()->send($relayed[0]);
+        self::runTheWorkerUntilIdle('async_notify');
+
+        $handled = array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $this->asyncNotify()->getAcknowledged());
+        self::assertSame([UserRenamed::class, UserRenamed::class], $handled);
+        self::assertSame([], $this->asyncNotify()->getRejected());
+        self::assertSame([false, true], $this->hasTeamEntries());
+    }
+
     #[Test]
     public function publishingOutsideATransactionIsRefusedAndWritesNoOutboxRow(): void
     {
