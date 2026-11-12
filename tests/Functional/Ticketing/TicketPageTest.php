@@ -52,6 +52,9 @@ final class TicketPageTest extends WebTestCase
     /** @var array<string, string> step id by group code */
     private array $steps = [];
 
+    /** @var array<string, string> step id by core code, for the tickets of the Now and Next tests */
+    private array $stepsByCore = [];
+
     private int $nextNumber = 1;
 
     protected function setUp(): void
@@ -329,25 +332,131 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
-     * Beyond the shell, with the steps cached: the triager, the ticket with its project and parent, and the names of
-     * its reporter and assignee. Part 2 adds Now and Next within the page's ten.
+     * @return iterable<string, array{string, string|null, string, string|null}> the step's core code, the assignee,
+     *                                                                           the Now text and the Next text
+     */
+    public static function nowAndNextOfEachCoreStep(): iterable
+    {
+        $buildReviewTest = 'builds it, Lena reviews, Mia tests';
+        yield 'Backlog' => ['backlog', null, 'Lena plans it', 'a developer '.$buildReviewTest];
+        yield 'To do, assigned' => ['todo', 'Omar', 'Omar starts building', 'Omar '.$buildReviewTest];
+        yield 'To do, unassigned' => ['todo', null, 'Lena picks a developer', 'a developer '.$buildReviewTest];
+        yield 'In progress' => ['progress', 'Omar', 'Omar builds it', 'Lena reviews the code, then Mia tests it'];
+        yield 'Code review' => ['review', 'Omar', 'Lena reviews the code', 'Mia tests it'];
+        yield 'Testing' => ['test', 'Omar', 'Mia tests it', 'Done'];
+        yield 'Needs input' => ['input', 'Omar', 'Waiting for input from Lena', 'it goes back to work'];
+        yield 'On hold' => ['hold', 'Omar', 'Lena decides if it goes on', 'it goes back to work'];
+        yield 'Done' => ['done', 'Omar', 'Done. Nobody needs to act.', null];
+    }
+
+    #[Test]
+    #[DataProvider('nowAndNextOfEachCoreStep')]
+    public function theHeaderTellsWhoseTurnItIsNowAndWhatComesNext(string $coreCode, ?string $assignee, string $expectedNow, ?string $expectedNext): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => $coreCode, ...(null === $assignee ? [] : ['assignee' => $assignee])]);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($expectedNow, $this->turnLineOf($page, 'now'));
+        self::assertSame($expectedNext, $this->turnLineOf($page, 'next'));
+        self::assertCount(null === $expectedNext ? 0 : 1, $page->filter('.ticket__next'));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function pillOfEachCoreStep(): iterable
+    {
+        yield 'Backlog' => ['backlog', 'Backlog'];
+        yield 'To do' => ['todo', 'To do'];
+        yield 'In progress' => ['progress', 'In progress'];
+        yield 'Code review' => ['review', 'Code review'];
+        yield 'Testing' => ['test', 'Testing'];
+        yield 'Needs input' => ['input', 'Needs input'];
+        yield 'On hold' => ['hold', 'On hold'];
+        yield 'Done' => ['done', 'Done'];
+    }
+
+    #[Test]
+    #[DataProvider('pillOfEachCoreStep')]
+    public function theStatusPillNamesTheStepNextToTheTurnLines(string $coreCode, string $expectedPill): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => $coreCode, 'assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($expectedPill, $page->filter('.ticket__state .pill')->text());
+        self::assertCount(1, $page->filter('.ticket__state .ticket__now'));
+    }
+
+    #[Test]
+    public function theViewersOwnTurnReadsYouAndAnotherPersonsReadsTheirFirstName(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'test', 'assignee' => 'Omar']);
+
+        $this->logIn($this->client, $this->people['Mia']);
+        $miasPage = $this->client->request('GET', '/t/'.$key);
+        self::assertResponseStatusCodeSame(200);
+        $miasNow = $this->turnLineOf($miasPage, 'now');
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $omarsPage = $this->client->request('GET', '/t/'.$key);
+        self::assertResponseStatusCodeSame(200);
+
+        self::assertSame('You test it', $miasNow);
+        self::assertSame('Mia tests it', $this->turnLineOf($omarsPage, 'now'));
+    }
+
+    #[Test]
+    public function aTicketNoTeamOwnsRendersWithNoNowOrNextLine(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Footer links point nowhere', ['core' => 'progress', 'assignee' => 'Omar']);
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET team_id = NULL WHERE key = ?',
+            [$key],
+        ));
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Footer links point nowhere', $page->filter('h1')->text());
+        self::assertSame('In progress', $page->filter('.ticket__state .pill')->text());
+        self::assertCount(0, $page->filter('.ticket__now, .ticket__next'));
+    }
+
+    /**
+     * Beyond the shell, with the steps, the team's people and the rules cached: the triager, the ticket with its
+     * project and parent, the names of its reporter and assignee, then the ticket's turn facts (the ticket, the team's
+     * lead, its people and the lead's name), the reviews and tests waiting, the names of the team and the step policy
+     * of the rules.
      */
     #[Test]
-    public function aWarmPageReadsThreeQueriesBeyondTheShell(): void
+    public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
     {
+        $this->makeShopPeopleDevelopersAndTester();
         $parentKey = $this->addTicket('Checkout rework');
-        $key = $this->addTicket('Cart total shows the wrong sum', ['assignee' => 'Omar', 'release' => '2.4', 'parent' => $parentKey, 'components' => '{Checkout}']);
+        $key = $this->addTicket('Cart total shows the wrong sum', ['assignee' => 'Omar', 'release' => '2.4', 'parent' => $parentKey, 'components' => '{Checkout}', 'core' => 'review']);
         $this->logIn($this->client, $this->people['Lena']);
         // logIn() leaves the user in the entity manager, so the first request skips the user refresh every later one pays.
         $this->queryCountOf(self::SHELL);
         $shellQueryCount = $this->queryCountOf(self::SHELL);
-        // The first load fills the organization's cached steps.
+        // The first load fills the organization's cached steps and the team's cached rules and people.
         $this->queryCountOf('/t/'.$key);
 
         $pageQueryCount = $this->queryCountOf('/t/'.$key) - $shellQueryCount;
 
         self::assertSame([['Assignee', 'Omar'], ['Priority', 'Major'], ['Release', '2.4'], ['Parent', 'SHOP-1'], ['Components', 'Checkout'], ['Created', '5 Nov']], $this->detailsOf($this->client->getCrawler()));
-        self::assertSame(3, $pageQueryCount);
+        self::assertSame('You review the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
+        self::assertSame(10, $pageQueryCount);
     }
 
     /**
@@ -360,6 +469,32 @@ final class TicketPageTest extends WebTestCase
         self::assertCount(0, $this->client->getCrawler()->filter('.ticket'));
         self::assertStringNotContainsString(self::HIDDEN_TITLE, (string) $this->client->getResponse()->getContent());
         self::assertStringNotContainsString(self::HIDDEN_DESCRIPTION, (string) $this->client->getResponse()->getContent());
+    }
+
+    /**
+     * @return string|null the text after "Now:" or "Next:"; null when the page has no such line
+     */
+    private function turnLineOf(Crawler $page, string $line): ?string
+    {
+        $paragraph = $page->filter('.ticket__'.$line);
+        if (0 === $paragraph->count()) {
+            return null;
+        }
+
+        return preg_replace('/^'.ucfirst($line).':\s+/', '', $paragraph->text());
+    }
+
+    /**
+     * Omar builds, Mia tests: Shop's team has one developer and one tester besides its lead, who reviews. Mia is a
+     * member rather than the viewer the other tests make her.
+     */
+    private function makeShopPeopleDevelopersAndTester(): void
+    {
+        $this->committedAs($this->acmeFoods, function (Connection $migrator): int {
+            $migrator->executeStatement("UPDATE org_team_member SET job = 'developer' WHERE team_id = ? AND user_id = ?", [$this->shop->toString(), $this->people['Omar']->id()->toString()]);
+
+            return (int) $migrator->executeStatement("UPDATE org_team_member SET team_role = 'member', job = 'tester' WHERE team_id = ? AND user_id = ?", [$this->shop->toString(), $this->people['Mia']->id()->toString()]);
+        });
     }
 
     private function queryCountOf(string $uri): int
@@ -392,9 +527,14 @@ final class TicketPageTest extends WebTestCase
     {
         $organizationId = $this->acmeFoods->toString();
         $steps = [];
-        foreach (['wait' => ['Needs input', 'input'], 'check' => ['Code review', 'review'], 'doing' => ['In progress', 'progress'], 'todo' => ['To do', 'todo'], 'done' => ['Done', 'done']] as $groupCode => [$name, $coreCode]) {
-            $this->steps[$groupCode] = Uuid::v7()->toRfc4122();
-            $steps[] = [$this->steps[$groupCode], $name, $groupCode, $coreCode, \count($steps)];
+        foreach ([
+            ['Needs input', 'wait', 'input'], ['Code review', 'check', 'review'], ['In progress', 'doing', 'progress'], ['To do', 'todo', 'todo'],
+            ['Done', 'done', 'done'], ['Backlog', 'todo', 'backlog'], ['Testing', 'check', 'test'], ['On hold', 'wait', 'hold'],
+        ] as [$name, $groupCode, $coreCode]) {
+            $stepId = Uuid::v7()->toRfc4122();
+            $this->steps[$groupCode] ??= $stepId;
+            $this->stepsByCore[$coreCode] = $stepId;
+            $steps[] = [$stepId, $name, $groupCode, $coreCode, \count($steps)];
         }
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $steps): int {
             foreach ($steps as $step) {
@@ -411,7 +551,7 @@ final class TicketPageTest extends WebTestCase
     /**
      * A major bug of Shop's team, for everyone, reported by Lena at CREATED_THIS_YEAR in To do.
      *
-     * @param array{group?: string, type?: string, priority?: string, description?: string, release?: string, parent?: string, components?: string, assignee?: string, reporter?: string, visibility?: string, createdAt?: string} $details
+     * @param array{group?: string, type?: string, priority?: string, description?: string, release?: string, parent?: string, components?: string, assignee?: string, reporter?: string, visibility?: string, createdAt?: string, core?: string} $details
      *
      * @return string the ticket's key
      */
@@ -423,7 +563,7 @@ final class TicketPageTest extends WebTestCase
         $parameters = [
             $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), $number, $key, $title,
             $details['description'] ?? self::HIDDEN_DESCRIPTION, $details['type'] ?? 'bug', $details['release'] ?? null, $priority,
-            self::PRIORITY_RANKS[$priority], $this->steps[$details['group'] ?? 'todo'], $this->people[$details['reporter'] ?? 'Lena']->id()->toString(),
+            self::PRIORITY_RANKS[$priority], isset($details['core']) ? $this->stepsByCore[$details['core']] : $this->steps[$details['group'] ?? 'todo'], $this->people[$details['reporter'] ?? 'Lena']->id()->toString(),
             $details['visibility'] ?? 'all', isset($details['assignee']) ? $this->people[$details['assignee']]->id()->toString() : null,
             $details['parent'] ?? null, $details['components'] ?? '{}', $details['createdAt'] ?? self::CREATED_THIS_YEAR,
         ];

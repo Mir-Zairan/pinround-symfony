@@ -23,8 +23,12 @@
             <h1 class="ticket__title">{{ ticket.title }}</h1>
             <div class="ticket__state">
                 <twig:StatusPill group="{{ pillGroup }}">{{ ticket.stepName }}</twig:StatusPill>
-                {# TODO(P03.T6 part 2): the Now and Next lines go in this slot. #}
-                <div class="ticket__turn"></div>
+                <div class="ticket__turn">
+                    {% if turnLines is not null %}
+                        <p class="ticket__now"><strong>Now:</strong> {{ turnLines.now }}</p>
+                        {% if turnLines.next is not null %}<p class="ticket__next"><strong>Next:</strong> {{ turnLines.next }}</p>{% endif %}
+                    {% endif %}
+                </div>
             </div>
             <p class="ticket__note">Reported in pinround · Group: {{ ticket.groupLabel }}</p>
         </header>

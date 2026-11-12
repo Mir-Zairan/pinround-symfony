@@ -138,6 +138,7 @@ services:
     App\Ticketing\Api\AssigneeTicketCounts: '@App\Ticketing\Infrastructure\Doctrine\DbalAssigneeTicketCounts'
     App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
     App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
+    App\Insight\Api\TeamLoadQueries: '@App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -231,6 +232,9 @@ when@test:
             alias: App\Insight\Api\TurnUserQueries
             public: true
         # No page shows the project rail before P03.T5 step 2; the count tests get it as a page would.
+        test.insight_team_load_queries:
+            alias: App\Insight\Api\TeamLoadQueries
+            public: true
         test.insight_project_count_queries:
             alias: App\Insight\Api\ProjectCountQueries
             public: true

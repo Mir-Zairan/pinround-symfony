@@ -54,6 +54,25 @@
   gap: var(--space-12);
 }
 
+.ticket__turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.ticket__now,
+.ticket__next {
+  margin: 0;
+}
+
+.ticket__now {
+  font-size: 15px;
+}
+
+.ticket__next {
+  color: var(--on-surface-var);
+}
+
 .ticket__note {
   margin: 0;
   color: var(--on-surface-var);
