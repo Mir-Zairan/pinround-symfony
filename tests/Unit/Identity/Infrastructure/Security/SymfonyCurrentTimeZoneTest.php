@@ -64,6 +64,15 @@ final class SymfonyCurrentTimeZoneTest extends TestCase
         self::assertSame('UTC', new SymfonyCurrentTimeZone(self::storageOf($withoutZone))->zone()->getName());
     }
 
+    #[Test]
+    public function aSavedZoneThatIsNotAKnownIanaNameGivesUtc(): void
+    {
+        $unknownZone = self::lena('Europe/Berlin');
+        $unknownZone->__unserialize([...$unknownZone->__serialize(), 'timeZone' => 'Mars/Olympus']);
+
+        self::assertSame('UTC', new SymfonyCurrentTimeZone(self::storageOf($unknownZone))->zone()->getName());
+    }
+
     private static function storageOf(SecurityUser $user): TokenStorage
     {
         $tokenStorage = new TokenStorage();

@@ -132,9 +132,15 @@ test('a Show more link whose response has no matching frame loads that page in t
     document.body.insertAdjacentHTML('beforeend', '<turbo-frame id="more-probe"><a id="more-probe-link" href="/tickets/more-probe">Show more</a></turbo-frame>');
   });
 
+  await page.evaluate(() => {
+    (window as any).__beforeMoreProbe = true;
+  });
+
   await page.locator('#more-probe-link').click();
 
   await expect(page).toHaveURL(/\/tickets\/more-probe$/);
+  // Only a real page load resets window; a Turbo visit would keep the marker.
+  expect(await page.evaluate(() => (window as any).__beforeMoreProbe)).toBeUndefined();
   await expect(page.getByRole('heading', { name: 'Landed page' })).toBeVisible();
   await expect(page.getByText('Content missing')).toHaveCount(0);
 });

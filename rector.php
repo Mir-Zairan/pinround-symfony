@@ -18,8 +18,8 @@ return RectorConfig::configure()
         __DIR__.'/config/reference.php',
         __DIR__.'/tests/Fixtures', // deliberate violations, see tests/Fixtures/Deptrac
         // The locking repositories refresh these entities, and Doctrine then sets their dates again: they stay writable.
-        // A ticket moves through workflow steps and its title, assignee and updatedAt change after construction, so
-        // those properties stay writable even though today's code only sets them in the constructor.
+        // A ticket's title, assignee and updatedAt stay writable: the move and assign commands still to be built
+        // will change them after construction.
         ClassPropertyAssignToConstructorPromotionRector::class => [
             __DIR__.'/src/Organization/Domain/Membership.php',
             __DIR__.'/src/Organization/Domain/Team.php',

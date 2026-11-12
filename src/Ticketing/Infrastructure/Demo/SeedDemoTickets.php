@@ -181,7 +181,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
             $assignee,
             $now,
         );
-        // Clearing drops the managed Ticket so the raw UPDATE below is not overwritten by a later flush of stale state.
+        // The flush writes the row so the raw UPDATE below can find it; clear() drops the now-stale Ticket so later reads load it fresh.
         $this->entityManager->flush();
         $this->entityManager->clear();
 
