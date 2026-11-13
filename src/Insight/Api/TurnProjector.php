@@ -38,12 +38,14 @@ interface TurnProjector
      * (or the ticket page's TurnSnapshotRow), so the ticket is not read again: it writes the same row and count refresh
      * would for that snapshot. Reads no ticket. The caller vouches that the snapshot is the ticket as it stands in its
      * open transaction, after its change; a stale snapshot saves a stale turn row and count until the next refresh.
-     * A ticket the snapshot gives no team has its row deleted and counts nowhere.
+     * A ticket the snapshot gives no team has its row deleted and counts nowhere. The snapshot carries no organization:
+     * one of a ticket the tenant's organization does not have fails on the first write with DBAL's
+     * ForeignKeyConstraintViolationException, writing nothing, and the change must roll back.
      *
      * @return string|null the turn's override note, as refresh returns it
      *
      * @throws \LogicException as refresh does: when no transaction is open, or when the count row the ticket was in is
      *                         missing, so the change must roll back
      */
-    public function refreshFrom(TicketTurnSnapshot $facts): ?string;
+    public function refreshFrom(TicketTurnSnapshot $snapshot): ?string;
 }

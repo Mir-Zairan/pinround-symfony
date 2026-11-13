@@ -24,8 +24,10 @@ interface TicketTurnQueries
      * the same request; but a reader that read the old rows just before that commit and saved them just after the
      * clear keeps them cached until the relayed TeamRoleChanged is handled in worker-notify (the outbox relay, then
      * worker-notify: under a second normally, longer while either is behind or down), as does an entry the clear
-     * failed to drop. A renamed lead's name lags until the relayed UserRenamed is handled. A turn row saved from such
-     * an answer stays until the ticket's next refresh, as nothing refreshes a team's turn rows on TeamRoleChanged.
+     * failed to drop. At worst, when InvalidateTeamPeopleCacheHandler runs out of retries and TeamRoleChanged lands in
+     * messenger_failed, the entry stays until its one-day lifetime (the cache.team_people pool) runs out or the failed
+     * message is retried. A renamed lead's name lags until the relayed UserRenamed is handled. A turn row saved from
+     * such an answer stays until the ticket's next refresh, as nothing refreshes a team's turn rows on TeamRoleChanged.
      *
      * @return TicketTurnSnapshot|null null when the organization has no ticket with this id
      *

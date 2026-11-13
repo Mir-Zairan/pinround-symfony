@@ -57,9 +57,9 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         return null;
     }
 
-    public function refreshFrom(TicketTurnSnapshot $facts): ?string
+    public function refreshFrom(TicketTurnSnapshot $snapshot): ?string
     {
-        $this->writes[] = 'turn from snapshot '.$facts->ticketId->toString();
+        $this->writes[] = 'turn from snapshot '.$snapshot->ticketId->toString();
 
         return null;
     }

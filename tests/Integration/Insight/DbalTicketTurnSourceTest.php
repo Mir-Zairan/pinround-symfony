@@ -27,6 +27,7 @@ use App\Workflow\Api\NeedsYouScore;
 use App\Workflow\Api\TeamMemberLoad;
 use App\Workflow\Api\TurnRules;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -360,6 +361,75 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         }
         $this->tenantContext()->clear();
         self::assertSame($storedTurns, $this->storedTurnsOf($ticketId));
+    }
+
+    /**
+     * refreshFrom trusts the snapshot's ticket id, so what stops a Beta Bakery snapshot from writing under Acme Foods is
+     * the composite foreign key of ins_project_count_ticket on tkt_ticket, the first write. Beta Bakery's team and
+     * project reuse Acme Foods' ids, so without that key the ticket would be counted in Acme Foods' own count row.
+     */
+    #[Test]
+    public function refreshFromASnapshotOfAnotherOrganizationsTicketWritesNothing(): void
+    {
+        $this->createdTicketFor(self::OMAR);
+        $betaTicketId = $this->betaBakeryTicketFor(self::OMAR);
+        $this->transactions()->committedAs(self::BETA_BAKERY, fn (): ?string => $this->projector()->refresh($betaTicketId));
+        $betaSnapshot = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): ?TicketTurnSnapshot => $this->turnQueries()->factsOf($betaTicketId));
+        self::assertNotNull($betaSnapshot);
+        $acmeBefore = $this->turnStateOfOrganization(self::ACME_FOODS);
+        $betaBefore = $this->turnStateOfOrganization(self::BETA_BAKERY);
+        self::assertNotSame([], $acmeBefore['turns']);
+        self::assertNotSame([], $acmeBefore['placements']);
+        self::assertNotSame([], $betaBefore['turns']);
+        self::assertNotSame([], $betaBefore['placements']);
+
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->projectorAtFixedTime()->refreshFrom($betaSnapshot));
+            self::fail('A Beta Bakery snapshot was projected under Acme Foods.');
+        } catch (ForeignKeyConstraintViolationException $refusal) {
+            self::assertStringContainsString('ins_project_count_ticket_ticket_fkey', $refusal->getMessage());
+        }
+        self::getContainer()->get('doctrine')->resetManager();
+
+        self::assertSame($acmeBefore, $this->turnStateOfOrganization(self::ACME_FOODS));
+        self::assertSame($betaBefore, $this->turnStateOfOrganization(self::BETA_BAKERY));
+    }
+
+    /**
+     * A ticket of Beta Bakery, assigned to the person, in a team and project with Acme Foods' ids and To do step, whose
+     * lead is Lena and whose developers are Lena and Omar.
+     */
+    private function betaBakeryTicketFor(string $assigneeId): TicketId
+    {
+        $shopTeamRows = $this->shopTeamRows();
+        $shopTeamRows->add(self::BETA_BAKERY, self::SHOP_TEAM, self::SHOP_PROJECT, self::LENA, []);
+        $shopTeamRows->addMember(self::BETA_BAKERY, self::SHOP_TEAM, self::LENA, 'lead', 'developer');
+        $shopTeamRows->addMember(self::BETA_BAKERY, self::SHOP_TEAM, self::OMAR, 'member', 'developer');
+        $this->ticketRows()->addWithAudienceOf(self::BETA_BAKERY, self::BETA_BAKERY_TICKET, self::SHOP_PROJECT, 1, 'all', self::SHOP_TEAM, self::MIA, ['assignee_id' => $assigneeId]);
+        $this->transactions()->committedAs(self::BETA_BAKERY, fn (): int|string => $this->connection()->executeStatement(
+            'UPDATE tkt_ticket SET step_id = ? WHERE id = ?',
+            [ShopTeamRows::TO_DO_STEP, self::BETA_BAKERY_TICKET],
+        ));
+
+        return new TicketId(self::BETA_BAKERY_TICKET);
+    }
+
+    /**
+     * @return array{turns: list<array<string, mixed>>, placements: list<array<string, mixed>>, counts: list<array<string, mixed>>}
+     */
+    private function turnStateOfOrganization(string $organizationId): array
+    {
+        return $this->transactions()->rolledBackAs($organizationId, fn (): array => [
+            'turns' => $this->connection()->fetchAllAssociative(
+                'SELECT organization_id, ticket_id, team_id, project_id, grp, turn_user_id, kind, waiting_since FROM ins_ticket_turn ORDER BY ticket_id',
+            ),
+            'placements' => $this->connection()->fetchAllAssociative(
+                'SELECT organization_id, ticket_id, project_id, team_id, visibility, is_done FROM ins_project_count_ticket ORDER BY ticket_id',
+            ),
+            'counts' => $this->connection()->fetchAllAssociative(
+                'SELECT organization_id, project_id, team_id, visibility, open_count, done_count FROM ins_project_counts ORDER BY project_id, team_id, visibility',
+            ),
+        ]);
     }
 
     private function addCodeReviewAndDoneSteps(): void

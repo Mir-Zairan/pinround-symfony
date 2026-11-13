@@ -53,11 +53,11 @@ final readonly class DbalTurnProjector implements TurnProjector
         return $this->write($ticketId, $this->source->factsFor($ticketId), $organizationId);
     }
 
-    public function refreshFrom(TicketTurnSnapshot $facts): ?string
+    public function refreshFrom(TicketTurnSnapshot $snapshot): ?string
     {
         $organizationId = $this->requireTransactionTenant();
 
-        return $this->write($facts->ticketId, $this->source->factsFrom($facts), $organizationId);
+        return $this->write($snapshot->ticketId, $this->source->factsFrom($snapshot), $organizationId);
     }
 
     private function requireTransactionTenant(): string
