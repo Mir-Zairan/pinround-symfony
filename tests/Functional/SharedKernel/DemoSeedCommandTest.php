@@ -17,6 +17,7 @@ use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ProjectRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Infrastructure\Demo\SeedDemoProjects;
+use App\Ticketing\Infrastructure\Demo\SeedDemoTickets;
 use App\Workflow\Domain\CoreStep;
 use App\Workflow\Domain\RuleSet;
 use Doctrine\DBAL\Connection;
@@ -323,7 +324,7 @@ final class DemoSeedCommandTest extends KernelTestCase
     }
 
     #[Test]
-    public function itCreatesFortyShopTicketsInEveryCoreStepWithTheirEventAndTurnRowsAndASecondRunAddsNone(): void
+    public function itCreatesFortyOneShopTicketsInEveryCoreStepWithTheirEventAndTurnRowsAndASecondRunAddsNone(): void
     {
         $this->startWithPassword(self::PASSWORD);
         $first = $this->runSeed();
@@ -356,21 +357,27 @@ final class DemoSeedCommandTest extends KernelTestCase
         $second = $this->runSeed();
 
         self::assertSame(Command::SUCCESS, $first->getStatusCode());
-        self::assertStringContainsString('Tickets: created 40, kept 0.', $first->getDisplay());
+        self::assertStringContainsString('Tickets: created 41, kept 0.', $first->getDisplay());
         self::assertSame(['backlog', 'todo', 'progress', 'review', 'test', 'input', 'hold', 'done'], $afterFirstRun[0]);
-        self::assertSame([40, 3, 5], \array_slice($afterFirstRun, 1, 3));
+        self::assertSame([41, 3, 5], \array_slice($afterFirstRun, 1, 3));
         self::assertGreaterThan(0, $afterFirstRun[4]);
-        self::assertLessThan(40, $afterFirstRun[4]);
+        self::assertLessThan(41, $afterFirstRun[4]);
         self::assertGreaterThan(0, $afterFirstRun[5]);
-        self::assertLessThan(40, $afterFirstRun[5]);
+        self::assertLessThan(41, $afterFirstRun[5]);
         // The five done tickets are nobody's turn, so they hold no turn row.
-        self::assertSame([40, 35, 5], \array_slice($afterFirstRun, 6, 3));
+        self::assertSame([41, 36, 5], \array_slice($afterFirstRun, 6, 3));
         // The rail's stored counts follow the seed's raw step and visibility moves: both visibilities, five done.
         self::assertCount(2, $afterFirstRun[10]);
         self::assertSame(5, array_sum(array_column($afterFirstRun[10], 2)));
         self::assertSame($afterFirstRun[10], $afterFirstRun[9]);
-        self::assertStringContainsString('Tickets: created 0, kept 40.', $second->getDisplay());
+        self::assertStringContainsString('Tickets: created 0, kept 41.', $second->getDisplay());
         self::assertSame($afterFirstRun, $ticketFacts());
+        $longAskLength = $this->underTenant($acmeFoods, fn (): mixed => $this->connection()->fetchOne('SELECT length(description) FROM tkt_ticket WHERE title = ?', [SeedDemoTickets::LONG_ASK_TITLE]));
+        self::assertGreaterThan(700, $longAskLength);
+        $inputLabels = $this->underTenant($acmeFoods, fn (): array => $this->connection()->fetchFirstColumn(
+            "SELECT DISTINCT t.waiting_on_label FROM tkt_ticket t JOIN wf_step s ON s.organization_id = t.organization_id AND s.id = t.step_id WHERE s.core_code = 'input'",
+        ));
+        self::assertSame(['Customer'], $inputLabels, 'A waiting label says who, as workflow-engine.md describes it.');
     }
 
     #[Test]

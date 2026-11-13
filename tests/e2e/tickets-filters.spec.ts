@@ -4,7 +4,7 @@ import { LENA_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
-// As Lena, on the seeded stack: make seed gives SHOP 40 tickets, 5 of them in Done, half of the open ones Omar's, and
+// As Lena, on the seeded stack: make seed gives SHOP 41 tickets, 5 of them in Done, half of the open ones Omar's, and
 // several with "basket" in the title. The toolbar (TicketFilters) and the rail reload only their frames; a full page
 // load would reset window, so each test puts a marker there and checks it afterwards.
 test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 800 } });

@@ -56,7 +56,7 @@ final readonly class ProjectRail
             'teamName' => null,
             'manageUrl' => null,
             // A team the viewer is in stays on "All projects"; another team's rail came from its project alone.
-            'allProjectsUrl' => $this->listUrl([TicketListController::TEAM_QUERY => $isViewerInTeam ? $teamId->toString() : null, ...$keptQuery]),
+            'allProjectsUrl' => $this->listUrl([TicketListContext::TEAM_QUERY => $isViewerInTeam ? $teamId->toString() : null, ...$keptQuery]),
             'isAllProjectsPressed' => null === $pickedProject,
             'allProjectsCount' => null,
             'projects' => [],
@@ -89,7 +89,7 @@ final readonly class ProjectRail
             'key' => $project->key(),
             'name' => $project->name(),
             'count' => self::countViewOf($count, $showsDone),
-            'url' => $this->listUrl([TicketListController::PROJECT_QUERY => $project->key(), ...$keptQuery]),
+            'url' => $this->listUrl([TicketListContext::PROJECT_QUERY => $project->key(), ...$keptQuery]),
             'isPressed' => $pickedProject?->id() === $project->id(),
         ], $projects, $countOfEachProject);
 
@@ -98,9 +98,9 @@ final readonly class ProjectRail
             $rail['teamSwitch'] = array_map(fn (TeamSummary $ownTeam): array => [
                 'name' => $ownTeam->name(),
                 'url' => $this->listUrl([
-                    TicketListController::TEAM_QUERY => $ownTeam->id()->toString(),
-                    TicketListController::DONE_QUERY => $keptQuery[TicketListController::DONE_QUERY] ?? null,
-                    TicketListController::SEARCH_QUERY => $keptQuery[TicketListController::SEARCH_QUERY] ?? null,
+                    TicketListContext::TEAM_QUERY => $ownTeam->id()->toString(),
+                    TicketListContext::DONE_QUERY => $keptQuery[TicketListContext::DONE_QUERY] ?? null,
+                    TicketListContext::SEARCH_QUERY => $keptQuery[TicketListContext::SEARCH_QUERY] ?? null,
                 ]),
                 'isCurrent' => $ownTeam->id()->equals($teamId),
             ], $ownTeams);

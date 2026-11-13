@@ -13,46 +13,43 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
- * DbalSettingsQueries read at most once per organization and request: the Team page, the workflow voter and the
- * workflow caches each ask for the step policy, and each ticket visibility check for the triager. The kernel resets it at the start of the next request or message
+ * The organization's settings read at most once per organization and request, in one query that gives the step policy
+ * and the triager together: the Team page, the workflow voter and the workflow caches each ask for the step policy, and
+ * each ticket visibility check for the triager. The kernel resets it at the start of the next request or message
  * (ADR-0008), so a policy change takes effect from the next request on. The tenant is part of the key, because under
- * another tenant row-level security hides the row and the answer is the default.
+ * another tenant row-level security hides the row and the answer is the default. A stored value that
+ * StoredSettingsQueries refuses fails both reads, as the one query reads both.
  */
 final class RequestScopedSettingsQueries implements SettingsQueries, ResetInterface
 {
-    /** @var array<string, StepPolicy> by organization id and tenant */
-    private array $stepPoliciesOfThisRequest = [];
-
-    /** @var array<string, ?UserId> by organization id and tenant; null when there is no triager */
-    private array $triagersOfThisRequest = [];
+    /** @var array<string, StoredSettings> by organization id and tenant */
+    private array $settingsOfThisRequest = [];
 
     public function __construct(
         #[Autowire(service: DbalSettingsQueries::class)]
-        private readonly SettingsQueries $settingsQueries,
+        private readonly StoredSettingsQueries $storedSettingsQueries,
         private readonly TenantContext $tenantContext,
     ) {
     }
 
     public function stepPolicyOf(OrganizationId $organizationId): StepPolicy
     {
-        return $this->stepPoliciesOfThisRequest[$this->cacheKeyOf($organizationId)] ??= $this->settingsQueries->stepPolicyOf($organizationId);
+        return $this->settingsOf($organizationId)->stepPolicy;
     }
 
     public function triagerOf(OrganizationId $organizationId): ?UserId
     {
-        $key = $this->cacheKeyOf($organizationId);
-        // Not ??=, which would read again for a cached null.
-        if (!\array_key_exists($key, $this->triagersOfThisRequest)) {
-            $this->triagersOfThisRequest[$key] = $this->settingsQueries->triagerOf($organizationId);
-        }
-
-        return $this->triagersOfThisRequest[$key];
+        return $this->settingsOf($organizationId)->triagerId;
     }
 
     public function reset(): void
     {
-        $this->stepPoliciesOfThisRequest = [];
-        $this->triagersOfThisRequest = [];
+        $this->settingsOfThisRequest = [];
+    }
+
+    private function settingsOf(OrganizationId $organizationId): StoredSettings
+    {
+        return $this->settingsOfThisRequest[$this->cacheKeyOf($organizationId)] ??= $this->storedSettingsQueries->settingsOf($organizationId);
     }
 
     private function cacheKeyOf(OrganizationId $organizationId): string

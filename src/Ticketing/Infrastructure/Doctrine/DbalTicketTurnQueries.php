@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Ticketing\Infrastructure\Doctrine;
 
 use App\Identity\Api\UserQueries;
-use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
@@ -26,7 +25,7 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         private Connection $connection,
         private TenantContext $tenantContext,
         private StepQueries $stepQueries,
-        private TeamQueries $teamQueries,
+        private TicketTeamLookup $teamLookup,
         private UserQueries $userQueries,
     ) {
     }
@@ -38,10 +37,7 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         }
 
         $row = $this->connection->fetchAssociative(
-            "SELECT project_id, step_id, previous_step_id, team_id, visibility, priority, release, reporter_id, assignee_id,
-                    pending_assignee_id, reviewer_id, tester_id, waiting_on_user_id, waiting_on_label,
-                    'risk' = ANY (check_reasons) AS is_risk_check
-             FROM tkt_ticket WHERE organization_id = ? AND id = ?",
+            'SELECT '.TurnSnapshotRow::COLUMNS.' FROM tkt_ticket AS ticket WHERE ticket.organization_id = ? AND ticket.id = ?',
             [$this->tenantContext->require()->toString(), $ticketId->toString()],
         );
         if (false === $row) {
@@ -49,34 +45,11 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         }
 
         $stepId = self::text($row['step_id'], 'step_id');
-        $teamId = null === $row['team_id'] ? null : new TeamId(self::text($row['team_id'], 'team_id'));
+        $teamId = TurnSnapshotRow::teamIdOf($row);
         [$groupCode, $coreCode] = $this->groupAndCoreCodeOf($stepId, $teamId);
         [$leadId, $leadDisplayName, $developerIds, $testerIds] = null === $teamId ? [null, null, [], []] : $this->peopleOf($teamId);
 
-        return new TicketTurnSnapshot(
-            $ticketId,
-            self::text($row['project_id'], 'project_id'),
-            $stepId,
-            $coreCode,
-            $groupCode,
-            $teamId,
-            $leadId,
-            $leadDisplayName,
-            $developerIds,
-            $testerIds,
-            self::text($row['visibility'], 'visibility'),
-            self::text($row['priority'], 'priority'),
-            self::textOrNull($row['release'], 'release'),
-            new UserId(self::text($row['reporter_id'], 'reporter_id')),
-            self::userIdOrNull($row['assignee_id'], 'assignee_id'),
-            self::userIdOrNull($row['pending_assignee_id'], 'pending_assignee_id'),
-            self::userIdOrNull($row['reviewer_id'], 'reviewer_id'),
-            self::userIdOrNull($row['tester_id'], 'tester_id'),
-            self::userIdOrNull($row['waiting_on_user_id'], 'waiting_on_user_id'),
-            self::textOrNull($row['waiting_on_label'], 'waiting_on_label'),
-            self::textOrNull($row['previous_step_id'], 'previous_step_id'),
-            true === $row['is_risk_check'],
-        );
+        return TurnSnapshotRow::snapshotOf($ticketId, $row, $groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds);
     }
 
     /**
@@ -84,10 +57,9 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
      */
     private function groupAndCoreCodeOf(string $stepId, ?TeamId $teamId): array
     {
-        foreach (null === $teamId ? [] : $this->stepQueries->stepsFor($teamId) as $step) {
-            if ($step->id() === $stepId) {
-                return [$step->groupCode(), $step->coreCode()];
-            }
+        $teamStep = $this->teamLookup->stepOf($stepId, $teamId);
+        if (null !== $teamStep) {
+            return [$teamStep->groupCode(), $teamStep->coreCode()];
         }
 
         return [$this->stepQueries->groupOf($stepId) ?? throw new \LogicException('A ticket is in a step its organization does not have.'), null];
@@ -98,25 +70,14 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
      */
     private function peopleOf(TeamId $teamId): array
     {
-        $leadId = $this->teamQueries->leadOf($teamId) ?? throw new \LogicException('A ticket\'s team is not a team of its organization.');
-        $peopleByJob = $this->teamQueries->peopleByJob($teamId);
+        [$leadId, $developerIds, $testerIds] = $this->teamLookup->peopleOf($teamId);
         $lead = $this->userQueries->byIds([$leadId])[$leadId->toString()] ?? throw new \LogicException('The lead of a ticket\'s team is no user.');
 
-        return [$leadId, $lead->displayName, $peopleByJob['developer'], $peopleByJob['tester']];
+        return [$leadId, $lead->displayName, $developerIds, $testerIds];
     }
 
     private static function text(mixed $value, string $column): string
     {
         return \is_string($value) ? $value : throw new \LogicException(\sprintf('A ticket %s from the database is not a string.', $column));
-    }
-
-    private static function textOrNull(mixed $value, string $column): ?string
-    {
-        return null === $value ? null : self::text($value, $column);
-    }
-
-    private static function userIdOrNull(mixed $value, string $column): ?UserId
-    {
-        return null === $value ? null : new UserId(self::text($value, $column));
     }
 }

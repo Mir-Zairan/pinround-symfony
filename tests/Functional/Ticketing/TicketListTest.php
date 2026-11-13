@@ -159,6 +159,55 @@ final class TicketListTest extends WebTestCase
     }
 
     /**
+     * A row opens its ticket with every filter the list was asked for, so the ticket page walks this same list; it
+     * leaves the list's Turbo frame for the whole page. The plain list's rows carry no query.
+     */
+    #[Test]
+    public function aRowLinksToItsTicketWithTheListsFilters(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->addTicket('todo', 'Add a gift wrap', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+        $omar = $this->people['Omar']->id()->toString();
+        $team = $this->shop->toString();
+        $plain = $this->client->request('GET', self::TICKETS);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['/t/SHOP-2', '/t/SHOP-1'], $plain->filter('.tickets__row a.tickets__row-link')->each(static fn (Crawler $link): ?string => $link->attr('href')));
+        self::assertSame(['false'], $plain->filter('ul.tickets__row-list')->each(static fn (Crawler $rows): ?string => $rows->attr('data-turbo-prefetch')));
+
+        $page = $this->client->request('GET', self::TICKETS.'?team='.$team.'&q=gift&done=1&person='.$omar.'&project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        $link = $page->filter('[data-ticket-key="SHOP-1"] a.tickets__row-link');
+        self::assertSame(
+            ['/t/SHOP-1?project=SHOP&person='.$omar.'&done=1&q=gift&team='.$team, '_top', 'Add a gift note'],
+            [$link->attr('href'), $link->attr('data-turbo-frame'), $link->text()],
+        );
+        self::assertCount(1, $page->filter('.tickets__row'));
+    }
+
+    /**
+     * The rows of a "Show more" page sit in that page's own frame, so their links still break out to the whole page.
+     */
+    #[Test]
+    public function aRowOfAShowMorePageLinksOutOfItsFrameWithTheFilters(): void
+    {
+        $this->addManyTickets('todo', 52);
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKETS.'?project=SHOP');
+        self::assertResponseStatusCodeSame(200);
+        $frameId = (string) $page->filter('[data-group="todo"] turbo-frame')->attr('id');
+
+        $frame = $this->client->request('GET', (string) $page->filter('[data-group="todo"] [data-step-more]')->attr('href'), server: ['HTTP_TURBO_FRAME' => $frameId]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [['/t/SHOP-2?project=SHOP', '_top'], ['/t/SHOP-1?project=SHOP', '_top']],
+            $frame->filter('turbo-frame#'.$frameId.' a.tickets__row-link')->each(static fn (Crawler $link): array => [$link->attr('href'), $link->attr('data-turbo-frame')]),
+        );
+    }
+
+    /**
      * @return iterable<string, array{string}>
      */
     public static function keysOfNoProjectOfAcmeFoods(): iterable

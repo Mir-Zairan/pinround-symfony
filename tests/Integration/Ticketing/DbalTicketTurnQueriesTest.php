@@ -17,6 +17,7 @@ use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries;
+use App\Ticketing\Infrastructure\Doctrine\TicketTeamLookup;
 use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -212,7 +213,7 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
             $stepQueries = self::getContainer()->get('test.workflow_step_queries');
             self::assertInstanceOf(StepQueries::class, $stepQueries);
 
-            return new DbalTicketTurnQueries($connection, $this->tenantContext(), $stepQueries, new DbalTeamQueries($connection), new DbalUserQueries($connection))
+            return new DbalTicketTurnQueries($connection, $this->tenantContext(), $stepQueries, new TicketTeamLookup($stepQueries, new DbalTeamQueries($connection)), new DbalUserQueries($connection))
                 ->factsOf($ticketId);
         });
 

@@ -4,7 +4,7 @@ import { LENA_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
-// As Lena (auth.setup.ts), on the seeded stack (make seed gives SHOP 40 tickets, 35 open and 5 in Done, fewer than one page per step). The
+// As Lena (auth.setup.ts), on the seeded stack (make seed gives SHOP 41 tickets, 36 open and 5 in Done, fewer than one page per step). The
 // specs make no tickets. The parts that need rows skip with a note only on an empty database; TicketListTest proves
 // "Show more" and its focus on the server, and the frame-missing case below injects a link because no seeded step
 // holds more than 50 rows.
@@ -94,6 +94,30 @@ test('Lena collapses a step with the keyboard and finds it collapsed after a rel
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(rows).toBeVisible();
+});
+
+// The title's link covers the whole row; the assignee's avatar sits above it, so its "Assigned to …" title still shows
+// on hover, and a click anywhere else on the row opens the ticket.
+test('a row opens its ticket from anywhere but the avatar, which keeps its name on hover', async ({ page }) => {
+  await openTicketsWithRows(page);
+  const avatar = page.locator('.tickets__row:visible .tickets__assignee[title^="Assigned to "]').first();
+  test.skip((await avatar.count()) === 0, 'No shown row has an assignee in the e2e database (run make seed).');
+
+  const isAvatarOnTop = await avatar.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return null !== hit && element.contains(hit);
+  });
+  expect(isAvatarOnTop).toBe(true);
+
+  // The link's overlay sits over the time, so Playwright's own click would wait for it; a mouse click at the time's
+  // centre is what a person's click does.
+  const row = avatar.locator('xpath=ancestor::li[contains(@class, "tickets__row")]');
+  const key = (await row.getAttribute('data-ticket-key')) ?? '';
+  const time = await row.locator('.tickets__updated').boundingBox();
+  expect(time).not.toBeNull();
+  await page.mouse.click((time?.x ?? 0) + (time?.width ?? 0) / 2, (time?.y ?? 0) + (time?.height ?? 0) / 2);
+  await expect(page).toHaveURL(new RegExp(`/t/${key}$`));
 });
 
 test.describe('at 360 px', () => {

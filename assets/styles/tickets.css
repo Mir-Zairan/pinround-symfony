@@ -265,10 +265,15 @@
 }
 
 .tickets__row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-16);
   padding: var(--space-12) var(--space-16);
+}
+
+.tickets__row:hover {
+  background: var(--s-low);
 }
 
 .tickets__row + .tickets__row {
@@ -296,6 +301,24 @@
   overflow-wrap: anywhere;
 }
 
+.tickets__row-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* The title's link covers the whole row, so a click anywhere except the assignee avatar opens the ticket; the row
+   stays one link for a screen reader. */
+.tickets__row-link::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+
+.tickets__row-link:hover,
+.tickets__row-link:focus-visible {
+  text-decoration: underline;
+}
+
 .tickets__meta,
 .tickets__priority,
 .tickets__updated {
@@ -310,6 +333,12 @@
 .tickets__priority--urgent {
   font-weight: 700;
   color: var(--error);
+}
+
+/* Above the row link's overlay, so hovering the avatar still shows its "Assigned to …" title. */
+.tickets__assignee {
+  position: relative;
+  z-index: 1;
 }
 
 .tickets__assignee--nobody {

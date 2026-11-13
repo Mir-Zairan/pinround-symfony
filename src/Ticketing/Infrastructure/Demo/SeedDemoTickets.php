@@ -31,8 +31,9 @@ use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
 
 /**
- * 40 demo tickets in SHOP, five in each core step of the Shop team's workflow. It runs after SeedDemoProjects. A ticket
- * whose title SHOP already holds stays as it is.
+ * 41 demo tickets in SHOP: five in each core step of the Shop team's workflow, and a sixth in Backlog whose ask is past
+ * the ticket page's 700-character cut (the ticket page's e2e spec opens it by its title). It runs after SeedDemoProjects.
+ * A ticket whose title SHOP already holds stays as it is.
  *
  * No command moves a ticket yet (P03.T7), so a ticket is made through TicketCommands::create, which starts it in
  * Backlog or To do, and then put in its step with one UPDATE; its turn row is refreshed after that.
@@ -47,6 +48,8 @@ final readonly class SeedDemoTickets implements DemoSeedStep
     private const string MIA_EMAIL = 'mia@acme-foods.example';
     /** The core steps in workflow order; ticket n goes to step n modulo their count. */
     private const array CORE_STEPS = ['backlog', 'todo', 'progress', 'review', 'test', 'input', 'hold', 'done'];
+    public const string LONG_ASK_TITLE = 'Pay button does nothing on a long basket';
+    private const string SHORT_ASK = 'Seeded for the demo.';
     private const array TITLES = [
         'Search box loses focus after typing',
         'Price rounds wrong in basket',
@@ -88,7 +91,14 @@ final readonly class SeedDemoTickets implements DemoSeedStep
         'Support chat button hides the Pay now button',
         'Show how many items are left when stock is low',
         'Refund note is missing from the order email',
+        self::LONG_ASK_TITLE,
     ];
+
+    /** Whole words, so the page's cut at 700 characters ends at a word and the rest stays behind "Show the full ask". */
+    private static function longAsk(): string
+    {
+        return str_repeat('Pay now does nothing once the basket holds many items. ', 14).'The checkout total is wrong.';
+    }
 
     public function __construct(
         private DemoOrganizations $demoOrganizations,
@@ -148,7 +158,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
             $coreCode = self::CORE_STEPS[$index % \count(self::CORE_STEPS)];
             $targetStep = $stepsByCoreCode[$coreCode] ?? throw new DemoSeedRefused(\sprintf('The Shop team has no %s step.', $coreCode));
             $assignee = 'backlog' === $coreCode ? null : (0 === $index % 2 ? $omar : $lena);
-            $this->seedTicket($organizationId, $projectId, $lena, $title, $index, $assignee, $targetStep, $stepsByCoreCode['progress'] ?? throw new DemoSeedRefused('The Shop team has no progress step.'), $mia, $lena);
+            $this->seedTicket($organizationId, $projectId, $lena, $title, self::LONG_ASK_TITLE === $title ? self::longAsk() : self::SHORT_ASK, $index, $assignee, $targetStep, $stepsByCoreCode['progress'] ?? throw new DemoSeedRefused('The Shop team has no progress step.'), $mia, $lena);
             ++$created;
         }
 
@@ -160,6 +170,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
         string $projectId,
         UserId $reporter,
         string $title,
+        string $description,
         int $index,
         ?UserId $assignee,
         StepView $targetStep,
@@ -175,7 +186,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
             $reporter,
             $projectId,
             $title,
-            'Seeded for the demo.',
+            $description,
             $types[$index % \count($types)]->value,
             $priorities[($index + intdiv($index, \count(self::CORE_STEPS))) % \count($priorities)]->value,
             $assignee,
@@ -200,7 +211,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
                 3 === $index % 5 ? Visibility::Team->value : Visibility::All->value,
                 'review' === $coreCode ? $reviewer->toString() : null,
                 'test' === $coreCode ? $tester->toString() : null,
-                $isWaiting ? ('input' === $coreCode ? 'Answer from the shopper' : 'Supplier delivery') : null,
+                $isWaiting ? ('input' === $coreCode ? 'Customer' : 'Supplier delivery') : null,
                 'done' === $coreCode ? $now->format(\DateTimeInterface::ATOM) : null,
                 $organizationId->toString(),
                 $ticketId,

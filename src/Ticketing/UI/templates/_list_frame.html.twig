@@ -21,12 +21,14 @@
                         </h2>
                         <div class="tickets__rows" id="step-{{ step.id }}-rows" {{ stimulus_target('step-collapse', 'rows') }}{% if step.isCollapsed %} hidden{% endif %}>
                             {% if step.pageFrameId is not null %}<turbo-frame id="{{ step.pageFrameId }}">{% endif %}
-                            <ul class="tickets__row-list"{% if step.pageFrameId is not null %} tabindex="-1" autofocus{% endif %}>
+                            {# No hover prefetch: inside a frame Turbo prefetches links even with Drive off, and each would cost a ticket page's queries. #}
+                            <ul class="tickets__row-list" data-turbo-prefetch="false"{% if step.pageFrameId is not null %} tabindex="-1" autofocus{% endif %}>
                                 {% for row in step.rows %}
                                     <li class="tickets__row" data-ticket-key="{{ row.key }}">
                                         <span class="tickets__key">{{ row.key }}</span>
                                         <span class="tickets__summary">
-                                            <span class="tickets__row-title">{{ row.title }}</span>
+                                            {# _top: a row inside a "Show more" frame must open the whole ticket page, not replace that frame. #}
+                                            <a class="tickets__row-title tickets__row-link" href="{{ path('ticket_show', {key: row.key}|merge(listQuery)) }}" data-turbo-frame="_top">{{ row.title }}</a>
                                             <span class="tickets__meta">{{ row.meta }}</span>
                                         </span>
                                         <span class="tickets__priority{% if row.isUrgent %} tickets__priority--urgent{% endif %}">{{ row.priority }}</span>

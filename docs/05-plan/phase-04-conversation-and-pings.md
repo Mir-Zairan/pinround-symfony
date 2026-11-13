@@ -156,7 +156,7 @@ FR-CNV-01, FR-CNV-02, FR-CNV-03, FR-CNV-04, FR-CNV-05, FR-CNV-06, FR-CNV-07, FR-
 3. Outbox handlers publish: per-user Turbo Streams (bell count, bell items, toasts for the user) and content-free `refresh` signals on ticket topics.
 4. Coalescing: at most one ticket-topic signal per ticket per ~2 s; the browser re-fetches frames through the voter with 0–1 s random jitter, and only when the page is visible (`document.visibilityState`).
 5. Graceful fallback: without Mercure the app works; a "refresh" link appears after 60 s of missed heartbeats.
-**Files:** `src/Notification/Infrastructure/Mercure/*`, `src/Notification/UI/Controller/RealtimeTokenController.php`, `templates/ticket/show.html.twig` (stream source), FrankenPHP config.
+**Files:** `src/Notification/Infrastructure/Mercure/*`, `src/Notification/UI/Controller/RealtimeTokenController.php`, `@Ticketing/show.html.twig` (`src/Ticketing/UI/templates/show.html.twig`, stream source), FrankenPHP config.
 **Acceptance criteria:**
 - [ ] Two browsers on one ticket: a move in one updates the other within 3 s.
 - [ ] A user whose access was removed gets only a refresh and then a 404 — no content; after logout, the token renewal fails and the stream stops within 10 minutes.

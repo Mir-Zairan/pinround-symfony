@@ -151,6 +151,27 @@ final class TicketListTextTest extends TestCase
         self::assertSame($expected, TicketListText::updatedOf(new \DateTimeImmutable($updatedAt), new \DateTimeImmutable($now), new \DateTimeZone($zone)));
     }
 
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function dates(): iterable
+    {
+        yield 'a minute ago is still a date' => ['2026-03-15T10:29:00+00:00', 'UTC', '15 Mar'];
+        yield 'this year' => ['2026-01-05T10:00:00+00:00', 'UTC', '5 Jan'];
+        yield 'another year' => ['2025-11-05T10:00:00+00:00', 'UTC', '5 Nov 2025'];
+        yield 'the viewer\'s zone moves the day' => ['2026-03-12T23:30:00+00:00', 'Europe/Berlin', '13 Mar'];
+        yield 'the viewer\'s zone moves the year' => ['2025-12-31T23:30:00+00:00', 'Asia/Tokyo', '1 Jan'];
+    }
+
+    #[Test]
+    #[DataProvider('dates')]
+    public function aDateIsDayAndMonthInTheViewersZoneWithTheYearOnlyWhenItIsNotThisOne(string $at, string $zone, string $expected): void
+    {
+        $now = new \DateTimeImmutable('2026-03-15T10:30:00+00:00');
+
+        self::assertSame($expected, TicketListText::dateOf(new \DateTimeImmutable($at), $now, new \DateTimeZone($zone)));
+    }
+
     private static function stepOf(int $ticketCount, bool $isCountCapped): TicketListStep
     {
         return new TicketListStep(self::STEP, 'To do', false, $ticketCount, $isCountCapped, [], null);

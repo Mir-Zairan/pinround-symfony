@@ -7,6 +7,8 @@ namespace App\Tests\Functional\Workflow;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
+use App\Organization\Infrastructure\Doctrine\StoredSettings;
+use App\Organization\Infrastructure\Doctrine\StoredSettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -455,7 +457,7 @@ final class TeamWorkflowControllerTest extends WebTestCase
      */
     private static function settingsThatChangeAfterTheFirstRead(StepPolicy $first, StepPolicy $later): SettingsQueries
     {
-        return new class($first, $later) implements SettingsQueries {
+        return new class($first, $later) implements SettingsQueries, StoredSettingsQueries {
             private bool $wasRead = false;
 
             public function __construct(private readonly StepPolicy $first, private readonly StepPolicy $later)
@@ -473,6 +475,11 @@ final class TeamWorkflowControllerTest extends WebTestCase
             public function triagerOf(OrganizationId $organizationId): ?UserId
             {
                 return null;
+            }
+
+            public function settingsOf(OrganizationId $organizationId): StoredSettings
+            {
+                return new StoredSettings($this->stepPolicyOf($organizationId), $this->triagerOf($organizationId));
             }
         };
     }

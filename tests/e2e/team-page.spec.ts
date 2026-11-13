@@ -117,7 +117,7 @@ test.describe('as the lead', () => {
     await expect(projectRows(page).filter({ hasText: 'DOCS' })).toHaveCount(1);
   });
 
-  // DOCS has no tickets, so it can be unlinked; an open ticket blocks unlinking SHOP, which the seed gives 40 tickets, 35 of them open.
+  // DOCS has no tickets, so it can be unlinked; an open ticket blocks unlinking SHOP, which the seed gives 41 tickets, 36 of them open.
   test('Remove unlinks a project and the dialog then lists it', async ({ page }) => {
     await openShopTeam(page);
     await addProjects(page, ['DOCS']);

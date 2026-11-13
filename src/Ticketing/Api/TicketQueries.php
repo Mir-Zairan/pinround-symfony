@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Api;
 
 /**
- * The tickets list, for the list page and other modules. It reads the organization of TenantContext under row-level
+ * The tickets list and one ticket's page, for those pages and other modules. It reads the organization of TenantContext under row-level
  * security, so it needs an open transaction whose tenant is the viewer's organization.
  */
 interface TicketQueries
@@ -36,4 +36,46 @@ interface TicketQueries
      *                                   other way round, before any query
      */
     public function list(ListFilter $filter, ?Cursor $cursor = null): array;
+
+    /**
+     * The ticket with that key, only when the viewer may see it (ADR-0013): a ticket hidden from them answers null,
+     * exactly as an unknown key does, so a caller never learns that it exists. Its parent's key is there only when the
+     * viewer may see the parent too. A page still decides TicketPermission VIEW on the visibility facts, as a second
+     * guard. Four queries at most: the ticket with its project and its parent's key in one, its team's lead and its people
+     * by job (none for a ticket no team owns), and the names of everyone the page shows in one batch (reporter,
+     * assignee, reviewer, tester, pending assignee, waiting-on and the team's lead, developers and testers); its step
+     * through Workflow's StepQueries::listedSteps and the team's steps add queries only while their cache is cold. The
+     * view carries the ticket's turn facts, so the turn needs no second read of the ticket. A key that cannot
+     * be a ticket key (not PROJECT-number, a number from 1 up with no leading zero, case as stored) runs none.
+     *
+     * @param TicketVisibility $viewer whose ticket visibility predicate the ticket and its parent are read under
+     *
+     * @return TicketPageView|null null when the tenant has no ticket with that key the viewer may see, or the key
+     *                             cannot be one
+     *
+     * @throws \LogicException when no transaction is open, no tenant is set, or the viewer is of another organization
+     *                         than the tenant, before any query; when the ticket's step is not one of the
+     *                         organization's
+     */
+    public function pageOf(string $key, TicketVisibility $viewer): ?TicketPageView;
+
+    /**
+     * Where the ticket with that key sits in the list the filter gives, in exactly list()'s order and under the same
+     * visibility and filters, in one query (none while Workflow's StepQueries caches the steps, plus that one when
+     * cold). Without a search it never sorts the whole organization: each step counts at most
+     * TicketListStep::COUNT_CAP tickets as list() does, and the neighbours are read by keyset over the list's index,
+     * crossing into the nearest earlier or later step that holds a ticket. With a search, only the matches list()
+     * would read are ranked.
+     *
+     * @param ListFilter $filter the list the ticket is looked for in; its viewer's predicate decides the ticket, its
+     *                           neighbours and the count
+     *
+     * @return TicketPosition|null null when the ticket is not in that list: an unknown key, a ticket the viewer may not
+     *                             see, one the filter leaves out, a Done ticket of a list without Done, a key that
+     *                             cannot be one (no query), or a match past the search's cap
+     *
+     * @throws \LogicException when no transaction is open, no tenant is set, or the filter's viewer is of another
+     *                         organization than the tenant, before any query
+     */
+    public function positionOf(string $key, ListFilter $filter): ?TicketPosition;
 }
