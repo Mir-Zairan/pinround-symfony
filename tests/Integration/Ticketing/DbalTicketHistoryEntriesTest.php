@@ -114,6 +114,24 @@ final class DbalTicketHistoryEntriesTest extends KernelTestCase
         self::assertSame([], $this->latestOf(self::BETA_BAKERY, $ticketId));
     }
 
+    /**
+     * The query names Acme Foods in both runs, so only row-level security keeps the rows from Beta Bakery's tenant.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsMoves(): void
+    {
+        $ticketId = $this->createdTicketOf(self::ACME_FOODS);
+        $this->addEvents(self::ACME_FOODS, $ticketId->toString(), [
+            ['0197a3c0-0000-7000-8000-0000000ef201', 'moved', '2027-03-16 09:00:00+00', '{}'],
+        ]);
+
+        $idsUnderAcmeFoods = $this->acmeFoodsIdsReadAs(self::ACME_FOODS, $ticketId);
+        $idsUnderBetaBakery = $this->acmeFoodsIdsReadAs(self::BETA_BAKERY, $ticketId);
+
+        self::assertSame(['0197a3c0-0000-7000-8000-0000000ef201'], $idsUnderAcmeFoods);
+        self::assertSame([], $idsUnderBetaBakery);
+    }
+
     #[Test]
     public function aGiveWhosePayloadNamesNoUserIdGivesToNobodyKnown(): void
     {
@@ -215,6 +233,22 @@ final class DbalTicketHistoryEntriesTest extends KernelTestCase
             DbalTicketHistoryEntries::LATEST_SQL,
             DbalTicketHistoryEntries::parametersOf($organizationId, $ticketId, new \DateTimeImmutable(self::TICKET_CREATED_AT)),
         ));
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    private function acmeFoodsIdsReadAs(string $tenantOrganizationId, TicketId $ticketId): array
+    {
+        return $this->transactions()->rolledBackAs($tenantOrganizationId, function () use ($ticketId): array {
+            $connection = $this->connection();
+            self::assertSame(['pinround_app', 'on'], [$connection->fetchOne('SELECT current_user'), $connection->fetchOne('SHOW row_security')]);
+
+            return $connection->fetchFirstColumn(
+                DbalTicketHistoryEntries::LATEST_SQL,
+                DbalTicketHistoryEntries::parametersOf(self::ACME_FOODS, $ticketId, new \DateTimeImmutable(self::TICKET_CREATED_AT)),
+            );
+        });
     }
 
     private function historyEntries(): DbalTicketHistoryEntries

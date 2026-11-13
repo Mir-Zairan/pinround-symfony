@@ -21,6 +21,11 @@
   color: var(--on-primary);
 }
 
+/* The base ring is --primary, the bar's own background. */
+.queue-bar :focus-visible {
+  outline-color: var(--on-primary);
+}
+
 .queue-bar__line {
   margin: 0;
   overflow-wrap: anywhere;

@@ -47,7 +47,7 @@ final readonly class DbalTicketHistoryEntries implements TicketHistoryEntries
         return [
             'organization' => $organizationId,
             'ticket' => $ticketId->toString(),
-            // Microseconds kept: a created row stored in the same second as the ticket must not fall below the bound.
+            // Microseconds kept: a move saved in the same second the ticket was created must not fall below the bound.
             'ticket_created_at' => $ticketCreatedAt->format('Y-m-d H:i:s.uP'),
         ];
     }

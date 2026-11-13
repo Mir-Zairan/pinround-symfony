@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { demoPassword, LENA_EMAIL } from './auth';
 
@@ -6,6 +7,8 @@ import { demoPassword, LENA_EMAIL } from './auth';
 // the demo seed's SHOP Code review step and makes or moves no ticket.
 const STEP = 'Code review';
 const TOAST_REGION = '#toast-region';
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
+const DESKTOP = { width: 1280, height: 800 };
 
 test.describe.configure({ mode: 'serial' });
 
@@ -13,7 +16,7 @@ let context: BrowserContext;
 let page: Page;
 
 test.beforeAll(async ({ browser }) => {
-  context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
+  context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: DESKTOP });
   page = await context.newPage();
   await page.goto('/login');
   await page.getByLabel('Email').fill(LENA_EMAIL);
@@ -89,4 +92,42 @@ test('Back while in a queue ends it and opens the list', async () => {
   await page.goBack();
   await page.reload();
   await expect(queueBar()).toHaveCount(0);
+});
+
+test('a ticket page with the queue bar has no serious or critical accessibility violations', async () => {
+  await startQueue();
+  await expect(queueBar()).toBeVisible();
+
+  const { violations } = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
+
+  expect(
+    violations
+      .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+      .map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(' ')).join(' | ')}`),
+  ).toEqual([]);
+});
+
+test('at 360 px the queue bar fits and the page does not scroll sideways', async () => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  try {
+    await startQueue();
+    await queueBar().getByRole('link', { name: 'Next ticket' }).click();
+    await expect(queueBar().locator('.queue-bar__line')).toHaveText(new RegExp(`^${STEP} · 2 of \\d+$`));
+
+    const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+    const controls = await queueBar().locator('.btn').all();
+    expect(controls).toHaveLength(3);
+    for (const control of controls) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(clientWidth);
+    }
+  } finally {
+    await page.setViewportSize(DESKTOP);
+  }
 });

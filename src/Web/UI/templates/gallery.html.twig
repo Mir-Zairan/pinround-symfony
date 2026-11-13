@@ -208,4 +208,10 @@
             <twig:NextStepBoxExample />
         </div>
     </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-queue-bar">
+        <h2 id="gallery-queue-bar">Queue bar</h2>
+        <twig:QueueBar aria-label="Queue, first ticket" label="Code reviews" :place="1" :count="3" nextUrl="/t/SHOP-13" finishUrl="/tickets/queue/finish" stopUrl="/t/SHOP-12/queue/stop" csrfToken="gallery-example" />
+        <twig:QueueBar aria-label="Queue, last ticket" label="Code reviews" :place="3" :count="3" previousUrl="/t/SHOP-13" finishUrl="/tickets/queue/finish" stopUrl="/t/SHOP-14/queue/stop" csrfToken="gallery-example" />
+    </section>
 {% endblock %}

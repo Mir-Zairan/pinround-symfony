@@ -222,7 +222,7 @@ final class TeamPageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('People 7 waiting on them', $page->filter('#team-people')->text());
         self::assertSame(
-            ['Noor 20', 'Ben 19', 'Omar 8', 'Lena (you) 7', 'Tom 3', 'Zoe 3', 'Pia 0'],
+            ['Noor 20 Too much', 'Ben 19 Busy', 'Omar 8 Busy', 'Lena (you) 7', 'Tom 3', 'Zoe 3', 'Pia 0'],
             $page->filter('.team__person-head')->each(static fn (Crawler $head): string => $head->text()),
         );
         self::assertSame(
@@ -234,14 +234,14 @@ final class TeamPageTest extends WebTestCase
             $page->filter('.team__meter')->each(static fn (Crawler $meter): array => [$meter->attr('value'), $meter->attr('max')]),
         );
         self::assertSame(
-            'Counts are open tickets where it is this person’s turn. Red means too much.',
+            'Counts are open tickets where it is this person’s turn. Busy from 8 tickets, too much from 20.',
             $page->filter('.team__people-note')->text(),
         );
         self::assertCount(0, $page->filter('.team__column--aside .empty-state'));
     }
 
     #[Test]
-    public function aBarTurnsAmberAtEightNotSevenAndRedAtTwentyNotNineteen(): void
+    public function aBarTurnsAmberAndReadsBusyAtEightNotSevenAndRedAndTooMuchAtTwentyNotNineteen(): void
     {
         $people = $this->createAcmeFoodsPeople();
         $members = $this->addShopMembers('Ben', 'Noor');
@@ -256,13 +256,14 @@ final class TeamPageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
             [
-                ['Noor 20', 'team__meter team__meter--too-much'],
-                ['Ben 19', 'team__meter team__meter--busy'],
-                ['Omar (you) 8', 'team__meter team__meter--busy'],
-                ['Lena 7', 'team__meter team__meter--normal'],
+                ['Noor 20', ['Too much'], 'team__meter team__meter--too-much'],
+                ['Ben 19', ['Busy'], 'team__meter team__meter--busy'],
+                ['Omar (you) 8', ['Busy'], 'team__meter team__meter--busy'],
+                ['Lena 7', [], 'team__meter team__meter--normal'],
             ],
             $page->filter('.team__person')->each(static fn (Crawler $person): array => [
-                $person->filter('.team__person-head')->text(),
+                $person->filter('.team__person-name')->text().' '.$person->filter('.team__person-load')->text(),
+                $person->filter('.team__person-level')->each(static fn (Crawler $level): string => $level->text()),
                 $person->filter('.team__meter')->attr('class'),
             ]),
         );
@@ -334,17 +335,20 @@ final class TeamPageTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, string}>
+     * @return iterable<string, array{string, string, array{string, string}}> the viewer, Omar's row and his bar's value and max
      */
     public static function viewersOfOmarsLoad(): iterable
     {
-        yield 'Lena, lead of Shop, counts the team-only ticket' => ['Lena', 'Omar 2'];
-        yield 'Raj, a Manager with no team role, does not' => ['Raj', 'Omar 1'];
+        yield 'Lena, lead of Shop, counts the team-only ticket' => ['Lena', 'Omar 2', ['2', '2']];
+        yield 'Raj, a Manager with no team role, does not' => ['Raj', 'Omar 1', ['1', '1']];
     }
 
+    /**
+     * @param array{string, string} $omarsMeter
+     */
     #[Test]
     #[DataProvider('viewersOfOmarsLoad')]
-    public function aBarCountsOnlyTheTeamsTicketsTheViewerMaySee(string $viewer, string $omarsLoad): void
+    public function aBarCountsOnlyTheTeamsTicketsTheViewerMaySee(string $viewer, string $omarsLoad, array $omarsMeter): void
     {
         $people = $this->createAcmeFoodsPeople();
         $shopProjectId = $this->addProject($this->shop, 'SHOP', 'Web shop');
@@ -361,6 +365,7 @@ final class TeamPageTest extends WebTestCase
             static fn (string $head): string => str_replace(' (you)', '', $head),
             $page->filter('.team__person-head')->each(static fn (Crawler $head): string => $head->text()),
         ));
+        self::assertSame($omarsMeter, [$page->filter('.team__meter')->first()->attr('value'), $page->filter('.team__meter')->first()->attr('max')]);
     }
 
     #[Test]

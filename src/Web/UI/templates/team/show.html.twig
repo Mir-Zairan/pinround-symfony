@@ -199,7 +199,10 @@
                             <div class="team__person-main">
                                 <div class="team__person-head">
                                     <span class="team__person-name">{{ person.name }}{{ person.isViewer ? ' (you)' }}</span>
-                                    <span class="team__person-load">{{ person.waitingTickets }}</span>
+                                    <span class="team__person-figures">
+                                        <span class="team__person-load">{{ person.waitingTickets }}</span>
+                                        {%- if person.level.label is not null %} <span class="team__person-level">{{ person.level.label }}</span>{% endif -%}
+                                    </span>
                                 </div>
                                 <progress class="team__meter team__meter--{{ person.level.value }}" max="{{ workload.meterMax }}" value="{{ person.waitingTickets }}" aria-hidden="true"></progress>
                                 <span class="team__person-job">{{ person.jobLine }}</span>
@@ -211,7 +214,7 @@
                     <p class="team__people-none" hidden {{ stimulus_target('team-people', 'noMatch') }}>No one in this team matches.</p>
                     <twig:Button type="button" variant="text" size="sm" class="team__people-toggle" aria-controls="team-people-list" aria-expanded="false" data-show-all-label="Show all {{ workload.people|length }}" data-show-fewer-label="Show fewer" data-team-people-target="toggle" data-action="team-people#toggle">Show all {{ workload.people|length }}</twig:Button>
                 {% endif %}
-                <p class="team__hint team__people-note">Counts are open tickets where it is this person’s turn. Red means too much.</p>
+                <p class="team__hint team__people-note">Counts are open tickets where it is this person’s turn. Busy from {{ constant('App\\Web\\UI\\Team\\WorkloadLevel::BUSY_FROM') }} tickets, too much from {{ constant('App\\Web\\UI\\Team\\WorkloadLevel::TOO_MUCH_FROM') }}.</p>
             </section>
         </div>
     </div>

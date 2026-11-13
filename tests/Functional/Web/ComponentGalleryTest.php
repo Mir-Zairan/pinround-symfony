@@ -23,14 +23,15 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Your next step box', 'Your next step', 'Move to Needs input'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Your next step box', 'Your next step', 'Move to Needs input', 'Queue bar'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
         // 4 variants x 2 sizes x (normal, disabled, link)
         // plus the one action button inside the empty-state example, the dialog's trigger, Cancel and Confirm, the
-        // person picker's Cancel, and the next step box's verb, its "Move to another step…" summary, Cancel and Move
-        self::assertCount(33, $crawler->filter('main .btn'));
-        self::assertCount(9, $crawler->filter('main a.btn[href]'));
+        // person picker's Cancel, the next step box's verb, its "Move to another step…" summary, Cancel and Move, and
+        // the two queue bars' Previous, Next ticket or Finish, and Stop
+        self::assertCount(39, $crawler->filter('main .btn'));
+        self::assertCount(11, $crawler->filter('main a.btn[href]'));
         self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
-        self::assertCount(5, $crawler->filter('main button.btn.btn-text:not([disabled])'));
+        self::assertCount(7, $crawler->filter('main button.btn.btn-text:not([disabled])'));
     }
 
     #[Test]
@@ -165,6 +166,33 @@ final class ComponentGalleryTest extends WebTestCase
             $dialog->filter('.waiting-on__choice')->each(static fn (Crawler $choice): array => [$choice->text(), $choice->filter('input[type="radio"]')->attr('checked')]),
         );
         self::assertSame(['Cancel', 'Move'], $dialog->filter('.dialog__actions .btn')->each(static fn (Crawler $button): string => $button->text()));
+    }
+
+    /**
+     * The first ticket of a queue, with Previous off and Next ticket, and the last, with Previous on and Finish; both
+     * with Stop. Their styles come from ticket.css, which the gallery links.
+     */
+    #[Test]
+    public function theGalleryShowsTheQueueBarOnTheFirstAndTheLastTicket(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $crawler->filter('link[rel="stylesheet"][href*="styles/ticket-"]'));
+        $bars = $crawler->filter('#gallery-queue-bar ~ nav.queue-bar');
+        self::assertSame(
+            [
+                ['Queue, first ticket', 'Code reviews · 1 of 3', [['Previous', null, 'true'], ['Next ticket', '/t/SHOP-13', null], ['Stop', null, null]], ['/t/SHOP-12/queue/stop']],
+                ['Queue, last ticket', 'Code reviews · 3 of 3', [['Previous', '/t/SHOP-13', null], ['Finish', null, null], ['Stop', null, null]], ['/tickets/queue/finish', '/t/SHOP-14/queue/stop']],
+            ],
+            $bars->each(static fn (Crawler $bar): array => [
+                $bar->attr('aria-label'),
+                $bar->filter('.queue-bar__line')->text(),
+                $bar->filter('.btn')->each(static fn (Crawler $button): array => [$button->text(), $button->attr('href'), $button->attr('aria-disabled')]),
+                $bar->filter('form')->each(static fn (Crawler $form): ?string => $form->attr('action')),
+            ]),
+        );
     }
 
     #[Test]

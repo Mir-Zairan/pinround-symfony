@@ -111,7 +111,6 @@ test.describe('a team of more than six people', () => {
   });
 
   test('"Show all N" is off the screen while a search runs', async ({ page }) => {
-    test.fail(true, 'Known bug: .btn sets display: inline-flex, which beats the hidden attribute the controller sets on the toggle.');
     await peopleSearch(page).pressSequentially('person004');
     await expect(peopleToggle(page)).toHaveAttribute('hidden', '');
 
@@ -137,14 +136,17 @@ test.describe('a team of more than six people', () => {
     await test.info().attach('people-section', { body: await peopleSection(page).screenshot(), contentType: 'image/png' });
   });
 
-  test('each workload bar has an accessible name', async ({ page }) => {
-    test.fail(true, 'Known gap: the bar is aria-hidden, so a screen reader hears the count but not the level that red or amber shows.');
-    const bars = shownPersonRows(page).getByRole('progressbar');
+  // The bar is aria-hidden, so the words beside the count carry the level its colour shows.
+  test('each row names in words the level its bar shows in colour', async ({ page }) => {
+    const rows = shownPersonRows(page);
+    await expect(rows).toHaveCount(SHOWN_AT_FIRST);
 
-    await expect(bars).toHaveCount(SHOWN_AT_FIRST, { timeout: 1_000 });
-    for (const bar of await bars.all()) {
-      await expect(bar).toHaveAccessibleName(/\S/, { timeout: 1_000 });
+    for (const row of await rows.all()) {
+      const barClass = (await row.locator('progress').getAttribute('class')) ?? '';
+      const expectedLevel = barClass.includes('team__meter--too-much') ? ['Too much'] : barClass.includes('team__meter--busy') ? ['Busy'] : [];
+      expect(await row.locator('.team__person-level').allInnerTexts()).toEqual(expectedLevel);
     }
+    await expect(peopleSection(page).locator('.team__people-note')).not.toContainText(/red|amber/i);
   });
 
   // Only the controls and the first rows: axe takes over 30 seconds on the whole list of 2,001 people, shown or hidden.
