@@ -1,13 +1,14 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { demoPassword, LENA_STORAGE_STATE, OMAR_STORAGE_STATE, RAJ_EMAIL } from './auth';
+import { existsSync } from 'node:fs';
+import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE, RAJ_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
 // The spec moves tickets, so it never touches the seeded ones the other specs read: Lena makes a SHOP ticket for Omar
 // in To do for each journey, with a title no earlier run used, and the run leaves it where its last move put it.
-// TicketMoveControllerTest proves every verb, refusal and the redirect without Turbo on the server.
+// tests/Functional/Ticketing/TicketMoveTest.php proves every verb, refusal and the redirect without Turbo on the server.
 const TOAST_REGION = '#toast-region';
 const MOVE_FAILED = 'Could not move the ticket. Try again.';
 const PENDING_TOAST_KEY = 'pinround.pendingToast';
@@ -164,26 +165,14 @@ test.describe('four people move one SHOP ticket', () => {
     await expectSameLoad(page);
   });
 
-  // Raj is Shop's Viewer and a Manager of Acme Foods: he sees the ticket but may not move it.
+  // Raj is Shop's Viewer and a Manager of Acme Foods: he sees the ticket but may not move it. His session comes from
+  // auth.setup.ts, made before confirm-its-you.spec.ts turns his two-step login on, so that spec cannot log him out here.
   test('Raj sees the ticket with no verb and no move list', async ({ browser }) => {
-    const context = await browser.newContext({ storageState: { cookies: [], origins: [] }, ignoreHTTPSErrors: true });
-    const page = await context.newPage();
-    await page.goto('/login');
-    await page.getByLabel('Email').fill(RAJ_EMAIL);
-    await page.getByLabel('Password').fill(demoPassword());
-    await page.getByRole('button', { name: 'Log in' }).click();
-    const codePage = page.getByRole('heading', { name: 'Type your code', level: 1 });
-    const avatar = page.getByRole('button', { name: 'Raj', exact: true });
-    await expect(codePage.or(avatar)).toBeVisible();
-    // Typing one of Raj's recovery codes here would spend a code and a try that confirm-its-you.spec.ts counts on.
-    const hasTwoStepLoginOn = await codePage.isVisible();
-    if (hasTwoStepLoginOn) {
-      await context.close();
-    }
     test.skip(
-      hasTwoStepLoginOn,
-      'Raj has two-step login on: confirm-its-you.spec.ts turns it on while it runs, or an earlier run left it on (see auth.ts). TicketPageTest::theNextStepBoxOffersMovesOnlyToThoseWhoMayMakeThem proves a manager gets no verb.',
+      !process.env.CI && !existsSync(RAJ_STORAGE_STATE),
+      'auth.setup.ts skipped Raj: his two-step login is on in this database. TicketPageTest::theNextStepBoxOffersMovesOnlyToThoseWhoMayMakeThem proves a manager gets no verb.',
     );
+    const { context, page } = await openAs(browser, RAJ_STORAGE_STATE);
 
     await openTicket(page, key, title);
 
@@ -242,6 +231,26 @@ test.describe('a stale page and a failed move', () => {
       expect(await page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), PENDING_TOAST_KEY)).toBeNull();
     });
   }
+
+  // assets/app.js has no failure text of its own, so a page-level Turbo form without data-failed-toast reloads silently.
+  test('a failed post from a form with no failure text reloads the page with no toast', async ({ browser, page }) => {
+    const title = `Wish list drops the last item ${randomUUID().slice(0, 8)}`;
+    const key = await makeTicketForOmar(browser, title);
+    await openTicket(page, key, title);
+    await page.route('**/move/start_work', (route) => route.fulfill({ status: 403, contentType: 'text/html', body: '<!doctype html><title>No</title>' }));
+    const startWorkForm = nextStepBox(page).locator('.next-step-box__verbs form').filter({ hasText: 'Start work' });
+    await startWorkForm.evaluate((form) => form.removeAttribute('data-failed-toast'));
+    await markThisLoad(page);
+
+    const reloaded = page.waitForEvent('load');
+    await verbButtons(page).filter({ hasText: 'Start work' }).click();
+    await reloaded;
+
+    await expect(page.locator('html')).not.toHaveAttribute('data-e2e-load', 'before-move');
+    await expect(statusPill(page)).toHaveText('To do');
+    await expect(page.locator(`${TOAST_REGION} .toast`)).toHaveCount(0);
+    expect(await page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), PENDING_TOAST_KEY)).toBeNull();
+  });
 
   test('a move after the session ended goes to the login page with no toast', async ({ browser, page }) => {
     const title = `Order email misses the delivery slot ${randomUUID().slice(0, 8)}`;

@@ -150,7 +150,8 @@ final readonly class MoveTicket
     }
 
     /**
-     * Only the label the caller sent becomes WaitingOnRefused; Ticket::moveTo's own InvalidWaitingOn stays a fault.
+     * Only the label the caller sent becomes WaitingOnRefused; an InvalidWaitingOn from Ticket::move would be a bug here,
+     * so it stays a fault.
      *
      * @throws WaitingOnRefused when the label is blank, over 100 characters or not one line
      */

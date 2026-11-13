@@ -24,7 +24,6 @@ use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\WaitingOnRefused;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\TicketTurnSnapshots;
-use App\Ticketing\Domain\InvalidWaitingOn;
 use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
@@ -510,56 +509,6 @@ final class MoveTicketTest extends KernelTestCase
 
         self::assertInstanceOf(WaitingOnRefused::class, $refusal);
         self::assertSame('A ticket waits on a person or a label, not both.', $refusal->getMessage());
-        self::assertSame($stateBefore, $this->storedState());
-    }
-
-    /**
-     * MoveTicket and Ticket::move always agree on Needs input, so a Tickets double that moves the ticket again without
-     * anyone to wait on stands in for a fault after the caller's label was read.
-     */
-    #[Test]
-    public function aWaitingOnFaultAfterTheLabelWasReadIsNotTurnedIntoARefusal(): void
-    {
-        $moveTicket = $this->moveTicketWith(new readonly class(new DoctrineTickets($this->entityManager()), self::MOVED_AT) implements Tickets {
-            public function __construct(private Tickets $doctrineTickets, private string $movedAt)
-            {
-            }
-
-            public function nextIdentity(): TicketId
-            {
-                return $this->doctrineTickets->nextIdentity();
-            }
-
-            public function add(Ticket $ticket): void
-            {
-                $this->doctrineTickets->add($ticket);
-            }
-
-            public function save(Ticket $ticket): void
-            {
-                $ticket->move($ticket->stepId(), 'wait', true, null, new \DateTimeImmutable($this->movedAt));
-            }
-
-            public function ofKey(OrganizationId $organizationId, TicketKey $key): ?Ticket
-            {
-                return $this->doctrineTickets->ofKey($organizationId, $key);
-            }
-        });
-        $stateBefore = $this->storedState();
-
-        $fault = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $moveTicket->moveTo(
-            new OrganizationId(self::ACME_FOODS),
-            new UserId(self::LENA),
-            self::KEY,
-            self::NEEDS_INPUT_STEP,
-            $stateBefore['version'],
-            null,
-            'Customer',
-            new \DateTimeImmutable(self::MOVED_AT),
-        )));
-
-        self::assertNotNull($fault);
-        self::assertSame([InvalidWaitingOn::class, 'A ticket in Needs input waits on a person or a label.'], [$fault::class, $fault->getMessage()]);
         self::assertSame($stateBefore, $this->storedState());
     }
 

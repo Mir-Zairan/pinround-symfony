@@ -37,6 +37,8 @@ final class MoveToasts
     /** For a refusal whose rule has no note, or that no rule makes, such as a step that is the ticket's step now. */
     public const string MOVE_REFUSED = 'You can’t make this move now.';
     public const string WAITING_ON_REFUSED = 'Name one person, or write a label of one line and 100 characters or fewer.';
+    /** The move forms' data-failed-toast: assets/app.js shows it after an answer with no Turbo Stream reloads the page. */
+    public const string MOVE_FAILED = 'Could not move the ticket. Try again.';
 
     /** For a turn whose person Identity does not know any more, so the toast never fails on a missing name. */
     public const string SOMEONE = 'someone';

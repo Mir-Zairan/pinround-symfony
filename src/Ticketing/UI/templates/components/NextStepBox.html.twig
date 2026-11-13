@@ -2,6 +2,7 @@
 {% set csrfField = constant(moveController ~ '::CSRF_FIELD') %}
 {% set versionField = constant(moveController ~ '::VERSION_FIELD') %}
 {% set csrfToken = csrf_token(this.csrfTokenId) %}
+{% set moveFailedToast = constant('App\\Ticketing\\UI\\MoveToasts::MOVE_FAILED') %}
 <section{{ attributes.defaults({class: 'next-step-box', 'aria-labelledby': 'next-step-box-label'}) }}>
     <h2 class="next-step-box__label" id="next-step-box-label"{% if isHeadingAutofocused %} tabindex="-1" autofocus{% endif %}>Your next step</h2>
     <p class="next-step-box__sentence">{{ nextStep.sentence }}</p>
@@ -9,7 +10,7 @@
     {% if moveTransitions is not empty %}
         <div class="next-step-box__verbs">
             {% for transition in moveTransitions %}
-                <form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: transition.verb}) }}" data-turbo="true">
+                <form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: transition.verb}) }}" data-turbo="true" data-failed-toast="{{ moveFailedToast }}">
                     <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                     <input type="hidden" name="{{ versionField }}" value="{{ version }}">
                     <twig:Button type="submit" variant="{{ transition.isPrimary ? 'filled' : 'outline' }}">{{ transition.label }}</twig:Button>
@@ -38,7 +39,7 @@
                                 <div class="waiting-on" {{ stimulus_controller('waiting-on') }}>
                                     <twig:Dialog id="{{ dialogId }}" title="Move to {{ stepName }}">
                                         <twig:block name="trigger">
-                                            <form method="post" action="{{ moveToPath }}" data-turbo="true" {{ stimulus_target('waiting-on', 'moveForm') }}>
+                                            <form method="post" action="{{ moveToPath }}" data-turbo="true" data-failed-toast="{{ moveFailedToast }}" {{ stimulus_target('waiting-on', 'moveForm') }}>
                                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                                                 <input type="hidden" name="{{ versionField }}" value="{{ version }}">
                                                 <input type="hidden" name="{{ constant(moveController ~ '::WAITING_ON_USER_FIELD') }}" value="" {{ stimulus_target('waiting-on', 'userField') }}>
@@ -73,7 +74,7 @@
                                     </twig:Dialog>
                                 </div>
                             {% else %}
-                                <form method="post" action="{{ moveToPath }}" data-turbo="true">
+                                <form method="post" action="{{ moveToPath }}" data-turbo="true" data-failed-toast="{{ moveFailedToast }}">
                                     <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                                     <input type="hidden" name="{{ versionField }}" value="{{ version }}">
                                     {% if choice.isCurrent %}

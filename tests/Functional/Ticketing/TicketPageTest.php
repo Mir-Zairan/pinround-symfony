@@ -11,6 +11,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
+use App\Ticketing\UI\MoveToasts;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -597,6 +598,9 @@ final class TicketPageTest extends WebTestCase
         );
         // Drive is off, so only a form that opts in is posted by Turbo and gets the move's Turbo Stream answer.
         self::assertCount($page->filter('form[action*="/move"]')->count(), $page->filter('form[action*="/move"][data-turbo="true"]'));
+        // assets/app.js has no failure text of its own: after a reload it shows the form's data-failed-toast.
+        $moveForms = $page->filter('form[action*="/move"]');
+        self::assertSame(array_fill(0, $moveForms->count(), MoveToasts::MOVE_FAILED), $moveForms->each(static fn (Crawler $form): ?string => $form->attr('data-failed-toast')));
         $moveList = $box->filter('details.next-step-box__move-to');
         self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog#needs-input-'.$this->stepsByCore['input']));
         self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog'));

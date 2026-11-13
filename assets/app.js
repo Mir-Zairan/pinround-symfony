@@ -3,7 +3,6 @@ import * as Turbo from '@hotwired/turbo';
 
 // A toast a page leaves for the next page load, which shows it once in the toast region.
 const PENDING_TOAST_KEY = 'pinround.pendingToast';
-const MOVE_FAILED_MESSAGE = 'Could not move the ticket. Try again.';
 
 // sessionStorage throws when the browser blocks storage; the toast is then lost, never the reload.
 function queuePendingToast(message) {
@@ -49,8 +48,8 @@ document.addEventListener('turbo:frame-missing', (event) => {
 });
 // A page-level Turbo form (the ticket's move forms) expects a Turbo Stream. Any other answer (a plain 403/404/500,
 // the login page after the session expired) would be swapped in as a Turbo visit whose scripts the CSP blocks, so load
-// a real page instead: the redirect's target, or this page again, as the answered URL may be POST-only, with a toast
-// that says the move failed.
+// a real page instead: the redirect's target, or this page again, as the answered URL may be POST-only. Before that
+// reload, a form with data-failed-toast leaves its text as the next page's toast; a form without one reloads silently.
 document.addEventListener('turbo:before-fetch-response', (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || form.closest('turbo-frame') || form.hasAttribute('data-turbo-frame')) {
@@ -64,7 +63,10 @@ document.addEventListener('turbo:before-fetch-response', (event) => {
   if (fetchResponse.redirected) {
     window.location.assign(fetchResponse.response.url);
   } else {
-    queuePendingToast(MOVE_FAILED_MESSAGE);
+    const failedToast = form.dataset.failedToast;
+    if (failedToast) {
+      queuePendingToast(failedToast);
+    }
     window.location.reload();
   }
 });

@@ -6,29 +6,31 @@ import { logInAndTurnOnTwoStepLogin, RAJ_EMAIL, turnOffTwoStepLogin, twoStepCode
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // As Raj, whom no other spec logs in as: beforeAll turns his two-step login on and afterAll turns it off with a
-// recovery code, so a run takes one of his 5 code tries in 15 minutes. This spec only opens the page and never
-// confirms. The functional ConfirmItsYouTest covers the confirmation, the refusals and the return path.
-const RAJ_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'raj-confirm.json');
+// recovery code, so a run takes one of his 5 code tries in 15 minutes. ticket-move.spec.ts only reuses the session
+// auth.setup.ts made before this spec started, which turning two-step login on or off does not end. This spec only
+// opens the page and never confirms. The functional ConfirmItsYouTest covers the confirmation, the refusals and the
+// return path.
+const RAJ_CONFIRM_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'raj-confirm.json');
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   await logInAndTurnOnTwoStepLogin(await context.newPage(), RAJ_EMAIL, 'Raj');
-  await context.storageState({ path: RAJ_STORAGE_STATE });
+  await context.storageState({ path: RAJ_CONFIRM_STORAGE_STATE });
   await context.close();
 });
 
 test.afterAll(async ({ browser }) => {
-  if (!existsSync(twoStepCodesFile(RAJ_EMAIL)) || !existsSync(RAJ_STORAGE_STATE)) {
+  if (!existsSync(twoStepCodesFile(RAJ_EMAIL)) || !existsSync(RAJ_CONFIRM_STORAGE_STATE)) {
     return;
   }
-  const context = await browser.newContext({ storageState: RAJ_STORAGE_STATE });
+  const context = await browser.newContext({ storageState: RAJ_CONFIRM_STORAGE_STATE });
   await turnOffTwoStepLogin(await context.newPage(), RAJ_EMAIL);
   await context.close();
 });
 
-test.use({ storageState: RAJ_STORAGE_STATE });
+test.use({ storageState: RAJ_CONFIRM_STORAGE_STATE });
 
 async function openConfirmPage(page: Page): Promise<void> {
   await page.goto('/me/confirm');
