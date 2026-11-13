@@ -179,7 +179,7 @@
         <div class="gallery-row">
             <twig:Chip>Person ▾</twig:Chip>
             <div class="person-picker__host">
-                <twig:Dialog id="gallery-person-picker-demo" title="{{ pickerMode.title }}">
+                <twig:Dialog id="gallery-person-picker-demo" title="{{ pickerMode.title('') }}">
                     <twig:block name="trigger">
                         <twig:Chip pressed aria-haspopup="dialog" data-action="dialog#open">Omar</twig:Chip>
                     </twig:block>
@@ -187,10 +187,10 @@
                         <p class="person-picker__sub">{{ pickerMode.sub }}</p>
                         <div class="person-picker">
                             <input class="person-picker__field" type="search" autocomplete="off" placeholder="{{ searchLabel }}" aria-label="{{ searchLabel }}">
-                            <twig:PersonPickerRows :matchCount="3":rows="[
-                                {personId: '00000000-0000-4000-8000-000000000001', name: 'Omar', openCount: 3, isPressed: true},
-                                {personId: '00000000-0000-4000-8000-000000000002', name: 'Mia', openCount: 1, isPressed: false},
-                                {personId: '00000000-0000-4000-8000-000000000003', name: 'Lena', openCount: 0, isPressed: false},
+                            <twig:PersonPickerRows :mode="pickerMode" :matchCount="3" :rows="[
+                                {personId: '00000000-0000-4000-8000-000000000001', name: 'Omar', count: 3, isPressed: true},
+                                {personId: '00000000-0000-4000-8000-000000000002', name: 'Mia', count: 1, isPressed: false},
+                                {personId: '00000000-0000-4000-8000-000000000003', name: 'Lena', count: 0, isPressed: false},
                             ]"/>
                         </div>
                     </twig:block>

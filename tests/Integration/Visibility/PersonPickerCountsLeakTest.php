@@ -11,17 +11,25 @@ use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\AssigneeTicketCounts;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibility;
+use App\Web\UI\Component\PersonPickerMode;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\UX\TwigComponent\Test\InteractsWithTwigComponents;
 
 /**
  * The person picker's "N open" (AssigneeTicketCounts), read as the picker does: the viewer's visibility from
  * TicketVisibilities::of() under their own organization as tenant. Both cast tickets are assigned to Noor, so her count
  * is exactly the tickets the viewer may see; the no-team ticket's step is added as a To do step, so both are open.
+ * The assign picker's "N waiting" (WaitingTurnCounts) is read through the rendered picker: the team-only ticket's turn
+ * is Lena's.
  */
 final class PersonPickerCountsLeakTest extends VisibilityLeakCast
 {
+    use InteractsWithTwigComponents;
+
     /** The step the cast's no-team ticket is in, which the cast itself does not add. */
     private const string NO_TEAM_TICKET_STEP = '0197a3c0-0000-7000-8000-00000000f0d0';
 
@@ -40,6 +48,13 @@ final class PersonPickerCountsLeakTest extends VisibilityLeakCast
                     'UPDATE tkt_ticket SET assignee_id = ? WHERE id IN (?, ?)',
                     [self::VIEWERS['Noor'][0], self::teamOnlyTicketId(), self::NO_TEAM_TICKET],
                 );
+                $updated = $tenantMigrator->executeStatement(
+                    "UPDATE ins_ticket_turn SET turn_user_id = ?, turn_label = NULL, kind = 'build', grp = 'doing', waiting_since = '2027-03-01 09:00:00+00' WHERE ticket_id = ?",
+                    [self::VIEWERS['Lena'][0], self::teamOnlyTicketId()],
+                );
+                if (1 !== $updated) {
+                    throw new \LogicException('The cast\'s team-only ticket has no turn row to wait on Lena.');
+                }
             });
         } finally {
             $tenantContext->clear();
@@ -85,6 +100,50 @@ final class PersonPickerCountsLeakTest extends VisibilityLeakCast
             [2, 1, 1, 1, 0, 0],
             [self::readCountsAs('Sara')[$noor], self::readCountsAs('Omar')[$noor], self::readCountsAs('Mia')[$noor], self::readCountsAs('Lena')[$noor], self::readCountsAs('Raj')[$noor], self::readCountsAs('Ben')[$noor]],
         );
+    }
+
+    /**
+     * Each Acme Foods viewer and whether they may see the team-only ticket. Ben is of another organization, whose
+     * tenant holds none of the team's people, so he is left out.
+     *
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function acmeFoodsViewers(): iterable
+    {
+        foreach (self::viewers() as $case => [$viewer, $seesTeamOnly]) {
+            if ('Ben' !== $viewer) {
+                yield $case => [$viewer, $seesTeamOnly];
+            }
+        }
+    }
+
+    /**
+     * The "Give it to…" picker as each viewer's request renders it: the team-only ticket waits on Lena, the team's only
+     * person, so her "N waiting" is exactly whether the viewer may see that ticket.
+     */
+    #[Test]
+    #[DataProvider('acmeFoodsViewers')]
+    public function theAssignPickersWaitingCountNeverIncludesATicketTheViewerMayNotSee(string $viewer, bool $seesTeamOnly): void
+    {
+        $rows = self::asViewer($viewer, function (TokenInterface $token): array {
+            $tokenStorage = self::getContainer()->get('security.token_storage');
+            $tokenStorage->setToken($token);
+            try {
+                $picker = new Crawler((string) $this->renderTwigComponent('PersonPickerSearch', [
+                    'mode' => PersonPickerMode::Assign,
+                    'team' => self::SHOP_TEAM,
+                    'pickForm' => 'give-it-to-form',
+                    'pickField' => 'assignee',
+                    'isOpened' => true,
+                ]));
+            } finally {
+                $tokenStorage->setToken(null);
+            }
+
+            return $picker->filter('.pick')->each(static fn (Crawler $row): array => [$row->filter('.pick__name')->text(), $row->filter('.pick__side')->text()]);
+        });
+
+        self::assertSame([['Lena', $seesTeamOnly ? '1 waiting' : '0 waiting']], $rows, \sprintf('%s counts the wrong tickets.', $viewer));
     }
 
     #[Test]

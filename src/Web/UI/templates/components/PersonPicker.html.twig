@@ -1,15 +1,22 @@
 {# Inside the Dialog's blocks "this" is the Dialog, so the picker's props go in as plain variables. #}
 {% set picker = this %}
+{% set isAssign = picker.mode is same as(constant('App\\Web\\UI\\Component\\PersonPickerMode::Assign')) %}
 {# The person-picker controller hands the search the pressed person as the dialog opens, from this value, which follows the parent's re-renders. #}
 <div class="person-picker__host" {{ stimulus_controller('person-picker', {pressedPerson: picker.pressedPerson}) }}>
-    <twig:Dialog id="{{ picker.id }}" title="{{ picker.mode.title }}">
+    <twig:Dialog id="{{ picker.id }}" title="{{ picker.mode.title(picker.ticketKey) }}">
         <twig:block name="trigger">
-            <twig:Chip :pressed="picker.isTriggerPressed" data-person-picker-trigger aria-haspopup="dialog"
-                data-action="dialog#open person-picker#open">{{ picker.triggerLabel }}</twig:Chip>
+            {% if isAssign %}
+                <twig:Button variant="{{ picker.isTriggerPrimary ? 'filled' : 'outline' }}" data-person-picker-trigger aria-haspopup="dialog"
+                    data-action="dialog#open person-picker#open">{{ picker.triggerLabel }}</twig:Button>
+            {% else %}
+                <twig:Chip :pressed="picker.isTriggerPressed" data-person-picker-trigger aria-haspopup="dialog"
+                    data-action="dialog#open person-picker#open">{{ picker.triggerLabel }}</twig:Chip>
+            {% endif %}
         </twig:block>
         <twig:block name="content">
             <p class="person-picker__sub">{{ picker.mode.sub }}</p>
-            <twig:PersonPickerSearch team="{{ picker.team }}" projectId="{{ picker.projectId }}" pickedEvent="{{ picker.pickedEvent }}"/>
+            <twig:PersonPickerSearch :mode="picker.mode" team="{{ picker.team }}" projectId="{{ picker.projectId }}" pickedEvent="{{ picker.pickedEvent }}"
+                pickForm="{{ picker.pickForm }}" pickField="{{ picker.pickField }}"/>
         </twig:block>
         <twig:block name="actions">
             <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
