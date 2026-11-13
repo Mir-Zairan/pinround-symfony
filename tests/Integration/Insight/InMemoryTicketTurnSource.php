@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Insight;
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TicketTurnSource;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
@@ -30,6 +31,14 @@ final class InMemoryTicketTurnSource implements TicketTurnSource, ResetInterface
     public function factsFor(TicketId $ticketId): ?TicketTurnFacts
     {
         return $this->factsByTicketId[$ticketId->toString()] ?? null;
+    }
+
+    /**
+     * No test projects from a snapshot through this double; the real mapping is tested on DbalTicketTurnSource.
+     */
+    public function factsFrom(TicketTurnSnapshot $snapshot): never
+    {
+        throw new \LogicException('InMemoryTicketTurnSource cannot build facts from a snapshot; use DbalTicketTurnSource.');
     }
 
     public function reset(): void

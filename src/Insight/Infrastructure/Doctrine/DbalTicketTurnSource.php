@@ -8,8 +8,8 @@ use App\Insight\Api\TeamLoadQueries;
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TicketTurnSource;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\Ticketing\Api\TicketTurnQueries;
-use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TurnInputs;
 use Doctrine\DBAL\Connection;
@@ -30,13 +30,16 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
 
     public function factsFor(TicketId $ticketId): ?TicketTurnFacts
     {
-        // Outside a transaction no tenant is set for row-level security, so the loads would silently count zero.
-        if (!$this->connection->isTransactionActive()) {
-            throw new \LogicException('Turn facts for the projector are read in a transaction under the organization as tenant; none is open.');
-        }
-
+        $this->requireTransaction();
         $snapshot = $this->ticketTurnQueries->factsOf($ticketId);
-        if (null === $snapshot || null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
+
+        return null === $snapshot ? null : $this->factsFrom($snapshot);
+    }
+
+    public function factsFrom(TicketTurnSnapshot $snapshot): ?TicketTurnFacts
+    {
+        $this->requireTransaction();
+        if (null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
             return null;
         }
 
@@ -45,11 +48,19 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
             $snapshot->leadDisplayName,
             $snapshot->developerIds,
             $snapshot->testerIds,
-            $this->teamLoadQueries->waitingTurnsOf([...$snapshot->developerIds, ...$snapshot->testerIds], $ticketId),
+            $this->teamLoadQueries->waitingTurnsOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId),
         );
 
         // No organization has a current release yet, and the quick check and questions come later in P03.
-        return new TicketTurnFacts($ticketId, $snapshot->projectId, $this->ticketStateOf($snapshot), $team, $snapshot->visibility, isRiskCheck: $snapshot->isRiskCheck);
+        return new TicketTurnFacts($snapshot->ticketId, $snapshot->projectId, $this->ticketStateOf($snapshot), $team, $snapshot->visibility, isRiskCheck: $snapshot->isRiskCheck);
+    }
+
+    private function requireTransaction(): void
+    {
+        // Outside a transaction no tenant is set for row-level security, so the loads would silently count zero.
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('Turn facts for the projector are read in a transaction under the organization as tenant; none is open.');
+        }
     }
 
     private function ticketStateOf(TicketTurnSnapshot $snapshot): TicketState

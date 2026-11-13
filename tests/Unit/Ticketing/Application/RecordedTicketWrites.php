@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Ticketing\Application;
 use App\Insight\Api\TurnProjector;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\Event\TicketEvent;
 use App\Ticketing\Application\TicketEvents;
@@ -52,6 +53,13 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
     public function refresh(TicketId $ticketId): ?string
     {
         $this->writes[] = 'turn '.$ticketId->toString();
+
+        return null;
+    }
+
+    public function refreshFrom(TicketTurnSnapshot $facts): ?string
+    {
+        $this->writes[] = 'turn from snapshot '.$facts->ticketId->toString();
 
         return null;
     }

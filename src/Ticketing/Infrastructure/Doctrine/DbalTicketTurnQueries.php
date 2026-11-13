@@ -7,8 +7,8 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\Ticketing\Api\TicketTurnQueries;
-use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 

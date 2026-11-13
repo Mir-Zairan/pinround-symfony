@@ -6,8 +6,8 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
-use App\Ticketing\Api\TicketTurnSnapshot;
 
 /**
  * Makes a {@see TicketTurnSnapshot} from a row of tkt_ticket, so the turn query and the ticket page, which reads the

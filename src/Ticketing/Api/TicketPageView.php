@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Api;
 
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 
 /**
  * One ticket as its page shows it (ticket-page.md): the header, The ask and Details, with the facts TicketPermission

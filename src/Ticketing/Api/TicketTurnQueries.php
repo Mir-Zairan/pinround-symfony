@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Api;
 
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 
 /**
  * One ticket as Insight's turn projector needs it, for other modules. It reads the organization of TenantContext under

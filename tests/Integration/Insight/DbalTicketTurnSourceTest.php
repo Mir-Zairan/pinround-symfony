@@ -7,11 +7,15 @@ namespace App\Tests\Integration\Insight;
 use App\Insight\Api\TurnProjector;
 use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TicketTurnSource;
+use App\Insight\Application\Turn\TurnRowResolver;
+use App\Insight\Infrastructure\Doctrine\DbalProjectCountsProjector;
 use App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries;
 use App\Insight\Infrastructure\Doctrine\DbalTicketTurnSource;
+use App\Insight\Infrastructure\Doctrine\DbalTurnProjector;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
@@ -19,13 +23,16 @@ use App\Tests\Integration\Ticketing\ShopTickets;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketTurnQueries;
-use App\Ticketing\Api\TicketTurnSnapshot;
+use App\Workflow\Api\NeedsYouScore;
 use App\Workflow\Api\TeamMemberLoad;
+use App\Workflow\Api\TurnRules;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * The container's TicketTurnSource and TurnProjector on a ticket TicketCommands creates, with Ticketing's real query
@@ -48,6 +55,8 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
     private const string THIRD_OTHER_TICKET = '0197a3c0-0000-7000-8000-00000000b733';
     private const string FOURTH_OTHER_TICKET = '0197a3c0-0000-7000-8000-00000000b734';
     private const string BETA_BAKERY_TICKET = '0197a3c0-0000-7000-8000-00000000b735';
+    private const string CODE_REVIEW_STEP = '0197a3c0-0000-7000-8000-00000000b741';
+    private const string DONE_STEP = '0197a3c0-0000-7000-8000-00000000b742';
 
     protected function setUp(): void
     {
@@ -199,6 +208,91 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
     }
 
     /**
+     * @return iterable<string, array{string, string|null, array{string, string|null, string}|null, array{string, bool}|null}>
+     *                                                                                                                         the ticket column changed and its new value, then the turn row's group, person
+     *                                                                                                                         and kind and the ticket's count placement (visibility, done) expected after it
+     */
+    public static function ticketChanges(): iterable
+    {
+        yield 'to do, now restricted to its team' => ['visibility', 'team', ['todo', self::OMAR, 'build'], ['team', false]];
+        yield 'in code review' => ['step_id', self::CODE_REVIEW_STEP, ['check', self::LENA, 'review'], ['all', false]];
+        yield 'done' => ['step_id', self::DONE_STEP, null, ['all', true]];
+        yield 'owned by no team' => ['team_id', null, null, null];
+    }
+
+    /**
+     * Lena's own ticket shares the count row, so a count that moves must move by Omar's ticket alone. Each change
+     * leaves the stored row and count of Omar's ticket stale, so both paths must write something.
+     *
+     * @param array{string, string|null, string}|null $expectedTurn
+     * @param array{string, bool}|null                $expectedPlacement
+     */
+    #[Test]
+    #[DataProvider('ticketChanges')]
+    public function refreshFromTheTicketsSnapshotWritesTheTurnRowAndCountThatRefreshWrites(string $column, ?string $value, ?array $expectedTurn, ?array $expectedPlacement): void
+    {
+        $this->addCodeReviewAndDoneSteps();
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $this->createdTicketFor(self::LENA);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            "UPDATE tkt_ticket SET {$column} = ? WHERE id = ?",
+            [$value, $ticketId->toString()],
+        ));
+        $stale = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->projectedStateOf($ticketId));
+
+        $refreshed = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => [
+            $this->projectorAtFixedTime()->refresh($ticketId),
+            $this->projectedStateOf($ticketId),
+        ]);
+        $refreshedFrom = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($ticketId): array {
+            $snapshot = $this->turnQueries()->factsOf($ticketId);
+            self::assertNotNull($snapshot);
+
+            return [$this->projectorAtFixedTime()->refreshFrom($snapshot), $this->projectedStateOf($ticketId)];
+        });
+
+        self::assertSame(
+            [$expectedTurn, $expectedPlacement],
+            [
+                [] === $refreshed[1]['turn'] ? null : [$refreshed[1]['turn'][0]['grp'], $refreshed[1]['turn'][0]['turn_user_id'], $refreshed[1]['turn'][0]['kind']],
+                [] === $refreshed[1]['placement'] ? null : [$refreshed[1]['placement'][0]['visibility'], $refreshed[1]['placement'][0]['is_done']],
+            ],
+        );
+        self::assertNotSame($stale, $refreshed[1]);
+        self::assertSame($refreshed, $refreshedFrom);
+    }
+
+    /**
+     * The snapshot carries the ticket and its team's people, so what is left is the team's waiting reviews and tests,
+     * the count placement, which writes nothing more while it stays, and the turn upsert.
+     */
+    #[Test]
+    public function refreshFromAnOpenTicketWhoseCountStaysRunsThreeQueries(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $debugData = $this->debugData();
+
+        $statements = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($ticketId, $debugData): array {
+            $snapshot = $this->turnQueries()->factsOf($ticketId);
+            self::assertNotNull($snapshot);
+            $debugData->reset();
+            $this->projectorAtFixedTime()->refreshFrom($snapshot);
+
+            return self::sqlOf($debugData);
+        });
+
+        self::assertSame(
+            ['SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn', 'INSERT INTO ins_project_count_ticket', 'INSERT INTO ins_ticket_turn'],
+            [
+                substr($statements[0] ?? '', 0, \strlen('SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn')),
+                substr($statements[1] ?? '', 0, \strlen('INSERT INTO ins_project_count_ticket')),
+                substr($statements[2] ?? '', 0, \strlen('INSERT INTO ins_ticket_turn')),
+            ],
+        );
+        self::assertCount(3, $statements);
+    }
+
+    /**
      * Ticketing's query is replaced by one that needs no transaction, so it is the source's own check that refuses.
      */
     #[Test]
@@ -220,6 +314,127 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
                 [$refusal->getMessage(), array_filter($debugData->getData(), static fn (mixed $queriesOfOneConnection): bool => [] !== $queriesOfOneConnection)],
             );
         }
+    }
+
+    #[Test]
+    public function factsFromASnapshotWithNoTransactionAreRefusedBeforeAnyQuery(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $snapshotUnderAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketTurnSnapshot => $this->turnQueries()->factsOf($ticketId));
+        self::assertNotNull($snapshotUnderAcme);
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $debugData = $this->debugData();
+        $debugData->reset();
+
+        try {
+            $this->source()->factsFrom($snapshotUnderAcme);
+            self::fail('The turn facts were built with no transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame(
+                ['Turn facts for the projector are read in a transaction under the organization as tenant; none is open.', []],
+                [$refusal->getMessage(), self::sqlOf($debugData)],
+            );
+        }
+    }
+
+    #[Test]
+    public function refreshFromWithNoTransactionIsRefusedBeforeAnyQuery(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $snapshotUnderAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?TicketTurnSnapshot => $this->turnQueries()->factsOf($ticketId));
+        self::assertNotNull($snapshotUnderAcme);
+        $storedTurns = $this->storedTurnsOf($ticketId);
+        self::assertNotSame([], $storedTurns);
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $debugData = $this->debugData();
+        $debugData->reset();
+
+        try {
+            $this->projectorAtFixedTime()->refreshFrom($snapshotUnderAcme);
+            self::fail('The turn row was refreshed with no transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame(
+                ['A turn row is refreshed in the transaction of the change; none is open.', []],
+                [$refusal->getMessage(), self::sqlOf($debugData)],
+            );
+        }
+        $this->tenantContext()->clear();
+        self::assertSame($storedTurns, $this->storedTurnsOf($ticketId));
+    }
+
+    private function addCodeReviewAndDoneSteps(): void
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $migrator->transactional(static function (Connection $connection): void {
+                foreach ([[self::CODE_REVIEW_STEP, 'Code review', 'check', 'review', 2], [self::DONE_STEP, 'Done', 'done', 'done', 3]] as [$stepId, $name, $groupCode, $coreCode, $position]) {
+                    $connection->executeStatement(
+                        "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, ?, ?, ?, 'core', ?)",
+                        [self::ACME_FOODS, $stepId, $name, $groupCode, $coreCode, $position],
+                    );
+                }
+            });
+        } finally {
+            $this->tenantContext()->clear();
+        }
+    }
+
+    /**
+     * @return array{turn: list<array<string, mixed>>, placement: list<array<string, mixed>>, counts: list<array<string, mixed>>}
+     */
+    private function projectedStateOf(TicketId $ticketId): array
+    {
+        return [
+            'turn' => $this->connection()->fetchAllAssociative(
+                'SELECT team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, check_user_id, visibility,
+                        reporter_id, assignee_id, pending_assignee_id, reviewer_id, tester_id, waiting_on_user_id
+                 FROM ins_ticket_turn WHERE ticket_id = ?',
+                [$ticketId->toString()],
+            ),
+            'placement' => $this->connection()->fetchAllAssociative(
+                'SELECT project_id, team_id, visibility, is_done FROM ins_project_count_ticket WHERE ticket_id = ?',
+                [$ticketId->toString()],
+            ),
+            'counts' => $this->connection()->fetchAllAssociative(
+                'SELECT project_id, team_id, visibility, open_count, done_count FROM ins_project_counts ORDER BY project_id, team_id, visibility',
+            ),
+        ];
+    }
+
+    private function projectorAtFixedTime(): DbalTurnProjector
+    {
+        $turnRules = self::getContainer()->get('test.workflow_turn_rules');
+        self::assertInstanceOf(TurnRules::class, $turnRules);
+        $needsYouScore = self::getContainer()->get('test.workflow_needs_you_score');
+        self::assertInstanceOf(NeedsYouScore::class, $needsYouScore);
+
+        return new DbalTurnProjector(
+            $this->source(),
+            new TurnRowResolver($turnRules, $needsYouScore),
+            new DbalProjectCountsProjector($this->connection(), $this->tenantContext()),
+            $this->connection(),
+            $this->tenantContext(),
+            new MockClock('2027-03-16 09:30:00+00:00'),
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function sqlOf(DebugDataHolder $debugData): array
+    {
+        $sql = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            self::assertIsArray($queriesOfOneConnection);
+            foreach ($queriesOfOneConnection as $query) {
+                self::assertIsArray($query);
+                self::assertIsString($query['sql']);
+                $sql[] = $query['sql'];
+            }
+        }
+
+        return $sql;
     }
 
     private static function turnQueriesReturning(TicketTurnSnapshot $snapshot): TicketTurnQueries
