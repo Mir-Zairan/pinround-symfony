@@ -37,8 +37,8 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
  *
  * A ticket is made through TicketCommands::create, which starts it in Backlog or To do, and then put in its step with one
  * UPDATE rather than TicketCommands::move: the seed places it, skipping the transition policy and the moved history row on
- * purpose, and sets what no move sets (visibility, reviewer, tester, the label On hold waits on). Its turn row is
- * refreshed after that.
+ * purpose, and sets directly the visibility, the reviewer in Code review, the tester in Testing and the label On hold
+ * waits on, since no move stores them for a row written without one. Its turn row is refreshed after that.
  */
 #[AsTaggedItem(priority: 30)]
 final readonly class SeedDemoTickets implements DemoSeedStep

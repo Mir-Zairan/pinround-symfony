@@ -211,6 +211,8 @@ final class MoveTicketTest extends KernelTestCase
         $refusal = $this->refusalOf(fn () => $this->move(self::OMAR, 'approve_code', $stateBefore['version']));
 
         self::assertInstanceOf(MoveRefused::class, $refusal);
+        self::assertNull($refusal->ruleNoteTemplate);
+        self::assertSame([], $refusal->ruleNotePeople);
         self::assertSame($stateBefore, $this->storedState());
         self::assertSame([self::MIA, null], $this->storedReviewerAndTester());
         self::assertSame(['turn_user_id' => self::MIA, 'kind' => 'review'], $this->turnOf($ticketId));
