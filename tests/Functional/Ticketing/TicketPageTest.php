@@ -12,6 +12,7 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
+use App\Ticketing\UI\TicketPageParts;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -716,6 +717,53 @@ final class TicketPageTest extends WebTestCase
         self::assertNull($dialog->filter('input.waiting-on__label')->attr('disabled'));
     }
 
+    /**
+     * Raj reported the ticket, Omar has it, and it waits in Code review on Lena, the lead the move stored as reviewer;
+     * Mia, the team's tester, comes next. Each of the three sees the same rows, with "(you)" on their own.
+     */
+    #[Test]
+    public function thePeopleSectionListsTheTicketsPeopleWithTheirRolesTheTurnAndTheViewer(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'review', 'reporter' => 'Raj', 'assignee' => 'Omar']);
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET reviewer_id = ? WHERE key = ?',
+            [$this->people['Lena']->id()->toString(), $key],
+        ));
+        $rows = [
+            'Omar' => ['Omar', 'Assignee · Developer'],
+            'Raj' => ['Raj', 'Reporter'],
+            'Lena' => ['Lena', 'Code reviewer · Lead · their turn'],
+            'Mia' => ['Mia', 'Tester for the team'],
+        ];
+
+        foreach (['Lena', 'Omar', 'Mia'] as $viewer) {
+            $this->logIn($this->client, $this->people[$viewer]);
+            $page = $this->client->request('GET', '/t/'.$key);
+
+            self::assertResponseStatusCodeSame(200);
+            $expectedRows = $rows;
+            $expectedRows[$viewer][0] .= ' (you)';
+            self::assertSame(array_values($expectedRows), self::peopleRowsOf($page), $viewer.' sees the rows');
+        }
+    }
+
+    /**
+     * Done: the tester and the reviewer are no longer listed, and nobody's turn is marked.
+     */
+    #[Test]
+    public function aDoneTicketListsOnlyItsAssigneeAndReporter(): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'done', 'reporter' => 'Mia', 'assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([['Omar', 'Assignee · Developer'], ['Mia', 'Reporter · Tester']], self::peopleRowsOf($page));
+    }
+
     #[Test]
     public function aRenderedVerbFormMovesTheTicket(): void
     {
@@ -1093,6 +1141,22 @@ final class TicketPageTest extends WebTestCase
         }
 
         return preg_replace('/^'.ucfirst($line).':\s+/', '', $paragraph->text());
+    }
+
+    /**
+     * Asserts the People section sits in the aside, in its Turbo Stream target, and has rows.
+     *
+     * @return list<array{string, string}> each row's name and role line, in order
+     */
+    private static function peopleRowsOf(Crawler $page): array
+    {
+        $section = $page->filter('.ticket__aside #'.TicketPageParts::PEOPLE_ID.' section[aria-labelledby="ticket-people-heading"]');
+        self::assertCount(1, $section);
+        self::assertSame('People', $section->filter('#ticket-people-heading')->text());
+        $rows = $section->filter('.people__row')->each(static fn (Crawler $row): array => [$row->filter('.people__name')->text(), $row->filter('.people__role')->text()]);
+        self::assertNotEmpty($rows);
+
+        return $rows;
     }
 
     /**

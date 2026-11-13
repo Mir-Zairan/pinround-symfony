@@ -1,0 +1,12 @@
+<section{{ attributes.defaults({class: 'ticket__section people', 'aria-labelledby': 'ticket-people-heading'}) }}>
+    <h2 id="ticket-people-heading" class="ticket__section-title">People</h2>
+    <ul class="people__rows">
+        {% for person in people %}
+            <li class="people__row">
+                <twig:Avatar name="{{ person.name }}" aria-hidden="true"/>
+                <span class="people__name">{{ person.firstName }}{% if person.isViewer %} (you){% endif %}</span>
+                <span class="people__role">{{ person.roleLine }}{% if person.isTheirTurn %}<span class="people__turn"> · their turn</span>{% endif %}</span>
+            </li>
+        {% endfor %}
+    </ul>
+</section>

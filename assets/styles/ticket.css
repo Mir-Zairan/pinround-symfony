@@ -72,7 +72,8 @@
 
 /* The parts a move's Turbo Stream answer replaces: they hold their children in the layout of the header or aside. */
 .ticket__header-state,
-.ticket__next-step {
+.ticket__next-step,
+.ticket__people {
   display: contents;
 }
 
@@ -349,4 +350,37 @@
 .waiting-on__label:disabled {
   background: var(--s-c);
   color: var(--on-surface-var);
+}
+
+.people__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Avatar, then the name, then the role line, which wraps under the name on a narrow aside. */
+.people__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-8);
+  min-width: 0;
+}
+
+.people__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.people__role {
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.people__turn {
+  color: var(--on-surface);
+  font-weight: 600;
 }

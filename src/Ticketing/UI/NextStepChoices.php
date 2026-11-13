@@ -35,11 +35,11 @@ final readonly class NextStepChoices
     /** The core code of Needs input; MoveTicket keeps its own, as Ticketing's Application may not import its UI. */
     private const string NEEDS_INPUT = 'input';
 
-    /** The role words of the ticket page's People section (ticket-page.md, People). */
-    private const string ROLE_REPORTER = 'Reporter';
-    private const string ROLE_ASSIGNEE = 'Assignee';
-    private const string ROLE_REVIEWER = 'Code reviewer';
-    private const string ROLE_TESTER = 'Tester';
+    /** The role words of the ticket page's People section (ticket-page.md, People), which TicketPeople shares. */
+    public const string ROLE_REPORTER = 'Reporter';
+    public const string ROLE_ASSIGNEE = 'Assignee';
+    public const string ROLE_REVIEWER = 'Code reviewer';
+    public const string ROLE_TESTER = 'Tester';
 
     public function __construct(
         private TransitionPolicy $transitionPolicy,

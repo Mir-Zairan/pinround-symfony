@@ -883,7 +883,7 @@ final class TicketMoveTest extends WebTestCase
 
         $streams = $this->streamsOfTheAnswer(200);
         self::assertSame(
-            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, self::TOAST_REGION_ID => 0],
+            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, TicketPageParts::PEOPLE_ID => 0, self::TOAST_REGION_ID => 0],
             array_map(static fn (Crawler $stream): int => $stream->filter('[autofocus]')->count(), $streams),
         );
         $heading = $streams[TicketPageParts::NEXT_STEP_ID]->filter('[autofocus]');
@@ -1013,8 +1013,8 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state and its box and updates the
-     * toast region, in that order.
+     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state, its box and its People and
+     * updates the toast region, in that order.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
@@ -1029,7 +1029,7 @@ final class TicketMoveTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['update', self::TOAST_REGION_ID]],
+            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['replace', TicketPageParts::PEOPLE_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];
@@ -1038,6 +1038,7 @@ final class TicketMoveTest extends WebTestCase
         }
         self::assertCount(1, $streams[TicketPageParts::STATE_ID]->filter('#'.TicketPageParts::STATE_ID));
         self::assertCount(1, $streams[TicketPageParts::NEXT_STEP_ID]->filter('#'.TicketPageParts::NEXT_STEP_ID.' .next-step-box'));
+        self::assertCount(1, $streams[TicketPageParts::PEOPLE_ID]->filter('#'.TicketPageParts::PEOPLE_ID));
 
         return $streams;
     }
@@ -1093,6 +1094,11 @@ final class TicketMoveTest extends WebTestCase
             }
 
             public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
+            {
+                throw new \LogicException('Only moveTo is replaced.');
+            }
+
+            public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
             {
                 throw new \LogicException('Only moveTo is replaced.');
             }
