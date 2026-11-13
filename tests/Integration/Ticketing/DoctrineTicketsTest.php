@@ -106,21 +106,42 @@ final class DoctrineTicketsTest extends KernelTestCase
         self::assertSame($acmeTicketId, $underAcmeFoods, 'The ticket is not found under its own organization either, so the check above proves nothing.');
     }
 
+    /**
+     * One loaded ticket saved three times in one request: moved, unchanged, then moved back; each row read is the
+     * ticket's tkt_ticket row in that request's transaction, and the entity's own version follows it.
+     */
     #[Test]
-    public function savingAMovedTicketWritesItsStepAndRaisesItsVersionByOne(): void
+    public function savingRaisesTheVersionByOneOnlyWhenTheTicketChanged(): void
     {
         $ticketId = $this->createdTicketOf(self::ACME_FOODS);
         $key = $this->keyOf(self::ACME_FOODS, $ticketId);
         self::assertSame([ShopTeamRows::TO_DO_STEP, 1], $this->stepAndVersionOf($ticketId));
 
-        $this->transactions()->committedAs(self::ACME_FOODS, function () use ($key): void {
+        $afterEachSave = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($key, $ticketId): array {
             $ticket = $this->tickets()->ofKey(new OrganizationId(self::ACME_FOODS), $key);
             self::assertNotNull($ticket);
+            $afterEachSave = [];
+
             $ticket->move(ShopTeamRows::BACKLOG_STEP, 'todo', false, null, new \DateTimeImmutable('2027-03-16 09:30:00 UTC'));
             $this->tickets()->save($ticket);
+            $afterEachSave[] = [...$this->stepAndVersionInThisTransactionOf($ticketId), $ticket->version()];
+
+            $this->tickets()->save($ticket);
+            $afterEachSave[] = [...$this->stepAndVersionInThisTransactionOf($ticketId), $ticket->version()];
+
+            $ticket->move(ShopTeamRows::TO_DO_STEP, 'todo', false, null, new \DateTimeImmutable('2027-03-16 09:31:00 UTC'));
+            $this->tickets()->save($ticket);
+            $afterEachSave[] = [...$this->stepAndVersionInThisTransactionOf($ticketId), $ticket->version()];
+
+            return $afterEachSave;
         });
 
-        self::assertSame([ShopTeamRows::BACKLOG_STEP, 2], $this->stepAndVersionOf($ticketId));
+        self::assertSame([
+            [ShopTeamRows::BACKLOG_STEP, 2, 2],
+            [ShopTeamRows::BACKLOG_STEP, 2, 2],
+            [ShopTeamRows::TO_DO_STEP, 3, 3],
+        ], $afterEachSave);
+        self::assertSame([ShopTeamRows::TO_DO_STEP, 3], $this->stepAndVersionOf($ticketId));
     }
 
     /**
@@ -181,7 +202,17 @@ final class DoctrineTicketsTest extends KernelTestCase
      */
     private function stepAndVersionOf(string $ticketId): array
     {
-        $row = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): mixed => $this->entityManager()->getConnection()->fetchAssociative('SELECT step_id, version FROM tkt_ticket WHERE id = ?', [$ticketId]));
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->stepAndVersionInThisTransactionOf($ticketId));
+    }
+
+    /**
+     * Reads in the caller's open transaction and, unlike stepAndVersionOf, leaves the loaded entities managed.
+     *
+     * @return array{string, int}
+     */
+    private function stepAndVersionInThisTransactionOf(string $ticketId): array
+    {
+        $row = $this->entityManager()->getConnection()->fetchAssociative('SELECT step_id, version FROM tkt_ticket WHERE id = ?', [$ticketId]);
         self::assertIsArray($row);
         self::assertIsString($row['step_id']);
         self::assertIsInt($row['version']);

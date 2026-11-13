@@ -51,7 +51,7 @@ final class DbalTicketHistoryTest extends KernelTestCase
     }
 
     /**
-     * Three moves of one ticket, so each row's payload holds exactly the parts its move had, and the created row of the
+     * Four moves of one ticket, so each row's payload holds exactly the parts its move had, and the created row of the
      * ticket is not among them.
      */
     #[Test]
@@ -60,15 +60,17 @@ final class DbalTicketHistoryTest extends KernelTestCase
         $ticketId = $this->createdTicketOf(self::ACME_FOODS);
 
         $this->transactions()->committedAs(self::ACME_FOODS, function () use ($ticketId): void {
-            $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'Park', null, '2027-03-16 09:30:00 UTC');
+            $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'put_on_hold', null, '2027-03-16 09:30:00 UTC');
             $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, null, null, '2027-03-16 09:31:00 UTC');
-            $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'Park', 'Customer asked to wait', '2027-03-16 09:32:00 UTC');
+            $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'put_on_hold', 'Customer asked to wait', '2027-03-16 09:32:00 UTC');
+            $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, null, 'Release is frozen', '2027-03-16 09:33:00 UTC');
         });
 
         self::assertSame([
-            [ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, self::LENA, ['verb' => 'Park'], '2027-03-16 09:30:00+00'],
+            [ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, self::LENA, ['verb' => 'put_on_hold'], '2027-03-16 09:30:00+00'],
             [ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, self::LENA, [], '2027-03-16 09:31:00+00'],
-            [ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, self::LENA, ['verb' => 'Park', 'override_note' => 'Customer asked to wait'], '2027-03-16 09:32:00+00'],
+            [ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, self::LENA, ['verb' => 'put_on_hold', 'override_note' => 'Customer asked to wait'], '2027-03-16 09:32:00+00'],
+            [ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, self::LENA, ['override_note' => 'Release is frozen'], '2027-03-16 09:33:00+00'],
         ], $this->movedRowsOf(self::ACME_FOODS, $ticketId));
     }
 
@@ -85,7 +87,7 @@ final class DbalTicketHistoryTest extends KernelTestCase
         foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $namedOrganizationId) {
             $sqlStates[] = $this->transactions()->rolledBackAs(self::BETA_BAKERY, function () use ($namedOrganizationId, $acmeTicketId): ?string {
                 try {
-                    $this->recordMoveOf($namedOrganizationId, $acmeTicketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'Park', null, self::MOVED_AT);
+                    $this->recordMoveOf($namedOrganizationId, $acmeTicketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'put_on_hold', null, self::MOVED_AT);
                 } catch (DriverException $refusal) {
                     return $refusal->getSQLState();
                 }
@@ -106,7 +108,7 @@ final class DbalTicketHistoryTest extends KernelTestCase
 
         self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
         try {
-            $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'Park', null, self::MOVED_AT);
+            $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'put_on_hold', null, self::MOVED_AT);
             self::fail('A move was recorded with no transaction open.');
         } catch (\LogicException $refusal) {
             self::assertSame('A ticket event is recorded in the transaction of its change; none is open.', $refusal->getMessage());

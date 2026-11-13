@@ -26,23 +26,7 @@ final readonly class DbalTicketHistory implements TicketHistory
 
     public function recordCreated(OrganizationId $organizationId, TicketId $ticketId, UserId $reporter, string $stepId, \DateTimeImmutable $at): void
     {
-        if (!$this->connection->isTransactionActive()) {
-            throw new \LogicException('A ticket event is recorded in the transaction of its change; none is open.');
-        }
-
-        $this->connection->executeStatement(
-            "INSERT INTO tkt_ticket_event (id, organization_id, ticket_id, actor_id, type, from_step, to_step, payload, at)
-             VALUES (?, ?, ?, ?, ?, NULL, ?, '{}', ?)",
-            [
-                Uuid::v7()->toRfc4122(),
-                $organizationId->toString(),
-                $ticketId->toString(),
-                $reporter->toString(),
-                self::CREATED,
-                $stepId,
-                $at->format(\DateTimeInterface::ATOM),
-            ],
-        );
+        $this->insertEvent($organizationId, $ticketId, $reporter, self::CREATED, null, $stepId, [], $at);
     }
 
     public function recordMoved(
@@ -55,11 +39,27 @@ final readonly class DbalTicketHistory implements TicketHistory
         ?string $overrideNote,
         \DateTimeImmutable $at,
     ): void {
+        $payload = array_filter(['verb' => $verb, 'override_note' => $overrideNote], static fn (?string $value): bool => null !== $value);
+        $this->insertEvent($organizationId, $ticketId, $actor, self::MOVED, $fromStepId, $toStepId, $payload, $at);
+    }
+
+    /**
+     * @param array<string, string> $payload
+     */
+    private function insertEvent(
+        OrganizationId $organizationId,
+        TicketId $ticketId,
+        UserId $actor,
+        string $type,
+        ?string $fromStepId,
+        string $toStepId,
+        array $payload,
+        \DateTimeImmutable $at,
+    ): void {
         if (!$this->connection->isTransactionActive()) {
             throw new \LogicException('A ticket event is recorded in the transaction of its change; none is open.');
         }
 
-        $payload = array_filter(['verb' => $verb, 'override_note' => $overrideNote], static fn (?string $value): bool => null !== $value);
         $this->connection->executeStatement(
             'INSERT INTO tkt_ticket_event (id, organization_id, ticket_id, actor_id, type, from_step, to_step, payload, at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -68,7 +68,7 @@ final readonly class DbalTicketHistory implements TicketHistory
                 $organizationId->toString(),
                 $ticketId->toString(),
                 $actor->toString(),
-                self::MOVED,
+                $type,
                 $fromStepId,
                 $toStepId,
                 json_encode((object) $payload, \JSON_THROW_ON_ERROR),

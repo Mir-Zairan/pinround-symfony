@@ -351,7 +351,7 @@ All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `oc
 | Event | Producer | Consumers | Payload (besides the base) | Delivery |
 |---|---|---|---|---|
 | TicketCreated | Ticketing | Insight, Notification, Audit, Assist, Integration | ticketId, projectId, teamId?, reporterId, assigneeId?, checkReasons[] | outbox |
-| TicketMoved | Ticketing | Insight, Notification, Audit, Integration | ticketId, fromStep, toStep, transition | outbox (turn row synchronous) |
+| TicketMoved | Ticketing | Insight, Notification, Audit, Integration | ticketId, key, fromStepId, toStepId, verb? (the Workflow verb's code, for example `start_work`; null for a lead's "Move to another step…"), movedAt (stands in for `occurredAt`) | outbox (turn row synchronous) |
 | TicketAssigned | Ticketing | Insight, Notification, Audit | ticketId, assigneeId, previousId? | outbox |
 | TicketChecked | Ticketing | Insight, Notification, Audit | ticketId, checkerId | outbox |
 | TicketClosedAsDuplicate | Ticketing | Insight, Notification, Audit | ticketId, duplicateOfId | outbox |

@@ -27,7 +27,8 @@ interface TicketHistory
      *
      * @param string      $fromStepId   the wf_step id the ticket left
      * @param string      $toStepId     the wf_step id the ticket is in now
-     * @param string|null $verb         the button's verb the person clicked, for example "Start", or null when moved without one
+     * @param string|null $verb         the code of the Workflow verb the person clicked, for example "start_work", or null
+     *                                  for a lead's "Move to another step…"
      * @param string|null $overrideNote why a lead moved the ticket past a rule, or null when no rule was overridden
      *
      * @throws \LogicException when no transaction is open
