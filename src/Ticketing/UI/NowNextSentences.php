@@ -38,12 +38,15 @@ final readonly class NowNextSentences
     }
 
     /**
+     * @param list<UserId> $otherPeopleIds people the page names besides the ticket's own and its team, such as the
+     *                                     movers of What happened; their names come in the turn person's one query
+     *
      * @return PageTurn|null null when the ticket has no team: no turn is chosen for it, so the page shows no lines and
      *                       no next step
      *
      * @throws \LogicException when no transaction is open or no tenant is set
      */
-    public function pageTurnOf(TicketPageView $page): ?PageTurn
+    public function pageTurnOf(TicketPageView $page, array $otherPeopleIds = []): ?PageTurn
     {
         $snapshot = $page->turnSnapshot;
         if (null === $snapshot->teamId || null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
@@ -57,7 +60,7 @@ final readonly class NowNextSentences
         $rules = $this->ruleQueries->rulesFor($snapshot->teamId);
         $context = new NowNextContext(
             $page->stepName,
-            $this->displayNamesWith($page->displayNames, $turn->userId),
+            $this->displayNamesWith($page->displayNames, null === $turn->userId ? $otherPeopleIds : [$turn->userId, ...$otherPeopleIds]),
             $team,
             $rules->reviewBeforeTest,
         );
@@ -86,16 +89,20 @@ final readonly class NowNextSentences
 
     /**
      * @param array<string, string> $displayNames
+     * @param list<UserId>          $userIds
      *
-     * @return array<string, string> the page's names, and the turn user's when the page does not hold it: one more
-     *                               query, for a turn that went to someone outside the ticket's people and its team
+     * @return array<string, string> the page's names, and those of the people the page does not hold: one more query
+     *                               when any is missing (a turn that went to someone outside the ticket's people and
+     *                               its team, a mover who left the team), none otherwise; a person Identity does not
+     *                               know stays out
      */
-    private function displayNamesWith(array $displayNames, ?UserId $turnUserId): array
+    public function displayNamesWith(array $displayNames, array $userIds): array
     {
-        if (null === $turnUserId || isset($displayNames[$turnUserId->toString()])) {
+        $missingIds = array_values(array_filter($userIds, static fn (UserId $userId): bool => !isset($displayNames[$userId->toString()])));
+        if ([] === $missingIds) {
             return $displayNames;
         }
-        foreach ($this->userQueries->byIds([$turnUserId]) as $userKey => $user) {
+        foreach ($this->userQueries->byIds($missingIds) as $userKey => $user) {
             $displayNames[$userKey] = $user->displayName;
         }
 
