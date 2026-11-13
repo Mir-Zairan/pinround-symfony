@@ -79,6 +79,14 @@ final class MoveToastsTest extends TestCase
     }
 
     #[Test]
+    public function aGiveNamesWhoGotTheTicketOrSomeone(): void
+    {
+        self::assertSame('Given to Omar.', MoveToasts::givenTo('Omar'));
+        self::assertSame('Given to someone.', MoveToasts::givenTo(null));
+        self::assertSame('Given to {step}.', MoveToasts::givenTo('{step}'));
+    }
+
+    #[Test]
     public function aToastNamingTheStepWithNoStepGivenFails(): void
     {
         $this->expectException(\LogicException::class);
@@ -92,7 +100,7 @@ final class MoveToastsTest extends TestCase
      */
     public static function verbsWithNoToast(): iterable
     {
-        yield 'give_it_to, which comes with P03.T8' => ['give_it_to'];
+        yield 'give_it_to, whose toast is givenTo' => ['give_it_to'];
         yield 'an unknown verb' => ['jump'];
     }
 

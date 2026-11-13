@@ -104,8 +104,8 @@ New rules are added as new guard classes plus a column in `wf_rule_set`, plus an
 | Verb (button) | From | To | Who may | Guards | Side effects | Event |
 |---|---|---|---|---|---|---|
 | Plan it | Backlog | To do | Lead | — | — | TicketMoved |
-| Give it to… | To do (no assignee), or Backlog (then also → To do) | same / To do | Lead (also the checker during a check) | Assignee must be a team member who is not a viewer | Person picker sorted by load; notify assignee | TicketAssigned (+ TicketMoved) |
-| Give it to someone else… | To do (assigned) | To do | Lead | same | notify both | TicketAssigned |
+| Give it to… | To do (no assignee), or Backlog (then also → To do) | same / To do | Lead (also the checker during a check, only while the ticket has no assignee; the route `POST /t/{key}/assign` asks `TicketPermission::ASSIGN`, a lead's only) | Assignee must be the lead or a team member who is not a viewer, and not the assignee now | Person picker sorted by load; notify assignee | From Backlog: TicketAssigned and TicketMoved; in To do: TicketAssigned only |
+| Give it to someone else… (the label of give_it_to on an assigned ticket) | To do (assigned) | To do | Lead | same | notify both | TicketAssigned only (no TicketMoved, as the step does not change) |
 | Start work | To do (assigned) | In progress | Assignee | — | — | TicketMoved |
 | Send to code review | In progress | Code review | Assignee; Lead when nobody is assigned | — | sets reviewer (see below); draft-round dialog ([ADR-0017](../03-adr/0017-private-draft-rounds.md)) | TicketMoved |
 | Send to testing | In progress | Testing | Assignee | `review_before_test` must be off (the button is hidden without a note; `check()` refuses with the rule's note) | sets tester; draft-round dialog | TicketMoved |

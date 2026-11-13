@@ -12,8 +12,8 @@ namespace App\Ticketing\UI;
 final class MoveToasts
 {
     /**
-     * By Workflow verb code, every verb but give_it_to, which comes with P03.T8; TicketMoveControllerTest keeps the
-     * codes the same as Workflow's.
+     * By Workflow verb code, every verb but give_it_to, which names its person and has its own route and GIVEN_TO;
+     * TicketMoveControllerTest keeps the codes the same as Workflow's.
      */
     public const array VERB_TOASTS = [
         'plan_it' => 'Planned. It is in To do now.',
@@ -32,6 +32,7 @@ final class MoveToasts
     ];
 
     public const string MOVED_TO = 'Moved to {step}.';
+    public const string GIVEN_TO = 'Given to {person}.';
     public const string CHANGED_MEANWHILE = 'Someone changed this ticket. The page is updated.';
     public const string FORM_EXPIRED = 'The page was open too long. Try again.';
     /** For a refusal whose rule has no note, or that no rule makes, such as a step that is the ticket's step now. */
@@ -79,6 +80,14 @@ final class MoveToasts
     public static function movedTo(string $stepName): string
     {
         return strtr(self::MOVED_TO, [self::STEP => $stepName]);
+    }
+
+    /**
+     * @param string|null $personFirstName null for a person Identity does not know; the toast then says SOMEONE
+     */
+    public static function givenTo(?string $personFirstName): string
+    {
+        return strtr(self::GIVEN_TO, [self::PERSON => $personFirstName ?? self::SOMEONE]);
     }
 
     /**
