@@ -18,8 +18,9 @@ final readonly class NextStep
      * @param string|null           $ruleNote       why a move is not offered, with people named; null for none
      * @param list<MoveChoiceGroup> $groups         the "Move to another step…" list; empty for anyone but the lead
      * @param list<PersonToWaitOn>  $peopleToWaitOn who a move to Needs input can wait on: the ticket's named reporter,
-     *                                              assignee, reviewer and tester, in that order, once each; empty
-     *                                              when $groups offers no move to Needs input
+     *                                              assignee, reviewer and tester who are still members of the
+     *                                              organization, in that order, once each; empty when $groups offers
+     *                                              no move to Needs input
      */
     public function __construct(
         public string $sentence,

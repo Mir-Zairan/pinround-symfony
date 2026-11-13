@@ -651,11 +651,7 @@ final class TicketPageTest extends WebTestCase
                 ['Mia · Code reviewer', $this->people['Mia']->id()->toString(), false],
                 ['Someone else', '', false],
             ],
-            $dialog->filter('.waiting-on__choice')->each(static fn (Crawler $choice): array => [
-                $choice->text(),
-                $choice->filter('input[type="radio"]')->attr('value'),
-                null !== $choice->filter('input[type="radio"]')->attr('checked'),
-            ]),
+            self::waitingOnChoicesOf($dialog),
         );
         $labelField = $dialog->filter('input.waiting-on__label[type="text"]');
         self::assertCount(1, $labelField);
@@ -663,6 +659,57 @@ final class TicketPageTest extends WebTestCase
         self::assertNotNull($labelField->attr('disabled'));
         self::assertStringNotContainsString('Raj', $dialog->text());
         self::assertStringNotContainsString('Lena', $dialog->text());
+    }
+
+    /**
+     * Raj reported the ticket and left Acme Foods before Lena opened it, so he is not offered, as the move would be
+     * refused; Omar, the next of the ticket's people, is chosen instead.
+     */
+    #[Test]
+    public function theNeedsInputDialogLeavesOutAReporterWhoLeftAndChoosesTheNextPerson(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'reporter' => 'Raj', 'assignee' => 'Omar']);
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET reviewer_id = ? WHERE key = ?',
+            [$this->people['Mia']->id()->toString(), $key],
+        ));
+        $this->removeMembership($this->people['Raj'], $this->acmeFoods);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $dialog = $page->filter('dialog#needs-input-'.$this->stepsByCore['input']);
+        self::assertSame(
+            [
+                ['Omar · Assignee', $this->people['Omar']->id()->toString(), true],
+                ['Mia · Code reviewer', $this->people['Mia']->id()->toString(), false],
+                ['Someone else', '', false],
+            ],
+            self::waitingOnChoicesOf($dialog),
+        );
+        self::assertNotNull($dialog->filter('input.waiting-on__label')->attr('disabled'));
+        self::assertStringNotContainsString('Raj', $dialog->text());
+    }
+
+    /**
+     * Raj reported the ticket and Sara has it; both left Acme Foods, so only Someone else is left, chosen, with its
+     * label to write.
+     */
+    #[Test]
+    public function theNeedsInputDialogChoosesSomeoneElseWhenEveryoneOfTheTicketLeft(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'reporter' => 'Raj', 'assignee' => 'Sara']);
+        $this->removeMembership($this->people['Raj'], $this->acmeFoods);
+        $this->removeMembership($this->people['Sara'], $this->acmeFoods);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $dialog = $page->filter('dialog#needs-input-'.$this->stepsByCore['input']);
+        self::assertSame([['Someone else', '', true]], self::waitingOnChoicesOf($dialog));
+        self::assertNull($dialog->filter('input.waiting-on__label')->attr('disabled'));
     }
 
     #[Test]
@@ -853,7 +900,8 @@ final class TicketPageTest extends WebTestCase
 
     /**
      * The costliest page: a project list that does not hold the ticket (the project lookup and the plain list's
-     * position) and a saved turn of someone outside the ticket's people and team (one more names query).
+     * position), a saved turn of someone outside the ticket's people and team (one more names query), and the lead's
+     * Needs input dialog (one membership read).
      */
     #[Test]
     public function theCostliestWarmPageStaysWithinTheTenQueryBudget(): void
@@ -870,14 +918,14 @@ final class TicketPageTest extends WebTestCase
 
         self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
-        self::assertSame(8, $pageQueryCount);
+        self::assertSame(9, $pageQueryCount);
     }
 
     /**
      * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
      * one query), the ticket, the names of everyone in one batch, the saved turn with the waiting turns in one query,
-     * and the position in one; a project's list adds the project by key, and a list the ticket is not in adds the plain
-     * list's position.
+     * the position in one, and the lead's Needs input dialog asks which of the ticket's people are still members in one;
+     * a project's list adds the project by key, and a list the ticket is not in adds the plain list's position.
      */
     #[Test]
     public function aWarmPageReadsOneQueryForItsPlaceInEachList(): void
@@ -894,13 +942,14 @@ final class TicketPageTest extends WebTestCase
             self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'), $uri);
         }
 
-        self::assertSame([5, 6, 5, 7], $queryCounts);
+        self::assertSame([6, 7, 6, 8], $queryCounts);
     }
 
     /**
      * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
      * one query), the ticket, the names of everyone in one batch, the saved turn with the waiting turns in one query,
-     * and the ticket's place in the plain open list in one.
+     * the ticket's place in the plain open list in one, and for the lead's Needs input dialog which of the ticket's
+     * people are still members in one.
      */
     #[Test]
     public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
@@ -919,12 +968,11 @@ final class TicketPageTest extends WebTestCase
 
         self::assertSame([['Assignee', 'Omar'], ['Priority', 'Major'], ['Release', '2.4'], ['Parent', 'SHOP-1'], ['Components', 'Checkout'], ['Created', '5 Nov']], $this->detailsOf($this->client->getCrawler()));
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
-        // The lead's Needs input dialog names the ticket's people from the same batch, so the count covers it.
         self::assertSame(
             ['Lena · Reporter', 'Omar · Assignee', 'Someone else'],
             $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
         );
-        self::assertSame(5, $pageQueryCount);
+        self::assertSame(6, $pageQueryCount);
     }
 
     /**
@@ -1058,6 +1106,20 @@ final class TicketPageTest extends WebTestCase
              FROM tkt_ticket WHERE key = ?",
             [null === $turnPerson ? null : $this->people[$turnPerson]->id()->toString(), $turnLabel, $kind, $ticketKey],
         ));
+    }
+
+    /**
+     * @return list<array{string, string|null, bool}> each choice's text, radio value and whether it is checked
+     */
+    private static function waitingOnChoicesOf(Crawler $dialog): array
+    {
+        self::assertCount(1, $dialog);
+
+        return $dialog->filter('.waiting-on__choice')->each(static fn (Crawler $choice): array => [
+            $choice->text(),
+            $choice->filter('input[type="radio"]')->attr('value'),
+            null !== $choice->filter('input[type="radio"]')->attr('checked'),
+        ]);
     }
 
     private function queryCountOf(string $uri): int

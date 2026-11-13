@@ -327,6 +327,11 @@ final class CreateTicketTest extends TestCase
                     default => Roles::none(),
                 };
             }
+
+            public function membersAmong(OrganizationId $organizationId, array $userIds): array
+            {
+                throw new \LogicException('CreateTicket reads only roles.');
+            }
         };
     }
 

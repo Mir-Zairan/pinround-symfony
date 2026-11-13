@@ -73,6 +73,25 @@ final readonly class DbalMembershipQueries implements MembershipQueries
         );
     }
 
+    public function membersAmong(OrganizationId $organizationId, array $userIds): array
+    {
+        if ([] === $userIds) {
+            return [];
+        }
+
+        // One array literal parameter keeps the SQL text the same for any number of ids; a UserId is always a uuid, so
+        // it needs no quoting inside the literal.
+        $memberIds = $this->connection->fetchFirstColumn(
+            'SELECT user_id FROM org_membership WHERE organization_id = ? AND user_id = ANY(?::uuid[]) ORDER BY user_id',
+            [$organizationId->toString(), '{'.implode(',', array_map(static fn (UserId $userId): string => $userId->toString(), $userIds)).'}'],
+        );
+
+        return array_map(
+            static fn (mixed $userId): UserId => \is_string($userId) ? new UserId($userId) : throw new \LogicException('A user id from the database is not a uuid.'),
+            $memberIds,
+        );
+    }
+
     /**
      * @return list<string>
      */

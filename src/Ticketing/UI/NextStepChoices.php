@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\Organization\Api\ActorContext;
+use App\Organization\Api\MembershipQueries;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\MoveChoice;
@@ -20,7 +22,8 @@ use App\Workflow\Api\VerbFor;
 /**
  * The "Your next step" box of the ticket page (ticket-page.md, Your next step box): its sentence, the verbs
  * TransitionPolicy::available gives the viewer, the rule note, and the lead's "Move to another step…" list. Reads no
- * database but the team's move targets for a lead (StepQueries::moveTargetsFor, cached).
+ * database but, for a lead, the team's move targets (StepQueries::moveTargetsFor, cached) and, when the list offers
+ * Needs input, which of the ticket's people are still members (one MembershipQueries::membersAmong).
  */
 final readonly class NextStepChoices
 {
@@ -29,8 +32,8 @@ final readonly class NextStepChoices
     public const string NOTHING_FOR_YOU = 'Nothing for you. %s.';
     public const string NOTHING_FOR_YOU_NOW = 'Nothing for you now. %s’s turn.';
 
-    /** The core code of Needs input, whose move-to form also sends who the ticket waits on. */
-    public const string NEEDS_INPUT = 'input';
+    /** The core code of Needs input; MoveTicket keeps its own, as Ticketing's Application may not import its UI. */
+    private const string NEEDS_INPUT = 'input';
 
     /** The role words of the ticket page's People section (ticket-page.md, People). */
     private const string ROLE_REPORTER = 'Reporter';
@@ -43,7 +46,17 @@ final readonly class NextStepChoices
         private StepQueries $stepQueries,
         private VerbFor $verbFor,
         private NowNext $nowNext,
+        private MembershipQueries $membershipQueries,
     ) {
+    }
+
+    /**
+     * Whether the chip moves the ticket to Needs input, so it asks who the ticket waits on; the step the ticket is in is
+     * no move, so its chip asks nothing.
+     */
+    public static function isMoveToNeedsInput(MoveChoice $choice): bool
+    {
+        return !$choice->isCurrent && self::NEEDS_INPUT === $choice->step->coreCode();
     }
 
     /**
@@ -66,7 +79,7 @@ final readonly class NextStepChoices
             $availability->transitions,
             $availability->ruleNote?->render(static fn (UserId $userId): string => $pageTurn->context->firstNameOf($userId) ?? TicketShowController::UNKNOWN_PERSON),
             $moveChoices->groups,
-            self::offersMoveToNeedsInput($moveChoices->groups) ? self::peopleToWaitOnOf($pageTurn) : [],
+            self::offersMoveToNeedsInput($moveChoices->groups) ? $this->peopleToWaitOnOf($pageTurn, $viewer->organizationId()) : [],
         );
     }
 
@@ -77,20 +90,17 @@ final readonly class NextStepChoices
     {
         return array_any(
             $groups,
-            static fn (MoveChoiceGroup $group): bool => array_any(
-                $group->choices,
-                static fn (MoveChoice $choice): bool => !$choice->isCurrent && self::NEEDS_INPUT === $choice->step->coreCode(),
-            ),
+            static fn (MoveChoiceGroup $group): bool => array_any($group->choices, self::isMoveToNeedsInput(...)),
         );
     }
 
     /**
-     * The ticket's people by the names the page already holds, so this adds no query; anyone without a name is left
-     * out, as the dialog could not name them.
+     * The ticket's people by the names the page already holds; anyone without a name is left out, as the dialog could
+     * not name them, and so is anyone who left the organization, as MoveTicket refuses to wait on them.
      *
      * @return list<PersonToWaitOn>
      */
-    private static function peopleToWaitOnOf(PageTurn $pageTurn): array
+    private function peopleToWaitOnOf(PageTurn $pageTurn, OrganizationId $organizationId): array
     {
         $ticket = $pageTurn->ticket;
         $roleNamesByUser = [];
@@ -104,12 +114,23 @@ final readonly class NextStepChoices
                 $roleNamesByUser[$userId->toString()][] = $roleName;
             }
         }
-
-        $people = [];
-        foreach ($roleNamesByUser as $userKey => $roleNames) {
+        $firstNamesByUser = [];
+        foreach (array_keys($roleNamesByUser) as $userKey) {
             $firstName = $pageTurn->context->firstNameOf(new UserId($userKey));
             if (null !== $firstName) {
-                $people[] = new PersonToWaitOn($userKey, $firstName, implode(' · ', $roleNames));
+                $firstNamesByUser[$userKey] = $firstName;
+            }
+        }
+        $members = $this->membershipQueries->membersAmong(
+            $organizationId,
+            array_map(static fn (string $userKey): UserId => new UserId($userKey), array_keys($firstNamesByUser)),
+        );
+        $memberKeys = array_map(static fn (UserId $memberId): string => $memberId->toString(), $members);
+
+        $people = [];
+        foreach ($firstNamesByUser as $userKey => $firstName) {
+            if (\in_array($userKey, $memberKeys, true)) {
+                $people[] = new PersonToWaitOn($userKey, $firstName, implode(' · ', $roleNamesByUser[$userKey]));
             }
         }
 

@@ -172,6 +172,11 @@ final class TicketVoterTest extends TestCase
             {
                 throw new \LogicException('The voter decides with the actor\'s roles and reads no membership.');
             }
+
+            public function membersAmong(OrganizationId $organizationId, array $userIds): array
+            {
+                throw new \LogicException('The voter decides with the actor\'s roles and reads no membership.');
+            }
         };
     }
 

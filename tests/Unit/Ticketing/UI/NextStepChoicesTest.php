@@ -40,6 +40,7 @@ use PHPUnit\Framework\TestCase;
 final class NextStepChoicesTest extends TestCase
 {
     private const string ORGANIZATION = '0190a000-0000-7000-8000-0000000000f1';
+    private const string OTHER_ORGANIZATION = '0190a000-0000-7000-8000-0000000000f0';
     private const string MANAGERS_NOTE = 'Managers can read and comment. Only the team moves tickets.';
 
     /** Raj has no name here, as for a person whose user row is gone. */
@@ -47,9 +48,12 @@ final class NextStepChoicesTest extends TestCase
 
     private RecordingTransitionPolicy $policy;
 
+    private FixedMembershipQueries $memberships;
+
     protected function setUp(): void
     {
         $this->policy = new RecordingTransitionPolicy(GuardFixtures::policy());
+        $this->memberships = new FixedMembershipQueries([self::ORGANIZATION => [GuardFixtures::LENA, GuardFixtures::OMAR, GuardFixtures::MIA, GuardFixtures::RAJ]]);
     }
 
     #[Test]
@@ -136,7 +140,7 @@ final class NextStepChoicesTest extends TestCase
         $pageTurn = self::pageTurn(GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR), new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build));
 
         $lena = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
-        $omar = new NextStepChoices($this->policy, new FixedStepQueries([]), new PlainVerbFor(), self::nowNext())->of($pageTurn, self::member(GuardFixtures::OMAR), true);
+        $omar = new NextStepChoices($this->policy, new FixedStepQueries([]), new PlainVerbFor(), self::nowNext(), $this->memberships)->of($pageTurn, self::member(GuardFixtures::OMAR), true);
 
         self::assertSame(['todo', 'doing', 'check', 'wait', 'done'], array_map(static fn (MoveChoiceGroup $group): string => $group->groupCode, $lena->groups));
         $currentSteps = array_merge(...array_map(
@@ -249,19 +253,61 @@ final class NextStepChoicesTest extends TestCase
         $nextStep = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
 
         self::assertEquals([new PersonToWaitOn(GuardFixtures::OMAR, 'Omar', 'Assignee')], $nextStep->peopleToWaitOn);
+        self::assertSame([[GuardFixtures::OMAR]], $this->memberships->membersAmongReads);
+    }
+
+    /**
+     * Mia reported the ticket but is now only in another organization, so Omar, the assignee, comes first; the one
+     * membership read asks for the named people in role order and answers in id order (Lena before Omar).
+     */
+    #[Test]
+    public function aPersonWhoLeftTheOrganizationIsNotOfferedToWaitOn(): void
+    {
+        $this->memberships = new FixedMembershipQueries([
+            self::ORGANIZATION => [GuardFixtures::LENA, GuardFixtures::OMAR],
+            self::OTHER_ORGANIZATION => [GuardFixtures::MIA],
+        ]);
+        $pageTurn = self::pageTurn(
+            GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, reviewer: GuardFixtures::LENA, reporter: GuardFixtures::MIA),
+            new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
+        );
+
+        $nextStep = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
+
+        self::assertEquals([
+            new PersonToWaitOn(GuardFixtures::OMAR, 'Omar', 'Assignee'),
+            new PersonToWaitOn(GuardFixtures::LENA, 'Lena', 'Code reviewer'),
+        ], $nextStep->peopleToWaitOn);
+        self::assertSame([[GuardFixtures::MIA, GuardFixtures::OMAR, GuardFixtures::LENA]], $this->memberships->membersAmongReads);
     }
 
     #[Test]
-    public function nobodyToWaitOnForAMemberOrALeadWhoMayNotMove(): void
+    public function nobodyToWaitOnWhenEveryoneOfTheTicketLeft(): void
+    {
+        $this->memberships = new FixedMembershipQueries([self::ORGANIZATION => [GuardFixtures::LENA], self::OTHER_ORGANIZATION => [GuardFixtures::OMAR, GuardFixtures::MIA]]);
+        $pageTurn = self::pageTurn(
+            GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, reporter: GuardFixtures::MIA),
+            new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
+        );
+
+        $nextStep = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
+
+        self::assertNotSame([], $nextStep->groups);
+        self::assertSame([], $nextStep->peopleToWaitOn);
+        self::assertSame([[GuardFixtures::MIA, GuardFixtures::OMAR]], $this->memberships->membersAmongReads);
+    }
+
+    #[Test]
+    public function nobodyToWaitOnForAMemberOrALeadWhoMayNotMoveAndNoMembershipRead(): void
     {
         $pageTurn = self::pageTurn(
             GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, tester: GuardFixtures::MIA, reporter: GuardFixtures::MIA),
             new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
         );
 
-        self::assertNotSame([], $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA))->peopleToWaitOn);
         self::assertSame([], $this->nextStepOf($pageTurn, self::member(GuardFixtures::OMAR))->peopleToWaitOn);
         self::assertSame([], $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA), mayMove: false)->peopleToWaitOn);
+        self::assertSame([], $this->memberships->membersAmongReads);
     }
 
     #[Test]
@@ -273,11 +319,12 @@ final class NextStepChoicesTest extends TestCase
         );
         $stepsWithoutNeedsInput = array_values(array_filter(GuardFixtures::steps(), static fn (StepView $step): bool => 'input' !== $step->coreCode()));
 
-        $nextStep = new NextStepChoices($this->policy, new FixedStepQueries([], $stepsWithoutNeedsInput), new PlainVerbFor(), self::nowNext())
+        $nextStep = new NextStepChoices($this->policy, new FixedStepQueries([], $stepsWithoutNeedsInput), new PlainVerbFor(), self::nowNext(), $this->memberships)
             ->of($pageTurn, self::lead(GuardFixtures::LENA), true);
 
         self::assertNotSame([], $nextStep->groups);
         self::assertSame([], $nextStep->peopleToWaitOn);
+        self::assertSame([], $this->memberships->membersAmongReads);
     }
 
     #[Test]
@@ -291,11 +338,33 @@ final class NextStepChoicesTest extends TestCase
 
         self::assertNotSame([], $nextStep->groups);
         self::assertSame([], $nextStep->peopleToWaitOn);
+        self::assertSame([], $this->memberships->membersAmongReads);
+    }
+
+    #[Test]
+    public function onlyAChipThatMovesToNeedsInputAsksWhoItWaitsOn(): void
+    {
+        [$needsInput, $onHold] = [self::stepOfCore('input'), self::stepOfCore('hold')];
+
+        self::assertTrue(NextStepChoices::isMoveToNeedsInput(new MoveChoice($needsInput, false)));
+        self::assertFalse(NextStepChoices::isMoveToNeedsInput(new MoveChoice($needsInput, true)));
+        self::assertFalse(NextStepChoices::isMoveToNeedsInput(new MoveChoice($onHold, false)));
+    }
+
+    private static function stepOfCore(string $coreCode): StepView
+    {
+        foreach (GuardFixtures::steps() as $step) {
+            if ($coreCode === $step->coreCode()) {
+                return $step;
+            }
+        }
+
+        throw new \LogicException(\sprintf('The fixture steps have no %s step.', $coreCode));
     }
 
     private function nextStepOf(PageTurn $pageTurn, ActorContext $viewer, bool $mayMove = true): NextStep
     {
-        return new NextStepChoices($this->policy, new FixedStepQueries([], GuardFixtures::steps()), new PlainVerbFor(), self::nowNext())->of($pageTurn, $viewer, $mayMove);
+        return new NextStepChoices($this->policy, new FixedStepQueries([], GuardFixtures::steps()), new PlainVerbFor(), self::nowNext(), $this->memberships)->of($pageTurn, $viewer, $mayMove);
     }
 
     private static function pageTurn(TicketState $ticket, Turn $turn, ?TeamFacts $team = null): PageTurn
