@@ -22,7 +22,7 @@
     {% endif %}
     {% if nextStep.groups is not empty %}
         {# A native disclosure: it opens without JavaScript, and the browser tells screen readers whether it is expanded. #}
-        <details class="next-step-box__move-to">
+        <details class="next-step-box__move-to"{% if isMoveListOpen %} open{% endif %}>
             <summary class="btn btn-text btn-sm">Move to another step…</summary>
             {% for group in nextStep.groups %}
                 <div class="next-step-box__group" role="group" aria-labelledby="next-step-box-group-{{ group.groupCode }}">
@@ -47,7 +47,7 @@
                                             </form>
                                         </twig:block>
                                         <twig:block name="content">
-                                            <form method="dialog" id="{{ dialogId }}-form" class="waiting-on__form" data-action="change->waiting-on#enableLabelForSomeoneElse submit->waiting-on#move">
+                                            <form method="dialog" id="{{ dialogId }}-form" class="waiting-on__form" data-action="change->waiting-on#chooseWhoItWaitsOn submit->waiting-on#move">
                                                 <fieldset class="waiting-on__choices">
                                                     <legend class="waiting-on__legend">Who does it wait on?</legend>
                                                     {% for person in peopleToWaitOn %}

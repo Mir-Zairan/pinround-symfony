@@ -33,6 +33,9 @@ final class NextStepBox
      */
     public bool $isHeadingAutofocused = false;
 
+    /** Renders "Move to another step…" open; the ticket page leaves it closed, the component gallery opens it. */
+    public bool $isMoveListOpen = false;
+
     public function csrfTokenId(): string
     {
         return TicketMoveController::csrfIdOf($this->ticketKey);

@@ -1,0 +1,2 @@
+{% set exampleClass = 'App\\Ticketing\\UI\\Component\\NextStepBoxExample' %}
+<twig:NextStepBox ticketKey="{{ constant(exampleClass ~ '::TICKET_KEY') }}" :version="constant(exampleClass ~ '::VERSION')" :nextStep="this.nextStep" :isMoveListOpen="true" />

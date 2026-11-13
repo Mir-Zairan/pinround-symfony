@@ -976,6 +976,39 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
+     * @return iterable<string, array{string}>
+     */
+    public static function viewersWithNoMoveList(): iterable
+    {
+        yield 'Omar, the assignee and a member' => ['Omar'];
+        yield 'Raj, a manager with no team role' => ['Raj'];
+    }
+
+    /**
+     * The same page as aWarmPageReadsTheBudgetedQueriesBeyondTheShell less the membership read: only a lead's move list
+     * offers Needs input, so nobody else's page asks which of the ticket's people are still members.
+     */
+    #[Test]
+    #[DataProvider('viewersWithNoMoveList')]
+    public function aWarmPageWithNoNeedsInputDialogSkipsTheMembershipRead(string $viewer): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $parentKey = $this->addTicket('Checkout rework');
+        $key = $this->addTicket('Cart total shows the wrong sum', ['assignee' => 'Omar', 'release' => '2.4', 'parent' => $parentKey, 'components' => '{Checkout}', 'core' => 'review']);
+        $this->logIn($this->client, $this->people[$viewer]);
+        $this->queryCountOf(self::SHELL);
+        $shellQueryCount = $this->queryCountOf(self::SHELL);
+        $this->queryCountOf('/t/'.$key);
+
+        $pageQueryCount = $this->queryCountOf('/t/'.$key) - $shellQueryCount;
+
+        self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
+        self::assertCount(1, $this->client->getCrawler()->filter('.ticket__aside .next-step-box'));
+        self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog'));
+        self::assertSame(5, $pageQueryCount);
+    }
+
+    /**
      * Inserted out of list order. SHOP's open list: A (Code review), F (In progress), then To do: D (critical), H
      * (major, newest), C and B (major, tied on updated_at, C with the higher id), E (minor). OPS-8, a blocker in To do
      * of project OPS, is only in the plain list; G is in Done.

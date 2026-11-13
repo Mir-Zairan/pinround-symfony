@@ -7,11 +7,11 @@ export default class extends Controller {
   static targets = ['moveForm', 'userField', 'labelField', 'choice', 'someoneElse', 'label'];
 
   connect() {
-    this.enableLabelForSomeoneElse();
+    this.chooseWhoItWaitsOn();
   }
 
   // A disabled field is not validated, so its required and pattern hold only while "Someone else" is chosen.
-  enableLabelForSomeoneElse(event) {
+  chooseWhoItWaitsOn(event) {
     const isSomeoneElse = this.someoneElseTarget.checked;
     this.labelTarget.disabled = !isSomeoneElse;
     if (isSomeoneElse && event?.target === this.someoneElseTarget) {

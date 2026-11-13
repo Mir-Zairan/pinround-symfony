@@ -107,6 +107,7 @@ final class NextStepBoxComponentTest extends KernelTestCase
         $box = $this->render($this->leadsNextStep());
 
         $moveList = $box->filter('details.next-step-box__move-to');
+        self::assertNull($moveList->attr('open'));
         self::assertSame('Move to another step…', $moveList->filter('summary')->text());
         self::assertSame(
             [['To do', ['To do']], ['Doing', ['In progress', 'Pairing']], ['Waiting', ['Needs input', 'On hold']]],
@@ -121,6 +122,14 @@ final class NextStepBoxComponentTest extends KernelTestCase
             $forms->each(static fn (Crawler $form): string => (string) $form->attr('action')),
         );
         self::assertSame(['post'], array_values(array_unique($forms->each(static fn (Crawler $form): string => (string) $form->attr('method')))));
+    }
+
+    #[Test]
+    public function theMoveListRendersOpenWhenAskedTo(): void
+    {
+        $box = $this->render($this->leadsNextStep(), ['isMoveListOpen' => true]);
+
+        self::assertSame('', $box->filter('details.next-step-box__move-to')->attr('open'));
     }
 
     #[Test]
@@ -172,6 +181,7 @@ final class NextStepBoxComponentTest extends KernelTestCase
         self::assertSame('Move to Needs input', $dialog->filter('#needs-input-'.self::INPUT_ID.'-title')->text());
         $form = $dialog->filter('form');
         self::assertSame(['dialog', 'needs-input-'.self::INPUT_ID.'-form'], [$form->attr('method'), $form->attr('id')]);
+        self::assertSame('change->waiting-on#chooseWhoItWaitsOn submit->waiting-on#move', $form->attr('data-action'));
         self::assertSame('Who does it wait on?', $form->filter('fieldset > legend')->text());
         self::assertSame(
             [['Mia · Reporter · Tester', self::MIA_ID, ''], ['Omar · Assignee', self::OMAR_ID, null], ['Someone else', '', null]],
@@ -250,8 +260,11 @@ final class NextStepBoxComponentTest extends KernelTestCase
         });
     }
 
-    private function render(NextStep $nextStep): Crawler
+    /**
+     * @param array<string, mixed> $moreProps
+     */
+    private function render(NextStep $nextStep, array $moreProps = []): Crawler
     {
-        return $this->renderTwigComponent(NextStepBox::class, ['ticketKey' => self::KEY, 'version' => self::VERSION, 'nextStep' => $nextStep])->crawler();
+        return $this->renderTwigComponent(NextStepBox::class, ['ticketKey' => self::KEY, 'version' => self::VERSION, 'nextStep' => $nextStep, ...$moreProps])->crawler();
     }
 }
