@@ -11,6 +11,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\UseCaseTicketCommands;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
@@ -41,6 +42,7 @@ final class TicketMoveTest extends WebTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
+    use ReadsSentSql;
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string KEY = 'SHOP-1';
@@ -53,6 +55,8 @@ final class TicketMoveTest extends WebTestCase
     private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
     /** base.html.twig's toast region, which a streamed toast updates. */
     private const string TOAST_REGION_ID = 'toast-region';
+    /** The stream answer's re-read of the ticket page, warm, by the first table each statement reads. */
+    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', "SELECT set_config('app.org_id', ?, true)", 'tkt_ticket', 'idn_user', 'ins_ticket_turn', '"COMMIT"'];
 
     private KernelBrowser $client;
 
@@ -812,21 +816,79 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
+     * A move made reads the ticket again after its COMMIT, warm, in the same statements as a refused one: its own
+     * transaction with the ticket, the names and the saved turn.
+     */
+    #[Test]
+    public function aTurboVerbMoveReadsTheTicketAgainInTheBudgetedQueries(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        $this->client->request('POST', '/t/'.self::KEY.'/move/start_work', $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+        $this->streamsOfTheAnswer(200);
+
+        $reRead = $this->statementsAfterTheMovesCommit('/t/'.self::KEY.'/move/send_to_code_review', $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION + 1)]));
+
+        self::assertSame('Sent to code review. Lena’s turn now.', $this->toastOf($this->streamsOfTheAnswer(200)));
+        $state = $this->stateOfTicket();
+        self::assertSame([$this->steps['review'], self::VERSION + 2], [$state['step_id'], $state['version']]);
+        self::assertSame(self::RE_READ_STATEMENTS, $reRead);
+    }
+
+    #[Test]
+    public function aTurboMoveToAnotherStepReadsTheTicketAgainInTheBudgetedQueries(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+        $this->streamsOfTheAnswer(200);
+
+        $reRead = $this->statementsAfterTheMovesCommit($this->moveToPath('review'), $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION + 1)]));
+
+        self::assertSame('Moved to Code review.', $this->toastOf($this->streamsOfTheAnswer(200)));
+        $state = $this->stateOfTicket();
+        self::assertSame([$this->steps['review'], self::VERSION + 2], [$state['step_id'], $state['version']]);
+        self::assertSame(self::RE_READ_STATEMENTS, $reRead);
+    }
+
+    /**
+     * Posts a Turbo move and gives what it sent after the move's own COMMIT.
+     *
+     * @param array<string, string> $fields
+     *
+     * @return list<string> each statement as the first table it reads from, or whole when it reads from none
+     */
+    private function statementsAfterTheMovesCommit(string $path, array $fields): array
+    {
+        $debugData = $this->debugData();
+        $debugData->reset();
+        $this->client->request('POST', $path, $fields, [], self::TURBO_FORM_HEADERS);
+
+        $sql = self::sqlOf($debugData);
+        $commits = array_keys($sql, '"COMMIT"', true);
+        self::assertCount(2, $commits, 'the move and the re-read each commit once');
+
+        return array_map(
+            static fn (string $statement): string => 1 === preg_match('/\bFROM (\w+)/', $statement, $table) ? $table[1] : $statement,
+            \array_slice($sql, $commits[0] + 1),
+        );
+    }
+
+    /**
      * @param array<string, string> $fields
      * @param array<string, string> $headers
      */
     private function queryCountOfAMove(array $fields, array $headers): int
     {
-        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData = $this->debugData();
         $debugData->reset();
         $this->client->request('POST', '/t/'.self::KEY.'/move/put_on_hold', $fields, [], $headers);
 
-        $queryCount = 0;
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            $queryCount += \count($queriesOfOneConnection);
-        }
-
-        return $queryCount;
+        return \count(self::sqlOf($debugData));
     }
 
     /**
