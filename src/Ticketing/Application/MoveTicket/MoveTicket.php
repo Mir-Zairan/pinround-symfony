@@ -71,12 +71,13 @@ final readonly class MoveTicket
         }
         $team = $this->teamOf($teamId);
         $before = $this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people);
+        $waitingTurns = $this->teamLoadQueries->waitingTurnsOf([...$before->developerIds, ...$before->testerIds], $before->ticketId);
         $teamFacts = TurnInputs::teamFacts(
             $before->leadId ?? throw new \LogicException('A ticket with a team has a lead.'),
             $before->leadDisplayName ?? throw new \LogicException('A ticket with a team has a lead.'),
             $before->developerIds,
             $before->testerIds,
-            $this->teamLoadQueries->waitingTurnsOf([...$before->developerIds, ...$before->testerIds], $before->ticketId),
+            $waitingTurns,
         );
         $decision = $this->transitionPolicy->check(
             TurnInputs::ticketStateOf($before),
@@ -89,7 +90,7 @@ final readonly class MoveTicket
         $target = $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.'));
         $waitingOn = self::NEEDS_INPUT === $target->coreCode() ? WaitingOn::ofPerson($ticket->reporter()) : null;
 
-        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, $verb, $at);
+        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, $verb, $at, $waitingTurns);
     }
 
     /**
@@ -142,7 +143,7 @@ final readonly class MoveTicket
             default => WaitingOn::ofPerson($ticket->reporter()),
         };
 
-        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at);
+        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, null);
     }
 
     private function teamOf(TeamId $teamId): MoveTeam
@@ -177,6 +178,10 @@ final readonly class MoveTicket
         return $ticket;
     }
 
+    /**
+     * @param array<string, array<string, int>>|null $waitingTurns the team's waiting reviews and tests already read for
+     *                                                             $before, or null for the turn refresh to read them
+     */
     private function moveAndRecord(
         Ticket $ticket,
         MoveTeam $team,
@@ -186,6 +191,7 @@ final readonly class MoveTicket
         ?WaitingOn $waitingOn,
         ?string $verb,
         \DateTimeImmutable $at,
+        ?array $waitingTurns,
     ): void {
         $fromStepId = $ticket->stepId();
         if ($target->id() === $fromStepId) {
@@ -197,7 +203,7 @@ final readonly class MoveTicket
         } catch (TicketVersionConflict $conflict) {
             throw new TicketChangedMeanwhile('The ticket was changed after it was read.', 0, $conflict);
         }
-        $overrideNote = $this->turnProjector->refreshFrom($this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people));
+        $overrideNote = $this->turnProjector->refreshFrom($this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people), $waitingTurns);
         $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $target->id(), $verb, $overrideNote, $at);
         $this->ticketEvents->publish(new TicketMoved(
             $ticket->organizationId()->toString(),

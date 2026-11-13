@@ -53,7 +53,7 @@ final class Ticket implements TenantOwned
     private ?string $closedAsDuplicateOf = null;
     // Set when the ticket's step is in the done group, cleared on reopen.
     private ?\DateTimeImmutable $closedAt = null;
-    // Doctrine's optimistic lock; it raises the version on every update.
+    // The optimistic lock; Tickets::save raises it on every save that changes the ticket.
     private int $version = 1;
     private readonly \DateTimeImmutable $createdAt;
     private \DateTimeImmutable $updatedAt;
@@ -270,7 +270,7 @@ final class Ticket implements TenantOwned
     }
 
     /**
-     * The optimistic lock version as last read or saved; Doctrine raises it on every update.
+     * The optimistic lock version as last read or saved; Tickets::save raises it on every save that changes the ticket.
      */
     public function version(): int
     {

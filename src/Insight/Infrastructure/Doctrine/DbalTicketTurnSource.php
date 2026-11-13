@@ -35,7 +35,7 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
         return null === $snapshot ? null : $this->factsFrom($snapshot);
     }
 
-    public function factsFrom(TicketTurnSnapshot $snapshot): ?TicketTurnFacts
+    public function factsFrom(TicketTurnSnapshot $snapshot, ?array $waitingTurns = null): ?TicketTurnFacts
     {
         $this->requireTransaction();
         if (null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
@@ -47,7 +47,7 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
             $snapshot->leadDisplayName,
             $snapshot->developerIds,
             $snapshot->testerIds,
-            $this->teamLoadQueries->waitingTurnsOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId),
+            $waitingTurns ?? $this->teamLoadQueries->waitingTurnsOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId),
         );
 
         // No organization has a current release yet, and the quick check and questions come later in P03.

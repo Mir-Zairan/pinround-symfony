@@ -251,6 +251,13 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
 
             return [$this->projectorAtFixedTime()->refreshFrom($snapshot), $this->projectedStateOf($ticketId)];
         });
+        $refreshedFromGivenWaitingTurns = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($ticketId): array {
+            $snapshot = $this->turnQueries()->factsOf($ticketId);
+            self::assertNotNull($snapshot);
+            $waitingTurns = new DbalTeamLoadQueries($this->connection(), $this->tenantContext())->waitingTurnsOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId);
+
+            return [$this->projectorAtFixedTime()->refreshFrom($snapshot, $waitingTurns), $this->projectedStateOf($ticketId)];
+        });
 
         self::assertSame(
             [$expectedTurn, $expectedPlacement],
@@ -261,6 +268,33 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         );
         self::assertNotSame($stale, $refreshed[1]);
         self::assertSame($refreshed, $refreshedFrom);
+        self::assertSame($refreshed, $refreshedFromGivenWaitingTurns);
+    }
+
+    /**
+     * With the waiting reviews and tests given, as a verb move passes the ones it read, only the count placement and
+     * the turn upsert run.
+     */
+    #[Test]
+    public function refreshFromWithGivenWaitingTurnsReadsNoLoads(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $debugData = $this->debugData();
+
+        $statements = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($ticketId, $debugData): array {
+            $snapshot = $this->turnQueries()->factsOf($ticketId);
+            self::assertNotNull($snapshot);
+            $debugData->reset();
+            $this->projectorAtFixedTime()->refreshFrom($snapshot, []);
+
+            return self::sqlOf($debugData);
+        });
+
+        self::assertSame(['INSERT INTO ins_project_count_ticket', 'INSERT INTO ins_ticket_turn'], [
+            substr($statements[0] ?? '', 0, \strlen('INSERT INTO ins_project_count_ticket')),
+            substr($statements[1] ?? '', 0, \strlen('INSERT INTO ins_ticket_turn')),
+        ]);
+        self::assertCount(2, $statements);
     }
 
     /**

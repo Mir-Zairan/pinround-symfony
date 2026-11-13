@@ -16,6 +16,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\OptimisticLockException;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -169,8 +170,76 @@ final class DoctrineTicketsTest extends KernelTestCase
         });
 
         self::assertInstanceOf(TicketVersionConflict::class, $refusal);
-        self::assertInstanceOf(OptimisticLockException::class, $refusal->getPrevious());
+        self::assertSame('The ticket was saved by another request after it was read.', $refusal->getMessage());
         self::assertSame([ShopTeamRows::TO_DO_STEP, 2], $this->stepAndVersionOf($ticketId));
+    }
+
+    /**
+     * The refused ticket keeps its move in memory; a flush later in the same request meets Doctrine's own version
+     * lock, so the move is still not written.
+     */
+    #[Test]
+    public function aFlushAfterARefusedSaveDoesNotWriteTheRefusedMove(): void
+    {
+        $ticketId = $this->createdTicketOf(self::ACME_FOODS);
+        $key = $this->keyOf(self::ACME_FOODS, $ticketId);
+
+        $refusals = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($key, $ticketId): array {
+            $ticket = $this->tickets()->ofKey(new OrganizationId(self::ACME_FOODS), $key);
+            self::assertNotNull($ticket);
+            $this->raiseVersionOnAnotherConnection($ticketId);
+            $ticket->move(ShopTeamRows::BACKLOG_STEP, 'todo', false, null, new \DateTimeImmutable('2027-03-16 09:30:00 UTC'));
+            $refusals = [];
+            try {
+                $this->tickets()->save($ticket);
+            } catch (TicketVersionConflict $refusal) {
+                $refusals[] = $refusal::class;
+            }
+            try {
+                $this->entityManager()->flush();
+            } catch (OptimisticLockException $refusal) {
+                $refusals[] = $refusal::class;
+            }
+            $refusals[] = $ticket->version();
+
+            return $refusals;
+        });
+
+        self::assertSame([TicketVersionConflict::class, OptimisticLockException::class, 1], $refusals);
+        self::assertSame([ShopTeamRows::TO_DO_STEP, 2], $this->stepAndVersionOf($ticketId));
+    }
+
+    /**
+     * The move's columns all reach the row, and a new request's load reads them back as the entity left them.
+     */
+    #[Test]
+    public function aSavedMoveWritesEveryChangedColumnInOneConditionalUpdate(): void
+    {
+        $ticketId = $this->createdTicketOf(self::ACME_FOODS);
+        $key = $this->keyOf(self::ACME_FOODS, $ticketId);
+        $debugData = $this->debugData();
+
+        $statements = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($key, $debugData): array {
+            $ticket = $this->tickets()->ofKey(new OrganizationId(self::ACME_FOODS), $key);
+            self::assertNotNull($ticket);
+            $ticket->move(ShopTeamRows::BACKLOG_STEP, 'todo', false, null, new \DateTimeImmutable('2027-03-16 09:30:00 UTC'));
+            $debugData->reset();
+            $this->tickets()->save($ticket);
+
+            return self::sqlOf($debugData);
+        });
+        $this->entityManager()->clear();
+        $reloaded = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($key): array {
+            $ticket = $this->tickets()->ofKey(new OrganizationId(self::ACME_FOODS), $key);
+            self::assertNotNull($ticket);
+
+            return [$ticket->stepId(), $ticket->previousStepId(), $ticket->updatedAt()->format(\DATE_ATOM), $ticket->version()];
+        });
+
+        self::assertSame([
+            'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?, updated_at = ?, version = version + 1 WHERE organization_id = ? AND id = ? AND version = ?',
+        ], $statements);
+        self::assertSame([ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, '2027-03-16T09:30:00+00:00', 2], $reloaded);
     }
 
     #[Test]
@@ -229,6 +298,29 @@ final class DoctrineTicketsTest extends KernelTestCase
         $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
         $updatedRows = $migrator->transactional(static fn (Connection $connection): int|string => $connection->executeStatement('UPDATE tkt_ticket SET version = version + 1 WHERE id = ?', [$ticketId]));
         self::assertSame(1, $updatedRows);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function sqlOf(DebugDataHolder $debugData): array
+    {
+        $sql = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            self::assertIsArray($queriesOfOneConnection);
+            foreach ($queriesOfOneConnection as $query) {
+                self::assertIsArray($query);
+                self::assertIsString($query['sql']);
+                $sql[] = $query['sql'];
+            }
+        }
+
+        return $sql;
+    }
+
+    private function debugData(): DebugDataHolder
+    {
+        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function createdTicketOf(string $organizationId): string

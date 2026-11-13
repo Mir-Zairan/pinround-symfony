@@ -24,11 +24,13 @@ interface TicketTurnSource
 
     /**
      * The facts of a ticket its caller has already read, as {@see factsFor} would build them from the same snapshot;
-     * reads no ticket, only the team's waiting reviews and tests.
+     * reads no ticket, only the team's waiting reviews and tests, and those only when the caller gives none.
+     *
+     * @param array<string, array<string, int>>|null $waitingTurns as TurnProjector::refreshFrom takes them
      *
      * @return TicketTurnFacts|null null for a ticket no team owns, so its turn row goes
      *
      * @throws \LogicException when no transaction is open, before any query
      */
-    public function factsFrom(TicketTurnSnapshot $snapshot): ?TicketTurnFacts;
+    public function factsFrom(TicketTurnSnapshot $snapshot, ?array $waitingTurns = null): ?TicketTurnFacts;
 }

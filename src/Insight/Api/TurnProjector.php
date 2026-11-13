@@ -42,10 +42,16 @@ interface TurnProjector
      * one of a ticket the tenant's organization does not have fails on the first write with DBAL's
      * ForeignKeyConstraintViolationException, writing nothing, and the change must roll back.
      *
+     * @param array<string, array<string, int>>|null $waitingTurns the reviews and tests waiting for the snapshot's
+     *                                                             developers and testers, as TeamLoadQueries::waitingTurnsOf
+     *                                                             gave them for its ticket in this transaction; they count
+     *                                                             other tickets only, so the ticket's own change leaves them
+     *                                                             as they were. Null reads them, one query.
+     *
      * @return string|null the turn's override note, as refresh returns it
      *
      * @throws \LogicException as refresh does: when no transaction is open, or when the count row the ticket was in is
      *                         missing, so the change must roll back
      */
-    public function refreshFrom(TicketTurnSnapshot $snapshot): ?string;
+    public function refreshFrom(TicketTurnSnapshot $snapshot, ?array $waitingTurns = null): ?string;
 }

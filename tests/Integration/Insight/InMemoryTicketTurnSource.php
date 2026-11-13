@@ -36,7 +36,7 @@ final class InMemoryTicketTurnSource implements TicketTurnSource, ResetInterface
     /**
      * No test projects from a snapshot through this double; the real mapping is tested on DbalTicketTurnSource.
      */
-    public function factsFrom(TicketTurnSnapshot $snapshot): never
+    public function factsFrom(TicketTurnSnapshot $snapshot, ?array $waitingTurns = null): never
     {
         throw new \LogicException('InMemoryTicketTurnSource cannot build facts from a snapshot; use DbalTicketTurnSource.');
     }

@@ -72,14 +72,10 @@ final class MoveTicketTest extends KernelTestCase
     private const string NO_TEAM_ROLE_NOTE = 'Managers can read and comment. Only the team moves tickets.';
     private const string TICKET_BY_KEY = 'SELECT t0.project_id AS project_id_1, t0.number AS number_2, t0.key AS key_3,';
     private const string WAITING_TURNS = 'SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn';
-    // The flush's savepoint around the versioned UPDATE and Doctrine's re-read of the version, the turn projector's
-    // read and writes, the history row, then the event bus's doctrine_transaction savepoint around the outbox's own.
-    private const array SAVED_PROJECTED_AND_PUBLISHED = [
-        'SAVEPOINT DOCTRINE_2',
-        'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?,',
-        'SELECT version FROM tkt_ticket WHERE organization_id = ? AND id = ?',
-        'RELEASE SAVEPOINT DOCTRINE_2',
-        self::WAITING_TURNS,
+    private const string SAVED = 'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?,';
+    // The turn projector's writes, the history row, then the event bus's doctrine_transaction savepoint around the
+    // outbox's own.
+    private const array PROJECTED_AND_PUBLISHED = [
         'INSERT INTO ins_project_count_ticket ',
         'INSERT INTO ins_ticket_turn ',
         'INSERT INTO tkt_ticket_event ',
@@ -509,7 +505,7 @@ final class MoveTicketTest extends KernelTestCase
      * and the team's waiting reviews and tests, then saves, projects and publishes.
      */
     #[Test]
-    public function aWarmVerbMoveRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveRunsEightQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -518,13 +514,13 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, ...self::SAVED_PROJECTED_AND_PUBLISHED], $statements);
-        // TODO(P03.T7): over the 8-query budget, see breakdown
-        self::assertCount(10, self::queriesBesideSavepoints($statements));
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(8, self::queriesBesideSavepoints($statements));
+        self::assertLessThanOrEqual(8, \count(self::queriesBesideSavepoints($statements)), 'P03.T7: a move uses at most 8 queries');
     }
 
     #[Test]
-    public function aWarmMoveToAPlainStepRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToAPlainStepRunsEightQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -533,16 +529,16 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::ON_HOLD_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, ...self::SAVED_PROJECTED_AND_PUBLISHED], $statements);
-        // TODO(P03.T7): over the 8-query budget, see breakdown
-        self::assertCount(9, self::queriesBesideSavepoints($statements));
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(8, self::queriesBesideSavepoints($statements));
+        self::assertLessThanOrEqual(8, \count(self::queriesBesideSavepoints($statements)), 'P03.T7: a move uses at most 8 queries');
     }
 
     /**
      * Raj is in the team, but who a ticket waits on may be any member of the organization, so his membership is read.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsNineQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -551,9 +547,9 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, new UserId(self::RAJ), null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', ...self::SAVED_PROJECTED_AND_PUBLISHED], $statements);
-        // TODO(P03.T7): over the 8-query budget, see breakdown
-        self::assertCount(10, self::queriesBesideSavepoints($statements));
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        // TODO(P03.T7): 9 queries — the waiting-on membership check; budget exception left to the user
+        self::assertCount(9, self::queriesBesideSavepoints($statements));
     }
 
     /**

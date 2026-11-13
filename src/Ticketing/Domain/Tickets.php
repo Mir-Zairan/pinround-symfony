@@ -26,10 +26,11 @@ interface Tickets
 
     /**
      * Saves the changes of a ticket loaded with ofKey at once, raising its version by one, only when its row still has
-     * the version the ticket was read with. It flushes the whole unit of work, as add does.
+     * the version the ticket was read with; a ticket with no change keeps its version. It then flushes the whole unit
+     * of work, as add does.
      *
-     * @throws TicketVersionConflict when another request saved the ticket after it was read; nothing of the ticket is
-     *                               saved, and the caller rolls back, as the entity manager is closed
+     * @throws TicketVersionConflict when another request saved the ticket after it was read; nothing is saved, the
+     *                               ticket keeps its unsaved changes, and the caller rolls back
      * @throws \LogicException       when the ticket was not loaded or added in this request
      */
     public function save(Ticket $ticket): void;
