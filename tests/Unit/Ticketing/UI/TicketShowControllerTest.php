@@ -6,13 +6,12 @@ namespace App\Tests\Unit\Ticketing\UI;
 
 use App\Ticketing\Api\TicketPosition;
 use App\Ticketing\UI\TicketShowController;
-use App\Web\UI\Component\Group;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The ask's 700-character cut, the status pill's group and the "N of M" line, which the ticket page builds itself.
+ * The ask's 700-character cut and the "N of M" line, which the ticket page builds itself.
  */
 final class TicketShowControllerTest extends TestCase
 {
@@ -48,14 +47,6 @@ final class TicketShowControllerTest extends TestCase
         self::assertSame(699, mb_strlen($shortAsk) - mb_strlen(TicketShowController::ASK_CUT_MARK));
     }
 
-    #[Test]
-    public function everyWorkflowGroupHasAStatusPillGroup(): void
-    {
-        $pillGroups = array_map(TicketShowController::pillGroupOf(...), ['todo', 'doing', 'check', 'wait', 'done']);
-
-        self::assertSame(array_map(static fn (Group $group): string => $group->value, Group::cases()), $pillGroups);
-    }
-
     /**
      * @return iterable<string, array{TicketPosition, string}>
      */
@@ -71,13 +62,5 @@ final class TicketShowControllerTest extends TestCase
     public function aPositionReadsAsTheListPrintsItsCounts(TicketPosition $position, string $expectedLine): void
     {
         self::assertSame($expectedLine, TicketShowController::positionLineOf($position));
-    }
-
-    #[Test]
-    public function anUnknownGroupHasNoStatusPill(): void
-    {
-        $this->expectExceptionObject(new \LogicException('A step group "checking" has no status pill.'));
-
-        TicketShowController::pillGroupOf('checking');
     }
 }

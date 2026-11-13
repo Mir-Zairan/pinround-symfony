@@ -3,7 +3,7 @@
 {% set versionField = constant(moveController ~ '::VERSION_FIELD') %}
 {% set csrfToken = csrf_token(this.csrfTokenId) %}
 <section{{ attributes.defaults({class: 'next-step-box', 'aria-labelledby': 'next-step-box-label'}) }}>
-    <h2 class="next-step-box__label" id="next-step-box-label">Your next step</h2>
+    <h2 class="next-step-box__label" id="next-step-box-label"{% if isHeadingAutofocused %} tabindex="-1" autofocus{% endif %}>Your next step</h2>
     <p class="next-step-box__sentence">{{ nextStep.sentence }}</p>
     {% set moveTransitions = this.moveTransitions %}
     {% if moveTransitions is not empty %}

@@ -23,6 +23,9 @@ final readonly class TicketPageParts
     public const string STATE_ID = 'ticket-state';
     public const string NEXT_STEP_ID = 'ticket-next-step';
 
+    /** Workflow's group codes to StatusPill's groups. */
+    private const array PILL_GROUPS = ['todo' => 'todo', 'doing' => 'doing', 'check' => 'checking', 'wait' => 'waiting', 'done' => 'done'];
+
     public function __construct(
         private NowNextSentences $nowNextSentences,
         private NextStepChoices $nextStepChoices,
@@ -41,9 +44,21 @@ final readonly class TicketPageParts
 
         return [
             'ticket' => $ticket,
-            'pillGroup' => TicketShowController::pillGroupOf($ticket->groupCode),
+            'pillGroup' => self::pillGroupOf($ticket->groupCode),
             'turnLines' => null === $pageTurn ? null : $this->nowNextSentences->linesOf($pageTurn),
             'nextStep' => null === $pageTurn ? null : $this->nextStepChoices->of($pageTurn, $viewer, $this->authorizationChecker->isGranted(TicketPermission::MOVE, $ticket->visibilityFacts)),
         ];
+    }
+
+    /**
+     * @param string $groupCode one of Workflow's group codes: todo, doing, check, wait, done
+     *
+     * @return string the StatusPill group of the step's group, as Ticketing_UI may not import Web_UI's Group
+     *
+     * @throws \LogicException for a group code Workflow does not have
+     */
+    public static function pillGroupOf(string $groupCode): string
+    {
+        return self::PILL_GROUPS[$groupCode] ?? throw new \LogicException(\sprintf('A step group "%s" has no status pill.', $groupCode));
     }
 }

@@ -760,6 +760,35 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
+     * The stream replaces the form that had focus; Turbo then focuses the stream's one [autofocus] element, the box's
+     * heading, so focus stays in the box (WCAG 2.4.3). The page itself must not pull focus there on load.
+     */
+    #[Test]
+    public function theStreamFocusesTheBoxHeadingAndThePageDoesNot(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('.next-step-box__label'));
+        self::assertCount(0, $page->filter('[autofocus]'));
+        self::assertNull($page->filter('.next-step-box__label')->attr('tabindex'));
+
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame(
+            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, self::TOAST_REGION_ID => 0],
+            array_map(static fn (Crawler $stream): int => $stream->filter('[autofocus]')->count(), $streams),
+        );
+        $heading = $streams[TicketPageParts::NEXT_STEP_ID]->filter('[autofocus]');
+        self::assertSame('Your next step', $heading->text());
+        self::assertSame('-1', $heading->attr('tabindex'));
+    }
+
+    /**
      * The stream answer reads the ticket's page again after the move's transaction, in one of its own: the same refusal
      * answered by stream and by redirect differs by that read alone, warm: 6 queries with the transaction's own
      * statements, the ticket, the names and the saved turn among them.

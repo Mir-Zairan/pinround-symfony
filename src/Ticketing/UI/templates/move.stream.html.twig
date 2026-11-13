@@ -1,4 +1,4 @@
 {#- TicketMoveController's answer to a Turbo form: the ticket's state and its Your next step box as they are now, then the toast. -#}
 <turbo-stream action="replace" target="{{ constant('App\\Ticketing\\UI\\TicketPageParts::STATE_ID') }}"><template>{{ include('@Ticketing/_ticket_state.html.twig') }}</template></turbo-stream>
-<turbo-stream action="replace" target="{{ constant('App\\Ticketing\\UI\\TicketPageParts::NEXT_STEP_ID') }}"><template>{{ include('@Ticketing/_next_step.html.twig') }}</template></turbo-stream>
+<turbo-stream action="replace" target="{{ constant('App\\Ticketing\\UI\\TicketPageParts::NEXT_STEP_ID') }}"><template>{{ include('@Ticketing/_next_step.html.twig', {isStreamed: true}) }}</template></turbo-stream>
 {{ include('@Web/_toast_stream.html.twig', {message: toast}) }}

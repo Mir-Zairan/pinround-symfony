@@ -236,6 +236,11 @@
   text-transform: uppercase;
 }
 
+/* Only a move's stream answer focuses the heading (tabindex="-1"), to keep keyboard focus in the box; it is not a control. */
+.next-step-box__label:focus {
+  outline: none;
+}
+
 .next-step-box__sentence {
   margin: 0;
   font-size: 17px;

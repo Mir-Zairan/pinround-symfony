@@ -29,6 +29,12 @@ final class NextStepBox
 
     public NextStep $nextStep;
 
+    /**
+     * Set when a move's Turbo Stream renders the box: the form that had focus is replaced with it, and Turbo focuses
+     * the stream's [autofocus] element, so keyboard and screen reader users land on the box rather than the page top.
+     */
+    public bool $isHeadingAutofocused = false;
+
     public function csrfTokenId(): string
     {
         return TicketMoveController::csrfIdOf($this->ticketKey);
