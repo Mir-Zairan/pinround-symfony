@@ -43,6 +43,7 @@ use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionPolicy;
 use App\Workflow\Api\TurnInputs;
+use App\Workflow\Api\TurnPeopleChoice;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -178,37 +179,86 @@ final class MoveTicketTest extends KernelTestCase
     #[Test]
     public function theLeadsTicketSentToCodeReviewGoesToTheDeveloperWithFewerWaitingReviews(): void
     {
-        self::mockTime(self::MOVED_AT);
-        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
-            "UPDATE org_team_member SET job = 'developer' WHERE organization_id = ? AND team_id = ? AND user_id = ?",
-            [self::ACME_FOODS, self::SHOP_TEAM, self::MIA],
-        ));
-        self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
-        $omarsReviewId = new ShopTickets($this->ticketCommands(), $this->transactions(), $this->connection())->createdFor(self::ACME_FOODS, self::SHOP_PROJECT, self::MIA, self::LENA);
-        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
-            'UPDATE tkt_ticket SET step_id = ?, reviewer_id = ? WHERE id = ?',
-            [self::CODE_REVIEW_STEP, self::OMAR, $omarsReviewId->toString()],
-        ));
-        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($omarsReviewId));
+        $this->makeMiaADeveloperWhileOmarReviewsAnotherTicket();
         $this->setColumns(['step_id' => self::IN_PROGRESS_STEP, 'assignee_id' => self::LENA]);
         $ticketId = $this->ticketId();
-        self::assertSame(
-            [self::OMAR => [TurnInputs::WAITING_REVIEW => 1]],
-            $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array => self::getContainer()->get(TeamLoadQueries::class)->waitingTurnsOf(
-                [new UserId(self::LENA), new UserId(self::OMAR), new UserId(self::MIA)],
-                $ticketId,
-            )),
-        );
 
         $this->move(self::LENA, 'send_to_code_review', $this->stepAndVersion()[1]);
 
-        self::assertSame(
-            ['turn_user_id' => self::MIA, 'kind' => 'review'],
-            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchAssociative('SELECT turn_user_id, kind FROM ins_ticket_turn WHERE ticket_id = ?', [$ticketId->toString()])),
-        );
+        self::assertSame([self::MIA, null], $this->storedReviewerAndTester());
+        self::assertSame(['turn_user_id' => self::MIA, 'kind' => 'review'], $this->turnOf($ticketId));
         $turnRowsAfterTheMove = $this->turnRows();
         $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
         self::assertSame($this->turnRows(), $turnRowsAfterTheMove);
+    }
+
+    /**
+     * FR-WF-14: Mia gets the review on the loads at the move. Once Omar's other review leaves Code review the loads tie
+     * and a fresh choice would name Omar on the lower user id, so only the stored reviewer keeps the turn and the verb
+     * with Mia.
+     */
+    #[Test]
+    public function theReviewerChosenAtTheMoveKeepsTheReviewAfterTheLoadsChange(): void
+    {
+        $omarsReviewId = $this->makeMiaADeveloperWhileOmarReviewsAnotherTicket();
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP, 'assignee_id' => self::LENA]);
+        $ticketId = $this->ticketId();
+        $this->move(self::LENA, 'send_to_code_review', $this->stepAndVersion()[1]);
+        $this->moveOutOfItsCheckStep($omarsReviewId);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
+        $stateBefore = $this->storedState();
+
+        $refusal = $this->refusalOf(fn () => $this->move(self::OMAR, 'approve_code', $stateBefore['version']));
+
+        self::assertInstanceOf(MoveRefused::class, $refusal);
+        self::assertSame($stateBefore, $this->storedState());
+        self::assertSame([self::MIA, null], $this->storedReviewerAndTester());
+        self::assertSame(['turn_user_id' => self::MIA, 'kind' => 'review'], $this->turnOf($ticketId));
+
+        $this->move(self::MIA, 'approve_code', $stateBefore['version']);
+
+        self::assertSame([self::TESTING_STEP, $stateBefore['version'] + 1], $this->stepAndVersion());
+        self::assertSame([self::MIA, null], $this->storedReviewerAndTester());
+    }
+
+    /**
+     * A reviewer stored before, here by the lead, is kept when the ticket comes back to Code review, though the loads
+     * at that move would now choose Mia.
+     */
+    #[Test]
+    public function aStoredReviewerIsKeptWhenTheTicketReturnsToCodeReview(): void
+    {
+        $this->makeMiaADeveloperWhileOmarReviewsAnotherTicket();
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP, 'assignee_id' => self::LENA, 'reviewer_id' => self::OMAR]);
+
+        $this->move(self::LENA, 'send_to_code_review', $this->stepAndVersion()[1]);
+
+        self::assertSame([self::OMAR, null], $this->storedReviewerAndTester());
+        self::assertSame(['turn_user_id' => self::OMAR, 'kind' => 'review'], $this->turnOf($this->ticketId()));
+    }
+
+    /**
+     * The lead reviewing their own code is a fallback, so nobody is stored and the history keeps the override note.
+     */
+    #[Test]
+    public function theLeadReviewingTheirOwnCodeIsNotStored(): void
+    {
+        self::mockTime(self::MOVED_AT);
+        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
+            "UPDATE org_team_member SET team_role = 'viewer', job = 'other' WHERE organization_id = ? AND team_id = ? AND user_id = ?",
+            [self::ACME_FOODS, self::SHOP_TEAM, self::OMAR],
+        ));
+        self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP, 'assignee_id' => self::LENA]);
+
+        $this->move(self::LENA, 'send_to_code_review', $this->stepAndVersion()[1]);
+
+        self::assertSame([null, null], $this->storedReviewerAndTester());
+        self::assertSame(['turn_user_id' => self::LENA, 'kind' => 'review'], $this->turnOf($this->ticketId()));
+        self::assertSame(
+            ['Lena reviews their own code: no other developer in the team'],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn("SELECT payload->>'override_note' FROM tkt_ticket_event WHERE type = 'moved'")),
+        );
     }
 
     /**
@@ -223,13 +273,45 @@ final class MoveTicketTest extends KernelTestCase
 
         $this->move(self::LENA, 'approve_code', $this->stepAndVersion()[1]);
 
-        self::assertSame(
-            ['turn_user_id' => self::RAJ, 'kind' => 'test'],
-            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchAssociative('SELECT turn_user_id, kind FROM ins_ticket_turn WHERE ticket_id = ?', [$ticketId->toString()])),
-        );
+        self::assertSame([self::LENA, self::RAJ], $this->storedReviewerAndTester());
+        self::assertSame(['turn_user_id' => self::RAJ, 'kind' => 'test'], $this->turnOf($ticketId));
         $turnRowsAfterTheMove = $this->turnRows();
         $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
         self::assertSame($this->turnRows(), $turnRowsAfterTheMove);
+    }
+
+    /**
+     * FR-WF-14: Raj gets the test on the loads at the move. Once Mia's other test leaves Testing the loads tie and a
+     * fresh choice would name Mia on the lower user id, so only the stored tester keeps the turn with Raj.
+     */
+    #[Test]
+    public function theTesterChosenAtTheMoveKeepsTheTestAfterTheLoadsChange(): void
+    {
+        $miasTestId = $this->makeRajASecondTesterWhileMiaTestsAnotherTicket();
+        $this->setColumns(['step_id' => self::CODE_REVIEW_STEP, 'reviewer_id' => self::LENA]);
+        $ticketId = $this->ticketId();
+        $this->move(self::LENA, 'approve_code', $this->stepAndVersion()[1]);
+
+        $this->moveOutOfItsCheckStep($miasTestId);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
+
+        self::assertSame([self::LENA, self::RAJ], $this->storedReviewerAndTester());
+        self::assertSame(['turn_user_id' => self::RAJ, 'kind' => 'test'], $this->turnOf($ticketId));
+    }
+
+    /**
+     * With Mia a developer the team has no tester, so nobody is stored and the Testing turn is the lead's.
+     */
+    #[Test]
+    public function approvedCodeInATeamWithoutATesterStoresNoTester(): void
+    {
+        $this->makeMiaADeveloperWhileOmarReviewsAnotherTicket();
+        $this->setColumns(['step_id' => self::CODE_REVIEW_STEP, 'reviewer_id' => self::LENA]);
+
+        $this->move(self::LENA, 'approve_code', $this->stepAndVersion()[1]);
+
+        self::assertSame([self::TESTING_STEP, null], [$this->stepAndVersion()[0], $this->storedReviewerAndTester()[1]]);
+        self::assertSame(['turn_user_id' => self::LENA, 'kind' => 'test'], $this->turnOf($this->ticketId()));
     }
 
     /**
@@ -371,6 +453,22 @@ final class MoveTicketTest extends KernelTestCase
         $this->moveTo(self::LENA, self::TESTING_STEP, $versionBefore);
 
         $this->assertMoved($stepBefore, $versionBefore, self::TESTING_STEP, self::LENA, null);
+        self::assertSame([null, self::MIA], $this->storedReviewerAndTester());
+    }
+
+    /**
+     * A move without a verb stores the reviewer as a verb does, from the waiting reviews it read: Omar would win a tie.
+     */
+    #[Test]
+    public function theLeadMovingTheirTicketToCodeReviewStoresTheDeveloperWithFewerWaitingReviews(): void
+    {
+        $this->makeMiaADeveloperWhileOmarReviewsAnotherTicket();
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP, 'assignee_id' => self::LENA]);
+
+        $this->moveTo(self::LENA, self::CODE_REVIEW_STEP, $this->stepAndVersion()[1]);
+
+        self::assertSame([self::MIA, null], $this->storedReviewerAndTester());
+        self::assertSame(['turn_user_id' => self::MIA, 'kind' => 'review'], $this->turnOf($this->ticketId()));
     }
 
     /**
@@ -678,7 +776,7 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::ON_HOLD_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
         self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T7: a move uses at most 8 queries');
     }
 
@@ -695,7 +793,7 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, new UserId(self::RAJ), null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
         // Nine, not eight: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
         self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
     }
@@ -713,7 +811,7 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
         self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the reporter\'s membership check');
     }
 
@@ -1034,10 +1132,88 @@ final class MoveTicketTest extends KernelTestCase
     }
 
     /**
+     * Mia, until now the tester, becomes a developer of Shop, which then has no tester, and Omar reviews another
+     * ticket, so he has one waiting review and she none.
+     *
+     * @return TicketId Omar's review
+     */
+    private function makeMiaADeveloperWhileOmarReviewsAnotherTicket(): TicketId
+    {
+        self::mockTime(self::MOVED_AT);
+        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
+            "UPDATE org_team_member SET job = 'developer' WHERE organization_id = ? AND team_id = ? AND user_id = ?",
+            [self::ACME_FOODS, self::SHOP_TEAM, self::MIA],
+        ));
+        self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
+        $omarsReviewId = new ShopTickets($this->ticketCommands(), $this->transactions(), $this->connection())->createdFor(self::ACME_FOODS, self::SHOP_PROJECT, self::MIA, self::LENA);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            'UPDATE tkt_ticket SET step_id = ?, reviewer_id = ? WHERE id = ?',
+            [self::CODE_REVIEW_STEP, self::OMAR, $omarsReviewId->toString()],
+        ));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($omarsReviewId));
+        $ticketId = $this->ticketId();
+        self::assertSame(
+            [self::OMAR => [TurnInputs::WAITING_REVIEW => 1]],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array => self::getContainer()->get(TeamLoadQueries::class)->waitingTurnsOf(
+                [new UserId(self::LENA), new UserId(self::OMAR), new UserId(self::MIA)],
+                $ticketId,
+            )),
+        );
+
+        return $omarsReviewId;
+    }
+
+    /**
+     * The other ticket goes back to In progress and its turn row is refreshed, so, SHOP-7 aside, nobody has a review or
+     * test waiting and the loads tie.
+     */
+    private function moveOutOfItsCheckStep(TicketId $otherTicketId): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            'UPDATE tkt_ticket SET step_id = ? WHERE id = ?',
+            [self::IN_PROGRESS_STEP, $otherTicketId->toString()],
+        ));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($otherTicketId));
+        $ticketId = $this->ticketId();
+        self::assertSame(
+            [],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array => self::getContainer()->get(TeamLoadQueries::class)->waitingTurnsOf(
+                [new UserId(self::LENA), new UserId(self::OMAR), new UserId(self::MIA), new UserId(self::RAJ)],
+                $ticketId,
+            )),
+        );
+    }
+
+    /**
+     * @return array<string, mixed> the turn_user_id and kind of the ticket's turn row, or none without one
+     */
+    private function turnOf(TicketId $ticketId): array
+    {
+        $turn = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchAssociative('SELECT turn_user_id, kind FROM ins_ticket_turn WHERE ticket_id = ?', [$ticketId->toString()]));
+
+        return false === $turn ? [] : $turn;
+    }
+
+    /**
+     * @return array{string|null, string|null} the reviewer_id and tester_id of Acme Foods' SHOP-7
+     */
+    private function storedReviewerAndTester(): array
+    {
+        $row = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchNumeric('SELECT reviewer_id, tester_id FROM tkt_ticket WHERE key = ?', [self::KEY]));
+        self::assertIsArray($row);
+        self::assertTrue(null === $row[0] || \is_string($row[0]));
+        self::assertTrue(null === $row[1] || \is_string($row[1]));
+
+        return [$row[0], $row[1]];
+    }
+
+    /**
      * Raj, until now a viewer, becomes a tester member of Shop, and Mia tests another ticket, so she has one waiting
      * test and he none.
+     *
+     * @return TicketId Mia's test
      */
-    private function makeRajASecondTesterWhileMiaTestsAnotherTicket(): void
+    private function makeRajASecondTesterWhileMiaTestsAnotherTicket(): TicketId
     {
         self::mockTime(self::MOVED_AT);
         $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
@@ -1059,6 +1235,8 @@ final class MoveTicketTest extends KernelTestCase
                 $ticketId,
             )),
         );
+
+        return $miasTestId;
     }
 
     private function removeMembershipOf(string $userId): void
@@ -1129,6 +1307,7 @@ final class MoveTicketTest extends KernelTestCase
             new DbalTicketHistory($this->connection()),
             $this->turnProjector(),
             new MessengerTicketEvents($container->get('event.bus'), $this->connection()),
+            $container->get(TurnPeopleChoice::class),
         );
     }
 

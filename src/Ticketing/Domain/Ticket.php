@@ -288,18 +288,27 @@ final class Ticket implements TenantOwned
     /**
      * Moves the ticket to the step. The caller has resolved the step and checked the move is allowed; the ticket only
      * keeps its own fields in step. Entering the done group closes it, and leaving that group reopens it. Who it waits
-     * on is kept only in Needs input. A refused move changes nothing.
+     * on is kept only in Needs input. A reviewer or tester already stored is kept. A refused move changes nothing.
      *
      * @param string         $stepId           the wf_step id of the step the ticket moves to
      * @param string         $groupCode        that step's group: todo, doing, check, wait or done
      * @param bool           $isNeedsInputStep true when that step is the core Needs input step
      * @param WaitingOn|null $waitingOn        who the ticket waits on; given exactly when $isNeedsInputStep is true
+     * @param UserId|null    $chosenReviewer   the reviewer to store when the ticket has none (FR-WF-14)
+     * @param UserId|null    $chosenTester     the tester to store when the ticket has none (FR-WF-14)
      *
      * @throws InvalidWaitingOn          when a Needs input step has no one to wait on, or another step has someone
      * @throws \InvalidArgumentException when the group code is none of the five
      */
-    public function move(string $stepId, string $groupCode, bool $isNeedsInputStep, ?WaitingOn $waitingOn, \DateTimeImmutable $movedAt): void
-    {
+    public function move(
+        string $stepId,
+        string $groupCode,
+        bool $isNeedsInputStep,
+        ?WaitingOn $waitingOn,
+        \DateTimeImmutable $movedAt,
+        ?UserId $chosenReviewer = null,
+        ?UserId $chosenTester = null,
+    ): void {
         if (!\in_array($groupCode, self::GROUP_CODES, true)) {
             throw new \InvalidArgumentException('A step group is one of todo, doing, check, wait or done.');
         }
@@ -319,6 +328,8 @@ final class Ticket implements TenantOwned
         }
         $this->waitingOnUserId = $waitingOn?->userId()?->toString();
         $this->waitingOnLabel = $waitingOn?->label();
+        $this->reviewerId ??= $chosenReviewer?->toString();
+        $this->testerId ??= $chosenTester?->toString();
         $this->updatedAt = $movedAt;
     }
 

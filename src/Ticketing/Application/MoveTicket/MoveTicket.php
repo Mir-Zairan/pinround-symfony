@@ -32,8 +32,10 @@ use App\Workflow\Api\Decision;
 use App\Workflow\Api\RuleQueries;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
+use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TransitionPolicy;
 use App\Workflow\Api\TurnInputs;
+use App\Workflow\Api\TurnPeopleChoice;
 
 /**
  * The use case behind {@see TicketCommands::move} and {@see TicketCommands::moveTo}, which carry the contract.
@@ -41,6 +43,8 @@ use App\Workflow\Api\TurnInputs;
 final readonly class MoveTicket
 {
     private const string NEEDS_INPUT = 'input';
+    private const string REVIEW = 'review';
+    private const string TEST = 'test';
     // Workflow's Verb::GiveItTo, which also chooses the assignee; it comes with P03.T8.
     private const string GIVE_IT_TO = 'give_it_to';
 
@@ -56,6 +60,7 @@ final readonly class MoveTicket
         private TicketHistory $ticketHistory,
         private TurnProjector $turnProjector,
         private TicketEvents $ticketEvents,
+        private TurnPeopleChoice $turnPeopleChoice,
     ) {
     }
 
@@ -74,14 +79,8 @@ final readonly class MoveTicket
         }
         $team = $this->teamOf($teamId);
         $before = $this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people);
-        $waitingTurns = $this->teamLoadQueries->waitingTurnsOf([...$before->developerIds, ...$before->testerIds], $before->ticketId);
-        $teamFacts = TurnInputs::teamFacts(
-            $before->leadId ?? throw new \LogicException('A ticket with a team has a lead.'),
-            $before->leadDisplayName ?? throw new \LogicException('A ticket with a team has a lead.'),
-            $before->developerIds,
-            $before->testerIds,
-            $waitingTurns,
-        );
+        $waitingTurns = $this->waitingTurnsOf($before);
+        $teamFacts = self::teamFactsOf($before, $waitingTurns);
         $decision = $this->transitionPolicy->check(
             TurnInputs::ticketStateOf($before),
             $team->actorInTeam($actor),
@@ -93,7 +92,7 @@ final readonly class MoveTicket
         $target = $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.'));
         $waitingOn = self::NEEDS_INPUT === $target->coreCode() ? $this->waitingOnReporter($ticket) : null;
 
-        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, $verb, $at, $waitingTurns);
+        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, $verb, $at, $waitingTurns, $teamFacts);
     }
 
     /**
@@ -145,8 +144,31 @@ final readonly class MoveTicket
             null !== $waitingOnLabel => self::waitingOnLabel($waitingOnLabel),
             default => $this->waitingOnReporter($ticket),
         };
+        $waitingTurns = $this->waitingTurnsOf($before);
 
-        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, null);
+        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns));
+    }
+
+    /**
+     * @return array<string, array<string, int>>
+     */
+    private function waitingTurnsOf(TicketTurnSnapshot $before): array
+    {
+        return $this->teamLoadQueries->waitingTurnsOf([...$before->developerIds, ...$before->testerIds], $before->ticketId);
+    }
+
+    /**
+     * @param array<string, array<string, int>> $waitingTurns
+     */
+    private static function teamFactsOf(TicketTurnSnapshot $before, array $waitingTurns): TeamFacts
+    {
+        return TurnInputs::teamFacts(
+            $before->leadId ?? throw new \LogicException('A ticket with a team has a lead.'),
+            $before->leadDisplayName ?? throw new \LogicException('A ticket with a team has a lead.'),
+            $before->developerIds,
+            $before->testerIds,
+            $waitingTurns,
+        );
     }
 
     /**
@@ -209,8 +231,11 @@ final readonly class MoveTicket
     }
 
     /**
-     * @param array<string, array<string, int>>|null $waitingTurns the team's waiting reviews and tests already read for
-     *                                                             $before, or null for the turn refresh to read them
+     * The reviewer or tester is stored on entering Code review or Testing (FR-WF-14), chosen from the same loads the
+     * turn refresh gets, so the stored person, the turn row and who may approve are one person.
+     *
+     * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
+     * @param TeamFacts                         $teamFacts    the team facts built from $before and $waitingTurns
      */
     private function moveAndRecord(
         Ticket $ticket,
@@ -221,13 +246,22 @@ final readonly class MoveTicket
         ?WaitingOn $waitingOn,
         ?string $verb,
         \DateTimeImmutable $at,
-        ?array $waitingTurns,
+        array $waitingTurns,
+        TeamFacts $teamFacts,
     ): void {
         $fromStepId = $ticket->stepId();
         if ($target->id() === $fromStepId) {
             throw new MoveRefused(null);
         }
-        $ticket->move($target->id(), $target->groupCode(), self::NEEDS_INPUT === $target->coreCode(), $waitingOn, $at);
+        $ticket->move(
+            $target->id(),
+            $target->groupCode(),
+            self::NEEDS_INPUT === $target->coreCode(),
+            $waitingOn,
+            $at,
+            self::REVIEW === $target->coreCode() ? $this->turnPeopleChoice->reviewerToStore($before->assigneeId, $teamFacts) : null,
+            self::TEST === $target->coreCode() ? $this->turnPeopleChoice->testerToStore($teamFacts) : null,
+        );
         try {
             $this->tickets->save($ticket);
         } catch (TicketVersionConflict $conflict) {
