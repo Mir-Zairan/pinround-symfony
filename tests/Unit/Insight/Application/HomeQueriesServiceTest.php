@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Insight\Application;
 
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\TurnGroup;
+use App\Insight\Api\TurnGroupCursor;
 use App\Insight\Application\HomeQueriesService;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -57,6 +58,119 @@ final class HomeQueriesServiceTest extends TestCase
         $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null)->groups;
 
         self::assertSame([self::OMAR, self::MIA], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $groups));
+    }
+
+    /**
+     * Labels "10" and "9" share their oldest wait: byte by byte, as the database's keyset goes, "10" comes first,
+     * though PHP's <=> would put the number 9 first.
+     */
+    #[Test]
+    public function numericLabelsOfOneOldestWaitGoByteByByte(): void
+    {
+        $rows = new FixedWhoseTurnRows([
+            self::labelGroup('9', '2027-03-05 07:00:00'),
+            self::labelGroup('10', '2027-03-05 07:00:00'),
+        ]);
+
+        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null)->groups;
+
+        self::assertSame(['10', '9'], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $groups));
+    }
+
+    /**
+     * The rows give the viewer's group and 21 others, one more than a page, given in reverse order: the page keeps the
+     * viewer's group and the 20 oldest waits, and its cursor is after the 20th.
+     */
+    #[Test]
+    public function aPageHoldsTheViewersGroupAndTwentyOthersAndACursorAfterTheTwentieth(): void
+    {
+        $otherGroups = [];
+        for ($day = 21; $day >= 1; --$day) {
+            $otherGroups[] = self::labelGroup(\sprintf('Supplier %02d', $day), \sprintf('2027-03-%02d 06:00:00', $day));
+        }
+        $rows = new FixedWhoseTurnRows([...$otherGroups, self::personGroup(self::LENA, '2027-03-25 09:00:00')], 40);
+
+        $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null);
+
+        $expectedKeys = [self::LENA];
+        for ($day = 1; $day <= 20; ++$day) {
+            $expectedKeys[] = \sprintf('Supplier %02d', $day);
+        }
+        self::assertSame($expectedKeys, array_map(static fn (TurnGroup $group): string => $group->groupKey(), $page->groups));
+        self::assertSame(40, $page->ticketCount);
+        self::assertNotNull($page->nextCursor);
+        self::assertSame(
+            ['2027-03-20 06:00:00', null, 'Supplier 20'],
+            [$page->nextCursor->oldestWaitingSince->format('Y-m-d H:i:s'), $page->nextCursor->turnUserId, $page->nextCursor->turnLabel],
+        );
+    }
+
+    #[Test]
+    public function aPageOfTwentyOtherGroupsIsTheLastAndHasNoCursor(): void
+    {
+        $otherGroups = [];
+        for ($day = 20; $day >= 1; --$day) {
+            $otherGroups[] = self::labelGroup(\sprintf('Supplier %02d', $day), \sprintf('2027-03-%02d 06:00:00', $day));
+        }
+        $rows = new FixedWhoseTurnRows([self::personGroup(self::LENA, '2027-03-25 09:00:00'), ...$otherGroups]);
+
+        $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null);
+
+        self::assertCount(21, $page->groups);
+        self::assertSame('Supplier 20', $page->groups[20]->groupKey());
+        self::assertNull($page->nextCursor);
+    }
+
+    #[Test]
+    public function aNextPageGoesOnAfterTheCursorWithoutTheViewersGroup(): void
+    {
+        $after = new TurnGroupCursor(new \DateTimeImmutable('2027-03-01 06:00:00 UTC'), null, 'Customer');
+        $rows = new FixedWhoseTurnRows([
+            self::personGroup(self::LENA, '2027-03-25 09:00:00'),
+            self::personGroup(self::MIA, '2027-03-09 07:00:00'),
+            self::personGroup(self::OMAR, '2027-03-02 07:00:00'),
+        ], 7);
+
+        $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, null, $after);
+
+        self::assertSame([self::OMAR, self::MIA], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $page->groups));
+        self::assertNull($page->nextCursor);
+        self::assertSame([[self::SHOP_PROJECT, null, $after, 21]], $rows->calls);
+    }
+
+    #[Test]
+    public function aCursorLabelOfExactly100MultibyteCharactersIsRead(): void
+    {
+        $after = new TurnGroupCursor(new \DateTimeImmutable('2027-03-01 06:00:00 UTC'), null, str_repeat('é', 100));
+        $rows = new FixedWhoseTurnRows([]);
+
+        new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, $after);
+
+        self::assertSame([[null, null, $after, 21]], $rows->calls);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function refusedCursorLabels(): iterable
+    {
+        yield 'a label of 101 characters' => [str_repeat('é', 101)];
+        yield 'a label that is not UTF-8' => ["Customer\xC3"];
+    }
+
+    #[Test]
+    #[DataProvider('refusedCursorLabels')]
+    public function aCursorWithAMalformedLabelIsRefusedBeforeTheRowsAreRead(string $label): void
+    {
+        $rows = new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')]);
+
+        try {
+            new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, new TurnGroupCursor(new \DateTimeImmutable('2027-03-01 06:00:00 UTC'), null, $label));
+            self::fail('The read must be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('A whose-turn cursor\'s label has at most 100 characters.', $exception->getMessage());
+        }
+        self::assertSame([], $rows->calls, 'No rows were read before the refusal.');
     }
 
     #[Test]

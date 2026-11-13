@@ -183,6 +183,10 @@ final class WhoseTurnTest extends WebTestCase
         yield 'a project key of no project' => ['?project=NOPE'];
         yield 'an opened group of 101 characters' => ['?open='.str_repeat('a', 101)];
         yield 'an opened group that is not UTF-8' => ['?open=%FF'];
+        yield 'a cursor of no known form' => ['?after=yesterday'];
+        yield 'a v4 uuid where a cursor is expected' => ['?after=4f6b1c9e-8d2a-4b7e-9c1d-2e3f4a5b6c7d'];
+        yield 'a cursor after a person by a v4 uuid' => ['?after=1793098800.person.4f6b1c9e-8d2a-4b7e-9c1d-2e3f4a5b6c7d'];
+        yield 'a cursor after a label of 101 characters' => ['?after=1793098800.label.'.str_repeat('a', 101)];
     }
 
     #[Test]
@@ -261,21 +265,208 @@ final class WhoseTurnTest extends WebTestCase
     public function theListAndThisPageSwitchViewsKeepingTheProject(): void
     {
         $this->logIn($this->client, $this->people['Lena']);
+        $viewQuery = '?project=SHOP';
 
-        $list = $this->client->request('GET', '/tickets?project=SHOP&q=cart');
+        $list = $this->client->request('GET', '/tickets'.$viewQuery.'&q=cart');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['/tickets'.$viewQuery, self::TURN.$viewQuery],
+            $list->filter('.tickets__header a.seg')->each(static fn (Crawler $link): string => (string) $link->attr('href')),
+        );
+
+        $page = $this->client->request('GET', self::TURN.$viewQuery);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['/tickets'.$viewQuery, self::TURN.$viewQuery],
+            $page->filter('.tickets__header a.seg')->each(static fn (Crawler $link): string => (string) $link->attr('href')),
+        );
+        self::assertSame('SHOP · Shop', $page->filter('.tickets__title')->text());
+    }
+
+    /**
+     * OPS is a project of no team, so the team Lena picked, Mobile, decides the rail and both views keep it.
+     */
+    #[Test]
+    public function theListAndThisPageSwitchViewsKeepingTheProjectAndThePickedTeam(): void
+    {
+        $this->addProject(null, 'OPS', 'Ops');
+        $this->logIn($this->client, $this->people['Lena']);
+        $viewQuery = '?project=OPS&team='.$this->mobile->toString();
+
+        $list = $this->client->request('GET', '/tickets'.$viewQuery.'&q=cart');
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['List', 'Whose turn?'], $list->filter('.tickets__header a.seg')->each(static fn (Crawler $link): string => $link->text()));
         self::assertSame('List', $list->filter('.tickets__header a.seg[aria-current="page"]')->text());
-        self::assertSame(self::TURN.'?project=SHOP', $list->filter('.tickets__header a.seg')->eq(1)->attr('href'));
+        self::assertSame(
+            ['/tickets'.$viewQuery, self::TURN.$viewQuery],
+            $list->filter('.tickets__header a.seg')->each(static fn (Crawler $link): string => (string) $link->attr('href')),
+        );
+
+        $page = $this->client->request('GET', self::TURN.$viewQuery);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Whose turn?', $page->filter('.tickets__header a.seg[aria-current="page"]')->text());
+        self::assertSame(
+            ['/tickets'.$viewQuery, self::TURN.$viewQuery],
+            $page->filter('.tickets__header a.seg')->each(static fn (Crawler $link): string => (string) $link->attr('href')),
+        );
+        self::assertSame('OPS · Ops', $page->filter('.tickets__title')->text());
+        self::assertSame('No tickets here yet.', $page->filter('.empty-state')->text());
+    }
+
+    #[Test]
+    public function aSearchTooLongIsABadRequestThatShowsNoTicket(): void
+    {
+        $this->addWaitingTicket('Omar', 'build', 3, self::HIDDEN_TITLE);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('GET', self::TURN.'?q='.rawurlencode(str_repeat('é', 201)));
+
+        self::assertResponseStatusCodeSame(400);
+        $body = (string) $this->client->getResponse()->getContent();
+        self::assertSame('The search is too long. Use 200 characters or fewer.', $body);
+        self::assertStringNotContainsString(self::HIDDEN_TITLE, $body);
+    }
+
+    /**
+     * Sara is an admin of no team, so the page has no team to mark people outside of; a label would still be marked.
+     */
+    #[Test]
+    public function aViewerOfNoTeamSeesNoPersonMarkedOutsideTheTeam(): void
+    {
+        $this->addWaitingTicket('Omar', 'build', 3, 'Search shows no results');
+        $this->addWaitingTicket('Raj', 'decide', 5, 'Coupon field takes any text');
+        $this->addWaitingTicket('Mia', 'test', 7, 'Checkout button is hidden');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', self::TURN);
+
+        self::assertResponseStatusCodeSame(200);
+        $sentences = $page->filter('.turn__sentence')->each(static fn (Crawler $sentence): string => $sentence->text());
+        self::assertSame([
+            '1 ticket waits on Mia · for 7 days',
+            '1 ticket waits on Raj · for 5 days',
+            '1 ticket waits on Omar · for 3 days',
+        ], $sentences);
+        foreach ($sentences as $sentence) {
+            self::assertStringNotContainsString(' · outside the team', $sentence);
+        }
+        $tones = $page->filter('.turn__card')->each(static fn (Crawler $card): string => (string) $card->attr('class'));
+        self::assertCount(3, $tones);
+        foreach ($tones as $tone) {
+            self::assertSame('turn__card turn__card--team', $tone);
+        }
+    }
+
+    #[Test]
+    public function aPersonWithNoNameIsShownAsAnUnknownPerson(): void
+    {
+        $this->addTicketWaitingOn(Uuid::v7()->toRfc4122(), 'build', 3, 'Search shows no results');
+        $this->logIn($this->client, $this->people['Lena']);
 
         $page = $this->client->request('GET', self::TURN.'?project=SHOP');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Whose turn?', $page->filter('.tickets__header a.seg[aria-current="page"]')->text());
-        self::assertSame('/tickets?project=SHOP', $page->filter('.tickets__header a.seg')->eq(0)->attr('href'));
-        self::assertSame('SHOP · Shop', $page->filter('.tickets__title')->text());
-        self::assertSame('No tickets here yet.', $page->filter('.empty-state')->text());
+        self::assertSame(['an unknown person'], $page->filter('.turn__name')->each(static fn (Crawler $name): string => $name->text()));
+        self::assertSame('1 ticket waits on an unknown person · for 3 days · outside the team', $page->filter('.turn__sentence')->text());
+    }
+
+    /**
+     * A label's card id is its ASCII slug and a hash of the label; a label with no ASCII letter or digit keeps the hash.
+     */
+    #[Test]
+    public function aLabelsCardHasAStableIdThatShowMoreAndShowFewerLandOn(): void
+    {
+        foreach ([6, 5, 4, 3, 2, 1] as $waitDays) {
+            $this->addWaitingTicket(null, 'input', $waitDays, 'Customer waits '.$waitDays);
+        }
+        $this->addTicketWaitingOn(null, 'input', 1, 'Supplier waits', turnLabel: '顧客');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TURN.'?project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        $customerCardId = 'turn-label-customer-bf376338';
+        self::assertSame(
+            [$customerCardId, 'turn-label-40b3e4e1'],
+            $page->filter('.turn__card')->each(static fn (Crawler $card): string => (string) $card->attr('id')),
+        );
+        $moreUrl = (string) $page->filter('.turn__card')->eq(0)->filter('.turn__more')->attr('href');
+        self::assertSame(self::TURN.'?project=SHOP&open=Customer#'.$customerCardId, $moreUrl);
+
+        $opened = $this->client->request('GET', $moreUrl);
+
+        self::assertResponseStatusCodeSame(200);
+        $openedCard = $opened->filter('.turn__card')->eq(0);
+        self::assertSame($customerCardId, $openedCard->attr('id'));
+        self::assertCount(6, $openedCard->filter('.turn__row'));
+        self::assertSame('Show fewer', $openedCard->filter('.turn__more')->text());
+        self::assertSame(self::TURN.'?project=SHOP#'.$customerCardId, $openedCard->filter('.turn__more')->attr('href'));
+    }
+
+    /**
+     * Vendor 01 to 18 wait 40 to 23 days; Omar, Vendor 19 to 21 and "vendor 00" all wait 10 days, so the first page ends
+     * inside that tie: a person before the labels, then the labels byte by byte, where the lower-case "vendor 00" comes
+     * after "Vendor 21". Raj waits the shortest. The groups go in newest first, against the page's order.
+     */
+    #[Test]
+    public function aPageShowsTheViewersCardAndTwentyOthersAndShowMorePeopleGoesOnWithNoRepeatAndNoGap(): void
+    {
+        $this->addWaitingTicket('Raj', 'decide', 2, 'Coupon field takes any text');
+        $this->addTicketWaitingOn(null, 'input', 10, 'Ticket of vendor 00', turnLabel: 'vendor 00');
+        for ($vendor = 21; $vendor >= 1; --$vendor) {
+            $label = \sprintf('Vendor %02d', $vendor);
+            $this->addTicketWaitingOn(null, 'input', $vendor <= 18 ? 41 - $vendor : 10, 'Ticket of '.$label, turnLabel: $label);
+        }
+        $this->addWaitingTicket('Omar', 'build', 10, 'Search shows no results');
+        $this->addWaitingTicket('Lena', 'review', 1, 'Cart total shows the wrong sum');
+        $this->logIn($this->client, $this->people['Lena']);
+        // The first request skips the user refresh every later one pays, and fills the team people's cache.
+        $this->queryCountOf(self::SHELL);
+        $shellQueryCount = $this->queryCountOf(self::SHELL);
+        $this->queryCountOf(self::TURN);
+
+        $firstPageQueryCount = $this->queryCountOf(self::TURN) - $shellQueryCount;
+
+        $firstPage = $this->client->getCrawler();
+        $firstPageNames = ['You'];
+        for ($vendor = 1; $vendor <= 18; ++$vendor) {
+            $firstPageNames[] = \sprintf('Vendor %02d', $vendor);
+        }
+        $firstPageNames = [...$firstPageNames, 'Omar', 'Vendor 19'];
+        self::assertSame($firstPageNames, $firstPage->filter('.turn__name')->each(static fn (Crawler $name): string => $name->text()));
+        self::assertSame('25 tickets · grouped by who acts next', $firstPage->filter('.tickets__total')->text());
+        self::assertSame('Show more people', $firstPage->filter('.turn__more-people')->text());
+        // Vendor 19's oldest wait, 27 Oct 2026 11:00 UTC, in Unix seconds.
+        $morePeopleUrl = (string) $firstPage->filter('.turn__more-people')->attr('href');
+        self::assertSame(self::TURN.'?after=1793098800.label.Vendor%2019', $morePeopleUrl);
+        self::assertSame(3, $firstPageQueryCount);
+
+        $secondPageQueryCount = $this->queryCountOf($morePeopleUrl) - $shellQueryCount;
+
+        $secondPage = $this->client->getCrawler();
+        self::assertSame(
+            ['Vendor 20', 'Vendor 21', 'vendor 00', 'Raj'],
+            $secondPage->filter('.turn__name')->each(static fn (Crawler $name): string => $name->text()),
+        );
+        self::assertSame('25 tickets · grouped by who acts next', $secondPage->filter('.tickets__total')->text());
+        self::assertCount(0, $secondPage->filter('.turn__more-people'));
+        self::assertSame(3, $secondPageQueryCount);
+    }
+
+    #[Test]
+    public function aCursorAfterALabelOfAHundredCharactersShowsThePageAfterIt(): void
+    {
+        $this->addWaitingTicket('Omar', 'build', 3, 'Search shows no results');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TURN.'?after=1793098800.label.'.str_repeat('a', 100));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['1 ticket waits on Omar · for 3 days'], $page->filter('.turn__sentence')->each(static fn (Crawler $sentence): string => $sentence->text()));
     }
 
     #[Test]
@@ -336,16 +527,23 @@ final class WhoseTurnTest extends WebTestCase
      */
     private function addWaitingTicket(?string $turnPerson, string $kind, int $waitDays, string $title, string $visibility = 'all'): void
     {
+        $this->addTicketWaitingOn(null === $turnPerson ? null : $this->people[$turnPerson]->id()->toString(), $kind, $waitDays, $title, $visibility);
+    }
+
+    /**
+     * As addWaitingTicket, waiting on the user id $turnUserId, which may be of nobody, or on $turnLabel for null.
+     */
+    private function addTicketWaitingOn(?string $turnUserId, string $kind, int $waitDays, string $title, string $visibility = 'all', string $turnLabel = 'Customer'): void
+    {
         $number = $this->nextNumber++;
         $ticketId = Uuid::v7()->toRfc4122();
         $organizationId = $this->acmeFoods->toString();
         $shopTeam = $this->shop->toString();
         $lena = $this->people['Lena']->id()->toString();
-        $turnUserId = null === $turnPerson ? null : $this->people[$turnPerson]->id()->toString();
         $waitingSince = new \DateTimeImmutable(self::NOW)->modify(\sprintf('-%d days -1 hour', $waitDays))->format('Y-m-d H:i:sP');
         $projectId = $this->shopProject;
         $stepId = $this->doingStep;
-        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $ticketId, $projectId, $shopTeam, $number, $title, $stepId, $lena, $visibility, $turnUserId, $kind, $waitingSince): int {
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $ticketId, $projectId, $shopTeam, $number, $title, $stepId, $lena, $visibility, $turnUserId, $turnLabel, $kind, $waitingSince): int {
             $migrator->executeStatement(
                 "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority,
                      priority_rank, step_id, reporter_id, visibility, assignee_id, components, check_reasons, created_at, updated_at)
@@ -355,7 +553,7 @@ final class WhoseTurnTest extends WebTestCase
             $migrator->executeStatement(
                 "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id)
                  VALUES (?, ?, ?, ?, 'doing', ?, ?, ?, 100, CAST(? AS timestamptz), ?, ?)",
-                [$organizationId, $ticketId, $shopTeam, $projectId, $turnUserId, null === $turnUserId ? 'Customer' : null, $kind, $waitingSince, $visibility, $lena],
+                [$organizationId, $ticketId, $shopTeam, $projectId, $turnUserId, null === $turnUserId ? $turnLabel : null, $kind, $waitingSince, $visibility, $lena],
             );
 
             return 0;
