@@ -595,6 +595,8 @@ final class TicketPageTest extends WebTestCase
             array_map(static fn (string $verb, string $label): array => ['/t/'.$key.'/move/'.$verb, $label], array_keys($expectedVerbs), $expectedVerbs),
             $box->filter('.next-step-box__verbs form')->each(static fn (Crawler $form): array => [(string) $form->attr('action'), $form->filter('button')->text()]),
         );
+        // Drive is off, so only a form that opts in is posted by Turbo and gets the move's Turbo Stream answer.
+        self::assertCount($page->filter('form[action*="/move"]')->count(), $page->filter('form[action*="/move"][data-turbo="true"]'));
         $moveList = $box->filter('details.next-step-box__move-to');
         if (!$hasMoveList) {
             self::assertCount(0, $moveList);

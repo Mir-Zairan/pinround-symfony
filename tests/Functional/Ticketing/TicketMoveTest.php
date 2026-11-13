@@ -16,12 +16,14 @@ use App\Ticketing\Application\UseCaseTicketCommands;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
 use App\Ticketing\UI\TicketMoveController;
+use App\Ticketing\UI\TicketPageParts;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -47,6 +49,10 @@ final class TicketMoveTest extends WebTestCase
     private const int VERSION = 3;
     private const string NOBODY_ID = '0197a3c0-0000-7000-8000-00000000dead';
     private const string REVIEW_BEFORE_TEST_NOTE = 'Team rule: code review comes before testing.';
+    /** What Turbo sends with a form it posts. */
+    private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
+    /** base.html.twig's toast region, which a streamed toast updates. */
+    private const string TOAST_REGION_ID = 'toast-region';
 
     private KernelBrowser $client;
 
@@ -588,6 +594,278 @@ final class TicketMoveTest extends WebTestCase
 
         self::assertSame(MoveToasts::WAITING_ON_REFUSED, $this->toastAfterTheRedirect());
         self::assertSame($stateBefore, $this->stateOfTicket());
+    }
+
+    #[Test]
+    public function aTurboVerbMoveAnswersAStreamOfTheNewStateTheNewBoxAndTheToast(): void
+    {
+        $this->addTicket(['step' => 'progress']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', '/t/'.self::KEY.'/move/send_to_code_review', $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame('Code review', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertSame('Reported in pinround · Group: Checking', $streams[TicketPageParts::STATE_ID]->filter('.ticket__note')->text());
+        self::assertSame('Nothing for you now. Lena’s turn.', $streams[TicketPageParts::NEXT_STEP_ID]->filter('.next-step-box__sentence')->text());
+        self::assertSame([], $this->versionsOfTheForms($streams[TicketPageParts::NEXT_STEP_ID]));
+        self::assertSame('Sent to code review. Lena’s turn now.', $this->toastOf($streams));
+        self::assertSame(
+            [...$stateBefore, 'step_id' => $this->steps['review'], 'version' => self::VERSION + 1, 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
+            $this->stateOfTicket(),
+        );
+        $this->assertTheNextPageShowsNoToast();
+    }
+
+    #[Test]
+    public function aTurboMoveToAnotherStepAnswersAStreamOfTheNewStateTheNewBoxAndTheToast(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame('In progress', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertSame(['In progress'], $streams[TicketPageParts::NEXT_STEP_ID]->filter('button[aria-current="step"]')->each(static fn (Crawler $chip): string => $chip->text()));
+        $versions = $this->versionsOfTheForms($streams[TicketPageParts::NEXT_STEP_ID]);
+        self::assertNotEmpty($versions);
+        self::assertSame([(string) (self::VERSION + 1)], array_values(array_unique($versions)));
+        self::assertSame('Moved to In progress.', $this->toastOf($streams));
+        self::assertSame(
+            [...$stateBefore, 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
+            $this->stateOfTicket(),
+        );
+        $this->assertTheNextPageShowsNoToast();
+    }
+
+    /**
+     * A stale page posts the version it read; the answer shows the step and version the ticket is at now, so the next
+     * click is made from them.
+     */
+    #[Test]
+    public function aTurboMoveFromAStalePageSaysItChangedAndShowsTheTicketAsItIsNow(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $this->logIn($this->client, $this->people['Lena']);
+        $staleFields = $this->moveFields();
+        $this->client->request('POST', '/t/'.self::KEY.'/move/put_on_hold', $staleFields, [], self::TURBO_FORM_HEADERS);
+        $this->streamsOfTheAnswer(200);
+        $stateBefore = $this->stateOfTicket();
+
+        $this->client->request('POST', $this->moveToPath('progress'), $staleFields, [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(422);
+        self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->toastOf($streams));
+        self::assertSame('On hold', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        $versions = $this->versionsOfTheForms($streams[TicketPageParts::NEXT_STEP_ID]);
+        self::assertNotEmpty($versions);
+        self::assertSame([(string) (self::VERSION + 1)], array_values(array_unique($versions)));
+        self::assertSame($stateBefore, $this->stateOfTicket());
+        self::assertSame($this->steps['hold'], $stateBefore['step_id']);
+    }
+
+    /**
+     * @return iterable<string, array{string, string, array<string, string>, string}> who posts, the path, the fields
+     *                                                                                over SHOP-1's and the toast
+     */
+    public static function turboMovesRefused(): iterable
+    {
+        yield 'a team rule with a note' => ['Omar', '/t/SHOP-1/move/send_to_testing', [], self::REVIEW_BEFORE_TEST_NOTE];
+        yield 'a lead-only move by a member' => ['Omar', '{todo}', [], MoveToasts::MOVE_REFUSED];
+        yield 'a form token of no use' => ['Lena', '/t/SHOP-1/move/put_on_hold', [TicketMoveController::CSRF_FIELD => 'not-a-token'], MoveToasts::FORM_EXPIRED];
+        yield 'a version that is no number' => ['Lena', '/t/SHOP-1/move/put_on_hold', [TicketMoveController::VERSION_FIELD => 'three'], MoveToasts::CHANGED_MEANWHILE];
+        yield 'a label to wait on that the form alone refuses' => ['Lena', '{input}', [TicketMoveController::WAITING_ON_LABEL_FIELD => str_repeat('é', 101)], MoveToasts::WAITING_ON_REFUSED];
+        yield 'a label to wait on that the move refuses' => ['Lena', '{input}', [TicketMoveController::WAITING_ON_LABEL_FIELD => "Cus\r\ntomer"], MoveToasts::WAITING_ON_REFUSED];
+    }
+
+    /**
+     * @param array<string, string> $fields
+     */
+    #[Test]
+    #[DataProvider('turboMovesRefused')]
+    public function aRefusedTurboMoveAnswersAStreamOfTheUnchangedTicketAndWhy(string $actor, string $path, array $fields, string $expectedToast): void
+    {
+        $this->addTicket(['step' => 'progress']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people[$actor]);
+
+        $this->client->request('POST', strtr($path, ['{todo}' => $this->moveToPath('todo'), '{input}' => $this->moveToPath('input')]), $this->moveFields($fields), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(422);
+        self::assertSame($expectedToast, $this->toastOf($streams));
+        self::assertSame('In progress', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        $versions = $this->versionsOfTheForms($streams[TicketPageParts::NEXT_STEP_ID]);
+        self::assertNotEmpty($versions);
+        self::assertSame([(string) self::VERSION], array_values(array_unique($versions)));
+        self::assertSame($stateBefore, $this->stateOfTicket());
+        $this->assertTheNextPageShowsNoToast();
+    }
+
+    /**
+     * Each of them may open the ticket but not move it: a plain 403 with no stream, so nothing of the ticket is
+     * re-rendered for them.
+     */
+    #[Test]
+    #[DataProvider('peopleWhoMayNotMoveTheTeamsTickets')]
+    public function someoneWhoMayNotMoveTheTeamsTicketsGetsAPlainDenialToATurboMove(string $person, string $route): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people[$person]);
+
+        $this->client->request('POST', 'move' === $route ? '/t/'.self::KEY.'/move/start_work' : $this->moveToPath('progress'), $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+
+        self::assertResponseStatusCodeSame(403);
+        $this->assertNoStreamAndNoWordOfTheTicket();
+        self::assertSame($stateBefore, $this->stateOfTicket());
+    }
+
+    #[Test]
+    #[DataProvider('peopleWhoMayNotSeeTheTicket')]
+    public function someoneWhoMayNotSeeTheTicketGetsAPlainNotFoundToATurboMove(string $person, string $route): void
+    {
+        $this->addTicket(['step' => 'todo', 'visibility' => 'Raj' === $person ? 'team' : 'all']);
+        $stateBefore = $this->stateOfTicket();
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->people['Ben'] = $this->createUserWithoutOrganization('Ben');
+        $this->addMembership($this->people['Ben'], $betaBakery);
+        $this->setOrgRoles($this->people['Ben'], $betaBakery, '{admin}');
+        $this->logIn($this->client, $this->people[$person]);
+
+        $this->client->request('POST', 'move' === $route ? '/t/'.self::KEY.'/move/start_work' : $this->moveToPath('progress'), $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+
+        self::assertResponseStatusCodeSame(404);
+        $this->assertNoStreamAndNoWordOfTheTicket();
+        self::assertSame($stateBefore, $this->stateOfTicket());
+    }
+
+    /**
+     * The elements the stream replaces are on the ticket page, each once, so Turbo finds its targets.
+     */
+    #[Test]
+    public function theTargetsOfTheStreamAreOnTheTicketPage(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('header.ticket__header #'.TicketPageParts::STATE_ID.' .pill'));
+        self::assertCount(1, $page->filter('.ticket__aside #'.TicketPageParts::NEXT_STEP_ID.' .next-step-box'));
+        self::assertCount(1, $page->filter('#'.self::TOAST_REGION_ID.'[role="status"]'));
+    }
+
+    /**
+     * The stream answer reads the ticket's page again after the move's transaction, in one of its own: the same refusal
+     * answered by stream and by redirect differs by that read alone, warm: 6 queries with the transaction's own
+     * statements, the ticket, the names and the saved turn among them.
+     */
+    #[Test]
+    public function theStreamAnswerReadsTheTicketAgainInTheBudgetedQueries(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $this->logIn($this->client, $this->people['Lena']);
+        $staleFields = $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION - 1)]);
+        $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        $this->queryCountOfAMove($staleFields, []);
+        $this->queryCountOfAMove($staleFields, self::TURBO_FORM_HEADERS);
+
+        $redirectQueryCount = $this->queryCountOfAMove($staleFields, []);
+        $streamQueryCount = $this->queryCountOfAMove($staleFields, self::TURBO_FORM_HEADERS);
+
+        self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->toastOf($this->streamsOfTheAnswer(422)));
+        self::assertSame(6, $streamQueryCount - $redirectQueryCount);
+    }
+
+    /**
+     * @param array<string, string> $fields
+     * @param array<string, string> $headers
+     */
+    private function queryCountOfAMove(array $fields, array $headers): int
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $this->client->request('POST', '/t/'.self::KEY.'/move/put_on_hold', $fields, [], $headers);
+
+        $queryCount = 0;
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            $queryCount += \count($queriesOfOneConnection);
+        }
+
+        return $queryCount;
+    }
+
+    /**
+     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state and its box and updates the
+     * toast region, in that order.
+     *
+     * @return array<string, Crawler> each stream's template content by its target
+     */
+    private function streamsOfTheAnswer(int $expectedStatus): array
+    {
+        self::assertResponseStatusCodeSame($expectedStatus);
+        self::assertSame('text/vnd.turbo-stream.html; charset=UTF-8', $this->client->getResponse()->headers->get('Content-Type'));
+        preg_match_all(
+            '#<turbo-stream action="([a-z]+)" target="([a-z-]+)"><template>(.*?)</template></turbo-stream>#s',
+            (string) $this->client->getResponse()->getContent(),
+            $matches,
+            \PREG_SET_ORDER,
+        );
+        self::assertSame(
+            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['update', self::TOAST_REGION_ID]],
+            array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
+        );
+        $streams = [];
+        foreach ($matches as [, , $target, $content]) {
+            $streams[$target] = new Crawler('<!DOCTYPE html><html><body>'.$content.'</body></html>');
+        }
+        self::assertCount(1, $streams[TicketPageParts::STATE_ID]->filter('#'.TicketPageParts::STATE_ID));
+        self::assertCount(1, $streams[TicketPageParts::NEXT_STEP_ID]->filter('#'.TicketPageParts::NEXT_STEP_ID.' .next-step-box'));
+
+        return $streams;
+    }
+
+    /**
+     * @param array<string, Crawler> $streams
+     */
+    private function toastOf(array $streams): string
+    {
+        $toast = $streams[self::TOAST_REGION_ID]->filter('.toast[data-controller="toast"]');
+        self::assertCount(1, $toast);
+        self::assertSame('', $toast->text());
+
+        return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /**
+     * @return list<string> the version every move form of the box sends
+     */
+    private function versionsOfTheForms(Crawler $box): array
+    {
+        return $box->filter('form input[name="'.TicketMoveController::VERSION_FIELD.'"]')->each(static fn (Crawler $field): string => (string) $field->attr('value'));
+    }
+
+    /**
+     * The stream answer flashes nothing, so the toast is not shown a second time on the next page load.
+     */
+    private function assertTheNextPageShowsNoToast(): void
+    {
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.toast-region [data-toast-message-value]'));
+    }
+
+    private function assertNoStreamAndNoWordOfTheTicket(): void
+    {
+        $response = $this->client->getResponse();
+        self::assertStringNotContainsString('turbo-stream', (string) $response->headers->get('Content-Type'));
+        self::assertStringNotContainsString('<turbo-stream', (string) $response->getContent());
+        self::assertStringNotContainsString('Cart total shows the wrong sum', (string) $response->getContent());
     }
 
     private function replaceMoveToWithOneThatThrows(\Throwable $fault): void

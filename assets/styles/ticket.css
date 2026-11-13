@@ -70,6 +70,12 @@
   overflow-wrap: anywhere;
 }
 
+/* The parts a move's Turbo Stream answer replaces: they hold their children in the layout of the header or aside. */
+.ticket__header-state,
+.ticket__next-step {
+  display: contents;
+}
+
 .ticket__state {
   display: flex;
   flex-wrap: wrap;

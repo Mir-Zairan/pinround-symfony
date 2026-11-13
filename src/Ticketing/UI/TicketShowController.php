@@ -63,9 +63,8 @@ final class TicketShowController extends AbstractController
         private readonly TicketQueries $ticketQueries,
         private readonly ClockInterface $clock,
         private readonly CurrentTimeZone $currentTimeZone,
-        private readonly NowNextSentences $nowNextSentences,
         private readonly ProjectQueries $projectQueries,
-        private readonly NextStepChoices $nextStepChoices,
+        private readonly TicketPageParts $ticketPageParts,
     ) {
     }
 
@@ -89,27 +88,22 @@ final class TicketShowController extends AbstractController
 
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
-        $pageTurn = $this->nowNextSentences->pageTurnOf($ticket);
-        $nextStep = null === $pageTurn ? null : $this->nextStepChoices->of($pageTurn, $actor, $this->isGranted(TicketPermission::MOVE, $ticket->visibilityFacts));
 
         return $this->render('@Ticketing/show.html.twig', [
+            ...$this->ticketPageParts->of($ticket, $actor),
             'backQuery' => $listContext->query(),
             'position' => null === $position ? null : [
                 'line' => self::positionLineOf($position),
                 'previousUrl' => null === $position->previousKey ? null : $this->generateUrl(self::ROUTE, ['key' => $position->previousKey, ...$positionContext->query()]),
                 'nextUrl' => null === $position->nextKey ? null : $this->generateUrl(self::ROUTE, ['key' => $position->nextKey, ...$positionContext->query()]),
             ],
-            'ticket' => $ticket,
             'type' => ucfirst($ticket->type),
             'priority' => ucfirst($ticket->priority),
-            'pillGroup' => self::pillGroupOf($ticket->groupCode),
             'shortAsk' => self::shortAskOf($ticket->description),
             'created' => TicketListText::dateOf($ticket->createdAt, $now, $viewerTimeZone),
             'reporter' => $ticket->reporterName ?? self::UNKNOWN_PERSON,
             'assignee' => null === $ticket->visibilityFacts->assigneeId ? self::NOBODY : ($ticket->assigneeName ?? ucfirst(self::UNKNOWN_PERSON)),
             'components' => implode(', ', $ticket->components),
-            'turnLines' => null === $pageTurn ? null : $this->nowNextSentences->linesOf($pageTurn),
-            'nextStep' => $nextStep,
         ]);
     }
 

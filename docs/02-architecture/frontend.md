@@ -148,7 +148,7 @@ Every controller is small, stays under about 150 lines, and has a test (Playwrig
   - the ticket page's action box, thread and rounds;
   - the Home sections;
   - the admin tab bodies.
-- **POST answers:** a successful action answers with a `text/vnd.turbo-stream.html` response that replaces the changed frames and shows a toast. A non-Turbo form gets a normal redirect, so everything works without JavaScript except pins, uploads and local AI.
+- **POST answers:** a successful action answers with a `text/vnd.turbo-stream.html` response that replaces the changed frames and shows a toast. A non-Turbo form gets a normal redirect, so everything works without JavaScript except pins, uploads and local AI. With Drive off, a form opts in with `data-turbo="true"`. The ticket moves are the first: their stream replaces `#ticket-state` (the step pill, Now and Next, the group line) and `#ticket-next-step` (the Your next step box) from `TicketPageParts`, and puts the toast into `#toast-region` (`@Web/_toast_stream.html.twig`, the same empty toast the `toast` controller fills, so it is announced); a refused or stale move answers 422 with the same stream, showing the ticket as it is now.
 - **Push:** pages subscribe to Mercure topics through Symfony UX Turbo's Mercure support (verify the Twig helper name at implementation). The server publishes Turbo Streams per user, so a page never receives data the user may not see ([ADR-0023](../03-adr/0023-realtime-mercure.md)).
 
 ## Design tokens and theming

@@ -32,16 +32,7 @@
                 {% endif %}
             </div>
             <h1 class="ticket__title">{{ ticket.title }}</h1>
-            <div class="ticket__state">
-                <twig:StatusPill group="{{ pillGroup }}">{{ ticket.stepName }}</twig:StatusPill>
-                <div class="ticket__turn">
-                    {% if turnLines is not null %}
-                        <p class="ticket__now"><strong>Now:</strong> {{ turnLines.now }}</p>
-                        {% if turnLines.next is not null %}<p class="ticket__next"><strong>Next:</strong> {{ turnLines.next }}</p>{% endif %}
-                    {% endif %}
-                </div>
-            </div>
-            <p class="ticket__note">Reported in pinround · Group: {{ ticket.groupLabel }}</p>
+            {{ include('@Ticketing/_ticket_state.html.twig') }}
         </header>
 
         <div class="ticket__columns">
@@ -76,9 +67,7 @@
             </div>
 
             <aside class="ticket__aside">
-                {% if nextStep is not null %}
-                    <twig:NextStepBox ticketKey="{{ ticket.key }}" :version="ticket.version" :nextStep="nextStep" />
-                {% endif %}
+                {{ include('@Ticketing/_next_step.html.twig') }}
                 <section class="ticket__section" aria-labelledby="ticket-details-heading">
                     <h2 id="ticket-details-heading" class="ticket__section-title">Details</h2>
                     <dl class="ticket__details">

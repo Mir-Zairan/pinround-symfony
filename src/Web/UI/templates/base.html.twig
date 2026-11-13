@@ -122,12 +122,11 @@
         </header>
         {% endblock %}
         <main id="main" class="page">{% block main %}{% endblock %}</main>
-        {#- One toast at a time (frontend.md): the last one flashed by the action that redirected here. It arrives empty
-            and the toast controller writes the text in a moment later, because screen readers do not announce text that
-            is already in the region when Turbo swaps the body in. -#}
+        {#- One toast at a time (frontend.md): the last one flashed by the action that redirected here, or the one a
+            Turbo Stream answer (_toast_stream.html.twig) puts in by the region's id. -#}
         {%- set toasts = app.flashes('toast') %}
-        <div class="toast-region" role="status" aria-live="polite">
-            {%- if toasts is not empty %}<twig:Toast data-controller="toast" data-toast-message-value="{{ toasts|last }}" data-turbo-temporary></twig:Toast>{% endif -%}
+        <div id="toast-region" class="toast-region" role="status" aria-live="polite">
+            {%- if toasts is not empty %}{{ include('@Web/_toast.html.twig', {message: toasts|last}) }}{% endif -%}
         </div>
         {%- if toasts is not empty %}<noscript><twig:Toast>{{ toasts|last }}</twig:Toast></noscript>{% endif %}
         <div id="dialog-root"></div>

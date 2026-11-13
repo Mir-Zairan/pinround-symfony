@@ -14,6 +14,8 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
  * The ticket page's "Your next step" box (ticket-page.md, Your next step box): it only shows the NextStep that
  * NextStepChoices worked out for the viewer. Each verb and each step of the move list is a POST form to
  * TicketMoveController with the ticket's form token and the version the page read, so a move made meanwhile is refused.
+ * The forms opt in to Turbo (data-turbo="true", as Drive is off), so the answer is a Turbo Stream; without script
+ * they post and are redirected back.
  */
 #[AsTwigComponent(name: 'NextStepBox', template: '@Ticketing/components/NextStepBox.html.twig')]
 final class NextStepBox

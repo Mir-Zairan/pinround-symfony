@@ -171,7 +171,7 @@ final class DoctrineTransactionsTest extends KernelTestCase
 
     private function transactions(): DoctrineTransactions
     {
-        return new DoctrineTransactions($this->entityManager(), $this->tenantContext());
+        return new DoctrineTransactions($this->entityManager(), $this->tenantContext(), self::getContainer()->get('doctrine'));
     }
 
     private function migrator(): Connection

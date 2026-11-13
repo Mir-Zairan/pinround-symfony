@@ -1,0 +1,3 @@
+{#- The page's one toast, showing message: it arrives empty and the toast controller writes the text in a moment later,
+    because screen readers do not announce text that is already in the region when it is swapped in. -#}
+<twig:Toast data-controller="toast" data-toast-message-value="{{ message }}" data-turbo-temporary></twig:Toast>

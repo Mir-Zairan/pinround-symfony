@@ -32,10 +32,12 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Uid\Uuid;
+use Symfony\UX\Turbo\TurboBundle;
 
 /**
  * The moves of the ticket page (FR-TKT-10, P03.T7, ticket-page.md, Your next step box): a verb button, and the lead's
- * "Move to another step…". Each answers with a redirect to the ticket page and a toast from {@see MoveToasts}.
+ * "Move to another step…". Each answers with a toast from {@see MoveToasts}: a Turbo form in a Turbo Stream that also
+ * re-renders the ticket's state and its Your next step box, any other form with a redirect to the ticket page.
  *
  * Without the request transaction, as NewTicketController: a move can be refused after its conditional UPDATE, and only
  * rolling back the whole transaction leaves nothing of it. Transactions gives each request a transaction of its own,
@@ -83,6 +85,7 @@ final class TicketMoveController extends AbstractController
         private readonly StepQueries $stepQueries,
         private readonly UserQueries $userQueries,
         private readonly ClockInterface $clock,
+        private readonly TicketPageParts $ticketPageParts,
     ) {
     }
 
@@ -105,12 +108,7 @@ final class TicketMoveController extends AbstractController
         try {
             $toast = $this->transactions->run(function () use ($key, $verb, $csrfToken, $expectedVersion, $now): string {
                 [$actor, $ticket] = $this->movableTicketOf($key);
-                if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
-                    return MoveToasts::FORM_EXPIRED;
-                }
-                if (null === $expectedVersion) {
-                    return MoveToasts::CHANGED_MEANWHILE;
-                }
+                $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 try {
                     $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now);
                 } catch (MoveRefused $refused) {
@@ -126,12 +124,12 @@ final class TicketMoveController extends AbstractController
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
         } catch (TicketChangedMeanwhile) {
-            $toast = MoveToasts::CHANGED_MEANWHILE;
+            return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MoveRefusedWithToast $refused) {
-            $toast = $refused->toast();
+            return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        return $this->redirectWithToast($key, $toast);
+        return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
     }
 
     /**
@@ -151,14 +149,9 @@ final class TicketMoveController extends AbstractController
         try {
             $toast = $this->transactions->run(function () use ($key, $stepId, $csrfToken, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $now): string {
                 [$actor, $ticket] = $this->movableTicketOf($key);
-                if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
-                    return MoveToasts::FORM_EXPIRED;
-                }
-                if (null === $expectedVersion) {
-                    return MoveToasts::CHANGED_MEANWHILE;
-                }
+                $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 if (self::isWaitingOnMalformed($waitingOnUserId, $waitingOnLabel)) {
-                    return MoveToasts::WAITING_ON_REFUSED;
+                    throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
                 try {
                     $this->ticketCommands->moveTo(
@@ -182,12 +175,12 @@ final class TicketMoveController extends AbstractController
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
         } catch (TicketChangedMeanwhile) {
-            $toast = MoveToasts::CHANGED_MEANWHILE;
+            return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MoveRefusedWithToast $refused) {
-            $toast = $refused->toast();
+            return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        return $this->redirectWithToast($key, $toast);
+        return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
     }
 
     /**
@@ -300,10 +293,47 @@ final class TicketMoveController extends AbstractController
         throw new \LogicException('The step the ticket was moved to is not listed.');
     }
 
-    private function redirectWithToast(string $key, string $toast): Response
+    /**
+     * @phpstan-assert !null $expectedVersion
+     *
+     * @throws MoveRefusedWithToast for a form token that is not valid, or a version that is no number
+     */
+    private function refuseAnUnusableForm(string $key, string $csrfToken, ?int $expectedVersion): void
     {
-        $this->addFlash(self::TOAST, $toast);
+        if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
+            throw new MoveRefusedWithToast(MoveToasts::FORM_EXPIRED);
+        }
+        if (null === $expectedVersion) {
+            throw new MoveRefusedWithToast(MoveToasts::CHANGED_MEANWHILE);
+        }
+    }
 
-        return $this->redirectToRoute(TicketShowController::ROUTE, ['key' => $key], Response::HTTP_SEE_OTHER);
+    /**
+     * A Turbo form gets a Turbo Stream that shows the toast and replaces the header's state and the Your next step box
+     * with the ticket as it is now, so a refused or stale page is updated too; their form carries the new version and
+     * token. The ticket is read again in a transaction of its own, after the move's commit or rollback, with the same
+     * 404 and 403 as the move. Any other form gets a redirect to the ticket page with the toast flashed, whatever the
+     * move's outcome.
+     *
+     * @param int $streamStatus 200 for a move made, 422 for one refused
+     */
+    private function answerWithToast(Request $request, string $key, string $toast, int $streamStatus): Response
+    {
+        if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
+            $this->addFlash(self::TOAST, $toast);
+
+            return $this->redirectToRoute(TicketShowController::ROUTE, ['key' => $key], Response::HTTP_SEE_OTHER);
+        }
+        $parts = $this->transactions->run(function () use ($key): array {
+            [$actor, $ticket] = $this->movableTicketOf($key);
+
+            return $this->ticketPageParts->of($ticket, $actor);
+        });
+
+        return $this->render(
+            '@Ticketing/move.stream.html.twig',
+            [...$parts, 'toast' => $toast],
+            new Response(null, $streamStatus, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
+        );
     }
 }

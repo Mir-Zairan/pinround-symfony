@@ -9,7 +9,7 @@
     {% if moveTransitions is not empty %}
         <div class="next-step-box__verbs">
             {% for transition in moveTransitions %}
-                <form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: transition.verb}) }}">
+                <form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: transition.verb}) }}" data-turbo="true">
                     <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                     <input type="hidden" name="{{ versionField }}" value="{{ version }}">
                     <twig:Button type="submit" variant="{{ transition.isPrimary ? 'filled' : 'outline' }}">{{ transition.label }}</twig:Button>
@@ -30,7 +30,7 @@
                     <div class="next-step-box__chips">
                         {% for choice in group.choices %}
                             {% set asksWhoItWaitsOn = this.asksWhoItWaitsOn(choice) %}
-                            <form method="post" action="{{ path(constant(moveController ~ '::MOVE_TO_ROUTE'), {key: ticketKey, stepId: choice.step.id}) }}"
+                            <form method="post" action="{{ path(constant(moveController ~ '::MOVE_TO_ROUTE'), {key: ticketKey, stepId: choice.step.id}) }}" data-turbo="true"
                                 {%- if asksWhoItWaitsOn %} data-next-step-box-target="needsInputForm"{% endif %}>
                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                                 <input type="hidden" name="{{ versionField }}" value="{{ version }}">
