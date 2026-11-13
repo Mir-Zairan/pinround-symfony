@@ -28,7 +28,8 @@ final readonly class DoctrineTransactions implements Transactions
         }
 
         // A refusal thrown out of an earlier run in the same request closed the EntityManager; resetting the lazy
-        // service reopens the one every repository holds, so a read after a refused write still runs.
+        // service reopens the one every repository holds, so a read after a refused write still runs. Before the
+        // BEGIN below, where TenantFilterMiddleware marks the rebuilt manager's tenant filter.
         if (!$this->entityManager->isOpen()) {
             $this->doctrine->resetManager();
         }

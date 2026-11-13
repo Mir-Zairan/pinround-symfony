@@ -14,7 +14,8 @@ interface Transactions
     /**
      * Runs $write in a transaction of its own under the request's tenant, so row-level security applies, and commits
      * it. When $write throws, the transaction is rolled back, the entity manager is left closed and the exception is
-     * rethrown.
+     * rethrown. A later run reopens the entity manager: entities read before it are detached and their unsaved changes
+     * are lost.
      *
      * @template T
      *
