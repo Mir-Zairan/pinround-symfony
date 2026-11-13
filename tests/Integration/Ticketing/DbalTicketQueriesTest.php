@@ -642,7 +642,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
         $this->asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator) use ($key): void {
             $migrator->executeStatement(
                 "UPDATE tkt_ticket SET team_id = ?, assignee_id = ?, reviewer_id = ?, waiting_on_label = 'Supplier', waiting_on_user_id = ?,
-                     check_reasons = '{risk}' WHERE key = ?",
+                     check_reasons = '{risk}', version = 7 WHERE key = ?",
                 [self::SHOP_TEAM, self::OMAR, self::LENA, self::OMAR, $key],
             );
         });
@@ -657,6 +657,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
         );
         self::assertSame('Lena', $page->displayNames[self::LENA] ?? null);
         self::assertSame('Omar', $page->displayNames[self::OMAR] ?? null);
+        self::assertSame(7, $page->version);
     }
 
     #[Test]

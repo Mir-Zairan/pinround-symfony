@@ -154,7 +154,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         $row = $this->connection->fetchAssociative(
             'SELECT ticket.id, ticket.key, ticket.title, ticket.description, ticket.type, ticket.created_at,'
             .' to_json(ticket.components) AS components, '.TurnSnapshotRow::COLUMNS.','
-            .' project.name AS project_name, parent.key AS parent_key'
+            .' ticket.version, project.name AS project_name, parent.key AS parent_key'
             .' FROM tkt_ticket AS ticket'
             .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
             .' LEFT JOIN tkt_ticket AS parent ON parent.organization_id = ticket.organization_id AND parent.id = ticket.parent_id'
@@ -237,6 +237,7 @@ final readonly class DbalTicketQueries implements TicketQueries
             ),
             TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds),
             $displayNames,
+            self::integer($row['version'], 'version'),
         );
     }
 
