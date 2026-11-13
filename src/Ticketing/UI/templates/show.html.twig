@@ -76,6 +76,9 @@
             </div>
 
             <aside class="ticket__aside">
+                {% if nextStep is not null %}
+                    <twig:NextStepBox ticketKey="{{ ticket.key }}" :version="ticket.version" :nextStep="nextStep" />
+                {% endif %}
                 <section class="ticket__section" aria-labelledby="ticket-details-heading">
                     <h2 id="ticket-details-heading" class="ticket__section-title">Details</h2>
                     <dl class="ticket__details">

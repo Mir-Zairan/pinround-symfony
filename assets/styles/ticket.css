@@ -211,3 +211,82 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.next-step-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-20);
+  border-radius: var(--radius-card);
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.next-step-box__label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.next-step-box__sentence {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.next-step-box__verbs,
+.next-step-box__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.next-step-box__verbs form,
+.next-step-box__chips form {
+  margin: 0;
+}
+
+.next-step-box__rule-note {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.next-step-box__move-to {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.next-step-box__move-to > summary {
+  align-self: flex-start;
+  cursor: pointer;
+  list-style: none;
+}
+
+.next-step-box__move-to > summary::-webkit-details-marker {
+  display: none;
+}
+
+.next-step-box__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.next-step-box__group-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* The current step is pressed and disabled: no hover change and no pointer that suggests a move. */
+.next-step-box .chip:disabled {
+  cursor: default;
+}
+
+.next-step-box .chip[aria-pressed="true"]:hover {
+  background: var(--secondary-container);
+}

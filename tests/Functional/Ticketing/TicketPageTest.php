@@ -6,9 +6,11 @@ namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -72,9 +74,10 @@ final class TicketPageTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                $migrator->executeStatement('DELETE FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]);
-                $migrator->executeStatement('DELETE FROM tkt_ticket WHERE organization_id = ?', [$organizationId]);
-                $migrator->executeStatement('DELETE FROM wf_step WHERE organization_id = ?', [$organizationId]);
+                foreach (['tkt_ticket_event', 'ins_ticket_turn', 'ins_project_count_ticket', 'ins_project_counts', 'tkt_ticket', 'wf_step'] as $table) {
+                    $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
+                }
+                $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
 
                 return 0;
             });
@@ -552,6 +555,89 @@ final class TicketPageTest extends WebTestCase
         self::assertSame('Footer links point nowhere', $page->filter('h1')->text());
         self::assertSame('In progress', $page->filter('.ticket__state .pill')->text());
         self::assertCount(0, $page->filter('.ticket__now, .ticket__next'));
+        self::assertCount(0, $page->filter('.next-step-box'));
+    }
+
+    /**
+     * SHOP-1 is in To do and assigned to Omar. Only a lead or member of Shop may move it; only its lead gets the move
+     * list, which holds the organization's steps and Shop's own, never another team's.
+     *
+     * @return iterable<string, array{string, array<string, string>, bool}>
+     */
+    public static function nextStepOfEachRole(): iterable
+    {
+        yield 'Lena, the team\'s lead' => ['Lena', ['put_on_hold' => 'Put on hold'], true];
+        yield 'Omar, the assignee and a member' => ['Omar', ['start_work' => 'Start work'], false];
+        yield 'Mia, a viewer of the team' => ['Mia', [], false];
+        yield 'Raj, a manager with no team role' => ['Raj', [], false];
+        yield 'Sara, an admin with no team role' => ['Sara', [], false];
+    }
+
+    /**
+     * @param array<string, string> $expectedVerbs each verb's button label by its code
+     */
+    #[Test]
+    #[DataProvider('nextStepOfEachRole')]
+    public function theNextStepBoxOffersMovesOnlyToThoseWhoMayMakeThem(string $viewer, array $expectedVerbs, bool $hasMoveList): void
+    {
+        $this->addTeamStep($this->shop, 'Pairing', 'doing');
+        $this->addTeamStep($this->mobile, 'Store review', 'check');
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'todo', 'assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people[$viewer]);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $box = $page->filter('.ticket__aside .next-step-box');
+        self::assertCount(1, $box);
+        self::assertNotSame('', trim($box->filter('.next-step-box__sentence')->text()));
+        self::assertSame(
+            array_map(static fn (string $verb, string $label): array => ['/t/'.$key.'/move/'.$verb, $label], array_keys($expectedVerbs), $expectedVerbs),
+            $box->filter('.next-step-box__verbs form')->each(static fn (Crawler $form): array => [(string) $form->attr('action'), $form->filter('button')->text()]),
+        );
+        $moveList = $box->filter('details.next-step-box__move-to');
+        if (!$hasMoveList) {
+            self::assertCount(0, $moveList);
+            self::assertCount(\count($expectedVerbs), $page->filter('form[action*="/move"]'));
+
+            return;
+        }
+        // In the order of the steps' positions, which addSteps numbers across groups: Needs input is step 0.
+        self::assertSame(
+            [
+                ['Waiting', ['Needs input', 'On hold']],
+                ['Checking', ['Code review', 'Testing']],
+                ['Doing', ['In progress', 'Pairing']],
+                ['To do', ['To do', 'Backlog']],
+                ['Done', ['Done']],
+            ],
+            $moveList->filter('.next-step-box__group')->each(static fn (Crawler $group): array => [
+                $group->filter('.next-step-box__group-label')->text(),
+                $group->filter('button')->each(static fn (Crawler $chip): string => $chip->text()),
+            ]),
+        );
+        self::assertSame(['To do'], $moveList->filter('button[aria-current="step"]')->each(static fn (Crawler $chip): string => $chip->text()));
+        self::assertStringNotContainsString('Store review', $box->text());
+    }
+
+    #[Test]
+    public function aRenderedVerbFormMovesTheTicket(): void
+    {
+        new AddTicketEventPartitions($this->migrator(), new MockClock(new \DateTimeImmutable(self::NOW)))();
+        $key = $this->addTicket('Add a gift note', ['core' => 'backlog']);
+        [$stepBefore, $versionBefore] = $this->stepAndVersionOf($key);
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', '/t/'.$key);
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submit($page->selectButton('Plan it')->form());
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame($this->stepsByCore['backlog'], $stepBefore);
+        self::assertSame([$this->stepsByCore['todo'], $versionBefore + 1], $this->stepAndVersionOf($key));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Planned. It is in To do now.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
     }
 
     /**
@@ -948,6 +1034,31 @@ final class TicketPageTest extends WebTestCase
         self::assertNotEmpty($rows);
 
         return $rows;
+    }
+
+    private function addTeamStep(TeamId $teamId, string $name, string $groupCode): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, ?, ?, ?, NULL, 'team', 9)",
+            [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $teamId->toString(), $name, $groupCode],
+        ));
+    }
+
+    /**
+     * @return array{mixed, int}
+     */
+    private function stepAndVersionOf(string $key): array
+    {
+        $row = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($key, &$row): int {
+            $row = $migrator->fetchAssociative('SELECT step_id, version FROM tkt_ticket WHERE key = ?', [$key]);
+
+            return 0;
+        });
+        self::assertIsArray($row);
+        self::assertIsInt($row['version']);
+
+        return [$row['step_id'], $row['version']];
     }
 
     private function addSteps(): void

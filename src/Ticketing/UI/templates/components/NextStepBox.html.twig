@@ -1,0 +1,53 @@
+{% set moveController = 'App\\Ticketing\\UI\\TicketMoveController' %}
+{% set csrfField = constant(moveController ~ '::CSRF_FIELD') %}
+{% set versionField = constant(moveController ~ '::VERSION_FIELD') %}
+{% set csrfToken = csrf_token(this.csrfTokenId) %}
+<section{{ attributes.defaults({class: 'next-step-box', 'aria-labelledby': 'next-step-box-label'}) }}>
+    <h2 class="next-step-box__label" id="next-step-box-label">Your next step</h2>
+    <p class="next-step-box__sentence">{{ nextStep.sentence }}</p>
+    {% set moveTransitions = this.moveTransitions %}
+    {% if moveTransitions is not empty %}
+        <div class="next-step-box__verbs">
+            {% for transition in moveTransitions %}
+                <form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: transition.verb}) }}">
+                    <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                    <input type="hidden" name="{{ versionField }}" value="{{ version }}">
+                    <twig:Button type="submit" variant="{{ transition.isPrimary ? 'filled' : 'outline' }}">{{ transition.label }}</twig:Button>
+                </form>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if nextStep.ruleNote is not null %}
+        <p class="next-step-box__rule-note">{{ nextStep.ruleNote }}</p>
+    {% endif %}
+    {% if nextStep.groups is not empty %}
+        {# A native disclosure: it opens without JavaScript, and the browser tells screen readers whether it is expanded. #}
+        <details class="next-step-box__move-to">
+            <summary class="btn btn-text btn-sm">Move to another step…</summary>
+            {% for group in nextStep.groups %}
+                <div class="next-step-box__group" role="group" aria-labelledby="next-step-box-group-{{ group.groupCode }}">
+                    <span class="next-step-box__group-label" id="next-step-box-group-{{ group.groupCode }}">{{ group.groupLabel }}</span>
+                    <div class="next-step-box__chips">
+                        {% for choice in group.choices %}
+                            {% set asksWhoItWaitsOn = this.asksWhoItWaitsOn(choice) %}
+                            <form method="post" action="{{ path(constant(moveController ~ '::MOVE_TO_ROUTE'), {key: ticketKey, stepId: choice.step.id}) }}"
+                                {%- if asksWhoItWaitsOn %} data-next-step-box-target="needsInputForm"{% endif %}>
+                                <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                <input type="hidden" name="{{ versionField }}" value="{{ version }}">
+                                {% if asksWhoItWaitsOn %}
+                                    <input type="hidden" name="{{ constant(moveController ~ '::WAITING_ON_USER_FIELD') }}" value="">
+                                    <input type="hidden" name="{{ constant(moveController ~ '::WAITING_ON_LABEL_FIELD') }}" value="">
+                                {% endif %}
+                                {% if choice.isCurrent %}
+                                    <twig:Chip type="submit" :pressed="true" disabled aria-current="step">{{ choice.step.name }}</twig:Chip>
+                                {% else %}
+                                    <twig:Chip type="submit">{{ choice.step.name }}</twig:Chip>
+                                {% endif %}
+                            </form>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+        </details>
+    {% endif %}
+</section>

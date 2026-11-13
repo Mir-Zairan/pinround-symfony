@@ -23,8 +23,9 @@ use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * One ticket's page at /t/{key} (FR-TKT-08, P03.T6, ticket-page.md): the header, The ask, the Rounds empty state and
- * Details. Every person of the organization may ask for it (OrganizationPermission::VIEW); TicketQueries::pageOf reads
+ * One ticket's page at /t/{key} (FR-TKT-08, P03.T6, ticket-page.md): the header, The ask, the Rounds empty state, the
+ * "Your next step" box of a ticket a team owns (its verbs and move list only for someone TicketPermission::MOVE lets
+ * move it) and Details. Every person of the organization may ask for it (OrganizationPermission::VIEW); TicketQueries::pageOf reads
  * only a ticket the viewer may see, and TicketPermission VIEW on its visibility facts is the second guard. An unknown
  * or malformed key, another organization's ticket (row-level security hides it) and one the viewer may not see all
  * answer the same 404, so the answer never tells that a hidden ticket exists.
@@ -64,6 +65,7 @@ final class TicketShowController extends AbstractController
         private readonly CurrentTimeZone $currentTimeZone,
         private readonly NowNextSentences $nowNextSentences,
         private readonly ProjectQueries $projectQueries,
+        private readonly NextStepChoices $nextStepChoices,
     ) {
     }
 
@@ -88,6 +90,7 @@ final class TicketShowController extends AbstractController
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
         $pageTurn = $this->nowNextSentences->pageTurnOf($ticket);
+        $nextStep = null === $pageTurn ? null : $this->nextStepChoices->of($pageTurn, $actor, $this->isGranted(TicketPermission::MOVE, $ticket->visibilityFacts));
 
         return $this->render('@Ticketing/show.html.twig', [
             'backQuery' => $listContext->query(),
@@ -106,6 +109,7 @@ final class TicketShowController extends AbstractController
             'assignee' => null === $ticket->visibilityFacts->assigneeId ? self::NOBODY : ($ticket->assigneeName ?? ucfirst(self::UNKNOWN_PERSON)),
             'components' => implode(', ', $ticket->components),
             'turnLines' => null === $pageTurn ? null : $this->nowNextSentences->linesOf($pageTurn),
+            'nextStep' => $nextStep,
         ]);
     }
 
