@@ -17,6 +17,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\ShopTickets;
@@ -31,7 +32,6 @@ use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
 
@@ -41,6 +41,8 @@ use Symfony\Component\Clock\MockClock;
  */
 final class DbalTicketTurnSourceTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000b701';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000b702';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000b711';
@@ -523,24 +525,6 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
         );
     }
 
-    /**
-     * @return list<string>
-     */
-    private static function sqlOf(DebugDataHolder $debugData): array
-    {
-        $sql = [];
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            foreach ($queriesOfOneConnection as $query) {
-                self::assertIsArray($query);
-                self::assertIsString($query['sql']);
-                $sql[] = $query['sql'];
-            }
-        }
-
-        return $sql;
-    }
-
     private static function turnQueriesReturning(TicketTurnSnapshot $snapshot): TicketTurnQueries
     {
         return new readonly class($snapshot) implements TicketTurnQueries {
@@ -553,11 +537,6 @@ final class DbalTicketTurnSourceTest extends KernelTestCase
                 return $this->snapshot;
             }
         };
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     /**

@@ -11,6 +11,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Application\TicketTurnSnapshots;
@@ -37,6 +38,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class EntityTicketTurnSnapshotsTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000d701';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000d702';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000d711';
@@ -327,11 +330,6 @@ final class EntityTicketTurnSnapshotsTest extends KernelTestCase
         }
 
         return $queryCount;
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function createdTicketKey(): string

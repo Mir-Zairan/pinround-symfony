@@ -21,6 +21,7 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketTurnQueries;
@@ -39,6 +40,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class DbalTicketTurnQueriesTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000a701';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000a702';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000a711';
@@ -416,24 +419,6 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         );
     }
 
-    /**
-     * @return list<string>
-     */
-    private static function sqlOf(DebugDataHolder $debugData): array
-    {
-        $sql = [];
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            foreach ($queriesOfOneConnection as $query) {
-                self::assertIsArray($query);
-                self::assertIsString($query['sql']);
-                $sql[] = $query['sql'];
-            }
-        }
-
-        return $sql;
-    }
-
     private static function queryCountOf(DebugDataHolder $debugData): int
     {
         $queryCount = 0;
@@ -466,11 +451,6 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
     private function teamPeopleCache(): TeamPeopleCache
     {
         return self::getContainer()->get(TeamPeopleCache::class);
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function removeRows(): void

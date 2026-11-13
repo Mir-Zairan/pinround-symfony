@@ -8,6 +8,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\TicketVersionConflict;
@@ -16,7 +17,6 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\OptimisticLockException;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -25,6 +25,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class DoctrineTicketsTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000e701';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000e702';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000e711';
@@ -298,29 +300,6 @@ final class DoctrineTicketsTest extends KernelTestCase
         $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
         $updatedRows = $migrator->transactional(static fn (Connection $connection): int|string => $connection->executeStatement('UPDATE tkt_ticket SET version = version + 1 WHERE id = ?', [$ticketId]));
         self::assertSame(1, $updatedRows);
-    }
-
-    /**
-     * @return list<string>
-     */
-    private static function sqlOf(DebugDataHolder $debugData): array
-    {
-        $sql = [];
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            foreach ($queriesOfOneConnection as $query) {
-                self::assertIsArray($query);
-                self::assertIsString($query['sql']);
-                $sql[] = $query['sql'];
-            }
-        }
-
-        return $sql;
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function createdTicketOf(string $organizationId): string

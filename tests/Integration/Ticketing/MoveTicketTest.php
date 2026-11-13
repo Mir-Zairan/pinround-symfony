@@ -13,6 +13,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\Event\TicketMoved;
 use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
@@ -33,7 +34,6 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
@@ -46,6 +46,7 @@ use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
 final class MoveTicketTest extends KernelTestCase
 {
     use ClockSensitiveTrait;
+    use ReadsSentSql;
 
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000e701';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000e702';
@@ -515,8 +516,7 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(8, self::queriesBesideSavepoints($statements));
-        self::assertLessThanOrEqual(8, \count(self::queriesBesideSavepoints($statements)), 'P03.T7: a move uses at most 8 queries');
+        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T7: a move uses at most 8 queries');
     }
 
     #[Test]
@@ -530,8 +530,7 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(8, self::queriesBesideSavepoints($statements));
-        self::assertLessThanOrEqual(8, \count(self::queriesBesideSavepoints($statements)), 'P03.T7: a move uses at most 8 queries');
+        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T7: a move uses at most 8 queries');
     }
 
     /**
@@ -548,8 +547,8 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        // TODO(P03.T7): 9 queries — the waiting-on membership check; budget exception left to the user
-        self::assertCount(9, self::queriesBesideSavepoints($statements));
+        // Nine, not eight: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
+        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
     }
 
     /**
@@ -600,29 +599,6 @@ final class MoveTicketTest extends KernelTestCase
 
             return self::sqlOf($debugData);
         });
-    }
-
-    /**
-     * @return list<string>
-     */
-    private static function sqlOf(DebugDataHolder $debugData): array
-    {
-        $sql = [];
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            foreach ($queriesOfOneConnection as $query) {
-                self::assertIsArray($query);
-                self::assertIsString($query['sql']);
-                $sql[] = $query['sql'];
-            }
-        }
-
-        return $sql;
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function assertMoved(string $stepBefore, int $versionBefore, string $expectedStepId, string $actor, ?string $verb): void
