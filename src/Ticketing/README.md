@@ -4,4 +4,8 @@ Tickets from the first report to done: keys, moves, assignment, lead checks and 
 
 The ticket page's Now and Next lines (`UI\NowNextSentences`) read the turn snapshot from `TicketQueries::pageOf` (`TicketPageView`), the saved turn and waiting turns from Insight's `TeamLoadQueries` and the sentences from Workflow's `TurnRules` and `NowNext`; `pageTurnOf` gives that read as a `UI\PageTurn`, which `linesOf` words and `UI\NextStepChoices` turns into the "Your next step" box's `UI\NextStep` (the sentence, Workflow's `TransitionPolicy::available` verbs and rule note, and the lead's `moveChoices` over `StepQueries::moveTargetsFor`).
 
+`NextStep::peopleToWaitOn` lists, as `UI\PersonToWaitOn` (user id, first name, the roles joined by " · "), the ticket's named reporter, assignee, reviewer and tester once each, only when the lead's list offers a move to Needs input.
+
+`NextStepBox` puts that move's chip in a dialog ("Who does it wait on?": one radio per person, "Someone else" with a one-line label, "Move"), which the `waiting-on` controller submits through the chip's own form; without JavaScript the chip posts directly and the ticket waits on its reporter.
+
 See the [module catalogue](../../docs/02-architecture/modules.md#ticketing-tkt_).
