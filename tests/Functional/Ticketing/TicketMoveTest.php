@@ -57,9 +57,9 @@ final class TicketMoveTest extends WebTestCase
     /** base.html.twig's toast region, which a streamed toast updates. */
     private const string TOAST_REGION_ID = 'toast-region';
     /** The stream answer's re-read of the ticket page, warm, by the first table each statement reads. */
-    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'ins_ticket_turn', '"COMMIT"'];
+    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', '"COMMIT"'];
     /** A lead's re-read: their box offers the Needs input dialog, so it also reads which of the ticket's people are members. */
-    private const array LEAD_RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'ins_ticket_turn', 'org_membership', '"COMMIT"'];
+    private const array LEAD_RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', 'org_membership', '"COMMIT"'];
     /**
      * The tenant middleware's transaction-local setting, matched rather than written out: bin/check-tenant-setting
      * allows the literal call only in the files that set it.
@@ -305,6 +305,7 @@ final class TicketMoveTest extends WebTestCase
 
         $streams = $this->streamsOfTheAnswer(200);
         self::assertSame('Needs input', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertSame('now · Lena moved it from Code review to Needs input', $streams[TicketPageParts::ACTIVITY_ID]->filter('.activity__line')->first()->text());
         self::assertSame('Moved to Needs input.', $this->toastOf($streams));
         self::assertSame(
             [...$stateBefore, 'step_id' => $this->steps['input'], 'version' => self::VERSION + 1, 'waiting_on_user_id' => $this->people['Omar']->id()->toString(), 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
@@ -883,7 +884,7 @@ final class TicketMoveTest extends WebTestCase
 
         $streams = $this->streamsOfTheAnswer(200);
         self::assertSame(
-            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, TicketPageParts::PEOPLE_ID => 0, self::TOAST_REGION_ID => 0],
+            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, TicketPageParts::PEOPLE_ID => 0, TicketPageParts::ACTIVITY_ID => 0, self::TOAST_REGION_ID => 0],
             array_map(static fn (Crawler $stream): int => $stream->filter('[autofocus]')->count(), $streams),
         );
         $heading = $streams[TicketPageParts::NEXT_STEP_ID]->filter('[autofocus]');
@@ -893,9 +894,9 @@ final class TicketMoveTest extends WebTestCase
 
     /**
      * The stream answer reads the ticket's page again after the move's transaction, in one of its own: the same refusal
-     * answered by stream and by redirect differs by that read alone, warm: 6 queries with the transaction's own
-     * statements, the ticket, the names and the saved turn among them, and for a lead a 7th, the Needs input dialog's
-     * one read of which of the ticket's people are members.
+     * answered by stream and by redirect differs by that read alone, warm: 7 queries with the transaction's own
+     * statements, the ticket, the names, What happened's moves and the saved turn among them, and for a lead an 8th,
+     * the Needs input dialog's one read of which of the ticket's people are members.
      */
     #[Test]
     public function theStreamAnswerReadsTheTicketAgainInTheBudgetedQueries(): void
@@ -912,7 +913,7 @@ final class TicketMoveTest extends WebTestCase
         $streamStatements = $this->statementsOfAMove($staleFields, self::TURBO_FORM_HEADERS);
 
         self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->toastOf($this->streamsOfTheAnswer(422)));
-        self::assertSame(7, \count($streamStatements) - \count($redirectStatements), 'the re-read takes 6 and the lead’s Needs input dialog 1');
+        self::assertSame(8, \count($streamStatements) - \count($redirectStatements), 'the re-read takes 7 and the lead’s Needs input dialog 1');
         self::assertSame(
             1,
             \count(array_keys($streamStatements, 'org_membership', true)) - \count(array_keys($redirectStatements, 'org_membership', true)),
@@ -922,7 +923,7 @@ final class TicketMoveTest extends WebTestCase
 
     /**
      * A move made reads the ticket again after its COMMIT, warm, in the same statements as a refused one: its own
-     * transaction with the ticket, the names and the saved turn.
+     * transaction with the ticket, the names, What happened's moves and the saved turn.
      */
     #[Test]
     public function aTurboVerbMoveReadsTheTicketAgainInTheBudgetedQueries(): void
@@ -1013,8 +1014,8 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state, its box and its People and
-     * updates the toast region, in that order.
+     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state, its box, its People and
+     * What happened and updates the toast region, in that order.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
@@ -1029,7 +1030,7 @@ final class TicketMoveTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['replace', TicketPageParts::PEOPLE_ID], ['update', self::TOAST_REGION_ID]],
+            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['replace', TicketPageParts::PEOPLE_ID], ['replace', TicketPageParts::ACTIVITY_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];
@@ -1039,6 +1040,7 @@ final class TicketMoveTest extends WebTestCase
         self::assertCount(1, $streams[TicketPageParts::STATE_ID]->filter('#'.TicketPageParts::STATE_ID));
         self::assertCount(1, $streams[TicketPageParts::NEXT_STEP_ID]->filter('#'.TicketPageParts::NEXT_STEP_ID.' .next-step-box'));
         self::assertCount(1, $streams[TicketPageParts::PEOPLE_ID]->filter('#'.TicketPageParts::PEOPLE_ID));
+        self::assertCount(1, $streams[TicketPageParts::ACTIVITY_ID]->filter('#'.TicketPageParts::ACTIVITY_ID));
 
         return $streams;
     }

@@ -113,7 +113,8 @@
 /* The parts a move's Turbo Stream answer replaces: they hold their children in the layout of the header or aside. */
 .ticket__header-state,
 .ticket__next-step,
-.ticket__people {
+.ticket__people,
+.ticket__activity {
   display: contents;
 }
 
@@ -423,4 +424,24 @@
 .people__turn {
   color: var(--on-surface);
   font-weight: 600;
+}
+
+.activity__lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+/* A long step or person name wraps inside the aside instead of widening it. */
+.activity__line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.activity__time {
+  color: var(--on-surface-var);
 }

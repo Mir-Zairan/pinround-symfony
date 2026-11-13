@@ -10,6 +10,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Ticketing\Application\TicketHistoryEntry;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
 use App\Ticketing\UI\TicketPageParts;
@@ -561,6 +562,28 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
+     * With no team there is no turn to read names with, so What happened reads the name of Sara, who is not among the
+     * ticket's people, on its own.
+     */
+    #[Test]
+    public function whatHappenedOnATicketNoTeamOwnsNamesAMoverOutsideItsPeople(): void
+    {
+        new AddTicketEventPartitions($this->migrator(), new MockClock(new \DateTimeImmutable(self::NOW)))();
+        $key = $this->addTicket('Footer links point nowhere', ['core' => 'progress', 'assignee' => 'Omar']);
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET team_id = NULL WHERE key = ?',
+            [$key],
+        ));
+        $this->addHistoryRow($key, 'moved', 'Sara', 'todo', 'progress', [], '2026-11-06 10:00:00+00');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['2 h ago · Sara moved it from To do to In progress', '5 Nov · Created by Lena'], self::activityLinesOf($page));
+    }
+
+    /**
      * SHOP-1 is in To do and assigned to Omar. Only a lead or member of Shop may move it; only its lead gets the move
      * list, which holds the organization's steps and Shop's own, never another team's.
      *
@@ -764,6 +787,52 @@ final class TicketPageTest extends WebTestCase
         self::assertSame([['Omar', 'Assignee · Developer'], ['Mia', 'Reporter · Tester']], self::peopleRowsOf($page));
     }
 
+    /**
+     * Seven moves, the oldest one past the six shown, and the ticket's own "created" row, which the page words from
+     * the ticket instead. Mia's take and Sara's move share a time, so the later id comes first; Sara moves as an admin
+     * outside the ticket's people and its team, so her name comes from the extra names read.
+     */
+    #[Test]
+    public function whatHappenedListsTheLatestSixMovesNewestFirstThenTheCreatedLine(): void
+    {
+        new AddTicketEventPartitions($this->migrator(), new MockClock(new \DateTimeImmutable(self::NOW)))();
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'reporter' => 'Raj', 'assignee' => 'Omar']);
+        $this->addHistoryRow($key, 'created', 'Raj', null, 'backlog', [], '2026-11-04 23:30:00+00');
+        $this->addHistoryRow($key, 'moved', 'Lena', 'backlog', 'todo', ['verb' => 'plan'], '2026-11-05 08:00:00+00');
+        $this->addHistoryRow($key, 'moved', 'Lena', 'todo', 'todo', ['verb' => TicketHistoryEntry::GIVE_IT_TO, 'assignee_id' => $this->people['Omar']->id()->toString()], '2026-11-05 09:00:00+00');
+        $this->addHistoryRow($key, 'moved', 'Omar', 'todo', 'progress', ['verb' => 'start'], '2026-11-05 10:00:00+00');
+        $this->addHistoryRow($key, 'moved', 'Omar', 'progress', 'review', ['verb' => 'ready'], '2026-11-06 09:00:00+00');
+        $this->addHistoryRow($key, 'moved', 'Lena', 'review', 'test', ['verb' => 'approve'], '2026-11-06 11:30:00+00');
+        $this->addHistoryRow($key, 'moved', 'Mia', 'test', 'test', ['verb' => TicketHistoryEntry::GIVE_IT_TO, 'assignee_id' => $this->people['Mia']->id()->toString()], '2026-11-06 11:59:30+00');
+        $this->addHistoryRow($key, 'moved', 'Sara', 'test', 'progress', [], '2026-11-06 11:59:30+00');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([
+            'now · Sara moved it from Testing to In progress',
+            'now · Mia took it',
+            '30 min ago · Lena moved it from Code review to Testing',
+            '3 h ago · Omar moved it from In progress to Code review',
+            '5 Nov · Omar moved it from To do to In progress',
+            '5 Nov · Lena gave it to Omar',
+            '5 Nov · Created by Raj',
+        ], self::activityLinesOf($page));
+    }
+
+    #[Test]
+    public function aTicketWithNoMovesShowsOnlyItsCreatedLine(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['reporter' => 'Mia']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['5 Nov · Created by Mia'], self::activityLinesOf($page));
+    }
+
     #[Test]
     public function aRenderedVerbFormMovesTheTicket(): void
     {
@@ -952,14 +1021,17 @@ final class TicketPageTest extends WebTestCase
 
     /**
      * The costliest page: a project list that does not hold the ticket (the project lookup and the plain list's
-     * position), a saved turn of someone outside the ticket's people and team (one more names query), and the lead's
-     * Needs input dialog (one membership read).
+     * position), a saved turn of someone outside the ticket's people and team and a move by another such person (one
+     * more names query for both), What happened's moves (one query), and the lead's Needs input dialog (one membership
+     * read).
      */
     #[Test]
     public function theCostliestWarmPageStaysWithinTheTenQueryBudget(): void
     {
+        new AddTicketEventPartitions($this->migrator(), new MockClock(new \DateTimeImmutable(self::NOW)))();
         $keys = $this->addTicketsToWalk();
         $this->addTurnRow($keys['X'], 'Raj', 'decide');
+        $this->addHistoryRow($keys['X'], 'moved', 'Sara', 'todo', 'todo', [], '2026-11-06 11:00:00+00');
         $this->logIn($this->client, $this->people['Lena']);
         $this->queryCountOf(self::SHELL);
         $shellQueryCount = $this->queryCountOf(self::SHELL);
@@ -969,15 +1041,17 @@ final class TicketPageTest extends WebTestCase
         $pageQueryCount = $this->queryCountOf($uri) - $shellQueryCount;
 
         self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
+        self::assertSame(['1 h ago · Sara moved it to To do', '5 Nov · Created by Lena'], self::activityLinesOf($this->client->getCrawler()));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
-        self::assertSame(9, $pageQueryCount);
+        self::assertSame(10, $pageQueryCount);
     }
 
     /**
      * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
-     * one query), the ticket, the names of everyone in one batch, the saved turn with the waiting turns in one query,
-     * the position in one, and the lead's Needs input dialog asks which of the ticket's people are still members in one;
-     * a project's list adds the project by key, and a list the ticket is not in adds the plain list's position.
+     * one query), the ticket, the names of everyone in one batch, What happened's moves in one, the saved turn with the
+     * waiting turns in one query, the position in one, and the lead's Needs input dialog asks which of the ticket's
+     * people are still members in one; a project's list adds the project by key, and a list the ticket is not in adds
+     * the plain list's position.
      */
     #[Test]
     public function aWarmPageReadsOneQueryForItsPlaceInEachList(): void
@@ -994,14 +1068,14 @@ final class TicketPageTest extends WebTestCase
             self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'), $uri);
         }
 
-        self::assertSame([6, 7, 6, 8], $queryCounts);
+        self::assertSame([7, 8, 7, 9], $queryCounts);
     }
 
     /**
      * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
-     * one query), the ticket, the names of everyone in one batch, the saved turn with the waiting turns in one query,
-     * the ticket's place in the plain open list in one, and for the lead's Needs input dialog which of the ticket's
-     * people are still members in one.
+     * one query), the ticket, the names of everyone in one batch, What happened's moves in one, the saved turn with the
+     * waiting turns in one query, the ticket's place in the plain open list in one, and for the lead's Needs input
+     * dialog which of the ticket's people are still members in one.
      */
     #[Test]
     public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
@@ -1024,7 +1098,7 @@ final class TicketPageTest extends WebTestCase
             ['Lena · Reporter', 'Omar · Assignee', 'Someone else'],
             $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
         );
-        self::assertSame(6, $pageQueryCount);
+        self::assertSame(7, $pageQueryCount);
     }
 
     /**
@@ -1057,7 +1131,7 @@ final class TicketPageTest extends WebTestCase
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__aside .next-step-box'));
         self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog'));
-        self::assertSame(5, $pageQueryCount);
+        self::assertSame(6, $pageQueryCount);
     }
 
     /**
@@ -1157,6 +1231,38 @@ final class TicketPageTest extends WebTestCase
         self::assertNotEmpty($rows);
 
         return $rows;
+    }
+
+    /**
+     * Asserts What happened sits in the aside, in its Turbo Stream target.
+     *
+     * @return list<string> each line's text, in order
+     */
+    private static function activityLinesOf(Crawler $page): array
+    {
+        $section = $page->filter('.ticket__aside #'.TicketPageParts::ACTIVITY_ID.' section[aria-labelledby="ticket-activity-heading"]');
+        self::assertCount(1, $section);
+        self::assertSame('What happened', $section->filter('#ticket-activity-heading')->text());
+
+        return $section->filter('.activity__line')->each(static fn (Crawler $line): string => $line->text());
+    }
+
+    /**
+     * A row of the ticket's history as TicketHistory writes it; its id is a uuid v7, so a later row has the higher id.
+     *
+     * @param array<string, string> $payload
+     */
+    private function addHistoryRow(string $ticketKey, string $type, string $actor, ?string $fromCore, string $toCore, array $payload, string $at): void
+    {
+        $parameters = [
+            Uuid::v7()->toRfc4122(), $this->acmeFoods->toString(), $ticketKey, $this->people[$actor]->id()->toString(), $type,
+            null === $fromCore ? null : $this->stepsByCore[$fromCore], $this->stepsByCore[$toCore], json_encode($payload, \JSON_THROW_ON_ERROR | \JSON_FORCE_OBJECT), $at,
+        ];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'INSERT INTO tkt_ticket_event (id, organization_id, ticket_id, actor_id, type, from_step, to_step, payload, at)
+             VALUES (?, ?, (SELECT id FROM tkt_ticket WHERE key = ?), ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS timestamptz))',
+            $parameters,
+        ));
     }
 
     /**

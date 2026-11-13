@@ -62,8 +62,8 @@ final class TicketHistorySentencesTest extends TestCase
     #[Test]
     public function theCreatedLineNamesTheReporterByFirstName(): void
     {
-        self::assertSame('Lena created it', self::sentences()->createdSentenceOf(new UserId(self::LENA)));
-        self::assertSame('An unknown person created it', self::sentences()->createdSentenceOf(new UserId(self::GONE)));
+        self::assertSame('Created by Lena', self::sentences()->createdSentenceOf(new UserId(self::LENA)));
+        self::assertSame('Created by an unknown person', self::sentences()->createdSentenceOf(new UserId(self::GONE)));
     }
 
     #[Test]

@@ -45,9 +45,12 @@ final readonly class TicketHistorySentences
         return array_values($people);
     }
 
+    /**
+     * The prototype's words, "Created by Lena", rather than the moves' "Lena moved it…" form.
+     */
     public function createdSentenceOf(UserId $reporterId): string
     {
-        return $this->subjectOf($reporterId).' created it';
+        return 'Created by '.$this->firstNameOf($reporterId);
     }
 
     public function sentenceOf(TicketHistoryEntry $entry): string
