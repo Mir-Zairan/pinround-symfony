@@ -6,7 +6,7 @@ import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
 // Lena makes a SHOP ticket with nobody to give it to, so it starts in Backlog, with a title no earlier run used; the
-// run leaves it in To do with Omar. tests/Functional/Ticketing/GiveItToTest.php proves who sees the button, the
+// give test leaves it in To do with Omar, the 360 px test in Backlog. tests/Functional/Ticketing/GiveItToTest.php proves who sees the button, the
 // picker's order and the give on the server.
 const TOAST_REGION = '#toast-region';
 
@@ -78,4 +78,27 @@ test('Lena gives a Backlog ticket to Omar through the person picker', async ({ b
   await expect(page.locator(TOAST_REGION)).toHaveText('Given to Omar.');
   await expect(statusPill(page)).toHaveText('To do');
   await expect(nextStepBox(page).getByRole('button', { name: 'Give it to someone else…' })).toBeVisible();
+});
+
+test('at 360 px the opened picker fits and the page does not scroll sideways', async ({ page }) => {
+  const title = `Gift wrap option hides the total ${randomUUID().slice(0, 8)}`;
+  const key = await makeBacklogTicket(page, title);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await openTicket(page, key, title);
+
+  await nextStepBox(page).getByRole('button', { name: 'Give it to…' }).click();
+
+  const dialog = page.getByRole('dialog', { name: `Give ${key} to…` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('.pick').first()).toBeVisible();
+  const { scrollWidth, clientWidth } = await page.evaluate(() => {
+    const scrollingElement = document.scrollingElement ?? document.documentElement;
+    return { scrollWidth: scrollingElement.scrollWidth, clientWidth: scrollingElement.clientWidth };
+  });
+  expect(clientWidth).toBeLessThanOrEqual(360);
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+  const box = await dialog.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(clientWidth);
 });

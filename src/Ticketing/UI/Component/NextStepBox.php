@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Ticketing\UI\Component;
 
-use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\UI\NextStep;
 use App\Ticketing\UI\NextStepChoices;
@@ -12,7 +11,6 @@ use App\Ticketing\UI\TicketMoveController;
 use App\Workflow\Api\MoveChoice;
 use App\Workflow\Api\TransitionView;
 use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
-use Symfony\UX\TwigComponent\Attribute\PostMount;
 
 /**
  * The ticket page's "Your next step" box (ticket-page.md, Your next step box): it only shows the NextStep that
@@ -40,7 +38,10 @@ final class NextStepBox
     /** Renders "Move to another step…" open; the ticket page leaves it closed, the component gallery opens it. */
     public bool $isMoveListOpen = false;
 
-    /** The ticket's team, a canonical uuid, whose people Give it to… lists; empty when no team owns the ticket. */
+    /**
+     * The ticket's team, a canonical uuid, whose people Give it to… lists; empty when no team owns the ticket. A box
+     * that shows Give it to… without one fails at PersonPicker's mount check.
+     */
     public string $teamId = '';
 
     /**
@@ -49,19 +50,6 @@ final class NextStepBox
      * Give it to… only when this is true.
      */
     public bool $canGive = false;
-
-    /**
-     * A give_it_to with no team to pick from fails here rather than render a picker that lists nobody.
-     */
-    #[PostMount]
-    public function assertCanGive(): void
-    {
-        foreach ($this->moveTransitions() as $transition) {
-            if ($this->isGive($transition) && !ListFilter::isCanonicalUuid($this->teamId)) {
-                throw new \LogicException('A NextStepBox that offers Give it to… needs the ticket\'s team given by its canonical uuid.');
-            }
-        }
-    }
 
     public function csrfTokenId(): string
     {

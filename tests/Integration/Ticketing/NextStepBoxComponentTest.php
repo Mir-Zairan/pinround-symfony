@@ -160,23 +160,6 @@ final class NextStepBoxComponentTest extends KernelTestCase
     }
 
     #[Test]
-    public function giveItToWithoutTheTicketsTeamFailsAtMount(): void
-    {
-        foreach (['', 'not-a-uuid', strtoupper(self::TEAM_ID)] as $teamId) {
-            try {
-                $this->render(new NextStep('Give it to someone.', [new TransitionView('give_it_to', 'Give it to…', true, MoveTarget::coreStep('todo'))], null, []), ['teamId' => $teamId, 'canGive' => true]);
-                self::fail('A give with the team "'.$teamId.'" rendered.');
-            } catch (\Throwable $refused) {
-                $cause = $refused;
-                while (!$cause instanceof \LogicException && null !== $cause->getPrevious()) {
-                    $cause = $cause->getPrevious();
-                }
-                self::assertSame('A NextStepBox that offers Give it to… needs the ticket\'s team given by its canonical uuid.', $cause->getMessage());
-            }
-        }
-    }
-
-    #[Test]
     public function noMoveListShowsWhenThereAreNoGroups(): void
     {
         $box = $this->render(new NextStep('Start work.', [new TransitionView('start_work', 'Start work', true, MoveTarget::coreStep('progress'))], null, []));
