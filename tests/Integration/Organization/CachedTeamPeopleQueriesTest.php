@@ -59,6 +59,30 @@ final class CachedTeamPeopleQueriesTest extends KernelTestCase
     }
 
     #[Test]
+    public function eachPersonCarriesTheirDisplayNameJobAndWhetherTheyLead(): void
+    {
+        self::assertSame(
+            [[self::OMAR, 'Omar Demir', 'developer', false], [self::MIA, 'Mia Lund', 'tester', false], [self::LENA, 'Lena Berg', 'developer', true]],
+            $this->peopleOfShopAs(self::BETA_BAKERY),
+        );
+    }
+
+    /**
+     * Only the team's lead_user_id changes, so Lena's team role is still Lead: the flag follows lead_user_id.
+     */
+    #[Test]
+    public function theLeadIsTheTeamsLeadUserNotTheMemberWithTheLeadRole(): void
+    {
+        $this->transactions()->committedAs(self::BETA_BAKERY, static fn (): int|string => self::getContainer()->get('doctrine.dbal.default_connection')
+            ->executeStatement('UPDATE org_team SET lead_user_id = ? WHERE id = ?', [self::OMAR, self::SHOP_TEAM]));
+
+        self::assertSame(
+            [[self::OMAR, 'Omar Demir', 'developer', true], [self::MIA, 'Mia Lund', 'tester', false], [self::LENA, 'Lena Berg', 'developer', false]],
+            $this->peopleOfShopAs(self::BETA_BAKERY),
+        );
+    }
+
+    #[Test]
     public function anotherOrganizationGetsNoneOfTheTeamsPeopleColdOrWarm(): void
     {
         self::assertSame(['Omar', 'Mia', 'Lena'], $this->firstNamesOfShopAs(self::BETA_BAKERY));
@@ -76,6 +100,16 @@ final class CachedTeamPeopleQueriesTest extends KernelTestCase
         $people = $this->transactions()->committedAs($organizationId, fn (): array => $this->teamPeopleQueries()->namedPossibleAssigneesOf(new TeamId(self::SHOP_TEAM)));
 
         return array_map(static fn (PossibleAssignee $person): string => $person->firstName, $people);
+    }
+
+    /**
+     * @return list<array{string, string, string, bool}> each person's id, display name, job and whether they lead
+     */
+    private function peopleOfShopAs(string $organizationId): array
+    {
+        $people = $this->transactions()->committedAs($organizationId, fn (): array => $this->teamPeopleQueries()->namedPossibleAssigneesOf(new TeamId(self::SHOP_TEAM)));
+
+        return array_map(static fn (PossibleAssignee $person): array => [$person->userId->toString(), $person->displayName, $person->job->value, $person->isLead], $people);
     }
 
     private function teamPeopleQueries(): TeamPeopleQueries

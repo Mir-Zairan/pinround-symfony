@@ -18,7 +18,8 @@ interface TeamPeopleQueries
      * cannot move tickets, and so is a person Identity does not know. Empty for a team that is unknown or belongs to
      * another organization.
      *
-     * @return list<PossibleAssignee> the team's lead and members, in user id order
+     * @return list<PossibleAssignee> the team's lead and members, in user id order; the one marked isLead is the team's
+     *                                lead, and none is when Identity does not know the lead
      */
     public function namedPossibleAssigneesOf(TeamId $teamId): array;
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Organization\Infrastructure\Cache;
 
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\SharedKernel\Domain\OrganizationId;
@@ -54,7 +55,7 @@ final class TeamPeopleCacheTest extends TestCase
         self::assertSame(['Omar1'], $this->firstNamesOfShop());
         self::assertSame(['Omar1'], $this->firstNamesOfShop());
         self::assertTrue($this->pool->hasItem($this->shopKey()));
-        self::assertFalse($this->pool->hasItem('org.'.self::BETA_BAKERY.'.people.team.'.self::SHOP_TEAM));
+        self::assertFalse($this->pool->hasItem('org.'.self::BETA_BAKERY.'.people.v2.team.'.self::SHOP_TEAM));
     }
 
     #[Test]
@@ -204,7 +205,7 @@ final class TeamPeopleCacheTest extends TestCase
      */
     private function firstNamesOfShop(): array
     {
-        $people = $this->cache->remember(new TeamId(self::SHOP_TEAM), fn (): array => [new PossibleAssignee(new UserId(self::OMAR), 'Omar'.++$this->loads)]);
+        $people = $this->cache->remember(new TeamId(self::SHOP_TEAM), fn (): array => [new PossibleAssignee(new UserId(self::OMAR), 'Omar'.++$this->loads, 'Omar Demir', MemberJob::Developer, false)]);
 
         return array_map(static fn (PossibleAssignee $person): string => $person->firstName, $people);
     }
@@ -227,7 +228,7 @@ final class TeamPeopleCacheTest extends TestCase
 
     private function shopKey(): string
     {
-        return 'org.'.self::ACME_FOODS.'.people.team.'.self::SHOP_TEAM;
+        return 'org.'.self::ACME_FOODS.'.people.v2.team.'.self::SHOP_TEAM;
     }
 
     private function failingPool(): TagAwareCacheInterface

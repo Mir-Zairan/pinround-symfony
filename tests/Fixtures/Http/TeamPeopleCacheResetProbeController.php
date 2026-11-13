@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Fixtures\Http;
 
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\SharedKernel\Application\TenantContext;
@@ -47,7 +48,7 @@ final readonly class TeamPeopleCacheResetProbeController
         $team = new TeamId(self::TEAM_ID);
         $this->tenantContext->set(new OrganizationId($organizationId));
         $this->connection->beginTransaction();
-        $this->teamPeopleCache->remember($team, static fn (): array => [new PossibleAssignee(new UserId(self::OMAR), 'Omar')]);
+        $this->teamPeopleCache->remember($team, static fn (): array => [new PossibleAssignee(new UserId(self::OMAR), 'Omar', 'Omar Demir', MemberJob::Developer, false)]);
         $this->connection->close();
 
         throw new \RuntimeException('The controller failed after closing the connection inside a transaction.');

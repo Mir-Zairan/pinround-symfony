@@ -739,14 +739,14 @@ final class TicketPageTest extends WebTestCase
 
         self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
-        self::assertSame(10, $pageQueryCount);
+        self::assertSame(8, $pageQueryCount);
     }
 
     /**
-     * Beyond the shell, with the steps and the rules cached: the settings (step policy and triager, one query), the
-     * ticket, its team's lead and people, the names of everyone in one batch, the saved turn with the waiting turns in
-     * one query, and the position in one; a project's list adds the project by key, and a list the ticket is not in
-     * adds the plain list's position.
+     * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
+     * one query), the ticket, the names of everyone in one batch, the saved turn with the waiting turns in one query,
+     * and the position in one; a project's list adds the project by key, and a list the ticket is not in adds the plain
+     * list's position.
      */
     #[Test]
     public function aWarmPageReadsOneQueryForItsPlaceInEachList(): void
@@ -763,13 +763,13 @@ final class TicketPageTest extends WebTestCase
             self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'), $uri);
         }
 
-        self::assertSame([7, 8, 7, 9], $queryCounts);
+        self::assertSame([5, 6, 5, 7], $queryCounts);
     }
 
     /**
-     * Beyond the shell, with the steps and the rules cached: the settings (step policy and triager, one query), the
-     * ticket, its team's lead and people, the names of everyone in one batch, the saved turn with the waiting turns in
-     * one query, and the ticket's place in the plain open list in one.
+     * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
+     * one query), the ticket, the names of everyone in one batch, the saved turn with the waiting turns in one query,
+     * and the ticket's place in the plain open list in one.
      */
     #[Test]
     public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
@@ -788,7 +788,7 @@ final class TicketPageTest extends WebTestCase
 
         self::assertSame([['Assignee', 'Omar'], ['Priority', 'Major'], ['Release', '2.4'], ['Parent', 'SHOP-1'], ['Components', 'Checkout'], ['Created', '5 Nov']], $this->detailsOf($this->client->getCrawler()));
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
-        self::assertSame(7, $pageQueryCount);
+        self::assertSame(5, $pageQueryCount);
     }
 
     /**

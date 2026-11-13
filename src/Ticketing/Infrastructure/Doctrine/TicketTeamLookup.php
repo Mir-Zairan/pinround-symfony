@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Doctrine;
 
-use App\Organization\Api\TeamQueries;
+use App\Organization\Api\MemberJob;
+use App\Organization\Api\PossibleAssignee;
+use App\Organization\Api\TeamPeopleQueries;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\StepQueries;
@@ -12,13 +14,13 @@ use App\Workflow\Api\StepView;
 
 /**
  * What a ticket's turn needs from its team, read one way for the turn query and the ticket page: the core code of its
- * step among the team's steps, and the team's lead and people.
+ * step among the team's steps, and the team's lead and people from the team people cache.
  */
 final readonly class TicketTeamLookup
 {
     public function __construct(
         private StepQueries $stepQueries,
-        private TeamQueries $teamQueries,
+        private TeamPeopleQueries $teamPeopleQueries,
     ) {
     }
 
@@ -31,15 +33,35 @@ final readonly class TicketTeamLookup
     }
 
     /**
-     * @return array{UserId, list<UserId>, list<UserId>} the lead, the developers and the testers
+     * No query when the team's people are cached. A developer or tester Identity does not know is left out.
      *
-     * @throws \LogicException when the team is not a team of the organization
+     * @return array{UserId, string, list<UserId>, list<UserId>} the lead, their display name, the developers and the
+     *                                                           testers, each in user id order
+     *
+     * @throws \LogicException when the team is not a team of the organization, or Identity does not know its lead
      */
     public function peopleOf(TeamId $teamId): array
     {
-        $leadId = $this->teamQueries->leadOf($teamId) ?? throw new \LogicException('A ticket\'s team is not a team of its organization.');
-        $peopleByJob = $this->teamQueries->peopleByJob($teamId);
+        $people = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
+        if ([] === $people) {
+            throw new \LogicException('A ticket\'s team is not a team of its organization.');
+        }
+        $lead = array_find($people, static fn (PossibleAssignee $person): bool => $person->isLead)
+            ?? throw new \LogicException('The lead of a ticket\'s team is no user.');
 
-        return [$leadId, $peopleByJob['developer'], $peopleByJob['tester']];
+        return [$lead->userId, $lead->displayName, self::userIdsWithJob($people, MemberJob::Developer), self::userIdsWithJob($people, MemberJob::Tester)];
+    }
+
+    /**
+     * @param list<PossibleAssignee> $people
+     *
+     * @return list<UserId>
+     */
+    private static function userIdsWithJob(array $people, MemberJob $job): array
+    {
+        return array_values(array_map(
+            static fn (PossibleAssignee $person): UserId => $person->userId,
+            array_filter($people, static fn (PossibleAssignee $person): bool => $person->job === $job),
+        ));
     }
 }

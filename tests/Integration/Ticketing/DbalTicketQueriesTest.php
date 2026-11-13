@@ -6,7 +6,7 @@ namespace App\Tests\Integration\Ticketing;
 
 use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
 use App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries;
-use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
+use App\Organization\Infrastructure\Doctrine\DbalTeamPeopleQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -281,7 +281,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
             )->list($this->filter()),
         );
 
@@ -775,7 +775,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
             )->pageOf($key, self::adminOf(self::ACME_FOODS)),
         );
 
@@ -1046,7 +1046,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
             )->positionOf($key, $this->filter()),
         );
 

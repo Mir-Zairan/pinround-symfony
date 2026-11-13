@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Doctrine;
 
-use App\Identity\Api\UserQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
-use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Workflow\Api\StepQueries;
@@ -17,7 +15,7 @@ use Doctrine\DBAL\Connection;
 /**
  * The ticket is read by its primary key, naming organization_id as well as row-level security. Its step comes from the
  * team's cached steps, and from StepQueries::groupOf for a step they no longer list (removed) or a ticket with no team;
- * such a step gets no core code.
+ * such a step gets no core code. The team's lead and people come from the team people cache, so a warm read is one query.
  */
 final readonly class DbalTicketTurnQueries implements TicketTurnQueries
 {
@@ -26,7 +24,6 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         private TenantContext $tenantContext,
         private StepQueries $stepQueries,
         private TicketTeamLookup $teamLookup,
-        private UserQueries $userQueries,
     ) {
     }
 
@@ -47,7 +44,7 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         $stepId = self::text($row['step_id'], 'step_id');
         $teamId = TurnSnapshotRow::teamIdOf($row);
         [$groupCode, $coreCode] = $this->groupAndCoreCodeOf($stepId, $teamId);
-        [$leadId, $leadDisplayName, $developerIds, $testerIds] = null === $teamId ? [null, null, [], []] : $this->peopleOf($teamId);
+        [$leadId, $leadDisplayName, $developerIds, $testerIds] = null === $teamId ? [null, null, [], []] : $this->teamLookup->peopleOf($teamId);
 
         return TurnSnapshotRow::snapshotOf($ticketId, $row, $groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds);
     }
@@ -63,17 +60,6 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         }
 
         return [$this->stepQueries->groupOf($stepId) ?? throw new \LogicException('A ticket is in a step its organization does not have.'), null];
-    }
-
-    /**
-     * @return array{UserId, string, list<UserId>, list<UserId>} the lead, their name, the developers and the testers
-     */
-    private function peopleOf(TeamId $teamId): array
-    {
-        [$leadId, $developerIds, $testerIds] = $this->teamLookup->peopleOf($teamId);
-        $lead = $this->userQueries->byIds([$leadId])[$leadId->toString()] ?? throw new \LogicException('The lead of a ticket\'s team is no user.');
-
-        return [$leadId, $lead->displayName, $developerIds, $testerIds];
     }
 
     private static function text(mixed $value, string $column): string

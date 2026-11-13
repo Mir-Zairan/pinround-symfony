@@ -44,7 +44,8 @@ final readonly class TeamPeopleCache
             return $load();
         }
 
-        $key = \sprintf('org.%s.people.team.%s', $organization->toString(), $team->toString());
+        // Raise the version when PossibleAssignee changes shape, so an entry kept before is never read back.
+        $key = \sprintf('org.%s.people.v2.team.%s', $organization->toString(), $team->toString());
 
         return $this->pool->get($key, static function (ItemInterface $item) use ($load, $team): array {
             $people = $load();

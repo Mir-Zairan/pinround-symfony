@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Organization\Infrastructure\Messenger;
 
 use App\Organization\Api\Event\TeamRoleChanged;
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\Organization\Infrastructure\Messenger\InvalidateTeamPeopleCacheHandler;
@@ -36,14 +37,14 @@ final class InvalidateTeamPeopleCacheHandlerTest extends TestCase
         $cache = new TeamPeopleCache($pool, $invalidation);
         $invalidation->transactionBegan(new OrganizationId(self::ACME_FOODS));
         foreach ([self::SHOP_TEAM, self::MOBILE_TEAM] as $team) {
-            $cache->remember(new TeamId($team), static fn (): array => [new PossibleAssignee(new UserId(self::OMAR), 'Omar')]);
+            $cache->remember(new TeamId($team), static fn (): array => [new PossibleAssignee(new UserId(self::OMAR), 'Omar', 'Omar Demir', MemberJob::Developer, false)]);
         }
 
         new InvalidateTeamPeopleCacheHandler($cache)(new TeamRoleChanged(self::ACME_FOODS, self::SHOP_TEAM, self::OMAR, 'member', 'viewer', null, new \DateTimeImmutable('2026-03-04 10:00:00 UTC')));
 
         self::assertSame(
             [false, true],
-            [$pool->hasItem('org.'.self::ACME_FOODS.'.people.team.'.self::SHOP_TEAM), $pool->hasItem('org.'.self::ACME_FOODS.'.people.team.'.self::MOBILE_TEAM)],
+            [$pool->hasItem('org.'.self::ACME_FOODS.'.people.v2.team.'.self::SHOP_TEAM), $pool->hasItem('org.'.self::ACME_FOODS.'.people.v2.team.'.self::MOBILE_TEAM)],
         );
     }
 }
