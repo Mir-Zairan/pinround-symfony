@@ -266,6 +266,16 @@ final class NewTicketTest extends WebTestCase
             {
                 throw $this->refusal;
             }
+
+            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
+            {
+                throw new \LogicException('The new ticket page moves no ticket.');
+            }
+
+            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): void
+            {
+                throw new \LogicException('The new ticket page moves no ticket.');
+            }
         });
         $people = $this->createAcmeFoodsPeople();
         $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');

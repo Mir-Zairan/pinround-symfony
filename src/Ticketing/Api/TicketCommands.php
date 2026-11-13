@@ -44,4 +44,49 @@ interface TicketCommands
         ?UserId $assignee,
         \DateTimeImmutable $reportedAt,
     ): string;
+
+    /**
+     * Moves the ticket with one of the Workflow verbs, where the team's transition policy sends it, and writes its
+     * "moved" history row with the verb, its turn row and a TicketMoved event. A ticket moved into Needs input waits on
+     * its reporter.
+     *
+     * @param string $key             the ticket's key, for example "SHOP-12"
+     * @param string $verb            a Workflow verb's code, for example "start_work"
+     * @param int    $expectedVersion the ticket's version the caller read
+     *
+     * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it; nothing is saved
+     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first;
+     *                                nothing of the move is saved and the ticket is not reloaded
+     * @throws MoveRefused            when the ticket has no team, the policy refuses the verb to this person (with the
+     *                                rule's note when one explains it), the target is not a step of the team, is the
+     *                                ticket's step now, or the verb is give_it_to (P03.T8); nothing is saved
+     * @throws \LogicException        when no transaction is open
+     */
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void;
+
+    /**
+     * The lead's "Move to another step…": moves the ticket to a step of its team without a verb, and writes the same rows
+     * and event as move, with no verb. In Needs input the ticket waits on the person or label given, else its reporter.
+     *
+     * @param string $stepId the uuid of the step to move to
+     *
+     * @throws TicketNotFound            as move does
+     * @throws TicketChangedMeanwhile    as move does
+     * @throws MoveRefused               when the ticket has no team, the step is not one of its team or is its step now, the
+     *                                   policy refuses the move (with the rule's note when one explains it), or someone to
+     *                                   wait on is given for a step other than Needs input; nothing is saved
+     * @throws \InvalidArgumentException when both a person and a label are given, or the label is blank, over 100
+     *                                   characters or not one line; nothing is saved
+     * @throws \LogicException           when no transaction is open
+     */
+    public function moveTo(
+        OrganizationId $organizationId,
+        UserId $actor,
+        string $key,
+        string $stepId,
+        int $expectedVersion,
+        ?UserId $waitingOnUserId,
+        ?string $waitingOnLabel,
+        \DateTimeImmutable $at,
+    ): void;
 }
