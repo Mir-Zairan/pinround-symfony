@@ -67,7 +67,7 @@ final class TicketKeyTest extends TestCase
     public function aTextThatIsNoKeyIsRefused(string $text): void
     {
         $this->expectException(InvalidTicketKey::class);
-        $this->expectExceptionMessage('A ticket key is a project key, a hyphen and a number, such as SHOP-12.');
+        $this->expectExceptionMessageIsOrContains('A ticket key is a project key, a hyphen and a number, such as SHOP-12.');
         TicketKey::fromString($text);
     }
 }

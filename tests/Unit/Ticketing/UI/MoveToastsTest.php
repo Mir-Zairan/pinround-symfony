@@ -82,7 +82,7 @@ final class MoveToastsTest extends TestCase
     public function aToastNamingTheStepWithNoStepGivenFails(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The toast of the verb "move_on" names the step after the move.');
+        $this->expectExceptionMessageIsOrContains('The toast of the verb "move_on" names the step after the move.');
 
         MoveToasts::ofVerb('move_on', 'Lena', null);
     }
@@ -101,7 +101,7 @@ final class MoveToastsTest extends TestCase
     public function aVerbWithNoToastFails(string $verb): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage(\sprintf('The verb "%s" has no toast.', $verb));
+        $this->expectExceptionMessageIsOrContains(\sprintf('The verb "%s" has no toast.', $verb));
 
         MoveToasts::ofVerb($verb, 'Lena', 'To do');
     }

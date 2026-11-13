@@ -48,7 +48,7 @@ final class TicketVisibilityFactsTest extends TestCase
     public function aTicketTurnSnapshotRefusesAVisibilityThatIsNoConstant(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A ticket visibility must be all or team.');
+        $this->expectExceptionMessageIsOrContains('A ticket visibility must be all or team.');
         self::snapshotWith('org');
     }
 

@@ -51,7 +51,7 @@ final class WaitingOnTest extends TestCase
     public function aLabelThatIsNoLineOfTextIsRefused(string $label, string $expectedMessage): void
     {
         $this->expectException(InvalidWaitingOn::class);
-        $this->expectExceptionMessage($expectedMessage);
+        $this->expectExceptionMessageIsOrContains($expectedMessage);
         WaitingOn::ofLabel($label);
     }
 }
