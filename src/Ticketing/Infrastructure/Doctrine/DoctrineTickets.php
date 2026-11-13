@@ -29,11 +29,11 @@ final readonly class DoctrineTickets implements Tickets
         $this->entityManager->flush();
     }
 
-    public function ofKey(OrganizationId $organizationId, string $key): ?Ticket
+    public function ofKey(OrganizationId $organizationId, TicketKey $key): ?Ticket
     {
         return $this->entityManager->getRepository(Ticket::class)->findOneBy([
             'organizationId' => $organizationId->toString(),
-            'key' => TicketKey::fromString($key)->toString(),
+            'key' => $key->toString(),
         ]);
     }
 }

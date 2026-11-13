@@ -20,6 +20,7 @@ use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
 use App\Ticketing\Application\OrganizationProjects;
 use App\Ticketing\Domain\Ticket;
+use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
 use App\Ticketing\Infrastructure\Doctrine\DbalNextTicketNumber;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketHistory;
@@ -312,7 +313,7 @@ final class CreateTicketTest extends KernelTestCase
                 $this->doctrineTickets->add($ticket);
             }
 
-            public function ofKey(OrganizationId $organizationId, string $key): ?Ticket
+            public function ofKey(OrganizationId $organizationId, TicketKey $key): ?Ticket
             {
                 return $this->doctrineTickets->ofKey($organizationId, $key);
             }

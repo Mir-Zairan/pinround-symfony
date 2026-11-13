@@ -47,13 +47,11 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         $this->writes[] = 'ticket '.$ticket->id()->toString();
     }
 
-    public function ofKey(OrganizationId $organizationId, string $key): ?Ticket
+    public function ofKey(OrganizationId $organizationId, TicketKey $key): ?Ticket
     {
-        $canonicalKey = TicketKey::fromString($key)->toString();
-
         return array_find(
             $this->addedTickets,
-            static fn (Ticket $ticket): bool => $ticket->organizationId()->equals($organizationId) && $ticket->key()->toString() === $canonicalKey,
+            static fn (Ticket $ticket): bool => $ticket->organizationId()->equals($organizationId) && $ticket->key()->equals($key),
         );
     }
 

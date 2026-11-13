@@ -6,12 +6,12 @@ namespace App\Tests\Integration\Ticketing;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\TicketCommands;
-use App\Ticketing\Domain\InvalidTicketKey;
+use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
 use Doctrine\ORM\EntityManagerInterface;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -54,19 +54,20 @@ final class DoctrineTicketsTest extends KernelTestCase
         $acmeTicketId = $this->createdTicketOf(self::ACME_FOODS);
         $betaTicketId = $this->createdTicketOf(self::BETA_BAKERY);
         $key = $this->keyOf(self::ACME_FOODS, $acmeTicketId);
-        self::assertSame($key, $this->keyOf(self::BETA_BAKERY, $betaTicketId));
+        self::assertSame($key->toString(), $this->keyOf(self::BETA_BAKERY, $betaTicketId)->toString());
 
         $found = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => [
             $this->tickets()->ofKey(new OrganizationId(self::BETA_BAKERY), $key)?->id()->toString(),
-            $this->tickets()->ofKey(new OrganizationId(self::BETA_BAKERY), 'SHOP-999')?->id()->toString(),
+            $this->tickets()->ofKey(new OrganizationId(self::BETA_BAKERY), TicketKey::fromString('SHOP-999'))?->id()->toString(),
         ]);
 
         self::assertSame([$betaTicketId, null], $found);
     }
 
     /**
-     * Beta Bakery's tenant hides Acme Foods' ticket even when the SQL names Acme Foods, and under Acme Foods' tenant
-     * the SQL's organization alone hides it from a lookup for Beta Bakery, which has no ticket.
+     * Under Beta Bakery's tenant a lookup that names Acme Foods finds nothing (the tenant filter and row-level security
+     * both hide it; the filter-off test below proves row-level security alone does), and under Acme Foods' tenant the
+     * SQL's organization alone hides it from a lookup for Beta Bakery, which has no ticket.
      */
     #[Test]
     public function anotherOrganizationsKeyIsNotFound(): void
@@ -84,24 +85,22 @@ final class DoctrineTicketsTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{string}>
+     * With the tenant filter off the SQL names only Acme Foods, so under Beta Bakery's tenant nothing but row-level
+     * security on tkt_ticket can hide Acme Foods' ticket.
      */
-    public static function malformedKeys(): iterable
-    {
-        yield 'lower case' => ['shop-1'];
-        yield 'a trailing newline' => ["SHOP-1\n"];
-        yield 'a leading zero' => ['SHOP-01'];
-        yield 'no number' => ['SHOP-'];
-        yield 'a uuid' => ['0197a3c0-0000-7000-8000-00000000e721'];
-    }
-
     #[Test]
-    #[DataProvider('malformedKeys')]
-    public function aMalformedKeyIsRefused(string $key): void
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTicketWithTheTenantFilterOff(): void
     {
-        $this->expectException(InvalidTicketKey::class);
-        $this->expectExceptionMessage('A ticket key is a project key, a hyphen and a number, such as SHOP-12.');
-        $this->tickets()->ofKey(new OrganizationId(self::ACME_FOODS), $key);
+        $acmeTicketId = $this->createdTicketOf(self::ACME_FOODS);
+        $key = $this->keyOf(self::ACME_FOODS, $acmeTicketId);
+        $this->entityManager()->getFilters()->disable(TenantFilter::NAME);
+
+        $underBetaBakery = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): ?string => $this->tickets()->ofKey(new OrganizationId(self::ACME_FOODS), $key)?->id()->toString());
+        $underAcmeFoods = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?string => $this->tickets()->ofKey(new OrganizationId(self::ACME_FOODS), $key)?->id()->toString());
+
+        self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
+        self::assertNull($underBetaBakery);
+        self::assertSame($acmeTicketId, $underAcmeFoods, 'The ticket is not found under its own organization either, so the check above proves nothing.');
     }
 
     private function createdTicketOf(string $organizationId): string
@@ -114,12 +113,12 @@ final class DoctrineTicketsTest extends KernelTestCase
             ->toString();
     }
 
-    private function keyOf(string $organizationId, string $ticketId): string
+    private function keyOf(string $organizationId, string $ticketId): TicketKey
     {
         $key = $this->transactions()->rolledBackAs($organizationId, fn (): mixed => $this->entityManager()->getConnection()->fetchOne('SELECT key FROM tkt_ticket WHERE id = ?', [$ticketId]));
         self::assertIsString($key);
 
-        return $key;
+        return TicketKey::fromString($key);
     }
 
     private function tickets(): DoctrineTickets

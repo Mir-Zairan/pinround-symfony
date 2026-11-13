@@ -59,6 +59,7 @@ final class TicketKeyTest extends TestCase
         yield 'leading zero' => ['SHOP-012'];
         yield 'lowercase project key' => ['shop-12'];
         yield 'trailing newline' => ["SHOP-12\n"];
+        yield 'a uuid' => ['0197a3c0-0000-7000-8000-00000000e721'];
     }
 
     #[Test]
@@ -66,6 +67,7 @@ final class TicketKeyTest extends TestCase
     public function aTextThatIsNoKeyIsRefused(string $text): void
     {
         $this->expectException(InvalidTicketKey::class);
+        $this->expectExceptionMessage('A ticket key is a project key, a hyphen and a number, such as SHOP-12.');
         TicketKey::fromString($text);
     }
 }

@@ -26,6 +26,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -132,6 +133,52 @@ final class EntityTicketTurnSnapshotsTest extends KernelTestCase
         );
     }
 
+    #[Test]
+    public function aMoveToDoneSavesWhenTheTicketClosedAndTheStepItLeft(): void
+    {
+        $key = $this->createdTicketKey();
+
+        $savedRow = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($key): array|false {
+            $ticket = $this->loaded($key);
+            $ticket->move(self::DONE_STEP, 'done', false, null, new \DateTimeImmutable(self::MOVED_AT));
+            $this->entityManager()->flush();
+
+            return $this->connection()->fetchAssociative('SELECT closed_at, updated_at, previous_step_id FROM tkt_ticket WHERE key = ?', [$key]);
+        });
+
+        self::assertIsArray($savedRow);
+        self::assertIsString($savedRow['closed_at']);
+        self::assertIsString($savedRow['updated_at']);
+        self::assertSame(
+            [self::MOVED_AT, self::MOVED_AT, ShopTeamRows::TO_DO_STEP],
+            [self::utcTimeOf($savedRow['closed_at']), self::utcTimeOf($savedRow['updated_at']), $savedRow['previous_step_id']],
+        );
+    }
+
+    /**
+     * The step and team people caches warmed by a first snapshot serve the snapshot of the moved ticket.
+     */
+    #[Test]
+    public function loadingByKeyRunsOneQueryAndAWarmSnapshotOfTheMovedTicketRunsNone(): void
+    {
+        $key = $this->createdTicketKey();
+        $debugData = $this->debugData();
+
+        $queryCounts = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $key): array {
+            $debugData->reset();
+            $ticket = $this->loaded($key);
+            $loadQueries = self::queryCountOf($debugData);
+            $this->snapshots()->of($ticket);
+            $ticket->move(self::CODE_REVIEW_STEP, 'check', false, null, new \DateTimeImmutable(self::MOVED_AT));
+            $debugData->reset();
+            $snapshot = $this->snapshots()->of($ticket);
+
+            return [$loadQueries, self::queryCountOf($debugData), $snapshot->coreCode];
+        });
+
+        self::assertSame([1, 0, 'review'], $queryCounts);
+    }
+
     /**
      * A ticket no team owns gets its group from StepQueries::groupOf, no core code and no people.
      */
@@ -235,8 +282,29 @@ final class EntityTicketTurnSnapshotsTest extends KernelTestCase
 
     private function loaded(string $key): Ticket
     {
-        return new DoctrineTickets($this->entityManager())->ofKey(new OrganizationId(self::ACME_FOODS), $key)
+        return new DoctrineTickets($this->entityManager())->ofKey(new OrganizationId(self::ACME_FOODS), TicketKey::fromString($key))
             ?? throw new \LogicException(\sprintf('The ticket %s was not found.', $key));
+    }
+
+    private static function utcTimeOf(string $timestamp): string
+    {
+        return new \DateTimeImmutable($timestamp)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:sP');
+    }
+
+    private static function queryCountOf(DebugDataHolder $debugData): int
+    {
+        $queryCount = 0;
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            self::assertIsArray($queriesOfOneConnection);
+            $queryCount += \count($queriesOfOneConnection);
+        }
+
+        return $queryCount;
+    }
+
+    private function debugData(): DebugDataHolder
+    {
+        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function createdTicketKey(): string
