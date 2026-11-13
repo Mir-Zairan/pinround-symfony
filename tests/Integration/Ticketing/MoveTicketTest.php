@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Ticketing;
 
 use App\Insight\Api\TeamLoadQueries;
 use App\Insight\Api\TurnProjector;
+use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPeopleQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -247,6 +248,23 @@ final class MoveTicketTest extends KernelTestCase
         yield 'a step no organization has' => [self::LENA, '0197a3c0-0000-7000-8000-00000000e749', null, null, null];
         yield 'a person to wait on outside Needs input' => [self::LENA, self::IN_PROGRESS_STEP, self::RAJ, null, null];
         yield 'a label to wait on outside Needs input' => [self::LENA, self::IN_PROGRESS_STEP, null, 'Customer', null];
+        yield 'a person of another organization to wait on' => [self::LENA, self::NEEDS_INPUT_STEP, self::SARA, null, null];
+    }
+
+    #[Test]
+    public function aPersonWhoLeftTheOrganizationIsRefusedToWaitOn(): void
+    {
+        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
+            'DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?',
+            [self::ACME_FOODS, self::RAJ],
+        ));
+        $stateBefore = $this->storedState();
+
+        $refusal = $this->refusalOf(fn () => $this->moveTo(self::LENA, self::NEEDS_INPUT_STEP, $stateBefore['version'], new UserId(self::RAJ)));
+
+        self::assertInstanceOf(MoveRefused::class, $refusal);
+        self::assertNull($refusal->ruleNoteTemplate);
+        self::assertSame($stateBefore, $this->storedState());
     }
 
     #[Test]
@@ -652,6 +670,7 @@ final class MoveTicketTest extends KernelTestCase
             $snapshots,
             $container->get(TeamLoadQueries::class),
             $container->get(TeamPeopleQueries::class),
+            $container->get(MembershipQueries::class),
             $container->get(RuleQueries::class),
             $container->get(StepQueries::class),
             $container->get(TransitionPolicy::class),

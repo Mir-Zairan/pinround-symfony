@@ -203,7 +203,8 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `TicketQueries::reportedBy(UserId): list<TicketRow>`
   - `TicketQueries::duplicateCandidates(OrganizationId, string $text, ?TicketId $exclude): list<TicketRow>` (top 3)
   - `TicketCommands::create(OrganizationId, UserId $reporter, string $projectId, string $title, string $description, string $type, string $priority, ?UserId $assignee, \DateTimeImmutable $reportedAt): string` (built in P03.T1; returns the new key, for example `SHOP-12`, as `TicketKey` is Domain)
-  - `TicketCommands::move(TicketId, TransitionName, UserId): void`
+  - `TicketCommands::move(OrganizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void` (built in P03.T7; the verb's target step comes from Workflow's `TransitionPolicy`; throws `TicketNotFound` for a malformed or unknown key, `TicketChangedMeanwhile` for a stale version or a save another request won, `MoveRefused` when the ticket has no team, the policy refuses, the target is not a team step or is the ticket's step, or the verb is `give_it_to`)
+  - `TicketCommands::moveTo(OrganizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): void` (built in P03.T7; to a chosen step of the team; throws as `move` does, `MoveRefused` also for a waiting-on outside Needs input or a person to wait on who is no member of the organization, and `InvalidArgumentException` for both a person and a label or a label that is blank, over 100 characters or not one line)
   - `TicketCommands::assign(TicketId, UserId, UserId $actor): void`
   - `TicketCommands::confirmCheck(TicketId, UserId): void`
   - `TicketCommands::closeAsDuplicate(TicketId, TicketId $of, UserId): void`

@@ -6,6 +6,7 @@ namespace App\Ticketing\Application\MoveTicket;
 
 use App\Insight\Api\TeamLoadQueries;
 use App\Insight\Api\TurnProjector;
+use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPeopleQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -25,13 +26,10 @@ use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
 use App\Ticketing\Domain\TicketVersionConflict;
 use App\Ticketing\Domain\WaitingOn;
-use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\Decision;
-use App\Workflow\Api\MoveTarget;
 use App\Workflow\Api\RuleQueries;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
-use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionPolicy;
 use App\Workflow\Api\TurnInputs;
 
@@ -49,6 +47,7 @@ final readonly class MoveTicket
         private TicketTurnSnapshots $ticketTurnSnapshots,
         private TeamLoadQueries $teamLoadQueries,
         private TeamPeopleQueries $teamPeopleQueries,
+        private MembershipQueries $membershipQueries,
         private RuleQueries $ruleQueries,
         private StepQueries $stepQueries,
         private TransitionPolicy $transitionPolicy,
@@ -66,11 +65,12 @@ final readonly class MoveTicket
     public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
     {
         $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
-        $before = $this->ticketTurnSnapshots->of($ticket);
-        $teamId = $before->teamId ?? throw new MoveRefused(null);
+        $teamId = $ticket->team() ?? throw new MoveRefused(null);
         if (self::GIVE_IT_TO === $verb) {
             throw new MoveRefused(null);
         }
+        $team = $this->teamOf($teamId);
+        $before = $this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people);
         $teamFacts = TurnInputs::teamFacts(
             $before->leadId ?? throw new \LogicException('A ticket with a team has a lead.'),
             $before->leadDisplayName ?? throw new \LogicException('A ticket with a team has a lead.'),
@@ -79,23 +79,25 @@ final readonly class MoveTicket
             $this->teamLoadQueries->waitingTurnsOf([...$before->developerIds, ...$before->testerIds], $before->ticketId),
         );
         $decision = $this->transitionPolicy->check(
-            self::ticketStateOf($before),
-            $this->actorInTeam($teamId, $actor),
+            TurnInputs::ticketStateOf($before),
+            $team->actorInTeam($actor),
             $this->ruleQueries->rulesFor($teamId),
             $teamFacts,
             $verb,
         );
-        $target = $this->targetStepOf(self::allowedTargetOf($decision), $teamId);
+        self::refuseUnlessAllowed($decision);
+        $target = $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.'));
         $waitingOn = self::NEEDS_INPUT === $target->coreCode() ? WaitingOn::ofPerson($ticket->reporter()) : null;
 
-        $this->moveAndRecord($ticket, $before, $actor, $target, $waitingOn, $verb, $at);
+        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, $verb, $at);
     }
 
     /**
      * @throws TicketNotFound            when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile    when the ticket's version is not $expectedVersion, or another request saved it first
      * @throws MoveRefused               when the ticket has no team, the step is not one of its team, is its step now,
-     *                                   the policy refuses it, or a waiting-on is given for a step other than Needs input
+     *                                   the policy refuses it, a waiting-on is given for a step other than Needs input,
+     *                                   or the person to wait on is no member of the organization
      * @throws \InvalidArgumentException when both a person and a label are given, or the label is not one line of at
      *                                   most 100 characters
      */
@@ -113,20 +115,24 @@ final readonly class MoveTicket
             throw new \InvalidArgumentException('A ticket waits on a person or a label, not both.');
         }
         $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
-        $before = $this->ticketTurnSnapshots->of($ticket);
-        $teamId = $before->teamId ?? throw new MoveRefused(null);
-        $target = $this->stepOfTeam($stepId, $teamId);
+        $teamId = $ticket->team() ?? throw new MoveRefused(null);
+        $team = $this->teamOf($teamId);
+        $before = $this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people);
+        $target = $team->stepOfId($stepId);
         $decision = $this->transitionPolicy->checkMoveTo(
-            self::ticketStateOf($before),
-            $this->actorInTeam($teamId, $actor),
+            TurnInputs::ticketStateOf($before),
+            $team->actorInTeam($actor),
             $this->ruleQueries->rulesFor($teamId),
             $target,
             $this->stepQueries->moveTargetsFor($teamId),
         );
-        self::allowedTargetOf($decision);
+        self::refuseUnlessAllowed($decision);
         $isNeedsInputStep = self::NEEDS_INPUT === $target->coreCode();
         if (!$isNeedsInputStep && (null !== $waitingOnUserId || null !== $waitingOnLabel)) {
             throw new MoveRefused(null);
+        }
+        if ($isNeedsInputStep && null !== $waitingOnUserId) {
+            $this->refuseUnlessMember($waitingOnUserId, $organizationId);
         }
         $waitingOn = match (true) {
             !$isNeedsInputStep => null,
@@ -136,7 +142,24 @@ final readonly class MoveTicket
             default => WaitingOn::ofPerson($ticket->reporter()),
         };
 
-        $this->moveAndRecord($ticket, $before, $actor, $target, $waitingOn, null, $at);
+        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at);
+    }
+
+    private function teamOf(TeamId $teamId): MoveTeam
+    {
+        return new MoveTeam($this->stepQueries->stepsFor($teamId), $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId));
+    }
+
+    /**
+     * tkt_ticket.waiting_on_user_id has no foreign key, and who a ticket waits on may see it, so a person of another
+     * organization, or one who has left this one, is refused here. Membership alone counts, as a member with no org or
+     * team role may still be asked.
+     */
+    private function refuseUnlessMember(UserId $userId, OrganizationId $organizationId): void
+    {
+        if (!array_any($this->membershipQueries->organizationsOf($userId), static fn (OrganizationId $memberOf): bool => $memberOf->equals($organizationId))) {
+            throw new MoveRefused(null);
+        }
     }
 
     private function loadedTicket(OrganizationId $organizationId, string $key, int $expectedVersion): Ticket
@@ -156,6 +179,7 @@ final readonly class MoveTicket
 
     private function moveAndRecord(
         Ticket $ticket,
+        MoveTeam $team,
         TicketTurnSnapshot $before,
         UserId $actor,
         StepView $target,
@@ -173,7 +197,7 @@ final readonly class MoveTicket
         } catch (TicketVersionConflict $conflict) {
             throw new TicketChangedMeanwhile('The ticket was changed after it was read.', 0, $conflict);
         }
-        $overrideNote = $this->turnProjector->refreshFrom($this->ticketTurnSnapshots->of($ticket));
+        $overrideNote = $this->turnProjector->refreshFrom($this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people));
         $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $target->id(), $verb, $overrideNote, $at);
         $this->ticketEvents->publish(new TicketMoved(
             $ticket->organizationId()->toString(),
@@ -187,76 +211,10 @@ final readonly class MoveTicket
         ));
     }
 
-    private static function allowedTargetOf(Decision $decision): MoveTarget
+    private static function refuseUnlessAllowed(Decision $decision): void
     {
-        if (!$decision->isAllowed || null === $decision->moveTarget) {
+        if (!$decision->isAllowed) {
             throw new MoveRefused($decision->ruleNote?->template, $decision->ruleNote->people ?? []);
         }
-
-        return $decision->moveTarget;
-    }
-
-    /**
-     * A core target is the organization's step of that code; a step target, such as the step the ticket came from, must
-     * still be one of the team's steps, as a removed step takes no new moves.
-     */
-    private function targetStepOf(MoveTarget $target, TeamId $teamId): StepView
-    {
-        foreach ($this->stepQueries->stepsFor($teamId) as $step) {
-            if ($target->isCoreStep() ? $step->coreCode() === $target->coreCode : $step->id() === $target->stepId) {
-                return $step;
-            }
-        }
-
-        throw new MoveRefused(null);
-    }
-
-    private function stepOfTeam(string $stepId, TeamId $teamId): StepView
-    {
-        foreach ($this->stepQueries->stepsFor($teamId) as $step) {
-            if (strtolower($stepId) === $step->id()) {
-                return $step;
-            }
-        }
-
-        throw new MoveRefused(null);
-    }
-
-    /**
-     * Org roles grant no move, and viewers are not listed, so both get no team role.
-     */
-    private function actorInTeam(TeamId $teamId, UserId $actor): ActorInTeam
-    {
-        foreach ($this->teamPeopleQueries->namedPossibleAssigneesOf($teamId) as $person) {
-            if ($person->userId->equals($actor)) {
-                return new ActorInTeam(
-                    $actor,
-                    $person->isLead ? ActorInTeam::TEAM_ROLE_LEAD : ActorInTeam::TEAM_ROLE_MEMBER,
-                    $person->job->value,
-                );
-            }
-        }
-
-        return new ActorInTeam($actor);
-    }
-
-    private static function ticketStateOf(TicketTurnSnapshot $snapshot): TicketState
-    {
-        return TurnInputs::ticketState(
-            stepId: $snapshot->stepId,
-            coreCode: $snapshot->coreCode,
-            groupCode: $snapshot->groupCode,
-            teamId: $snapshot->teamId,
-            assigneeId: $snapshot->assigneeId,
-            reviewerId: $snapshot->reviewerId,
-            testerId: $snapshot->testerId,
-            pendingAssigneeId: $snapshot->pendingAssigneeId,
-            previousStepId: $snapshot->previousStepId,
-            reporterId: $snapshot->reporterId,
-            waitingOnUserId: $snapshot->waitingOnUserId,
-            waitingOnLabel: $snapshot->waitingOnLabel,
-            priority: $snapshot->priority,
-            release: $snapshot->release,
-        );
     }
 }

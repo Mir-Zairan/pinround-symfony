@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Ticketing;
 
+use App\Organization\Api\TeamPeopleQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -22,6 +23,7 @@ use App\Ticketing\Domain\TicketType;
 use App\Ticketing\Domain\Visibility;
 use App\Ticketing\Domain\WaitingOn;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
+use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -101,18 +103,20 @@ final class EntityTicketTurnSnapshotsTest extends KernelTestCase
             $this->setTurnColumnsOf($key);
         }
 
-        [$fromEntity, $fromRow] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($key, $stepId, $groupCode, $isNeedsInputStep, $waitingOn): array {
+        [$fromEntity, $fromTeamLists, $fromRow] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($key, $stepId, $groupCode, $isNeedsInputStep, $waitingOn): array {
             $ticket = $this->loaded($key);
             if (null !== $stepId) {
                 $ticket->move($stepId, $groupCode, $isNeedsInputStep, $waitingOn, new \DateTimeImmutable(self::MOVED_AT));
             }
             $fromEntity = $this->snapshots()->of($ticket);
+            $fromTeamLists = $this->snapshots()->ofTeamTicket($ticket, $this->stepQueries()->stepsFor(new TeamId(self::SHOP_TEAM)), $this->teamPeopleQueries()->namedPossibleAssigneesOf(new TeamId(self::SHOP_TEAM)));
             $this->entityManager()->flush();
 
-            return [$fromEntity, $this->turnQueries()->factsOf($ticket->id())];
+            return [$fromEntity, $fromTeamLists, $this->turnQueries()->factsOf($ticket->id())];
         });
 
         self::assertEquals($fromRow, $fromEntity);
+        self::assertEquals($fromRow, $fromTeamLists);
         self::assertSame(
             [$expectedStepId, $expectedCoreCode, $expectedGroupCode, self::SHOP_TEAM, self::LENA, 'Lena', [self::LENA, self::OMAR], [self::MIA]],
             [
@@ -202,6 +206,29 @@ final class EntityTicketTurnSnapshotsTest extends KernelTestCase
             [ShopTeamRows::TO_DO_STEP, null, 'todo', null, null, [], []],
             [$fromEntity->stepId, $fromEntity->coreCode, $fromEntity->groupCode, $fromEntity->teamId, $fromEntity->leadId, $fromEntity->developerIds, $fromEntity->testerIds],
         );
+    }
+
+    #[Test]
+    public function aTicketNoTeamOwnsGetsNoSnapshotFromTeamStepsAndPeople(): void
+    {
+        $key = $this->createdTicketKey();
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            'UPDATE tkt_ticket SET team_id = NULL WHERE key = ?',
+            [$key],
+        ));
+
+        $refusal = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($key): ?string {
+            $teamId = new TeamId(self::SHOP_TEAM);
+            try {
+                $this->snapshots()->ofTeamTicket($this->loaded($key), $this->stepQueries()->stepsFor($teamId), $this->teamPeopleQueries()->namedPossibleAssigneesOf($teamId));
+            } catch (\LogicException $noTeam) {
+                return $noTeam->getMessage();
+            }
+
+            return null;
+        });
+
+        self::assertSame('A snapshot from team steps and people is built only for a ticket a team owns.', $refusal);
     }
 
     #[Test]
@@ -365,6 +392,16 @@ final class EntityTicketTurnSnapshotsTest extends KernelTestCase
         self::assertInstanceOf(TicketTurnSnapshots::class, $snapshots);
 
         return $snapshots;
+    }
+
+    private function stepQueries(): StepQueries
+    {
+        return self::getContainer()->get(StepQueries::class);
+    }
+
+    private function teamPeopleQueries(): TeamPeopleQueries
+    {
+        return self::getContainer()->get(TeamPeopleQueries::class);
     }
 
     private function turnQueries(): TicketTurnQueries

@@ -42,7 +42,21 @@ final readonly class TicketTeamLookup
      */
     public function groupAndCoreCodeOf(string $stepId, ?TeamId $teamId): array
     {
-        $teamStep = $this->stepOf($stepId, $teamId);
+        return $this->groupAndCoreCodeAmong($stepId, null === $teamId ? [] : $this->stepQueries->stepsFor($teamId));
+    }
+
+    /**
+     * As groupAndCoreCodeOf, among team steps the caller has already read.
+     *
+     * @param list<StepView> $teamSteps StepQueries::stepsFor of the ticket's team; empty for a ticket with no team
+     *
+     * @return array{string, string|null} the group code and the core code
+     *
+     * @throws \LogicException when the organization of the open transaction has no such step
+     */
+    public function groupAndCoreCodeAmong(string $stepId, array $teamSteps): array
+    {
+        $teamStep = array_find($teamSteps, static fn (StepView $step): bool => $step->id() === $stepId);
         if (null !== $teamStep) {
             return [$teamStep->groupCode(), $teamStep->coreCode()];
         }
@@ -63,7 +77,21 @@ final readonly class TicketTeamLookup
      */
     public function peopleOf(TeamId $teamId): array
     {
-        $people = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
+        return self::peopleAmong($this->teamPeopleQueries->namedPossibleAssigneesOf($teamId));
+    }
+
+    /**
+     * As peopleOf, from the team's people the caller has already read.
+     *
+     * @param list<PossibleAssignee> $people TeamPeopleQueries::namedPossibleAssigneesOf of the ticket's team
+     *
+     * @return array{UserId, string, list<UserId>, list<UserId>} the lead, their display name, the developers and the
+     *                                                           testers, each in user id order
+     *
+     * @throws \LogicException when $people is empty or names no lead
+     */
+    public static function peopleAmong(array $people): array
+    {
         if ([] === $people) {
             throw new \LogicException('A ticket\'s team has no lead or member Identity knows, or is not a team of its organization.');
         }

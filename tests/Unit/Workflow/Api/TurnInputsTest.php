@@ -6,6 +6,8 @@ namespace App\Tests\Unit\Workflow\Api;
 
 use App\Insight\Api\TeamLoadQueries;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\TurnInputs;
 use PHPUnit\Framework\Attributes\Test;
@@ -41,6 +43,50 @@ final class TurnInputsTest extends TestCase
 
         self::assertSame(
             ['0197a3c0-0000-7000-8000-00000000c7a1', 'review', 'check', self::TEAM, self::OMAR, self::LENA, self::MIA, self::NOOR, '0197a3c0-0000-7000-8000-00000000c7a2', self::LENA, self::MIA, 'Supplier', 'major', '2.4'],
+            [
+                $state->stepId, $state->coreCode, $state->groupCode, $state->teamId?->toString(), $state->assigneeId?->toString(),
+                $state->reviewerId?->toString(), $state->testerId?->toString(), $state->pendingAssigneeId?->toString(), $state->previousStepId,
+                $state->reporterId?->toString(), $state->waitingOnUserId?->toString(), $state->waitingOnLabel, $state->priority, $state->release,
+            ],
+        );
+    }
+
+    #[Test]
+    public function theTicketStateOfASnapshotCarriesEachOfItsFieldsToTheSameField(): void
+    {
+        $snapshot = new TicketTurnSnapshot(
+            new TicketId('0197a3c0-0000-7000-8000-00000000c7b1'),
+            '0197a3c0-0000-7000-8000-00000000c721',
+            '0197a3c0-0000-7000-8000-00000000c7a1',
+            'review',
+            'check',
+            new TeamId(self::TEAM),
+            new UserId(self::LENA),
+            'Lena',
+            [new UserId(self::LENA), new UserId(self::OMAR)],
+            [new UserId(self::MIA)],
+            'all',
+            'major',
+            '2.4',
+            reporterId: new UserId('0197a3c0-0000-7000-8000-00000000c761'),
+            assigneeId: new UserId('0197a3c0-0000-7000-8000-00000000c762'),
+            pendingAssigneeId: new UserId('0197a3c0-0000-7000-8000-00000000c763'),
+            reviewerId: new UserId('0197a3c0-0000-7000-8000-00000000c764'),
+            testerId: new UserId('0197a3c0-0000-7000-8000-00000000c765'),
+            waitingOnUserId: new UserId('0197a3c0-0000-7000-8000-00000000c766'),
+            waitingOnLabel: 'Supplier',
+            previousStepId: '0197a3c0-0000-7000-8000-00000000c7a2',
+        );
+
+        $state = TurnInputs::ticketStateOf($snapshot);
+
+        self::assertSame(
+            [
+                '0197a3c0-0000-7000-8000-00000000c7a1', 'review', 'check', self::TEAM, '0197a3c0-0000-7000-8000-00000000c762',
+                '0197a3c0-0000-7000-8000-00000000c764', '0197a3c0-0000-7000-8000-00000000c765', '0197a3c0-0000-7000-8000-00000000c763',
+                '0197a3c0-0000-7000-8000-00000000c7a2', '0197a3c0-0000-7000-8000-00000000c761', '0197a3c0-0000-7000-8000-00000000c766',
+                'Supplier', 'major', '2.4',
+            ],
             [
                 $state->stepId, $state->coreCode, $state->groupCode, $state->teamId?->toString(), $state->assigneeId?->toString(),
                 $state->reviewerId?->toString(), $state->testerId?->toString(), $state->pendingAssigneeId?->toString(), $state->previousStepId,

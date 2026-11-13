@@ -50,22 +50,7 @@ final readonly class NowNextSentences
             return null;
         }
 
-        $ticket = TurnInputs::ticketState(
-            stepId: $snapshot->stepId,
-            coreCode: $snapshot->coreCode,
-            groupCode: $snapshot->groupCode,
-            teamId: $snapshot->teamId,
-            assigneeId: $snapshot->assigneeId,
-            reviewerId: $snapshot->reviewerId,
-            testerId: $snapshot->testerId,
-            pendingAssigneeId: $snapshot->pendingAssigneeId,
-            previousStepId: $snapshot->previousStepId,
-            reporterId: $snapshot->reporterId,
-            waitingOnUserId: $snapshot->waitingOnUserId,
-            waitingOnLabel: $snapshot->waitingOnLabel,
-            priority: $snapshot->priority,
-            release: $snapshot->release,
-        );
+        $ticket = TurnInputs::ticketStateOf($snapshot);
         $loads = $this->teamLoadQueries->loadsAndSavedTurnOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId);
         $team = TurnInputs::teamFacts($snapshot->leadId, $snapshot->leadDisplayName, $snapshot->developerIds, $snapshot->testerIds, $loads->waitingTurns);
         $turn = null === $loads->savedTurn ? $this->turnRules->turnFor($ticket, $team) : self::turnOf($loads->savedTurn);

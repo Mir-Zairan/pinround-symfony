@@ -10,7 +10,6 @@ use App\Insight\Application\Turn\TicketTurnSource;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\Ticketing\Api\TicketTurnQueries;
-use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TurnInputs;
 use Doctrine\DBAL\Connection;
 
@@ -52,7 +51,7 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
         );
 
         // No organization has a current release yet, and the quick check and questions come later in P03.
-        return new TicketTurnFacts($snapshot->ticketId, $snapshot->projectId, $this->ticketStateOf($snapshot), $team, $snapshot->visibility, isRiskCheck: $snapshot->isRiskCheck);
+        return new TicketTurnFacts($snapshot->ticketId, $snapshot->projectId, TurnInputs::ticketStateOf($snapshot), $team, $snapshot->visibility, isRiskCheck: $snapshot->isRiskCheck);
     }
 
     private function requireTransaction(): void
@@ -61,25 +60,5 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
         if (!$this->connection->isTransactionActive()) {
             throw new \LogicException('Turn facts for the projector are read in a transaction under the organization as tenant; none is open.');
         }
-    }
-
-    private function ticketStateOf(TicketTurnSnapshot $snapshot): TicketState
-    {
-        return TurnInputs::ticketState(
-            stepId: $snapshot->stepId,
-            coreCode: $snapshot->coreCode,
-            groupCode: $snapshot->groupCode,
-            teamId: $snapshot->teamId,
-            assigneeId: $snapshot->assigneeId,
-            reviewerId: $snapshot->reviewerId,
-            testerId: $snapshot->testerId,
-            pendingAssigneeId: $snapshot->pendingAssigneeId,
-            previousStepId: $snapshot->previousStepId,
-            reporterId: $snapshot->reporterId,
-            waitingOnUserId: $snapshot->waitingOnUserId,
-            waitingOnLabel: $snapshot->waitingOnLabel,
-            priority: $snapshot->priority,
-            release: $snapshot->release,
-        );
     }
 }
