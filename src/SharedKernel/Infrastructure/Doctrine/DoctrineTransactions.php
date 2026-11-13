@@ -15,6 +15,10 @@ final readonly class DoctrineTransactions implements Transactions
     {
     }
 
+    /**
+     * An entity manager an earlier run left closed is reset in place before BEGIN, so every repository's reference
+     * reopens and TenantFilterMiddleware marks the tenant filter of the rebuilt manager at that BEGIN.
+     */
     public function run(\Closure $write): mixed
     {
         // TenantConnection sets the tenant at BEGIN from TenantContext: without one, row-level security shows no rows.
@@ -26,10 +30,6 @@ final readonly class DoctrineTransactions implements Transactions
         if ($this->entityManager->getConnection()->isTransactionActive()) {
             throw new \LogicException('A transaction of its own must not run inside another transaction.');
         }
-
-        // A refusal thrown out of an earlier run in the same request closed the EntityManager; resetting the lazy
-        // service reopens the one every repository holds, so a read after a refused write still runs. Before the
-        // BEGIN below, where TenantFilterMiddleware marks the rebuilt manager's tenant filter.
         if (!$this->entityManager->isOpen()) {
             $this->doctrine->resetManager();
         }
