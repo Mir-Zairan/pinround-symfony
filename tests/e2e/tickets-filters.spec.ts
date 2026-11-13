@@ -61,35 +61,41 @@ test('typing a search narrows the list and replaces the address without a page l
   expect(await isSamePageLoad(page)).toBe(true);
 });
 
+// give-it-to.spec.ts and ticket-move.spec.ts make tickets in parallel, so one made between the first load and Back
+// grows the total. The journey is walked again until no ticket was made during it; a Back that keeps the filter still
+// fails every walk. The first openTickets stays outside the retry, so its skip on an empty database is not retried.
 test('a person chip filters the list, adds a history entry, and Back shows the whole list again', async ({ page }) => {
   await openTickets(page);
-  const total = page.locator('.tickets__total');
-  const totalBefore = await total.innerText();
-  const rowCountBefore = await page.locator('.tickets__row').count();
-  const omarChip = page.getByRole('group', { name: 'Assigned to' }).getByRole('link', { name: 'Omar', exact: true });
-  const omarId = await omarChip.getAttribute('data-person-chip');
-  const historyLengthBefore = await page.evaluate(() => window.history.length);
+  await expect(async () => {
+    await openTickets(page);
+    const total = page.locator('.tickets__total');
+    const totalBefore = await total.innerText();
+    const rowCountBefore = await page.locator('.tickets__row').count();
+    const omarChip = page.getByRole('group', { name: 'Assigned to' }).getByRole('link', { name: 'Omar', exact: true });
+    const omarId = await omarChip.getAttribute('data-person-chip');
+    const historyLengthBefore = await page.evaluate(() => window.history.length);
 
-  const loaded = listFrameLoaded(page);
-  await omarChip.click();
-  await loaded;
+    const loaded = listFrameLoaded(page);
+    await omarChip.click();
+    await loaded;
 
-  await expect(page).toHaveURL(new RegExp(`[?&]person=${omarId}(&|$)`));
-  await expect(page.getByRole('group', { name: 'Assigned to' }).getByRole('link', { name: 'Omar', exact: true })).toHaveAttribute('aria-current', 'true');
-  await expect(total).not.toHaveText(totalBefore);
-  const assignees = await page.locator('.tickets__row .tickets__assignee').evaluateAll((avatars) => avatars.map((avatar) => avatar.getAttribute('title')));
-  expect(assignees.length).toBeGreaterThan(0);
-  expect(assignees.length).toBeLessThan(rowCountBefore);
-  expect(new Set(assignees)).toEqual(new Set(['Assigned to Omar']));
-  expect(await page.evaluate(() => window.history.length)).toBe(historyLengthBefore + 1);
-  expect(await isSamePageLoad(page)).toBe(true);
+    await expect(page).toHaveURL(new RegExp(`[?&]person=${omarId}(&|$)`));
+    await expect(page.getByRole('group', { name: 'Assigned to' }).getByRole('link', { name: 'Omar', exact: true })).toHaveAttribute('aria-current', 'true');
+    await expect(total).not.toHaveText(totalBefore);
+    const assignees = await page.locator('.tickets__row .tickets__assignee').evaluateAll((avatars) => avatars.map((avatar) => avatar.getAttribute('title')));
+    expect(assignees.length).toBeGreaterThan(0);
+    expect(assignees.length).toBeLessThan(rowCountBefore);
+    expect(new Set(assignees)).toEqual(new Set(['Assigned to Omar']));
+    expect(await page.evaluate(() => window.history.length)).toBe(historyLengthBefore + 1);
+    expect(await isSamePageLoad(page)).toBe(true);
 
-  // Back to another list of this page reloads it, so the list and the address bar agree again.
-  await page.goBack({ waitUntil: 'networkidle' });
-  await expect(page).not.toHaveURL(/person=/);
-  await expect(total).toHaveText(totalBefore);
-  await expect(page.locator('.tickets__row')).toHaveCount(rowCountBefore);
-  await expect(page.getByRole('group', { name: 'Assigned to' }).getByRole('link', { name: 'Everyone', exact: true })).toHaveAttribute('aria-current', 'true');
+    // Back to another list of this page reloads it, so the list and the address bar agree again.
+    await page.goBack({ waitUntil: 'networkidle' });
+    await expect(page).not.toHaveURL(/person=/);
+    await expect(total).toHaveText(totalBefore);
+    await expect(page.locator('.tickets__row')).toHaveCount(rowCountBefore);
+    await expect(page.getByRole('group', { name: 'Assigned to' }).getByRole('link', { name: 'Everyone', exact: true })).toHaveAttribute('aria-current', 'true');
+  }).toPass({ intervals: [500, 1000] });
 });
 
 test('"Show done" adds the done tickets and reloads the rail, whose count changes, without a page load', async ({ page }) => {
