@@ -136,7 +136,7 @@ final class NextStepChoicesTest extends TestCase
         $lena = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
         $omar = new NextStepChoices($this->policy, new FixedStepQueries([]), new PlainVerbFor(), self::nowNext())->of($pageTurn, self::member(GuardFixtures::OMAR), true);
 
-        self::assertSame(['wait', 'check', 'doing', 'todo', 'done'], array_map(static fn (MoveChoiceGroup $group): string => $group->groupCode, $lena->groups));
+        self::assertSame(['todo', 'doing', 'check', 'wait', 'done'], array_map(static fn (MoveChoiceGroup $group): string => $group->groupCode, $lena->groups));
         $currentSteps = array_merge(...array_map(
             static fn (MoveChoiceGroup $group): array => array_values(array_filter($group->choices, static fn (MoveChoice $choice): bool => $choice->isCurrent)),
             $lena->groups,

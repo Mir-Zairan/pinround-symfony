@@ -602,13 +602,14 @@ final class TicketPageTest extends WebTestCase
 
             return;
         }
-        // In the order of the steps' positions, which addSteps numbers across groups: Needs input is step 0.
+        // The groups in their fixed order although addSteps numbers positions across groups from Needs input; inside a
+        // group by position, so To do (3) comes before Backlog (5).
         self::assertSame(
             [
-                ['Waiting', ['Needs input', 'On hold']],
-                ['Checking', ['Code review', 'Testing']],
-                ['Doing', ['In progress', 'Pairing']],
                 ['To do', ['To do', 'Backlog']],
+                ['Doing', ['In progress', 'Pairing']],
+                ['Checking', ['Code review', 'Testing']],
+                ['Waiting', ['Needs input', 'On hold']],
                 ['Done', ['Done']],
             ],
             $moveList->filter('.next-step-box__group')->each(static fn (Crawler $group): array => [

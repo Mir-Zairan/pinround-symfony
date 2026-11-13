@@ -40,10 +40,14 @@ interface TransitionPolicy
 
     /**
      * The "Move to another step…" list: only the team lead gets it, and not while a question is open; the steps are
-     * StepQueries::moveTargetsFor the ticket's team. Grouped in the order the steps come, the ticket's own step marked
-     * current. In progress → Testing stays in the list while review_before_test is on and is refused by checkMoveTo.
+     * StepQueries::moveTargetsFor the ticket's team. The groups come in their fixed order To do, Doing, Checking,
+     * Waiting, Done (ADR-0014), whatever order the steps come in, and a group with no step is left out; inside a group
+     * the steps come by position, a tie in the order given. The ticket's own step is marked current. In progress →
+     * Testing stays in the list while review_before_test is on and is refused by checkMoveTo.
      *
      * @param list<StepView> $steps StepQueries::moveTargetsFor the ticket's team
+     *
+     * @throws \InvalidArgumentException when a step's group code is not one of the five groups
      */
     public function moveChoices(TicketState $ticket, ActorInTeam $actor, array $steps): MoveChoices;
 

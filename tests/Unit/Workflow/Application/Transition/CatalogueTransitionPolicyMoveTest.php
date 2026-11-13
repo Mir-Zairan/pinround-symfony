@@ -160,7 +160,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
     }
 
     #[Test]
-    public function moveChoicesAreGroupedInTheOrderTheStepsComeWithTheCurrentStepMarked(): void
+    public function moveChoicesListTheFiveGroupsInTheirFixedOrderWithTheCurrentStepMarked(): void
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR);
 
@@ -169,21 +169,72 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
         self::assertNull($choices->ruleNote);
         self::assertSame(
             [
-                ['wait', 'Waiting', [['Needs input', false], ['On hold', false]]],
-                ['check', 'Checking', [['Code review', false], ['Testing', false], ['Design check', false]]],
-                ['doing', 'Doing', [['In progress', true]]],
                 ['todo', 'To do', [['Backlog', false], ['To do', false]]],
+                ['doing', 'Doing', [['In progress', true]]],
+                ['check', 'Checking', [['Code review', false], ['Testing', false], ['Design check', false]]],
+                ['wait', 'Waiting', [['Needs input', false], ['On hold', false]]],
                 ['done', 'Done', [['Done', false]]],
             ],
-            array_map(
-                static fn (MoveChoiceGroup $group): array => [
-                    $group->groupCode,
-                    $group->groupLabel,
-                    array_map(static fn (MoveChoice $choice): array => [$choice->step->name(), $choice->isCurrent], $group->choices),
-                ],
-                $choices->groups,
-            ),
+            self::groupsOf($choices->groups),
         );
+    }
+
+    /**
+     * The positions run across the groups out of group order (the Waiting step has the lowest), the steps inside a
+     * group come out of position order, and two Doing steps share a position, given with the higher id and the later
+     * name first, so only keeping the order they came in passes.
+     */
+    #[Test]
+    public function moveChoicesOrderGroupsByTheFixedGroupOrderAndStepsByPositionKeepingATieInTheOrderGiven(): void
+    {
+        $steps = [
+            new StepView('0190a000-0000-7000-8000-000000000201', 'Waiting on supplier', 'wait', 'Waiting', 0, 'team', null),
+            new StepView('0190a000-0000-7000-8000-000000000202', 'Ready to build', 'todo', 'To do', 5, 'team', null),
+            new StepView('0190a000-0000-7000-8000-000000000203', 'Done', 'done', 'Done', 7, 'core', 'done'),
+            new StepView('0190a000-0000-7000-8000-000000000204', 'To do', 'todo', 'To do', 1, 'core', 'todo'),
+            new StepView('0190a000-0000-7000-8000-000000000205', 'Testing', 'check', 'Checking', 4, 'core', 'test'),
+            new StepView('0190a000-0000-7000-8000-000000000206', 'Code review', 'check', 'Checking', 3, 'core', 'review'),
+            new StepView('0190a000-0000-7000-8000-000000000209', 'Pairing', 'doing', 'Doing', 2, 'team', null),
+            new StepView('0190a000-0000-7000-8000-000000000208', 'Build spike', 'doing', 'Doing', 2, 'team', null),
+        ];
+        $ticket = new TicketState($steps[5]->id(), 'review', 'check', GuardFixtures::ticket('todo', 'todo')->teamId);
+
+        $choices = GuardFixtures::policy()->moveChoices($ticket, GuardFixtures::lena(), $steps);
+
+        self::assertSame(
+            [
+                ['todo', 'To do', [['To do', false], ['Ready to build', false]]],
+                ['doing', 'Doing', [['Pairing', false], ['Build spike', false]]],
+                ['check', 'Checking', [['Code review', true], ['Testing', false]]],
+                ['wait', 'Waiting', [['Waiting on supplier', false]]],
+                ['done', 'Done', [['Done', false]]],
+            ],
+            self::groupsOf($choices->groups),
+        );
+    }
+
+    #[Test]
+    public function aGroupWithoutStepsIsLeftOutOfTheMoveChoices(): void
+    {
+        $steps = [
+            new StepView('0190a000-0000-7000-8000-000000000301', 'Done', 'done', 'Done', 7, 'core', 'done'),
+            new StepView('0190a000-0000-7000-8000-000000000302', 'To do', 'todo', 'To do', 1, 'core', 'todo'),
+        ];
+
+        $choices = GuardFixtures::policy()->moveChoices(GuardFixtures::ticket('todo', 'todo'), GuardFixtures::lena(), $steps);
+
+        self::assertSame(['todo', 'done'], array_map(static fn (MoveChoiceGroup $group): string => $group->groupCode, $choices->groups));
+    }
+
+    #[Test]
+    public function aStepWithAnUnknownGroupCodeIsRefusedLoudlyInTheMoveChoices(): void
+    {
+        $steps = [...GuardFixtures::steps(), new StepView('0190a000-0000-7000-8000-000000000401', 'Sideways', 'sideways', 'Sideways', 3, 'team', null)];
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('"sideways" is not a group.');
+
+        GuardFixtures::policy()->moveChoices(GuardFixtures::ticket('todo', 'todo'), GuardFixtures::lena(), $steps);
     }
 
     #[Test]
@@ -317,5 +368,22 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
         $decision = GuardFixtures::policy()->checkMoveTo($ticket, GuardFixtures::lena(), GuardFixtures::rules(reviewBeforeTest: false), GuardFixtures::steps()[0], []);
 
         self::assertFalse($decision->isAllowed);
+    }
+
+    /**
+     * @param list<MoveChoiceGroup> $groups
+     *
+     * @return list<array{string, string, list<array{string, bool}>}> each group's code, label and steps with whether each is current
+     */
+    private static function groupsOf(array $groups): array
+    {
+        return array_map(
+            static fn (MoveChoiceGroup $group): array => [
+                $group->groupCode,
+                $group->groupLabel,
+                array_map(static fn (MoveChoice $choice): array => [$choice->step->name(), $choice->isCurrent], $group->choices),
+            ],
+            $groups,
+        );
     }
 }
