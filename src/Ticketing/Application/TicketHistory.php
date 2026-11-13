@@ -43,4 +43,23 @@ interface TicketHistory
         ?string $overrideNote,
         \DateTimeImmutable $at,
     ): void;
+
+    /**
+     * Adds the "moved" row of a "Give it to…" in the caller's transaction, under the organization of its tenant, with the
+     * payload {"verb": "give_it_to", "assignee_id": <the person>}.
+     *
+     * @param string $fromStepId the wf_step id the ticket left; a give in To do leaves and enters the same step
+     * @param string $toStepId   the wf_step id the ticket is in now
+     *
+     * @throws \LogicException when no transaction is open
+     */
+    public function recordGiven(
+        OrganizationId $organizationId,
+        TicketId $ticketId,
+        UserId $actor,
+        string $fromStepId,
+        string $toStepId,
+        UserId $assignee,
+        \DateTimeImmutable $at,
+    ): void;
 }

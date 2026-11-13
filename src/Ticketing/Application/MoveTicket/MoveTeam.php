@@ -53,6 +53,14 @@ final readonly class MoveTeam
     }
 
     /**
+     * Whether the person is the team's lead or a member, who may be given its tickets; viewers are not listed.
+     */
+    public function hasPossibleAssignee(UserId $userId): bool
+    {
+        return array_any($this->people, static fn (PossibleAssignee $person): bool => $person->userId->equals($userId));
+    }
+
+    /**
      * Org roles grant no move, and viewers are not listed, so both get no team role.
      */
     public function actorInTeam(UserId $actor): ActorInTeam

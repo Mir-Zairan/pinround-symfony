@@ -333,6 +333,24 @@ final class Ticket implements TenantOwned
         $this->updatedAt = $movedAt;
     }
 
+    /**
+     * Makes the person the ticket's assignee; the caller has checked they may take it. A new assignee clears the stored
+     * reviewer, as NoSelfReview reads a stored reviewer equal to the assignee as the no-one-else fallback, and clears the
+     * stored tester when it is the new assignee. The same assignee given again keeps both.
+     */
+    public function giveTo(UserId $assignee, \DateTimeImmutable $givenAt): void
+    {
+        $assigneeId = $assignee->toString();
+        if ($assigneeId !== $this->assigneeId) {
+            $this->reviewerId = null;
+            if ($assigneeId === $this->testerId) {
+                $this->testerId = null;
+            }
+        }
+        $this->assigneeId = $assigneeId;
+        $this->updatedAt = $givenAt;
+    }
+
     private static function checkedTitle(string $title): string
     {
         $trimmedTitle = trim($title);

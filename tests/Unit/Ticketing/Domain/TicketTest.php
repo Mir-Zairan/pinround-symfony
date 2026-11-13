@@ -191,6 +191,50 @@ final class TicketTest extends TestCase
     }
 
     #[Test]
+    public function givingTheTicketSetsTheAssigneeAndTheGiveTime(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', null);
+        $givenAt = new \DateTimeImmutable('2027-03-16 09:30:00+00:00');
+
+        $ticket->giveTo(new UserId(self::OMAR), $givenAt);
+
+        self::assertSame([self::OMAR, self::BACKLOG_STEP, null, $givenAt], [$ticket->assignee()?->toString(), $ticket->stepId(), $ticket->previousStepId(), $ticket->updatedAt()]);
+    }
+
+    #[Test]
+    public function aNewAssigneeClearsTheStoredReviewerAndKeepsAnotherTester(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $ticket->move(self::TESTING_STEP, 'check', false, null, new \DateTimeImmutable('2027-03-16 09:30:00+00:00'), new UserId(self::LENA), new UserId(self::MIA));
+
+        $ticket->giveTo(new UserId(self::LENA), new \DateTimeImmutable('2027-03-17 08:00:00+00:00'));
+
+        self::assertSame([self::LENA, null, self::MIA], [$ticket->assignee()?->toString(), $ticket->reviewer()?->toString(), $ticket->tester()?->toString()]);
+    }
+
+    #[Test]
+    public function aNewAssigneeWhoIsTheStoredTesterClearsTheTester(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $ticket->move(self::TESTING_STEP, 'check', false, null, new \DateTimeImmutable('2027-03-16 09:30:00+00:00'), new UserId(self::LENA), new UserId(self::MIA));
+
+        $ticket->giveTo(new UserId(self::MIA), new \DateTimeImmutable('2027-03-17 08:00:00+00:00'));
+
+        self::assertSame([self::MIA, null, null], [$ticket->assignee()?->toString(), $ticket->reviewer()?->toString(), $ticket->tester()?->toString()]);
+    }
+
+    #[Test]
+    public function givingTheTicketToItsAssigneeAgainKeepsTheReviewerAndTester(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $ticket->move(self::TESTING_STEP, 'check', false, null, new \DateTimeImmutable('2027-03-16 09:30:00+00:00'), new UserId(self::LENA), new UserId(self::MIA));
+
+        $ticket->giveTo(new UserId(self::OMAR), new \DateTimeImmutable('2027-03-17 08:00:00+00:00'));
+
+        self::assertSame([self::OMAR, self::LENA, self::MIA], [$ticket->assignee()?->toString(), $ticket->reviewer()?->toString(), $ticket->tester()?->toString()]);
+    }
+
+    #[Test]
     public function enteringNeedsInputWaitsOnATrimmedLabel(): void
     {
         $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));

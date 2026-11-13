@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Ticketing\Api\Event;
 
 /**
- * A ticket was moved from one step of its team to another.
+ * A ticket was moved from one step of its team to another, or given to someone in To do, which leaves and enters the
+ * same step (a TicketAssigned comes with it).
  */
 final readonly class TicketMoved implements TicketEvent
 {
