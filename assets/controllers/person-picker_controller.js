@@ -2,10 +2,12 @@ import { Controller } from '@hotwired/stimulus';
 import { getComponent } from '@symfony/ux-live-component';
 
 // The person picker inside a `dialog` controller, which opens it as a modal, keeps Tab inside, closes it on Escape and
-// gives focus back to the chip. This one asks the PersonPickerSearch component for its rows when the dialog opens
-// (its own request, so the page renders none) with the person the page filters by now, which the parent's re-renders
-// keep in the pressedPerson value so the search never re-renders with them; it puts focus in the search field and
-// moves focus between the rows with the arrow keys; Enter or a click on a row emits the pick up to the parent component.
+// gives focus back to whatever trigger opened it (the Filter chip or the Assign button). This one asks the
+// PersonPickerSearch component for its rows when the dialog opens (its own request, so the page renders none) with the
+// person pressed now, which the parent's re-renders keep in the pressedPerson value so the search never re-renders with
+// them; it puts focus in the search field and moves focus between the rows with the arrow keys. Enter or a click on a
+// row picks: in Filter mode the row emits the pick up to the parent component; in Assign mode it submits the give form,
+// outside the dialog, with the person's id.
 export default class extends Controller {
   static targets = ['search', 'row'];
   static values = { pressedPerson: String };

@@ -5,15 +5,13 @@ declare(strict_types=1);
 namespace App\Ticketing\Application;
 
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Application\MoveTicket\MoveTicket;
 
 /**
  * One move of a ticket as its "moved" row of tkt_ticket_event holds it, for the ticket page's What happened.
  */
 final readonly class TicketHistoryEntry
 {
-    /** The verb code of a "Give it to…" move, whose payload names the person in assignee_id. */
-    public const string GIVE_IT_TO = 'give_it_to';
-
     /**
      * @param string|null $fromStepId the wf_step id the ticket left; a give in To do leaves and enters the same step
      * @param string      $toStepId   the wf_step id the ticket entered
@@ -32,6 +30,6 @@ final readonly class TicketHistoryEntry
 
     public function isGive(): bool
     {
-        return self::GIVE_IT_TO === $this->verb;
+        return MoveTicket::GIVE_IT_TO === $this->verb;
     }
 }

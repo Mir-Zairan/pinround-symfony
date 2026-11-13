@@ -10,7 +10,8 @@ use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
-use App\Ticketing\Application\TicketHistoryEntry;
+use App\Ticketing\Application\MoveTicket\MoveTicket;
+use App\Ticketing\Application\TicketHistory;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
 use App\Ticketing\UI\TicketPageParts;
@@ -618,7 +619,7 @@ final class TicketPageTest extends WebTestCase
         self::assertNotSame('', trim($box->filter('.next-step-box__sentence')->text()));
         self::assertSame(
             array_map(static fn (string $verb, string $label): array => ['/t/'.$key.'/move/'.$verb, $label], array_keys($expectedVerbs), $expectedVerbs),
-            $box->filter('.next-step-box__verbs form')->each(static fn (Crawler $form): array => [(string) $form->attr('action'), $form->filter('button')->text()]),
+            $box->filter('.next-step-box__verbs form:not(#give-it-to-form)')->each(static fn (Crawler $form): array => [(string) $form->attr('action'), $form->filter('button')->text()]),
         );
         // Drive is off, so only a form that opts in is posted by Turbo and gets the move's Turbo Stream answer.
         self::assertCount($page->filter('form[action*="/move"]')->count(), $page->filter('form[action*="/move"][data-turbo="true"]'));
@@ -627,7 +628,7 @@ final class TicketPageTest extends WebTestCase
         self::assertSame(array_fill(0, $moveForms->count(), MoveToasts::MOVE_FAILED), $moveForms->each(static fn (Crawler $form): ?string => $form->attr('data-failed-toast')));
         $moveList = $box->filter('details.next-step-box__move-to');
         self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog#needs-input-'.$this->stepsByCore['input']));
-        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog'));
+        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog:not(#give-it-to-picker)'));
         if (!$hasMoveList) {
             self::assertCount(0, $moveList);
             self::assertCount(\count($expectedVerbs), $page->filter('form[action*="/move"]'));
@@ -799,11 +800,11 @@ final class TicketPageTest extends WebTestCase
         $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'reporter' => 'Raj', 'assignee' => 'Omar']);
         $this->addHistoryRow($key, 'created', 'Raj', null, 'backlog', [], '2026-11-04 23:30:00+00');
         $this->addHistoryRow($key, 'moved', 'Lena', 'backlog', 'todo', ['verb' => 'plan'], '2026-11-05 08:00:00+00');
-        $this->addHistoryRow($key, 'moved', 'Lena', 'todo', 'todo', ['verb' => TicketHistoryEntry::GIVE_IT_TO, 'assignee_id' => $this->people['Omar']->id()->toString()], '2026-11-05 09:00:00+00');
+        $this->addHistoryRow($key, 'moved', 'Lena', 'todo', 'todo', ['verb' => MoveTicket::GIVE_IT_TO, TicketHistory::GIVEN_TO_PAYLOAD_KEY => $this->people['Omar']->id()->toString()], '2026-11-05 09:00:00+00');
         $this->addHistoryRow($key, 'moved', 'Omar', 'todo', 'progress', ['verb' => 'start'], '2026-11-05 10:00:00+00');
         $this->addHistoryRow($key, 'moved', 'Omar', 'progress', 'review', ['verb' => 'ready'], '2026-11-06 09:00:00+00');
         $this->addHistoryRow($key, 'moved', 'Lena', 'review', 'test', ['verb' => 'approve'], '2026-11-06 11:30:00+00');
-        $this->addHistoryRow($key, 'moved', 'Mia', 'test', 'test', ['verb' => TicketHistoryEntry::GIVE_IT_TO, 'assignee_id' => $this->people['Mia']->id()->toString()], '2026-11-06 11:59:30+00');
+        $this->addHistoryRow($key, 'moved', 'Mia', 'test', 'test', ['verb' => MoveTicket::GIVE_IT_TO, TicketHistory::GIVEN_TO_PAYLOAD_KEY => $this->people['Mia']->id()->toString()], '2026-11-06 11:59:30+00');
         $this->addHistoryRow($key, 'moved', 'Sara', 'test', 'progress', [], '2026-11-06 11:59:30+00');
         $this->logIn($this->client, $this->people['Omar']);
 

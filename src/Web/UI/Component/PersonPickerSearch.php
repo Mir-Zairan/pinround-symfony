@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Web\UI\Component;
 
-use App\Insight\Api\TicketViewer;
 use App\Insight\Api\WaitingTurnCounts;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
@@ -16,6 +15,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\Ticketing\Api\AssigneeTicketCounts;
 use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\TicketVisibilities;
+use App\Web\UI\TicketViewers;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
@@ -188,7 +188,7 @@ final class PersonPickerSearch
         $projectId = '' === $this->projectId ? null : $this->projectId;
         if (PersonPickerMode::Assign === $this->mode) {
             $waitingCounts = $this->waitingTurnCounts->waitingCountsOf(
-                new TicketViewer($visibility->organizationId(), $visibility->viewerId(), $visibility->teamIds(), $visibility->isAdmin(), $visibility->isTriager()),
+                TicketViewers::of($visibility),
                 $userIds,
                 new TeamId($this->team),
                 $projectId,

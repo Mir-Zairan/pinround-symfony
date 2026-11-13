@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Web\UI\Team;
 
-use App\Insight\Api\TicketViewer;
 use App\Insight\Api\WaitingTurnCounts;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\MemberJob;
@@ -12,6 +11,7 @@ use App\Organization\Api\PossibleAssignee;
 use App\Organization\Api\TeamPeopleQueries;
 use App\SharedKernel\Domain\TeamId;
 use App\Ticketing\Api\TicketVisibilities;
+use App\Web\UI\TicketViewers;
 
 /**
  * The People section of the Team page (FR-ORG-07, FR-ORG-08; prototype "Team: people and workload"): the team's lead
@@ -45,7 +45,7 @@ final readonly class TeamWorkloads
 
         $visibility = $this->ticketVisibilities->of($viewer->organizationId(), $viewer->userId());
         $counts = $this->waitingTurnCounts->waitingCountsOf(
-            new TicketViewer($visibility->organizationId(), $visibility->viewerId(), $visibility->teamIds(), $visibility->isAdmin(), $visibility->isTriager()),
+            TicketViewers::of($visibility),
             array_map(static fn (PossibleAssignee $person) => $person->userId, $people),
             $teamId,
             null,

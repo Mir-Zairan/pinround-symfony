@@ -87,7 +87,7 @@ final class PersonPicker
             throw new \InvalidArgumentException('A PersonPicker needs a trigger label.');
         }
         if (PersonPickerMode::Filter === $this->mode && '' === $this->pickedEvent) {
-            throw new \InvalidArgumentException('A PersonPicker needs a trigger label and the event its rows emit.');
+            throw new \InvalidArgumentException('A filter PersonPicker needs the event its rows emit.');
         }
         if (PersonPickerMode::Assign === $this->mode && ('' === trim($this->ticketKey) || '' === $this->pickForm || '' === $this->pickField)) {
             throw new \InvalidArgumentException('An assign PersonPicker needs the ticket key, the form its rows submit and the field they fill.');

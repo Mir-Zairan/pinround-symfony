@@ -172,7 +172,7 @@ final class PersonPickerComponentTest extends KernelTestCase
         yield 'a project key for the project id' => [['projectId' => 'SHOP'], 'project must be a canonical uuid'];
         yield 'a pressed person that is no uuid' => [['pressedPerson' => 'eva'], 'pressed person must be a canonical uuid'];
         yield 'a blank trigger label' => [['triggerLabel' => ' '], 'needs a trigger label'];
-        yield 'no picked event' => [['pickedEvent' => ''], 'needs a trigger label and the event'];
+        yield 'no picked event' => [['pickedEvent' => ''], 'filter PersonPicker needs the event its rows emit'];
     }
 
     /**

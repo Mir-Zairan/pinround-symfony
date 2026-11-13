@@ -13,6 +13,9 @@ use App\SharedKernel\Domain\UserId;
  */
 interface TicketHistory
 {
+    /** The payload key of a give's "moved" row that names the person given the ticket; its verb is MoveTicket::GIVE_IT_TO. */
+    public const string GIVEN_TO_PAYLOAD_KEY = 'assignee_id';
+
     /**
      * Adds the "created" row in the caller's transaction; the ticket must be saved before, as the row points at it.
      *

@@ -7,6 +7,7 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Application\TicketHistory;
 use App\Ticketing\Application\TicketHistoryEntries;
 use App\Ticketing\Application\TicketHistoryEntry;
 use Doctrine\DBAL\Connection;
@@ -17,7 +18,7 @@ use Doctrine\DBAL\Connection;
  */
 final readonly class DbalTicketHistoryEntries implements TicketHistoryEntries
 {
-    public const string LATEST_SQL = "SELECT id, actor_id, from_step, to_step, payload ->> 'verb' AS verb, payload ->> 'assignee_id' AS given_to_id, at"
+    public const string LATEST_SQL = "SELECT id, actor_id, from_step, to_step, payload ->> 'verb' AS verb, payload ->> '".TicketHistory::GIVEN_TO_PAYLOAD_KEY."' AS given_to_id, at"
         .' FROM tkt_ticket_event'
         .' WHERE organization_id = CAST(:organization AS uuid) AND ticket_id = CAST(:ticket AS uuid)'
         .' AND at >= CAST(:ticket_created_at AS timestamptz) AND type = \''.DbalTicketHistory::MOVED.'\''

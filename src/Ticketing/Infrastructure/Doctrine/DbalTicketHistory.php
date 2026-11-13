@@ -53,7 +53,7 @@ final readonly class DbalTicketHistory implements TicketHistory
         UserId $assignee,
         \DateTimeImmutable $at,
     ): void {
-        $payload = ['verb' => MoveTicket::GIVE_IT_TO, 'assignee_id' => $assignee->toString()];
+        $payload = ['verb' => MoveTicket::GIVE_IT_TO, self::GIVEN_TO_PAYLOAD_KEY => $assignee->toString()];
         $this->insertEvent($organizationId, $ticketId, $actor, self::MOVED, $fromStepId, $toStepId, $payload, $at);
     }
 

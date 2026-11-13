@@ -85,10 +85,10 @@ final readonly class MoveTicket
             throw new MoveRefused(null);
         }
         $team = $this->teamOf($teamId);
-        [$before, $waitingTurns, $teamFacts, $target] = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, $verb);
-        $waitingOn = self::NEEDS_INPUT === $target->coreCode() ? $this->waitingOnReporter($ticket) : null;
+        $allowed = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, $verb);
+        $waitingOn = self::NEEDS_INPUT === $allowed->target->coreCode() ? $this->waitingOnReporter($ticket) : null;
 
-        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, $verb, $at, $waitingTurns, $teamFacts);
+        $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts);
     }
 
     /**
@@ -106,7 +106,8 @@ final readonly class MoveTicket
         $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
         $teamId = $ticket->team() ?? throw new MoveRefused(null);
         $team = $this->teamOf($teamId);
-        [$before, $waitingTurns, , $target] = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, self::GIVE_IT_TO);
+        $allowed = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, self::GIVE_IT_TO);
+        $target = $allowed->target;
         if (!$team->hasPossibleAssignee($assignee)) {
             throw new MoveRefused(self::ASSIGNEE_NOT_IN_TEAM_NOTE);
         }
@@ -120,10 +121,10 @@ final readonly class MoveTicket
         }
         $ticket->giveTo($assignee, $at);
 
-        $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), self::GIVE_IT_TO, $assignee, $at, $waitingTurns);
+        $this->saveAndRecord($ticket, $team, $allowed->before, $actor, $fromStepId, $target->id(), self::GIVE_IT_TO, $assignee, $at, $allowed->waitingTurns);
         $this->ticketEvents->publish(new TicketAssigned(
             $ticket->organizationId()->toString(),
-            $before->ticketId->toString(),
+            $allowed->before->ticketId->toString(),
             $ticket->key()->toString(),
             $previousAssignee?->toString(),
             $assignee->toString(),
@@ -133,14 +134,9 @@ final readonly class MoveTicket
     }
 
     /**
-     * @return array{TicketTurnSnapshot, array<string, array<string, int>>, TeamFacts, StepView} the snapshot before the
-     *                                                                                           move, the team's waiting
-     *                                                                                           turns and facts read for
-     *                                                                                           it, and the target step
-     *
      * @throws MoveRefused when the policy refuses the verb, or its target is not a step of the team
      */
-    private function allowedVerbMoveOf(Ticket $ticket, TeamId $teamId, MoveTeam $team, UserId $actor, string $verb): array
+    private function allowedVerbMoveOf(Ticket $ticket, TeamId $teamId, MoveTeam $team, UserId $actor, string $verb): AllowedVerbMove
     {
         $before = $this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people);
         $waitingTurns = $this->waitingTurnsOf($before);
@@ -154,7 +150,12 @@ final readonly class MoveTicket
         );
         self::refuseUnlessAllowed($decision);
 
-        return [$before, $waitingTurns, $teamFacts, $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.'))];
+        return new AllowedVerbMove(
+            $before,
+            $waitingTurns,
+            $teamFacts,
+            $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.')),
+        );
     }
 
     /**
