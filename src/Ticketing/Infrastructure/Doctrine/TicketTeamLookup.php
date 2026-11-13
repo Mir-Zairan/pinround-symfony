@@ -33,18 +33,21 @@ final readonly class TicketTeamLookup
     }
 
     /**
-     * No query when the team's people are cached. A developer or tester Identity does not know is left out.
+     * No query when the team's people are cached. A developer or tester Identity does not know is left out. The cache
+     * is shared, so a caller that saves the answer can save people a SetTeamRole has just changed (the window is in
+     * TicketTurnQueries::factsOf).
      *
      * @return array{UserId, string, list<UserId>, list<UserId>} the lead, their display name, the developers and the
      *                                                           testers, each in user id order
      *
-     * @throws \LogicException when the team is not a team of the organization, or Identity does not know its lead
+     * @throws \LogicException when the team has no lead or member Identity knows, or is not a team of the organization;
+     *                         or Identity does not know its lead
      */
     public function peopleOf(TeamId $teamId): array
     {
         $people = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
         if ([] === $people) {
-            throw new \LogicException('A ticket\'s team is not a team of its organization.');
+            throw new \LogicException('A ticket\'s team has no lead or member Identity knows, or is not a team of its organization.');
         }
         $lead = array_find($people, static fn (PossibleAssignee $person): bool => $person->isLead)
             ?? throw new \LogicException('The lead of a ticket\'s team is no user.');

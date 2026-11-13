@@ -258,27 +258,6 @@ final class DbalTeamQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function peopleByJobGivesTheLeadAndMembersByJobInIdOrderWithoutViewers(): void
-    {
-        self::assertSame(
-            ['developer' => [self::LENA, self::OMAR], 'tester' => [self::MIA], 'other' => []],
-            $this->peopleByJobAs(self::ACME_FOODS, self::ACME_SHOP),
-        );
-        self::assertSame(['developer' => [], 'tester' => [], 'other' => [self::OMAR]], $this->peopleByJobAs(self::ACME_FOODS, self::ACME_MOBILE));
-    }
-
-    #[Test]
-    public function peopleByJobFindsNoOneForATeamOfAnotherOrganizationAnUnknownTeamOrNoTenant(): void
-    {
-        $noOne = ['developer' => [], 'tester' => [], 'other' => []];
-        // Under Beta Bakery itself Mia develops in Checkout, so the empty lists below come from row-level security.
-        self::assertSame(['developer' => [self::MIA], 'tester' => [], 'other' => []], $this->peopleByJobAs(self::BETA_BAKERY, self::BETA_CHECKOUT));
-        self::assertSame($noOne, $this->peopleByJobAs(self::ACME_FOODS, self::BETA_CHECKOUT));
-        self::assertSame($noOne, $this->peopleByJobAs(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000005df'));
-        self::assertSame($noOne, $this->peopleByJobAs(null, self::ACME_SHOP));
-    }
-
-    #[Test]
     public function possibleAssigneesOfGiveEachAskedTeamsLeadAndMembersInIdOrderWithoutViewers(): void
     {
         // Payments has a lead_user_id but no team member rows, so it answers with an empty list.
@@ -347,19 +326,6 @@ final class DbalTeamQueriesTest extends KernelTestCase
     private function jobAs(string $tenantId, string $teamId, string $userId): ?MemberJob
     {
         return $this->transactions()->rolledBackAs($tenantId, fn (): ?MemberJob => $this->queries()->jobOf(new TeamId($teamId), new UserId($userId)));
-    }
-
-    /**
-     * @return array<string, list<string>> user id strings by job
-     */
-    private function peopleByJobAs(?string $tenantId, string $teamId): array
-    {
-        $read = fn (): array => array_map(
-            static fn (array $userIds): array => array_map(static fn (UserId $userId): string => $userId->toString(), $userIds),
-            $this->queries()->peopleByJob(new TeamId($teamId)),
-        );
-
-        return null === $tenantId ? $read() : $this->transactions()->rolledBackAs($tenantId, $read);
     }
 
     /**

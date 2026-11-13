@@ -165,7 +165,7 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         $this->teamPeopleCache()->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessageIsOrContains('A ticket\'s team is not a team of its organization.');
+        $this->expectExceptionMessageIsOrContains('A ticket\'s team has no lead or member Identity knows, or is not a team of its organization.');
         $this->factsAs(self::ACME_FOODS, $ticketId);
     }
 

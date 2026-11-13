@@ -61,17 +61,6 @@ interface TeamQueries
     public function leadOf(TeamId $teamId): ?UserId;
 
     /**
-     * One query, for whose turn it is: the team's lead and members by job, each list in user id order; viewers are
-     * left out, as they cannot move tickets. Every job is a key, with an empty list when no one has it, and every key
-     * is empty for a team that is unknown or belongs to another organization.
-     *
-     * @return array{developer: list<UserId>, tester: list<UserId>, other: list<UserId>} keyed by MemberJob's values
-     *
-     * @throws \LogicException when a stored job is not one of MemberJob's values
-     */
-    public function peopleByJob(TeamId $teamId): array;
-
-    /**
      * One query, for an assignee picker over several teams: each team's lead and members, in user id order; viewers
      * are left out, as they cannot move tickets. Every asked team is a key, with an empty list for a team that is
      * unknown or belongs to another organization, and an empty $teamIds runs no query.
