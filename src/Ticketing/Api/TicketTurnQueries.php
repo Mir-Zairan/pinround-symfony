@@ -25,7 +25,7 @@ interface TicketTurnQueries
      * clear keeps them cached until the relayed TeamRoleChanged is handled in worker-notify (the outbox relay, then
      * worker-notify: under a second normally, longer while either is behind or down), as does an entry the clear
      * failed to drop. At worst, when InvalidateTeamPeopleCacheHandler runs out of retries and TeamRoleChanged lands in
-     * messenger_failed, the entry stays until its one-day lifetime (the cache.team_people pool) runs out or the failed
+     * messenger_failed, the entry stays until its one-day lifetime (the cache.team_people pool's default_lifetime, 86400 s) runs out or the failed
      * message is retried. A renamed lead's name lags until the relayed UserRenamed is handled. A turn row saved from
      * such an answer stays until the ticket's next refresh, as nothing refreshes a team's turn rows on TeamRoleChanged.
      *

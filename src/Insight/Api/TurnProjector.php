@@ -39,8 +39,9 @@ interface TurnProjector
      * would for that snapshot. Reads no ticket. The caller vouches that the snapshot is the ticket as it stands in its
      * open transaction, after its change; a stale snapshot saves a stale turn row and count until the next refresh.
      * A ticket the snapshot gives no team has its row deleted and counts nowhere. The snapshot carries no organization:
-     * one of a ticket the tenant's organization does not have fails on the first write with DBAL's
-     * ForeignKeyConstraintViolationException, writing nothing, and the change must roll back.
+     * one with a team, of a ticket the tenant's organization does not have, fails on the first write with DBAL's
+     * ForeignKeyConstraintViolationException, writing nothing, and the change must roll back; one with no team only
+     * deletes the tenant's rows for that ticket id, which match none, and returns null without an error.
      *
      * @param array<string, array<string, int>>|null $waitingTurns the reviews and tests waiting for the snapshot's
      *                                                             developers and testers, as TeamLoadQueries::waitingTurnsOf
