@@ -141,6 +141,8 @@ services:
     App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
     App\Insight\Api\TeamLoadQueries: '@App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries'
     App\Insight\Api\WaitingTurnCounts: '@App\Insight\Infrastructure\Doctrine\DbalWaitingTurnCounts'
+    App\Insight\Api\HomeQueries: '@App\Insight\Application\HomeQueriesService'
+    App\Insight\Application\WhoseTurnRows: '@App\Insight\Infrastructure\Doctrine\DbalWhoseTurnRows'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -247,6 +249,10 @@ when@test:
         # No page shows waiting counts before the "Give it to…" picker and the Team page; the tests get it as a page would.
         test.insight_waiting_turn_counts:
             alias: App\Insight\Api\WaitingTurnCounts
+            public: true
+        # No page shows Whose turn before its controller; DbalWhoseTurnRowsTest gets it as a page would.
+        test.insight_home_queries:
+            alias: App\Insight\Api\HomeQueries
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
