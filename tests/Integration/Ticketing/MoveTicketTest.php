@@ -29,8 +29,17 @@ use App\Ticketing\Domain\Tickets;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketHistory;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
 use App\Ticketing\Infrastructure\Messenger\MessengerTicketEvents;
+use App\Workflow\Api\ActorInTeam;
+use App\Workflow\Api\Availability;
+use App\Workflow\Api\Decision;
+use App\Workflow\Api\MoveChoices;
+use App\Workflow\Api\MoveTarget;
 use App\Workflow\Api\RuleQueries;
+use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\StepQueries;
+use App\Workflow\Api\StepView;
+use App\Workflow\Api\TeamFacts;
+use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionPolicy;
 use App\Workflow\Api\TurnInputs;
 use Doctrine\DBAL\Connection;
@@ -336,10 +345,7 @@ final class MoveTicketTest extends KernelTestCase
     #[Test]
     public function aPersonWhoLeftTheOrganizationIsRefusedToWaitOn(): void
     {
-        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
-            'DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?',
-            [self::ACME_FOODS, self::RAJ],
-        ));
+        $this->removeMembershipOf(self::RAJ);
         $stateBefore = $this->storedState();
 
         $refusal = $this->refusalOf(fn () => $this->moveTo(self::LENA, self::NEEDS_INPUT_STEP, $stateBefore['version'], new UserId(self::RAJ)));
@@ -348,6 +354,57 @@ final class MoveTicketTest extends KernelTestCase
         self::assertNull($refusal->ruleNoteTemplate);
         self::assertSame([], $refusal->ruleNotePeople);
         self::assertSame($stateBefore, $this->storedState());
+    }
+
+    #[Test]
+    public function aReporterWhoLeftTheOrganizationIsRefusedToWaitOnWhenNobodyIsNamed(): void
+    {
+        $this->removeMembershipOf(self::MIA);
+        $stateBefore = $this->storedState();
+
+        $refusal = $this->refusalOf(fn () => $this->moveTo(self::LENA, self::NEEDS_INPUT_STEP, $stateBefore['version']));
+
+        self::assertInstanceOf(MoveRefused::class, $refusal);
+        self::assertNull($refusal->ruleNoteTemplate);
+        self::assertSame([], $refusal->ruleNotePeople);
+        self::assertSame($stateBefore, $this->storedState());
+        self::assertSame([null, null], $this->waitingOn());
+    }
+
+    /**
+     * No verb of the catalogue leads to Needs input yet, so a policy that allows one stands in for the verb that will.
+     */
+    #[Test]
+    public function aVerbMoveToNeedsInputWaitsOnTheReporterOnlyWhileTheyAreAMember(): void
+    {
+        $moveTicket = $this->moveTicketWith(new DoctrineTickets($this->entityManager()), $this->policyAllowingEveryVerbToNeedsInput());
+        $verbMove = fn (int $expectedVersion) => $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $moveTicket->move(
+            new OrganizationId(self::ACME_FOODS),
+            new UserId(self::LENA),
+            self::KEY,
+            'ask_for_input',
+            $expectedVersion,
+            new \DateTimeImmutable(self::MOVED_AT),
+        ));
+        $this->removeMembershipOf(self::MIA);
+        $stateBefore = $this->storedState();
+
+        $refusal = $this->refusalOf(static fn () => $verbMove($stateBefore['version']));
+
+        self::assertInstanceOf(MoveRefused::class, $refusal);
+        self::assertNull($refusal->ruleNoteTemplate);
+        self::assertSame($stateBefore, $this->storedState());
+        self::assertSame([null, null], $this->waitingOn());
+
+        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
+            "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, '{}', '2027-03-15 10:00:00+00')",
+            [self::ACME_FOODS, self::MIA],
+        ));
+
+        $verbMove($stateBefore['version']);
+
+        self::assertSame([self::NEEDS_INPUT_STEP, $stateBefore['version'] + 1], $this->stepAndVersion());
+        self::assertSame([self::MIA, null], $this->waitingOn());
     }
 
     /**
@@ -592,6 +649,23 @@ final class MoveTicketTest extends KernelTestCase
         self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
         // Nine, not eight: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
         self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
+    }
+
+    /**
+     * With nobody named the ticket waits on Mia, its reporter, whose membership is read as a named person's is.
+     */
+    #[Test]
+    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsNineQueriesBesideItsSavepoints(): void
+    {
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $statements = $this->statementsOfAWarmMove(
+            fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::IN_PROGRESS_STEP, $versionBefore, null, null, new \DateTimeImmutable(self::MOVED_AT)),
+            fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
+        );
+
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::SAVED, self::WAITING_TURNS, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the reporter\'s membership check');
     }
 
     /**
@@ -910,7 +984,57 @@ final class MoveTicketTest extends KernelTestCase
         return $events;
     }
 
-    private function moveTicketWith(Tickets $tickets): MoveTicket
+    private function removeMembershipOf(string $userId): void
+    {
+        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
+            'DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?',
+            [self::ACME_FOODS, $userId],
+        ));
+    }
+
+    /**
+     * @return array{string|null, string|null} the waiting_on_user_id and waiting_on_label of Acme Foods' SHOP-7
+     */
+    private function waitingOn(): array
+    {
+        $row = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchNumeric('SELECT waiting_on_user_id, waiting_on_label FROM tkt_ticket WHERE key = ?', [self::KEY]));
+        self::assertIsArray($row);
+        self::assertTrue(null === $row[0] || \is_string($row[0]));
+        self::assertTrue(null === $row[1] || \is_string($row[1]));
+
+        return [$row[0], $row[1]];
+    }
+
+    private function policyAllowingEveryVerbToNeedsInput(): TransitionPolicy
+    {
+        return new readonly class(self::getContainer()->get(TransitionPolicy::class)) implements TransitionPolicy {
+            public function __construct(private TransitionPolicy $catalogue)
+            {
+            }
+
+            public function available(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team): Availability
+            {
+                return $this->catalogue->available($ticket, $actor, $rules, $team);
+            }
+
+            public function check(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, TeamFacts $team, string $verb): Decision
+            {
+                return Decision::allowed(MoveTarget::coreStep('input'));
+            }
+
+            public function moveChoices(TicketState $ticket, ActorInTeam $actor, array $steps): MoveChoices
+            {
+                return $this->catalogue->moveChoices($ticket, $actor, $steps);
+            }
+
+            public function checkMoveTo(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, StepView $target, array $steps): Decision
+            {
+                return $this->catalogue->checkMoveTo($ticket, $actor, $rules, $target, $steps);
+            }
+        };
+    }
+
+    private function moveTicketWith(Tickets $tickets, ?TransitionPolicy $transitionPolicy = null): MoveTicket
     {
         $container = self::getContainer();
         $snapshots = $container->get('test.ticketing_ticket_turn_snapshots');
@@ -924,7 +1048,7 @@ final class MoveTicketTest extends KernelTestCase
             $container->get(MembershipQueries::class),
             $container->get(RuleQueries::class),
             $container->get(StepQueries::class),
-            $container->get(TransitionPolicy::class),
+            $transitionPolicy ?? $container->get(TransitionPolicy::class),
             new DbalTicketHistory($this->connection()),
             $this->turnProjector(),
             new MessengerTicketEvents($container->get('event.bus'), $this->connection()),

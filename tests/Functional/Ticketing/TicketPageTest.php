@@ -598,6 +598,8 @@ final class TicketPageTest extends WebTestCase
         // Drive is off, so only a form that opts in is posted by Turbo and gets the move's Turbo Stream answer.
         self::assertCount($page->filter('form[action*="/move"]')->count(), $page->filter('form[action*="/move"][data-turbo="true"]'));
         $moveList = $box->filter('details.next-step-box__move-to');
+        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog#needs-input-'.$this->stepsByCore['input']));
+        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog'));
         if (!$hasMoveList) {
             self::assertCount(0, $moveList);
             self::assertCount(\count($expectedVerbs), $page->filter('form[action*="/move"]'));
@@ -621,6 +623,46 @@ final class TicketPageTest extends WebTestCase
         );
         self::assertSame(['To do'], $moveList->filter('button[aria-current="step"]')->each(static fn (Crawler $chip): string => $chip->text()));
         self::assertStringNotContainsString('Store review', $box->text());
+    }
+
+    /**
+     * Omar reported the ticket and has it, Mia reviews it; Lena, who looks, and Raj have no part in it, so they are not
+     * offered although both are members.
+     */
+    #[Test]
+    public function theNeedsInputDialogOffersTheTicketsPeopleWithTheirRolesAndSomeoneElse(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'reporter' => 'Omar', 'assignee' => 'Omar']);
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET reviewer_id = ? WHERE key = ?',
+            [$this->people['Mia']->id()->toString(), $key],
+        ));
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $dialog = $page->filter('dialog#needs-input-'.$this->stepsByCore['input']);
+        self::assertCount(1, $dialog);
+        self::assertSame('Move to Needs input', $dialog->filter('.dialog__title')->text());
+        self::assertSame(
+            [
+                ['Omar · Reporter · Assignee', $this->people['Omar']->id()->toString(), true],
+                ['Mia · Code reviewer', $this->people['Mia']->id()->toString(), false],
+                ['Someone else', '', false],
+            ],
+            $dialog->filter('.waiting-on__choice')->each(static fn (Crawler $choice): array => [
+                $choice->text(),
+                $choice->filter('input[type="radio"]')->attr('value'),
+                null !== $choice->filter('input[type="radio"]')->attr('checked'),
+            ]),
+        );
+        $labelField = $dialog->filter('input.waiting-on__label[type="text"]');
+        self::assertCount(1, $labelField);
+        self::assertSame(['100', 'Who else it waits on'], [$labelField->attr('maxlength'), $labelField->attr('aria-label')]);
+        self::assertNotNull($labelField->attr('disabled'));
+        self::assertStringNotContainsString('Raj', $dialog->text());
+        self::assertStringNotContainsString('Lena', $dialog->text());
     }
 
     #[Test]
@@ -877,6 +919,11 @@ final class TicketPageTest extends WebTestCase
 
         self::assertSame([['Assignee', 'Omar'], ['Priority', 'Major'], ['Release', '2.4'], ['Parent', 'SHOP-1'], ['Components', 'Checkout'], ['Created', '5 Nov']], $this->detailsOf($this->client->getCrawler()));
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
+        // The lead's Needs input dialog names the ticket's people from the same batch, so the count covers it.
+        self::assertSame(
+            ['Lena · Reporter', 'Omar · Assignee', 'Someone else'],
+            $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
+        );
         self::assertSame(5, $pageQueryCount);
     }
 

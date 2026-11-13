@@ -59,7 +59,8 @@ interface TicketCommands
      *                                nothing of the move is saved and the ticket is not reloaded
      * @throws MoveRefused            when the ticket has no team, the policy refuses the verb to this person (with the
      *                                rule's note when one explains it), the target is not a step of the team, is the
-     *                                ticket's step now, or the verb is give_it_to (P03.T8); nothing is saved
+     *                                ticket's step now, the verb is give_it_to (P03.T8), or it leads to Needs input and
+     *                                the reporter is no member of the organization; nothing is saved
      * @throws \LogicException        when no transaction is open
      */
     public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void;
@@ -74,8 +75,8 @@ interface TicketCommands
      * @throws TicketChangedMeanwhile as move does
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team or is its step now, the
      *                                policy refuses the move (with the rule's note when one explains it), someone to
-     *                                wait on is given for a step other than Needs input, or the person to wait on is
-     *                                no member of the organization; nothing is saved
+     *                                wait on is given for a step other than Needs input, or the person to wait on (the
+     *                                reporter when nobody is named) is no member of the organization; nothing is saved
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is blank, over 100
      *                                characters or not one line; nothing is saved
      * @throws \LogicException        when no transaction is open

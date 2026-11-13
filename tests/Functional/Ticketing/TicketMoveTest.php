@@ -25,6 +25,7 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\DomCrawler\Form;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -275,6 +276,100 @@ final class TicketMoveTest extends WebTestCase
             [...$stateBefore, 'step_id' => $this->steps['input'], 'version' => self::VERSION + 1, 'waiting_on_user_id' => $this->people['Raj']->id()->toString(), 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
             $this->stateOfTicket(),
         );
+    }
+
+    /**
+     * The dialog writes the chosen person or label into the chip's hidden fields, and Turbo posts the chip's form. Mia
+     * reported the ticket and Omar has it; Omar is the second choice, so a move that fell back on the reporter fails.
+     */
+    #[Test]
+    public function theNeedsInputDialogsPersonIsPostedByTheChipsFormAndTheTicketWaitsOnThem(): void
+    {
+        $this->addTicket(['step' => 'review', 'reporter' => 'Mia']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        $personChoices = $page->filter('dialog#needs-input-'.$this->steps['input'].' input[type="radio"]:not([value=""])')->each(static fn (Crawler $radio): string => (string) $radio->attr('value'));
+        self::assertSame([$this->people['Mia']->id()->toString(), $this->people['Omar']->id()->toString()], $personChoices);
+
+        $this->client->submit($this->needsInputFormOf($page), [TicketMoveController::WAITING_ON_USER_FIELD => $personChoices[1]], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame('Needs input', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertSame('Moved to Needs input.', $this->toastOf($streams));
+        self::assertSame(
+            [...$stateBefore, 'step_id' => $this->steps['input'], 'version' => self::VERSION + 1, 'waiting_on_user_id' => $this->people['Omar']->id()->toString(), 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
+            $this->stateOfTicket(),
+        );
+    }
+
+    #[Test]
+    public function theNeedsInputDialogsLabelIsPostedByTheChipsFormAndTheTicketWaitsOnIt(): void
+    {
+        $this->addTicket(['step' => 'review', 'reporter' => 'Mia']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submit($this->needsInputFormOf($page), [TicketMoveController::WAITING_ON_LABEL_FIELD => 'Customer'], self::TURBO_FORM_HEADERS);
+
+        self::assertSame('Moved to Needs input.', $this->toastOf($this->streamsOfTheAnswer(200)));
+        self::assertSame(
+            [...$stateBefore, 'step_id' => $this->steps['input'], 'version' => self::VERSION + 1, 'waiting_on_label' => 'Customer', 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
+            $this->stateOfTicket(),
+        );
+    }
+
+    /**
+     * Mia was offered when the page was read and has left Acme Foods since.
+     */
+    #[Test]
+    public function aPersonWhoLeftAfterTheDialogWasShownIsRefusedAndNothingChanges(): void
+    {
+        $this->addTicket(['step' => 'review', 'reporter' => 'Mia']);
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        $miasChoice = $page->filter('dialog#needs-input-'.$this->steps['input'].' input[type="radio"][value="'.$this->people['Mia']->id()->toString().'"]');
+        self::assertCount(1, $miasChoice);
+        $this->removeMembership($this->people['Mia'], $this->acmeFoods);
+        $stateBefore = $this->stateOfTicket();
+
+        $this->client->submit($this->needsInputFormOf($page), [TicketMoveController::WAITING_ON_USER_FIELD => (string) $miasChoice->attr('value')], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(422);
+        self::assertSame(MoveToasts::MOVE_REFUSED, $this->toastOf($streams));
+        self::assertSame('Code review', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertSame($stateBefore, $this->stateOfTicket());
+        self::assertSame($this->steps['review'], $stateBefore['step_id']);
+    }
+
+    /**
+     * Without script the chip posts its form with both fields empty, so the ticket would wait on its reporter, Mia, who
+     * has left Acme Foods.
+     */
+    #[Test]
+    public function aChipPostedWithoutScriptIsRefusedWhenTheReporterHasLeftAndNothingChanges(): void
+    {
+        $this->addTicket(['step' => 'review', 'reporter' => 'Mia']);
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        $this->removeMembership($this->people['Mia'], $this->acmeFoods);
+        $stateBefore = $this->stateOfTicket();
+        $form = $this->needsInputFormOf($page);
+        self::assertSame(
+            [TicketMoveController::WAITING_ON_USER_FIELD => '', TicketMoveController::WAITING_ON_LABEL_FIELD => ''],
+            array_intersect_key($form->getValues(), [TicketMoveController::WAITING_ON_USER_FIELD => true, TicketMoveController::WAITING_ON_LABEL_FIELD => true]),
+        );
+
+        $this->client->submit($form);
+
+        self::assertSame(MoveToasts::MOVE_REFUSED, $this->toastAfterTheRedirect());
+        self::assertSame($stateBefore, $this->stateOfTicket());
+        self::assertSame($this->steps['review'], $stateBefore['step_id']);
     }
 
     /**
@@ -1007,6 +1102,18 @@ final class TicketMoveTest extends WebTestCase
             TicketMoveController::VERSION_FIELD => (string) self::VERSION,
             ...$overrides,
         ];
+    }
+
+    /**
+     * The Needs input chip's own form, whose hidden waiting-on fields the dialog fills.
+     */
+    private function needsInputFormOf(Crawler $page): Form
+    {
+        $form = $page->filter('form[data-waiting-on-target="moveForm"]');
+        self::assertCount(1, $form);
+        self::assertSame('/t/'.self::KEY.'/move-to/'.$this->steps['input'], $form->attr('action'));
+
+        return $form->form();
     }
 
     /**

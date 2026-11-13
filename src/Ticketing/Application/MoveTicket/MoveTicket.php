@@ -62,7 +62,8 @@ final readonly class MoveTicket
     /**
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
-     * @throws MoveRefused            when the ticket has no team, the policy refuses the verb, or the verb is give_it_to
+     * @throws MoveRefused            when the ticket has no team, the policy refuses the verb, the verb is give_it_to, or
+     *                                it leads to Needs input and the reporter is no member of the organization
      */
     public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
     {
@@ -90,7 +91,7 @@ final readonly class MoveTicket
         );
         self::refuseUnlessAllowed($decision);
         $target = $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.'));
-        $waitingOn = self::NEEDS_INPUT === $target->coreCode() ? WaitingOn::ofPerson($ticket->reporter()) : null;
+        $waitingOn = self::NEEDS_INPUT === $target->coreCode() ? $this->waitingOnReporter($ticket) : null;
 
         $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, $verb, $at, $waitingTurns);
     }
@@ -100,7 +101,8 @@ final readonly class MoveTicket
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team, is its step now,
      *                                the policy refuses it, a waiting-on is given for a step other than Needs input,
-     *                                or the person to wait on is no member of the organization
+     *                                or the person to wait on (the reporter when nobody is named) is no member of the
+     *                                organization
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is not one line of at
      *                                most 100 characters
      */
@@ -141,8 +143,7 @@ final readonly class MoveTicket
             !$isNeedsInputStep => null,
             null !== $waitingOnUserId => WaitingOn::ofPerson($waitingOnUserId),
             null !== $waitingOnLabel => self::waitingOnLabel($waitingOnLabel),
-            // FR-WF-15: with nobody named, the ticket waits on its reporter.
-            default => WaitingOn::ofPerson($ticket->reporter()),
+            default => $this->waitingOnReporter($ticket),
         };
 
         $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, null);
@@ -160,6 +161,18 @@ final readonly class MoveTicket
         } catch (InvalidWaitingOn $invalidLabel) {
             throw new WaitingOnRefused($invalidLabel->getMessage(), 0, $invalidLabel);
         }
+    }
+
+    /**
+     * FR-WF-15: with nobody named, the ticket waits on its reporter, who must still be a member as a named person must.
+     *
+     * @throws MoveRefused when the reporter is no member of the ticket's organization
+     */
+    private function waitingOnReporter(Ticket $ticket): WaitingOn
+    {
+        $this->refuseUnlessMember($ticket->reporter(), $ticket->organizationId());
+
+        return WaitingOn::ofPerson($ticket->reporter());
     }
 
     private function teamOf(TeamId $teamId): MoveTeam
