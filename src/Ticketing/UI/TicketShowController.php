@@ -87,6 +87,7 @@ final class TicketShowController extends AbstractController
 
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
+        $pageTurn = $this->nowNextSentences->pageTurnOf($ticket);
 
         return $this->render('@Ticketing/show.html.twig', [
             'backQuery' => $listContext->query(),
@@ -104,7 +105,7 @@ final class TicketShowController extends AbstractController
             'reporter' => $ticket->reporterName ?? self::UNKNOWN_PERSON,
             'assignee' => null === $ticket->visibilityFacts->assigneeId ? self::NOBODY : ($ticket->assigneeName ?? ucfirst(self::UNKNOWN_PERSON)),
             'components' => implode(', ', $ticket->components),
-            'turnLines' => $this->nowNextSentences->of($ticket),
+            'turnLines' => null === $pageTurn ? null : $this->nowNextSentences->linesOf($pageTurn),
         ]);
     }
 
