@@ -82,7 +82,14 @@
   font-weight: 600;
 }
 
-.seg[aria-pressed="true"] {
+a.seg {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.seg[aria-pressed="true"],
+.seg[aria-current="page"] {
   background: var(--secondary-container);
   color: var(--on-secondary-container);
 }

@@ -42,10 +42,12 @@ final class ComponentGalleryTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('#gallery-chip ~ .gallery-row button.chip[aria-pressed="true"]'));
         self::assertCount(1, $crawler->filter('#gallery-chip ~ .gallery-row button.chip[aria-pressed="false"]'));
-        // 2 view groups + 3 team groups, each with exactly one pressed option
-        self::assertCount(5, $crawler->filter('main [role="group"][aria-label]'));
+        // 2 view groups + 3 team groups, each with exactly one pressed option, + 1 link group with one current page
+        self::assertCount(6, $crawler->filter('main [role="group"][aria-label]'));
         self::assertCount(5, $crawler->filter('main .seg[aria-pressed="true"]'));
         self::assertSame(['List', 'Whose turn?', 'Lena', 'Omar', 'Mia'], $crawler->filter('main .seg[aria-pressed="true"]')->each(static fn ($option): string => $option->text()));
+        self::assertSame(['List', 'Whose turn?'], $crawler->filter('main [aria-label="View as links"] a.seg[href]')->each(static fn ($link): string => $link->text()));
+        self::assertSame(['List'], $crawler->filter('main a.seg[aria-current="page"]')->each(static fn ($link): string => $link->text()));
         self::assertCount(2, $crawler->filter('main .tag'));
         self::assertCount(3, $crawler->filter('main .aichip'));
         foreach (['todo', 'doing', 'checking', 'waiting', 'done'] as $group) {

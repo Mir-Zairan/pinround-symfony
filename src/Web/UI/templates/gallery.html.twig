@@ -56,6 +56,9 @@
                 <twig:SegmentedControl label="Team member {{ teamMember }}" :options="teamOptions" selected="{{ teamMember }}" />
             {% endfor %}
         </div>
+        <div class="gallery-row">
+            <twig:SegmentedControl label="View as links" :links="[{label: 'List', href: '#gallery-segmented-control', isCurrent: true}, {label: 'Whose turn?', href: '#gallery-tag', isCurrent: false}]" />
+        </div>
     </section>
 
     <section class="gallery-section" aria-labelledby="gallery-tag">
