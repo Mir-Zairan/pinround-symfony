@@ -47,6 +47,17 @@ final class RuleNoteTest extends TestCase
     }
 
     #[Test]
+    public function aNameThatStartsTheNoteOrASentenceIsCapitalizedAndOnlyThere(): void
+    {
+        $note = new RuleNote('{reviewer} reviews it. Ask {reviewer} first. {tester} tests it.', ['reviewer' => new UserId(self::LENA), 'tester' => new UserId(self::OMAR)]);
+
+        self::assertSame(
+            'An unknown person reviews it. Ask an unknown person first. Éa tester tests it.',
+            $note->render(static fn (UserId $userId): string => self::LENA === $userId->toString() ? 'an unknown person' : 'éa tester'),
+        );
+    }
+
+    #[Test]
     public function aPlaceholderWithoutAPersonIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);

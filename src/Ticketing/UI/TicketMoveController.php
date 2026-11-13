@@ -22,6 +22,7 @@ use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\WaitingOnRefused;
 use App\Ticketing\Application\RoleTicketVisibilities;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\StepQueries;
@@ -156,7 +157,7 @@ final class TicketMoveController extends AbstractController
                 if (null === $expectedVersion) {
                     return MoveToasts::CHANGED_MEANWHILE;
                 }
-                if (('' !== $waitingOnUserId && !Uuid::isValid($waitingOnUserId)) || mb_strlen(trim($waitingOnLabel)) > self::WAITING_ON_LABEL_MAX_LENGTH) {
+                if (self::isWaitingOnMalformed($waitingOnUserId, $waitingOnLabel)) {
                     return MoveToasts::WAITING_ON_REFUSED;
                 }
                 try {
@@ -172,7 +173,7 @@ final class TicketMoveController extends AbstractController
                     );
                 } catch (MoveRefused $refused) {
                     throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
-                } catch (\InvalidArgumentException) {
+                } catch (WaitingOnRefused) {
                     throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
 
@@ -197,6 +198,19 @@ final class TicketMoveController extends AbstractController
         $version = $request->request->getString(self::VERSION_FIELD);
 
         return 1 === preg_match(self::VERSION_PATTERN, $version) ? (int) $version : null;
+    }
+
+    /**
+     * What the form alone shows wrong: both a person and a label, a person who is no uuid, or a label too long to count.
+     * moveTo refuses a blank label or one of more than one line with WaitingOnRefused.
+     */
+    private static function isWaitingOnMalformed(string $waitingOnUserId, string $waitingOnLabel): bool
+    {
+        if ('' !== $waitingOnUserId && ('' !== $waitingOnLabel || !Uuid::isValid($waitingOnUserId))) {
+            return true;
+        }
+
+        return mb_strlen(trim($waitingOnLabel)) > self::WAITING_ON_LABEL_MAX_LENGTH;
     }
 
     /**

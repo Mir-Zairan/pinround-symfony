@@ -6,10 +6,13 @@ namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Application\UseCaseTicketCommands;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
 use App\Ticketing\UI\TicketMoveController;
@@ -75,7 +78,7 @@ final class TicketMoveTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                foreach (['tkt_ticket_event', 'ins_ticket_turn', 'ins_project_count_ticket', 'ins_project_counts', 'tkt_ticket', 'wf_step'] as $table) {
+                foreach (['tkt_ticket_event', 'ins_ticket_turn', 'ins_project_count_ticket', 'ins_project_counts', 'tkt_ticket', 'wf_step', 'wf_rule_set'] as $table) {
                     $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
                 }
                 $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
@@ -88,22 +91,40 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, string, string, string, string}> who clicks, the step before, the verb, the
-     *                                                                         step after and the toast
+     * Every verb the page offers, by the person whose turn it is, from a step the catalogue applies it in. Shop has no
+     * tester, so its lead Lena tests; Omar is the assignee. Each row: who clicks, the ticket's columns, the verb, the step
+     * after, the toast, and whether Acme Foods' review_before_test rule is on.
+     *
+     * @return iterable<string, array{0: string, 1: array{step: string, reviewer?: string, waitingOn?: string}, 2: string, 3: string, 4: string, 5?: bool}>
      */
     public static function verbMoves(): iterable
     {
-        yield 'a verb whose toast names whose turn it is' => ['Omar', 'progress', 'send_to_code_review', 'review', 'Sent to code review. Lena’s turn now.'];
-        yield 'a verb whose toast names nobody' => ['Omar', 'todo', 'start_work', 'progress', 'Started. Status is In progress.'];
-        yield 'move on from a team step' => ['Omar', 'pairing', 'move_on', 'review', 'Moved to Code review.'];
-        yield 'a lead-only verb by the lead' => ['Lena', 'todo', 'put_on_hold', 'hold', 'On hold. It waits on you.'];
+        yield 'plan it, by the lead' => ['Lena', ['step' => 'backlog'], 'plan_it', 'todo', 'Planned. It is in To do now.'];
+        yield 'start work, by the assignee' => ['Omar', ['step' => 'todo'], 'start_work', 'progress', 'Started. Status is In progress.'];
+        yield 'send to code review, by the assignee' => ['Omar', ['step' => 'progress'], 'send_to_code_review', 'review', 'Sent to code review. Lena’s turn now.'];
+        yield 'send to testing, by the assignee, with review before testing off' => ['Omar', ['step' => 'progress'], 'send_to_testing', 'test', 'Sent to testing. Lena’s turn now.', false];
+        yield 'approve code, by the reviewer' => ['Lena', ['step' => 'review', 'reviewer' => 'Lena'], 'approve_code', 'test', 'Code approved. Lena’s turn to test.'];
+        yield 'ask for changes, by the reviewer' => ['Lena', ['step' => 'review', 'reviewer' => 'Lena'], 'ask_for_changes', 'progress', 'Sent back to Omar.'];
+        yield 'pass it, by the lead who tests' => ['Lena', ['step' => 'test'], 'pass_it', 'done', 'Passed. The ticket is Done.'];
+        yield 'needs changes, by the lead who tests' => ['Lena', ['step' => 'test'], 'needs_changes', 'progress', 'Sent back to Omar with your notes.'];
+        yield 'input given, by the person waited on' => ['Omar', ['step' => 'input', 'waitingOn' => 'Omar'], 'input_given', 'todo', 'Back to work.'];
+        yield 'go on, by the lead' => ['Lena', ['step' => 'hold'], 'go_on', 'progress', 'Back in progress.'];
+        yield 'reopen, by the lead' => ['Lena', ['step' => 'done'], 'reopen', 'progress', 'Reopened. Back in progress.'];
+        yield 'put on hold, by the lead' => ['Lena', ['step' => 'todo'], 'put_on_hold', 'hold', 'On hold. It waits on you.'];
+        yield 'move on from a team step, by the assignee' => ['Omar', ['step' => 'pairing'], 'move_on', 'review', 'Moved to Code review.'];
     }
 
+    /**
+     * @param array{step: string, reviewer?: string, waitingOn?: string} $columns
+     */
     #[Test]
     #[DataProvider('verbMoves')]
-    public function aVerbMovesTheTicketAndSaysSoInAToast(string $actor, string $stepBefore, string $verb, string $expectedStep, string $expectedToast): void
+    public function aVerbMovesTheTicketAndSaysSoInAToast(string $actor, array $columns, string $verb, string $expectedStep, string $expectedToast, bool $isReviewBeforeTestOn = true): void
     {
-        $this->addTicket(['step' => $stepBefore]);
+        if (!$isReviewBeforeTestOn) {
+            $this->switchReviewBeforeTestOff();
+        }
+        $this->addTicket($columns);
         $stateBefore = $this->stateOfTicket();
         $this->logIn($this->client, $this->people[$actor]);
 
@@ -111,7 +132,34 @@ final class TicketMoveTest extends WebTestCase
 
         self::assertSame($expectedToast, $this->toastAfterTheRedirect());
         self::assertSame(
-            [...$stateBefore, 'step_id' => $this->steps[$expectedStep], 'version' => self::VERSION + 1, 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
+            [
+                ...$stateBefore,
+                'step_id' => $this->steps[$expectedStep],
+                'version' => self::VERSION + 1,
+                'waiting_on_user_id' => null,
+                'waiting_on_label' => null,
+                'events' => $stateBefore['events'] + 1,
+                'outbox' => $stateBefore['outbox'] + 1,
+            ],
+            $this->stateOfTicket(),
+        );
+    }
+
+    #[Test]
+    public function theSameMoveSentTwiceMovesTheTicketOnceAndTheSecondSaysItChanged(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Omar']);
+        $fields = $this->moveFields();
+
+        $this->client->request('POST', '/t/'.self::KEY.'/move/start_work', $fields);
+        self::assertSame('Started. Status is In progress.', $this->toastAfterTheRedirect());
+        $this->client->request('POST', '/t/'.self::KEY.'/move/start_work', $fields);
+
+        self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->toastAfterTheRedirect());
+        self::assertSame(
+            [...$stateBefore, 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
             $this->stateOfTicket(),
         );
     }
@@ -325,13 +373,23 @@ final class TicketMoveTest extends WebTestCase
         self::assertSame($stateBefore, $this->stateOfTicket());
     }
 
+    /**
+     * @return iterable<string, array{string}> which route
+     */
+    public static function routes(): iterable
+    {
+        yield 'move' => ['move'];
+        yield 'move-to' => ['move-to'];
+    }
+
     #[Test]
-    public function anAnonymousVisitorIsSentToLogInAndNothingChanges(): void
+    #[DataProvider('routes')]
+    public function anAnonymousVisitorIsSentToLogInAndNothingChanges(string $route): void
     {
         $this->addTicket(['step' => 'todo']);
         $stateBefore = $this->stateOfTicket();
 
-        $this->client->request('POST', '/t/'.self::KEY.'/move/start_work', [TicketMoveController::VERSION_FIELD => (string) self::VERSION]);
+        $this->client->request('POST', 'move' === $route ? '/t/'.self::KEY.'/move/start_work' : $this->moveToPath('progress'), [TicketMoveController::VERSION_FIELD => (string) self::VERSION]);
 
         self::assertResponseStatusCodeSame(302);
         self::assertStringContainsString('/login', (string) $this->client->getResponse()->headers->get('Location'));
@@ -419,11 +477,15 @@ final class TicketMoveTest extends WebTestCase
     {
         yield 'a team rule with a note' => ['Omar', ['step' => 'progress'], 'send_to_testing', self::REVIEW_BEFORE_TEST_NOTE];
         yield 'a team rule whose note names the reviewer' => ['Omar', ['step' => 'review', 'reviewer' => 'Lena'], 'approve_code', 'Team rule: nobody approves their own code. Lena reviews it.'];
+        yield 'a team rule whose note names a reviewer Identity does not know' => ['Omar', ['step' => 'review', 'reviewer' => self::NOBODY_ID], 'approve_code', 'Team rule: nobody approves their own code. An unknown person reviews it.'];
         yield 'a lead-only verb by a member' => ['Omar', ['step' => 'todo'], 'put_on_hold', MoveToasts::MOVE_REFUSED];
         yield 'a verb that does not apply in the step' => ['Lena', ['step' => 'todo'], 'pass_it', MoveToasts::MOVE_REFUSED];
     }
 
     /**
+     * A note's person is the ticket's reviewer or one of its team's developers or its lead, all of whom the page has
+     * already named; so only someone Identity does not know reaches the controller's second name lookup.
+     *
      * @param array{step: string, reviewer?: string} $columns
      */
     #[Test]
@@ -456,10 +518,11 @@ final class TicketMoveTest extends WebTestCase
         yield 'a blank label' => ['input', [TicketMoveController::WAITING_ON_LABEL_FIELD => "  \t "], MoveToasts::WAITING_ON_REFUSED];
         yield 'a person to wait on who is no uuid' => ['input', [TicketMoveController::WAITING_ON_USER_FIELD => 'raj'], MoveToasts::WAITING_ON_REFUSED];
         yield 'a person to wait on whom the organization has not' => ['input', [TicketMoveController::WAITING_ON_USER_FIELD => self::NOBODY_ID], MoveToasts::MOVE_REFUSED];
+        yield 'a person and a label to wait on' => ['input', [TicketMoveController::WAITING_ON_USER_FIELD => '{Raj}', TicketMoveController::WAITING_ON_LABEL_FIELD => 'Customer'], MoveToasts::WAITING_ON_REFUSED];
     }
 
     /**
-     * @param array<string, string> $waitingOnFields
+     * @param array<string, string> $waitingOnFields with {Raj} for Raj's id
      */
     #[Test]
     #[DataProvider('movesToThePolicyOrTheFormRefuses')]
@@ -468,11 +531,99 @@ final class TicketMoveTest extends WebTestCase
         $this->addTicket(['step' => 'progress']);
         $stateBefore = $this->stateOfTicket();
         $this->logIn($this->client, $this->people['Lena']);
+        $sentFields = array_map(fn (string $value): string => strtr($value, ['{Raj}' => $this->people['Raj']->id()->toString()]), $waitingOnFields);
 
-        $this->client->request('POST', $this->moveToPath($step), $this->moveFields($waitingOnFields));
+        $this->client->request('POST', $this->moveToPath($step), $this->moveFields($sentFields));
 
         self::assertSame($expectedToast, $this->toastAfterTheRedirect());
         self::assertSame($stateBefore, $this->stateOfTicket());
+    }
+
+    /**
+     * As broken stored data would make the policy, snapshot or Ticket throw: only WaitingOnRefused is the form's fault.
+     */
+    #[Test]
+    public function anotherInvalidArgumentOfTheMoveIsAServerErrorWithNoToast(): void
+    {
+        $this->replaceMoveToWithOneThatThrows(new \InvalidArgumentException('A step group is one of todo, doing, check, wait or done.'));
+        $this->addTicket(['step' => 'todo']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields());
+
+        self::assertResponseStatusCodeSame(500);
+        self::assertSame($stateBefore, $this->stateOfTicket());
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.toast-region [data-toast-message-value]'));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>}> the waiting-on fields, with {Raj} for Raj's id
+     */
+    public static function waitingOnFieldsTheFormAloneRefuses(): iterable
+    {
+        yield 'a person and a label' => [[TicketMoveController::WAITING_ON_USER_FIELD => '{Raj}', TicketMoveController::WAITING_ON_LABEL_FIELD => 'Customer']];
+        yield 'a person who is no uuid' => [[TicketMoveController::WAITING_ON_USER_FIELD => 'raj']];
+        yield 'a label of 101 multibyte characters' => [[TicketMoveController::WAITING_ON_LABEL_FIELD => str_repeat('é', 101)]];
+    }
+
+    /**
+     * moveTo is never asked: a call would end in a server error.
+     *
+     * @param array<string, string> $waitingOnFields
+     */
+    #[Test]
+    #[DataProvider('waitingOnFieldsTheFormAloneRefuses')]
+    public function waitingOnFieldsTheFormAloneRefusesAreRefusedBeforeTheMove(array $waitingOnFields): void
+    {
+        $this->replaceMoveToWithOneThatThrows(new \LogicException('The form alone shows the waiting-on is wrong.'));
+        $this->addTicket(['step' => 'progress']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+        $sentFields = array_map(fn (string $value): string => strtr($value, ['{Raj}' => $this->people['Raj']->id()->toString()]), $waitingOnFields);
+
+        $this->client->request('POST', $this->moveToPath('input'), $this->moveFields($sentFields));
+
+        self::assertSame(MoveToasts::WAITING_ON_REFUSED, $this->toastAfterTheRedirect());
+        self::assertSame($stateBefore, $this->stateOfTicket());
+    }
+
+    private function replaceMoveToWithOneThatThrows(\Throwable $fault): void
+    {
+        self::getContainer()->set(UseCaseTicketCommands::class, new readonly class($fault) implements TicketCommands {
+            public function __construct(private \Throwable $fault)
+            {
+            }
+
+            public function create(OrganizationId $organizationId, UserId $reporter, string $projectId, string $title, string $description, string $type, string $priority, ?UserId $assignee, \DateTimeImmutable $reportedAt): string
+            {
+                throw new \LogicException('The move routes create no ticket.');
+            }
+
+            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
+            {
+                throw new \LogicException('Only moveTo is replaced.');
+            }
+
+            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): void
+            {
+                throw $this->fault;
+            }
+        });
+    }
+
+    /**
+     * Acme Foods' rule set, which Shop follows under the default step policy, with review_before_test off and the
+     * other rules at their defaults.
+     */
+    private function switchReviewBeforeTestOff(): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'INSERT INTO wf_rule_set (organization_id, team_id, tester_moves_done, no_self_review, review_before_test) VALUES (?, NULL, true, true, false)',
+            [$this->acmeFoods->toString()],
+        ));
     }
 
     /**
@@ -575,22 +726,24 @@ final class TicketMoveTest extends WebTestCase
 
     /**
      * SHOP-1 unless numbered, a major bug of Shop's team for everyone at VERSION, reported by Lena and assigned to Omar
-     * unless others are named.
+     * unless others are named. The reviewer is a person's name, or an id no user has.
      *
-     * @param array{step: string, number?: int, assignee?: string, reviewer?: string, reporter?: string, visibility?: string} $columns
+     * @param array{step: string, number?: int, assignee?: string, reviewer?: string, reporter?: string, waitingOn?: string, visibility?: string} $columns
      */
     private function addTicket(array $columns): void
     {
         $number = $columns['number'] ?? 1;
+        $reviewer = $columns['reviewer'] ?? null;
         $parameters = [
             $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), $number, 'SHOP-'.$number,
             $this->steps[$columns['step']], $this->people[$columns['reporter'] ?? 'Lena']->id()->toString(), $this->people[$columns['assignee'] ?? 'Omar']->id()->toString(),
-            isset($columns['reviewer']) ? $this->people[$columns['reviewer']]->id()->toString() : null, $columns['visibility'] ?? 'all', self::VERSION,
+            null === $reviewer ? null : (isset($this->people[$reviewer]) ? $this->people[$reviewer]->id()->toString() : $reviewer),
+            isset($columns['waitingOn']) ? $this->people[$columns['waitingOn']]->id()->toString() : null, $columns['visibility'] ?? 'all', self::VERSION,
         ];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
-                 step_id, reporter_id, assignee_id, reviewer_id, visibility, version, components, check_reasons, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, ?, ?, ?, '{}', '{}',
+                 step_id, reporter_id, assignee_id, reviewer_id, waiting_on_user_id, visibility, version, components, check_reasons, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, ?, ?, ?, ?, '{}', '{}',
                  TIMESTAMPTZ '2026-11-04 10:00:00+00', TIMESTAMPTZ '2026-11-05 10:00:00+00')",
             $parameters,
         ));

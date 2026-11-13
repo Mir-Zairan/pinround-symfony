@@ -13,6 +13,7 @@ use App\SharedKernel\Domain\UserId;
 final readonly class RuleNote
 {
     private const string PLACEHOLDER = '/\{([a-zA-Z]+)\}/';
+    private const string SENTENCE_BREAK = '. ';
 
     /**
      * @param string                $template the note with each person as a {placeholder}
@@ -33,15 +34,21 @@ final readonly class RuleNote
     }
 
     /**
+     * A name that starts the note or a sentence in it is capitalized, so a fallback such as "an unknown person" reads
+     * right there.
+     *
      * @param callable(UserId): string $nameOf the name to show for a person
      */
     public function render(callable $nameOf): string
     {
         $names = [];
         foreach ($this->people as $placeholder => $userId) {
-            $names['{'.$placeholder.'}'] = $nameOf($userId);
+            $name = $nameOf($userId);
+            $names['{'.$placeholder.'}'] = $name;
+            $names[self::SENTENCE_BREAK.'{'.$placeholder.'}'] = self::SENTENCE_BREAK.mb_strtoupper(mb_substr($name, 0, 1)).mb_substr($name, 1);
         }
 
-        return strtr($this->template, $names);
+        // strtr tries the longer key first; the break put before the template makes its start a sentence start too.
+        return substr(strtr(self::SENTENCE_BREAK.$this->template, $names), \strlen(self::SENTENCE_BREAK));
     }
 }

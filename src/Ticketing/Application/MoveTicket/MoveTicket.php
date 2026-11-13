@@ -17,10 +17,12 @@ use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketNotFound;
+use App\Ticketing\Api\WaitingOnRefused;
 use App\Ticketing\Application\TicketEvents;
 use App\Ticketing\Application\TicketHistory;
 use App\Ticketing\Application\TicketTurnSnapshots;
 use App\Ticketing\Domain\InvalidTicketKey;
+use App\Ticketing\Domain\InvalidWaitingOn;
 use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
@@ -94,13 +96,13 @@ final readonly class MoveTicket
     }
 
     /**
-     * @throws TicketNotFound            when the key is malformed or the organization has no ticket with it
-     * @throws TicketChangedMeanwhile    when the ticket's version is not $expectedVersion, or another request saved it first
-     * @throws MoveRefused               when the ticket has no team, the step is not one of its team, is its step now,
-     *                                   the policy refuses it, a waiting-on is given for a step other than Needs input,
-     *                                   or the person to wait on is no member of the organization
-     * @throws \InvalidArgumentException when both a person and a label are given, or the label is not one line of at
-     *                                   most 100 characters
+     * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
+     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
+     * @throws MoveRefused            when the ticket has no team, the step is not one of its team, is its step now,
+     *                                the policy refuses it, a waiting-on is given for a step other than Needs input,
+     *                                or the person to wait on is no member of the organization
+     * @throws WaitingOnRefused       when both a person and a label are given, or the label is not one line of at
+     *                                most 100 characters
      */
     public function moveTo(
         OrganizationId $organizationId,
@@ -113,7 +115,7 @@ final readonly class MoveTicket
         \DateTimeImmutable $at,
     ): void {
         if (null !== $waitingOnUserId && null !== $waitingOnLabel) {
-            throw new \InvalidArgumentException('A ticket waits on a person or a label, not both.');
+            throw new WaitingOnRefused('A ticket waits on a person or a label, not both.');
         }
         $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
         $teamId = $ticket->team() ?? throw new MoveRefused(null);
@@ -138,12 +140,26 @@ final readonly class MoveTicket
         $waitingOn = match (true) {
             !$isNeedsInputStep => null,
             null !== $waitingOnUserId => WaitingOn::ofPerson($waitingOnUserId),
-            null !== $waitingOnLabel => WaitingOn::ofLabel($waitingOnLabel),
+            null !== $waitingOnLabel => self::waitingOnLabel($waitingOnLabel),
             // FR-WF-15: with nobody named, the ticket waits on its reporter.
             default => WaitingOn::ofPerson($ticket->reporter()),
         };
 
         $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, null);
+    }
+
+    /**
+     * Only the label the caller sent becomes WaitingOnRefused; Ticket::moveTo's own InvalidWaitingOn stays a fault.
+     *
+     * @throws WaitingOnRefused when the label is blank, over 100 characters or not one line
+     */
+    private static function waitingOnLabel(string $label): WaitingOn
+    {
+        try {
+            return WaitingOn::ofLabel($label);
+        } catch (InvalidWaitingOn $invalidLabel) {
+            throw new WaitingOnRefused($invalidLabel->getMessage(), 0, $invalidLabel);
+        }
     }
 
     private function teamOf(TeamId $teamId): MoveTeam

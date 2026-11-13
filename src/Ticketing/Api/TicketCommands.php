@@ -70,15 +70,15 @@ interface TicketCommands
      *
      * @param string $stepId the uuid of the step to move to
      *
-     * @throws TicketNotFound            as move does
-     * @throws TicketChangedMeanwhile    as move does
-     * @throws MoveRefused               when the ticket has no team, the step is not one of its team or is its step now, the
-     *                                   policy refuses the move (with the rule's note when one explains it), someone to
-     *                                   wait on is given for a step other than Needs input, or the person to wait on is
-     *                                   no member of the organization; nothing is saved
-     * @throws \InvalidArgumentException when both a person and a label are given, or the label is blank, over 100
-     *                                   characters or not one line; nothing is saved
-     * @throws \LogicException           when no transaction is open
+     * @throws TicketNotFound         as move does
+     * @throws TicketChangedMeanwhile as move does
+     * @throws MoveRefused            when the ticket has no team, the step is not one of its team or is its step now, the
+     *                                policy refuses the move (with the rule's note when one explains it), someone to
+     *                                wait on is given for a step other than Needs input, or the person to wait on is
+     *                                no member of the organization; nothing is saved
+     * @throws WaitingOnRefused       when both a person and a label are given, or the label is blank, over 100
+     *                                characters or not one line; nothing is saved
+     * @throws \LogicException        when no transaction is open
      */
     public function moveTo(
         OrganizationId $organizationId,
