@@ -57,7 +57,15 @@ final class TicketMoveTest extends WebTestCase
     /** base.html.twig's toast region, which a streamed toast updates. */
     private const string TOAST_REGION_ID = 'toast-region';
     /** The stream answer's re-read of the ticket page, warm, by the first table each statement reads. */
-    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', "SELECT set_config('app.org_id', ?, true)", 'tkt_ticket', 'idn_user', 'ins_ticket_turn', '"COMMIT"'];
+    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'ins_ticket_turn', '"COMMIT"'];
+    /** A lead's re-read: their box offers the Needs input dialog, so it also reads which of the ticket's people are members. */
+    private const array LEAD_RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'ins_ticket_turn', 'org_membership', '"COMMIT"'];
+    /**
+     * The tenant middleware's transaction-local setting, matched rather than written out: bin/check-tenant-setting
+     * allows the literal call only in the files that set it.
+     */
+    private const string TENANT_STATEMENT_PATTERN = '/^SELECT set_config\(\'app\.org_id\', \?, true\)\z/';
+    private const string TENANT_STATEMENT = 'the tenant setting, transaction-local';
 
     private KernelBrowser $client;
 
@@ -890,7 +898,8 @@ final class TicketMoveTest extends WebTestCase
     /**
      * The stream answer reads the ticket's page again after the move's transaction, in one of its own: the same refusal
      * answered by stream and by redirect differs by that read alone, warm: 6 queries with the transaction's own
-     * statements, the ticket, the names and the saved turn among them.
+     * statements, the ticket, the names and the saved turn among them, and for a lead a 7th, the Needs input dialog's
+     * one read of which of the ticket's people are members.
      */
     #[Test]
     public function theStreamAnswerReadsTheTicketAgainInTheBudgetedQueries(): void
@@ -900,14 +909,19 @@ final class TicketMoveTest extends WebTestCase
         $staleFields = $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION - 1)]);
         $this->client->request('GET', self::TICKET_PAGE);
         self::assertResponseStatusCodeSame(200);
-        $this->queryCountOfAMove($staleFields, []);
-        $this->queryCountOfAMove($staleFields, self::TURBO_FORM_HEADERS);
+        $this->statementsOfAMove($staleFields, []);
+        $this->statementsOfAMove($staleFields, self::TURBO_FORM_HEADERS);
 
-        $redirectQueryCount = $this->queryCountOfAMove($staleFields, []);
-        $streamQueryCount = $this->queryCountOfAMove($staleFields, self::TURBO_FORM_HEADERS);
+        $redirectStatements = $this->statementsOfAMove($staleFields, []);
+        $streamStatements = $this->statementsOfAMove($staleFields, self::TURBO_FORM_HEADERS);
 
         self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->toastOf($this->streamsOfTheAnswer(422)));
-        self::assertSame(6, $streamQueryCount - $redirectQueryCount);
+        self::assertSame(7, \count($streamStatements) - \count($redirectStatements), 'the re-read takes 6 and the lead’s Needs input dialog 1');
+        self::assertSame(
+            1,
+            \count(array_keys($streamStatements, 'org_membership', true)) - \count(array_keys($redirectStatements, 'org_membership', true)),
+            'the lead’s box offers Needs input, so its dialog reads which of the ticket’s people are members, once',
+        );
     }
 
     /**
@@ -947,7 +961,7 @@ final class TicketMoveTest extends WebTestCase
         self::assertSame('Moved to Code review.', $this->toastOf($this->streamsOfTheAnswer(200)));
         $state = $this->stateOfTicket();
         self::assertSame([$this->steps['review'], self::VERSION + 2], [$state['step_id'], $state['version']]);
-        self::assertSame(self::RE_READ_STATEMENTS, $reRead);
+        self::assertSame(self::LEAD_RE_READ_STATEMENTS, $reRead, 'the lead’s box offers Needs input, so its dialog reads which of the ticket’s people are members, once');
     }
 
     /**
@@ -967,23 +981,39 @@ final class TicketMoveTest extends WebTestCase
         $commits = array_keys($sql, '"COMMIT"', true);
         self::assertCount(2, $commits, 'the move and the re-read each commit once');
 
-        return array_map(
-            static fn (string $statement): string => 1 === preg_match('/\bFROM (\w+)/', $statement, $table) ? $table[1] : $statement,
-            \array_slice($sql, $commits[0] + 1),
-        );
+        return self::firstTablesOf(\array_slice($sql, $commits[0] + 1));
     }
 
     /**
      * @param array<string, string> $fields
      * @param array<string, string> $headers
+     *
+     * @return list<string> each statement as the first table it reads from, or whole when it reads from none
      */
-    private function queryCountOfAMove(array $fields, array $headers): int
+    private function statementsOfAMove(array $fields, array $headers): array
     {
         $debugData = $this->debugData();
         $debugData->reset();
         $this->client->request('POST', '/t/'.self::KEY.'/move/put_on_hold', $fields, [], $headers);
 
-        return \count(self::sqlOf($debugData));
+        return self::firstTablesOf(self::sqlOf($debugData));
+    }
+
+    /**
+     * @param list<string> $sql
+     *
+     * @return list<string>
+     */
+    private static function firstTablesOf(array $sql): array
+    {
+        return array_map(
+            static fn (string $statement): string => match (true) {
+                1 === preg_match(self::TENANT_STATEMENT_PATTERN, $statement) => self::TENANT_STATEMENT,
+                1 === preg_match('/\bFROM (\w+)/', $statement, $table) => $table[1],
+                default => $statement,
+            },
+            $sql,
+        );
     }
 
     /**
