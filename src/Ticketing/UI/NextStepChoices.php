@@ -7,6 +7,8 @@ namespace App\Ticketing\UI;
 use App\Organization\Api\ActorContext;
 use App\SharedKernel\Domain\UserId;
 use App\Workflow\Api\ActorInTeam;
+use App\Workflow\Api\MoveChoice;
+use App\Workflow\Api\MoveChoiceGroup;
 use App\Workflow\Api\MoveChoices;
 use App\Workflow\Api\NeedsYouKind;
 use App\Workflow\Api\NowNext;
@@ -26,6 +28,15 @@ final readonly class NextStepChoices
     public const string CHECK = 'Take a quick look at this new ticket.';
     public const string NOTHING_FOR_YOU = 'Nothing for you. %s.';
     public const string NOTHING_FOR_YOU_NOW = 'Nothing for you now. %s’s turn.';
+
+    /** The core code of Needs input, whose move-to form also sends who the ticket waits on. */
+    public const string NEEDS_INPUT = 'input';
+
+    /** The role words of the ticket page's People section (ticket-page.md, People). */
+    private const string ROLE_REPORTER = 'Reporter';
+    private const string ROLE_ASSIGNEE = 'Assignee';
+    private const string ROLE_REVIEWER = 'Code reviewer';
+    private const string ROLE_TESTER = 'Tester';
 
     public function __construct(
         private TransitionPolicy $transitionPolicy,
@@ -55,7 +66,54 @@ final readonly class NextStepChoices
             $availability->transitions,
             $availability->ruleNote?->render(static fn (UserId $userId): string => $pageTurn->context->firstNameOf($userId) ?? TicketShowController::UNKNOWN_PERSON),
             $moveChoices->groups,
+            self::offersMoveToNeedsInput($moveChoices->groups) ? self::peopleToWaitOnOf($pageTurn) : [],
         );
+    }
+
+    /**
+     * @param list<MoveChoiceGroup> $groups
+     */
+    private static function offersMoveToNeedsInput(array $groups): bool
+    {
+        return array_any(
+            $groups,
+            static fn (MoveChoiceGroup $group): bool => array_any(
+                $group->choices,
+                static fn (MoveChoice $choice): bool => !$choice->isCurrent && self::NEEDS_INPUT === $choice->step->coreCode(),
+            ),
+        );
+    }
+
+    /**
+     * The ticket's people by the names the page already holds, so this adds no query; anyone without a name is left
+     * out, as the dialog could not name them.
+     *
+     * @return list<PersonToWaitOn>
+     */
+    private static function peopleToWaitOnOf(PageTurn $pageTurn): array
+    {
+        $ticket = $pageTurn->ticket;
+        $roleNamesByUser = [];
+        foreach ([
+            self::ROLE_REPORTER => $ticket->reporterId,
+            self::ROLE_ASSIGNEE => $ticket->assigneeId,
+            self::ROLE_REVIEWER => $ticket->reviewerId,
+            self::ROLE_TESTER => $ticket->testerId,
+        ] as $roleName => $userId) {
+            if (null !== $userId) {
+                $roleNamesByUser[$userId->toString()][] = $roleName;
+            }
+        }
+
+        $people = [];
+        foreach ($roleNamesByUser as $userKey => $roleNames) {
+            $firstName = $pageTurn->context->firstNameOf(new UserId($userKey));
+            if (null !== $firstName) {
+                $people[] = new PersonToWaitOn($userKey, $firstName, implode(' · ', $roleNames));
+            }
+        }
+
+        return $people;
     }
 
     private function actorInTeamOf(PageTurn $pageTurn, ActorContext $viewer, bool $mayMove): ActorInTeam

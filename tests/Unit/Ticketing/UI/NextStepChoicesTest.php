@@ -14,11 +14,13 @@ use App\Tests\Unit\Workflow\Application\Transition\GuardFixtures;
 use App\Ticketing\UI\NextStep;
 use App\Ticketing\UI\NextStepChoices;
 use App\Ticketing\UI\PageTurn;
+use App\Ticketing\UI\PersonToWaitOn;
 use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\MoveChoice;
 use App\Workflow\Api\MoveChoiceGroup;
 use App\Workflow\Api\NeedsYouKind;
 use App\Workflow\Api\NowNextContext;
+use App\Workflow\Api\StepView;
 use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TeamMemberLoad;
 use App\Workflow\Api\TicketState;
@@ -201,6 +203,94 @@ final class NextStepChoicesTest extends TestCase
             new ActorInTeam(new UserId(GuardFixtures::OMAR), 'member', 'developer'),
             new ActorInTeam(new UserId(GuardFixtures::MIA), 'member', 'tester'),
         ], $this->policy->askedActors);
+    }
+
+    #[Test]
+    public function theLeadCanWaitOnTheReporterAssigneeReviewerAndTesterInThatOrderOncePerPerson(): void
+    {
+        $pageTurn = self::pageTurn(
+            GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, reviewer: GuardFixtures::LENA, tester: GuardFixtures::MIA, reporter: GuardFixtures::OMAR),
+            new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
+        );
+
+        $nextStep = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
+
+        self::assertEquals([
+            new PersonToWaitOn(GuardFixtures::OMAR, 'Omar', 'Reporter · Assignee'),
+            new PersonToWaitOn(GuardFixtures::LENA, 'Lena', 'Code reviewer'),
+            new PersonToWaitOn(GuardFixtures::MIA, 'Mia', 'Tester'),
+        ], $nextStep->peopleToWaitOn);
+    }
+
+    #[Test]
+    public function aPersonInTwoRolesIsListedOnceAtTheirFirstRoleAndOthersOfTheTicketOrTeamAreLeftOut(): void
+    {
+        $pageTurn = self::pageTurn(
+            GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, tester: GuardFixtures::MIA, reporter: GuardFixtures::MIA, waitingOnUser: GuardFixtures::LENA),
+            new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
+        );
+
+        $nextStep = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
+
+        self::assertEquals([
+            new PersonToWaitOn(GuardFixtures::MIA, 'Mia', 'Reporter · Tester'),
+            new PersonToWaitOn(GuardFixtures::OMAR, 'Omar', 'Assignee'),
+        ], $nextStep->peopleToWaitOn);
+    }
+
+    #[Test]
+    public function aPersonWithoutANameIsNotOfferedToWaitOn(): void
+    {
+        $pageTurn = self::pageTurn(
+            GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, reporter: GuardFixtures::RAJ),
+            new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
+        );
+
+        $nextStep = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
+
+        self::assertEquals([new PersonToWaitOn(GuardFixtures::OMAR, 'Omar', 'Assignee')], $nextStep->peopleToWaitOn);
+    }
+
+    #[Test]
+    public function nobodyToWaitOnForAMemberOrALeadWhoMayNotMove(): void
+    {
+        $pageTurn = self::pageTurn(
+            GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, tester: GuardFixtures::MIA, reporter: GuardFixtures::MIA),
+            new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
+        );
+
+        self::assertNotSame([], $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA))->peopleToWaitOn);
+        self::assertSame([], $this->nextStepOf($pageTurn, self::member(GuardFixtures::OMAR))->peopleToWaitOn);
+        self::assertSame([], $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA), mayMove: false)->peopleToWaitOn);
+    }
+
+    #[Test]
+    public function nobodyToWaitOnWhenTheMoveListHasNoNeedsInputStep(): void
+    {
+        $pageTurn = self::pageTurn(
+            GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, reporter: GuardFixtures::MIA),
+            new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
+        );
+        $stepsWithoutNeedsInput = array_values(array_filter(GuardFixtures::steps(), static fn (StepView $step): bool => 'input' !== $step->coreCode()));
+
+        $nextStep = new NextStepChoices($this->policy, new FixedStepQueries([], $stepsWithoutNeedsInput), new PlainVerbFor(), self::nowNext())
+            ->of($pageTurn, self::lead(GuardFixtures::LENA), true);
+
+        self::assertNotSame([], $nextStep->groups);
+        self::assertSame([], $nextStep->peopleToWaitOn);
+    }
+
+    #[Test]
+    public function nobodyToWaitOnWhenTheTicketIsAlreadyInNeedsInput(): void
+    {
+        $needsInputStepId = GuardFixtures::steps()[0]->id();
+        $ticket = new TicketState($needsInputStepId, 'input', 'wait', self::teamId(), assigneeId: new UserId(GuardFixtures::OMAR), reporterId: new UserId(GuardFixtures::MIA), waitingOnUserId: new UserId(GuardFixtures::MIA));
+        $pageTurn = self::pageTurn($ticket, new Turn(new UserId(GuardFixtures::MIA), null, NeedsYouKind::Input));
+
+        $nextStep = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
+
+        self::assertNotSame([], $nextStep->groups);
+        self::assertSame([], $nextStep->peopleToWaitOn);
     }
 
     private function nextStepOf(PageTurn $pageTurn, ActorContext $viewer, bool $mayMove = true): NextStep

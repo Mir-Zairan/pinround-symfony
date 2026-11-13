@@ -13,16 +13,20 @@ use App\Workflow\Api\TransitionView;
 final readonly class NextStep
 {
     /**
-     * @param string                $sentence    the line under YOUR NEXT STEP, for example "Test it."
-     * @param list<TransitionView>  $transitions the verb buttons, as TransitionPolicy::available orders them
-     * @param string|null           $ruleNote    why a move is not offered, with people named; null for none
-     * @param list<MoveChoiceGroup> $groups      the "Move to another step…" list; empty for anyone but the lead
+     * @param string                $sentence       the line under YOUR NEXT STEP, for example "Test it."
+     * @param list<TransitionView>  $transitions    the verb buttons, as TransitionPolicy::available orders them
+     * @param string|null           $ruleNote       why a move is not offered, with people named; null for none
+     * @param list<MoveChoiceGroup> $groups         the "Move to another step…" list; empty for anyone but the lead
+     * @param list<PersonToWaitOn>  $peopleToWaitOn who a move to Needs input can wait on: the ticket's named reporter,
+     *                                              assignee, reviewer and tester, in that order, once each; empty
+     *                                              when $groups offers no move to Needs input
      */
     public function __construct(
         public string $sentence,
         public array $transitions,
         public ?string $ruleNote,
         public array $groups,
+        public array $peopleToWaitOn = [],
     ) {
     }
 }

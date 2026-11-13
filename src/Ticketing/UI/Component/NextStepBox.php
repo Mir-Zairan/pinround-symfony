@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\UI\Component;
 
 use App\Ticketing\UI\NextStep;
+use App\Ticketing\UI\NextStepChoices;
 use App\Ticketing\UI\TicketMoveController;
 use App\Workflow\Api\MoveChoice;
 use App\Workflow\Api\TransitionView;
@@ -20,9 +21,6 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
 #[AsTwigComponent(name: 'NextStepBox', template: '@Ticketing/components/NextStepBox.html.twig')]
 final class NextStepBox
 {
-    /** The core code of Needs input, whose move-to form also sends who the ticket waits on. */
-    private const string NEEDS_INPUT = 'input';
-
     public string $ticketKey;
 
     public int $version;
@@ -56,6 +54,6 @@ final class NextStepBox
 
     public function asksWhoItWaitsOn(MoveChoice $choice): bool
     {
-        return self::NEEDS_INPUT === $choice->step->coreCode();
+        return NextStepChoices::NEEDS_INPUT === $choice->step->coreCode();
     }
 }
