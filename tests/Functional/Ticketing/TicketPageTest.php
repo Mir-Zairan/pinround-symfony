@@ -616,7 +616,7 @@ final class TicketPageTest extends WebTestCase
             ],
             $moveList->filter('.next-step-box__group')->each(static fn (Crawler $group): array => [
                 $group->filter('.next-step-box__group-label')->text(),
-                $group->filter('button')->each(static fn (Crawler $chip): string => $chip->text()),
+                $group->filter('button.chip')->each(static fn (Crawler $chip): string => $chip->text()),
             ]),
         );
         self::assertSame(['To do'], $moveList->filter('button[aria-current="step"]')->each(static fn (Crawler $chip): string => $chip->text()));

@@ -52,8 +52,11 @@ final class NextStepBox
         ));
     }
 
+    /**
+     * Whether the chip opens the Needs input dialog; the step the ticket is in is no move, so its chip opens nothing.
+     */
     public function asksWhoItWaitsOn(MoveChoice $choice): bool
     {
-        return NextStepChoices::NEEDS_INPUT === $choice->step->coreCode();
+        return !$choice->isCurrent && NextStepChoices::NEEDS_INPUT === $choice->step->coreCode();
     }
 }

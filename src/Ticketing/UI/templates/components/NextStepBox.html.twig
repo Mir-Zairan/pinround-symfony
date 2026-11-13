@@ -29,21 +29,60 @@
                     <span class="next-step-box__group-label" id="next-step-box-group-{{ group.groupCode }}">{{ group.groupLabel }}</span>
                     <div class="next-step-box__chips">
                         {% for choice in group.choices %}
-                            {% set asksWhoItWaitsOn = this.asksWhoItWaitsOn(choice) %}
-                            <form method="post" action="{{ path(constant(moveController ~ '::MOVE_TO_ROUTE'), {key: ticketKey, stepId: choice.step.id}) }}" data-turbo="true"
-                                {%- if asksWhoItWaitsOn %} data-next-step-box-target="needsInputForm"{% endif %}>
-                                <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                <input type="hidden" name="{{ versionField }}" value="{{ version }}">
-                                {% if asksWhoItWaitsOn %}
-                                    <input type="hidden" name="{{ constant(moveController ~ '::WAITING_ON_USER_FIELD') }}" value="">
-                                    <input type="hidden" name="{{ constant(moveController ~ '::WAITING_ON_LABEL_FIELD') }}" value="">
-                                {% endif %}
-                                {% if choice.isCurrent %}
-                                    <twig:Chip type="submit" :pressed="true" disabled aria-current="step">{{ choice.step.name }}</twig:Chip>
-                                {% else %}
-                                    <twig:Chip type="submit">{{ choice.step.name }}</twig:Chip>
-                                {% endif %}
-                            </form>
+                            {% set moveToPath = path(constant(moveController ~ '::MOVE_TO_ROUTE'), {key: ticketKey, stepId: choice.step.id}) %}
+                            {% if this.asksWhoItWaitsOn(choice) %}
+                                {% set dialogId = 'needs-input-' ~ choice.step.id %}
+                                {% set stepName = choice.step.name %}
+                                {% set peopleToWaitOn = nextStep.peopleToWaitOn %}
+                                {# Without script the chip posts its own form with empty waiting-on fields, so the ticket waits on its reporter. #}
+                                <div class="waiting-on" {{ stimulus_controller('waiting-on') }}>
+                                    <twig:Dialog id="{{ dialogId }}" title="Move to {{ stepName }}">
+                                        <twig:block name="trigger">
+                                            <form method="post" action="{{ moveToPath }}" data-turbo="true" {{ stimulus_target('waiting-on', 'moveForm') }}>
+                                                <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                                <input type="hidden" name="{{ versionField }}" value="{{ version }}">
+                                                <input type="hidden" name="{{ constant(moveController ~ '::WAITING_ON_USER_FIELD') }}" value="" {{ stimulus_target('waiting-on', 'userField') }}>
+                                                <input type="hidden" name="{{ constant(moveController ~ '::WAITING_ON_LABEL_FIELD') }}" value="" {{ stimulus_target('waiting-on', 'labelField') }}>
+                                                <twig:Chip type="submit" aria-haspopup="dialog" data-action="dialog#open:prevent">{{ stepName }}</twig:Chip>
+                                            </form>
+                                        </twig:block>
+                                        <twig:block name="content">
+                                            <form method="dialog" id="{{ dialogId }}-form" class="waiting-on__form" data-action="change->waiting-on#enableLabelForSomeoneElse submit->waiting-on#move">
+                                                <fieldset class="waiting-on__choices">
+                                                    <legend class="waiting-on__legend">Who does it wait on?</legend>
+                                                    {% for person in peopleToWaitOn %}
+                                                        <label class="waiting-on__choice">
+                                                            <input type="radio" name="waiting-on" value="{{ person.userId }}"{% if loop.first %} checked{% endif %} {{ stimulus_target('waiting-on', 'choice') }}>
+                                                            {{ person.firstName }} · {{ person.roleNames }}
+                                                        </label>
+                                                    {% endfor %}
+                                                    <label class="waiting-on__choice">
+                                                        <input type="radio" name="waiting-on" value=""{% if peopleToWaitOn is empty %} checked{% endif %} {{ stimulus_target('waiting-on', 'choice someoneElse') }}>
+                                                        Someone else
+                                                    </label>
+                                                    <input class="waiting-on__label" type="text" maxlength="{{ constant(moveController ~ '::WAITING_ON_LABEL_MAX_LENGTH') }}" required pattern=".*\S.*"
+                                                        autocomplete="off" aria-label="Who else it waits on" placeholder="For example, Customer" title="Write a name or a role."
+                                                        {%- if peopleToWaitOn is not empty %} disabled{% endif %} {{ stimulus_target('waiting-on', 'label') }}>
+                                                </fieldset>
+                                            </form>
+                                        </twig:block>
+                                        <twig:block name="actions">
+                                            <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+                                            <twig:Button type="submit" form="{{ dialogId }}-form">Move</twig:Button>
+                                        </twig:block>
+                                    </twig:Dialog>
+                                </div>
+                            {% else %}
+                                <form method="post" action="{{ moveToPath }}" data-turbo="true">
+                                    <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                    <input type="hidden" name="{{ versionField }}" value="{{ version }}">
+                                    {% if choice.isCurrent %}
+                                        <twig:Chip type="submit" :pressed="true" disabled aria-current="step">{{ choice.step.name }}</twig:Chip>
+                                    {% else %}
+                                        <twig:Chip type="submit">{{ choice.step.name }}</twig:Chip>
+                                    {% endif %}
+                                </form>
+                            {% endif %}
                         {% endfor %}
                     </div>
                 </div>
