@@ -25,6 +25,16 @@ interface Tickets
     public function add(Ticket $ticket): void;
 
     /**
+     * Saves the changes of a ticket loaded with ofKey at once, raising its version by one, only when its row still has
+     * the version the ticket was read with. It flushes the whole unit of work, as add does.
+     *
+     * @throws TicketVersionConflict when another request saved the ticket after it was read; nothing of the ticket is
+     *                               saved, and the caller rolls back, as the entity manager is closed
+     * @throws \LogicException       when the ticket was not loaded or added in this request
+     */
+    public function save(Ticket $ticket): void;
+
+    /**
      * The ticket of the organization with the key, loaded for a change, in one query by the (organization_id, key)
      * index. A ticket of another organization is not found. When the request has loaded the ticket already, the query
      * still runs but the same object comes back with its fields, and any unsaved change to them, kept as they were.

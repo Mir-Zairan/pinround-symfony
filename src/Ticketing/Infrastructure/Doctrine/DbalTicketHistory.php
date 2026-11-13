@@ -18,6 +18,7 @@ use Symfony\Component\Uid\Uuid;
 final readonly class DbalTicketHistory implements TicketHistory
 {
     public const string CREATED = 'created';
+    public const string MOVED = 'moved';
 
     public function __construct(private Connection $connection)
     {
@@ -39,6 +40,38 @@ final readonly class DbalTicketHistory implements TicketHistory
                 $reporter->toString(),
                 self::CREATED,
                 $stepId,
+                $at->format(\DateTimeInterface::ATOM),
+            ],
+        );
+    }
+
+    public function recordMoved(
+        OrganizationId $organizationId,
+        TicketId $ticketId,
+        UserId $actor,
+        string $fromStepId,
+        string $toStepId,
+        ?string $verb,
+        ?string $overrideNote,
+        \DateTimeImmutable $at,
+    ): void {
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('A ticket event is recorded in the transaction of its change; none is open.');
+        }
+
+        $payload = array_filter(['verb' => $verb, 'override_note' => $overrideNote], static fn (?string $value): bool => null !== $value);
+        $this->connection->executeStatement(
+            'INSERT INTO tkt_ticket_event (id, organization_id, ticket_id, actor_id, type, from_step, to_step, payload, at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+                Uuid::v7()->toRfc4122(),
+                $organizationId->toString(),
+                $ticketId->toString(),
+                $actor->toString(),
+                self::MOVED,
+                $fromStepId,
+                $toStepId,
+                json_encode((object) $payload, \JSON_THROW_ON_ERROR),
                 $at->format(\DateTimeInterface::ATOM),
             ],
         );
