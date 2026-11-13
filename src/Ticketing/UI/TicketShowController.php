@@ -32,11 +32,13 @@ use Symfony\Component\Routing\Attribute\Route;
  * it, they walk the plain open-tickets list; a Done ticket in neither has no position line. A ticket in the viewer's
  * queue (TicketQueue, FR-TKT-15) shows the QueueBar instead, which walks the queue, and costs no position query.
  *
- * Five queries beyond the request's own when the steps, rules and team's people are cached (performance-and-scale.md: ten
- * at most for the page): the settings (step policy and triager, one query), the ticket with its project and parent, the
- * names of everyone the page shows in one batch, the saved turn with the waiting turns of {@see NowNextSentences} in
- * one, and the position in one; a miss of the team's people adds two. A list's project adds its lookup; a list the
- * ticket is not in adds the plain list's position.
+ * Six queries beyond the request's own when the steps, rules and team's people are cached, seven for a lead whose move
+ * list offers Needs input (performance-and-scale.md: ten at most for the page): the settings (step policy and triager,
+ * one query), the ticket with its project and parent, the names of everyone the page shows in one batch, the saved turn
+ * with the waiting turns of {@see NowNextSentences} in one, the latest moves of What happened in one
+ * ({@see TicketPageParts}), and the position in one; the lead's Needs input dialog adds its membership read, and a miss
+ * of the team's people adds two. A list's project adds its lookup; a list the ticket is not in adds the plain list's
+ * position.
  */
 final class TicketShowController extends AbstractController
 {

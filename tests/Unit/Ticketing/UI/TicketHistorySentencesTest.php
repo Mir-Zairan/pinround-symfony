@@ -60,6 +60,23 @@ final class TicketHistorySentencesTest extends TestCase
     }
 
     #[Test]
+    public function stepNamesKeyedByUpperCaseIdsAreFoundForAnEntryInAnyCase(): void
+    {
+        $sentences = new TicketHistorySentences(
+            [self::OMAR => 'Omar Haddad'],
+            [strtoupper(self::TO_DO) => 'To do', strtoupper(self::IN_PROGRESS) => 'In progress'],
+        );
+
+        self::assertSame('Omar moved it from To do to In progress', $sentences->sentenceOf(self::entry(self::OMAR, self::TO_DO, strtoupper(self::IN_PROGRESS), 'start_work')));
+    }
+
+    #[Test]
+    public function aMoveIntoTheStepItLeftWrittenInAnotherCaseNamesTheStepOnce(): void
+    {
+        self::assertSame('Lena moved it to To do', self::sentences()->sentenceOf(self::entry(self::LENA, strtoupper(self::TO_DO), self::TO_DO, null)));
+    }
+
+    #[Test]
     public function theCreatedLineNamesTheReporterByFirstName(): void
     {
         self::assertSame('Created by Lena', self::sentences()->createdSentenceOf(new UserId(self::LENA)));

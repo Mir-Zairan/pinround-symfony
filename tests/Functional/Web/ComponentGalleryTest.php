@@ -23,15 +23,15 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Your next step box', 'Your next step', 'Move to Needs input', 'Queue bar'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Give SHOP-12 to…', 'Your next step box', 'Your next step', 'Move to Needs input', 'Queue bar'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
         // 4 variants x 2 sizes x (normal, disabled, link)
         // plus the one action button inside the empty-state example, the dialog's trigger, Cancel and Confirm, the
-        // person picker's Cancel, the next step box's verb, its "Move to another step…" summary, Cancel and Move, and
-        // the two queue bars' Previous, Next ticket or Finish, and Stop
-        self::assertCount(39, $crawler->filter('main .btn'));
+        // two person pickers' Cancel and the Assign one's "Give it to…", the next step box's verb, its "Move to another
+        // step…" summary, Cancel and Move, and the two queue bars' Previous, Next ticket or Finish, and Stop
+        self::assertCount(41, $crawler->filter('main .btn'));
         self::assertCount(11, $crawler->filter('main a.btn[href]'));
         self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
-        self::assertCount(7, $crawler->filter('main button.btn.btn-text:not([disabled])'));
+        self::assertCount(8, $crawler->filter('main button.btn.btn-text:not([disabled])'));
     }
 
     #[Test]
@@ -119,6 +119,33 @@ final class ComponentGalleryTest extends WebTestCase
         self::assertSame(['Cancel'], $dialog->filter('.dialog__actions .btn')->each(static fn (Crawler $button): string => $button->text()));
         self::assertCount(0, $picker->filter('[data-model], [data-controller~="person-picker"], [data-action*="live#"]'));
         self::assertCount(0, $crawler->filter('[data-live-name-value]'));
+    }
+
+    /**
+     * The Assign mode's words and order: the ticket's key in the title, "N waiting" beside each person, fewest first.
+     * Each row submits the sample's own form, which does nothing outside a dialog, so a pick never posts.
+     */
+    #[Test]
+    public function theGalleryShowsTheAssignPersonPickerWithWaitingCountsFewestFirst(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        $picker = $crawler->filter('#gallery-person-picker ~ .gallery-row');
+        self::assertSame(['Give it to…'], $picker->filter('button.btn.btn-outline[aria-haspopup="dialog"][data-action="dialog#open"]')->each(static fn (Crawler $trigger): string => $trigger->text()));
+        $dialog = $picker->filter('dialog#gallery-person-picker-assign-demo');
+        self::assertCount(1, $dialog);
+        self::assertSame('Give SHOP-12 to…', $dialog->filter('.dialog__title')->text());
+        self::assertSame('The ticket moves to their list. Sorted by how much is already waiting on them.', $dialog->filter('.person-picker__sub')->text());
+        self::assertSame(
+            [['Mia', '0 waiting', 'submit'], ['Lena', '1 waiting', 'submit'], ['Omar', '3 waiting', 'submit']],
+            $dialog->filter('button.pick')->each(static fn (Crawler $row): array => [$row->filter('.pick__name')->text(), $row->filter('.pick__side')->text(), $row->attr('type')]),
+        );
+        self::assertSame(['gallery-person-picker-give-form'], array_values(array_unique($dialog->filter('button.pick')->each(static fn (Crawler $row): ?string => $row->attr('form')))));
+        self::assertSame('dialog', $crawler->filter('form#gallery-person-picker-give-form')->attr('method'));
+        self::assertSame(['Cancel'], $dialog->filter('.dialog__actions .btn')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertCount(0, $picker->filter('[data-model], [data-controller~="person-picker"], [data-action*="live#"]'));
     }
 
     /**

@@ -16,12 +16,16 @@ final readonly class TicketHistorySentences
     /** For a step id the organization no longer has at all; a removed step keeps its name. */
     public const string UNKNOWN_STEP = 'a step that is gone';
 
+    /** @var array<string, string> step names by lower-case step id */
+    private array $stepNames;
+
     /**
      * @param array<string, string> $displayNames display names by user id string; only the first word is used
-     * @param array<string, string> $stepNames    step names by step id
+     * @param array<string, string> $stepNames    step names by step id, in any case
      */
-    public function __construct(private array $displayNames, private array $stepNames)
+    public function __construct(private array $displayNames, array $stepNames)
     {
+        $this->stepNames = array_change_key_case($stepNames, \CASE_LOWER);
     }
 
     /**
@@ -64,7 +68,7 @@ final readonly class TicketHistorySentences
             return $actor.' gave it to '.(null === $entry->givenToId ? PersonNames::UNKNOWN_PERSON : $this->firstNameOf($entry->givenToId));
         }
         $toStep = $this->stepNameOf($entry->toStepId);
-        if (null === $entry->fromStepId || $entry->fromStepId === $entry->toStepId) {
+        if (null === $entry->fromStepId || 0 === strcasecmp($entry->fromStepId, $entry->toStepId)) {
             return $actor.' moved it to '.$toStep;
         }
 
