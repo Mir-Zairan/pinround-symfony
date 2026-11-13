@@ -11,6 +11,7 @@ use App\Insight\Application\Turn\TicketTurnFacts;
 use App\Insight\Application\Turn\TurnRowResolver;
 use App\Insight\Infrastructure\Doctrine\DbalProjectCountsProjector;
 use App\Insight\Infrastructure\Doctrine\DbalTurnProjector;
+use App\Insight\Infrastructure\Doctrine\DbalWaitingTurnCounts;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
@@ -19,6 +20,7 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\ReadsSentSql;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Workflow\Api\NeedsYouScore;
@@ -204,6 +206,22 @@ final class DbalWaitingTurnCountsTest extends KernelTestCase
     }
 
     #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsWaitingCounts(): void
+    {
+        $this->addTheWaits();
+        self::assertSame([self::OMAR => [3, '2027-03-05 07:00:00']], $this->countsOf([self::OMAR], null, null));
+
+        $counts = new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            fn (Connection $connection): array => new DbalWaitingTurnCounts($connection, $this->tenantContext())
+                ->waitingCountsOf(self::lena(), [new UserId(self::OMAR)], null, null),
+        );
+
+        self::assertSame([self::OMAR => [0, null]], self::countAndOldestOf($counts));
+    }
+
+    #[Test]
     public function withNoTransactionItRefusesBeforeAnyQuery(): void
     {
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
@@ -285,6 +303,16 @@ final class DbalWaitingTurnCountsTest extends KernelTestCase
             $projectId,
         ));
 
+        return self::countAndOldestOf($counts);
+    }
+
+    /**
+     * @param array<string, WaitingTurnCount> $counts
+     *
+     * @return array<string, array{int, string|null}> each person's count and oldest wait in UTC
+     */
+    private static function countAndOldestOf(array $counts): array
+    {
         return array_map(
             static fn (WaitingTurnCount $count): array => [$count->tickets, $count->oldestWaitingSince?->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s')],
             $counts,
