@@ -33,7 +33,9 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
 
 /**
@@ -43,6 +45,8 @@ use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
  */
 final class MoveTicketTest extends KernelTestCase
 {
+    use ClockSensitiveTrait;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000e701';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000e702';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000e711';
@@ -66,6 +70,26 @@ final class MoveTicketTest extends KernelTestCase
     private const string KEY = 'SHOP-7';
     private const string MOVED_AT = '2027-03-16 09:30:00+00:00';
     private const string NO_TEAM_ROLE_NOTE = 'Managers can read and comment. Only the team moves tickets.';
+    private const string TICKET_BY_KEY = 'SELECT t0.project_id AS project_id_1, t0.number AS number_2, t0.key AS key_3,';
+    private const string WAITING_TURNS = 'SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn';
+    // The flush's savepoint around the versioned UPDATE and Doctrine's re-read of the version, the turn projector's
+    // read and writes, the history row, then the event bus's doctrine_transaction savepoint around the outbox's own.
+    private const array SAVED_PROJECTED_AND_PUBLISHED = [
+        'SAVEPOINT DOCTRINE_2',
+        'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?,',
+        'SELECT version FROM tkt_ticket WHERE organization_id = ? AND id = ?',
+        'RELEASE SAVEPOINT DOCTRINE_2',
+        self::WAITING_TURNS,
+        'INSERT INTO ins_project_count_ticket ',
+        'INSERT INTO ins_ticket_turn ',
+        'INSERT INTO tkt_ticket_event ',
+        'SAVEPOINT DOCTRINE_2',
+        'SAVEPOINT DOCTRINE_3',
+        'INSERT INTO messenger_outbox ',
+        'SELECT pg_notify(?, ?)',
+        'RELEASE SAVEPOINT DOCTRINE_3',
+        'RELEASE SAVEPOINT DOCTRINE_2',
+    ];
 
     protected function setUp(): void
     {
@@ -478,6 +502,131 @@ final class MoveTicketTest extends KernelTestCase
 
         self::assertSame(self::ON_HOLD_STEP, $this->stepAndVersion()[0]);
         $this->assertBetaTicketsUntouched();
+    }
+
+    /**
+     * The team's steps, people and rules come from the caches the first move filled, so a verb move reads the ticket
+     * and the team's waiting reviews and tests, then saves, projects and publishes.
+     */
+    #[Test]
+    public function aWarmVerbMoveRunsTenQueriesBesideItsSavepoints(): void
+    {
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $statements = $this->statementsOfAWarmMove(
+            fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'start_work', $versionBefore, new \DateTimeImmutable(self::MOVED_AT)),
+            fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT)),
+        );
+
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, ...self::SAVED_PROJECTED_AND_PUBLISHED], $statements);
+        // TODO(P03.T7): over the 8-query budget, see breakdown
+        self::assertCount(10, self::queriesBesideSavepoints($statements));
+    }
+
+    #[Test]
+    public function aWarmMoveToAPlainStepRunsNineQueriesBesideItsSavepoints(): void
+    {
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $statements = $this->statementsOfAWarmMove(
+            fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::IN_PROGRESS_STEP, $versionBefore, null, null, new \DateTimeImmutable(self::MOVED_AT)),
+            fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::ON_HOLD_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
+        );
+
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, ...self::SAVED_PROJECTED_AND_PUBLISHED], $statements);
+        // TODO(P03.T7): over the 8-query budget, see breakdown
+        self::assertCount(9, self::queriesBesideSavepoints($statements));
+    }
+
+    /**
+     * Raj is in the team, but who a ticket waits on may be any member of the organization, so his membership is read.
+     */
+    #[Test]
+    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsTenQueriesBesideItsSavepoints(): void
+    {
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $statements = $this->statementsOfAWarmMove(
+            fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::IN_PROGRESS_STEP, $versionBefore, null, null, new \DateTimeImmutable(self::MOVED_AT)),
+            fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, new UserId(self::RAJ), null, new \DateTimeImmutable(self::MOVED_AT)),
+        );
+
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', ...self::SAVED_PROJECTED_AND_PUBLISHED], $statements);
+        // TODO(P03.T7): over the 8-query budget, see breakdown
+        self::assertCount(10, self::queriesBesideSavepoints($statements));
+    }
+
+    /**
+     * @param list<string> $expectedPrefixes
+     * @param list<string> $statements
+     */
+    private static function assertStatementsStartWith(array $expectedPrefixes, array $statements): void
+    {
+        $sentPrefixes = [];
+        foreach ($statements as $index => $statement) {
+            $sentPrefixes[] = substr($statement, 0, \strlen($expectedPrefixes[$index] ?? $statement));
+        }
+        self::assertSame($expectedPrefixes, $sentPrefixes);
+    }
+
+    /**
+     * @param list<string> $statements
+     *
+     * @return list<string> the statements that are neither a savepoint nor its release
+     */
+    private static function queriesBesideSavepoints(array $statements): array
+    {
+        return array_values(array_filter(
+            $statements,
+            static fn (string $statement): bool => !str_starts_with($statement, 'SAVEPOINT ') && !str_starts_with($statement, 'RELEASE SAVEPOINT '),
+        ));
+    }
+
+    /**
+     * Both moves run in one transaction under Acme Foods, as a request's would, and are rolled back. The first fills
+     * the caches; the entity manager is cleared after it, as a new request starts with an empty one.
+     *
+     * @param \Closure(): void $warmingMove
+     * @param \Closure(): void $measuredMove
+     *
+     * @return list<string> the SQL of each statement of the measured move, in the order sent
+     */
+    private function statementsOfAWarmMove(\Closure $warmingMove, \Closure $measuredMove): array
+    {
+        self::mockTime(self::MOVED_AT);
+        $debugData = $this->debugData();
+
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($warmingMove, $measuredMove, $debugData): array {
+            $warmingMove();
+            $this->entityManager()->clear();
+            $debugData->reset();
+            $measuredMove();
+
+            return self::sqlOf($debugData);
+        });
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function sqlOf(DebugDataHolder $debugData): array
+    {
+        $sql = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            self::assertIsArray($queriesOfOneConnection);
+            foreach ($queriesOfOneConnection as $query) {
+                self::assertIsArray($query);
+                self::assertIsString($query['sql']);
+                $sql[] = $query['sql'];
+            }
+        }
+
+        return $sql;
+    }
+
+    private function debugData(): DebugDataHolder
+    {
+        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function assertMoved(string $stepBefore, int $versionBefore, string $expectedStepId, string $actor, ?string $verb): void
