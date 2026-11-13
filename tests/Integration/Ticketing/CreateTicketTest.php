@@ -311,6 +311,11 @@ final class CreateTicketTest extends KernelTestCase
             {
                 $this->doctrineTickets->add($ticket);
             }
+
+            public function ofKey(OrganizationId $organizationId, string $key): ?Ticket
+            {
+                return $this->doctrineTickets->ofKey($organizationId, $key);
+            }
         };
     }
 

@@ -209,6 +209,10 @@ when@test:
         test.ticketing_ticket_turn_queries:
             alias: App\Ticketing\Api\TicketTurnQueries
             public: true
+        # No move use case builds snapshots before P03.T7; EntityTicketTurnSnapshotsTest gets the port as it would.
+        test.ticketing_ticket_turn_snapshots:
+            alias: App\Ticketing\Application\TicketTurnSnapshots
+            public: true
         test.insight_turn_projector:
             alias: App\Insight\Api\TurnProjector
             public: true

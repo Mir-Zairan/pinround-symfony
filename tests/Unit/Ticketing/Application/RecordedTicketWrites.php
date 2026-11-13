@@ -13,11 +13,13 @@ use App\Ticketing\Api\Event\TicketEvent;
 use App\Ticketing\Application\TicketEvents;
 use App\Ticketing\Application\TicketHistory;
 use App\Ticketing\Domain\Ticket;
+use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
 
 /**
  * Every write a ticket command makes, in the order it makes them: the saved ticket, its history row, its turn refresh
- * and its event. New tickets get the given id.
+ * and its event. New tickets get the given id; ofKey finds an added ticket as DoctrineTickets would, only in its own
+ * organization.
  */
 final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjector, TicketEvents
 {
@@ -43,6 +45,16 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
     {
         $this->addedTickets[] = $ticket;
         $this->writes[] = 'ticket '.$ticket->id()->toString();
+    }
+
+    public function ofKey(OrganizationId $organizationId, string $key): ?Ticket
+    {
+        $canonicalKey = TicketKey::fromString($key)->toString();
+
+        return array_find(
+            $this->addedTickets,
+            static fn (Ticket $ticket): bool => $ticket->organizationId()->equals($organizationId) && $ticket->key()->toString() === $canonicalKey,
+        );
     }
 
     public function recordCreated(OrganizationId $organizationId, TicketId $ticketId, UserId $reporter, string $stepId, \DateTimeImmutable $at): void

@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace App\Ticketing\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
-use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\Ticketing\Api\TicketTurnQueries;
-use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -22,7 +20,6 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
     public function __construct(
         private Connection $connection,
         private TenantContext $tenantContext,
-        private StepQueries $stepQueries,
         private TicketTeamLookup $teamLookup,
     ) {
     }
@@ -43,23 +40,10 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
 
         $stepId = self::text($row['step_id'], 'step_id');
         $teamId = TurnSnapshotRow::teamIdOf($row);
-        [$groupCode, $coreCode] = $this->groupAndCoreCodeOf($stepId, $teamId);
+        [$groupCode, $coreCode] = $this->teamLookup->groupAndCoreCodeOf($stepId, $teamId);
         [$leadId, $leadDisplayName, $developerIds, $testerIds] = null === $teamId ? [null, null, [], []] : $this->teamLookup->peopleOf($teamId);
 
         return TurnSnapshotRow::snapshotOf($ticketId, $row, $groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds);
-    }
-
-    /**
-     * @return array{string, string|null} the group code and the core code
-     */
-    private function groupAndCoreCodeOf(string $stepId, ?TeamId $teamId): array
-    {
-        $teamStep = $this->teamLookup->stepOf($stepId, $teamId);
-        if (null !== $teamStep) {
-            return [$teamStep->groupCode(), $teamStep->coreCode()];
-        }
-
-        return [$this->stepQueries->groupOf($stepId) ?? throw new \LogicException('A ticket is in a step its organization does not have.'), null];
     }
 
     private static function text(mixed $value, string $column): string

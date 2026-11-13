@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Doctrine;
 
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\Ticketing\Domain\Ticket;
+use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
@@ -25,5 +27,13 @@ final readonly class DoctrineTickets implements Tickets
     {
         $this->entityManager->persist($ticket);
         $this->entityManager->flush();
+    }
+
+    public function ofKey(OrganizationId $organizationId, string $key): ?Ticket
+    {
+        return $this->entityManager->getRepository(Ticket::class)->findOneBy([
+            'organizationId' => $organizationId->toString(),
+            'key' => TicketKey::fromString($key)->toString(),
+        ]);
     }
 }

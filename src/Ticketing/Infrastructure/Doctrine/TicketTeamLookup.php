@@ -33,6 +33,24 @@ final readonly class TicketTeamLookup
     }
 
     /**
+     * The step among the team's steps, else from StepQueries::groupOf (one query) for a step they no longer list
+     * (removed) or a ticket with no team; such a step gets no core code.
+     *
+     * @return array{string, string|null} the group code and the core code
+     *
+     * @throws \LogicException when the organization of the open transaction has no such step
+     */
+    public function groupAndCoreCodeOf(string $stepId, ?TeamId $teamId): array
+    {
+        $teamStep = $this->stepOf($stepId, $teamId);
+        if (null !== $teamStep) {
+            return [$teamStep->groupCode(), $teamStep->coreCode()];
+        }
+
+        return [$this->stepQueries->groupOf($stepId) ?? throw new \LogicException('A ticket is in a step its organization does not have.'), null];
+    }
+
+    /**
      * No query when the team's people are cached. A developer or tester Identity does not know is left out. The cache
      * is shared, so a caller that saves the answer can save people a SetTeamRole has just changed (the window is in
      * TicketTurnQueries::factsOf).

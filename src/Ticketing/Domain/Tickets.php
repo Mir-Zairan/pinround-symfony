@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Domain;
 
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 
 /**
@@ -22,4 +23,17 @@ interface Tickets
      * with it.
      */
     public function add(Ticket $ticket): void;
+
+    /**
+     * The ticket of the organization with the key, loaded for a change; one query unless the request has loaded it
+     * already. A ticket of another organization is not found. A caller that takes the key from a URL answers
+     * InvalidTicketKey as not found, as it does null.
+     *
+     * @param string $key the key as people write it, for example "SHOP-12"
+     *
+     * @return Ticket|null null when the organization has no ticket with the key
+     *
+     * @throws InvalidTicketKey when the key is not a project key, a hyphen and a number from 1 up, before any query
+     */
+    public function ofKey(OrganizationId $organizationId, string $key): ?Ticket;
 }

@@ -41,7 +41,20 @@ final class TicketVisibilityFactsTest extends TestCase
     #[DataProvider('visibilities')]
     public function aTicketTurnSnapshotAcceptsEveryVisibility(string $visibility): void
     {
-        $snapshot = new TicketTurnSnapshot(
+        self::assertSame($visibility, self::snapshotWith($visibility)->visibility);
+    }
+
+    #[Test]
+    public function aTicketTurnSnapshotRefusesAVisibilityThatIsNoConstant(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A ticket visibility must be all or team.');
+        self::snapshotWith('org');
+    }
+
+    private static function snapshotWith(string $visibility): TicketTurnSnapshot
+    {
+        return new TicketTurnSnapshot(
             new TicketId('0197a3c0-0000-7000-8000-00000000c1d1'),
             '0197a3c0-0000-7000-8000-00000000c1e1',
             '0197a3c0-0000-7000-8000-00000000c1f1',
@@ -57,7 +70,5 @@ final class TicketVisibilityFactsTest extends TestCase
             null,
             new UserId('0197a3c0-0000-7000-8000-00000000c1b3'),
         );
-
-        self::assertSame($visibility, $snapshot->visibility);
     }
 }

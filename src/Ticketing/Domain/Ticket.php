@@ -18,6 +18,7 @@ final class Ticket implements TenantOwned
 {
     public const int TITLE_MAX_LENGTH = 200;
     public const int DESCRIPTION_MAX_LENGTH = 50_000;
+    private const array GROUP_CODES = ['todo', 'doing', 'check', 'wait', 'done'];
 
     private readonly string $organizationId;
     private readonly string $id;
@@ -208,6 +209,117 @@ final class Ticket implements TenantOwned
     public function createdAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    public function updatedAt(): \DateTimeImmutable
+    {
+        return $this->updatedAt;
+    }
+
+    /**
+     * The wf_step id of the step the ticket was in before its last move; null before its first.
+     */
+    public function previousStepId(): ?string
+    {
+        return $this->previousStepId;
+    }
+
+    public function pendingAssignee(): ?UserId
+    {
+        return null === $this->pendingAssigneeId ? null : new UserId($this->pendingAssigneeId);
+    }
+
+    public function reviewer(): ?UserId
+    {
+        return null === $this->reviewerId ? null : new UserId($this->reviewerId);
+    }
+
+    public function tester(): ?UserId
+    {
+        return null === $this->testerId ? null : new UserId($this->testerId);
+    }
+
+    /**
+     * The person a ticket in Needs input waits on; null when it waits on a label, or is in another step.
+     */
+    public function waitingOnUser(): ?UserId
+    {
+        return null === $this->waitingOnUserId ? null : new UserId($this->waitingOnUserId);
+    }
+
+    /**
+     * The label a ticket in Needs input waits on, for example "Customer"; null when it waits on a person, or is in
+     * another step.
+     */
+    public function waitingOnLabel(): ?string
+    {
+        return $this->waitingOnLabel;
+    }
+
+    public function release(): ?string
+    {
+        return $this->release;
+    }
+
+    /**
+     * True while the ticket's check reasons include "risk".
+     */
+    public function isRiskCheck(): bool
+    {
+        return \in_array('risk', $this->checkReasons, true);
+    }
+
+    /**
+     * The optimistic lock version as last read or saved; Doctrine raises it on every update.
+     */
+    public function version(): int
+    {
+        return $this->version;
+    }
+
+    /**
+     * When the ticket last entered the done group; null while its step is in any other group.
+     */
+    public function closedAt(): ?\DateTimeImmutable
+    {
+        return $this->closedAt;
+    }
+
+    /**
+     * Moves the ticket to the step. The caller has resolved the step and checked the move is allowed; the ticket only
+     * keeps its own fields in step. Entering the done group closes it, and leaving that group reopens it. Who it waits
+     * on is kept only in Needs input. A refused move changes nothing.
+     *
+     * @param string         $stepId           the wf_step id of the step the ticket moves to
+     * @param string         $groupCode        that step's group: todo, doing, check, wait or done
+     * @param bool           $isNeedsInputStep true when that step is the core Needs input step
+     * @param WaitingOn|null $waitingOn        who the ticket waits on; given exactly when $isNeedsInputStep is true
+     *
+     * @throws InvalidWaitingOn          when a Needs input step has no one to wait on, or another step has someone
+     * @throws \InvalidArgumentException when the group code is none of the five
+     */
+    public function move(string $stepId, string $groupCode, bool $isNeedsInputStep, ?WaitingOn $waitingOn, \DateTimeImmutable $movedAt): void
+    {
+        if (!\in_array($groupCode, self::GROUP_CODES, true)) {
+            throw new \InvalidArgumentException('A step group is one of todo, doing, check, wait or done.');
+        }
+        if ($isNeedsInputStep && null === $waitingOn) {
+            throw new InvalidWaitingOn('A ticket in Needs input waits on a person or a label.');
+        }
+        if (!$isNeedsInputStep && null !== $waitingOn) {
+            throw new InvalidWaitingOn('Only a ticket in Needs input waits on someone.');
+        }
+
+        $this->previousStepId = $this->stepId;
+        $this->stepId = $stepId;
+        if ('done' !== $groupCode) {
+            $this->closedAt = null;
+        } elseif (null === $this->closedAt) {
+            $this->closedAt = $movedAt;
+        }
+        $this->waitingOnUserId = $waitingOn?->userId()?->toString();
+        $this->waitingOnLabel = $waitingOn?->label();
+        $this->updatedAt = $movedAt;
     }
 
     private static function checkedTitle(string $title): string
