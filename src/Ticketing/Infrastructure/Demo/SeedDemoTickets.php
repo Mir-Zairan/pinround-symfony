@@ -35,8 +35,10 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
  * the ticket page's 700-character cut (the ticket page's e2e spec opens it by its title). It runs after SeedDemoProjects.
  * A ticket whose title SHOP already holds stays as it is.
  *
- * No command moves a ticket yet (P03.T7), so a ticket is made through TicketCommands::create, which starts it in
- * Backlog or To do, and then put in its step with one UPDATE; its turn row is refreshed after that.
+ * A ticket is made through TicketCommands::create, which starts it in Backlog or To do, and then put in its step with one
+ * UPDATE rather than TicketCommands::move: the seed places it, skipping the transition policy and the moved history row on
+ * purpose, and sets what no move sets (visibility, reviewer, tester, the label On hold waits on). Its turn row is
+ * refreshed after that.
  */
 #[AsTaggedItem(priority: 30)]
 final readonly class SeedDemoTickets implements DemoSeedStep

@@ -34,6 +34,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
 
 /**
  * TicketCommands::move and moveTo on the real tables, policy, outbox and turn projector, as pinround_app under
@@ -194,8 +195,10 @@ final class MoveTicketTest extends KernelTestCase
 
         self::assertInstanceOf(MoveRefused::class, $verbRefusal);
         self::assertNull($verbRefusal->ruleNoteTemplate);
+        self::assertSame([], $verbRefusal->ruleNotePeople);
         self::assertInstanceOf(MoveRefused::class, $moveToRefusal);
         self::assertNull($moveToRefusal->ruleNoteTemplate);
+        self::assertSame([], $moveToRefusal->ruleNotePeople);
         self::assertSame($stateBefore, $this->storedState());
     }
 
@@ -208,6 +211,7 @@ final class MoveTicketTest extends KernelTestCase
         yield 'a person' => [self::RAJ, null, self::RAJ, null];
         yield 'a label' => [null, '  Customer  ', null, 'Customer'];
         yield 'nobody, so the reporter' => [null, null, self::MIA, null];
+        yield 'a label of 100 multibyte characters' => [null, str_repeat('é', 100), null, str_repeat('é', 100)];
     }
 
     #[Test]
@@ -235,20 +239,34 @@ final class MoveTicketTest extends KernelTestCase
         $this->assertMoved($stepBefore, $versionBefore, self::PAIRING_STEP, self::LENA, null);
     }
 
+    #[Test]
+    public function theLeadMovesTheTicketFromInProgressToTestingWhenTheTeamLetsTestingComeBeforeReview(): void
+    {
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP]);
+        $this->addRuleSet(reviewBeforeTest: false);
+        [$stepBefore, $versionBefore] = $this->stepAndVersion();
+
+        $this->moveTo(self::LENA, self::TESTING_STEP, $versionBefore);
+
+        $this->assertMoved($stepBefore, $versionBefore, self::TESTING_STEP, self::LENA, null);
+    }
+
     /**
-     * @return iterable<string, array{string, string, string|null, string|null, string|null}>
+     * @return iterable<string, array{string, string, array<string, string>, string|null, string|null, string|null, array<string, string>}>
      */
     public static function refusedMovesTo(): iterable
     {
-        // Who moves, to which step, who is named to wait on, and the rule note template it is refused with.
-        yield 'a member' => [self::OMAR, self::IN_PROGRESS_STEP, null, null, null];
-        yield 'a viewer' => [self::RAJ, self::IN_PROGRESS_STEP, null, null, self::NO_TEAM_ROLE_NOTE];
-        yield 'the step it is in' => [self::LENA, ShopTeamRows::TO_DO_STEP, null, null, null];
-        yield 'another team\'s step' => [self::LENA, self::WAREHOUSE_STEP, null, null, null];
-        yield 'a step no organization has' => [self::LENA, '0197a3c0-0000-7000-8000-00000000e749', null, null, null];
-        yield 'a person to wait on outside Needs input' => [self::LENA, self::IN_PROGRESS_STEP, self::RAJ, null, null];
-        yield 'a label to wait on outside Needs input' => [self::LENA, self::IN_PROGRESS_STEP, null, 'Customer', null];
-        yield 'a person of another organization to wait on' => [self::LENA, self::NEEDS_INPUT_STEP, self::SARA, null, null];
+        // Who moves, to which step, the ticket's columns before, who is named to wait on, and the rule note template and
+        // people it is refused with.
+        yield 'a member' => [self::OMAR, self::IN_PROGRESS_STEP, [], null, null, null, []];
+        yield 'a viewer' => [self::RAJ, self::IN_PROGRESS_STEP, [], null, null, self::NO_TEAM_ROLE_NOTE, []];
+        yield 'review before test, for the lead too' => [self::LENA, self::TESTING_STEP, ['step_id' => self::IN_PROGRESS_STEP], null, null, 'Team rule: code review comes before testing.', []];
+        yield 'the step it is in' => [self::LENA, ShopTeamRows::TO_DO_STEP, [], null, null, null, []];
+        yield 'another team\'s step' => [self::LENA, self::WAREHOUSE_STEP, [], null, null, null, []];
+        yield 'a step no organization has' => [self::LENA, '0197a3c0-0000-7000-8000-00000000e749', [], null, null, null, []];
+        yield 'a person to wait on outside Needs input' => [self::LENA, self::IN_PROGRESS_STEP, [], self::RAJ, null, null, []];
+        yield 'a label to wait on outside Needs input' => [self::LENA, self::IN_PROGRESS_STEP, [], null, 'Customer', null, []];
+        yield 'a person of another organization to wait on' => [self::LENA, self::NEEDS_INPUT_STEP, [], self::SARA, null, null, []];
     }
 
     #[Test]
@@ -264,19 +282,51 @@ final class MoveTicketTest extends KernelTestCase
 
         self::assertInstanceOf(MoveRefused::class, $refusal);
         self::assertNull($refusal->ruleNoteTemplate);
+        self::assertSame([], $refusal->ruleNotePeople);
         self::assertSame($stateBefore, $this->storedState());
     }
 
+    /**
+     * @param array<string, string> $columnsBefore
+     * @param array<string, string> $expectedPeople
+     */
     #[Test]
     #[DataProvider('refusedMovesTo')]
-    public function aRefusedMoveToSaysWhyAndChangesNothing(string $actor, string $stepId, ?string $waitingOnUserId, ?string $waitingOnLabel, ?string $expectedTemplate): void
+    public function aRefusedMoveToSaysWhyAndChangesNothing(string $actor, string $stepId, array $columnsBefore, ?string $waitingOnUserId, ?string $waitingOnLabel, ?string $expectedTemplate, array $expectedPeople): void
     {
+        $this->setColumns($columnsBefore);
         $stateBefore = $this->storedState();
 
         $refusal = $this->refusalOf(fn () => $this->moveTo($actor, $stepId, $stateBefore['version'], null === $waitingOnUserId ? null : new UserId($waitingOnUserId), $waitingOnLabel));
 
         self::assertInstanceOf(MoveRefused::class, $refusal);
         self::assertSame($expectedTemplate, $refusal->ruleNoteTemplate);
+        self::assertSame($expectedPeople, array_map(static fn (UserId $userId): string => $userId->toString(), $refusal->ruleNotePeople));
+        self::assertSame($stateBefore, $this->storedState());
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function badWaitingOnLabels(): iterable
+    {
+        yield 'blank' => ["  \t ", 'A ticket waits on a person or a label; the label is blank.'];
+        yield '101 characters' => [str_repeat('é', 101), 'A waiting-on label has at most 100 characters.'];
+        yield 'a CRLF' => ["Cus\r\ntomer", 'A waiting-on label is one line of text.'];
+        yield 'a U+2028 line separator' => ["Cus\u{2028}tomer", 'A waiting-on label is one line of text.'];
+        yield 'a byte order mark' => ["\u{FEFF}Customer", 'A waiting-on label is one line of text.'];
+    }
+
+    #[Test]
+    #[DataProvider('badWaitingOnLabels')]
+    public function aBadLabelToWaitOnIsRefusedAndChangesNothing(string $waitingOnLabel, string $expectedMessage): void
+    {
+        $stateBefore = $this->storedState();
+
+        $refusal = $this->refusalOf(fn () => $this->moveTo(self::LENA, self::NEEDS_INPUT_STEP, $stateBefore['version'], null, $waitingOnLabel));
+
+        self::assertInstanceOf(\InvalidArgumentException::class, $refusal);
+        self::assertSame($expectedMessage, $refusal->getMessage());
         self::assertSame($stateBefore, $this->storedState());
     }
 
@@ -368,7 +418,7 @@ final class MoveTicketTest extends KernelTestCase
 
         $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, function () use ($stateBefore): never {
             $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'start_work', $stateBefore['version'], new \DateTimeImmutable(self::MOVED_AT));
-            self::assertCount(1, $this->outboxBodiesOf(TicketMoved::class));
+            self::assertCount(1, $this->movedEvents());
             throw new \RuntimeException('Forced after the publish.');
         }));
 
@@ -443,22 +493,33 @@ final class MoveTicketTest extends KernelTestCase
             ]],
             $this->movedRows(),
         );
-        $events = $this->outboxBodiesOf(TicketMoved::class);
-        self::assertCount(1, $events);
-        self::assertSame(1, $this->outboxRows());
-        self::assertStringContainsString($expectedStepId, $events[0]);
-        if (null !== $verb) {
-            self::assertStringContainsString($verb, $events[0]);
-        }
-        self::assertStringNotContainsString('Cart total', $events[0]);
+        $ticketId = $this->ticketId();
+        $bodies = $this->outboxBodies();
+        self::assertCount(1, $bodies);
+        self::assertStringNotContainsString('Cart total', $bodies[0]);
+        $event = $this->movedEvents()[0] ?? null;
+        self::assertInstanceOf(TicketMoved::class, $event);
+        self::assertSame(
+            [self::ACME_FOODS, $ticketId->toString(), self::KEY, $stepBefore, $expectedStepId, $verb, $actor, '2027-03-16T09:30:00+00:00'],
+            [$event->organizationId, $event->ticketId, $event->key, $event->fromStepId, $event->toStepId, $event->verb, $event->actorId, $event->movedAt->format(\DATE_ATOM)],
+        );
         $turnRowsAfterTheMove = $this->turnRows();
         self::assertSame(
             self::DONE_STEP === $expectedStepId ? [] : [$this->groupOf($expectedStepId)],
             array_column($turnRowsAfterTheMove, 'grp'),
         );
-        $ticketId = $this->ticketId();
+        $isDone = self::DONE_STEP === $expectedStepId;
+        $countRowsAfterTheMove = $this->projectCountRows();
+        self::assertSame(
+            [
+                'placement' => [[self::SHOP_PROJECT, self::SHOP_TEAM, 'all', $isDone]],
+                'counts' => [[self::SHOP_PROJECT, self::SHOP_TEAM, 'all', $isDone ? 0 : 1, $isDone ? 1 : 0]],
+            ],
+            $countRowsAfterTheMove,
+        );
         $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
         self::assertSame($this->turnRows(), $turnRowsAfterTheMove);
+        self::assertSame($this->projectCountRows(), $countRowsAfterTheMove);
     }
 
     private function assertBetaTicketsUntouched(): void
@@ -573,13 +634,27 @@ final class MoveTicketTest extends KernelTestCase
     }
 
     /**
-     * @return array{step_id: string, version: int, history: list<array<string, mixed>>, outbox: int, turn: list<array<string, mixed>>}
+     * @return array{step_id: string, version: int, history: list<array<string, mixed>>, outbox: int, turn: list<array<string, mixed>>, project_counts: array{placement: list<list<mixed>>, counts: list<list<mixed>>}}
      */
     private function storedState(): array
     {
         [$stepId, $version] = $this->stepAndVersion();
 
-        return ['step_id' => $stepId, 'version' => $version, 'history' => $this->movedRows(), 'outbox' => $this->outboxRows(), 'turn' => $this->turnRows()];
+        return ['step_id' => $stepId, 'version' => $version, 'history' => $this->movedRows(), 'outbox' => $this->outboxRows(), 'turn' => $this->turnRows(), 'project_counts' => $this->projectCountRows()];
+    }
+
+    /**
+     * @return array{placement: list<list<mixed>>, counts: list<list<mixed>>} the count row Acme Foods' SHOP-7 is placed
+     *                                                                        in, and Acme Foods' count rows
+     */
+    private function projectCountRows(): array
+    {
+        $ticketId = $this->ticketId()->toString();
+
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => [
+            'placement' => $this->connection()->fetchAllNumeric('SELECT project_id, team_id, visibility, is_done FROM ins_project_count_ticket WHERE ticket_id = ?', [$ticketId]),
+            'counts' => $this->connection()->fetchAllNumeric('SELECT project_id, team_id, visibility, open_count, done_count FROM ins_project_counts ORDER BY project_id, team_id, visibility'),
+        ]);
     }
 
     /**
@@ -641,22 +716,34 @@ final class MoveTicketTest extends KernelTestCase
     }
 
     /**
-     * @param class-string $eventClass
-     *
-     * @return list<string> the body of each outbox row of that event class, oldest first
+     * @return list<string> the body of each outbox row, oldest first
      */
-    private function outboxBodiesOf(string $eventClass): array
+    private function outboxBodies(): array
     {
         $bodies = [];
         foreach ($this->connection()->fetchFirstColumn("SELECT body FROM messenger_outbox WHERE queue_name = 'outbox' ORDER BY id") as $body) {
             self::assertIsString($body);
-            // The transport stores the serialized envelope with its quotes and backslashes escaped.
-            if (str_contains(str_replace('\\', '', $body), '"'.str_replace('\\', '', $eventClass).'"')) {
-                $bodies[] = $body;
-            }
+            $bodies[] = $body;
         }
 
         return $bodies;
+    }
+
+    /**
+     * @return list<TicketMoved> the TicketMoved events in the outbox, decoded as the outbox transport does, oldest first
+     */
+    private function movedEvents(): array
+    {
+        $serializer = new PhpSerializer();
+        $events = [];
+        foreach ($this->outboxBodies() as $body) {
+            $message = $serializer->decode(['body' => $body])->getMessage();
+            if ($message instanceof TicketMoved) {
+                $events[] = $message;
+            }
+        }
+
+        return $events;
     }
 
     private function moveTicketWith(Tickets $tickets): MoveTicket
