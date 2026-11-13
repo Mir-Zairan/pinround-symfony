@@ -19,7 +19,7 @@ final readonly class TransitionCatalogue
     {
         return [
             new Transition(Verb::PlanIt, 'Plan it', [CoreStep::Backlog], CoreStep::Todo, [Mover::Lead], isPrimary: true),
-            new Transition(Verb::GiveItTo, 'Give it to…', [CoreStep::Todo, CoreStep::Backlog], CoreStep::Todo, [Mover::Lead, Mover::Checker], isPrimary: true, assigneeInTodo: AssigneeInTodo::Nobody),
+            new Transition(Verb::GiveItTo, 'Give it to…', [CoreStep::Todo, CoreStep::Backlog], CoreStep::Todo, [Mover::Lead, Mover::CheckerWhenUnassigned], isPrimary: true),
             new Transition(Verb::StartWork, 'Start work', [CoreStep::Todo], CoreStep::Progress, [Mover::Assignee], isPrimary: true, assigneeInTodo: AssigneeInTodo::Someone),
             new Transition(Verb::SendToCodeReview, 'Send to code review', [CoreStep::Progress], CoreStep::Review, [Mover::Assignee, Mover::LeadWhenUnassigned], isPrimary: true),
             new Transition(Verb::SendToTesting, 'Send to testing', [CoreStep::Progress], CoreStep::Test, [Mover::Assignee], isPrimary: false, explainsBlock: false),

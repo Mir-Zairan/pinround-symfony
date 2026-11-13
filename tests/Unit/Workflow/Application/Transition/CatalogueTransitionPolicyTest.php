@@ -32,6 +32,7 @@ final class CatalogueTransitionPolicyTest extends TestCase
             'Plan it' => [Verb::PlanIt, GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::rules(), ['Lena']],
             'Give it to… in Backlog' => [Verb::GiveItTo, GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::rules(), ['Lena']],
             'Give it to… in To do, Omar checks the new ticket' => [Verb::GiveItTo, GuardFixtures::ticket('todo', 'todo', checker: GuardFixtures::OMAR), GuardFixtures::rules(), ['Lena', 'Omar']],
+            'Give it to someone else… in To do, given to Mia while Omar checks it' => [Verb::GiveItTo, GuardFixtures::ticket('todo', 'todo', assignee: GuardFixtures::MIA, checker: GuardFixtures::OMAR), GuardFixtures::rules(), ['Lena']],
             'Start work, given to Omar' => [Verb::StartWork, GuardFixtures::ticket('todo', 'todo', assignee: GuardFixtures::OMAR), GuardFixtures::rules(), ['Omar']],
             'Send to code review, Omar builds it' => [Verb::SendToCodeReview, GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR), GuardFixtures::rules(), ['Omar']],
             'Send to code review, nobody assigned' => [Verb::SendToCodeReview, GuardFixtures::ticket('progress', 'doing'), GuardFixtures::rules(), ['Lena']],
@@ -194,13 +195,22 @@ final class CatalogueTransitionPolicyTest extends TestCase
     }
 
     #[Test]
-    public function inToDoGiveItToIsOfferedOnlyWhileNobodyIsAssigned(): void
+    public function inToDoTheLeadGivesAnAssignedTicketToSomeoneElseAndTheAssigneeOnlyStartsWork(): void
     {
-        $ticket = GuardFixtures::ticket('todo', 'todo', assignee: GuardFixtures::OMAR);
+        $assigned = GuardFixtures::ticket('todo', 'todo', assignee: GuardFixtures::OMAR);
+        $unassigned = GuardFixtures::ticket('todo', 'todo');
         $policy = GuardFixtures::policy();
 
-        self::assertSame([Verb::PutOnHold->value], self::verbsOf($policy->available($ticket, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team())));
-        self::assertSame([Verb::StartWork->value], self::verbsOf($policy->available($ticket, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team())));
+        $leadsAssigned = $policy->available($assigned, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team());
+        $leadsUnassigned = $policy->available($unassigned, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team());
+
+        self::assertSame([Verb::GiveItTo->value, Verb::PutOnHold->value], self::verbsOf($leadsAssigned));
+        self::assertSame('Give it to someone else…', $leadsAssigned->transitions[0]->label);
+        self::assertSame('Give it to…', $leadsUnassigned->transitions[0]->label);
+        self::assertEquals(MoveTarget::coreStep('todo'), $leadsAssigned->transitions[0]->moveTarget);
+        self::assertTrue($policy->check($assigned, GuardFixtures::lena(), GuardFixtures::rules(), GuardFixtures::team(), Verb::GiveItTo->value)->isAllowed);
+        self::assertSame([Verb::StartWork->value], self::verbsOf($policy->available($assigned, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team())));
+        self::assertFalse($policy->check($assigned, GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team(), Verb::GiveItTo->value)->isAllowed);
     }
 
     #[Test]

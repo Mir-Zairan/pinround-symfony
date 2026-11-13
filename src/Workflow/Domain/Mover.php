@@ -25,8 +25,8 @@ enum Mover: string
      */
     case WaitedOn = 'waited_on';
 
-    /** The person checking a new ticket, while that check is needed. */
-    case Checker = 'checker';
+    /** The person checking a new ticket, while that check is needed and the ticket has no assignee. */
+    case CheckerWhenUnassigned = 'checker_when_unassigned';
 
     /** The ticket's reviewer, whose turn it is in code review: the stored one, else the one the reviewer choice finds. */
     case Reviewer = 'reviewer';

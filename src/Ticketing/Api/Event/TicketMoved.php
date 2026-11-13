@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Ticketing\Api\Event;
 
 /**
- * A ticket was moved from one step of its team to another, or given to someone in To do, which leaves and enters the
- * same step (a TicketAssigned comes with it).
+ * A ticket was moved from one step of its team to another; never from a step to itself. A give out of Backlog also
+ * publishes a TicketAssigned; a give inside To do publishes only that.
  */
 final readonly class TicketMoved implements TicketEvent
 {

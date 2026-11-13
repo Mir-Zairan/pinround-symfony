@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Ticketing\Api\Event;
 
 /**
- * A ticket was given to a person with "Give it to…"; the TicketMoved of the same give comes with it.
+ * A ticket was given to a person with "Give it to…". A give out of Backlog also publishes the TicketMoved to To do,
+ * before this; a give inside To do publishes only this.
  */
 final readonly class TicketAssigned implements TicketEvent
 {

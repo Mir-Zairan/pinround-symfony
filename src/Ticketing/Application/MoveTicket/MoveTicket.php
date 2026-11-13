@@ -47,6 +47,8 @@ final readonly class MoveTicket
     public const string GIVE_IT_TO = 'give_it_to';
     /** The refusal of a person to give the ticket to who is not its team's lead or a member (a viewer, or nobody of it). */
     public const string ASSIGNEE_NOT_IN_TEAM_NOTE = 'Give it to someone in the ticket’s team.';
+    /** The refusal of giving the ticket to the person who already has it, with {assignee} for them. */
+    public const string ALREADY_GIVEN_NOTE = '{assignee} already has this ticket.';
 
     private const string NEEDS_INPUT = 'input';
     private const string REVIEW = 'review';
@@ -95,8 +97,9 @@ final readonly class MoveTicket
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
-     * @throws MoveRefused            when the ticket has no team, the policy refuses give_it_to, or the person is not the
-     *                                team's lead or a member (ASSIGNEE_NOT_IN_TEAM_NOTE)
+     * @throws MoveRefused            when the ticket has no team, the policy refuses give_it_to, the person is not the
+     *                                team's lead or a member (ASSIGNEE_NOT_IN_TEAM_NOTE), or already has the ticket
+     *                                (ALREADY_GIVEN_NOTE)
      */
     public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
     {
@@ -109,6 +112,9 @@ final readonly class MoveTicket
         }
         $fromStepId = $ticket->stepId();
         $previousAssignee = $ticket->assignee();
+        if (null !== $previousAssignee && $previousAssignee->equals($assignee)) {
+            throw new MoveRefused(self::ALREADY_GIVEN_NOTE, ['assignee' => $assignee]);
+        }
         if ($target->id() !== $fromStepId) {
             $ticket->move($target->id(), $target->groupCode(), false, null, $at);
         }
@@ -323,8 +329,8 @@ final readonly class MoveTicket
     }
 
     /**
-     * Saves the changed ticket under its version lock, refreshes its turn row, and writes its "moved" history row and
-     * TicketMoved.
+     * Saves the changed ticket under its version lock, refreshes its turn row, and writes its "moved" history row and,
+     * when it left its step, TicketMoved.
      *
      * @param UserId|null                       $givenTo      the person a give_it_to names, recorded in the history row
      * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
@@ -353,6 +359,11 @@ final readonly class MoveTicket
             $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $verb, $overrideNote, $at);
         } else {
             $this->ticketHistory->recordGiven($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $givenTo, $at);
+        }
+        // Only a give inside To do stays in its step (a move to the same step is refused); its TicketAssigned is its one
+        // event.
+        if ($fromStepId === $toStepId) {
+            return;
         }
         $this->ticketEvents->publish(new TicketMoved(
             $ticket->organizationId()->toString(),
