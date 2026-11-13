@@ -14,6 +14,7 @@ use App\Ticketing\Api\ProjectPermission;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
 use App\Web\UI\Team\ProjectTicketsLink;
+use App\Web\UI\Team\TeamWorkloads;
 use App\Workflow\Api\RuleQueries;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
@@ -25,7 +26,8 @@ use Symfony\Component\Routing\Attribute\Route;
 /**
  * The team page, /teams/{slug} (P02.T8). The slug is looked up in the request's organization only, so a slug of
  * another organization is not found; a team found there still needs TeamPermission::VIEW (ADR-0013). It only reads:
- * the changes it will offer are POST routes of Ticketing and Workflow that its templates post to.
+ * the changes it will offer are POST routes of Ticketing and Workflow that its templates post to. Its People section
+ * counts only the tickets the viewer may see (TeamWorkloads).
  */
 final class TeamController extends AbstractController
 {
@@ -94,6 +96,7 @@ final class TeamController extends AbstractController
         private readonly SettingsQueries $settingsQueries,
         private readonly TenantContext $tenantContext,
         private readonly CurrentActor $currentActor,
+        private readonly TeamWorkloads $teamWorkloads,
     ) {
     }
 
@@ -130,6 +133,8 @@ final class TeamController extends AbstractController
             'unlinkedProjects' => $canLink ? $this->projectQueries->unlinkedProjectChoices(ProjectQueries::CHOICE_LIMIT) : [],
             'projectForms' => self::PROJECT_FORMS,
             'projects' => $projects,
+            'workload' => $this->teamWorkloads->workloadOf($team->id(), $viewer),
+            'peopleShownAtFirst' => TeamWorkloads::SHOWN_AT_FIRST,
             'ticketsUrls' => array_combine(
                 array_map(static fn (ProjectSummary $project): string => $project->id(), $projects),
                 array_map($this->projectTicketsLink->urlOf(...), $projects),

@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Web;
 use App\Identity\Domain\User;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
+use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
 use App\Organization\Infrastructure\Doctrine\StoredSettings;
 use App\Organization\Infrastructure\Doctrine\StoredSettingsQueries;
@@ -23,6 +24,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -42,6 +44,9 @@ final class TeamPageTest extends WebTestCase
     private const string LEAD_ONLY_NOTE = 'Only the team lead can change projects and steps.';
 
     private KernelBrowser $client;
+
+    /** addTeamOnlyTicket() takes number 1. */
+    private int $nextTicketNumber = 2;
 
     protected function setUp(): void
     {
@@ -199,15 +204,163 @@ final class TeamPageTest extends WebTestCase
     }
 
     #[Test]
-    public function thePeopleSectionIsAShellWithItsHeading(): void
+    public function thePeopleSectionListsTheLeadAndMembersByLoadHighestFirstThenByNameAndLeavesTheViewerOut(): void
     {
-        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
+        $people = $this->createAcmeFoodsPeople();
+        $members = $this->addShopMembers('Zoe', 'Tom', 'Ben', 'Noor', 'Pia');
+        $this->setShopJob($people['Lena'], 'developer');
+        $this->setShopJob($people['Omar'], 'tester');
+        $this->setShopJob($members['Ben'], 'developer');
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Web shop');
+        foreach (['Lena' => 7, 'Omar' => 8, 'Ben' => 19, 'Noor' => 20, 'Tom' => 3, 'Zoe' => 3] as $name => $load) {
+            $this->addTurnsWaitingOn($people[$name] ?? $members[$name], $load, $projectId, $this->shop, $people['Omar']);
+        }
+        $this->logIn($this->client, $people['Lena']);
 
         $page = $this->client->request('GET', '/teams/shop');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('People waiting on them', $page->filter('#team-people')->text());
-        self::assertCount(1, $page->filter('.team__column--aside .empty-state'));
+        self::assertSame('People 7 waiting on them', $page->filter('#team-people')->text());
+        self::assertSame(
+            ['Noor 20', 'Ben 19', 'Omar 8', 'Lena (you) 7', 'Tom 3', 'Zoe 3', 'Pia 0'],
+            $page->filter('.team__person-head')->each(static fn (Crawler $head): string => $head->text()),
+        );
+        self::assertSame(
+            ['Member', 'Developer', 'Tester', 'Team lead · developer', 'Member', 'Member', 'Member'],
+            $page->filter('.team__person-job')->each(static fn (Crawler $job): string => $job->text()),
+        );
+        self::assertSame(
+            [['20', '20'], ['19', '20'], ['8', '20'], ['7', '20'], ['3', '20'], ['3', '20'], ['0', '20']],
+            $page->filter('.team__meter')->each(static fn (Crawler $meter): array => [$meter->attr('value'), $meter->attr('max')]),
+        );
+        self::assertSame(
+            'Counts are open tickets where it is this person’s turn. Red means too much.',
+            $page->filter('.team__people-note')->text(),
+        );
+        self::assertCount(0, $page->filter('.team__column--aside .empty-state'));
+    }
+
+    #[Test]
+    public function aBarTurnsAmberAtEightNotSevenAndRedAtTwentyNotNineteen(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $members = $this->addShopMembers('Ben', 'Noor');
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Web shop');
+        foreach (['Lena' => 7, 'Omar' => 8, 'Ben' => 19, 'Noor' => 20] as $name => $load) {
+            $this->addTurnsWaitingOn($people[$name] ?? $members[$name], $load, $projectId, $this->shop, $people['Omar']);
+        }
+        $this->logIn($this->client, $people['Omar']);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [
+                ['Noor 20', 'team__meter team__meter--too-much'],
+                ['Ben 19', 'team__meter team__meter--busy'],
+                ['Omar (you) 8', 'team__meter team__meter--busy'],
+                ['Lena 7', 'team__meter team__meter--normal'],
+            ],
+            $page->filter('.team__person')->each(static fn (Crawler $person): array => [
+                $person->filter('.team__person-head')->text(),
+                $person->filter('.team__meter')->attr('class'),
+            ]),
+        );
+    }
+
+    #[Test]
+    public function sixPeopleShowAndShowAllNAndTheSearchHoldTheRestWhenTheTeamHasMore(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addShopMembers('Zoe', 'Tom', 'Ben', 'Noor', 'Pia');
+        $this->logIn($this->client, $people['Lena']);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        $rows = $page->filter('.team__person');
+        self::assertCount(7, $rows);
+        self::assertSame(
+            [false, false, false, false, false, false, true],
+            $rows->each(static fn (Crawler $row): bool => null !== $row->attr('hidden')),
+        );
+        self::assertSame(
+            ['ben', 'lena', 'noor', 'omar', 'pia', 'tom', 'zoe'],
+            $rows->each(static fn (Crawler $row): ?string => $row->attr('data-search')),
+        );
+        $toggle = $page->filter('.team__people-toggle');
+        self::assertSame('Show all 7', $toggle->text());
+        self::assertSame('Show fewer', $toggle->attr('data-show-fewer-label'));
+        self::assertSame('false', $toggle->attr('aria-expanded'));
+        self::assertSame('Find a person', $page->filter('.team__people-search')->attr('aria-label'));
+        self::assertSame('No one in this team matches.', $page->filter('.team__people-none')->text());
+        self::assertSame('6', $page->filter('#team-people')->closest('section')?->attr('data-team-people-shown-at-first-value'));
+    }
+
+    #[Test]
+    public function aTeamOfSixShowsEveryoneWithNoShowAllAndNoSearch(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addShopMembers('Ben', 'Noor', 'Pia', 'Tom');
+        $this->logIn($this->client, $people['Lena']);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        $rows = $page->filter('.team__person');
+        self::assertCount(6, $rows);
+        self::assertSame([false, false, false, false, false, false], $rows->each(static fn (Crawler $row): bool => null !== $row->attr('hidden')));
+        self::assertCount(0, $page->filter('.team__people-toggle'));
+        self::assertCount(0, $page->filter('.team__people-search'));
+    }
+
+    #[Test]
+    public function aTeamWithNoLoadDrawsEmptyBarsAgainstAMaximumOfOne(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->logIn($this->client, $people['Omar']);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [['Lena 0', '0', '1'], ['Omar (you) 0', '0', '1']],
+            $page->filter('.team__person')->each(static fn (Crawler $person): array => [
+                $person->filter('.team__person-head')->text(),
+                $person->filter('.team__meter')->attr('value'),
+                $person->filter('.team__meter')->attr('max'),
+            ]),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function viewersOfOmarsLoad(): iterable
+    {
+        yield 'Lena, lead of Shop, counts the team-only ticket' => ['Lena', 'Omar 2'];
+        yield 'Raj, a Manager with no team role, does not' => ['Raj', 'Omar 1'];
+    }
+
+    #[Test]
+    #[DataProvider('viewersOfOmarsLoad')]
+    public function aBarCountsOnlyTheTeamsTicketsTheViewerMaySee(string $viewer, string $omarsLoad): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $shopProjectId = $this->addProject($this->shop, 'SHOP', 'Web shop');
+        $mobileProjectId = $this->addProject($this->mobile, 'APP', 'Mobile app');
+        $this->addTurnsWaitingOn($people['Omar'], 1, $shopProjectId, $this->shop, $people['Omar']);
+        $this->addTurnsWaitingOn($people['Omar'], 1, $shopProjectId, $this->shop, $people['Omar'], 'team');
+        $this->addTurnsWaitingOn($people['Omar'], 1, $mobileProjectId, $this->mobile, $people['Omar']);
+        $this->logIn($this->client, $people[$viewer]);
+
+        $page = $this->client->request('GET', '/teams/shop');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([$omarsLoad, 'Lena 0'], array_map(
+            static fn (string $head): string => str_replace(' (you)', '', $head),
+            $page->filter('.team__person-head')->each(static fn (Crawler $head): string => $head->text()),
+        ));
     }
 
     #[Test]
@@ -343,6 +496,41 @@ final class TeamPageTest extends WebTestCase
 
         self::assertSame($statementsWithOneProject, $statementsWithFiveProjects);
         self::assertContains('db SELECT', $statementsWithOneProject);
+    }
+
+    #[Test]
+    public function theQueriesStayTheSameWhateverTheNumberOfPeopleAndTheirLoads(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->logIn($this->client, $people['Lena']);
+        $this->client->disableReboot();
+        $exporter = self::getContainer()->get('tracing.in_memory_exporter');
+        self::assertInstanceOf(InMemoryExporter::class, $exporter);
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Web shop');
+        $this->addTurnsWaitingOn($people['Omar'], 1, $projectId, $this->shop, $people['Omar']);
+        // The first request of a session also loads the logged-in user's own state and fills the team people cache.
+        $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+
+        $spansBeforeTwoPeople = \count(ExportedSpans::of($exporter));
+        $page = $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(2, $page->filter('.team__person'));
+        $statementsWithTwoPeople = $this->spanNamesAfter($exporter, $spansBeforeTwoPeople);
+
+        foreach ($this->addShopMembers('Ben', 'Noor', 'Pia', 'Tom', 'Zoe') as $member) {
+            $this->addTurnsWaitingOn($member, 3, $projectId, $this->shop, $people['Omar']);
+        }
+        self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow($this->shop);
+        $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+        $spansBeforeSevenPeople = \count(ExportedSpans::of($exporter));
+        $page = $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Ben 3', 'Noor 3', 'Pia 3', 'Tom 3', 'Zoe 3', 'Omar 1'], \array_slice($page->filter('.team__person-head')->each(static fn (Crawler $head): string => $head->text()), 0, 6));
+        $statementsWithSevenPeople = $this->spanNamesAfter($exporter, $spansBeforeSevenPeople);
+
+        self::assertSame($statementsWithTwoPeople, $statementsWithSevenPeople);
     }
 
     /**
@@ -717,13 +905,69 @@ final class TeamPageTest extends WebTestCase
         ));
     }
 
+    /**
+     * @return array<string, User> the new members of Shop by first name, each with the job "other"
+     */
+    private function addShopMembers(string ...$names): array
+    {
+        $members = [];
+        foreach ($names as $name) {
+            $members[$name] = $this->createUserWithoutOrganization($name);
+            $this->addMembership($members[$name], $this->acmeFoods);
+            $this->addTeamRole($members[$name], $this->acmeFoods, $this->shop, 'member');
+        }
+
+        return $members;
+    }
+
+    /**
+     * @param 'developer'|'tester'|'other' $job
+     */
+    private function setShopJob(User $person, string $job): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE org_team_member SET job = ? WHERE organization_id = ? AND team_id = ? AND user_id = ?',
+            [$job, $this->acmeFoods->toString(), $this->shop->toString(), $person->id()->toString()],
+        ));
+    }
+
+    /**
+     * $count open tickets whose turn is $person's, written straight into tkt_ticket and ins_ticket_turn, numbered on
+     * from the last ones added; the counts read only ins_ticket_turn, whose rows need their ticket.
+     *
+     * @param 'all'|'team' $audience
+     */
+    private function addTurnsWaitingOn(User $person, int $count, string $projectId, TeamId $teamId, User $reporter, string $audience = 'all'): void
+    {
+        $firstNumber = $this->nextTicketNumber;
+        $this->nextTicketNumber += $count;
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "WITH ticket AS (
+                 INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
+                     step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
+                 SELECT CAST(? AS uuid), gen_random_uuid(), CAST(? AS uuid), CAST(? AS uuid), number, 'SHOP-' || number, 'Checkout button is hidden', '', 'bug', 'major', 2,
+                     gen_random_uuid(), CAST(? AS uuid), ?, '{}', '{}', '2027-03-15 10:00:00+00', '2027-03-15 10:00:00+00'
+                 FROM generate_series(CAST(? AS int), CAST(? AS int)) AS number
+                 RETURNING organization_id, id, team_id, project_id, visibility, reporter_id
+             )
+             INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, kind, base_score, waiting_since, visibility, reporter_id)
+             SELECT organization_id, id, team_id, project_id, 'doing', CAST(? AS uuid), 'build', 10, '2027-03-15 10:00:00+00', visibility, reporter_id FROM ticket",
+            [
+                $this->acmeFoods->toString(), $projectId, $teamId->toString(), $reporter->id()->toString(), $audience,
+                $firstNumber, $firstNumber + $count - 1, $person->id()->toString(),
+            ],
+        ));
+    }
+
     private function removeCommittedTickets(): void
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
-            $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement(
-                'DELETE FROM tkt_ticket WHERE organization_id = ?',
-                [$organizationId],
-            ));
+            $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
+                $migrator->executeStatement('DELETE FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]);
+                $migrator->executeStatement('DELETE FROM tkt_ticket WHERE organization_id = ?', [$organizationId]);
+
+                return 0;
+            });
         }
     }
 
