@@ -413,7 +413,7 @@ final class WhoseTurnTest extends WebTestCase
      * after "Vendor 21". Raj waits the shortest. The groups go in newest first, against the page's order.
      */
     #[Test]
-    public function aPageShowsTheViewersCardAndTwentyOthersAndNextTwentyPeopleGoesOnWithNoRepeatAndNoGap(): void
+    public function aPageShowsTheViewersCardAndTwentyOthersAndNextPageGoesOnWithNoRepeatAndNoGap(): void
     {
         $this->addWaitingTicket('Raj', 'decide', 2, 'Coupon field takes any text');
         $this->addTicketWaitingOn(null, 'input', 10, 'Ticket of vendor 00', turnLabel: 'vendor 00');
@@ -439,14 +439,14 @@ final class WhoseTurnTest extends WebTestCase
         $firstPageNames = [...$firstPageNames, 'Omar', 'Vendor 19'];
         self::assertSame($firstPageNames, $firstPage->filter('.turn__name')->each(static fn (Crawler $name): string => $name->text()));
         self::assertSame('25 tickets · grouped by who acts next', $firstPage->filter('.tickets__total')->text());
-        self::assertSame('Next 20 people', $firstPage->filter('.turn__next-people')->text());
+        self::assertSame('Next page', $firstPage->filter('.turn__next-page')->text());
         self::assertCount(0, $firstPage->filter('.turn__first-page'));
         // Vendor 19's oldest wait, 27 Oct 2026 11:00 UTC, in Unix seconds.
-        $nextPeopleUrl = (string) $firstPage->filter('.turn__next-people')->attr('href');
-        self::assertSame(self::TURN.'?after=1793098800.label.Vendor%2019', $nextPeopleUrl);
+        $nextPageUrl = (string) $firstPage->filter('.turn__next-page')->attr('href');
+        self::assertSame(self::TURN.'?after=1793098800.label.Vendor%2019', $nextPageUrl);
         self::assertSame(3, $firstPageQueryCount);
 
-        $secondPageQueryCount = $this->queryCountOf($nextPeopleUrl) - $shellQueryCount;
+        $secondPageQueryCount = $this->queryCountOf($nextPageUrl) - $shellQueryCount;
 
         $secondPage = $this->client->getCrawler();
         self::assertSame(
@@ -454,7 +454,7 @@ final class WhoseTurnTest extends WebTestCase
             $secondPage->filter('.turn__name')->each(static fn (Crawler $name): string => $name->text()),
         );
         self::assertSame('25 tickets · grouped by who acts next', $secondPage->filter('.tickets__total')->text());
-        self::assertCount(0, $secondPage->filter('.turn__next-people'));
+        self::assertCount(0, $secondPage->filter('.turn__next-page'));
         self::assertSame('Back to the start', $secondPage->filter('.turn__first-page')->text());
         self::assertSame(self::TURN, $secondPage->filter('.turn__first-page')->attr('href'));
         self::assertSame(3, $secondPageQueryCount);
@@ -498,15 +498,15 @@ final class WhoseTurnTest extends WebTestCase
         self::assertSame($firstPageNames, $firstPage->filter('.turn__name')->each(static fn (Crawler $name): string => $name->text()));
         // The cut person's oldest wait, 27 Oct 2026 11:00 UTC, in Unix seconds.
         $after = 'after=1793098800.person.'.$cutId;
-        $nextPeopleUrl = (string) $firstPage->filter('.turn__next-people')->attr('href');
-        self::assertSame(self::TURN.'?project=SHOP&'.$after, $nextPeopleUrl);
+        $nextPageUrl = (string) $firstPage->filter('.turn__next-page')->attr('href');
+        self::assertSame(self::TURN.'?project=SHOP&'.$after, $nextPageUrl);
 
-        $secondPage = $this->client->request('GET', $nextPeopleUrl);
+        $secondPage = $this->client->request('GET', $nextPageUrl);
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame([$nextPerson, 'Vendor 20', 'Mia'], $secondPage->filter('.turn__name')->each(static fn (Crawler $name): string => $name->text()));
         self::assertSame('34 tickets · grouped by who acts next', $secondPage->filter('.tickets__total')->text());
-        self::assertCount(0, $secondPage->filter('.turn__next-people'));
+        self::assertCount(0, $secondPage->filter('.turn__next-page'));
         self::assertSame(self::TURN.'?project=SHOP', $secondPage->filter('.turn__first-page')->attr('href'));
         $nextCardId = 'turn-'.$nextId;
         $nextCard = $secondPage->filter('.turn__card')->eq(0);
@@ -538,6 +538,44 @@ final class WhoseTurnTest extends WebTestCase
     }
 
     /**
+     * Omar waits 30 days on 6 tickets, so his card shows "Show 1 more"; Vendor 01 to 19 wait 28 to 10 days and fill the
+     * page, and Vendor 20 waits 9 days, on the next one.
+     */
+    #[Test]
+    public function nextPageShowMoreAndShowFewerKeepTheProjectAndTheSearch(): void
+    {
+        $this->addWaitingTicket('Lena', 'review', 1, 'Cart total shows the wrong sum');
+        foreach ([25, 26, 27, 28, 29, 30] as $waitDays) {
+            $this->addWaitingTicket('Omar', 'build', $waitDays, 'Omar waits '.$waitDays);
+        }
+        for ($vendor = 20; $vendor >= 1; --$vendor) {
+            $label = \sprintf('Vendor %02d', $vendor);
+            $this->addTicketWaitingOn(null, 'input', 29 - $vendor, 'Ticket of '.$label, turnLabel: $label);
+        }
+        $omarId = $this->people['Omar']->id()->toString();
+        $omarCardId = 'turn-'.$omarId;
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TURN.'?project=SHOP&q=cart');
+
+        self::assertResponseStatusCodeSame(200);
+        // Vendor 19's oldest wait, 27 Oct 2026 11:00 UTC, in Unix seconds.
+        self::assertSame(self::TURN.'?project=SHOP&q=cart&after=1793098800.label.Vendor%2019', $page->filter('.turn__next-page')->attr('href'));
+        $omarCard = $page->filter('.turn__card')->eq(1);
+        self::assertSame($omarCardId, $omarCard->attr('id'));
+        self::assertSame('Show 1 more', $omarCard->filter('.turn__more')->text());
+        $openUrl = (string) $omarCard->filter('.turn__more')->attr('href');
+        self::assertSame(self::TURN.'?project=SHOP&q=cart&open='.$omarId.'#'.$omarCardId, $openUrl);
+
+        $opened = $this->client->request('GET', $openUrl);
+
+        self::assertResponseStatusCodeSame(200);
+        $openedCard = $opened->filter('.turn__card')->eq(1);
+        self::assertSame('Show fewer', $openedCard->filter('.turn__more')->text());
+        self::assertSame(self::TURN.'?project=SHOP&q=cart#'.$omarCardId, $openedCard->filter('.turn__more')->attr('href'));
+    }
+
+    /**
      * The tickets of the next page may be done before it is read, so a cursor can lie past the last card.
      */
     #[Test]
@@ -555,7 +593,7 @@ final class WhoseTurnTest extends WebTestCase
         self::assertSame('1 ticket · grouped by who acts next', $page->filter('.tickets__total')->text());
         self::assertSame('Back to the start', $page->filter('.turn__first-page')->text());
         self::assertSame(self::TURN, $page->filter('.turn__first-page')->attr('href'));
-        self::assertCount(0, $page->filter('.turn__next-people'));
+        self::assertCount(0, $page->filter('.turn__next-page'));
     }
 
     #[Test]

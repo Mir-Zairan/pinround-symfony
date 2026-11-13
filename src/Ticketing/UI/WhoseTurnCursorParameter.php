@@ -9,7 +9,7 @@ use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\ListFilter;
 
 /**
- * The Whose turn page's next-page TurnGroupCursor as the "Next 20 people" link carries it, in AFTER_QUERY:
+ * The Whose turn page's next-page TurnGroupCursor as the "Next page" link carries it, in AFTER_QUERY:
  * "<oldest wait in Unix seconds>.person.<user id>" or "<oldest wait in Unix seconds>.label.<label>". The turn read
  * model keeps waits in whole seconds, so the seconds name the exact wait. It is not signed: it holds only what the
  * viewer already saw on the last card, and a forged one only moves where the page starts.

@@ -60,7 +60,7 @@ final class WhoseTurnCursorParameterTest extends TestCase
 
     #[Test]
     #[DataProvider('malformedValues')]
-    public function aValueValueOfNeverMakesIsNoCursor(string $value): void
+    public function aMalformedAfterValueGivesNoCursor(string $value): void
     {
         self::assertNull(WhoseTurnCursorParameter::cursorOf($value));
     }

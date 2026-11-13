@@ -571,7 +571,7 @@
 }
 
 .turn__first-page,
-.turn__next-people {
+.turn__next-page {
   color: var(--primary);
   font-weight: 700;
 }

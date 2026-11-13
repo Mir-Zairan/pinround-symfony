@@ -48,13 +48,13 @@
                 {% endfor %}
             </ul>
         {% endif %}
-        {% if backToTheStartUrl or nextPeopleUrl %}
+        {% if backToTheStartUrl or nextPageUrl %}
             <nav class="turn__pages" aria-label="Pages of cards">
                 {% if backToTheStartUrl %}
                     <a class="turn__first-page" href="{{ backToTheStartUrl }}">{{ backToTheStartText }}</a>
                 {% endif %}
-                {% if nextPeopleUrl %}
-                    <a class="turn__next-people" href="{{ nextPeopleUrl }}">{{ nextPeopleText }}</a>
+                {% if nextPageUrl %}
+                    <a class="turn__next-page" href="{{ nextPageUrl }}">{{ nextPageText }}</a>
                 {% endif %}
             </nav>
         {% endif %}

@@ -42,7 +42,7 @@ test('Back to the start leaves a later page for the first, with Lena\'s own card
   // A cursor after 1 Jan 2030 lies past every seeded wait, so this later page is empty whatever the seed holds.
   await page.goto('/tickets/turn?project=SHOP&after=1893456000.label.Customer');
   await expect(cards(page)).toHaveCount(0);
-  await expect(page.getByRole('link', { name: /^Next \d+ people$/ })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Next page', exact: true })).toHaveCount(0);
   const backToTheStart = page.getByRole('navigation', { name: 'Pages of cards' }).getByRole('link', { name: 'Back to the start', exact: true });
   await expect(backToTheStart).toHaveAttribute('href', '/tickets/turn?project=SHOP');
 
