@@ -30,6 +30,17 @@ trait ReadsSentSql
         return $sql;
     }
 
+    private static function queryCountOf(DebugDataHolder $debugData): int
+    {
+        $queryCount = 0;
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            self::assertIsArray($queriesOfOneConnection);
+            $queryCount += \count($queriesOfOneConnection);
+        }
+
+        return $queryCount;
+    }
+
     private function debugData(): DebugDataHolder
     {
         return self::getContainer()->get('doctrine.debug_data_holder');

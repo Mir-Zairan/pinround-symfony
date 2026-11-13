@@ -31,7 +31,6 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -1210,17 +1209,6 @@ final class DbalTicketQueriesTest extends KernelTestCase
              FROM generate_series(CAST(? AS int), CAST(? AS int)) AS number",
             [self::ACME_FOODS, $projectId, $stepId, self::LENA, $firstNumber, $firstNumber + $count - 1],
         ));
-    }
-
-    private static function queryCountOf(DebugDataHolder $debugData): int
-    {
-        $queryCount = 0;
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            $queryCount += \count($queriesOfOneConnection);
-        }
-
-        return $queryCount;
     }
 
     /**

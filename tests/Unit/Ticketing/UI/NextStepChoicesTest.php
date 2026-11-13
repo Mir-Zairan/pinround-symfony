@@ -53,7 +53,12 @@ final class NextStepChoicesTest extends TestCase
     protected function setUp(): void
     {
         $this->policy = new RecordingTransitionPolicy(GuardFixtures::policy());
-        $this->memberships = new FixedMembershipQueries([self::ORGANIZATION => [GuardFixtures::LENA, GuardFixtures::OMAR, GuardFixtures::MIA, GuardFixtures::RAJ]]);
+        $this->memberships = self::everyoneOfTheTicketAMember();
+    }
+
+    private static function everyoneOfTheTicketAMember(): FixedMembershipQueries
+    {
+        return new FixedMembershipQueries([self::ORGANIZATION => [GuardFixtures::LENA, GuardFixtures::OMAR, GuardFixtures::MIA, GuardFixtures::RAJ]]);
     }
 
     #[Test]
@@ -305,7 +310,17 @@ final class NextStepChoicesTest extends TestCase
             new Turn(new UserId(GuardFixtures::OMAR), null, NeedsYouKind::Build),
         );
 
+        self::assertEquals(
+            [new PersonToWaitOn(GuardFixtures::MIA, 'Mia', 'Reporter · Tester'), new PersonToWaitOn(GuardFixtures::OMAR, 'Omar', 'Assignee')],
+            $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA))->peopleToWaitOn,
+        );
+        self::assertSame([[GuardFixtures::MIA, GuardFixtures::OMAR]], $this->memberships->membersAmongReads);
+
+        $this->memberships = self::everyoneOfTheTicketAMember();
         self::assertSame([], $this->nextStepOf($pageTurn, self::member(GuardFixtures::OMAR))->peopleToWaitOn);
+        self::assertSame([], $this->memberships->membersAmongReads);
+
+        $this->memberships = self::everyoneOfTheTicketAMember();
         self::assertSame([], $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA), mayMove: false)->peopleToWaitOn);
         self::assertSame([], $this->memberships->membersAmongReads);
     }

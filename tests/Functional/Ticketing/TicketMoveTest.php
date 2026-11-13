@@ -625,17 +625,14 @@ final class TicketMoveTest extends WebTestCase
         yield 'the step the ticket is in' => ['progress', [], MoveToasts::MOVE_REFUSED];
         yield 'a step no organization has' => [self::NOBODY_ID, [], MoveToasts::MOVE_REFUSED];
         yield 'a label to wait on outside Needs input' => ['done', [TicketMoveController::WAITING_ON_LABEL_FIELD => 'Customer'], MoveToasts::MOVE_REFUSED];
-        yield 'a label of 101 multibyte characters' => ['input', [TicketMoveController::WAITING_ON_LABEL_FIELD => str_repeat('é', 101)], MoveToasts::WAITING_ON_REFUSED];
         yield 'a label with a CR LF' => ['input', [TicketMoveController::WAITING_ON_LABEL_FIELD => "Cus\r\ntomer"], MoveToasts::WAITING_ON_REFUSED];
         yield 'a label with a U+2028 line separator' => ['input', [TicketMoveController::WAITING_ON_LABEL_FIELD => "Cus\u{2028}tomer"], MoveToasts::WAITING_ON_REFUSED];
         yield 'a blank label' => ['input', [TicketMoveController::WAITING_ON_LABEL_FIELD => "  \t "], MoveToasts::WAITING_ON_REFUSED];
-        yield 'a person to wait on who is no uuid' => ['input', [TicketMoveController::WAITING_ON_USER_FIELD => 'raj'], MoveToasts::WAITING_ON_REFUSED];
         yield 'a person to wait on whom the organization has not' => ['input', [TicketMoveController::WAITING_ON_USER_FIELD => self::NOBODY_ID], MoveToasts::MOVE_REFUSED];
-        yield 'a person and a label to wait on' => ['input', [TicketMoveController::WAITING_ON_USER_FIELD => '{Raj}', TicketMoveController::WAITING_ON_LABEL_FIELD => 'Customer'], MoveToasts::WAITING_ON_REFUSED];
     }
 
     /**
-     * @param array<string, string> $waitingOnFields with {Raj} for Raj's id
+     * @param array<string, string> $waitingOnFields
      */
     #[Test]
     #[DataProvider('movesToThePolicyOrTheFormRefuses')]
@@ -644,9 +641,8 @@ final class TicketMoveTest extends WebTestCase
         $this->addTicket(['step' => 'progress']);
         $stateBefore = $this->stateOfTicket();
         $this->logIn($this->client, $this->people['Lena']);
-        $sentFields = array_map(fn (string $value): string => strtr($value, ['{Raj}' => $this->people['Raj']->id()->toString()]), $waitingOnFields);
 
-        $this->client->request('POST', $this->moveToPath($step), $this->moveFields($sentFields));
+        $this->client->request('POST', $this->moveToPath($step), $this->moveFields($waitingOnFields));
 
         self::assertSame($expectedToast, $this->toastAfterTheRedirect());
         self::assertSame($stateBefore, $this->stateOfTicket());

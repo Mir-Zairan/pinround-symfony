@@ -50,8 +50,6 @@ final class TicketShowController extends AbstractController
     public const string ASK_CUT_MARK = ' …';
 
     public const string NOBODY = 'Nobody';
-    /** For a reporter or assignee whose user row is gone, so the page never fails on a missing name. */
-    public const string UNKNOWN_PERSON = 'an unknown person';
 
     public function __construct(
         private readonly TenantContext $tenantContext,
@@ -98,8 +96,8 @@ final class TicketShowController extends AbstractController
             'priority' => ucfirst($ticket->priority),
             'shortAsk' => self::shortAskOf($ticket->description),
             'created' => TicketListText::dateOf($ticket->createdAt, $now, $viewerTimeZone),
-            'reporter' => $ticket->reporterName ?? self::UNKNOWN_PERSON,
-            'assignee' => null === $ticket->visibilityFacts->assigneeId ? self::NOBODY : ($ticket->assigneeName ?? ucfirst(self::UNKNOWN_PERSON)),
+            'reporter' => $ticket->reporterName ?? PersonNames::UNKNOWN_PERSON,
+            'assignee' => null === $ticket->visibilityFacts->assigneeId ? self::NOBODY : ($ticket->assigneeName ?? ucfirst(PersonNames::UNKNOWN_PERSON)),
             'components' => implode(', ', $ticket->components),
         ]);
     }

@@ -31,7 +31,6 @@ use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -417,17 +416,6 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
             self::ACME_FOODS,
             static fn () => $setTeamRole(new TeamId(self::SHOP_TEAM), new UserId($userId), $teamRole, Job::Developer, new UserId(self::LENA), new \DateTimeImmutable('2027-03-16 10:00:00 UTC')),
         );
-    }
-
-    private static function queryCountOf(DebugDataHolder $debugData): int
-    {
-        $queryCount = 0;
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            $queryCount += \count($queriesOfOneConnection);
-        }
-
-        return $queryCount;
     }
 
     /**

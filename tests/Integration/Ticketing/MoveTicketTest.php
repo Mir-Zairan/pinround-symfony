@@ -21,8 +21,10 @@ use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketNotFound;
+use App\Ticketing\Api\WaitingOnRefused;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\TicketTurnSnapshots;
+use App\Ticketing\Domain\InvalidWaitingOn;
 use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
@@ -206,6 +208,54 @@ final class MoveTicketTest extends KernelTestCase
             $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchAssociative('SELECT turn_user_id, kind FROM ins_ticket_turn WHERE ticket_id = ?', [$ticketId->toString()])),
         );
         $turnRowsAfterTheMove = $this->turnRows();
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
+        self::assertSame($this->turnRows(), $turnRowsAfterTheMove);
+    }
+
+    /**
+     * With equal loads Mia would test it on the lower user id, so only the waiting tests the move read send it to Raj.
+     */
+    #[Test]
+    public function approvedCodeGoesToTheTesterWithFewerWaitingTests(): void
+    {
+        $this->makeRajASecondTesterWhileMiaTestsAnotherTicket();
+        $this->setColumns(['step_id' => self::CODE_REVIEW_STEP, 'reviewer_id' => self::LENA]);
+        $ticketId = $this->ticketId();
+
+        $this->move(self::LENA, 'approve_code', $this->stepAndVersion()[1]);
+
+        self::assertSame(
+            ['turn_user_id' => self::RAJ, 'kind' => 'test'],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchAssociative('SELECT turn_user_id, kind FROM ins_ticket_turn WHERE ticket_id = ?', [$ticketId->toString()])),
+        );
+        $turnRowsAfterTheMove = $this->turnRows();
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
+        self::assertSame($this->turnRows(), $turnRowsAfterTheMove);
+    }
+
+    /**
+     * A ticket in Testing with no tester stored is the less busy tester's turn; with equal loads it would be Mia's. Any
+     * tester may pass it, so the waiting tests decide only the turn, which Done then clears.
+     */
+    #[Test]
+    public function theLessBusyTesterPassesATicketWithNoTesterStoredAndTheTurnsMatchAFreshRefresh(): void
+    {
+        $this->makeRajASecondTesterWhileMiaTestsAnotherTicket();
+        $this->setColumns(['step_id' => self::TESTING_STEP]);
+        $ticketId = $this->ticketId();
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
+        self::assertSame(
+            ['turn_user_id' => self::RAJ, 'kind' => 'test'],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchAssociative('SELECT turn_user_id, kind FROM ins_ticket_turn WHERE ticket_id = ?', [$ticketId->toString()])),
+        );
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $this->move(self::RAJ, 'pass_it', $versionBefore);
+
+        self::assertSame([self::DONE_STEP, $versionBefore + 1], $this->stepAndVersion());
+        $turnRowsAfterTheMove = $this->turnRows();
+        self::assertSame([], array_values(array_filter($turnRowsAfterTheMove, static fn (array $turnRow): bool => $turnRow['ticket_id'] === $ticketId->toString())));
+        self::assertCount(1, $turnRowsAfterTheMove);
         $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
         self::assertSame($this->turnRows(), $turnRowsAfterTheMove);
     }
@@ -446,7 +496,7 @@ final class MoveTicketTest extends KernelTestCase
 
         $refusal = $this->refusalOf(fn () => $this->moveTo(self::LENA, self::NEEDS_INPUT_STEP, $stateBefore['version'], null, $waitingOnLabel));
 
-        self::assertInstanceOf(\InvalidArgumentException::class, $refusal);
+        self::assertInstanceOf(WaitingOnRefused::class, $refusal);
         self::assertSame($expectedMessage, $refusal->getMessage());
         self::assertSame($stateBefore, $this->storedState());
     }
@@ -458,8 +508,58 @@ final class MoveTicketTest extends KernelTestCase
 
         $refusal = $this->refusalOf(fn () => $this->moveTo(self::LENA, self::NEEDS_INPUT_STEP, $stateBefore['version'], new UserId(self::RAJ), 'Customer'));
 
-        self::assertInstanceOf(\InvalidArgumentException::class, $refusal);
+        self::assertInstanceOf(WaitingOnRefused::class, $refusal);
         self::assertSame('A ticket waits on a person or a label, not both.', $refusal->getMessage());
+        self::assertSame($stateBefore, $this->storedState());
+    }
+
+    /**
+     * MoveTicket and Ticket::move always agree on Needs input, so a Tickets double that moves the ticket again without
+     * anyone to wait on stands in for a fault after the caller's label was read.
+     */
+    #[Test]
+    public function aWaitingOnFaultAfterTheLabelWasReadIsNotTurnedIntoARefusal(): void
+    {
+        $moveTicket = $this->moveTicketWith(new readonly class(new DoctrineTickets($this->entityManager()), self::MOVED_AT) implements Tickets {
+            public function __construct(private Tickets $doctrineTickets, private string $movedAt)
+            {
+            }
+
+            public function nextIdentity(): TicketId
+            {
+                return $this->doctrineTickets->nextIdentity();
+            }
+
+            public function add(Ticket $ticket): void
+            {
+                $this->doctrineTickets->add($ticket);
+            }
+
+            public function save(Ticket $ticket): void
+            {
+                $ticket->move($ticket->stepId(), 'wait', true, null, new \DateTimeImmutable($this->movedAt));
+            }
+
+            public function ofKey(OrganizationId $organizationId, TicketKey $key): ?Ticket
+            {
+                return $this->doctrineTickets->ofKey($organizationId, $key);
+            }
+        });
+        $stateBefore = $this->storedState();
+
+        $fault = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $moveTicket->moveTo(
+            new OrganizationId(self::ACME_FOODS),
+            new UserId(self::LENA),
+            self::KEY,
+            self::NEEDS_INPUT_STEP,
+            $stateBefore['version'],
+            null,
+            'Customer',
+            new \DateTimeImmutable(self::MOVED_AT),
+        )));
+
+        self::assertNotNull($fault);
+        self::assertSame([InvalidWaitingOn::class, 'A ticket in Needs input waits on a person or a label.'], [$fault::class, $fault->getMessage()]);
         self::assertSame($stateBefore, $this->storedState());
     }
 
@@ -982,6 +1082,34 @@ final class MoveTicketTest extends KernelTestCase
         }
 
         return $events;
+    }
+
+    /**
+     * Raj, until now a viewer, becomes a tester member of Shop, and Mia tests another ticket, so she has one waiting
+     * test and he none.
+     */
+    private function makeRajASecondTesterWhileMiaTestsAnotherTicket(): void
+    {
+        self::mockTime(self::MOVED_AT);
+        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
+            "UPDATE org_team_member SET team_role = 'member', job = 'tester' WHERE organization_id = ? AND team_id = ? AND user_id = ?",
+            [self::ACME_FOODS, self::SHOP_TEAM, self::RAJ],
+        ));
+        self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
+        $miasTestId = new ShopTickets($this->ticketCommands(), $this->transactions(), $this->connection())->createdFor(self::ACME_FOODS, self::SHOP_PROJECT, self::LENA, self::OMAR);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            'UPDATE tkt_ticket SET step_id = ?, tester_id = ? WHERE id = ?',
+            [self::TESTING_STEP, self::MIA, $miasTestId->toString()],
+        ));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($miasTestId));
+        $ticketId = $this->ticketId();
+        self::assertSame(
+            [self::MIA => [TurnInputs::WAITING_TEST => 1]],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array => self::getContainer()->get(TeamLoadQueries::class)->waitingTurnsOf(
+                [new UserId(self::MIA), new UserId(self::RAJ)],
+                $ticketId,
+            )),
+        );
     }
 
     private function removeMembershipOf(string $userId): void

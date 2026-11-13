@@ -77,7 +77,7 @@ final readonly class NextStepChoices
         return new NextStep(
             $this->sentenceOf($pageTurn, $actor),
             $availability->transitions,
-            $availability->ruleNote?->render(static fn (UserId $userId): string => $pageTurn->context->firstNameOf($userId) ?? TicketShowController::UNKNOWN_PERSON),
+            $availability->ruleNote?->render(static fn (UserId $userId): string => $pageTurn->context->firstNameOf($userId) ?? PersonNames::UNKNOWN_PERSON),
             $moveChoices->groups,
             self::offersMoveToNeedsInput($moveChoices->groups) ? $this->peopleToWaitOnOf($pageTurn, $viewer->organizationId()) : [],
         );
@@ -181,7 +181,7 @@ final readonly class NextStepChoices
         if (null === $actor->teamRole) {
             return \sprintf(self::NOTHING_FOR_YOU, $this->nowNext->now($pageTurn->ticket, $turn, $pageTurn->context));
         }
-        $name = (null === $turn->userId ? null : $pageTurn->context->firstNameOf($turn->userId)) ?? $turn->label ?? ucfirst(TicketShowController::UNKNOWN_PERSON);
+        $name = (null === $turn->userId ? null : $pageTurn->context->firstNameOf($turn->userId)) ?? $turn->label ?? ucfirst(PersonNames::UNKNOWN_PERSON);
 
         return \sprintf(self::NOTHING_FOR_YOU_NOW, $name);
     }

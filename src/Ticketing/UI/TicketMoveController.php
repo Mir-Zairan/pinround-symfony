@@ -242,7 +242,7 @@ final class TicketMoveController extends AbstractController
         }
 
         return new RuleNote($refused->ruleNoteTemplate, $refused->ruleNotePeople)->render(
-            fn (UserId $userId): string => $this->firstNameOf($userId, $ticket) ?? TicketShowController::UNKNOWN_PERSON,
+            fn (UserId $userId): string => $this->firstNameOf($userId, $ticket) ?? PersonNames::UNKNOWN_PERSON,
         );
     }
 

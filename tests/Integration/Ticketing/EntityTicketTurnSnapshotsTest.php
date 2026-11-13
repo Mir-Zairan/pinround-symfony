@@ -29,7 +29,6 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -319,17 +318,6 @@ final class EntityTicketTurnSnapshotsTest extends KernelTestCase
     private static function utcTimeOf(string $timestamp): string
     {
         return new \DateTimeImmutable($timestamp)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:sP');
-    }
-
-    private static function queryCountOf(DebugDataHolder $debugData): int
-    {
-        $queryCount = 0;
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            $queryCount += \count($queriesOfOneConnection);
-        }
-
-        return $queryCount;
     }
 
     private function createdTicketKey(): string

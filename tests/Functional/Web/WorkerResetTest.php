@@ -15,6 +15,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Organization\SendsInvitationLinks;
 use App\Ticketing\UI\MoveToasts;
 use App\Ticketing\UI\TicketMoveController;
+use App\Ticketing\UI\TicketPageParts;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use OpenTelemetry\API\Trace\SpanContextValidator;
@@ -196,6 +197,11 @@ final class WorkerResetTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(422);
         self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->streamedToast());
+        self::assertSame(
+            [TicketPageParts::STATE_ID => 1, TicketPageParts::NEXT_STEP_ID => 1],
+            [TicketPageParts::STATE_ID => $this->replacedPartCount(TicketPageParts::STATE_ID), TicketPageParts::NEXT_STEP_ID => $this->replacedPartCount(TicketPageParts::NEXT_STEP_ID)],
+        );
+        self::assertTrue($this->entityManager()->isOpen());
         self::assertSame($this->acmeFoods->toString(), $this->tenantContext()->get()?->toString());
 
         // Lena's session would enter Acme Foods again; the next request is someone else's.
@@ -258,6 +264,22 @@ final class WorkerResetTest extends WebTestCase
         self::assertCount(1, $toast);
 
         return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /**
+     * @return int how many elements of the id the stream's replace of that id carries, 0 when there is no such replace
+     */
+    private function replacedPartCount(string $partId): int
+    {
+        if (1 !== preg_match(
+            '#<turbo-stream action="replace" target="'.preg_quote($partId, '#').'"><template>(.*?)</template></turbo-stream>#s',
+            (string) $this->client->getResponse()->getContent(),
+            $match,
+        )) {
+            return 0;
+        }
+
+        return new Crawler('<!DOCTYPE html><html><body>'.$match[1].'</body></html>')->filter('#'.$partId)->count();
     }
 
     /**
