@@ -9,6 +9,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Ticketing\UI\NextStepChoices;
 use App\Ticketing\UI\QueueController;
 use App\Ticketing\UI\TicketQueue;
 use Doctrine\DBAL\Connection;
@@ -40,8 +41,11 @@ final class QueueWalkThroughTest extends WebTestCase
     private const string NOW = '2026-11-06 12:00:00 UTC';
     /** A refused viewer must never get a word of it. */
     private const string HIDDEN_TITLE = 'Price rules for staff';
+    /** R3's title, a constant so the test env's error page, which quotes the failing test's source, cannot hold it. */
+    private const string LATER_HIDDEN_TITLE = 'Coupon field takes any text';
     private const string START = '/tickets/queue/start/list-step';
     private const string FINISH = '/tickets/queue/finish';
+    private const string SHELL = '/_test/menu/shell';
 
     private KernelBrowser $client;
 
@@ -70,7 +74,7 @@ final class QueueWalkThroughTest extends WebTestCase
         $this->keys['R1'] = $this->addTicket('check', 'Search shows no results', '2026-11-05 10:00:00+00', 'Omar');
         $this->keys['R2'] = $this->addTicket('check', 'Cart total shows the wrong sum', '2026-11-05 12:00:00+00');
         $this->keys['H'] = $this->addTicket('check', self::HIDDEN_TITLE, '2026-11-05 09:00:00+00', null, 'team');
-        $this->keys['R3'] = $this->addTicket('check', 'Coupon field takes any text', '2026-11-05 11:00:00+00', 'Omar');
+        $this->keys['R3'] = $this->addTicket('check', self::LATER_HIDDEN_TITLE, '2026-11-05 11:00:00+00', 'Omar');
     }
 
     protected function tearDown(): void
@@ -349,6 +353,191 @@ final class QueueWalkThroughTest extends WebTestCase
         self::assertStringNotContainsString(self::HIDDEN_TITLE, (string) $this->client->getResponse()->getContent());
     }
 
+    #[Test]
+    public function theBarShowsTheFirstPlaceWithPreviousDisabledAndHidesTheListsPosition(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->goThrough('/tickets?project=SHOP', 'check');
+
+        $page = $this->client->followRedirect();
+
+        self::assertResponseStatusCodeSame(200);
+        $bar = $page->filter('nav.queue-bar');
+        self::assertCount(1, $bar);
+        self::assertSame('Code review · 1 of 4', $bar->filter('.queue-bar__line')->text());
+        $previous = $bar->filter('.queue-bar__previous');
+        self::assertSame('true', $previous->attr('aria-disabled'));
+        self::assertNull($previous->attr('href'));
+        self::assertSame('/t/'.$this->keys['R3'].'?project=SHOP', $bar->filter('.queue-bar__next')->attr('href'));
+        self::assertCount(0, $bar->filter('.queue-bar__finish'));
+        self::assertSame('/t/'.$this->keys['R2'].'/queue/stop?project=SHOP', $bar->filter('.queue-bar__stop')->closest('form')?->attr('action'));
+        self::assertCount(0, $page->filter('.ticket__position'));
+    }
+
+    #[Test]
+    public function theLastTicketShowsFinishInsteadOfNextTicket(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->goThrough('/tickets', 'check');
+
+        $page = $this->client->request('GET', '/t/'.$this->keys['H']);
+
+        self::assertResponseStatusCodeSame(200);
+        $bar = $page->filter('nav.queue-bar');
+        self::assertSame('Code review · 4 of 4', $bar->filter('.queue-bar__line')->text());
+        self::assertSame('/t/'.$this->keys['R1'], $bar->filter('.queue-bar__previous')->attr('href'));
+        self::assertNull($bar->filter('.queue-bar__previous')->attr('aria-disabled'));
+        self::assertCount(0, $bar->filter('.queue-bar__next'));
+        self::assertSame('Finish', $bar->filter('.queue-bar__finish')->text());
+        self::assertSame(self::FINISH, $bar->filter('.queue-bar__finish')->closest('form')?->attr('action'));
+    }
+
+    #[Test]
+    public function stopFromTheBarRemovesItAndStaysOnTheTicket(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->goThrough('/tickets?project=SHOP', 'check');
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $stopForm = $page->filter('.queue-bar__stop')->closest('form') ?? throw new \LogicException('The bar has no Stop form.');
+
+        $this->client->submit($stopForm->form());
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertResponseRedirects('/t/'.$this->keys['R2'].'?project=SHOP');
+        self::assertNull($this->queue());
+        $ticket = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($this->keys['R2'], $ticket->filter('article.ticket')->attr('data-ticket-key'));
+        self::assertCount(0, $ticket->filter('.queue-bar'));
+        self::assertCount(1, $ticket->filter('.ticket__position'));
+        self::assertSame('/tickets?project=SHOP', $ticket->filter('a.ticket__back')->attr('href'));
+    }
+
+    #[Test]
+    public function backWhileInAQueueEndsItAndOpensTheList(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->goThrough('/tickets?project=SHOP', 'check');
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $backForm = $page->filter('form.ticket__back-form');
+        self::assertCount(1, $backForm);
+        self::assertCount(0, $page->filter('a.ticket__back'));
+
+        $this->client->submit($backForm->form());
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertResponseRedirects('/tickets?project=SHOP');
+        self::assertNull($this->queue());
+    }
+
+    #[Test]
+    public function aTicketNotInTheQueueHasNoBarAndShowsItsPlaceInTheList(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->goThrough('/tickets', 'check');
+
+        $page = $this->client->request('GET', '/t/'.$this->keys['T']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.queue-bar'));
+        self::assertCount(1, $page->filter('.ticket__position'));
+        self::assertSame('/tickets', $page->filter('a.ticket__back')->attr('href'));
+        self::assertNotNull($this->queue());
+    }
+
+    #[Test]
+    public function aWalkThroughThreeTicketsEndsWithFinishAndAllDoneOnHome(): void
+    {
+        $this->logIn($this->client, $this->people['Raj']);
+        $this->goThrough('/tickets', 'check');
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $walked = [[$page->filter('article.ticket')->attr('data-ticket-key'), $page->filter('.queue-bar__line')->text()]];
+
+        for ($step = 0; $step < 2; ++$step) {
+            $page = $this->client->click($page->filter('a.queue-bar__next')->link());
+            self::assertResponseStatusCodeSame(200);
+            $walked[] = [$page->filter('article.ticket')->attr('data-ticket-key'), $page->filter('.queue-bar__line')->text()];
+        }
+        $finishForm = $page->filter('.queue-bar__finish')->closest('form') ?? throw new \LogicException('The last ticket has no Finish form.');
+        $this->client->submit($finishForm->form());
+
+        self::assertSame([
+            [$this->keys['R2'], 'Code review · 1 of 3'],
+            [$this->keys['R3'], 'Code review · 2 of 3'],
+            [$this->keys['R1'], 'Code review · 3 of 3'],
+        ], $walked);
+        self::assertResponseStatusCodeSame(303);
+        self::assertResponseRedirects('/');
+        self::assertNull($this->queue());
+        $home = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('All done in Code review.', $home->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+    }
+
+    #[Test]
+    public function aQueuedTicketLaterMadeTeamOnlyIsNotFoundWithNoWordOfIt(): void
+    {
+        $this->logIn($this->client, $this->people['Raj']);
+        $this->goThrough('/tickets', 'check');
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $next = $page->filter('a.queue-bar__next');
+        self::assertSame('/t/'.$this->keys['R3'], $next->attr('href'));
+        $this->setTicket($this->keys['R3'], "visibility = 'team'");
+
+        $this->client->click($next->link());
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringNotContainsString(self::LATER_HIDDEN_TITLE, (string) $this->client->getResponse()->getContent());
+        self::assertSame([$this->keys['R2'], $this->keys['R3'], $this->keys['R1']], $this->queue()?->keys);
+    }
+
+    #[Test]
+    public function aQueuedTicketThatLeftTheViewersTurnStaysInTheQueueAndShowsTheNormalBox(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->goThrough('/tickets', 'check');
+        $this->client->request('GET', '/t/'.$this->keys['R3']);
+        self::assertResponseStatusCodeSame(200);
+        $sentenceInReview = $this->client->getCrawler()->filter('.next-step-box__sentence')->text();
+        $this->setTicket($this->keys['R3'], "step_id = '".$this->steps['done']."', closed_at = TIMESTAMPTZ '2026-11-06 11:00:00+00'");
+
+        $queued = $this->client->request('GET', '/t/'.$this->keys['R3']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Code review · 2 of 4', $queued->filter('.queue-bar__line')->text());
+        self::assertNotSame(NextStepChoices::DONE, $sentenceInReview);
+        self::assertSame(NextStepChoices::DONE, $queued->filter('.next-step-box__sentence')->text());
+        self::assertSame([$this->keys['R2'], $this->keys['R3'], $this->keys['R1'], $this->keys['H']], $this->queue()?->keys);
+    }
+
+    /**
+     * Beyond the shell, with the steps, the rules and the team's people cached, a queued page reads what the same
+     * page outside a queue reads but its place in the list (performance-and-scale.md: ten at most).
+     */
+    #[Test]
+    public function aQueuedWarmPageSkipsThePlaceQueryAndStaysWithinTheTenQueryBudget(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        // logIn() leaves the user in the entity manager, so the first request skips the user refresh every later one pays.
+        $this->queryCountOf(self::SHELL);
+        $shellQueryCount = $this->queryCountOf(self::SHELL);
+        $uri = '/t/'.$this->keys['R3'].'?project=SHOP';
+        $this->queryCountOf($uri);
+        $pageQueryCount = $this->queryCountOf($uri) - $shellQueryCount;
+        self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
+        $this->goThrough('/tickets?project=SHOP', 'check');
+
+        $queuedPageQueryCount = $this->queryCountOf($uri) - $shellQueryCount;
+
+        self::assertCount(1, $this->client->getCrawler()->filter('.queue-bar'));
+        self::assertSame($pageQueryCount - 1, $queuedPageQueryCount);
+        self::assertLessThanOrEqual(10, $queuedPageQueryCount);
+    }
+
     /**
      * Opens the list at $listUri and sends its "Go through them" form of the step of $groupCode.
      */
@@ -380,6 +569,35 @@ final class QueueWalkThroughTest extends WebTestCase
     private static function tokenField(?string $token): array
     {
         return null === $token ? [] : ['_csrf_token' => $token];
+    }
+
+    /**
+     * Changes one ticket behind the application's back, as another person's change would.
+     *
+     * @param string $assignments a literal SQL SET list
+     */
+    private function setTicket(string $key, string $assignments): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET '.$assignments.' WHERE organization_id = ? AND key = ?',
+            [$organizationId, $key],
+        ));
+    }
+
+    private function queryCountOf(string $uri): int
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $this->client->request('GET', $uri);
+        self::assertResponseStatusCodeSame(200);
+
+        $queryCount = 0;
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            $queryCount += \count($queriesOfOneConnection);
+        }
+
+        return $queryCount;
     }
 
     private function queue(): ?TicketQueue

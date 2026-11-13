@@ -12,11 +12,32 @@
 {% endblock %}
 
 {% block main %}
+    {% if queueBar is not null %}
+        <twig:QueueBar
+            label="{{ queueBar.label }}"
+            :place="queueBar.place"
+            :count="queueBar.count"
+            :previousUrl="queueBar.previousUrl"
+            :nextUrl="queueBar.nextUrl"
+            finishUrl="{{ queueBar.finishUrl }}"
+            stopUrl="{{ queueBar.stopUrl }}"
+            csrfToken="{{ csrf_token(queueBar.csrfId) }}"
+        />
+    {% endif %}
     <article class="ticket" data-ticket-key="{{ ticket.key }}">
         <header class="ticket__header">
             {# One wrapping row, as the prototype has it: back, key · type · project, tags, then the position on the right edge. #}
             <div class="ticket__key-row">
-                <twig:Button variant="text" href="{{ path('ticketing_tickets', backQuery) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Tickets</twig:Button>
+                {% if queueBar is not null %}
+                    {# Leaving for the list ends the queue, so Back is a Stop that opens the list. #}
+                    <form method="post" action="{{ queueBar.stopUrl }}" class="ticket__back-form" data-turbo-frame="_top">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token(queueBar.csrfId) }}">
+                        <input type="hidden" name="{{ constant('App\\Ticketing\\UI\\QueueController::BACK_FIELD') }}" value="1">
+                        <twig:Button type="submit" variant="text" class="ticket__back"><span aria-hidden="true">&lt;</span> Tickets</twig:Button>
+                    </form>
+                {% else %}
+                    <twig:Button variant="text" href="{{ path('ticketing_tickets', backQuery) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Tickets</twig:Button>
+                {% endif %}
                 <p class="ticket__key-line">
                     <span class="ticket__key">{{ ticket.key }}</span>
                     <span aria-hidden="true">·</span>
