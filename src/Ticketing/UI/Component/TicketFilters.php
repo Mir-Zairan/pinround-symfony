@@ -72,7 +72,7 @@ final class TicketFilters
     #[LiveProp]
     public bool $showsDone = false;
 
-    /** The team whose people the chips show, as TicketListController::railTeamOf chose it; empty for none. */
+    /** The team whose people the chips show, as RailTeamChoice::teamOf chose it; empty for none. */
     #[LiveProp]
     public string $team = '';
 

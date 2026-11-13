@@ -42,7 +42,7 @@ final readonly class ProjectRail
     }
 
     /**
-     * @param TeamId|null           $teamId    the team TicketListController::railTeamOf chose, one the viewer may see
+     * @param TeamId|null           $teamId    the team RailTeamChoice::teamOf chose, one the viewer may see
      *                                         (TeamPermission::VIEW); null shows "All projects" alone
      * @param array<string, string> $keptQuery the list's other filters (person, done, search), kept by every rail link
      *
