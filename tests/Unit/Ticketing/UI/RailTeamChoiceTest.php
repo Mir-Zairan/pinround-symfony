@@ -79,9 +79,9 @@ final class RailTeamChoiceTest extends TestCase
      */
     private static function choiceSeeing(array $visibleTeamIds): RailTeamChoice
     {
-        return new RailTeamChoice(new class($visibleTeamIds) implements AuthorizationCheckerInterface {
+        return new RailTeamChoice(new readonly class($visibleTeamIds) implements AuthorizationCheckerInterface {
             /** @param list<string> $visibleTeamIds */
-            public function __construct(private readonly array $visibleTeamIds)
+            public function __construct(private array $visibleTeamIds)
             {
             }
 

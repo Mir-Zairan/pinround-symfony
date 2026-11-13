@@ -26,7 +26,7 @@ final class TicketQueueTest extends TestCase
     public function aQueueOfOneKeyPastTheCapIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A queue holds at most 100 ticket keys.');
+        $this->expectExceptionMessageIsOrContains('A queue holds at most 100 ticket keys.');
 
         new TicketQueue('Code review', self::keys(TicketQueue::MAX_KEYS + 1));
     }
@@ -50,7 +50,7 @@ final class TicketQueueTest extends TestCase
     public function aQueueThatCannotBeWalkedIsRefused(string $label, array $keys, string $reason): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage($reason);
+        $this->expectExceptionMessageIsOrContains($reason);
 
         new TicketQueue($label, $keys);
     }

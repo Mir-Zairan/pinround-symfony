@@ -108,7 +108,7 @@ final class PersonPickerSearchTest extends TestCase
         $picker = $this->openedPicker(PersonPickerMode::Assign);
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The waiting counts leave out a person of the team.');
+        $this->expectExceptionMessageIsOrContains('The waiting counts leave out a person of the team.');
 
         $picker->shownPeople();
     }

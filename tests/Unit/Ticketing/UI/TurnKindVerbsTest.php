@@ -58,7 +58,7 @@ final class TurnKindVerbsTest extends TestCase
     public function aKindThatIsNoNeedsYouKindIsRefused(): void
     {
         $this->expectException(\ValueError::class);
-        $this->expectExceptionMessage('"Test"');
+        $this->expectExceptionMessageIsOrContains('"Test"');
 
         TurnKindVerbs::of('Test');
     }

@@ -51,7 +51,7 @@ final class TeamWorkloadsTest extends TestCase
         $teamWorkloads = $this->teamWorkloads(leftOutPersonId: self::MIA);
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The waiting counts leave out a person of the team.');
+        $this->expectExceptionMessageIsOrContains('The waiting counts leave out a person of the team.');
 
         $teamWorkloads->workloadOf(new TeamId(self::SHOP_TEAM), $this->viewer());
     }

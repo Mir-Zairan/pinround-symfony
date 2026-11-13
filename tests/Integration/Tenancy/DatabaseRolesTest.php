@@ -414,7 +414,7 @@ final class DatabaseRolesTest extends KernelTestCase
         self::assertEqualsCanonicalizing(['pinround_app SELECT', 'pinround_readonly SELECT'], $this->grantsToOthersThanTheOwner($connection, 'tkt_ticket_list_v'));
         self::assertSame(
             ['v', 'pinround_migrator', '{security_invoker=true}'],
-            array_values($connection->fetchNumeric("SELECT relkind::text, relowner::regrole::text, reloptions::text FROM pg_class WHERE oid = to_regclass('public.tkt_ticket_list_v')") ?: []),
+            $connection->fetchNumeric("SELECT relkind::text, relowner::regrole::text, reloptions::text FROM pg_class WHERE oid = to_regclass('public.tkt_ticket_list_v')"),
         );
     }
 
