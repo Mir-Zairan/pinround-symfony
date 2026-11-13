@@ -207,6 +207,21 @@
   gap: var(--space-8);
 }
 
+.tickets__step-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.tickets__step-header .tickets__step-heading {
+  flex: 1 1 auto;
+}
+
+.tickets__go-through {
+  margin: 0;
+}
+
 .tickets__step-heading {
   display: flex;
   flex-wrap: wrap;

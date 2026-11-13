@@ -119,6 +119,10 @@ final class TicketListController extends AbstractController
             'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $searchText, $assigneeId, $cursor, $collapsedStepIds),
             // A row opens its ticket inside this list, so the page's Previous and Next walk it (ticket-page.md, Header).
             'listQuery' => $listContext->query(),
+            // Each step's "Go through them" walks that step of this same list; its form names the step.
+            'queueStartUrl' => $this->generateUrl(QueueController::START_ROUTE, ['source' => QueueController::LIST_STEP_SOURCE, ...$listContext->query()]),
+            'queueCsrfId' => QueueController::CSRF_ID,
+            'queueStepField' => QueueController::STEP_FIELD,
             'noTickets' => null === $searchText && null === $assigneeId ? self::NO_TICKETS : self::NO_MATCHES,
             'filters' => [
                 'project' => $project?->key() ?? '',

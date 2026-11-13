@@ -6,6 +6,7 @@
                 {% for step in group.steps %}
                     <section class="tickets__step" id="step-{{ step.id }}" data-group="{{ group.code }}" data-step-id="{{ step.id }}"
                         {{ stimulus_controller('step-collapse', {url: step.collapseUrl, token: csrf_token(step.csrfId)}) }}>
+                        <div class="tickets__step-header">
                         <h2 class="tickets__step-heading">
                             <button type="button" class="tickets__step-toggle" aria-expanded="{{ step.isCollapsed ? 'false' : 'true' }}" aria-controls="step-{{ step.id }}-rows"
                                 {{ stimulus_target('step-collapse', 'toggle') }} data-step-toggle data-action="step-collapse#toggle">
@@ -19,6 +20,12 @@
                                 <span class="tickets__hint">{{ group.hint }}</span>
                             {% endif %}
                         </h2>
+                        <form method="post" action="{{ queueStartUrl }}" class="tickets__go-through" data-turbo-frame="_top">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token(queueCsrfId) }}">
+                            <input type="hidden" name="{{ queueStepField }}" value="{{ step.id }}">
+                            <twig:Button type="submit" variant="outline" size="sm" aria-label="Go through them: {{ step.name }}">Go through them</twig:Button>
+                        </form>
+                        </div>
                         <div class="tickets__rows" id="step-{{ step.id }}-rows" {{ stimulus_target('step-collapse', 'rows') }}{% if step.isCollapsed %} hidden{% endif %}>
                             {% if step.pageFrameId is not null %}<turbo-frame id="{{ step.pageFrameId }}">{% endif %}
                             {# No hover prefetch: inside a frame Turbo prefetches links even with Drive off, and each would cost a ticket page's queries. #}
