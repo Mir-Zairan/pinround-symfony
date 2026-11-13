@@ -121,12 +121,14 @@ final class HomeQueriesServiceTest extends TestCase
         self::assertNull($page->nextCursor);
     }
 
+    /**
+     * The database leaves the viewer's group out after a cursor (WhoseTurnTest proves it), so the rows hold none here.
+     */
     #[Test]
-    public function aNextPageGoesOnAfterTheCursorWithoutTheViewersGroup(): void
+    public function aNextPagePassesTheCursorOnOrdersTheRowsAndHasNoCursorUnderAFullPage(): void
     {
         $after = new TurnGroupCursor(new \DateTimeImmutable('2027-03-01 06:00:00 UTC'), null, 'Customer');
         $rows = new FixedWhoseTurnRows([
-            self::personGroup(self::LENA, '2027-03-25 09:00:00'),
             self::personGroup(self::MIA, '2027-03-09 07:00:00'),
             self::personGroup(self::OMAR, '2027-03-02 07:00:00'),
         ], 7);
@@ -134,6 +136,7 @@ final class HomeQueriesServiceTest extends TestCase
         $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, null, $after);
 
         self::assertSame([self::OMAR, self::MIA], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $page->groups));
+        self::assertSame(7, $page->ticketCount);
         self::assertNull($page->nextCursor);
         self::assertSame([[self::SHOP_PROJECT, null, $after, 21]], $rows->calls);
     }

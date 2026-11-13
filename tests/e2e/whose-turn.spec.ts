@@ -4,7 +4,8 @@ import { LENA_STORAGE_STATE } from './auth';
 
 // Reads the demo seed's SHOP tickets and changes nothing. tests/Functional/Ticketing/WhoseTurnTest.php proves the cards,
 // their order, the paging by keyset and who sees what on the server; this spec proves what only a browser shows: the
-// switch from the list, landing on a card after "Show N more", accessibility and the 360 px layout.
+// switch from the list, landing on a card after "Show N more", "Back to the start" from a later page, accessibility
+// and the 360 px layout.
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 const DESKTOP = { width: 1280, height: 800 };
 // base.css's --header-height-max, the scroll-padding-top that keeps a landed card clear of the sticky header.
@@ -34,6 +35,22 @@ test('Lena switches from the list to Whose turn? and sees her own card first', a
   await expect(page.locator('.turn__card--you')).toHaveCount(1);
   await expect(page.locator('.turn__name', { hasText: /^You$/ })).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'List', exact: true })).toHaveAttribute('href', '/tickets?project=SHOP');
+  await expect(page.getByRole('link', { name: 'Back to the start', exact: true })).toHaveCount(0);
+});
+
+test('Back to the start leaves a later page for the first, with Lena\'s own card', async ({ page }) => {
+  // A cursor after 1 Jan 2030 lies past every seeded wait, so this later page is empty whatever the seed holds.
+  await page.goto('/tickets/turn?project=SHOP&after=1893456000.label.Customer');
+  await expect(cards(page)).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /^Next \d+ people$/ })).toHaveCount(0);
+  const backToTheStart = page.getByRole('navigation', { name: 'Pages of cards' }).getByRole('link', { name: 'Back to the start', exact: true });
+  await expect(backToTheStart).toHaveAttribute('href', '/tickets/turn?project=SHOP');
+
+  await backToTheStart.click();
+
+  await expect(page).toHaveURL(/\/tickets\/turn\?project=SHOP$/);
+  await expect(cards(page).first()).toHaveClass(/\bturn__card--you\b/);
+  await expect(page.getByRole('link', { name: 'Back to the start', exact: true })).toHaveCount(0);
 });
 
 test('Show N more opens that card and lands on it below the header', async ({ page }) => {

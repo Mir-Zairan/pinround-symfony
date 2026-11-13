@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ticketing\UI;
 
+use App\Insight\Api\HomeQueries;
+
 /**
  * The words and thresholds of the whose-turn view (FR-TKT-03, FR-TKT-18): each card's sentence, wait and meter.
  */
@@ -19,7 +21,9 @@ final class WhoseTurnText
     public const string INTRO = 'Each ticket sits with the one person who must act next. Longest waits first. Done tickets are left out.';
     public const string YOU = 'You';
     public const string OUTSIDE_THE_TEAM = ' · outside the team';
-    public const string SHOW_MORE_PEOPLE = 'Show more people';
+    /** The next page replaces this one; the number of cards still to come is not known, so it names a full page. */
+    public const string NEXT_PEOPLE = 'Next '.HomeQueries::GROUPS_PER_PAGE.' people';
+    public const string BACK_TO_THE_START = 'Back to the start';
 
     /**
      * Whole days from $since to $now; 0 for a wait under a day, or one that starts after $now.

@@ -30,7 +30,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * or label they wait on, "You" first, then the oldest wait first (HomeQueries::whoseTurn). Every person of the
  * organization may open it, as the tickets list. It keeps the list's project (TicketListContext::PROJECT_QUERY) and
  * picked team; the search and person filters are not applied yet. A page holds the viewer's card and 20 others;
- * "Show more people" goes on by keyset (WhoseTurnCursorParameter). Each card shows its 5 oldest tickets; OPEN_QUERY,
+ * "Next 20 people" replaces it with the next page by keyset (WhoseTurnCursorParameter), and "Back to the start" goes
+ * back to the first, which holds the viewer's card. Each card shows its 5 oldest tickets; OPEN_QUERY,
  * a card's TurnGroup::groupKey(), shows up to 100 of that one. A project key of no project, an OPEN_QUERY longer
  * than 100 characters, or a malformed cursor is a 404.
  *
@@ -109,11 +110,16 @@ final class WhoseTurnController extends AbstractController
             'totalLine' => WhoseTurnText::totalLineOf($page->ticketCount),
             'intro' => WhoseTurnText::INTRO,
             'cards' => $cards,
-            'morePeopleText' => WhoseTurnText::SHOW_MORE_PEOPLE,
-            'morePeopleUrl' => null === $page->nextCursor ? null : $this->generateUrl(self::ROUTE, [
+            'nextPeopleText' => WhoseTurnText::NEXT_PEOPLE,
+            'nextPeopleUrl' => null === $page->nextCursor ? null : $this->generateUrl(self::ROUTE, [
                 ...$viewQuery,
                 WhoseTurnCursorParameter::AFTER_QUERY => WhoseTurnCursorParameter::valueOf($page->nextCursor),
             ]),
+            'backToTheStartText' => WhoseTurnText::BACK_TO_THE_START,
+            'backToTheStartUrl' => null === $cursor ? null : $this->generateUrl(self::ROUTE, array_filter([
+                ...$viewQuery,
+                TicketListContext::SEARCH_QUERY => $listContext->searchText,
+            ], static fn (?string $value): bool => null !== $value)),
             'noTickets' => TicketListController::NO_TICKETS,
             'viewQuery' => $viewQuery,
             'listQuery' => $listContext->query(),

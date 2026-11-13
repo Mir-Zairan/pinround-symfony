@@ -47,9 +47,16 @@
                     </li>
                 {% endfor %}
             </ul>
-            {% if morePeopleUrl %}
-                <a class="turn__more-people" href="{{ morePeopleUrl }}">{{ morePeopleText }}</a>
-            {% endif %}
+        {% endif %}
+        {% if backToTheStartUrl or nextPeopleUrl %}
+            <nav class="turn__pages" aria-label="Pages of cards">
+                {% if backToTheStartUrl %}
+                    <a class="turn__first-page" href="{{ backToTheStartUrl }}">{{ backToTheStartText }}</a>
+                {% endif %}
+                {% if nextPeopleUrl %}
+                    <a class="turn__next-people" href="{{ nextPeopleUrl }}">{{ nextPeopleText }}</a>
+                {% endif %}
+            </nav>
         {% endif %}
     </div>
 {% endblock %}
