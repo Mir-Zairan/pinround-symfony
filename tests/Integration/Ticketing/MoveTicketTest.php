@@ -8,8 +8,10 @@ use App\Insight\Api\TeamLoadQueries;
 use App\Insight\Api\TurnProjector;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPeopleQueries;
+use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
@@ -30,6 +32,7 @@ use App\Ticketing\Infrastructure\Messenger\MessengerTicketEvents;
 use App\Workflow\Api\RuleQueries;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\TransitionPolicy;
+use App\Workflow\Api\TurnInputs;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -156,6 +159,46 @@ final class MoveTicketTest extends KernelTestCase
 
         $this->assertMoved($stepBefore, $versionBefore, $expectedStepId, $actor, $verb);
         $this->assertBetaTicketsUntouched();
+    }
+
+    /**
+     * Omar and Mia are both developers with no review of their own code, so the lead's ticket goes to the one with fewer
+     * waiting reviews; with equal loads Omar would win on the lower user id.
+     */
+    #[Test]
+    public function theLeadsTicketSentToCodeReviewGoesToTheDeveloperWithFewerWaitingReviews(): void
+    {
+        self::mockTime(self::MOVED_AT);
+        $this->asMigratorOf(self::ACME_FOODS, static fn (Connection $connection): int|string => $connection->executeStatement(
+            "UPDATE org_team_member SET job = 'developer' WHERE organization_id = ? AND team_id = ? AND user_id = ?",
+            [self::ACME_FOODS, self::SHOP_TEAM, self::MIA],
+        ));
+        self::getContainer()->get(TeamPeopleCache::class)->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
+        $omarsReviewId = new ShopTickets($this->ticketCommands(), $this->transactions(), $this->connection())->createdFor(self::ACME_FOODS, self::SHOP_PROJECT, self::MIA, self::LENA);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            'UPDATE tkt_ticket SET step_id = ?, reviewer_id = ? WHERE id = ?',
+            [self::CODE_REVIEW_STEP, self::OMAR, $omarsReviewId->toString()],
+        ));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($omarsReviewId));
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP, 'assignee_id' => self::LENA]);
+        $ticketId = $this->ticketId();
+        self::assertSame(
+            [self::OMAR => [TurnInputs::WAITING_REVIEW => 1]],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array => self::getContainer()->get(TeamLoadQueries::class)->waitingTurnsOf(
+                [new UserId(self::LENA), new UserId(self::OMAR), new UserId(self::MIA)],
+                $ticketId,
+            )),
+        );
+
+        $this->move(self::LENA, 'send_to_code_review', $this->stepAndVersion()[1]);
+
+        self::assertSame(
+            ['turn_user_id' => self::MIA, 'kind' => 'review'],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchAssociative('SELECT turn_user_id, kind FROM ins_ticket_turn WHERE ticket_id = ?', [$ticketId->toString()])),
+        );
+        $turnRowsAfterTheMove = $this->turnRows();
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
+        self::assertSame($this->turnRows(), $turnRowsAfterTheMove);
     }
 
     #[Test]
