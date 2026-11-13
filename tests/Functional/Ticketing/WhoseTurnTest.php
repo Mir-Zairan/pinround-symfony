@@ -158,8 +158,10 @@ final class WhoseTurnTest extends WebTestCase
         self::assertSame(['9 days', '8 days', '7 days', '5 days', '3 days'], $omarsCard->filter('.turn__wait')->each(static fn (Crawler $wait): string => $wait->text()));
         self::assertSame('Show 2 more', $omarsCard->filter('.turn__more')->text());
         self::assertSame('Show 1 more', $page->filter('.turn__card')->eq(0)->filter('.turn__more')->text());
+        $omarsCardId = 'turn-'.$this->people['Omar']->id()->toString();
+        self::assertSame($omarsCardId, $omarsCard->attr('id'));
         $openUrl = (string) $omarsCard->filter('.turn__more')->attr('href');
-        self::assertSame(self::TURN.'?project=SHOP&open='.$this->people['Omar']->id()->toString(), $openUrl);
+        self::assertSame(self::TURN.'?project=SHOP&open='.$this->people['Omar']->id()->toString().'#'.$omarsCardId, $openUrl);
 
         $opened = $this->client->request('GET', $openUrl);
 
@@ -167,7 +169,8 @@ final class WhoseTurnTest extends WebTestCase
         $openedCard = $opened->filter('.turn__card')->eq(1);
         self::assertSame(['9 days', '8 days', '7 days', '5 days', '3 days', '2 days', '1 day'], $openedCard->filter('.turn__wait')->each(static fn (Crawler $wait): string => $wait->text()));
         self::assertSame('Show fewer', $openedCard->filter('.turn__more')->text());
-        self::assertSame(self::TURN.'?project=SHOP', $openedCard->filter('.turn__more')->attr('href'));
+        self::assertSame($omarsCardId, $openedCard->attr('id'));
+        self::assertSame(self::TURN.'?project=SHOP#'.$omarsCardId, $openedCard->filter('.turn__more')->attr('href'));
         self::assertCount(5, $opened->filter('.turn__card')->eq(0)->filter('.turn__row'));
         self::assertSame('Show 1 more', $opened->filter('.turn__card')->eq(0)->filter('.turn__more')->text());
     }

@@ -119,7 +119,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
     {
         $this->addTheWaits();
 
-        $tickets = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->whoseTurn(self::lena(), null, null)[0]->tickets);
+        $tickets = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->whoseTurn(self::lena(), null, null, null)->groups[0]->tickets);
 
         self::assertSame(
             [[self::ticketIdOf(6), 'SHOP-6', 'Checkout button is hidden', 'check', '2027-03-14 08:00:00']],
@@ -191,7 +191,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
 
         $keys = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => array_map(
             static fn (WaitingTicket $ticket): string => $ticket->key,
-            $this->queries()->whoseTurn(self::lena(), null, self::RAJ)[0]->tickets,
+            $this->queries()->whoseTurn(self::lena(), null, self::RAJ, null)->groups[0]->tickets,
         ));
 
         self::assertSame(array_map(static fn (int $number): string => 'SHOP-'.(1000 + $number), range(0, 99)), $keys);
@@ -221,7 +221,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
         [$groups, $queryCount] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
             $debugData = $this->debugData();
             $debugData->reset();
-            $groups = $this->queries()->whoseTurn(self::lena(), self::SHOP_PROJECT, self::RAJ);
+            $groups = $this->queries()->whoseTurn(self::lena(), self::SHOP_PROJECT, self::RAJ, null)->groups;
 
             return [$groups, self::queryCountOf($debugData)];
         });
@@ -239,7 +239,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
             self::BETA_BAKERY,
             self::ACME_FOODS,
             fn (Connection $connection): array => new DbalWhoseTurnRows($connection, $this->tenantContext())
-                ->groupedRowsOf(self::lena(), null, null),
+                ->groupedRowsOf(self::lena(), null, null, null, 21)['groups'],
         );
 
         self::assertSame([], $groups);
@@ -251,7 +251,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
         $this->assertRefusedBeforeAnyQuery(
-            fn (): array => $this->queries()->whoseTurn(self::lena(), null, null),
+            fn (): array => $this->queries()->whoseTurn(self::lena(), null, null, null)->groups,
             \LogicException::class,
             'Whose turn is read in a transaction under the organization as tenant; none is open.',
         );
@@ -265,7 +265,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
         $connection->beginTransaction();
         try {
             $this->assertRefusedBeforeAnyQuery(
-                fn (): array => $this->queries()->whoseTurn(self::lena(), null, null),
+                fn (): array => $this->queries()->whoseTurn(self::lena(), null, null, null)->groups,
                 TenantNotSet::class,
                 'No organization is set for this unit of work.',
             );
@@ -280,7 +280,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
         $betaBakeryAdmin = new TicketViewer(new OrganizationId(self::BETA_BAKERY), new UserId(self::RAJ), [], true, false);
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, fn () => $this->assertRefusedBeforeAnyQuery(
-            fn (): array => $this->queries()->whoseTurn($betaBakeryAdmin, null, null),
+            fn (): array => $this->queries()->whoseTurn($betaBakeryAdmin, null, null, null)->groups,
             \LogicException::class,
             'Whose turn is read under the viewer\'s own organization as tenant.',
         ));
@@ -290,7 +290,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
     public function aProjectIdThatIsNoCanonicalUuidIsRefusedBeforeAnyQuery(): void
     {
         $this->transactions()->rolledBackAs(self::ACME_FOODS, fn () => $this->assertRefusedBeforeAnyQuery(
-            fn (): array => $this->queries()->whoseTurn(self::lena(), strtoupper(self::SHOP_PROJECT), null),
+            fn (): array => $this->queries()->whoseTurn(self::lena(), strtoupper(self::SHOP_PROJECT), null, null)->groups,
             \InvalidArgumentException::class,
             'Whose turn is read in a project given by its canonical lowercase uuid.',
         ));
@@ -319,7 +319,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
      */
     private function whoseTurnOf(?string $projectId, ?string $openedGroup): array
     {
-        $groups = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->whoseTurn(self::lena(), $projectId, $openedGroup));
+        $groups = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->whoseTurn(self::lena(), $projectId, $openedGroup, null)->groups);
 
         return array_map(static fn (TurnGroup $group): array => [
             $group->groupKey(),
@@ -335,7 +335,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
     private function shownAndCountOf(?string $openedGroup): array
     {
         $shownAndCount = [];
-        foreach ($this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->whoseTurn(self::lena(), null, $openedGroup)) as $group) {
+        foreach ($this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->whoseTurn(self::lena(), null, $openedGroup, null)->groups) as $group) {
             $shownAndCount[$group->groupKey()] = [\count($group->tickets), $group->ticketCount];
         }
 

@@ -19,6 +19,7 @@ final class WhoseTurnText
     public const string INTRO = 'Each ticket sits with the one person who must act next. Longest waits first. Done tickets are left out.';
     public const string YOU = 'You';
     public const string OUTSIDE_THE_TEAM = ' · outside the team';
+    public const string SHOW_MORE_PEOPLE = 'Show more people';
 
     /**
      * Whole days from $since to $now; 0 for a wait under a day, or one that starts after $now.

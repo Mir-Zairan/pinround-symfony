@@ -126,7 +126,7 @@ final class WhoseTurnLeakTest extends VisibilityLeakCast
     {
         $titles = self::asViewer('Raj', static fn (): array => array_merge(...array_map(
             static fn (TurnGroup $group): array => array_map(static fn (WaitingTicket $ticket): string => $ticket->title, $group->tickets),
-            self::homeQueries()->whoseTurn(self::ticketViewerOf('Raj'), null, null),
+            self::homeQueries()->whoseTurn(self::ticketViewerOf('Raj'), null, null, null)->groups,
         )));
 
         self::assertNotSame([], $titles);
@@ -157,7 +157,7 @@ final class WhoseTurnLeakTest extends VisibilityLeakCast
      */
     private static function readGroupsAs(string $viewer): array
     {
-        $groups = self::asViewer($viewer, static fn (): array => self::homeQueries()->whoseTurn(self::ticketViewerOf($viewer), null, null));
+        $groups = self::asViewer($viewer, static fn (): array => self::homeQueries()->whoseTurn(self::ticketViewerOf($viewer), null, null, null)->groups);
 
         return array_map(static fn (TurnGroup $group): array => [
             $group->groupKey(),

@@ -20,7 +20,7 @@
             <p class="turn__intro">{{ intro }}</p>
             <ul class="turn__cards">
                 {% for card in cards %}
-                    <li class="turn__card turn__card--{{ card.tone }}">
+                    <li id="{{ card.id }}" class="turn__card turn__card--{{ card.tone }}">
                         <div class="turn__head">
                             <twig:Avatar name="{{ card.avatarName }}" size="lg" class="turn__avatar turn__avatar--{{ card.tone }}" aria-hidden="true" />
                             <div class="turn__who">
@@ -47,6 +47,9 @@
                     </li>
                 {% endfor %}
             </ul>
+            {% if morePeopleUrl %}
+                <a class="turn__more-people" href="{{ morePeopleUrl }}">{{ morePeopleText }}</a>
+            {% endif %}
         {% endif %}
     </div>
 {% endblock %}

@@ -7,6 +7,7 @@ namespace App\Insight\Infrastructure\Doctrine;
 use App\Insight\Api\HomeQueries;
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\TurnGroup;
+use App\Insight\Api\TurnGroupCursor;
 use App\Insight\Api\WaitingTicket;
 use App\Insight\Application\WhoseTurnRows;
 use App\SharedKernel\Application\TenantContext;
@@ -18,18 +19,22 @@ use Doctrine\DBAL\Connection;
 
 /**
  * One query: window functions count, date and number every visible turn row within its person or label, so the counts
- * and oldest waits cover every ticket the viewer may see while only the first rows of each group are joined to
+ * and oldest waits cover every ticket the viewer may see. The page's groups are picked by keyset on (oldest wait,
+ * label or not, user id or label in byte order), HomeQueriesService's order, and only their first rows are joined to
  * Ticketing's read-only view tkt_ticket_list_v for their key and title (the one cross-module join ADR-0015 allows).
  */
 final readonly class DbalWhoseTurnRows implements WhoseTurnRows
 {
     private const string TURN_ALIAS = 'turn';
+    /** The order of a page's groups and of its keyset; COLLATE "C" compares labels byte by byte, as strcmp does. */
+    private const string GROUP_ORDER = 'visible_turn.group_oldest, visible_turn.turn_user_id IS NULL,'
+        .' COALESCE(CAST(visible_turn.turn_user_id AS text), visible_turn.turn_label) COLLATE "C"';
 
     public function __construct(private Connection $connection, private TenantContext $tenantContext)
     {
     }
 
-    public function groupedRowsOf(TicketViewer $viewer, ?string $projectId, ?string $openedGroup): array
+    public function groupedRowsOf(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, int $otherGroupLimit): array
     {
         if (!$this->connection->isTransactionActive()) {
             throw new \LogicException('Whose turn is read in a transaction under the organization as tenant; none is open.');
@@ -44,6 +49,7 @@ final readonly class DbalWhoseTurnRows implements WhoseTurnRows
             self::TURN_ALIAS,
         );
         // The ticket id breaks ties of waiting_since, so the shown rows of a group do not change between two reads.
+        // The LEFT JOIN from the count keeps one row, with no ticket, when the page has no group.
         $rows = $this->connection->fetchAllAssociative(
             'WITH visible_turn AS (SELECT turn.ticket_id, turn.turn_user_id, turn.turn_label, turn.kind, turn.waiting_since,'
             .' count(*) OVER turn_group AS group_tickets, min(turn.waiting_since) OVER turn_group AS group_oldest,'
@@ -52,17 +58,35 @@ final readonly class DbalWhoseTurnRows implements WhoseTurnRows
             .' WHERE turn.organization_id = CAST(:organization AS uuid)'
             .(null === $projectId ? '' : ' AND turn.project_id = CAST(:project AS uuid)')
             .' AND '.$visibleTurn->sql()
-            .' WINDOW turn_group AS (PARTITION BY turn.turn_user_id, turn.turn_label))'
-            .' SELECT visible_turn.ticket_id, visible_turn.turn_user_id, visible_turn.turn_label, visible_turn.kind,'
-            .' visible_turn.waiting_since, visible_turn.group_tickets, visible_turn.group_oldest, ticket.key, ticket.title'
+            .' WINDOW turn_group AS (PARTITION BY turn.turn_user_id, turn.turn_label)),'
+            .' page_group AS ('
+            .(null === $after ? '(SELECT visible_turn.turn_user_id, visible_turn.turn_label FROM visible_turn'
+                .' WHERE visible_turn.place = 1 AND visible_turn.turn_user_id = CAST(:viewer AS uuid)) UNION ALL ' : '')
+            .'(SELECT visible_turn.turn_user_id, visible_turn.turn_label FROM visible_turn'
+            .' WHERE visible_turn.place = 1 AND visible_turn.turn_user_id IS DISTINCT FROM CAST(:viewer AS uuid)'
+            .(null === $after ? '' : ' AND ('.self::GROUP_ORDER.')'
+                .' > (CAST(:after_oldest AS timestamptz), CAST(:after_is_label AS boolean), CAST(:after_key AS text) COLLATE "C")')
+            .' ORDER BY '.self::GROUP_ORDER.' LIMIT CAST(:other_group_limit AS integer)))'
+            .' SELECT totals.visible_tickets, shown.* FROM (SELECT count(*) AS visible_tickets FROM visible_turn) AS totals'
+            .' LEFT JOIN (SELECT visible_turn.ticket_id, visible_turn.turn_user_id, visible_turn.turn_label, visible_turn.kind,'
+            .' visible_turn.waiting_since, visible_turn.group_tickets, visible_turn.group_oldest, visible_turn.place, ticket.key, ticket.title'
             .' FROM visible_turn'
+            .' JOIN page_group ON page_group.turn_user_id IS NOT DISTINCT FROM visible_turn.turn_user_id'
+            .' AND page_group.turn_label IS NOT DISTINCT FROM visible_turn.turn_label'
             .' JOIN tkt_ticket_list_v AS ticket ON ticket.organization_id = CAST(:organization AS uuid) AND ticket.id = visible_turn.ticket_id'
             .' WHERE visible_turn.place <= CASE WHEN COALESCE(CAST(visible_turn.turn_user_id AS text), visible_turn.turn_label) = CAST(:opened AS text)'
-            .' THEN CAST(:opened_shown AS integer) ELSE CAST(:shown AS integer) END'
-            .' ORDER BY visible_turn.turn_user_id, visible_turn.turn_label, visible_turn.place',
+            .' THEN CAST(:opened_shown AS integer) ELSE CAST(:shown AS integer) END) AS shown ON true'
+            .' ORDER BY shown.turn_user_id, shown.turn_label, shown.place',
             [
                 'organization' => $organizationId->toString(),
                 ...(null === $projectId ? [] : ['project' => $projectId]),
+                'viewer' => $viewer->viewerId->toString(),
+                ...(null === $after ? [] : [
+                    'after_oldest' => $after->oldestWaitingSince->format('Y-m-d H:i:sP'),
+                    'after_is_label' => null === $after->turnUserId ? 'true' : 'false',
+                    'after_key' => $after->turnUserId?->toString() ?? (string) $after->turnLabel,
+                ]),
+                'other_group_limit' => (string) $otherGroupLimit,
                 'opened' => $openedGroup,
                 'opened_shown' => (string) HomeQueries::SHOWN_TICKETS_OF_THE_OPENED_GROUP,
                 'shown' => (string) HomeQueries::SHOWN_TICKETS,
@@ -70,9 +94,17 @@ final readonly class DbalWhoseTurnRows implements WhoseTurnRows
             ],
         );
 
+        $ticketCount = 0;
         /** @var array<string, array{?UserId, ?string, int, \DateTimeImmutable, list<WaitingTicket>}> $groups */
         $groups = [];
         foreach ($rows as $row) {
+            if (!\is_int($row['visible_tickets'])) {
+                throw new \LogicException('The whose-turn count from the database is not a number.');
+            }
+            $ticketCount = $row['visible_tickets'];
+            if (null === $row['ticket_id']) {
+                continue;
+            }
             if (!\is_string($row['ticket_id']) || !\is_string($row['kind']) || !\is_string($row['waiting_since'])
                 || !\is_int($row['group_tickets']) || !\is_string($row['group_oldest'])
                 || !\is_string($row['key']) || !\is_string($row['title'])
@@ -98,9 +130,12 @@ final readonly class DbalWhoseTurnRows implements WhoseTurnRows
             );
         }
 
-        return array_values(array_map(
-            static fn (array $group): TurnGroup => new TurnGroup(...$group),
-            $groups,
-        ));
+        return [
+            'groups' => array_values(array_map(
+                static fn (array $group): TurnGroup => new TurnGroup(...$group),
+                $groups,
+            )),
+            'ticketCount' => $ticketCount,
+        ];
     }
 }

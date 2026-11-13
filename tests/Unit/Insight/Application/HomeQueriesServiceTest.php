@@ -38,7 +38,7 @@ final class HomeQueriesServiceTest extends TestCase
             self::personGroup(self::RAJ, '2027-03-01 06:00:00'),
         ]);
 
-        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null);
+        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null)->groups;
 
         self::assertSame(
             [self::LENA, self::RAJ, 'Customer', self::OMAR, self::MIA, 'Supplier delivery'],
@@ -54,7 +54,7 @@ final class HomeQueriesServiceTest extends TestCase
             self::personGroup(self::OMAR, '2027-03-02 07:00:00'),
         ]);
 
-        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null);
+        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null)->groups;
 
         self::assertSame([self::OMAR, self::MIA], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $groups));
     }
@@ -64,9 +64,9 @@ final class HomeQueriesServiceTest extends TestCase
     {
         $rows = new FixedWhoseTurnRows([]);
 
-        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, 'Customer');
+        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, 'Customer', null)->groups;
 
-        self::assertSame([[], [[self::SHOP_PROJECT, 'Customer']]], [$groups, $rows->calls]);
+        self::assertSame([[], [[self::SHOP_PROJECT, 'Customer', null, 21]]], [$groups, $rows->calls]);
     }
 
     /**
@@ -91,7 +91,7 @@ final class HomeQueriesServiceTest extends TestCase
         $rows = new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')]);
 
         try {
-            new HomeQueriesService($rows)->whoseTurn(self::lena(), $projectId, $openedGroup);
+            new HomeQueriesService($rows)->whoseTurn(self::lena(), $projectId, $openedGroup, null);
             self::fail('The read must be refused.');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame($refusal, $exception->getMessage());
@@ -104,9 +104,9 @@ final class HomeQueriesServiceTest extends TestCase
     {
         $rows = new FixedWhoseTurnRows([]);
 
-        new HomeQueriesService($rows)->whoseTurn(self::lena(), null, str_repeat('é', 100));
+        new HomeQueriesService($rows)->whoseTurn(self::lena(), null, str_repeat('é', 100), null);
 
-        self::assertSame([[null, str_repeat('é', 100)]], $rows->calls);
+        self::assertSame([[null, str_repeat('é', 100), null, 21]], $rows->calls);
     }
 
     private static function personGroup(string $userId, string $oldestWaitingSince): TurnGroup

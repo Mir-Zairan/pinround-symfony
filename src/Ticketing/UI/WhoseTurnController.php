@@ -29,9 +29,10 @@ use Symfony\Component\Routing\Attribute\Route;
  * The whose-turn view at /tickets/turn (FR-TKT-03, FR-TKT-18): the open tickets the viewer may see, one card per person
  * or label they wait on, "You" first, then the oldest wait first (HomeQueries::whoseTurn). Every person of the
  * organization may open it, as the tickets list. It keeps the list's project (TicketListContext::PROJECT_QUERY) and
- * picked team; the search and person filters are not applied yet. Each card shows its 5 oldest tickets; OPEN_QUERY,
- * a card's TurnGroup::groupKey(), shows up to 100 of that one. A project key of no project, or an OPEN_QUERY longer
- * than 100 characters, is a 404.
+ * picked team; the search and person filters are not applied yet. A page holds the viewer's card and 20 others;
+ * "Show more people" goes on by keyset (WhoseTurnCursorParameter). Each card shows its 5 oldest tickets; OPEN_QUERY,
+ * a card's TurnGroup::groupKey(), shows up to 100 of that one. A project key of no project, an OPEN_QUERY longer
+ * than 100 characters, or a malformed cursor is a 404.
  *
  * "Outside the team" marks a label, and a person who is not one of the lead and members of the team RailTeamChoice
  * picks; with no such team, no person is marked. Three queries beside the shell's and the project's, whatever the
@@ -68,14 +69,17 @@ final class WhoseTurnController extends AbstractController
         $project = $listContext->project;
         $openedGroup = $request->query->getString(self::OPEN_QUERY);
         $openedGroup = '' === $openedGroup ? null : $openedGroup;
+        $after = $request->query->getString(WhoseTurnCursorParameter::AFTER_QUERY);
+        $cursor = '' === $after ? null : (WhoseTurnCursorParameter::cursorOf($after) ?? throw new NotFoundHttpException('No such page of whose turn.'));
 
         $visibility = $this->ticketVisibilities->ofActor($actor);
         $viewer = new TicketViewer($visibility->organizationId(), $visibility->viewerId(), $visibility->teamIds(), $visibility->isAdmin(), $visibility->isTriager());
         try {
-            $groups = $this->homeQueries->whoseTurn($viewer, $project?->id(), $openedGroup);
+            $page = $this->homeQueries->whoseTurn($viewer, $project?->id(), $openedGroup, $cursor);
         } catch (\InvalidArgumentException $refusal) {
-            throw new NotFoundHttpException('No such group of tickets.', $refusal);
+            throw new NotFoundHttpException('No such group or page of tickets.', $refusal);
         }
+        $groups = $page->groups;
 
         $railTeamId = $this->railTeamChoice->teamOf($actor, $project, $listContext->pickedTeamId);
         $teamPeopleIds = null === $railTeamId ? null : array_map(
@@ -93,19 +97,23 @@ final class WhoseTurnController extends AbstractController
             TicketListContext::PROJECT_QUERY => $project?->key(),
             TicketListContext::TEAM_QUERY => $listContext->pickedTeamId?->toString(),
         ], static fn (?string $value): bool => null !== $value);
+        $pageQuery = null === $cursor ? $viewQuery : [...$viewQuery, WhoseTurnCursorParameter::AFTER_QUERY => WhoseTurnCursorParameter::valueOf($cursor)];
 
-        $ticketCount = 0;
         $cards = [];
         foreach ($groups as $group) {
-            $ticketCount += $group->ticketCount;
-            $cards[] = $this->cardOf($group, $actor->userId(), $names, $teamPeopleIds, $openedGroup, $viewQuery);
+            $cards[] = $this->cardOf($group, $actor->userId(), $names, $teamPeopleIds, $openedGroup, $pageQuery);
         }
 
         return $this->render('@Ticketing/whose_turn.html.twig', [
             'heading' => null === $project ? TicketListController::ALL_TICKETS : $project->key().' · '.$project->name(),
-            'totalLine' => WhoseTurnText::totalLineOf($ticketCount),
+            'totalLine' => WhoseTurnText::totalLineOf($page->ticketCount),
             'intro' => WhoseTurnText::INTRO,
             'cards' => $cards,
+            'morePeopleText' => WhoseTurnText::SHOW_MORE_PEOPLE,
+            'morePeopleUrl' => null === $page->nextCursor ? null : $this->generateUrl(self::ROUTE, [
+                ...$viewQuery,
+                WhoseTurnCursorParameter::AFTER_QUERY => WhoseTurnCursorParameter::valueOf($page->nextCursor),
+            ]),
             'noTickets' => TicketListController::NO_TICKETS,
             'viewQuery' => $viewQuery,
             'listQuery' => $listContext->query(),
@@ -116,12 +124,13 @@ final class WhoseTurnController extends AbstractController
     /**
      * @param array<string, UserView> $names         by user id string
      * @param list<string>|null       $teamPeopleIds the rail team's lead and members; null for no team
-     * @param array<string, string>   $viewQuery     the project and picked team, kept in the card's links
+     * @param array<string, string>   $pageQuery     the project, picked team and page, kept in the card's links
      *
      * @return array<string, mixed>
      */
-    private function cardOf(TurnGroup $group, UserId $viewerId, array $names, ?array $teamPeopleIds, ?string $openedGroup, array $viewQuery): array
+    private function cardOf(TurnGroup $group, UserId $viewerId, array $names, ?array $teamPeopleIds, ?string $openedGroup, array $pageQuery): array
     {
+        $cardId = self::cardIdOf($group);
         $now = $this->clock->now();
         $oldestWaitDays = WhoseTurnText::waitDaysOf($group->oldestWaitingSince, $now);
         $isViewer = null !== $group->turnUserId && $group->turnUserId->equals($viewerId);
@@ -151,6 +160,7 @@ final class WhoseTurnController extends AbstractController
         }
 
         return [
+            'id' => $cardId,
             'name' => $isViewer ? WhoseTurnText::YOU : $name,
             'avatarName' => $name,
             'tone' => $isViewer ? 'you' : ($isOutsideTheTeam ? 'outside' : 'team'),
@@ -160,8 +170,25 @@ final class WhoseTurnController extends AbstractController
             'meterTitle' => 'Oldest wait: '.WhoseTurnText::waitOf($oldestWaitDays),
             'rows' => $rows,
             'moreText' => $hiddenCount > 0 && !$isOpened ? 'Show '.number_format($hiddenCount).' more' : null,
-            'moreUrl' => $this->generateUrl(self::ROUTE, [...$viewQuery, self::OPEN_QUERY => $group->groupKey()]),
-            'fewerUrl' => $isOpened && \count($group->tickets) > HomeQueries::SHOWN_TICKETS ? $this->generateUrl(self::ROUTE, $viewQuery) : null,
+            'moreUrl' => $this->generateUrl(self::ROUTE, [...$pageQuery, self::OPEN_QUERY => $group->groupKey(), '_fragment' => $cardId]),
+            'fewerUrl' => $isOpened && \count($group->tickets) > HomeQueries::SHOWN_TICKETS
+                ? $this->generateUrl(self::ROUTE, [...$pageQuery, '_fragment' => $cardId])
+                : null,
         ];
+    }
+
+    /**
+     * The card's HTML id, the same on every read, so "Show N more" and "Show fewer" land on it: "turn-<user id>", or for a
+     * label "turn-label-" and its ASCII slug, with a hash of the label that keeps two labels of one slug apart.
+     */
+    private static function cardIdOf(TurnGroup $group): string
+    {
+        if (null !== $group->turnUserId) {
+            return 'turn-'.$group->turnUserId->toString();
+        }
+        $label = (string) $group->turnLabel;
+        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower(substr($label, 0, 40))), '-');
+
+        return 'turn-label-'.('' === $slug ? '' : $slug.'-').substr(hash('sha256', $label), 0, 8);
     }
 }
