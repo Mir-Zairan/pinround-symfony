@@ -6,9 +6,12 @@ namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
+use App\Ticketing\UI\MoveToasts;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -72,9 +75,10 @@ final class TicketPageTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                $migrator->executeStatement('DELETE FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]);
-                $migrator->executeStatement('DELETE FROM tkt_ticket WHERE organization_id = ?', [$organizationId]);
-                $migrator->executeStatement('DELETE FROM wf_step WHERE organization_id = ?', [$organizationId]);
+                foreach (['tkt_ticket_event', 'ins_ticket_turn', 'ins_project_count_ticket', 'ins_project_counts', 'tkt_ticket', 'wf_step'] as $table) {
+                    $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
+                }
+                $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
 
                 return 0;
             });
@@ -552,6 +556,184 @@ final class TicketPageTest extends WebTestCase
         self::assertSame('Footer links point nowhere', $page->filter('h1')->text());
         self::assertSame('In progress', $page->filter('.ticket__state .pill')->text());
         self::assertCount(0, $page->filter('.ticket__now, .ticket__next'));
+        self::assertCount(0, $page->filter('.next-step-box'));
+    }
+
+    /**
+     * SHOP-1 is in To do and assigned to Omar. Only a lead or member of Shop may move it; only its lead gets the move
+     * list, which holds the organization's steps and Shop's own, never another team's.
+     *
+     * @return iterable<string, array{string, array<string, string>, bool}>
+     */
+    public static function nextStepOfEachRole(): iterable
+    {
+        yield 'Lena, the team\'s lead' => ['Lena', ['put_on_hold' => 'Put on hold'], true];
+        yield 'Omar, the assignee and a member' => ['Omar', ['start_work' => 'Start work'], false];
+        yield 'Mia, a viewer of the team' => ['Mia', [], false];
+        yield 'Raj, a manager with no team role' => ['Raj', [], false];
+        yield 'Sara, an admin with no team role' => ['Sara', [], false];
+    }
+
+    /**
+     * @param array<string, string> $expectedVerbs each verb's button label by its code
+     */
+    #[Test]
+    #[DataProvider('nextStepOfEachRole')]
+    public function theNextStepBoxOffersMovesOnlyToThoseWhoMayMakeThem(string $viewer, array $expectedVerbs, bool $hasMoveList): void
+    {
+        $this->addTeamStep($this->shop, 'Pairing', 'doing');
+        $this->addTeamStep($this->mobile, 'Store review', 'check');
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'todo', 'assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people[$viewer]);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $box = $page->filter('.ticket__aside .next-step-box');
+        self::assertCount(1, $box);
+        self::assertNotSame('', trim($box->filter('.next-step-box__sentence')->text()));
+        self::assertSame(
+            array_map(static fn (string $verb, string $label): array => ['/t/'.$key.'/move/'.$verb, $label], array_keys($expectedVerbs), $expectedVerbs),
+            $box->filter('.next-step-box__verbs form')->each(static fn (Crawler $form): array => [(string) $form->attr('action'), $form->filter('button')->text()]),
+        );
+        // Drive is off, so only a form that opts in is posted by Turbo and gets the move's Turbo Stream answer.
+        self::assertCount($page->filter('form[action*="/move"]')->count(), $page->filter('form[action*="/move"][data-turbo="true"]'));
+        // assets/app.js has no failure text of its own: after a reload it shows the form's data-failed-toast.
+        $moveForms = $page->filter('form[action*="/move"]');
+        self::assertSame(array_fill(0, $moveForms->count(), MoveToasts::MOVE_FAILED), $moveForms->each(static fn (Crawler $form): ?string => $form->attr('data-failed-toast')));
+        $moveList = $box->filter('details.next-step-box__move-to');
+        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog#needs-input-'.$this->stepsByCore['input']));
+        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog'));
+        if (!$hasMoveList) {
+            self::assertCount(0, $moveList);
+            self::assertCount(\count($expectedVerbs), $page->filter('form[action*="/move"]'));
+
+            return;
+        }
+        // The groups in their fixed order although addSteps numbers positions across groups from Needs input; inside a
+        // group by position, so To do (3) comes before Backlog (5).
+        self::assertSame(
+            [
+                ['To do', ['To do', 'Backlog']],
+                ['Doing', ['In progress', 'Pairing']],
+                ['Checking', ['Code review', 'Testing']],
+                ['Waiting', ['Needs input', 'On hold']],
+                ['Done', ['Done']],
+            ],
+            $moveList->filter('.next-step-box__group')->each(static fn (Crawler $group): array => [
+                $group->filter('.next-step-box__group-label')->text(),
+                $group->filter('button.chip')->each(static fn (Crawler $chip): string => $chip->text()),
+            ]),
+        );
+        self::assertSame(['To do'], $moveList->filter('button[aria-current="step"]')->each(static fn (Crawler $chip): string => $chip->text()));
+        self::assertStringNotContainsString('Store review', $box->text());
+    }
+
+    /**
+     * Omar reported the ticket and has it, Mia reviews it; Lena, who looks, and Raj have no part in it, so they are not
+     * offered although both are members.
+     */
+    #[Test]
+    public function theNeedsInputDialogOffersTheTicketsPeopleWithTheirRolesAndSomeoneElse(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'reporter' => 'Omar', 'assignee' => 'Omar']);
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET reviewer_id = ? WHERE key = ?',
+            [$this->people['Mia']->id()->toString(), $key],
+        ));
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $dialog = $page->filter('dialog#needs-input-'.$this->stepsByCore['input']);
+        self::assertCount(1, $dialog);
+        self::assertSame('Move to Needs input', $dialog->filter('.dialog__title')->text());
+        self::assertSame(
+            [
+                ['Omar · Reporter · Assignee', $this->people['Omar']->id()->toString(), true],
+                ['Mia · Code reviewer', $this->people['Mia']->id()->toString(), false],
+                ['Someone else', '', false],
+            ],
+            self::waitingOnChoicesOf($dialog),
+        );
+        $labelField = $dialog->filter('input.waiting-on__label[type="text"]');
+        self::assertCount(1, $labelField);
+        self::assertSame(['100', 'Who else it waits on'], [$labelField->attr('maxlength'), $labelField->attr('aria-label')]);
+        self::assertNotNull($labelField->attr('disabled'));
+        self::assertStringNotContainsString('Raj', $dialog->text());
+        self::assertStringNotContainsString('Lena', $dialog->text());
+    }
+
+    /**
+     * Raj reported the ticket and left Acme Foods before Lena opened it, so he is not offered, as the move would be
+     * refused; Omar, the next of the ticket's people, is chosen instead.
+     */
+    #[Test]
+    public function theNeedsInputDialogLeavesOutAReporterWhoLeftAndChoosesTheNextPerson(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'reporter' => 'Raj', 'assignee' => 'Omar']);
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET reviewer_id = ? WHERE key = ?',
+            [$this->people['Mia']->id()->toString(), $key],
+        ));
+        $this->removeMembership($this->people['Raj'], $this->acmeFoods);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $dialog = $page->filter('dialog#needs-input-'.$this->stepsByCore['input']);
+        self::assertSame(
+            [
+                ['Omar · Assignee', $this->people['Omar']->id()->toString(), true],
+                ['Mia · Code reviewer', $this->people['Mia']->id()->toString(), false],
+                ['Someone else', '', false],
+            ],
+            self::waitingOnChoicesOf($dialog),
+        );
+        self::assertNotNull($dialog->filter('input.waiting-on__label')->attr('disabled'));
+        self::assertStringNotContainsString('Raj', $dialog->text());
+    }
+
+    /**
+     * Raj reported the ticket and Sara has it; both left Acme Foods, so only Someone else is left, chosen, with its
+     * label to write.
+     */
+    #[Test]
+    public function theNeedsInputDialogChoosesSomeoneElseWhenEveryoneOfTheTicketLeft(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'progress', 'reporter' => 'Raj', 'assignee' => 'Sara']);
+        $this->removeMembership($this->people['Raj'], $this->acmeFoods);
+        $this->removeMembership($this->people['Sara'], $this->acmeFoods);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $dialog = $page->filter('dialog#needs-input-'.$this->stepsByCore['input']);
+        self::assertSame([['Someone else', '', true]], self::waitingOnChoicesOf($dialog));
+        self::assertNull($dialog->filter('input.waiting-on__label')->attr('disabled'));
+    }
+
+    #[Test]
+    public function aRenderedVerbFormMovesTheTicket(): void
+    {
+        new AddTicketEventPartitions($this->migrator(), new MockClock(new \DateTimeImmutable(self::NOW)))();
+        $key = $this->addTicket('Add a gift note', ['core' => 'backlog']);
+        [$stepBefore, $versionBefore] = $this->stepAndVersionOf($key);
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', '/t/'.$key);
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submit($page->selectButton('Plan it')->form());
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame($this->stepsByCore['backlog'], $stepBefore);
+        self::assertSame([$this->stepsByCore['todo'], $versionBefore + 1], $this->stepAndVersionOf($key));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Planned. It is in To do now.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
     }
 
     /**
@@ -722,7 +904,8 @@ final class TicketPageTest extends WebTestCase
 
     /**
      * The costliest page: a project list that does not hold the ticket (the project lookup and the plain list's
-     * position) and a saved turn of someone outside the ticket's people and team (one more names query).
+     * position), a saved turn of someone outside the ticket's people and team (one more names query), and the lead's
+     * Needs input dialog (one membership read).
      */
     #[Test]
     public function theCostliestWarmPageStaysWithinTheTenQueryBudget(): void
@@ -739,14 +922,14 @@ final class TicketPageTest extends WebTestCase
 
         self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
-        self::assertSame(10, $pageQueryCount);
+        self::assertSame(9, $pageQueryCount);
     }
 
     /**
-     * Beyond the shell, with the steps and the rules cached: the settings (step policy and triager, one query), the
-     * ticket, its team's lead and people, the names of everyone in one batch, the saved turn with the waiting turns in
-     * one query, and the position in one; a project's list adds the project by key, and a list the ticket is not in
-     * adds the plain list's position.
+     * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
+     * one query), the ticket, the names of everyone in one batch, the saved turn with the waiting turns in one query,
+     * the position in one, and the lead's Needs input dialog asks which of the ticket's people are still members in one;
+     * a project's list adds the project by key, and a list the ticket is not in adds the plain list's position.
      */
     #[Test]
     public function aWarmPageReadsOneQueryForItsPlaceInEachList(): void
@@ -763,13 +946,14 @@ final class TicketPageTest extends WebTestCase
             self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'), $uri);
         }
 
-        self::assertSame([7, 8, 7, 9], $queryCounts);
+        self::assertSame([6, 7, 6, 8], $queryCounts);
     }
 
     /**
-     * Beyond the shell, with the steps and the rules cached: the settings (step policy and triager, one query), the
-     * ticket, its team's lead and people, the names of everyone in one batch, the saved turn with the waiting turns in
-     * one query, and the ticket's place in the plain open list in one.
+     * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
+     * one query), the ticket, the names of everyone in one batch, the saved turn with the waiting turns in one query,
+     * the ticket's place in the plain open list in one, and for the lead's Needs input dialog which of the ticket's
+     * people are still members in one.
      */
     #[Test]
     public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
@@ -788,7 +972,44 @@ final class TicketPageTest extends WebTestCase
 
         self::assertSame([['Assignee', 'Omar'], ['Priority', 'Major'], ['Release', '2.4'], ['Parent', 'SHOP-1'], ['Components', 'Checkout'], ['Created', '5 Nov']], $this->detailsOf($this->client->getCrawler()));
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
-        self::assertSame(7, $pageQueryCount);
+        self::assertSame(
+            ['Lena · Reporter', 'Omar · Assignee', 'Someone else'],
+            $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
+        );
+        self::assertSame(6, $pageQueryCount);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function viewersWithNoMoveList(): iterable
+    {
+        yield 'Omar, the assignee and a member' => ['Omar'];
+        yield 'Raj, a manager with no team role' => ['Raj'];
+    }
+
+    /**
+     * The same page as aWarmPageReadsTheBudgetedQueriesBeyondTheShell less the membership read: only a lead's move list
+     * offers Needs input, so nobody else's page asks which of the ticket's people are still members.
+     */
+    #[Test]
+    #[DataProvider('viewersWithNoMoveList')]
+    public function aWarmPageWithNoNeedsInputDialogSkipsTheMembershipRead(string $viewer): void
+    {
+        $this->makeShopPeopleDevelopersAndTester();
+        $parentKey = $this->addTicket('Checkout rework');
+        $key = $this->addTicket('Cart total shows the wrong sum', ['assignee' => 'Omar', 'release' => '2.4', 'parent' => $parentKey, 'components' => '{Checkout}', 'core' => 'review']);
+        $this->logIn($this->client, $this->people[$viewer]);
+        $this->queryCountOf(self::SHELL);
+        $shellQueryCount = $this->queryCountOf(self::SHELL);
+        $this->queryCountOf('/t/'.$key);
+
+        $pageQueryCount = $this->queryCountOf('/t/'.$key) - $shellQueryCount;
+
+        self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
+        self::assertCount(1, $this->client->getCrawler()->filter('.ticket__aside .next-step-box'));
+        self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog'));
+        self::assertSame(5, $pageQueryCount);
     }
 
     /**
@@ -924,6 +1145,20 @@ final class TicketPageTest extends WebTestCase
         ));
     }
 
+    /**
+     * @return list<array{string, string|null, bool}> each choice's text, radio value and whether it is checked
+     */
+    private static function waitingOnChoicesOf(Crawler $dialog): array
+    {
+        self::assertCount(1, $dialog);
+
+        return $dialog->filter('.waiting-on__choice')->each(static fn (Crawler $choice): array => [
+            $choice->text(),
+            $choice->filter('input[type="radio"]')->attr('value'),
+            null !== $choice->filter('input[type="radio"]')->attr('checked'),
+        ]);
+    }
+
     private function queryCountOf(string $uri): int
     {
         $debugData = self::getContainer()->get('doctrine.debug_data_holder');
@@ -948,6 +1183,31 @@ final class TicketPageTest extends WebTestCase
         self::assertNotEmpty($rows);
 
         return $rows;
+    }
+
+    private function addTeamStep(TeamId $teamId, string $name, string $groupCode): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, ?, ?, ?, NULL, 'team', 9)",
+            [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $teamId->toString(), $name, $groupCode],
+        ));
+    }
+
+    /**
+     * @return array{mixed, int}
+     */
+    private function stepAndVersionOf(string $key): array
+    {
+        $row = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($key, &$row): int {
+            $row = $migrator->fetchAssociative('SELECT step_id, version FROM tkt_ticket WHERE key = ?', [$key]);
+
+            return 0;
+        });
+        self::assertIsArray($row);
+        self::assertIsInt($row['version']);
+
+        return [$row['step_id'], $row['version']];
     }
 
     private function addSteps(): void

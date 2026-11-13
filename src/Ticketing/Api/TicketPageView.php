@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Api;
 
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 
 /**
  * One ticket as its page shows it (ticket-page.md): the header, The ask and Details, with the facts TicketPermission
@@ -30,6 +31,8 @@ final readonly class TicketPageView
      *                                               assignee, reviewer, tester, pending assignee, waiting-on) and of its
      *                                               team's lead, developers and testers; a person Identity does not know
      *                                               is left out
+     * @param int                   $version         the ticket's version as read, which a move's form sends back so a
+     *                                               change made meanwhile is refused
      */
     public function __construct(
         public TicketId $id,
@@ -51,6 +54,7 @@ final readonly class TicketPageView
         public TicketVisibilityFacts $visibilityFacts,
         public TicketTurnSnapshot $turnSnapshot,
         public array $displayNames,
+        public int $version,
     ) {
     }
 

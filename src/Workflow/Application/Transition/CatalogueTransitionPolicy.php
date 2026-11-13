@@ -44,7 +44,8 @@ use App\Workflow\Domain\Verb;
  * it is.
  *
  * "Move to another step…" is the lead's separate list (moveChoices) and check (checkMoveTo); both take the team's move
- * targets (StepQueries::moveTargetsFor), and checkMoveTo refuses a step outside them.
+ * targets (StepQueries::moveTargetsFor), and checkMoveTo refuses a step outside them. The list shows the groups in
+ * their fixed order (Group::cases(), To do to Done), not the list order moveTargetsFor sorts by.
  */
 final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 {
@@ -136,16 +137,25 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             return new MoveChoices([], null);
         }
 
-        $choicesByGroup = [];
-        $labelsByGroup = [];
+        $stepsByGroup = [];
         foreach ($steps as $step) {
-            $choicesByGroup[$step->groupCode()][] = new MoveChoice($step, $step->id() === $ticket->stepId);
-            $labelsByGroup[$step->groupCode()] = $step->groupLabel();
+            $group = Group::tryFrom($step->groupCode()) ?? throw new \InvalidArgumentException(\sprintf('"%s" is not a group.', $step->groupCode()));
+            $stepsByGroup[$group->value][] = $step;
         }
 
         $groups = [];
-        foreach ($choicesByGroup as $groupCode => $choices) {
-            $groups[] = new MoveChoiceGroup($groupCode, $labelsByGroup[$groupCode], $choices);
+        foreach (Group::cases() as $group) {
+            $groupSteps = $stepsByGroup[$group->value] ?? [];
+            if ([] === $groupSteps) {
+                continue;
+            }
+
+            usort($groupSteps, static fn (StepView $left, StepView $right): int => $left->position() <=> $right->position());
+            $groups[] = new MoveChoiceGroup(
+                $group->value,
+                $group->label(),
+                array_map(static fn (StepView $step): MoveChoice => new MoveChoice($step, $step->id() === $ticket->stepId), $groupSteps),
+            );
         }
 
         return new MoveChoices($groups, null);

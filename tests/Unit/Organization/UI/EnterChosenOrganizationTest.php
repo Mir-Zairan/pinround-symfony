@@ -133,6 +133,11 @@ final class EnterChosenOrganizationTest extends TestCase
             {
                 throw new \LogicException('The listener checks memberships only.');
             }
+
+            public function membersAmong(OrganizationId $organizationId, array $userIds): array
+            {
+                throw new \LogicException('The listener asks for one user\'s organizations.');
+            }
         };
         $urlGenerator = new class implements UrlGeneratorInterface {
             /**

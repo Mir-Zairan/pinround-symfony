@@ -36,4 +36,9 @@ final class RecordingMembershipQueries implements MembershipQueries
 
         return $this->rolesByUserAndOrganization[$key] ?? Roles::none();
     }
+
+    public function membersAmong(OrganizationId $organizationId, array $userIds): array
+    {
+        throw new \LogicException('Only rolesOf is expected.');
+    }
 }

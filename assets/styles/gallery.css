@@ -42,3 +42,8 @@
 .gallery-card-heading {
   margin: 0 0 8px;
 }
+
+/* About as wide as the ticket page's aside column (ticket.css, .ticket__aside, from 300px), where the box sits. */
+.gallery-next-step {
+  max-width: 360px;
+}

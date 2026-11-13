@@ -4,11 +4,19 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
+use App\Identity\Domain\User;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantNotSet;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
+use App\Tests\Fixtures\Entity\TenantProbe;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Organization\SendsInvitationLinks;
+use App\Ticketing\UI\MoveToasts;
+use App\Ticketing\UI\TicketMoveController;
+use App\Ticketing\UI\TicketPageParts;
+use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use OpenTelemetry\API\Trace\SpanContextValidator;
 use OpenTelemetry\SDK\Trace\SpanDataInterface;
@@ -16,6 +24,9 @@ use OpenTelemetry\SDK\Trace\SpanExporter\InMemoryExporter;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -25,11 +36,19 @@ use Zenstruck\Foundry\Test\Factories;
  */
 final class WorkerResetTest extends WebTestCase
 {
+    use CreatesAcmeFoodsTeams;
+    use CreatesTeams;
     use Factories;
-    use LogsInUsers;
+    use IssuesCsrfTokens;
+    use LogsInUsers {
+        tearDown as private removeUsersAndOrganizations;
+    }
     use SendsInvitationLinks;
 
     private const string ORG_A = '0197a3c0-0000-7000-8000-00000000000a';
+    /** Before today: a clock ahead of the login would end the session as idle. */
+    private const string NOW = '2026-11-06 12:00:00 UTC';
+    private const int SHOP_1_VERSION = 3;
 
     private KernelBrowser $client;
 
@@ -38,6 +57,21 @@ final class WorkerResetTest extends WebTestCase
         self::ensureKernelShutdown();
         $this->client = self::createClient();
         $this->client->disableReboot();
+    }
+
+    protected function tearDown(): void
+    {
+        foreach ($this->createdOrganizationIds as $organizationId) {
+            $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
+                foreach (['tkt_ticket', 'wf_step'] as $table) {
+                    $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
+                }
+
+                return 0;
+            });
+        }
+        $this->removeCommittedProjects();
+        $this->removeUsersAndOrganizations();
     }
 
     #[Test]
@@ -136,6 +170,52 @@ final class WorkerResetTest extends WebTestCase
         self::assertSame(['entry' => 'gone after the invalidation', 'loads' => 2], $this->responseJson());
     }
 
+    /**
+     * A stale move rolls back and closes the entity manager; the Turbo answer's re-read resets it inside the request.
+     * The rebuilt manager must still leave the next request no tenant, and its tenant filter on.
+     */
+    #[Test]
+    public function theNextRequestHasNoTenantAndATenantFilteredEntityManagerAfterAMoveReopenedItForItsStream(): void
+    {
+        $this->client->setServerParameter('HTTPS', 'on');
+        self::getContainer()->set('clock', new MockClock(new \DateTimeImmutable(self::NOW)));
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreTodoStepAndShop1($people['Lena'], $people['Omar']);
+        $ticketBefore = $this->shop1Row();
+        $this->logIn($this->client, $people['Lena']);
+
+        $this->client->request(
+            'POST',
+            '/t/SHOP-1/move/put_on_hold',
+            [
+                TicketMoveController::CSRF_FIELD => $this->csrfTokenFor($this->client, TicketMoveController::csrfIdOf('SHOP-1')),
+                TicketMoveController::VERSION_FIELD => (string) (self::SHOP_1_VERSION - 1),
+            ],
+            [],
+            ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'],
+        );
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->streamedToast());
+        self::assertSame(
+            [TicketPageParts::STATE_ID => 1, TicketPageParts::NEXT_STEP_ID => 1],
+            [TicketPageParts::STATE_ID => $this->replacedPartCount(TicketPageParts::STATE_ID), TicketPageParts::NEXT_STEP_ID => $this->replacedPartCount(TicketPageParts::NEXT_STEP_ID)],
+        );
+        self::assertTrue($this->entityManager()->isOpen());
+        self::assertSame($this->acmeFoods->toString(), $this->tenantContext()->get()?->toString());
+
+        // Lena's session would enter Acme Foods again; the next request is someone else's.
+        $this->client->getCookieJar()->clear();
+        $this->client->request('GET', '/_test/worker-reset');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['organizationId' => null, 'isEntityManagerOpen' => true], $this->responseJson());
+        // Read only now: committedAs resets the tenant itself.
+        self::assertSame($ticketBefore, $this->shop1Row());
+        $this->expectException(TenantNotSet::class);
+        $this->entityManager()->createQuery('SELECT p FROM '.TenantProbe::class.' p')->getSQL();
+    }
+
     #[Test]
     public function theNextRequestStartsANewTraceWithNoParentAfterARequestThatThrew(): void
     {
@@ -171,5 +251,79 @@ final class WorkerResetTest extends WebTestCase
     private function responseJson(): mixed
     {
         return json_decode((string) $this->client->getResponse()->getContent(), true, flags: \JSON_THROW_ON_ERROR);
+    }
+
+    private function streamedToast(): string
+    {
+        self::assertSame(1, preg_match(
+            '#<turbo-stream action="update" target="toast-region"><template>(.*?)</template></turbo-stream>#s',
+            (string) $this->client->getResponse()->getContent(),
+            $match,
+        ));
+        $toast = new Crawler('<!DOCTYPE html><html><body>'.$match[1].'</body></html>')->filter('.toast[data-controller="toast"]');
+        self::assertCount(1, $toast);
+
+        return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /**
+     * @return int how many elements of the id the stream's replace of that id carries, 0 when there is no such replace
+     */
+    private function replacedPartCount(string $partId): int
+    {
+        if (1 !== preg_match(
+            '#<turbo-stream action="replace" target="'.preg_quote($partId, '#').'"><template>(.*?)</template></turbo-stream>#s',
+            (string) $this->client->getResponse()->getContent(),
+            $match,
+        )) {
+            return 0;
+        }
+
+        return new Crawler('<!DOCTYPE html><html><body>'.$match[1].'</body></html>')->filter('#'.$partId)->count();
+    }
+
+    /**
+     * Acme Foods' core To do step, and Shop's SHOP-1 in it at SHOP_1_VERSION, reported by Lena and assigned to Omar.
+     */
+    private function addCoreTodoStepAndShop1(User $reporter, User $assignee): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $todoStepId = Uuid::v7()->toRfc4122();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'To do', 'todo', 'todo', 'core', 1)",
+            [$organizationId, $todoStepId],
+        ));
+        $shopProjectId = $this->addProject($this->shop, 'SHOP', 'Shop');
+        $reporterId = $reporter->id()->toString();
+        $assigneeId = $assignee->id()->toString();
+        $shopTeamId = $this->shop->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
+                 step_id, reporter_id, assignee_id, reviewer_id, waiting_on_user_id, visibility, version, components, check_reasons, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 1, 'SHOP-1', 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, NULL, NULL, 'all', ?, '{}', '{}',
+                 TIMESTAMPTZ '2026-11-04 10:00:00+00', TIMESTAMPTZ '2026-11-05 10:00:00+00')",
+            [$organizationId, Uuid::v7()->toRfc4122(), $shopProjectId, $shopTeamId, $todoStepId, $reporterId, $assigneeId, self::SHOP_1_VERSION],
+        ));
+    }
+
+    /**
+     * @return array<string, mixed> SHOP-1's columns, and the count of Acme Foods' ticket history rows
+     */
+    private function shop1Row(): array
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $row = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$row): int {
+            $row = $migrator->fetchAssociative(
+                "SELECT t.*, (SELECT count(*) FROM tkt_ticket_event e WHERE e.organization_id = t.organization_id) AS events
+                 FROM tkt_ticket t WHERE t.organization_id = ? AND t.key = 'SHOP-1'",
+                [$organizationId],
+            );
+
+            return 0;
+        });
+        self::assertIsArray($row);
+
+        return $row;
     }
 }

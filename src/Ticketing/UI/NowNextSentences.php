@@ -18,7 +18,8 @@ use App\Workflow\Api\TurnInputs;
 use App\Workflow\Api\TurnRules;
 
 /**
- * The "Now" and "Next" lines under a ticket's title (ticket-page.md, Header). The sentences are Workflow's
+ * The "Now" and "Next" lines under a ticket's title (ticket-page.md, Header): pageTurnOf reads the ticket's turn once,
+ * for these lines and for {@see NextStepChoices}, and linesOf words them. The sentences are Workflow's
  * ({@see NowNext}); the turn is the one Insight saved for Home and Whose turn, so the page names the same person, and
  * only a ticket with no saved turn (a done one) gets it from {@see TurnRules}. The ticket, its team and the names come
  * with the page's own read; this adds one query on ins_ticket_turn (the saved turn and the reviews and tests waiting),
@@ -37,55 +38,48 @@ final readonly class NowNextSentences
     }
 
     /**
-     * @return array{now: string, next: string|null}|null null when the ticket has no team: no turn is chosen for it, so
-     *                                                    the page shows no lines; next is null when nothing comes next,
-     *                                                    as in Done
+     * @return PageTurn|null null when the ticket has no team: no turn is chosen for it, so the page shows no lines and
+     *                       no next step
      *
      * @throws \LogicException when no transaction is open or no tenant is set
      */
-    public function of(TicketPageView $page): ?array
+    public function pageTurnOf(TicketPageView $page): ?PageTurn
     {
         $snapshot = $page->turnSnapshot;
         if (null === $snapshot->teamId || null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
             return null;
         }
 
-        $ticket = TurnInputs::ticketState(
-            stepId: $snapshot->stepId,
-            coreCode: $snapshot->coreCode,
-            groupCode: $snapshot->groupCode,
-            teamId: $snapshot->teamId,
-            assigneeId: $snapshot->assigneeId,
-            reviewerId: $snapshot->reviewerId,
-            testerId: $snapshot->testerId,
-            pendingAssigneeId: $snapshot->pendingAssigneeId,
-            previousStepId: $snapshot->previousStepId,
-            reporterId: $snapshot->reporterId,
-            waitingOnUserId: $snapshot->waitingOnUserId,
-            waitingOnLabel: $snapshot->waitingOnLabel,
-            priority: $snapshot->priority,
-            release: $snapshot->release,
-        );
+        $ticket = TurnInputs::ticketStateOf($snapshot);
         $loads = $this->teamLoadQueries->loadsAndSavedTurnOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId);
         $team = TurnInputs::teamFacts($snapshot->leadId, $snapshot->leadDisplayName, $snapshot->developerIds, $snapshot->testerIds, $loads->waitingTurns);
-        $turn = null === $loads->savedTurn ? $this->turnRules->turnFor($ticket, $team) : self::turnOf($loads->savedTurn);
+        $turn = null === $loads->savedTurn ? $this->turnRules->turnFor($ticket, $team) : self::turnOfSaved($loads->savedTurn);
+        $rules = $this->ruleQueries->rulesFor($snapshot->teamId);
         $context = new NowNextContext(
             $page->stepName,
             $this->displayNamesWith($page->displayNames, $turn->userId),
             $team,
-            $this->ruleQueries->rulesFor($snapshot->teamId)->reviewBeforeTest,
+            $rules->reviewBeforeTest,
         );
 
+        return new PageTurn($snapshot->teamId, $ticket, $team, $turn, $context, $rules);
+    }
+
+    /**
+     * @return array{now: string, next: string|null} next is null when nothing comes next, as in Done
+     */
+    public function linesOf(PageTurn $pageTurn): array
+    {
         return [
-            'now' => $this->nowNext->now($ticket, $turn, $context),
-            'next' => $this->nowNext->next($ticket, $turn, $context),
+            'now' => $this->nowNext->now($pageTurn->ticket, $pageTurn->turn, $pageTurn->context),
+            'next' => $this->nowNext->next($pageTurn->ticket, $pageTurn->turn, $pageTurn->context),
         ];
     }
 
     /**
      * @throws \ValueError when the saved kind is not one of NeedsYouKind's
      */
-    private static function turnOf(SavedTurn $savedTurn): Turn
+    private static function turnOfSaved(SavedTurn $savedTurn): Turn
     {
         return new Turn($savedTurn->userId, $savedTurn->label, NeedsYouKind::from($savedTurn->kind));
     }

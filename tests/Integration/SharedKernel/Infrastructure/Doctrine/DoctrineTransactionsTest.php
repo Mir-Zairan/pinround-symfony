@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace App\Tests\Integration\SharedKernel\Infrastructure\Doctrine;
 
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Doctrine\DoctrineTransactions;
 use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
+use App\Tests\Fixtures\Entity\TenantProbe;
+use App\Tests\Integration\Tenancy\TenantProbeTable;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -15,7 +18,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * DoctrineTransactions on a real tenant table (wf_step) as pinround_app, under row-level security. The rows are
- * written and counted through plain DBAL, so the test depends on no module.
+ * written and counted through plain DBAL, so the test depends on no module. What a run writes and reads through the
+ * entity manager uses the test-only TenantProbe on zz_tenant_probe.
  */
 final class DoctrineTransactionsTest extends KernelTestCase
 {
@@ -23,9 +27,26 @@ final class DoctrineTransactionsTest extends KernelTestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000012a2';
     private const string DESIGN_CHECK = '0197a3c0-0000-7000-8000-0000000012d1';
     private const string BAKERY_CHECK = '0197a3c0-0000-7000-8000-0000000012d2';
+    private const string REFUSED_PROBE = '0197a3c0-0000-7000-8000-0000000012e1';
+    private const string KEPT_PROBE = '0197a3c0-0000-7000-8000-0000000012e2';
+    private const string PROBE_LABELS_DQL = 'SELECT p.label FROM '.TenantProbe::class.' p ORDER BY p.label';
+
+    public static function setUpBeforeClass(): void
+    {
+        self::probeTable()->recreate();
+        self::ensureKernelShutdown();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::probeTable()->drop();
+        self::ensureKernelShutdown();
+        parent::tearDownAfterClass();
+    }
 
     protected function setUp(): void
     {
+        self::probeTable()->removeAllRows();
         $this->removeStepsOf(self::ACME_FOODS, self::BETA_BAKERY);
     }
 
@@ -73,6 +94,41 @@ final class DoctrineTransactionsTest extends KernelTestCase
         self::assertFalse($this->connection()->isTransactionActive());
         self::assertFalse($this->entityManager()->isOpen());
         self::assertSame(0, $this->stepRowCount(self::ACME_FOODS, self::DESIGN_CHECK));
+    }
+
+    #[Test]
+    public function aRunAfterAFailedOneReopensTheEntityManagerWithTheTenantFilterOfTheRequestsTenant(): void
+    {
+        $this->tenantContext()->set(new OrganizationId(self::BETA_BAKERY));
+        $this->transactions()->run(fn () => $this->connection()->executeStatement(
+            'INSERT INTO zz_tenant_probe (organization_id, label) VALUES (?, ?)',
+            [self::BETA_BAKERY, 'bakery probe'],
+        ));
+        $this->tenantContext()->reset();
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $repositoryEntityManager = $this->entityManager();
+        $this->thrownBy(fn () => $this->transactions()->run(function (): void {
+            $this->entityManager()->persist(new TenantProbe(self::REFUSED_PROBE, self::ACME_FOODS, 'refused probe'));
+
+            throw new \DomainException('refused');
+        }));
+        self::assertFalse($repositoryEntityManager->isOpen(), 'the failed run did not close the entity manager');
+
+        $this->transactions()->run(fn () => $this->entityManager()->persist(new TenantProbe(self::KEPT_PROBE, self::ACME_FOODS, 'kept probe')));
+        // With row-level security off, only the tenant filter of the reopened entity manager keeps the bakery's row out.
+        [$tenantSetting, $visibleLabels] = $this->withProbeRowLevelSecurityOff(fn (): array => $this->transactions()->run(fn (): array => [
+            $this->connection()->fetchOne('SELECT current_setting(?, true)', [TenantSetting::NAME]),
+            $this->entityManager()->createQuery(self::PROBE_LABELS_DQL)->getSingleColumnResult(),
+        ]));
+
+        self::assertTrue($repositoryEntityManager->isOpen(), 'the entity manager a repository holds is still closed');
+        self::assertSame(self::ACME_FOODS, $tenantSetting);
+        self::assertSame(['kept probe'], $visibleLabels);
+        self::assertInstanceOf(
+            TenantNotSet::class,
+            $this->thrownBy(fn () => $this->entityManager()->createQuery(self::PROBE_LABELS_DQL)->getSingleColumnResult()),
+            'the tenant of the committed run is still marked on the reopened entity manager',
+        );
     }
 
     #[Test]
@@ -169,9 +225,33 @@ final class DoctrineTransactionsTest extends KernelTestCase
         }
     }
 
+    private static function probeTable(): TenantProbeTable
+    {
+        return new TenantProbeTable(self::getContainer()->get('doctrine.dbal.migrator_connection'));
+    }
+
+    /**
+     * Stands in for a role that bypasses row-level security, so only the tenant filter can keep the organizations apart.
+     *
+     * @template T
+     *
+     * @param \Closure(): T $work
+     *
+     * @return T
+     */
+    private function withProbeRowLevelSecurityOff(\Closure $work): mixed
+    {
+        $this->migrator()->executeStatement('ALTER TABLE zz_tenant_probe DISABLE ROW LEVEL SECURITY');
+        try {
+            return $work();
+        } finally {
+            $this->migrator()->executeStatement('ALTER TABLE zz_tenant_probe ENABLE ROW LEVEL SECURITY');
+        }
+    }
+
     private function transactions(): DoctrineTransactions
     {
-        return new DoctrineTransactions($this->entityManager(), $this->tenantContext());
+        return new DoctrineTransactions($this->entityManager(), $this->tenantContext(), self::getContainer()->get('doctrine'));
     }
 
     private function migrator(): Connection

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\SharedKernel\Infrastructure\Cache;
 
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\SharedKernel\Application\TenantContext;
@@ -139,7 +140,7 @@ final class AfterCommitTagInvalidationMiddlewareTest extends KernelTestCase
     {
         return [
             $this->workflowPool->hasItem('org.'.self::ORG_ACME.'.wf.team.'.self::TEAM_SHOP.'.steps'),
-            $this->teamPeoplePool->hasItem('org.'.self::ORG_ACME.'.people.team.'.self::TEAM_SHOP),
+            $this->teamPeoplePool->hasItem('org.'.self::ORG_ACME.'.people.v2.team.'.self::TEAM_SHOP),
         ];
     }
 
@@ -172,7 +173,7 @@ final class AfterCommitTagInvalidationMiddlewareTest extends KernelTestCase
     private function rememberBoth(string $loaded): array
     {
         $team = new TeamId(self::TEAM_SHOP);
-        $people = $this->teamPeopleCache->remember($team, static fn (): array => [new PossibleAssignee(new UserId(self::OMAR), $loaded)]);
+        $people = $this->teamPeopleCache->remember($team, static fn (): array => [new PossibleAssignee(new UserId(self::OMAR), $loaded, $loaded, MemberJob::Developer, false)]);
 
         return [$this->workflowCache->remember($team, 'steps', static fn (): string => $loaded), $people[0]->firstName];
     }

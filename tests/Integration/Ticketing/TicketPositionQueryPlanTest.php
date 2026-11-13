@@ -8,6 +8,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\TicketPosition;
 use App\Ticketing\Api\TicketQueries;
@@ -27,6 +28,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class TicketPositionQueryPlanTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000076a1';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000076c1';
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000076d1';
@@ -283,11 +286,6 @@ final class TicketPositionQueryPlanTest extends KernelTestCase
         \assert($ticketVisibilities instanceof TicketVisibilities);
 
         return $ticketVisibilities;
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private static function removeRows(): void

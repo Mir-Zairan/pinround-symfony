@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace App\Workflow\Api;
 
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 
 /**
  * Makes the two inputs of {@see TurnRules} and {@see NowNext}, TicketState and TeamFacts, from SharedKernel values and
- * strings, so every module that reads a ticket's turn builds them the same way: Insight's turn projector and the ticket
- * page. Pure; it holds no state.
+ * strings, so every module that reads a ticket's turn builds them the same way: Insight's turn projector, the ticket
+ * page and Ticketing's move. Pure; it holds no state.
  */
 final class TurnInputs
 {
@@ -59,6 +60,29 @@ final class TurnInputs
             waitingOnLabel: $waitingOnLabel,
             priority: $priority,
             release: $release,
+        );
+    }
+
+    /**
+     * The ticket state of a turn snapshot, as Ticketing's move, the ticket page and Insight's turn source all read it.
+     */
+    public static function ticketStateOf(TicketTurnSnapshot $snapshot): TicketState
+    {
+        return self::ticketState(
+            stepId: $snapshot->stepId,
+            coreCode: $snapshot->coreCode,
+            groupCode: $snapshot->groupCode,
+            teamId: $snapshot->teamId,
+            assigneeId: $snapshot->assigneeId,
+            reviewerId: $snapshot->reviewerId,
+            testerId: $snapshot->testerId,
+            pendingAssigneeId: $snapshot->pendingAssigneeId,
+            previousStepId: $snapshot->previousStepId,
+            reporterId: $snapshot->reporterId,
+            waitingOnUserId: $snapshot->waitingOnUserId,
+            waitingOnLabel: $snapshot->waitingOnLabel,
+            priority: $snapshot->priority,
+            release: $snapshot->release,
         );
     }
 

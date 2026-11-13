@@ -180,6 +180,42 @@ final class DbalMembershipQueriesTest extends KernelTestCase
         self::assertSame(['isAdmin' => false, 'isManager' => false, 'teamIds' => [self::ACME_TEAM_B, self::ACME_TEAM_A], 'leadTeamIds' => [self::ACME_TEAM_A], 'memberTeamIds' => [], 'viewerTeamIds' => [self::ACME_TEAM_B]], $lenaAfter);
     }
 
+    #[Test]
+    public function membersAmongGivesOnlyTheMembersOfTheOrganizationEachOnceInIdOrder(): void
+    {
+        // Sara before Lena and twice, Mia in no organization and Omar only in Beta Bakery.
+        $asked = [self::SARA, self::MIA, self::OMAR, self::LENA, self::SARA];
+
+        self::assertSame([self::LENA, self::SARA], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->membersAmong(self::ACME_FOODS, $asked)));
+        self::assertSame([self::LENA, self::OMAR], $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => $this->membersAmong(self::BETA_BAKERY, $asked)));
+    }
+
+    #[Test]
+    public function membersAmongFindsNobodyUnderAnotherTenantOrNone(): void
+    {
+        self::assertSame([], $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => $this->membersAmong(self::ACME_FOODS, [self::LENA, self::SARA])));
+        self::assertSame([], $this->membersAmong(self::ACME_FOODS, [self::LENA, self::SARA]));
+    }
+
+    #[Test]
+    public function membersAmongNoUsersIsNobody(): void
+    {
+        self::assertSame([], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->membersAmong(self::ACME_FOODS, [])));
+    }
+
+    /**
+     * @param list<string> $userIds
+     *
+     * @return list<string>
+     */
+    private function membersAmong(string $organizationId, array $userIds): array
+    {
+        return array_map(
+            static fn (UserId $userId): string => $userId->toString(),
+            $this->queries()->membersAmong(new OrganizationId($organizationId), array_map(static fn (string $userId): UserId => new UserId($userId), $userIds)),
+        );
+    }
+
     /**
      * @return array{isAdmin: bool, isManager: bool, teamIds: list<string>, leadTeamIds: list<string>, memberTeamIds: list<string>, viewerTeamIds: list<string>}
      */

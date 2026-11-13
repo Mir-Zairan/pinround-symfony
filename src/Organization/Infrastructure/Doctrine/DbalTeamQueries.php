@@ -81,7 +81,7 @@ final readonly class DbalTeamQueries implements TeamQueries
             return null;
         }
 
-        return self::memberJob($job);
+        return TeamMemberRows::jobOf($job);
     }
 
     /**
@@ -97,21 +97,6 @@ final readonly class DbalTeamQueries implements TeamQueries
         return \is_string($leadId) ? new UserId($leadId) : throw new \LogicException('A team lead id from the database is not a uuid.');
     }
 
-    public function peopleByJob(TeamId $teamId): array
-    {
-        $rows = $this->connection->fetchAllAssociative(
-            "SELECT user_id, job FROM org_team_member WHERE team_id = ? AND team_role IN ('lead', 'member') ORDER BY user_id",
-            [$teamId->toString()],
-        );
-        $people = [MemberJob::Developer->value => [], MemberJob::Tester->value => [], MemberJob::Other->value => []];
-        foreach ($rows as $row) {
-            $userId = \is_string($row['user_id']) ? new UserId($row['user_id']) : throw new \LogicException('A team member id from the database is not a uuid.');
-            $people[self::memberJob($row['job'])->value][] = $userId;
-        }
-
-        return $people;
-    }
-
     public function possibleAssigneesOf(array $teamIds): array
     {
         $assignees = [];
@@ -124,22 +109,17 @@ final readonly class DbalTeamQueries implements TeamQueries
 
         // One array literal keeps the SQL text the same for any number of ids; a TeamId is a uuid, so needs no quoting.
         $rows = $this->connection->fetchAllAssociative(
-            "SELECT team_id, user_id FROM org_team_member WHERE team_id = ANY(?::uuid[]) AND team_role IN ('lead', 'member') ORDER BY user_id",
+            'SELECT team_id, user_id FROM org_team_member WHERE team_id = ANY(?::uuid[]) AND '.TeamMemberRows::LEADS_AND_MEMBERS_IN_USER_ID_ORDER,
             ['{'.implode(',', array_keys($assignees)).'}'],
         );
         foreach ($rows as $row) {
             $teamId = \is_string($row['team_id']) && \array_key_exists($row['team_id'], $assignees)
                 ? $row['team_id']
                 : throw new \LogicException('A team id from the database is not one of the asked teams.');
-            $assignees[$teamId][] = \is_string($row['user_id']) ? new UserId($row['user_id']) : throw new \LogicException('A team member id from the database is not a uuid.');
+            $assignees[$teamId][] = TeamMemberRows::userIdOf($row['user_id']);
         }
 
         return $assignees;
-    }
-
-    private static function memberJob(mixed $job): MemberJob
-    {
-        return (\is_string($job) ? MemberJob::tryFrom($job) : null) ?? throw new \LogicException('org_team_member holds an unknown job.');
     }
 
     /**

@@ -9,14 +9,15 @@ use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
 
 /**
- * The given steps for every team.
+ * The given steps and move targets for every team.
  */
 final readonly class FixedStepQueries implements StepQueries
 {
     /**
-     * @param list<StepView> $steps
+     * @param list<StepView>      $steps
+     * @param list<StepView>|null $moveTargets null for a caller that must read none
      */
-    public function __construct(private array $steps)
+    public function __construct(private array $steps, private ?array $moveTargets = null)
     {
     }
 
@@ -27,7 +28,7 @@ final readonly class FixedStepQueries implements StepQueries
 
     public function moveTargetsFor(TeamId $teamId): array
     {
-        throw new \LogicException('Creating a ticket reads no move targets.');
+        return $this->moveTargets ?? throw new \LogicException('This caller reads no move targets.');
     }
 
     public function listedSteps(): array

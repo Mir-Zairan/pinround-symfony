@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Insight\Api;
 
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 
 /**
  * Keeps the ticket's row in ins_ticket_turn, the turn read model of ADR-0015, in step with the ticket. Every
@@ -31,4 +32,27 @@ interface TurnProjector
      *                         count row the ticket was in is missing, so the change must roll back
      */
     public function refresh(TicketId $ticketId): ?string;
+
+    /**
+     * Does what {@see refresh} does, from the ticket's facts its caller has already read with TicketTurnQueries::factsOf
+     * (or the ticket page's TurnSnapshotRow), so the ticket is not read again: it writes the same row and count refresh
+     * would for that snapshot. Reads no ticket. The caller vouches that the snapshot is the ticket as it stands in its
+     * open transaction, after its change; a stale snapshot saves a stale turn row and count until the next refresh.
+     * A ticket the snapshot gives no team has its row deleted and counts nowhere. The snapshot carries no organization:
+     * one with a team, of a ticket the tenant's organization does not have, fails on the first write with DBAL's
+     * ForeignKeyConstraintViolationException, writing nothing, and the change must roll back; one with no team only
+     * deletes the tenant's rows for that ticket id, which match none, and returns null without an error.
+     *
+     * @param array<string, array<string, int>>|null $waitingTurns the reviews and tests waiting for the snapshot's
+     *                                                             developers and testers, as TeamLoadQueries::waitingTurnsOf
+     *                                                             gave them for its ticket in this transaction; they count
+     *                                                             other tickets only, so the ticket's own change leaves them
+     *                                                             as they were. Null reads them, one query.
+     *
+     * @return string|null the turn's override note, as refresh returns it
+     *
+     * @throws \LogicException as refresh does: when no transaction is open, or when the count row the ticket was in is
+     *                         missing, so the change must roll back
+     */
+    public function refreshFrom(TicketTurnSnapshot $snapshot, ?array $waitingTurns = null): ?string;
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Organization\Infrastructure\Messenger;
 
 use App\Identity\Api\Event\UserRenamed;
+use App\Organization\Api\MemberJob;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Infrastructure\Cache\TeamPeopleCache;
 use App\Organization\Infrastructure\Messenger\ForgetRenamedPersonHandler;
@@ -47,9 +48,9 @@ final class ForgetRenamedPersonHandlerTest extends TestCase
         self::assertSame(
             ['shop' => false, 'mobile' => true, 'ovens' => false],
             [
-                'shop' => $pool->hasItem('org.'.self::ACME_FOODS.'.people.team.'.self::SHOP_TEAM),
-                'mobile' => $pool->hasItem('org.'.self::ACME_FOODS.'.people.team.'.self::MOBILE_TEAM),
-                'ovens' => $pool->hasItem('org.'.self::BETA_BAKERY.'.people.team.'.self::OVENS_TEAM),
+                'shop' => $pool->hasItem('org.'.self::ACME_FOODS.'.people.v2.team.'.self::SHOP_TEAM),
+                'mobile' => $pool->hasItem('org.'.self::ACME_FOODS.'.people.v2.team.'.self::MOBILE_TEAM),
+                'ovens' => $pool->hasItem('org.'.self::BETA_BAKERY.'.people.v2.team.'.self::OVENS_TEAM),
             ],
         );
     }
@@ -61,7 +62,7 @@ final class ForgetRenamedPersonHandlerTest extends TestCase
     {
         $invalidation->transactionBegan(new OrganizationId($organization));
         foreach ($peopleByTeam as $team => $people) {
-            $cache->remember(new TeamId($team), static fn (): array => array_map(static fn (string $person): PossibleAssignee => new PossibleAssignee(new UserId($person), 'Name'), $people));
+            $cache->remember(new TeamId($team), static fn (): array => array_map(static fn (string $person): PossibleAssignee => new PossibleAssignee(new UserId($person), 'Name', 'Name', MemberJob::Developer, false), $people));
         }
         $invalidation->transactionCommitted();
     }

@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Workflow\Domain;
 
 /**
- * One of the five fixed groups every step belongs to (ADR-0014). Managers compare teams by these groups.
+ * One of the five fixed groups every step belongs to (ADR-0014). Managers compare teams by these groups. The cases are
+ * declared in the groups' fixed order, To do to Done, which the lead's move list shows; lists use inListOrder().
  */
 enum Group: string
 {

@@ -30,11 +30,7 @@ final readonly class ShopTeamRows
     public function add(string $organizationId, string $teamId, string $projectId, string $leadUserId, array $people): void
     {
         foreach ($people as $userId => [$name]) {
-            $this->migrator->executeStatement(
-                "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp)
-                 VALUES (?, ?, ?, 'active', 'en', 'UTC', '2027-03-15 10:00:00+00', 'a-stamp')",
-                [$userId, strtolower($name).'.'.substr($userId, -4).'@acme-foods.example', $name],
-            );
+            $this->addUser($userId, $name);
         }
         new TicketRows($this->migrator, $this->tenantContext)->addKeyedProjectOf($organizationId, $projectId, $teamId, 'SHOP', 7);
         $this->asTenant($organizationId, function () use ($organizationId, $teamId, $leadUserId): void {
@@ -52,6 +48,15 @@ final readonly class ShopTeamRows
         foreach ($people as $userId => [, $teamRole, $job]) {
             $this->addMember($organizationId, $teamId, $userId, $teamRole, $job);
         }
+    }
+
+    public function addUser(string $userId, string $name): void
+    {
+        $this->migrator->executeStatement(
+            "INSERT INTO idn_user (id, email, name, status, locale, time_zone, created_at, session_stamp)
+             VALUES (?, ?, ?, 'active', 'en', 'UTC', '2027-03-15 10:00:00+00', 'a-stamp')",
+            [$userId, strtolower($name).'.'.substr($userId, -4).'@acme-foods.example', $name],
+        );
     }
 
     /**

@@ -11,6 +11,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
 use App\Ticketing\Application\ProjectNotFound;
@@ -20,7 +21,6 @@ use App\Ticketing\UI\NewTicketController;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -42,6 +42,7 @@ final class NewTicketTest extends WebTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
+    use ReadsSentSql;
 
     private const string NEW_TICKET = '/tickets/new';
 
@@ -266,6 +267,16 @@ final class NewTicketTest extends WebTestCase
             {
                 throw $this->refusal;
             }
+
+            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
+            {
+                throw new \LogicException('The new ticket page moves no ticket.');
+            }
+
+            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): void
+            {
+                throw new \LogicException('The new ticket page moves no ticket.');
+            }
         });
         $people = $this->createAcmeFoodsPeople();
         $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
@@ -445,13 +456,7 @@ final class NewTicketTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertGreaterThan(0, $form->filter('select[name="assignee_id"] optgroup option')->count());
 
-        $queryCount = 0;
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            $queryCount += \count($queriesOfOneConnection);
-        }
-
-        return $queryCount;
+        return self::queryCountOf($debugData);
     }
 
     /**
@@ -492,11 +497,6 @@ final class NewTicketTest extends WebTestCase
         $this->addMembership($person, $betaBakery);
 
         return [$person, $betaBakery];
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     /**

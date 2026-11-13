@@ -32,8 +32,9 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * ins_project_counts as TurnProjector::refresh moves each ticket between its rows (DbalProjectCountsProjector), as the
- * rail reads it, and as the backfill migration Version20261112140100 fills it. No command moves a ticket yet (P03.T7),
- * so a move here is a raw UPDATE followed by the refresh every change must call.
+ * rail reads it, and as the backfill migration Version20261112140100 fills it. A move through the product goes through
+ * TicketCommands::moveTo; where a test needs the ticket's row changed without its refresh, it uses a raw UPDATE and
+ * then refreshes as the test requires.
  */
 final class DbalProjectCountsProjectorTest extends KernelTestCase
 {
@@ -121,24 +122,23 @@ final class DbalProjectCountsProjectorTest extends KernelTestCase
     }
 
     /**
-     * Replace the raw UPDATEs with T7's move command, and this must still pass.
+     * Lena, the Shop team's lead, moves the ticket with TicketCommands::moveTo, whose own refresh moves the count; the
+     * Shop team's steps here are only Backlog, To do and Done, so no verb leads from To do to Done and back.
      */
     #[Test]
     public function aTicketMovedToDoneCountsAsDoneAndBackAsOpenWhenReopened(): void
     {
         $ticketId = $this->ticketFactory()->createOne(self::ACME_FOODS, self::SHOP_PROJECT, self::LENA);
+        $this->ticketFactory()->createOne(self::BETA_BAKERY, self::BETA_PROJECT, self::BEN);
+        $betaRowsBefore = $this->storedRowsOfBoth()[self::BETA_BAKERY];
 
-        $this->moveToDone(self::ACME_FOODS, $ticketId);
-        $this->refreshAs(self::ACME_FOODS, $ticketId);
+        $this->moveAsLena($ticketId, self::DONE_STEP);
         $countsWhenDone = $this->storedCountsOf(self::ACME_FOODS);
-        $this->asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            'UPDATE tkt_ticket SET step_id = ?, closed_at = NULL WHERE id = ?',
-            [ShopTeamRows::TO_DO_STEP, $ticketId->toString()],
-        ));
-        $this->refreshAs(self::ACME_FOODS, $ticketId);
+        $this->moveAsLena($ticketId, ShopTeamRows::TO_DO_STEP);
 
         self::assertSame([[self::SHOP_PROJECT, self::SHOP_TEAM, 'all', 0, 1]], $countsWhenDone);
         self::assertSame([[self::SHOP_PROJECT, self::SHOP_TEAM, 'all', 1, 0]], $this->storedCountsOf(self::ACME_FOODS));
+        self::assertSame($betaRowsBefore, $this->storedRowsOfBoth()[self::BETA_BAKERY]);
     }
 
     /**
@@ -376,6 +376,22 @@ final class DbalProjectCountsProjectorTest extends KernelTestCase
         $this->asTenantMigrator($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "UPDATE tkt_ticket SET step_id = ?, closed_at = '2027-03-16 10:00:00+00' WHERE id = ?",
             [self::DONE_STEP, $ticketId->toString()],
+        ));
+    }
+
+    private function moveAsLena(TicketId $ticketId, string $stepId): void
+    {
+        $keyAndVersion = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array|false => $this->connection()->fetchAssociative('SELECT key, version FROM tkt_ticket WHERE id = ?', [$ticketId->toString()]));
+        \assert(\is_array($keyAndVersion) && \is_string($keyAndVersion['key']) && \is_int($keyAndVersion['version']));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->ticketCommands()->moveTo(
+            new OrganizationId(self::ACME_FOODS),
+            new UserId(self::LENA),
+            $keyAndVersion['key'],
+            $stepId,
+            $keyAndVersion['version'],
+            null,
+            null,
+            new \DateTimeImmutable('2027-03-16 10:00:00 UTC'),
         ));
     }
 

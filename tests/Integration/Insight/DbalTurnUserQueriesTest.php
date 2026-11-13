@@ -11,12 +11,12 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -25,6 +25,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class DbalTurnUserQueriesTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000072a1';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000072a2';
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000072d1';
@@ -164,11 +166,6 @@ final class DbalTurnUserQueriesTest extends KernelTestCase
         self::assertInstanceOf(TurnUserQueries::class, $turnUserQueries);
 
         return $turnUserQueries;
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function migrator(): Connection

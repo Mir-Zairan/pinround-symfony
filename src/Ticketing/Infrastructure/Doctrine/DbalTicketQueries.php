@@ -154,7 +154,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         $row = $this->connection->fetchAssociative(
             'SELECT ticket.id, ticket.key, ticket.title, ticket.description, ticket.type, ticket.created_at,'
             .' to_json(ticket.components) AS components, '.TurnSnapshotRow::COLUMNS.','
-            .' project.name AS project_name, parent.key AS parent_key'
+            .' ticket.version, project.name AS project_name, parent.key AS parent_key'
             .' FROM tkt_ticket AS ticket'
             .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
             .' LEFT JOIN tkt_ticket AS parent ON parent.organization_id = ticket.organization_id AND parent.id = ticket.parent_id'
@@ -194,13 +194,12 @@ final readonly class DbalTicketQueries implements TicketQueries
         $assigneeId = self::userIdOrNull($row['assignee_id'], 'assignee id');
         $teamId = TurnSnapshotRow::teamIdOf($row);
         $coreCode = $this->teamLookup->stepOf($stepId, $teamId)?->coreCode();
-        [$leadId, $developerIds, $testerIds] = null === $teamId ? [null, [], []] : $this->teamLookup->peopleOf($teamId);
+        [$leadId, $leadDisplayName, $developerIds, $testerIds] = null === $teamId ? [null, null, [], []] : $this->teamLookup->peopleOf($teamId);
         $users = $this->userQueries->byIds(self::distinctUserIds([
             $reporterId, $assigneeId, self::userIdOrNull($row['pending_assignee_id'], 'pending assignee id'), self::userIdOrNull($row['reviewer_id'], 'reviewer id'),
             self::userIdOrNull($row['tester_id'], 'tester id'), self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
             $leadId, ...$developerIds, ...$testerIds,
         ]));
-        $lead = null === $leadId ? null : ($users[$leadId->toString()] ?? throw new \LogicException('The lead of a ticket\'s team is no user.'));
         $displayNames = array_map(static fn (UserView $user): string => $user->displayName, $users);
         $decodedComponents = json_decode(self::text($row['components'], 'components'), true, 2, \JSON_THROW_ON_ERROR);
         if (!\is_array($decodedComponents) || !array_is_list($decodedComponents)) {
@@ -236,8 +235,9 @@ final readonly class DbalTicketQueries implements TicketQueries
                 self::userIdOrNull($row['tester_id'], 'tester id'),
                 self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
             ),
-            TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $lead?->displayName, $developerIds, $testerIds),
+            TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds),
             $displayNames,
+            self::integer($row['version'], 'version'),
         );
     }
 

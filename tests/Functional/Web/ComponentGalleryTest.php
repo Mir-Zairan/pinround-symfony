@@ -23,14 +23,14 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Your next step box', 'Your next step', 'Move to Needs input'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
         // 4 variants x 2 sizes x (normal, disabled, link)
-        // plus the one action button inside the empty-state example, the dialog's trigger, Cancel and Confirm, and the
-        // person picker's Cancel
-        self::assertCount(29, $crawler->filter('main .btn'));
+        // plus the one action button inside the empty-state example, the dialog's trigger, Cancel and Confirm, the
+        // person picker's Cancel, and the next step box's verb, its "Move to another step…" summary, Cancel and Move
+        self::assertCount(33, $crawler->filter('main .btn'));
         self::assertCount(9, $crawler->filter('main a.btn[href]'));
         self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
-        self::assertCount(4, $crawler->filter('main button.btn.btn-text:not([disabled])'));
+        self::assertCount(5, $crawler->filter('main button.btn.btn-text:not([disabled])'));
     }
 
     #[Test]
@@ -116,6 +116,53 @@ final class ComponentGalleryTest extends WebTestCase
         self::assertSame(['Cancel'], $dialog->filter('.dialog__actions .btn')->each(static fn (Crawler $button): string => $button->text()));
         self::assertCount(0, $picker->filter('[data-model], [data-controller~="person-picker"], [data-action*="live#"]'));
         self::assertCount(0, $crawler->filter('[data-live-name-value]'));
+    }
+
+    /**
+     * Lena, the lead, on a ticket in Testing: one outline verb, the rule note, the move list open with Testing pressed,
+     * and the Needs input chip with its dialog. The dialog's Move posts to the real move route, which refuses it.
+     */
+    #[Test]
+    public function theGalleryShowsTheNextStepBoxWithItsMoveListOpenAndTheNeedsInputDialog(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $crawler->filter('link[rel="stylesheet"][href*="styles/ticket-"]'));
+        $box = $crawler->filter('#gallery-next-step-box ~ .gallery-next-step section.next-step-box');
+        self::assertCount(1, $box);
+        self::assertSame('Your next step', $box->filter('.next-step-box__label')->text());
+        self::assertSame('Nothing for you now. Mia’s turn.', $box->filter('.next-step-box__sentence')->text());
+        self::assertSame(
+            [['/t/SHOP-12/move/put_on_hold', 'Put on hold', 'btn btn-outline']],
+            $box->filter('.next-step-box__verbs form')->each(static fn (Crawler $form): array => [(string) $form->attr('action'), $form->filter('button')->text(), $form->filter('button')->attr('class')]),
+        );
+        self::assertSame('Team rule: only the tester moves a ticket to Done.', $box->filter('.next-step-box__rule-note')->text());
+        $moveList = $box->filter('details.next-step-box__move-to[open]');
+        self::assertCount(1, $moveList);
+        self::assertSame(
+            [
+                ['To do', ['Backlog', 'To do']],
+                ['Doing', ['In progress']],
+                ['Checking', ['Code review', 'Testing']],
+                ['Waiting', ['Needs input', 'On hold']],
+                ['Done', ['Done']],
+            ],
+            $moveList->filter('.next-step-box__group')->each(static fn (Crawler $group): array => [
+                $group->filter('.next-step-box__group-label')->text(),
+                $group->filter('button.chip')->each(static fn (Crawler $chip): string => $chip->text()),
+            ]),
+        );
+        self::assertSame(['Testing'], $moveList->filter('button[aria-current="step"]')->each(static fn (Crawler $chip): string => $chip->text()));
+        $dialog = $moveList->filter('[data-controller="waiting-on"] dialog');
+        self::assertCount(1, $dialog);
+        self::assertSame('Move to Needs input', $dialog->filter('.dialog__title')->text());
+        self::assertSame(
+            [['Sara · Reporter', ''], ['Omar · Assignee', null], ['Lena · Code reviewer', null], ['Mia · Tester', null], ['Someone else', null]],
+            $dialog->filter('.waiting-on__choice')->each(static fn (Crawler $choice): array => [$choice->text(), $choice->filter('input[type="radio"]')->attr('checked')]),
+        );
+        self::assertSame(['Cancel', 'Move'], $dialog->filter('.dialog__actions .btn')->each(static fn (Crawler $button): string => $button->text()));
     }
 
     #[Test]

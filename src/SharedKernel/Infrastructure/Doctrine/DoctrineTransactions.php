@@ -7,13 +7,18 @@ namespace App\SharedKernel\Infrastructure\Doctrine;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\Persistence\ManagerRegistry;
 
 final readonly class DoctrineTransactions implements Transactions
 {
-    public function __construct(private EntityManagerInterface $entityManager, private TenantContext $tenantContext)
+    public function __construct(private EntityManagerInterface $entityManager, private TenantContext $tenantContext, private ManagerRegistry $doctrine)
     {
     }
 
+    /**
+     * An entity manager an earlier run left closed is reset in place before BEGIN, so every repository's reference
+     * reopens and TenantFilterMiddleware marks the tenant filter of the rebuilt manager at that BEGIN.
+     */
     public function run(\Closure $write): mixed
     {
         // TenantConnection sets the tenant at BEGIN from TenantContext: without one, row-level security shows no rows.
@@ -24,6 +29,9 @@ final readonly class DoctrineTransactions implements Transactions
         // failure would close the request's EntityManager.
         if ($this->entityManager->getConnection()->isTransactionActive()) {
             throw new \LogicException('A transaction of its own must not run inside another transaction.');
+        }
+        if (!$this->entityManager->isOpen()) {
+            $this->doctrine->resetManager();
         }
 
         return $this->entityManager->wrapInTransaction($write);

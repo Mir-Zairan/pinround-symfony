@@ -20,6 +20,7 @@ use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
 use App\Ticketing\Application\OrganizationProjects;
 use App\Ticketing\Domain\Ticket;
+use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
 use App\Ticketing\Infrastructure\Doctrine\DbalNextTicketNumber;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketHistory;
@@ -106,7 +107,7 @@ final class CreateTicketTest extends KernelTestCase
         self::assertSame('SHOP-'.self::SHOP_NEXT_NUMBER, $key);
         self::assertSame([['key' => $key, 'step_id' => self::TO_DO_STEP]], $this->storedTickets());
         self::assertSame(
-            [['ticket_id' => self::TICKET, 'actor_id' => self::MIA, 'type' => 'created', 'to_step' => self::TO_DO_STEP, 'at' => '2027-03-15 10:00:00']],
+            [['ticket_id' => self::TICKET, 'actor_id' => self::MIA, 'type' => 'created', 'from_step' => null, 'to_step' => self::TO_DO_STEP, 'payload' => '{}', 'at' => '2027-03-15 10:00:00']],
             $this->storedCreatedRows(),
         );
         self::assertSame([['ticket_id' => self::TICKET, 'turn_user_id' => self::OMAR, 'kind' => 'build', 'grp' => 'todo']], $this->storedTurns());
@@ -311,6 +312,16 @@ final class CreateTicketTest extends KernelTestCase
             {
                 $this->doctrineTickets->add($ticket);
             }
+
+            public function save(Ticket $ticket): void
+            {
+                $this->doctrineTickets->save($ticket);
+            }
+
+            public function ofKey(OrganizationId $organizationId, TicketKey $key): ?Ticket
+            {
+                return $this->doctrineTickets->ofKey($organizationId, $key);
+            }
         };
     }
 
@@ -331,7 +342,7 @@ final class CreateTicketTest extends KernelTestCase
     private function storedCreatedRows(): array
     {
         return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchAllAssociative(
-            "SELECT ticket_id, actor_id, type, to_step, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS at FROM tkt_ticket_event WHERE organization_id = ?",
+            "SELECT ticket_id, actor_id, type, from_step, to_step, payload::text AS payload, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS at FROM tkt_ticket_event WHERE organization_id = ?",
             [self::ACME_FOODS],
         ));
     }

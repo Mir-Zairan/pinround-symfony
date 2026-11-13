@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Ticketing\Api;
+namespace App\Tests\Unit\SharedKernel\Domain;
 
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
-use App\Ticketing\Api\TicketTurnSnapshot;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;

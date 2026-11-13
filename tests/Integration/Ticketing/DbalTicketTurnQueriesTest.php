@@ -5,24 +5,32 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Ticketing;
 
 use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
-use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
+use App\Organization\Application\SetTeamRole;
+use App\Organization\Domain\Job;
+use App\Organization\Domain\TeamRole;
+use App\Organization\Infrastructure\Cache\TeamPeopleCache;
+use App\Organization\Infrastructure\Doctrine\DbalTeamPeopleQueries;
+use App\Organization\Infrastructure\Doctrine\DoctrineMemberships;
+use App\Organization\Infrastructure\Doctrine\DoctrineTeams;
+use App\Organization\Infrastructure\Messenger\MessengerOrganizationEvents;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketTurnQueries;
-use App\Ticketing\Api\TicketTurnSnapshot;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries;
 use App\Ticketing\Infrastructure\Doctrine\TicketTeamLookup;
 use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -31,6 +39,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class DbalTicketTurnQueriesTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000a701';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000a702';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000a711';
@@ -59,7 +69,8 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
             self::LENA => ['Lena', 'lead', 'developer'],
             self::OMAR => ['Omar', 'member', 'developer'],
             self::MIA => ['Mia', 'member', 'tester'],
-            self::RAJ => ['Raj', 'viewer', 'other'],
+            // A tester who only views Shop, so he is in no list until he becomes a member.
+            self::RAJ => ['Raj', 'viewer', 'tester'],
         ]);
     }
 
@@ -138,9 +149,25 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
             "UPDATE org_team SET lead_user_id = '0197a3c0-0000-7000-8000-00000000a765' WHERE id = ?",
             [self::SHOP_TEAM],
         ));
+        $this->teamPeopleCache()->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
 
         $this->expectException(\LogicException::class);
         $this->expectExceptionMessageIsOrContains('The lead of a ticket\'s team is no user.');
+        $this->factsAs(self::ACME_FOODS, $ticketId);
+    }
+
+    #[Test]
+    public function aTeamWithNoLeadOrMemberIsAnError(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            "UPDATE org_team_member SET team_role = 'viewer' WHERE team_id = ?",
+            [self::SHOP_TEAM],
+        ));
+        $this->teamPeopleCache()->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageIsOrContains('A ticket\'s team has no lead or member Identity knows, or is not a team of its organization.');
         $this->factsAs(self::ACME_FOODS, $ticketId);
     }
 
@@ -213,7 +240,7 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
             $stepQueries = self::getContainer()->get('test.workflow_step_queries');
             self::assertInstanceOf(StepQueries::class, $stepQueries);
 
-            return new DbalTicketTurnQueries($connection, $this->tenantContext(), $stepQueries, new TicketTeamLookup($stepQueries, new DbalTeamQueries($connection)), new DbalUserQueries($connection))
+            return new DbalTicketTurnQueries($connection, $this->tenantContext(), new TicketTeamLookup($stepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))))
                 ->factsOf($ticketId);
         });
 
@@ -255,21 +282,79 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
     }
 
     /**
-     * The team's steps are cached, so the first read warms the cache and the second is counted.
+     * The team's steps stay cached while its people are invalidated, so the first read costs the ticket, the team's
+     * people and their names, and the second only the ticket. Raw rows publish no event, hence the invalidation.
      */
     #[Test]
     public function itCostsTheSameQueriesForABiggerTeam(): void
     {
         $ticketId = $this->createdTicketFor(self::OMAR);
-        $queriesForFourPeople = $this->queriesOfFactsAs(self::ACME_FOODS, $ticketId);
+        $this->factsAs(self::ACME_FOODS, $ticketId);
+        $this->teamPeopleCache()->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
+        $queriesForFourPeople = $this->coldAndWarmQueriesOfFactsAs(self::ACME_FOODS, $ticketId);
         foreach (self::MORE_PEOPLE as $userId => $job) {
+            $this->shopTeamRows()->addUser($userId, 'Person');
             $this->shopTeamRows()->addMember(self::ACME_FOODS, self::SHOP_TEAM, $userId, 'member', $job);
         }
+        $this->teamPeopleCache()->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
 
-        $queriesForEightPeople = $this->queriesOfFactsAs(self::ACME_FOODS, $ticketId);
+        $queriesForEightPeople = $this->coldAndWarmQueriesOfFactsAs(self::ACME_FOODS, $ticketId);
 
-        self::assertSame([4, 4], [$queriesForFourPeople, $queriesForEightPeople]);
+        self::assertSame([[3, 1], [3, 1]], [$queriesForFourPeople, $queriesForEightPeople]);
         self::assertCount(4, $this->factsAs(self::ACME_FOODS, $ticketId)->developerIds ?? []);
+    }
+
+    #[Test]
+    public function aDeveloperWithNoUserIsLeftOut(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $this->shopTeamRows()->addMember(self::ACME_FOODS, self::SHOP_TEAM, '0197a3c0-0000-7000-8000-00000000a765', 'member', 'developer');
+        $this->teamPeopleCache()->invalidateTeamNow(new TeamId(self::SHOP_TEAM));
+
+        self::assertSame([self::OMAR, self::LENA], self::idsOf($this->factsAs(self::ACME_FOODS, $ticketId)->developerIds ?? []));
+    }
+
+    #[Test]
+    public function aSecondReadTakesTheTeamsPeopleFromTheCacheAndReadsOnlyTheTicket(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $debugData = $this->debugData();
+
+        [$leadDisplayName, $sqlOfTheSecondRead] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData, $ticketId): array {
+            $this->turnQueries()->factsOf($ticketId);
+            $debugData->reset();
+
+            return [$this->turnQueries()->factsOf($ticketId)?->leadDisplayName, self::sqlOf($debugData)];
+        });
+
+        self::assertSame('Lena', $leadDisplayName);
+        self::assertCount(1, $sqlOfTheSecondRead);
+        self::assertStringContainsString('FROM tkt_ticket', $sqlOfTheSecondRead[0]);
+    }
+
+    /**
+     * The first read keeps Shop's people in the cache; SetTeamRole invalidates them when its transaction commits.
+     */
+    #[Test]
+    public function aViewerMadeMemberAndANewLeadAreInTheNextFactsOnceSetTeamRoleCommits(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $before = $this->factsAs(self::ACME_FOODS, $ticketId);
+
+        $this->setTeamRole(self::RAJ, TeamRole::Member);
+        $this->setTeamRole(self::OMAR, TeamRole::Lead);
+        $after = $this->factsAs(self::ACME_FOODS, $ticketId);
+
+        self::assertSame(
+            [
+                [self::LENA, 'Lena', [self::OMAR, self::LENA], [self::MIA]],
+                [self::OMAR, 'Omar', [self::OMAR, self::LENA], [self::MIA, self::RAJ]],
+            ],
+            [
+                [$before?->leadId?->toString(), $before?->leadDisplayName, self::idsOf($before->developerIds ?? []), self::idsOf($before->testerIds ?? [])],
+                [$after?->leadId?->toString(), $after?->leadDisplayName, self::idsOf($after->developerIds ?? []), self::idsOf($after->testerIds ?? [])],
+            ],
+        );
     }
 
     private function createdTicketFor(string $assigneeId): TicketId
@@ -305,28 +390,32 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         return $this->transactions()->rolledBackAs($organizationId, fn (): ?TicketTurnSnapshot => $this->turnQueries()->factsOf($ticketId));
     }
 
-    private function queriesOfFactsAs(string $organizationId, TicketId $ticketId): int
+    /**
+     * @return array{int, int} the queries of a first read and of a second one in the same transaction
+     */
+    private function coldAndWarmQueriesOfFactsAs(string $organizationId, TicketId $ticketId): array
     {
         $debugData = $this->debugData();
 
-        return $this->transactions()->rolledBackAs($organizationId, function () use ($debugData, $ticketId): int {
+        return $this->transactions()->rolledBackAs($organizationId, function () use ($debugData, $ticketId): array {
+            $debugData->reset();
             $this->turnQueries()->factsOf($ticketId);
+            $coldQueries = self::queryCountOf($debugData);
             $debugData->reset();
             $this->turnQueries()->factsOf($ticketId);
 
-            return self::queryCountOf($debugData);
+            return [$coldQueries, self::queryCountOf($debugData)];
         });
     }
 
-    private static function queryCountOf(DebugDataHolder $debugData): int
+    private function setTeamRole(string $userId, TeamRole $teamRole): void
     {
-        $queryCount = 0;
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            $queryCount += \count($queriesOfOneConnection);
-        }
-
-        return $queryCount;
+        $entityManager = $this->entityManager();
+        $setTeamRole = new SetTeamRole(new DoctrineTeams($entityManager), new DoctrineMemberships($entityManager), self::getContainer()->get(MessengerOrganizationEvents::class));
+        $this->transactions()->committedAs(
+            self::ACME_FOODS,
+            static fn () => $setTeamRole(new TeamId(self::SHOP_TEAM), new UserId($userId), $teamRole, Job::Developer, new UserId(self::LENA), new \DateTimeImmutable('2027-03-16 10:00:00 UTC')),
+        );
     }
 
     /**
@@ -347,14 +436,14 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         return $turnQueries;
     }
 
-    private function debugData(): DebugDataHolder
+    private function teamPeopleCache(): TeamPeopleCache
     {
-        return self::getContainer()->get('doctrine.debug_data_holder');
+        return self::getContainer()->get(TeamPeopleCache::class);
     }
 
     private function removeRows(): void
     {
-        $this->shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA, self::RAJ], self::ACME_FOODS, self::BETA_BAKERY);
+        $this->shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA, self::RAJ, ...array_keys(self::MORE_PEOPLE)], self::ACME_FOODS, self::BETA_BAKERY);
     }
 
     private function shopTeamRows(): ShopTeamRows

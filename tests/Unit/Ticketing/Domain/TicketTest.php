@@ -9,6 +9,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Domain\BlankTicketTitle;
+use App\Ticketing\Domain\InvalidWaitingOn;
 use App\Ticketing\Domain\Priority;
 use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Domain\ProjectKey;
@@ -18,6 +19,7 @@ use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\TicketTitleTooLong;
 use App\Ticketing\Domain\TicketType;
 use App\Ticketing\Domain\Visibility;
+use App\Ticketing\Domain\WaitingOn;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -30,8 +32,15 @@ final class TicketTest extends TestCase
     private const string TICKET = '0197a3c0-0000-7000-8000-0000000031e1';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000031b1';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000031b2';
+    private const string MIA = '0197a3c0-0000-7000-8000-0000000031b3';
     private const string BACKLOG_STEP = '0197a3c0-0000-7000-8000-0000000031f1';
     private const string TO_DO_STEP = '0197a3c0-0000-7000-8000-0000000031f2';
+    private const string IN_PROGRESS_STEP = '0197a3c0-0000-7000-8000-0000000031f3';
+    private const string NEEDS_INPUT_STEP = '0197a3c0-0000-7000-8000-0000000031f4';
+    private const string CODE_REVIEW_STEP = '0197a3c0-0000-7000-8000-0000000031f7';
+    private const string TESTING_STEP = '0197a3c0-0000-7000-8000-0000000031f8';
+    private const string DONE_STEP = '0197a3c0-0000-7000-8000-0000000031f5';
+    private const string SHIPPED_STEP = '0197a3c0-0000-7000-8000-0000000031f6';
 
     #[Test]
     public function aTicketWithAnAssigneeStartsInTheToDoStep(): void
@@ -102,6 +111,158 @@ final class TicketTest extends TestCase
     {
         $this->expectException(TicketDescriptionTooLong::class);
         self::reported('Checkout button is hidden', str_repeat('é', 50_001), null);
+    }
+
+    #[Test]
+    public function aMoveKeepsTheStepItLeftAndTheMoveTime(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $movedAt = new \DateTimeImmutable('2027-03-16 09:30:00+00:00');
+
+        $ticket->move(self::IN_PROGRESS_STEP, 'doing', false, null, $movedAt);
+
+        self::assertSame([self::IN_PROGRESS_STEP, self::TO_DO_STEP, null, null, null, null, null, $movedAt], self::moveStateOf($ticket));
+        self::assertEquals(new \DateTimeImmutable('2027-03-15 10:00:00+00:00'), $ticket->createdAt());
+    }
+
+    #[Test]
+    public function enteringTheDoneGroupClosesTheTicketAndLeavingItReopensIt(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $closedAt = new \DateTimeImmutable('2027-03-16 09:30:00+00:00');
+        $ticket->move(self::DONE_STEP, 'done', false, null, $closedAt);
+        self::assertSame($closedAt, $ticket->closedAt());
+
+        $ticket->move(self::SHIPPED_STEP, 'done', false, null, new \DateTimeImmutable('2027-03-17 08:00:00+00:00'));
+        self::assertSame([self::SHIPPED_STEP, self::DONE_STEP, $closedAt], [$ticket->stepId(), $ticket->previousStepId(), $ticket->closedAt()]);
+
+        $ticket->move(self::IN_PROGRESS_STEP, 'doing', false, null, new \DateTimeImmutable('2027-03-18 08:00:00+00:00'));
+        self::assertSame([self::IN_PROGRESS_STEP, self::SHIPPED_STEP, null], [$ticket->stepId(), $ticket->previousStepId(), $ticket->closedAt()]);
+    }
+
+    #[Test]
+    public function enteringNeedsInputWaitsOnThePersonAndLeavingItClearsThem(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $askedAt = new \DateTimeImmutable('2027-03-16 09:30:00+00:00');
+        $ticket->move(self::NEEDS_INPUT_STEP, 'wait', true, WaitingOn::ofPerson(new UserId(self::LENA)), $askedAt);
+        self::assertSame([self::NEEDS_INPUT_STEP, self::TO_DO_STEP, null, null, null, self::LENA, null, $askedAt], self::moveStateOf($ticket));
+
+        $answeredAt = new \DateTimeImmutable('2027-03-17 08:00:00+00:00');
+        $ticket->move(self::TO_DO_STEP, 'todo', false, null, $answeredAt);
+        self::assertSame([self::TO_DO_STEP, self::NEEDS_INPUT_STEP, null, null, null, null, null, $answeredAt], self::moveStateOf($ticket));
+    }
+
+    #[Test]
+    public function aMoveStoresTheChosenReviewerAndTesterWhenTheTicketHasNone(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $reviewedAt = new \DateTimeImmutable('2027-03-16 09:30:00+00:00');
+        $ticket->move(self::CODE_REVIEW_STEP, 'check', false, null, $reviewedAt, new UserId(self::LENA));
+        self::assertSame([self::CODE_REVIEW_STEP, self::TO_DO_STEP, null, self::LENA, null, null, null, $reviewedAt], self::moveStateOf($ticket));
+
+        $testedAt = new \DateTimeImmutable('2027-03-17 08:00:00+00:00');
+        $ticket->move(self::TESTING_STEP, 'check', false, null, $testedAt, chosenTester: new UserId(self::MIA));
+        self::assertSame([self::TESTING_STEP, self::CODE_REVIEW_STEP, null, self::LENA, self::MIA, null, null, $testedAt], self::moveStateOf($ticket));
+    }
+
+    #[Test]
+    public function aMoveKeepsTheReviewerAndTesterTheTicketHasOverNewlyChosenOnes(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $ticket->move(self::TESTING_STEP, 'check', false, null, new \DateTimeImmutable('2027-03-16 09:30:00+00:00'), new UserId(self::LENA), new UserId(self::MIA));
+
+        $ticket->move(self::CODE_REVIEW_STEP, 'check', false, null, new \DateTimeImmutable('2027-03-17 08:00:00+00:00'), new UserId(self::OMAR), new UserId(self::OMAR));
+
+        self::assertSame([self::LENA, self::MIA], [$ticket->reviewer()?->toString(), $ticket->tester()?->toString()]);
+    }
+
+    #[Test]
+    public function aMoveWithNobodyChosenLeavesTheReviewerAndTesterAsTheyWere(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $ticket->move(self::CODE_REVIEW_STEP, 'check', false, null, new \DateTimeImmutable('2027-03-16 09:30:00+00:00'));
+        self::assertSame([null, null], [$ticket->reviewer(), $ticket->tester()]);
+
+        $ticket->move(self::TESTING_STEP, 'check', false, null, new \DateTimeImmutable('2027-03-17 08:00:00+00:00'), new UserId(self::LENA), new UserId(self::MIA));
+        $ticket->move(self::IN_PROGRESS_STEP, 'doing', false, null, new \DateTimeImmutable('2027-03-18 08:00:00+00:00'));
+
+        self::assertSame([self::LENA, self::MIA], [$ticket->reviewer()?->toString(), $ticket->tester()?->toString()]);
+    }
+
+    #[Test]
+    public function enteringNeedsInputWaitsOnATrimmedLabel(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $askedAt = new \DateTimeImmutable('2027-03-16 09:30:00+00:00');
+
+        $ticket->move(self::NEEDS_INPUT_STEP, 'wait', true, WaitingOn::ofLabel(' Customer '), $askedAt);
+
+        self::assertSame([self::NEEDS_INPUT_STEP, self::TO_DO_STEP, null, null, null, null, 'Customer', $askedAt], self::moveStateOf($ticket));
+    }
+
+    /**
+     * @return iterable<string, array{string, string, bool, WaitingOn|null, class-string<\Throwable>, string}>
+     */
+    public static function refusedMoves(): iterable
+    {
+        yield 'waiting on someone in a step that is not Needs input' => [
+            self::IN_PROGRESS_STEP, 'doing', false, WaitingOn::ofPerson(new UserId(self::LENA)),
+            InvalidWaitingOn::class, 'Only a ticket in Needs input waits on someone.',
+        ];
+        yield 'Needs input without anyone to wait on' => [
+            self::NEEDS_INPUT_STEP, 'wait', true, null,
+            InvalidWaitingOn::class, 'A ticket in Needs input waits on a person or a label.',
+        ];
+        yield 'a group that does not exist' => [
+            self::IN_PROGRESS_STEP, 'started', false, null,
+            \InvalidArgumentException::class, 'A step group is one of todo, doing, check, wait or done.',
+        ];
+    }
+
+    /**
+     * @param class-string<\Throwable> $expectedException
+     */
+    #[Test]
+    #[DataProvider('refusedMoves')]
+    public function aRefusedMoveLeavesTheTicketAsItWas(string $stepId, string $groupCode, bool $isNeedsInputStep, ?WaitingOn $waitingOn, string $expectedException, string $expectedMessage): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $before = self::moveStateOf($ticket);
+
+        try {
+            $ticket->move($stepId, $groupCode, $isNeedsInputStep, $waitingOn, new \DateTimeImmutable('2027-03-16 09:30:00+00:00'), new UserId(self::LENA), new UserId(self::MIA));
+            self::fail('The move was not refused.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertSame([$expectedException, $expectedMessage], [$refusal::class, $refusal->getMessage()]);
+        }
+
+        self::assertSame($before, self::moveStateOf($ticket));
+    }
+
+    #[Test]
+    public function aNewTicketHasNoTurnPeopleNoReleaseNoRiskCheckAndItsFirstVersion(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+
+        self::assertSame(
+            [null, null, null, null, null, null, null, false, 1],
+            [
+                $ticket->previousStepId(), $ticket->pendingAssignee(), $ticket->reviewer(), $ticket->tester(), $ticket->waitingOnUser(),
+                $ticket->waitingOnLabel(), $ticket->release(), $ticket->isRiskCheck(), $ticket->version(),
+            ],
+        );
+    }
+
+    /**
+     * @return array{string, string|null, \DateTimeImmutable|null, string|null, string|null, string|null, string|null, \DateTimeImmutable}
+     */
+    private static function moveStateOf(Ticket $ticket): array
+    {
+        return [
+            $ticket->stepId(), $ticket->previousStepId(), $ticket->closedAt(), $ticket->reviewer()?->toString(), $ticket->tester()?->toString(),
+            $ticket->waitingOnUser()?->toString(), $ticket->waitingOnLabel(), $ticket->updatedAt(),
+        ];
     }
 
     private static function reported(string $title, string $description, ?UserId $assignee, ?\DateTimeImmutable $reportedAt = null): Ticket

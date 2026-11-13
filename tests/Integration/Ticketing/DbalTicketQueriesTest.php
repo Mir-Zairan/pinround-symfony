@@ -6,13 +6,14 @@ namespace App\Tests\Integration\Ticketing;
 
 use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
 use App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries;
-use App\Organization\Infrastructure\Doctrine\DbalTeamQueries;
+use App\Organization\Infrastructure\Doctrine\DbalTeamPeopleQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Api\Cursor;
 use App\Ticketing\Api\ListFilter;
@@ -30,7 +31,6 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -39,6 +39,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class DbalTicketQueriesTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000071a1';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000071a2';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000071c1';
@@ -281,7 +283,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
             )->list($this->filter()),
         );
 
@@ -639,7 +641,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
         $this->asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator) use ($key): void {
             $migrator->executeStatement(
                 "UPDATE tkt_ticket SET team_id = ?, assignee_id = ?, reviewer_id = ?, waiting_on_label = 'Supplier', waiting_on_user_id = ?,
-                     check_reasons = '{risk}' WHERE key = ?",
+                     check_reasons = '{risk}', version = 7 WHERE key = ?",
                 [self::SHOP_TEAM, self::OMAR, self::LENA, self::OMAR, $key],
             );
         });
@@ -654,6 +656,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
         );
         self::assertSame('Lena', $page->displayNames[self::LENA] ?? null);
         self::assertSame('Omar', $page->displayNames[self::OMAR] ?? null);
+        self::assertSame(7, $page->version);
     }
 
     #[Test]
@@ -775,7 +778,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
             )->pageOf($key, self::adminOf(self::ACME_FOODS)),
         );
 
@@ -1046,7 +1049,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 $acmeStepQueries,
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
-                new TicketTeamLookup($acmeStepQueries, new DbalTeamQueries($connection)),
+                new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
             )->positionOf($key, $this->filter()),
         );
 
@@ -1208,17 +1211,6 @@ final class DbalTicketQueriesTest extends KernelTestCase
         ));
     }
 
-    private static function queryCountOf(DebugDataHolder $debugData): int
-    {
-        $queryCount = 0;
-        foreach ($debugData->getData() as $queriesOfOneConnection) {
-            self::assertIsArray($queriesOfOneConnection);
-            $queryCount += \count($queriesOfOneConnection);
-        }
-
-        return $queryCount;
-    }
-
     /**
      * @param \Closure(Connection): mixed $work
      */
@@ -1246,11 +1238,6 @@ final class DbalTicketQueriesTest extends KernelTestCase
         self::assertInstanceOf(StepQueries::class, $stepQueries);
 
         return $stepQueries;
-    }
-
-    private function debugData(): DebugDataHolder
-    {
-        return self::getContainer()->get('doctrine.debug_data_holder');
     }
 
     private function removeRows(): void

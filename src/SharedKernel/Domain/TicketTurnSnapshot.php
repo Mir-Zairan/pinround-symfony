@@ -2,15 +2,12 @@
 
 declare(strict_types=1);
 
-namespace App\Ticketing\Api;
-
-use App\SharedKernel\Domain\TeamId;
-use App\SharedKernel\Domain\TicketId;
-use App\SharedKernel\Domain\UserId;
+namespace App\SharedKernel\Domain;
 
 /**
- * One ticket, its step and its team's people, as {@see TicketTurnQueries::factsOf} reads them. Codes and step ids are
- * strings because this Api may use SharedKernel only.
+ * One ticket, its step and its team's people, as Ticketing's TicketTurnQueries::factsOf reads them and Insight's
+ * TurnProjector::refreshFrom takes them. It lives in SharedKernel because both modules' Apis name it and an Api may use
+ * SharedKernel only; for the same reason codes and step ids are strings.
  */
 final readonly class TicketTurnSnapshot
 {
@@ -58,7 +55,8 @@ final readonly class TicketTurnSnapshot
         if ((null === $teamId) !== (null === $leadId) || (null === $leadId) !== (null === $leadDisplayName)) {
             throw new \InvalidArgumentException('A ticket has a team lead and their name exactly when it has a team.');
         }
-        if (!\in_array($visibility, [TicketVisibilityFacts::FOR_EVERYONE, TicketVisibilityFacts::TEAM_ONLY], true)) {
+        // The values of Ticketing's TicketVisibilityFacts::FOR_EVERYONE and TEAM_ONLY, which SharedKernel cannot see.
+        if (!\in_array($visibility, ['all', 'team'], true)) {
             throw new \InvalidArgumentException('A ticket visibility must be all or team.');
         }
     }

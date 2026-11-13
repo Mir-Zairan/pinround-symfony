@@ -4,6 +4,7 @@
 
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/gallery.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
 {% endblock %}
 
 {% block main %}
@@ -195,6 +196,13 @@
                     </twig:block>
                 </twig:Dialog>
             </div>
+        </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-next-step-box">
+        <h2 id="gallery-next-step-box">Your next step box</h2>
+        <div class="gallery-next-step">
+            <twig:NextStepBoxExample />
         </div>
     </section>
 {% endblock %}

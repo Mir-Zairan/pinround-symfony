@@ -182,6 +182,11 @@ final class RoleTicketVisibilitiesTest extends TestCase
             {
                 return $this->test->readRolesOf($userId, $organizationId);
             }
+
+            public function membersAmong(OrganizationId $organizationId, array $userIds): array
+            {
+                throw new \LogicException('The ticket visibility reads only the viewer\'s roles.');
+            }
         };
         $settings = new readonly class($this) implements SettingsQueries {
             public function __construct(private RoleTicketVisibilitiesTest $test)

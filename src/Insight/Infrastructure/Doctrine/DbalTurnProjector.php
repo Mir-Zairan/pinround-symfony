@@ -11,6 +11,7 @@ use App\Insight\Application\Turn\TicketTurnSource;
 use App\Insight\Application\Turn\TurnRowResolver;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use Doctrine\DBAL\Connection;
 use Psr\Clock\ClockInterface;
 
@@ -47,13 +48,33 @@ final readonly class DbalTurnProjector implements TurnProjector
 
     public function refresh(TicketId $ticketId): ?string
     {
+        $organizationId = $this->requireTransactionTenant();
+
+        return $this->write($ticketId, $this->source->factsFor($ticketId), $organizationId);
+    }
+
+    public function refreshFrom(TicketTurnSnapshot $snapshot, ?array $waitingTurns = null): ?string
+    {
+        $organizationId = $this->requireTransactionTenant();
+
+        return $this->write($snapshot->ticketId, $this->source->factsFrom($snapshot, $waitingTurns), $organizationId);
+    }
+
+    private function requireTransactionTenant(): string
+    {
         // TenantMiddleware sets the tenant when a transaction begins; outside one the policy would hide every row.
         if (!$this->connection->isTransactionActive()) {
             throw new \LogicException('A turn row is refreshed in the transaction of the change; none is open.');
         }
 
-        $organizationId = $this->tenantContext->require()->toString();
-        $facts = $this->source->factsFor($ticketId);
+        return $this->tenantContext->require()->toString();
+    }
+
+    /**
+     * @param TicketTurnFacts|null $facts null when the ticket is gone or no team owns it, so its row and count go
+     */
+    private function write(TicketId $ticketId, ?TicketTurnFacts $facts, string $organizationId): ?string
+    {
         $this->projectCountsProjector->moveTicket($ticketId, null === $facts ? null : self::countedTicketOf($facts));
         $row = null === $facts ? null : $this->resolver->rowFor($facts);
 
