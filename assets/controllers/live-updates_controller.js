@@ -1,5 +1,5 @@
 import { Controller } from '@hotwired/stimulus';
-import { visit } from '@hotwired/turbo';
+import { renderStreamMessage, visit } from '@hotwired/turbo';
 
 // The subscriber cookie lasts 10 min (RealtimeSubscriptions::LIFETIME_SECONDS); renewing at 8 leaves room for a slow
 // answer, and every renewal checks the session, the membership and the ticket again.
@@ -19,8 +19,10 @@ const MAX_REOPEN_STEP_MS = 60 * 1000;
 // twice that, and a token route or a hub that never answers stops no other tab.
 const COOKIE_LOCK = 'pinround-live-updates-cookie';
 const MAX_CONNECT_WAIT_MS = 5000;
-// RefreshTicketPagesHandler::SIGNAL_TYPE.
+// RefreshTicketPagesHandler::SIGNAL_TYPE. An update sent with no type comes as a 'message' and carries Turbo Streams
+// (RefreshBellHandler), rendered as they come, hidden tab or not.
 const SIGNAL_TYPE = 'refresh';
+const STREAM_MESSAGE_TYPE = 'message';
 // Marks what a signal fetches again: a turbo-frame with a src reloads; any other element with an id is swapped for the
 // element of the same id in the page fetched again.
 const REFRESHED_PARTS = '[data-live-refresh]';
@@ -135,6 +137,7 @@ export default class extends Controller {
   // Ids of the parts a signal skipped because they were in use.
   #heldPartIds = new Set();
   #onSignal = () => this.#refetchWhenVisible();
+  #onStreamMessage = (event) => renderStreamMessage(event.data);
   #onVisibilityChange = () => this.#refetchMissedSignal();
   #onHoldMayEnd = () => this.#refreshReleasedPartsSoon();
 
@@ -184,6 +187,7 @@ export default class extends Controller {
       const source = new EventSource(this.subscribeUrlValue, { withCredentials: true });
       this.#source = source;
       source.addEventListener(SIGNAL_TYPE, this.#onSignal);
+      source.addEventListener(STREAM_MESSAGE_TYPE, this.#onStreamMessage);
       source.addEventListener('open', () => this.#showConnected());
       source.addEventListener('error', () => this.#reopenLater());
       await connectionSettled(source);
