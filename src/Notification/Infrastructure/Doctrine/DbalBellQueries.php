@@ -19,8 +19,9 @@ use Psr\Clock\ClockInterface;
  * The bell in one query under row-level security: the person's open notifications are read through the bell index
  * (organization_id, user_id, actor_id, ticket_id, created_at DESC) WHERE done_at IS NULL, grouped by sender and
  * ticket with window functions, and each group's newest row is joined to its ping for the text. Names and keys come
- * from the snapshot the notification was written with, so no other module is asked. A notification held for quiet
- * hours (deliver_after still ahead), or one with no sender or ticket, is no bell item.
+ * from the snapshot the notification was written with, so no other module is asked for them. A notification held for quiet
+ * hours (deliver_after still ahead), or one with no sender or ticket, is no bell item, and so is one whose ticket
+ * VisibleBellTickets does not find visible to the person (ADR-0013).
  */
 final readonly class DbalBellQueries
 {
@@ -40,7 +41,7 @@ final readonly class DbalBellQueries
             FROM ntf_notification AS bell
             WHERE bell.organization_id = :organization AND bell.user_id = :user AND bell.done_at IS NULL
                 AND bell.actor_id IS NOT NULL AND bell.ticket_id IS NOT NULL AND bell.kind IN (:kinds)
-                AND (bell.deliver_after IS NULL OR bell.deliver_after <= :now)
+                AND (bell.deliver_after IS NULL OR bell.deliver_after <= :now) AND bell.ticket_id IN (:tickets)
             WINDOW grp AS (PARTITION BY bell.actor_id, bell.ticket_id)
         ) AS newest
         LEFT JOIN ntf_ping AS ping ON newest.kind = 'ping' AND ping.organization_id = :organization
@@ -50,27 +51,39 @@ final readonly class DbalBellQueries
         LIMIT :cap
         SQL;
 
-    public function __construct(private Connection $connection, private TenantContext $tenantContext, private ClockInterface $clock)
-    {
+    public function __construct(
+        private Connection $connection,
+        private TenantContext $tenantContext,
+        private ClockInterface $clock,
+        private VisibleBellTickets $visibleTickets,
+    ) {
     }
 
     /**
      * @throws \App\SharedKernel\Application\TenantNotSet when no tenant is set, before any query
+     * @throws \LogicException                            when no transaction is open
      * @throws \UnexpectedValueException                  when a notification's snapshot lacks the sender's name or the
      *                                                    ticket's key, which the handler that wrote it always sets
      */
     public function bell(UserId $userId): BellView
     {
+        $organizationId = $this->tenantContext->require()->toString();
+        $now = $this->clock->now();
+        $visibleTicketIds = $this->visibleTickets->amongOpenRowsOf($userId, $now);
+        if ([] === $visibleTicketIds) {
+            return new BellView(0, []);
+        }
         $rows = $this->connection->fetchAllAssociative(
             self::BELL,
             [
-                'organization' => $this->tenantContext->require()->toString(),
+                'organization' => $organizationId,
                 'user' => $userId->toString(),
                 'kinds' => BellKind::codes(),
-                'now' => $this->clock->now()->format('Y-m-d H:i:sP'),
+                'now' => $now->format('Y-m-d H:i:sP'),
+                'tickets' => array_map(static fn (TicketId $ticketId): string => $ticketId->toString(), $visibleTicketIds),
                 'cap' => self::MAX_BELL_GROUPS,
             ],
-            ['kinds' => ArrayParameterType::STRING, 'cap' => ParameterType::INTEGER],
+            ['kinds' => ArrayParameterType::STRING, 'tickets' => ArrayParameterType::STRING, 'cap' => ParameterType::INTEGER],
         );
 
         $openCount = 0;

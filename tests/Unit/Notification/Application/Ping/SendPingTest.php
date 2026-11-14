@@ -289,6 +289,16 @@ final class SendPingTest extends TestCase
             {
                 throw new \LogicException('SendPing does not place tickets.');
             }
+
+            public function visibleTicketIdsOf(TicketVisibility $viewer, array $ticketIds): array
+            {
+                if (\count($ticketIds) > self::MAX_CHECKED_TICKET_IDS) {
+                    throw new \InvalidArgumentException('At most 200 tickets are checked for visibility at once.');
+                }
+                $isAsked = array_any($ticketIds, fn (TicketId $ticketId): bool => $ticketId->equals($this->page->id));
+
+                return $isAsked && $viewer->isVisible($this->page->visibilityFacts) ? [$this->page->id] : [];
+            }
         };
     }
 
