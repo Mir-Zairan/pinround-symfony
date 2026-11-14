@@ -7,6 +7,7 @@ namespace App\Notification\Infrastructure\Doctrine;
 use App\Notification\Application\Notify\NewNotification;
 use App\Notification\Application\Notify\NotificationKind;
 use App\Notification\Application\Notify\Notifications;
+use App\Notification\Infrastructure\Cache\BellCountCache;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Uid\UuidV7;
 
@@ -25,7 +26,7 @@ final readonly class DbalNotifications implements Notifications
 
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:s.uP';
 
-    public function __construct(private Connection $connection)
+    public function __construct(private Connection $connection, private BellCountCache $bellCountCache)
     {
     }
 
@@ -33,7 +34,8 @@ final readonly class DbalNotifications implements Notifications
     {
         $this->requireTransaction();
 
-        // The id carries the instant of created_at, so ordering by id and by created_at agree.
+        // The id carries the instant the row was written; a fold later moves created_at but keeps the id, so ordering by
+        // id and by created_at can differ for a folded reply.
         $id = new UuidV7(UuidV7::generate($notification->createdAt));
         $this->connection->executeStatement(self::INSERT, [
             $notification->organizationId->toString(),
@@ -46,6 +48,7 @@ final readonly class DbalNotifications implements Notifications
             $notification->deliverAfter?->format(self::TIMESTAMP_FORMAT),
             $notification->createdAt->format(self::TIMESTAMP_FORMAT),
         ]);
+        $this->bellCountCache->invalidateAfterCommit($notification->recipientId);
     }
 
     public function foldIntoUnreadReply(NewNotification $reply, \DateTimeImmutable $since): bool
@@ -60,7 +63,7 @@ final readonly class DbalNotifications implements Notifications
             \sprintf('ntf_reply:%s:%s:%s', $reply->organizationId->toString(), $reply->recipientId->toString(), $messageId),
         ]);
 
-        return 0 < $this->connection->executeStatement(self::FOLD, [
+        $isFolded = 0 < $this->connection->executeStatement(self::FOLD, [
             $reply->actorId->toString(),
             self::jsonOf($reply->data),
             $reply->createdAt->format(self::TIMESTAMP_FORMAT),
@@ -70,6 +73,11 @@ final readonly class DbalNotifications implements Notifications
             $messageId,
             $since->format(self::TIMESTAMP_FORMAT),
         ]);
+        if ($isFolded) {
+            $this->bellCountCache->invalidateAfterCommit($reply->recipientId);
+        }
+
+        return $isFolded;
     }
 
     private function requireTransaction(): void

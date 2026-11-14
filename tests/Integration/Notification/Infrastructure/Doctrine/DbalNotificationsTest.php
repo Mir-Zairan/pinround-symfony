@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Notification\Infrastructure\Doctrine;
 
 use App\Notification\Application\Notify\NewNotification;
 use App\Notification\Application\Notify\NotificationKind;
+use App\Notification\Infrastructure\Cache\BellCountCache;
 use App\Notification\Infrastructure\Doctrine\DbalNotifications;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -42,6 +43,7 @@ final class DbalNotificationsTest extends KernelTestCase
         $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->ticketRows()->addOf(self::ACME_FOODS, self::TICKET, self::SHOP_PROJECT, self::LENA);
         $this->ticketRows()->addOf(self::BETA_BAKERY, self::BETA_TICKET, self::BETA_PROJECT, self::LENA);
+        self::getContainer()->get('cache.bell_count')->clear();
     }
 
     protected function tearDown(): void
@@ -121,6 +123,54 @@ final class DbalNotificationsTest extends KernelTestCase
 
         self::assertFalse($isFolded);
         self::assertSame($rowsBefore, $this->rowsOf(self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function aCommittedNotificationDropsTheRecipientsCachedBellCountAndLeavesOthers(): void
+    {
+        self::assertSame(1, $this->cachedBellCountOf(self::OMAR, 1));
+        self::assertSame(1, $this->cachedBellCountOf(self::MIA, 1));
+        self::assertSame(1, $this->cachedBellCountOf(self::OMAR, 2), 'The count was not read from the cache.');
+
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::FIRST_REPLY_AT)));
+
+        self::assertSame(2, $this->cachedBellCountOf(self::OMAR, 2));
+        self::assertSame(1, $this->cachedBellCountOf(self::MIA, 2));
+    }
+
+    #[Test]
+    public function aRolledBackNotificationKeepsTheCachedBellCount(): void
+    {
+        self::assertSame(1, $this->cachedBellCountOf(self::OMAR, 1));
+
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, fn () => $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::FIRST_REPLY_AT)));
+
+        self::assertSame(1, $this->cachedBellCountOf(self::OMAR, 2));
+    }
+
+    #[Test]
+    public function aFoldDropsTheRecipientsCachedBellCount(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::FIRST_REPLY_AT)));
+        self::assertSame(1, $this->cachedBellCountOf(self::OMAR, 1));
+
+        $second = $this->reply(self::OMAR, self::MESSAGE, self::MIA, '2027-03-15 10:02:00 UTC');
+        $isFolded = $this->transactions()->committedAs(self::ACME_FOODS, fn (): bool => $this->notifications()->foldIntoUnreadReply($second, new \DateTimeImmutable(self::FIRST_REPLY_AT)));
+
+        self::assertTrue($isFolded);
+        self::assertSame(2, $this->cachedBellCountOf(self::OMAR, 2));
+    }
+
+    #[Test]
+    public function aFoldThatFindsNoReplyKeepsTheCachedBellCount(): void
+    {
+        self::assertSame(1, $this->cachedBellCountOf(self::OMAR, 1));
+
+        $second = $this->reply(self::OMAR, self::MESSAGE, self::MIA, '2027-03-15 10:02:00 UTC');
+        $isFolded = $this->transactions()->committedAs(self::ACME_FOODS, fn (): bool => $this->notifications()->foldIntoUnreadReply($second, new \DateTimeImmutable(self::FIRST_REPLY_AT)));
+
+        self::assertFalse($isFolded);
+        self::assertSame(1, $this->cachedBellCountOf(self::OMAR, 2));
     }
 
     #[Test]
@@ -209,7 +259,20 @@ final class DbalNotificationsTest extends KernelTestCase
 
     private function notifications(): DbalNotifications
     {
-        return new DbalNotifications($this->connection());
+        return new DbalNotifications($this->connection(), $this->bellCountCache());
+    }
+
+    /**
+     * The person's bell count as the cache answers it in Acme Foods: what it kept, or $freshCount when it kept none.
+     */
+    private function cachedBellCountOf(string $userId, int $freshCount): int
+    {
+        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): int => $this->bellCountCache()->remember(new UserId($userId), static fn (): int => $freshCount));
+    }
+
+    private function bellCountCache(): BellCountCache
+    {
+        return self::getContainer()->get(BellCountCache::class);
     }
 
     private function connection(): Connection
