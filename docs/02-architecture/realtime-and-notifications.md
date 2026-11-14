@@ -106,10 +106,13 @@ The actor never notifies themselves. Muted tickets are skipped. For restricted t
 
 ## The bell
 
-- The badge shows the number of open items: pings plus notifications in the bell column above that are not cleared or read.
-- The popover shows groups (person + ticket), each with "Done" and "Open". "Open" goes to the ticket and marks the group read.
+- The badge counts the person's open bell rows in `ntf_notification`: of a bell kind, delivered (`deliver_after` empty or past), not done, with a sender and a ticket the person may still see. A read row stays counted until it is done. The badge shows "99+" above 99; a screen reader hears "Pings, N open".
+- The popover is a lazy Turbo frame, `GET /bell`, loaded again on every open. It shows groups (sender + ticket), largest first, each with "Done" and "Open".
+- `POST /bell/{senderId}/{ticketId}/done` marks the group's open rows done. A Turbo form gets one Turbo Stream answer that replaces the badge (`#bell-badge`), the popover body and shows the toast "Marked done."; a plain form is sent Home with that toast.
+- `POST /bell/{senderId}/{ticketId}/open` marks the group read and goes to the ticket, whose page checks again that the person may see it.
+- All three routes need ORG_VIEW (OrganizationVoter) and take the person from the session, never from the URL. A malformed id, a group with nothing open, and another person's group are not found (404) and change nothing; a missing or wrong CSRF token is refused (422). Proven by `BellTest`.
 - Home shows the top 3 groups in "Pings for you" and "Show N more", which opens the bell.
-- Counts are read from `ntf_ping` and `ntf_notification` with indexes that start with `(organization_id, user_id)`. They are cached per user in Valkey for 60 s and invalidated on every change for that user.
+- The count is read from `ntf_notification` with indexes that start with `(organization_id, user_id)`. It is cached per user for 60 s (`cache.bell_count`) and invalidated after the commit of every change for that user.
 
 ## Email digest
 

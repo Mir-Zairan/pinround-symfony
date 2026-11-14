@@ -52,10 +52,12 @@ final class BellTest extends WebTestCase
     private string $shop2;
     private string $lenaToMia;
 
+    /** @var array<string, string> the seeded notifications' ids by what they are */
+    private array $rowIds = [];
+
     protected function tearDown(): void
     {
-        self::getContainer()->get(TenantContext::class)->reset();
-        new TicketRows($this->migrator(), self::getContainer()->get(TenantContext::class))->removeAllOf(...$this->createdOrganizationIds);
+        $this->ticketRows()->removeAllOf(...$this->createdOrganizationIds);
         $this->removeUsersAndOrganizations();
     }
 
@@ -101,12 +103,14 @@ final class BellTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertResponseHeaderSame('Content-Type', self::STREAM_MEDIA_TYPE.'; charset=UTF-8');
         $stream = new Crawler((string) $client->getResponse()->getContent());
-        self::assertSame('1 open', $stream->filter('turbo-stream[target="bell-badge"] template')->text());
+        $badge = new Crawler($stream->filter('turbo-stream[target="bell-badge"] template')->html());
+        self::assertSame('1', $badge->filter('#bell-badge .bell__badge')->text());
+        self::assertSame('1 open', $badge->filter('#bell-badge .visually-hidden')->text());
         $popover = new Crawler($stream->filter('turbo-stream[target="bell-popover-body"] template')->html());
         self::assertSame('Pings · 1 open', $popover->filter('#bell-popover-title')->text());
         self::assertSame(['Mia asked you · 3 h ago'], $popover->filter('.ping-card__line')->each(static fn (Crawler $line): string => $line->text()));
         self::assertStringContainsString('data-toast-message-value="Marked done."', $stream->filter('turbo-stream[target="toast-region"]')->html());
-        self::assertSame($this->doneNow($rowsBefore, 'Lena to Omar on SHOP-1 at 50 min', 'Lena to Omar on SHOP-1 at 20 min', 'Lena to Omar on SHOP-1 at 5 min'), $this->rows());
+        self::assertSame(self::marked($rowsBefore, 'done', 'Lena to Omar on SHOP-1 at 50 min', 'Lena to Omar on SHOP-1 at 20 min', 'Lena to Omar on SHOP-1 at 5 min'), $this->rows());
     }
 
     #[Test]
@@ -118,7 +122,7 @@ final class BellTest extends WebTestCase
         $home = $client->request('GET', '/');
         self::assertResponseStatusCodeSame(200);
         self::assertSame('4', $home->filter('header .bell__trigger .bell__badge')->text());
-        self::assertSame('4 open', $home->filter('header #bell-badge')->text());
+        self::assertSame('4 open', $home->filter('header #bell-badge .visually-hidden')->text());
 
         $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
 
@@ -138,11 +142,7 @@ final class BellTest extends WebTestCase
         $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'open'), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
 
         self::assertResponseRedirects('/t/SHOP-1', 303);
-        $expected = $rowsBefore;
-        foreach (['Lena to Omar on SHOP-1 at 50 min', 'Lena to Omar on SHOP-1 at 20 min', 'Lena to Omar on SHOP-1 at 5 min'] as $row) {
-            $expected[$row]['read'] = true;
-        }
-        self::assertSame($expected, $this->rows());
+        self::assertSame(self::marked($rowsBefore, 'read', 'Lena to Omar on SHOP-1 at 50 min', 'Lena to Omar on SHOP-1 at 20 min', 'Lena to Omar on SHOP-1 at 5 min'), $this->rows());
     }
 
     #[Test]
@@ -173,6 +173,7 @@ final class BellTest extends WebTestCase
         $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
 
         self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(BellController::GROUP_NOT_FOUND, (string) $client->getResponse()->getContent());
         self::assertSame($rowsAfterFirstDone, $this->rows());
     }
 
@@ -185,6 +186,7 @@ final class BellTest extends WebTestCase
         foreach (['/bell/not-an-id/'.$this->shop1.'/done', '/bell/'.$this->lena->id()->toString().'/not-an-id/open'] as $url) {
             $client->request('POST', $url, [BellController::CSRF_FIELD => $this->csrfToken($client)]);
             self::assertResponseStatusCodeSame(404, $url);
+            self::assertStringContainsString(BellController::GROUP_NOT_FOUND, (string) $client->getResponse()->getContent(), $url);
         }
 
         self::assertSame($rowsBefore, $this->rows());
@@ -236,14 +238,14 @@ final class BellTest extends WebTestCase
     }
 
     /**
-     * Omar logged in on a client that keeps its kernel, with the clock two hours behind the real time, so an age
-     * counted from the wall clock differs, yet within the session limits, whose own timestamps come from PHP's time().
+     * Omar logged in on a client that keeps its kernel, with the clock frozen on a day before today, so an age counted
+     * from the wall clock comes out in days, not minutes.
      */
     private function omarsClient(): KernelBrowser
     {
         $client = self::createClient([], ['HTTPS' => 'on', 'REMOTE_ADDR' => self::randomIp()]);
         $client->disableReboot();
-        $this->clock = new MockClock(new \DateTimeImmutable('@'.(time() - 7200)));
+        $this->clock = new MockClock(new \DateTimeImmutable('2026-11-05 12:00:00 UTC'));
         self::getContainer()->set('clock', $this->clock);
         $this->omar = $this->createUserWithPassword('Omar Haddad');
         $this->acmeFoods = new OrganizationId($this->createdOrganizationIds[0]);
@@ -268,7 +270,7 @@ final class BellTest extends WebTestCase
         $this->shop1 = Uuid::v7()->toRfc4122();
         $this->shop2 = Uuid::v7()->toRfc4122();
         $projectId = Uuid::v7()->toRfc4122();
-        $ticketRows = new TicketRows($this->migrator(), self::getContainer()->get(TenantContext::class));
+        $ticketRows = $this->ticketRows();
         $ticketRows->addOf($this->acmeFoods->toString(), $this->shop1, $projectId, $this->lena->id()->toString(), 1);
         $ticketRows->addOf($this->acmeFoods->toString(), $this->shop2, $projectId, $this->lena->id()->toString(), 2);
 
@@ -302,13 +304,23 @@ final class BellTest extends WebTestCase
         });
     }
 
-    /** @var array<string, string> the seeded notifications' ids by what they are */
-    private array $rowIds = [];
+    /**
+     * TicketRows switches the tenant, which the switch guard refuses while the entity manager holds the test's users or
+     * the last request left its tenant set; the users stay usable detached, as only their ids and names are read.
+     */
+    private function ticketRows(): TicketRows
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->reset();
+        self::getContainer()->get('doctrine.orm.default_entity_manager')->clear();
+
+        return new TicketRows($this->migrator(), $tenantContext);
+    }
 
     /**
      * @param array<string, string> $ids what it is about, as pingId
      *
-     * @return array<string, mixed>
+     * @return array{id: string}&array<string, string>
      */
     private function notification(User $sender, User $recipient, string $ticketId, string $kind, int $secondsAgo, array $ids = []): array
     {
@@ -357,16 +369,20 @@ final class BellTest extends WebTestCase
 
     /**
      * @param array<string, array{read: bool, done: bool}> $rows
+     * @param 'read'|'done'                                $state
      *
-     * @return array<string, array{read: bool, done: bool}>
+     * @return array<string, array{read: bool, done: bool}> the rows, with the named ones now also in that state
      */
-    private function doneNow(array $rows, string ...$names): array
+    private static function marked(array $rows, string $state, string ...$names): array
     {
-        foreach ($names as $name) {
-            $rows[$name]['done'] = true;
+        self::assertSame([], array_values(array_diff($names, array_keys($rows))), 'Every named row is seeded.');
+        $marked = [];
+        foreach ($rows as $name => $row) {
+            $isNamed = \in_array($name, $names, true);
+            $marked[$name] = ['read' => $row['read'] || ($isNamed && 'read' === $state), 'done' => $row['done'] || ($isNamed && 'done' === $state)];
         }
 
-        return $rows;
+        return $marked;
     }
 
     private function groupUrl(User $sender, string $ticketId, string $action): string
