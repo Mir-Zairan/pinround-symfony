@@ -396,7 +396,7 @@ final class QuestionJourneyTest extends WebTestCase
         $frame = $this->threadFrame();
 
         self::assertSame([false, false, 'false'], $this->askChipStateIn($frame));
-        self::assertSame('true', $frame->filter('.thread__content')->attr('data-thread-composer-may-ask-value'));
+        self::assertSame('true', $frame->filter('.thread__content')->attr('data-ask-choices-may-ask-value'));
         $askChip = $frame->filter('.thread__kinds [data-thread-composer-target="askChip"]');
         self::assertSame([self::ASK_PATH, 'What do you need to know?'], [$askChip->attr('data-form-action'), $askChip->attr('data-placeholder')]);
         $commentChip = $frame->filter('.thread__kinds [data-thread-composer-target="commentChip"]');
@@ -433,7 +433,7 @@ final class QuestionJourneyTest extends WebTestCase
         $frame = $this->threadFrame();
 
         self::assertSame([true, false, 'false'], $this->askChipStateIn($frame));
-        self::assertSame('false', $frame->filter('.thread__content')->attr('data-thread-composer-may-ask-value'));
+        self::assertSame('false', $frame->filter('.thread__content')->attr('data-ask-choices-may-ask-value'));
         self::assertCount(0, $frame->filter('.thread__people, input[name="'.ThreadController::ASKED_USER_FIELD.'"]'));
     }
 
@@ -451,7 +451,7 @@ final class QuestionJourneyTest extends WebTestCase
         $frame = $this->threadFrame();
 
         self::assertSame([true, false, 'true'], $this->askChipStateIn($frame));
-        self::assertSame('false', $frame->filter('.thread__content')->attr('data-thread-composer-may-ask-value'));
+        self::assertSame('false', $frame->filter('.thread__content')->attr('data-ask-choices-may-ask-value'));
         self::assertCount(0, $frame->filter('.thread__people'));
         self::assertSame(['Omar · 1 min ago · question to Lena', 'Waiting on Lena', true], $this->questionShownIn($frame, $questionId));
         self::assertCount(0, $frame->filter('.thread__answer'));
@@ -505,7 +505,7 @@ final class QuestionJourneyTest extends WebTestCase
     {
         $kindChips = $frame->filter('.thread__kinds button.chip');
         self::assertSame(['Comment', 'Ask a question'], $kindChips->each(static fn (Crawler $chip): string => trim($chip->text())));
-        $waitNote = $frame->filter('[data-thread-composer-target="waitNote"]');
+        $waitNote = $frame->filter('[data-ask-choices-target="waitNote"]');
         $isWaitNoteShown = 1 === $waitNote->count() && null === $waitNote->attr('hidden');
         if ($isWaitNoteShown) {
             self::assertSame('Wait for the open question first.', trim($waitNote->text()));

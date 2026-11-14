@@ -151,13 +151,14 @@ final class TicketThreadTest extends WebTestCase
             [['Comment', 'true', false], ['Ask a question', 'false', true]],
             $thread->filter('.thread__kinds button.chip[type="button"]')->each(static fn (Crawler $chip): array => [trim($chip->text()), $chip->attr('aria-pressed'), null !== $chip->attr('disabled')]),
         );
-        self::assertSame('thread-composer', $thread->filter('.thread__content')->attr('data-controller'));
+        self::assertSame('thread-composer ask-choices', $thread->filter('.thread__content')->attr('data-controller'));
         self::assertSame(
             'turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer',
             $thread->filter('.thread__content')->attr('data-action'),
             'Focus goes back to the composer or the changed message after a thread form.',
         );
-        self::assertCount(1, $thread->filter('.thread__content #'.Thread::MESSAGES_ID.'[data-thread-composer-target="messages"]'));
+        self::assertCount(1, $thread->filter('.thread__content #'.Thread::MESSAGES_ID.'[data-thread-composer-target="messages"][data-ask-choices-target="messages"]'));
+        self::assertCount(1, $thread->filter('form.thread__composer .thread__ask-choices[data-ask-choices-target="choices"]'), 'ask-choices replaces the composer\'s people after a live reload.');
         self::assertNotNull($thread->filter('form.thread__composer textarea[data-thread-composer-target="body"]')->attr('required'));
         self::assertSame('Comment', trim($thread->filter('form.thread__composer button[data-thread-composer-target="submit"]')->text()));
     }

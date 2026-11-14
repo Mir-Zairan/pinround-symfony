@@ -49,6 +49,7 @@ final class MessageVoter extends DenyByDefaultVoter
         if (null === $userId || null === $organizationId || !$subject->ticket->organizationId->equals($organizationId)) {
             return false;
         }
+        // Thread::resolvableCommentsAmong picks its candidates by this same author-or-lead rule; change both together.
         if (!$userId->equals($subject->authorId) && !(null !== $subject->teamLeadId && $userId->equals($subject->teamLeadId))) {
             return false;
         }

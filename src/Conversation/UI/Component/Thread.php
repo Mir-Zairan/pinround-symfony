@@ -186,6 +186,8 @@ final class Thread
             static fn (MessageView $message): bool => MessageView::KIND_COMMENT === $message->kind && !$message->isRemoved && !$message->isResolved
                 && ($isLead || $viewerId->equals($message->authorId)),
         ));
+        // A deny-by-default backstop for the whole list: the page's own visibility check already covers it, and the
+        // Resolve action itself is guarded by ResolveComment's check.
         if ([] === $candidates || !$this->authorizationChecker->isGranted(
             ConversationPermission::RESOLVE,
             new MessageOnTicket($ticket->visibilityFacts, $candidates[0]->authorId, $leadId),
