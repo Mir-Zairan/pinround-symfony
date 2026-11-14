@@ -18,6 +18,18 @@
   box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
 }
 
+/* Under the bell, right: 0 would push the popover past the left edge, as the avatar sits right of the bell. Here it
+   hangs from the header (.site-header__inner) instead. */
+@media (max-width: 40em) {
+  .bell {
+    position: static;
+  }
+
+  .bell__popover {
+    right: 16px;
+  }
+}
+
 .bell__popover[hidden] {
   display: none;
 }
