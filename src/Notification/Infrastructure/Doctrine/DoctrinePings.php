@@ -63,6 +63,26 @@ final readonly class DoctrinePings implements Pings
     }
 
     /**
+     * By ntf_ping's primary key; the tenant filter supplies the organization. FOR SHARE, and PostgreSQL checks the
+     * WHERE again on a row it waited to lock, so a ping cleared by the transaction it waited for gives null.
+     */
+    public function lockedOpenPing(PingId $id): ?Ping
+    {
+        $this->requireTransaction('Locking a ping needs an open transaction.');
+
+        /** @var Ping|null $openPing */
+        $openPing = $this->entityManager->createQuery(
+            'SELECT p FROM '.Ping::class.' p WHERE p.id = :id AND p.clearedAt IS NULL',
+        )
+            ->setParameter('id', $id->toString())
+            ->setLockMode(LockMode::PESSIMISTIC_READ)
+            ->setHint(Query::HINT_REFRESH, true)
+            ->getOneOrNullResult();
+
+        return $openPing;
+    }
+
+    /**
      * Outside a transaction no tenant is set, so row-level security would refuse the row only at flush, and a lock
      * would end with its own statement.
      */

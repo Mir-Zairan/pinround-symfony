@@ -11,6 +11,7 @@ use App\Notification\Api\PingRecipientCannotView;
 use App\Notification\Api\PingSlot;
 use App\Notification\Api\PingsPaused;
 use App\Notification\Api\PingToYourself;
+use App\Notification\Application\Notify\DeliveryTimes;
 use App\Notification\Domain\Ping;
 use App\Notification\Domain\PingId;
 use App\Notification\Domain\Pings;
@@ -24,7 +25,8 @@ use App\Ticketing\Api\TicketVisibilities;
 
 /**
  * The checks run cheapest first and every refusal comes before the ping window is taken, so a refused ping never uses
- * up the sender's slot. The ping shows at once: quiet hours do not hold it yet.
+ * up the sender's slot. During the recipient's quiet hours the ping is stored with the time they end and PingSent
+ * carries that time, so the bell shows it only then; otherwise both say now.
  */
 final readonly class SendPing implements PingCommands
 {
@@ -36,6 +38,7 @@ final readonly class SendPing implements PingCommands
         private PingWindow $pingWindow,
         private Pings $pings,
         private PingEvents $pingEvents,
+        private DeliveryTimes $deliveryTimes,
     ) {
     }
 
@@ -58,13 +61,14 @@ final readonly class SendPing implements PingCommands
             throw new PingRecipientCannotView();
         }
 
+        $deliverAfter = $this->deliveryTimes->deliverAfterFor($organizationId, $toUserId, $at);
         $pingId = $this->pings->nextIdentity();
         $limitHours = $this->pingSettingsQueries->pingLimitHoursOf($organizationId);
         $this->pingWindow->take($organizationId, $fromUserId, $toUserId, $ticket->id, $pingId, $limitHours, $at);
 
         try {
-            $this->pings->add(Ping::send($pingId, $organizationId, $ticket->id, $fromUserId, $toUserId, $body, null, $at));
-            $this->pingEvents->publish(new PingSent($organizationId->toString(), $ticket->id->toString(), $pingId->toString(), $fromUserId->toString(), $toUserId->toString(), $fromUserId->toString(), $at));
+            $this->pings->add(Ping::send($pingId, $organizationId, $ticket->id, $fromUserId, $toUserId, $body, $deliverAfter, $at));
+            $this->pingEvents->publish(new PingSent($organizationId->toString(), $ticket->id->toString(), $pingId->toString(), $fromUserId->toString(), $toUserId->toString(), $fromUserId->toString(), $deliverAfter ?? $at));
         } catch (\Throwable $failure) {
             try {
                 $this->pingWindow->release($organizationId, $fromUserId, $toUserId, $ticket->id, $pingId);
