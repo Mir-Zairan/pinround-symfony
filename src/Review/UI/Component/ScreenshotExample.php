@@ -24,8 +24,21 @@ final class ScreenshotExample
         .'<rect x="40" y="180" width="440" height="40" rx="8" fill="#ffffff"/>'
         .'<rect x="560" y="110" width="200" height="260" rx="12" fill="#ffffff"/></svg>';
 
+    /** An editable example starts with no pins, so a person can place them with the pin-placer controller. */
+    public bool $isEditable = false;
+
     public function view(): ScreenshotView
     {
+        if ($this->isEditable) {
+            return new ScreenshotView(
+                'gallery-editable-screenshot',
+                'data:image/svg+xml;base64,'.base64_encode(self::PICTURE),
+                800,
+                450,
+                'The Acme Foods checkout page of project SHOP, open for pins',
+            );
+        }
+
         return new ScreenshotView(
             'gallery-screenshot',
             'data:image/svg+xml;base64,'.base64_encode(self::PICTURE),
@@ -42,8 +55,8 @@ final class ScreenshotExample
         );
     }
 
-    public function selectedNumber(): int
+    public function selectedNumber(): ?int
     {
-        return 2;
+        return $this->isEditable ? null : 2;
     }
 }
