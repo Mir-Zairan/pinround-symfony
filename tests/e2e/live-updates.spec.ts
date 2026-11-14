@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page, type Request, type Response } from '@playwright/test';
+import { errors, expect, test, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
@@ -10,7 +10,7 @@ const MESSAGE_REMOVED = 'Message removed.';
 // phase-04-conversation-and-pings.md, Definition of done: a change in one browser shows in the other within 3 s.
 const SHOWS_WITHIN_MS = 3000;
 // RefreshTicketPagesHandler::WINDOW_MILLISECONDS: a change within 2 s of the last signal (the ticket's own creation counts) is
-// try runs one window later, so it may show that much later.
+// sent by a try one window later, so it may show that much later.
 const COALESCED_SHOWS_WITHIN_MS = 2000 + SHOWS_WITHIN_MS;
 const TOKEN_PATH = '/realtime/token';
 const HUB_PATH = '/.well-known/mercure';
@@ -79,19 +79,54 @@ async function turboVisit(page: Page, path: string): Promise<void> {
 }
 
 /**
- * Omar comments, opens the edit form of his comment and types in it, then clicks away: the open edit holds the thread.
- * It first waits until the signal of his own comment has been fetched and the thread it reloaded is shown, so the next
- * signal fetch is of someone else's change.
+ * Waits for the one signal the ticket's creation sends, which may reach Omar's page only after it opened, and resolves
+ * once that page has fetched and shown it, or once SHOWS_WITHIN_MS has passed with none, as the stream opened after it.
+ * Started as soon as the ticket is made, so the wait is never shorter than that bound. Every later signal then comes
+ * from a change the test makes.
  */
-async function holdThreadWithOpenEdit(page: Page, key: string, draft: string): Promise<{ message: Locator; editField: Locator }> {
-  const ownText = `A note to edit later ${randomUUID().slice(0, 8)}`;
+async function settleCreationSignal(page: Page, key: string): Promise<void> {
+  let creationFetch: Request;
+  try {
+    creationFetch = await page.waitForRequest((sent) => isPageFetch(sent, key), { timeout: SHOWS_WITHIN_MS });
+  } catch (error) {
+    if (error instanceof errors.TimeoutError) {
+      return;
+    }
+    throw error;
+  }
+  const response = await creationFetch.response();
+  await response?.finished();
+  await threadLoaded(page);
+  await nextTaskOf(page);
+}
+
+/** Lena makes a ticket for Omar, who opens its thread once no signal of the creation is left to come. */
+async function openNewTicketAsOmar(browser: Browser, title: string): Promise<{ key: string; omar: { context: BrowserContext; page: Page } }> {
+  const key = await makeTicketForOmar(browser, title);
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  const creationSignalSettled = settleCreationSignal(omar.page, key);
+  await openFollowedThread(omar.page, key);
+  await creationSignalSettled;
+  return { key, omar };
+}
+
+/**
+ * Omar comments and waits until the signal of his comment has been fetched and the thread it reloaded is shown, so the
+ * next signal fetch is of someone else's change. Returns his message.
+ */
+async function postOwnCommentAndSettle(page: Page, key: string, text: string): Promise<Locator> {
   const ownRefresh = page.waitForResponse((response) => pathOf(response.request()) === `/t/${key}/thread`);
   const ownSignalFetch = pageFetchAfterNow(page, key);
-  await postComment(page, ownText);
+  await postComment(page, text);
   await ownRefresh;
   expect((await ownSignalFetch).status()).toBe(200);
   await threadLoaded(page);
-  const message = messageWithText(page, ownText);
+  return messageWithText(page, text);
+}
+
+/** Omar comments, opens the edit form of his comment and types in it, then clicks away: the open edit holds the thread. */
+async function holdThreadWithOpenEdit(page: Page, key: string, draft: string): Promise<{ message: Locator; editField: Locator }> {
+  const message = await postOwnCommentAndSettle(page, key, `A note to edit later ${randomUUID().slice(0, 8)}`);
   await message.getByText('Edit', { exact: true }).click();
   const editField = message.getByLabel('Edit your message');
   await editField.fill(draft);
@@ -102,7 +137,7 @@ async function holdThreadWithOpenEdit(page: Page, key: string, draft: string): P
 
 /** The answer to the next fetch of the ticket page that starts from now on, which only a signal sends. */
 async function pageFetchAfterNow(page: Page, key: string): Promise<Response> {
-  const request = await page.waitForRequest((sent) => pathOf(sent) === `/t/${key}` && sent.resourceType() === 'fetch');
+  const request = await page.waitForRequest((sent) => isPageFetch(sent, key));
   const response = await request.response();
   if (response === null) {
     throw new Error(`The fetch of /t/${key} got no answer.`);
@@ -115,9 +150,13 @@ async function threadLoaded(page: Page): Promise<void> {
   await threadFrame(page).evaluate((frame) => (frame as HTMLElement & { loaded: Promise<void> }).loaded);
 }
 
-/** The fetches of the ticket page in requests, which only a signal sends. */
+/** Whether request is a fetch of the ticket page, which only a signal sends. */
+function isPageFetch(request: Request, key: string): boolean {
+  return pathOf(request) === `/t/${key}` && request.resourceType() === 'fetch';
+}
+
 function pageFetches(requests: Request[], key: string): Request[] {
-  return requests.filter((request) => pathOf(request) === `/t/${key}` && request.resourceType() === 'fetch');
+  return requests.filter((request) => isPageFetch(request, key));
 }
 
 function threadLoads(requests: Request[], key: string): Request[] {
@@ -127,6 +166,34 @@ function threadLoads(requests: Request[], key: string): Request[] {
 /** Resolves once the page has run a task queued after now, so the script's work on an answer already read is done. */
 async function nextTaskOf(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+}
+
+type ThreadRenderPause = Window & { resumeThreadRender?: () => void };
+
+/**
+ * Pauses the next render of the thread's frame through Turbo's own pause (turbo:before-frame-render's resume), after
+ * the frame's own listeners, live-updates' among them, have run.
+ */
+async function pauseNextThreadRender(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const pausing = (event: Event) => {
+      if ((event.target as Element).id !== 'ticket-thread') {
+        return;
+      }
+      document.removeEventListener('turbo:before-frame-render', pausing);
+      event.preventDefault();
+      (window as ThreadRenderPause).resumeThreadRender = (event as CustomEvent<{ resume: () => void }>).detail.resume;
+    };
+    document.addEventListener('turbo:before-frame-render', pausing);
+  });
+}
+
+async function threadRenderPaused(page: Page, timeout: number): Promise<void> {
+  await page.waitForFunction(() => (window as ThreadRenderPause).resumeThreadRender !== undefined, undefined, { timeout });
+}
+
+async function resumeThreadRender(page: Page): Promise<void> {
+  await page.evaluate(() => (window as ThreadRenderPause).resumeThreadRender?.());
 }
 
 function lenasPeopleRow(page: Page) {
@@ -216,10 +283,8 @@ test.describe('two people on one ticket', () => {
   });
 
   test("an edit Omar left open keeps its text: the thread waits until he closes it, then shows Lena's comment", async ({ browser }) => {
-    const key = await makeTicketForOmar(browser, `Gift wrap price shows twice ${randomUUID().slice(0, 8)}`);
-    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const { key, omar } = await openNewTicketAsOmar(browser, `Gift wrap price shows twice ${randomUUID().slice(0, 8)}`);
     const lena = await openAs(browser, LENA_STORAGE_STATE);
-    await openFollowedThread(omar.page, key);
     await openThread(lena.page, key);
     const editDraft = `Gift wrap adds its price twice ${randomUUID().slice(0, 8)}`;
     const reply = `Only on the basket page ${randomUUID().slice(0, 8)}`;
@@ -252,10 +317,8 @@ test.describe('two people on one ticket', () => {
   });
 
   test("the ping sheet Omar has open keeps its note: People waits until he closes it, then shows Lena's move", async ({ browser }) => {
-    const key = await makeTicketForOmar(browser, `Store picker forgets the town ${randomUUID().slice(0, 8)}`);
-    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const { key, omar } = await openNewTicketAsOmar(browser, `Store picker forgets the town ${randomUUID().slice(0, 8)}`);
     const lena = await openAs(browser, LENA_STORAGE_STATE);
-    await openFollowedThread(omar.page, key);
     await openThread(lena.page, key);
     await markThisLoad(omar.page);
     const note = `Could you check the town list ${randomUUID().slice(0, 8)}`;
@@ -292,14 +355,56 @@ test.describe('two people on one ticket', () => {
     await lena.context.close();
     await omar.context.close();
   });
+
+  test("focus Omar moves elsewhere while the thread renders Lena's comment stays where he moved it", async ({ browser }) => {
+    const { key, omar } = await openNewTicketAsOmar(browser, `Basket undo restores the wrong item ${randomUUID().slice(0, 8)}`);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openThread(lena.page, key);
+    const ownMessage = await postOwnCommentAndSettle(omar.page, key, `Undo brings back the last item ${randomUUID().slice(0, 8)}`);
+    const removeButton = ownMessage.getByRole('button', { name: 'Remove' });
+    await removeButton.focus();
+    await pauseNextThreadRender(omar.page);
+    const reply = `It brings back the first one ${randomUUID().slice(0, 8)}`;
+
+    await postComment(lena.page, reply);
+    // The reload noted the focused Remove button as its render began; the render now waits.
+    await threadRenderPaused(omar.page, COALESCED_SHOWS_WITHIN_MS);
+    const backLink = omar.page.locator('.ticket__back');
+    await backLink.focus();
+    await resumeThreadRender(omar.page);
+
+    await expect(messageWithText(omar.page, reply)).toHaveCount(1);
+    await threadLoaded(omar.page);
+    await nextTaskOf(omar.page);
+    await expect(backLink).toBeFocused();
+    await expect(removeButton).not.toBeFocused();
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test("a button whose label Lena's move changes does not hand Omar's focus to the button now in its place", async ({ browser }) => {
+    const { key, omar } = await openNewTicketAsOmar(browser, `Basket count skips gift cards ${randomUUID().slice(0, 8)}`);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openThread(lena.page, key);
+    const omarsVerbs = omar.page.locator('#ticket-next-step .next-step-box__verbs').getByRole('button');
+    await expect(omarsVerbs).toHaveText(['Start work']);
+    await omarsVerbs.first().focus();
+
+    await moveFromList(lena.page, 'In progress');
+
+    // The swapped box has a button where Start work was, so a lookup by place alone would focus it.
+    await expect(omarsVerbs.first()).toHaveText('Send to code review', { timeout: COALESCED_SHOWS_WITHIN_MS });
+    await expect(omarsVerbs.first()).not.toBeFocused();
+    expect(await omar.page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await lena.context.close();
+    await omar.context.close();
+  });
 });
 
 test.describe('a refetch that fails', () => {
   test("after Omar's session ended, Lena's comment sends his page to the login page with none of it shown", async ({ browser }) => {
-    const key = await makeTicketForOmar(browser, `Opening hours show the wrong day ${randomUUID().slice(0, 8)}`);
-    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const { key, omar } = await openNewTicketAsOmar(browser, `Opening hours show the wrong day ${randomUUID().slice(0, 8)}`);
     const lena = await openAs(browser, LENA_STORAGE_STATE);
-    await openFollowedThread(omar.page, key);
     await openThread(lena.page, key);
     const reply = `Sunday shows as Monday ${randomUUID().slice(0, 8)}`;
     // The open edit holds the thread, so only the page's fetch, not the frame's, can reach the login page.
