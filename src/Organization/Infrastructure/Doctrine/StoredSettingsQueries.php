@@ -13,10 +13,11 @@ use App\SharedKernel\Domain\OrganizationId;
 interface StoredSettingsQueries
 {
     /**
-     * Extend and no triager when the organization has no settings row (or it is not visible under the current tenant);
+     * Extend, no triager and a ping limit of 4 hours when the organization has no settings row (or it is not visible under the current tenant);
      * each missing key reads as it does through SettingsQueries.
      *
-     * @throws \LogicException           when the stored step policy is not one of StepPolicy's values
+     * @throws \LogicException           when the stored step policy is not one of StepPolicy's values, or the stored ping
+     *                                   limit not one of 1, 4, 8 or 24
      * @throws \InvalidArgumentException when the stored triager is not a user id
      */
     public function settingsOf(OrganizationId $organizationId): StoredSettings;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Organization\Infrastructure\Doctrine;
 
+use App\Organization\Api\PingSettingsQueries;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
 use App\SharedKernel\Application\TenantContext;
@@ -13,14 +14,14 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
- * The organization's settings read at most once per organization and request, in one query that gives the step policy
- * and the triager together: the Team page, the workflow voter and the workflow caches each ask for the step policy, and
- * each ticket visibility check for the triager. The kernel resets it at the start of the next request or message
+ * The organization's settings read at most once per organization and request, in one query that gives the step policy,
+ * the triager and the ping limit together: the Team page, the workflow voter and the workflow caches each ask for the
+ * step policy, each ticket visibility check for the triager, and the ticket page's ping sheets for the ping limit. The kernel resets it at the start of the next request or message
  * (ADR-0008), so a policy change takes effect from the next request on. The tenant is part of the key, because under
  * another tenant row-level security hides the row and the answer is the default. A stored value that
- * StoredSettingsQueries refuses fails both reads, as the one query reads both.
+ * StoredSettingsQueries refuses fails every read, the ping limit's too, as the one query reads them all.
  */
-final class RequestScopedSettingsQueries implements SettingsQueries, ResetInterface
+final class RequestScopedSettingsQueries implements SettingsQueries, PingSettingsQueries, ResetInterface
 {
     /** @var array<string, StoredSettings> by organization id and tenant */
     private array $settingsOfThisRequest = [];
@@ -40,6 +41,11 @@ final class RequestScopedSettingsQueries implements SettingsQueries, ResetInterf
     public function triagerOf(OrganizationId $organizationId): ?UserId
     {
         return $this->settingsOf($organizationId)->triagerId;
+    }
+
+    public function pingLimitHoursOf(OrganizationId $organizationId): int
+    {
+        return $this->settingsOf($organizationId)->pingLimitHours;
     }
 
     public function reset(): void

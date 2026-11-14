@@ -169,12 +169,13 @@ final class DbalSettingsQueriesTest extends KernelTestCase
         $debugData = self::getContainer()->get('doctrine.debug_data_holder');
 
         $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData): StoredSettings {
+            $this->connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{ping_limit_hours}', '8')");
             $debugData->reset();
 
             return $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS));
         });
 
-        self::assertSame([StepPolicy::Locked, self::SARA], [$settings->stepPolicy, $settings->triagerId?->toString()]);
+        self::assertSame([StepPolicy::Locked, self::SARA, 8], [$settings->stepPolicy, $settings->triagerId?->toString(), $settings->pingLimitHours]);
         $selects = array_filter(array_merge(...array_values($debugData->getData())), static fn (array $query): bool => \is_string($query['sql']) && str_contains($query['sql'], 'org_settings'));
         self::assertCount(1, $selects);
     }
@@ -186,7 +187,7 @@ final class DbalSettingsQueriesTest extends KernelTestCase
 
         $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): StoredSettings => $this->queries()->settingsOf(new OrganizationId(self::BETA_BAKERY)));
 
-        self::assertSame([StepPolicy::Extend, null], [$settings->stepPolicy, $settings->triagerId]);
+        self::assertSame([StepPolicy::Extend, null, 4], [$settings->stepPolicy, $settings->triagerId, $settings->pingLimitHours]);
     }
 
     #[Test]
@@ -196,7 +197,20 @@ final class DbalSettingsQueriesTest extends KernelTestCase
 
         $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): StoredSettings => $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS)));
 
-        self::assertSame([StepPolicy::Extend, null], [$settings->stepPolicy, $settings->triagerId]);
+        self::assertSame([StepPolicy::Extend, null, 4], [$settings->stepPolicy, $settings->triagerId, $settings->pingLimitHours]);
+    }
+
+    #[Test]
+    public function anUnknownStoredPingLimitIsRefusedTogether(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('org_settings holds an unknown ping limit.');
+
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): StoredSettings {
+            $this->connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{ping_limit_hours}', '2')");
+
+            return $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS));
+        });
     }
 
     private function triagerAs(string $tenantId, string $askedId): ?UserId

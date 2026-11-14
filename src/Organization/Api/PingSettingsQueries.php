@@ -14,7 +14,9 @@ interface PingSettingsQueries
 {
     /**
      * How many hours a person waits before pinging the same person about the same ticket again (data.ping_limit_hours):
-     * 1, 4, 8 or 24. One query, not cached. 4, the default, when the organization has no settings row (or it is not
+     * 1, 4, 8 or 24. One query, or none: the autowired one keeps the answer, read with the other settings, until the
+     * next request or message; SendPing, which takes the slot in its own transaction, is given the uncached one
+     * (services.yaml). 4, the default, when the organization has no settings row (or it is not
      * visible under the current tenant) or the row has no ping limit.
      *
      * @return 1|4|8|24

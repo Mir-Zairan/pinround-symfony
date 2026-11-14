@@ -20,12 +20,23 @@ final readonly class DbalPingSettingsQueries implements PingSettingsQueries
 
     public function pingLimitHoursOf(OrganizationId $organizationId): int
     {
-        $pingLimitHours = $this->connection->fetchOne(
+        return self::pingLimitHoursFrom($this->connection->fetchOne(
             "SELECT data->>'ping_limit_hours' FROM org_settings WHERE organization_id = ?",
             [$organizationId->toString()],
-        );
+        ));
+    }
 
-        // false: no row; null: no ping_limit_hours key (or a JSON null).
+    /**
+     * The ping limit from what a read of data->>'ping_limit_hours' gave, for every reader of org_settings.
+     *
+     * @param mixed $pingLimitHours false for no row; null for no ping_limit_hours key (or a JSON null)
+     *
+     * @return 1|4|8|24
+     *
+     * @throws \LogicException when the stored ping limit is not one of 1, 4, 8 or 24
+     */
+    public static function pingLimitHoursFrom(mixed $pingLimitHours): int
+    {
         if (false === $pingLimitHours || null === $pingLimitHours) {
             return self::DEFAULT_PING_LIMIT_HOURS;
         }

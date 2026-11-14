@@ -12,7 +12,10 @@ use App\SharedKernel\Domain\UserId;
  */
 final readonly class StoredSettings
 {
-    public function __construct(public StepPolicy $stepPolicy, public ?UserId $triagerId)
+    /**
+     * @param 1|4|8|24 $pingLimitHours
+     */
+    public function __construct(public StepPolicy $stepPolicy, public ?UserId $triagerId, public int $pingLimitHours)
     {
     }
 }

@@ -125,6 +125,11 @@ services:
     App\Workflow\Application\SetRule:
         arguments:
             $settingsQueries: '@App\Organization\Infrastructure\Doctrine\DbalSettingsQueries'
+    # The ping limit comes with the other settings for page reads; SendPing reads it fresh for the slot it takes.
+    App\Organization\Api\PingSettingsQueries: '@App\Organization\Infrastructure\Doctrine\RequestScopedSettingsQueries'
+    App\Notification\Application\Ping\SendPing:
+        arguments:
+            $pingSettingsQueries: '@App\Organization\Infrastructure\Doctrine\DbalPingSettingsQueries'
 
     # Other modules read steps and rules through WorkflowCache (performance-and-scale.md, "Caching").
     App\Workflow\Api\StepQueries: '@App\Workflow\Infrastructure\Cache\CachedStepQueries'
