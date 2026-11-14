@@ -232,7 +232,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `ThreadQueries::openQuestionsTo(UserId): list<QuestionView>`
 - **Commands:** PostComment, AskQuestion, Reply, Answer (a reply that resolves the question), Resolve.
 - **Events:** `CommentPosted`, `QuestionAsked`, `QuestionAnswered`, `CommentResolved`, `ReplyPosted`.
-- **Depends on:** Ticketing Api (visibility check, ticket exists), Insight Api (`TurnProjector::refresh` in the transaction of a question or answer), Identity Api (UI only: the voter's current user, author names).
+- **Depends on:** Ticketing Api (visibility check, ticket exists), Insight Api (`TurnProjector::refresh` in the transaction of a question or answer), Identity Api (the voter's current user; the thread's author names and the viewer's time zone).
 - **How pausing works:** a question does not change the ticket's step. Insight sees `QuestionAsked` and makes the asked person the turn owner. The page shows "Waiting · question to Mia" ([workflow-engine.md](workflow-engine.md#questions-pause-and-resume)).
 
 ### Review (`rvw_`)
