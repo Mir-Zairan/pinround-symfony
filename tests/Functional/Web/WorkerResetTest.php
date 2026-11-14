@@ -9,7 +9,6 @@ use App\Notification\UI\Controller\PingController;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
-use App\SharedKernel\Infrastructure\Http\RecordingCsrfTokenStorage;
 use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
 use App\Tests\Fixtures\Entity\TenantProbe;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
@@ -102,7 +101,6 @@ final class WorkerResetTest extends WebTestCase
         $this->client->request('GET', '/');
         self::assertResponseStatusCodeSame(200);
         $storage = $this->client->getContainer()->get('security.csrf.token_storage');
-        self::assertInstanceOf(RecordingCsrfTokenStorage::class, $storage);
         self::assertTrue($storage->hasStoredToken(), 'the page stored no token, so this test proves nothing');
 
         $this->client->request('GET', '/_test/worker-reset');

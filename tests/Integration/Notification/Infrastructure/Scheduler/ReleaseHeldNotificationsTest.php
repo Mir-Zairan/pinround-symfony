@@ -29,8 +29,8 @@ use Symfony\Component\Mercure\MockHub;
 use Symfony\Component\Mercure\Update;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
-use Symfony\Component\Scheduler\RecurringMessage;
-use Symfony\Component\Scheduler\Schedule;
+use Symfony\Component\Scheduler\Generator\MessageContext;
+use Symfony\Component\Scheduler\Messenger\ServiceCallMessage;
 
 /**
  * The release after quiet hours on 3 Mar 2027 at 09:00 UTC, through the resolver, the real command.bus, async_notify
@@ -115,17 +115,18 @@ final class ReleaseHeldNotificationsTest extends KernelTestCase
     public function theDefaultScheduleRunsTheReleaseEveryFiveMinutesOnce(): void
     {
         $schedule = self::getContainer()->get(DefaultSchedule::class);
-        self::assertInstanceOf(Schedule::class, $schedule);
 
-        $tasks = array_map(
-            static fn (RecurringMessage $task): string => $task->getTrigger().' '.$task->getProvider(),
-            $schedule->getRecurringMessages(),
-        );
+        $releaseTasks = [];
+        foreach ($schedule->getRecurringMessages() as $task) {
+            $context = new MessageContext('default', $task->getId(), $task->getTrigger(), new \DateTimeImmutable(self::NOW));
+            foreach ($task->getMessages($context) as $message) {
+                if ($message instanceof ServiceCallMessage && ReleaseHeldNotifications::class === $message->getServiceId()) {
+                    $releaseTasks[] = $task->getTrigger().' '.$message->getMethod();
+                }
+            }
+        }
 
-        self::assertSame(
-            ['every 5 minutes Symfony\Component\Scheduler\Messenger\ServiceCallMessage (@'.ReleaseHeldNotifications::class.')'],
-            array_values(array_filter($tasks, static fn (string $task): bool => str_contains($task, 'ReleaseHeldNotifications'))),
-        );
+        self::assertSame(['every 5 minutes __invoke'], $releaseTasks);
     }
 
     #[Test]
