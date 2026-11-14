@@ -15,6 +15,7 @@ use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\TransactionRequiredException;
 use PHPUnit\Framework\Attributes\Test;
@@ -22,7 +23,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * DoctrineMessages on the real tables: save() flushes only a message read in the same transaction, as a new one would
- * flush nothing and look saved; lockedOf() locks the row whether or not the transaction loaded the message before.
+ * flush nothing and look saved; lockedOf() locks the row whether or not the transaction loaded the message before;
+ * add() turns only a violation of the open-question key into QuestionAlreadyOpen and lets any other through.
  */
 final class DoctrineMessagesTest extends KernelTestCase
 {
@@ -77,6 +79,32 @@ final class DoctrineMessagesTest extends KernelTestCase
     }
 
     #[Test]
+    public function addingAMessageWithAnIdAlreadyStoredRaisesTheUniqueViolationNotQuestionAlreadyOpen(): void
+    {
+        $failure = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): ?\Throwable {
+            $sameIdAsLenasComment = Message::comment(
+                new MessageId(self::LENAS_COMMENT),
+                new OrganizationId(self::ACME_FOODS),
+                new TicketId(self::TICKET),
+                new UserId(self::LENA),
+                'Added twice.',
+                new \DateTimeImmutable('2027-03-15 10:05:00+00:00'),
+            );
+            try {
+                new DoctrineMessages($this->entityManager())->add($sameIdAsLenasComment);
+            } catch (\Throwable $failure) {
+                return $failure;
+            }
+
+            return null;
+        });
+
+        self::assertInstanceOf(UniqueConstraintViolationException::class, $failure, 'The message was added twice, or the failure was taken for an open question.');
+        self::assertSame('23505', $failure->getSQLState());
+        self::assertSame([[self::LENAS_COMMENT, self::ORIGINAL_BODY]], $this->messageRows());
+    }
+
+    #[Test]
     public function savingAMessageReadInTheTransactionWritesItsChange(): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
@@ -123,7 +151,7 @@ final class DoctrineMessagesTest extends KernelTestCase
     }
 
     #[Test]
-    public function lockingOutsideATransactionIsRefusedBeforeAnyQuery(): void
+    public function lockingOutsideATransactionIsRefused(): void
     {
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         try {
