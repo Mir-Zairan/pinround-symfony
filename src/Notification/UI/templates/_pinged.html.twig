@@ -1,3 +1,4 @@
 {#- A person's Ping button once the viewer pinged them: PingSheet renders it, and a ping's stream answer puts it in
-    the button's place. -#}
-<span id="{{ pingTargetId }}" class="ping-sheet__pinged">Pinged · {{ againIn }}</span>
+    the button's place with isPingedAutofocused, as that answer removes the open sheet and the focus with it; Turbo
+    then focuses it (tabindex="-1": it is not a control). Never autofocused on a page load. -#}
+<span id="{{ pingTargetId }}" class="ping-sheet__pinged" tabindex="-1"{% if isPingedAutofocused|default(false) %} autofocus{% endif %}>Pinged · {{ againIn }}</span>
