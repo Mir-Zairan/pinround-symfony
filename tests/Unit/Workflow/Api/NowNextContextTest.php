@@ -20,10 +20,10 @@ final class NowNextContextTest extends TestCase
      */
     public static function displayNames(): iterable
     {
-        yield 'first and last name' => ['Omar Haddad', 'Omar'];
-        yield 'padded with spaces' => ['  Lena Berg  ', 'Lena'];
+        yield 'first and last name' => ['Omar Lee', 'Omar'];
+        yield 'padded with spaces' => ['  Lena Lee  ', 'Lena'];
         yield 'one word' => ['Mia', 'Mia'];
-        yield 'multibyte first name' => ['Zoë Ångström', 'Zoë'];
+        yield 'multibyte first name' => ['Léna Ångström', 'Léna'];
         yield 'empty' => ['', null];
         yield 'only spaces' => ['   ', null];
     }
@@ -38,7 +38,7 @@ final class NowNextContextTest extends TestCase
     #[Test]
     public function firstNameOfUsesTheSameRuleAndIsNullForSomeoneWithoutAName(): void
     {
-        $context = F::context(names: [F::OMAR => '  Omar Haddad', F::MIA => ' ']);
+        $context = F::context(names: [F::OMAR => '  Omar Lee', F::MIA => ' ']);
 
         self::assertSame('Omar', $context->firstNameOf(F::user(F::OMAR)));
         self::assertNull($context->firstNameOf(F::user(F::MIA)));

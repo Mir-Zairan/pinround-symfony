@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\SharedKernel\Domain\UserId;
+use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TeamMemberLoad;
 use App\Workflow\Api\TicketState;
@@ -66,8 +67,8 @@ final readonly class TicketPeople
         foreach ($rolesByUser as $userKey => $roles) {
             $userId = new UserId($userKey);
             $name = trim($displayNames[$userKey] ?? '');
-            $firstName = explode(' ', $name, 2)[0];
-            if ('' === $name) {
+            $firstName = NowNextContext::firstNameFrom($name);
+            if (null === $firstName) {
                 $name = $firstName = ucfirst(PersonNames::UNKNOWN_PERSON);
             }
             $people[] = new TicketPerson(
