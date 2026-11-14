@@ -25,7 +25,9 @@ use App\Workflow\Api\WorkflowPermission;
  *            reported by someone who is no actor here; or "Team-only Support ticket reported by Mia" (a Viewer of
  *            Support) or "… reported by Omar" (no role in Support). Or a for-everyone ticket of Shop, where Noor has no
  *            role, so only the reporter exception lets her ask or ping: "For-everyone Shop ticket" (reported by someone
- *            who is no actor here) or "For-everyone Shop ticket reported by Noor".
+ *            who is no actor here) or "For-everyone Shop ticket reported by Noor". Or a comment on one of those
+ *            tickets, "<person>'s comment on <ticket>", which carries the lead of the ticket's team (Shop and Mobile:
+ *            Lena; Support: Noor) and none on the ticket with no team.
  * expected:  granted or denied.
  * twoStepProof: optional; decides for a person whose two-step login is on. true: they typed a code in this session 30
  *            minutes ago, within the 1 hour admin pages allow; an int: the code is that many seconds old; 'noCode': no
@@ -72,6 +74,7 @@ $managersOutsideTheTeam = 'Not to managers outside the team.';
 $commentAndReply = '| Comment, reply |';
 $pingAPerson = '| Ping a person | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
 $askAQuestion = '| Ask a question (pauses ticket) | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
+$resolveAComment = '| Resolve a comment | ⚠️ own | ⚠️ own | ✅ any in team | ⚠️ own | ⚠️ own | ⚠️ own |';
 $adminPings = 'An admin with no team role may see every ticket in the org (including team-only ones), comment, ask questions and ping';
 $seeForEveryoneTickets = '| See tickets (visibility "all") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
@@ -319,6 +322,21 @@ return [
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket', 'expected' => 'denied'],
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket reported by Noor', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Omar', 'subject' => 'Omar\'s comment on Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Lena', 'subject' => 'Omar\'s comment on Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Mia', 'subject' => 'Omar\'s comment on Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Sara', 'subject' => 'Omar\'s comment on Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Sara', 'subject' => 'Sara\'s comment on Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Raj', 'subject' => 'Omar\'s comment on Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Raj', 'subject' => 'Raj\'s comment on Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Mia', 'subject' => 'Mia\'s comment on Team-only Support ticket reported by Mia', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Noor', 'subject' => 'Mia\'s comment on Team-only Support ticket reported by Mia', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Lena', 'subject' => 'Mia\'s comment on Team-only Support ticket reported by Mia', 'expected' => 'denied'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Omar', 'subject' => 'Omar\'s comment on Team-only Support ticket reported by Omar', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Noor', 'subject' => 'Noor\'s comment on Team-only ticket with no team', 'expected' => 'granted'],
+    ['source' => $resolveAComment, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Lena', 'subject' => 'Noor\'s comment on Team-only ticket with no team', 'expected' => 'denied'],
+    ['source' => $teamOnlyTickets, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Noor', 'subject' => 'Noor\'s comment on Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => ConversationPermission::RESOLVE, 'actor' => 'Ben', 'subject' => 'Ben\'s comment on Team-only Shop ticket', 'expected' => 'denied'],
 
     ['source' => $teamOnlyTickets, 'attribute' => MutePermission::MUTE, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
     ['source' => $teamOnlyTickets, 'attribute' => MutePermission::MUTE, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],

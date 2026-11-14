@@ -23,4 +23,11 @@ final class ConversationPermission
      * yet is the use case's rule, checked on the locked ticket.
      */
     public const string ASK = 'CONVERSATION_ASK';
+
+    /**
+     * Resolve a comment, which folds it for everyone; the subject is Conversation's UI\Voter\MessageOnTicket, decided
+     * by UI\Voter\MessageVoter. Whoever may see the ticket and wrote the comment, or leads the ticket's team. That the
+     * message is a comment, not removed and not resolved yet is the use case's rule, checked on the locked row.
+     */
+    public const string RESOLVE = 'CONVERSATION_RESOLVE';
 }
