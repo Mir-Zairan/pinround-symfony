@@ -14,7 +14,6 @@ use App\Notification\Application\Notify\NewNotification;
 use App\Notification\Application\Notify\NotificationKind;
 use App\Notification\Application\Notify\Notifications;
 use App\Notification\Application\Notify\NotifyRecipients;
-use App\Notification\Application\Realtime\BellRefreshes;
 use App\Notification\Application\Realtime\RefreshBell;
 use App\Organization\Api\MemberNameQueries;
 use App\SharedKernel\Application\NoMessageBeingHandled;
@@ -24,6 +23,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Unit\Notification\Application\Realtime\BellRefreshesDouble;
 use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\TicketKeyQueries;
 use App\Ticketing\Api\TicketTurnQueries;
@@ -427,20 +427,6 @@ final class OnceOnlyHandlingDouble implements OnceOnlyHandling
         $effect();
 
         return true;
-    }
-}
-
-/**
- * Keeps what NotifyRecipients asks to send; whether a held one goes is MessengerBellRefreshes' call, proved in its test.
- */
-final class BellRefreshesDouble implements BellRefreshes
-{
-    /** @var list<array{RefreshBell, \DateTimeImmutable|null}> */
-    public array $sent = [];
-
-    public function sendOnceCommitted(RefreshBell $refresh, ?\DateTimeImmutable $deliverAfter): void
-    {
-        $this->sent[] = [$refresh, $deliverAfter];
     }
 }
 

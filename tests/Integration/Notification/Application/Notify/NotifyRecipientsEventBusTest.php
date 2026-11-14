@@ -7,6 +7,8 @@ namespace App\Tests\Integration\Notification\Application\Notify;
 use App\Conversation\Api\Event\QuestionAnswered;
 use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\Event\ReplyPosted;
+use App\Notification\Api\Event\PingCleared;
+use App\Notification\Api\Event\PingClearedReason;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Application\Notify\NotifyRecipients;
 use App\Notification\Application\Realtime\RefreshBell;
@@ -28,8 +30,8 @@ use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
  * async_notify the worker would also run the RefreshTicketPages that QueueTicketPagesRefreshHandler queues for each
  * of these events, which publishes to the hub. That handler also keeps a missing tag from throwing, so only the
  * missing row shows it. Each row also sends one RefreshBell to async_notify, held by its stamp until the delivery's
- * event.bus transaction commits, and none for a retried delivery or a ping held past the frozen clock. Everything
- * commits, so tearDown removes the rows.
+ * event.bus transaction commits, and none for a retried delivery or a ping held past the frozen clock; a cleared ping
+ * writes no row and refreshes the bell through PushBellOnPingCleared. Everything commits, so tearDown removes the rows.
  */
 final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
 {
@@ -130,6 +132,24 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
             [self::ACME_FOODS, $mia, null],
             [self::ACME_FOODS, $lena, null],
         ], $this->sentBellRefreshes());
+    }
+
+    #[Test]
+    public function aClearedPingDeliveredOnTheEventBusRefreshesTheBellOfThePersonPingedAndWritesNoRow(): void
+    {
+        $lena = self::VIEWERS['Lena'][0];
+        $mia = self::VIEWERS['Mia'][0];
+        self::transactions()->committedAs(self::ACME_FOODS, static function () use ($lena, $mia): void {
+            self::getContainer()->get('event.bus')->dispatch(new PingCleared(self::ACME_FOODS, self::teamOnlyTicketId(), self::PING, $mia, $lena, PingClearedReason::Done, $lena, new \DateTimeImmutable(self::NOW)));
+        });
+        self::runTheWorkerUntilIdle('outbox');
+        $relayed = $this->asyncNotify()->getSent();
+        self::assertSame([PingCleared::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
+
+        self::deliverFromAsyncNotify($relayed[0]);
+
+        self::assertSame([], $this->acmeNotifications());
+        self::assertSame([[self::ACME_FOODS, $lena, null]], $this->sentBellRefreshes());
     }
 
     private static function deliverFromAsyncNotify(Envelope $envelope): void
