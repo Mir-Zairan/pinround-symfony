@@ -9,7 +9,7 @@
             <index name="cnv_message_ticket_id_created_at_id_idx" columns="organization_id,ticket_id,created_at,id"/>
             <index name="cnv_message_to_user_id_open_question_idx" columns="organization_id,to_user_id">
                 <options>
-                    <option name="where">((kind = 'question'::text) AND (resolved_at IS NULL))</option>
+                    <option name="where">((kind = 'question'::text) AND (resolved_at IS NULL) AND (removed_at IS NULL))</option>
                 </options>
             </index>
         </indexes>

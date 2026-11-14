@@ -503,7 +503,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX cnv_message_pkey ON public.cnv_message USING btree (organization_id, id)',
                 'CREATE INDEX cnv_message_ticket_id_created_at_id_idx ON public.cnv_message USING btree (organization_id, ticket_id, created_at, id)',
                 "CREATE UNIQUE INDEX cnv_message_ticket_id_open_question_key ON public.cnv_message USING btree (organization_id, ticket_id) WHERE ((kind = 'question'::text) AND (resolved_at IS NULL) AND (removed_at IS NULL))",
-                "CREATE INDEX cnv_message_to_user_id_open_question_idx ON public.cnv_message USING btree (organization_id, to_user_id) WHERE ((kind = 'question'::text) AND (resolved_at IS NULL))",
+                "CREATE INDEX cnv_message_to_user_id_open_question_idx ON public.cnv_message USING btree (organization_id, to_user_id) WHERE ((kind = 'question'::text) AND (resolved_at IS NULL) AND (removed_at IS NULL))",
                 'CREATE UNIQUE INDEX cnv_reply_pkey ON public.cnv_reply USING btree (organization_id, id)',
                 'CREATE INDEX cnv_reply_message_id_created_at_id_idx ON public.cnv_reply USING btree (organization_id, message_id, created_at, id)',
                 'CREATE UNIQUE INDEX ntf_ping_pkey ON public.ntf_ping USING btree (organization_id, id)',

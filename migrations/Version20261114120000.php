@@ -47,7 +47,7 @@ final class Version20261114120000 extends AbstractMigration
         );
         $this->addSql(
             'CREATE INDEX cnv_message_to_user_id_open_question_idx ON cnv_message (organization_id, to_user_id)'
-            ." WHERE kind = 'question' AND resolved_at IS NULL",
+            ." WHERE kind = 'question' AND resolved_at IS NULL AND removed_at IS NULL",
         );
         foreach (TenantTable::enableRls('cnv_message') as $sql) {
             $this->addSql($sql);
