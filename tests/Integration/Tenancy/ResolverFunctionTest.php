@@ -261,16 +261,10 @@ final class ResolverFunctionTest extends KernelTestCase
     #[Test]
     public function everyResolverFunctionThatReadsTicketsKeepsToTheTenantOfTheTransaction(): void
     {
-        /** @var array<string, string> $bodiesByName */
-        $bodiesByName = $this->connection()->fetchAllKeyValue(
-            "SELECT p.proname, p.prosrc FROM pg_proc p
-             WHERE p.pronamespace = 'public'::regnamespace AND p.proowner = 'pinround_resolver'::regrole AND p.prosrc ~ '\\mtkt_ticket\\M'",
-        );
+        $ticketReaders = TenancyCatalog::read($this->connection(), $this->migrator())->resolverReadersByTable()['tkt_ticket'] ?? [];
 
-        self::assertContains('search_ticket_ids', array_keys($bodiesByName));
-        foreach ($bodiesByName as $name => $body) {
-            self::assertMatchesRegularExpression(TenancyCatalog::TENANT_BINDING, $body, $name);
-        }
+        self::assertArrayHasKey('search_ticket_ids', $ticketReaders);
+        self::assertSame(array_fill_keys(array_keys($ticketReaders), true), $ticketReaders);
     }
 
     #[Test]
