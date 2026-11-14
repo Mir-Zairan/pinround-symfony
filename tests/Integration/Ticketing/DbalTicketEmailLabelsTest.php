@@ -11,18 +11,18 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
-use App\Ticketing\Api\DigestTicket;
-use App\Ticketing\Api\TicketDigestQueries;
-use App\Ticketing\Infrastructure\Doctrine\DbalTicketDigestQueries;
+use App\Ticketing\Api\TicketEmailLabel;
+use App\Ticketing\Api\TicketEmailLabels;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketEmailLabels;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * DbalTicketDigestQueries as pinround_app on committed tickets of two organizations: one for everyone and one
+ * DbalTicketEmailLabels as pinround_app on committed tickets of two organizations: one for everyone and one
  * restricted to its team in Acme Foods, one in Beta Bakery.
  */
-final class DbalTicketDigestQueriesTest extends KernelTestCase
+final class DbalTicketEmailLabelsTest extends KernelTestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000088a1';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000088a2';
@@ -56,20 +56,20 @@ final class DbalTicketDigestQueriesTest extends KernelTestCase
     #[Test]
     public function onlyATicketForEveryoneGivesItsTitle(): void
     {
-        $lines = $this->linesAs(self::ACME_FOODS, [self::TEAM_ONLY_TICKET, self::FOR_EVERYONE_TICKET, self::TEAM_ONLY_TICKET]);
+        $labels = $this->labelsAs(self::ACME_FOODS, [self::TEAM_ONLY_TICKET, self::FOR_EVERYONE_TICKET, self::TEAM_ONLY_TICKET]);
 
         self::assertEquals([
-            new DigestTicket(new TicketId(self::TEAM_ONLY_TICKET), 'SHOP-13', new TeamId(self::SHOP_TEAM), null),
-            new DigestTicket(new TicketId(self::FOR_EVERYONE_TICKET), 'SHOP-12', null, 'Checkout button is hidden'),
-        ], $lines);
+            new TicketEmailLabel(new TicketId(self::TEAM_ONLY_TICKET), 'SHOP-13', new TeamId(self::SHOP_TEAM), null),
+            new TicketEmailLabel(new TicketId(self::FOR_EVERYONE_TICKET), 'SHOP-12', null, 'Checkout button is hidden'),
+        ], $labels);
     }
 
     #[Test]
     public function anotherOrganizationsTicketOrNoneIsLeftOut(): void
     {
-        $lines = $this->linesAs(self::ACME_FOODS, [self::BETA_TICKET, self::UNKNOWN_TICKET, self::FOR_EVERYONE_TICKET]);
+        $labels = $this->labelsAs(self::ACME_FOODS, [self::BETA_TICKET, self::UNKNOWN_TICKET, self::FOR_EVERYONE_TICKET]);
 
-        self::assertSame([self::FOR_EVERYONE_TICKET], array_map(static fn (DigestTicket $line): string => $line->ticketId->toString(), $lines));
+        self::assertSame([self::FOR_EVERYONE_TICKET], array_map(static fn (TicketEmailLabel $label): string => $label->ticketId->toString(), $labels));
     }
 
     /**
@@ -79,17 +79,17 @@ final class DbalTicketDigestQueriesTest extends KernelTestCase
     #[Test]
     public function rowLevelSecurityAloneHidesAnotherOrganizationsTicket(): void
     {
-        $linesOfAcmeTicket = static fn (Connection $connection): array => new DbalTicketDigestQueries($connection, self::getContainer()->get(TenantContext::class))
-            ->linesOf([new TicketId(self::FOR_EVERYONE_TICKET)]);
-        self::assertCount(1, $this->ownTransactions()->rolledBackAs(self::ACME_FOODS, $linesOfAcmeTicket));
+        $labelsOfAcmeTicket = static fn (Connection $connection): array => new DbalTicketEmailLabels($connection, self::getContainer()->get(TenantContext::class))
+            ->labelsOf([new TicketId(self::FOR_EVERYONE_TICKET)]);
+        self::assertCount(1, $this->ownTransactions()->rolledBackAs(self::ACME_FOODS, $labelsOfAcmeTicket));
 
-        self::assertSame([], $this->ownTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $linesOfAcmeTicket));
+        self::assertSame([], $this->ownTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $labelsOfAcmeTicket));
     }
 
     #[Test]
-    public function anEmptyListGivesNoLine(): void
+    public function anEmptyListGivesNoLabel(): void
     {
-        self::assertSame([], $this->linesAs(self::ACME_FOODS, []));
+        self::assertSame([], $this->labelsAs(self::ACME_FOODS, []));
     }
 
     /**
@@ -98,20 +98,20 @@ final class DbalTicketDigestQueriesTest extends KernelTestCase
     #[Test]
     public function moreIdsThanTheCapAreRefusedBeforeAnyQuery(): void
     {
-        $ticketIds = array_map(static fn (int $number): TicketId => new TicketId(\sprintf('0197a3c0-0000-7000-8000-0000000089%02x', $number)), range(0, TicketDigestQueries::MAX_TICKET_IDS));
+        $ticketIds = array_map(static fn (int $number): TicketId => new TicketId(\sprintf('0197a3c0-0000-7000-8000-0000000089%02x', $number)), range(0, TicketEmailLabels::MAX_TICKET_IDS));
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('At most 100 tickets are read for a digest at once.');
+        $this->expectExceptionMessage('At most 100 ticket labels are read at once.');
 
-        $this->queries()->linesOf($ticketIds);
+        $this->queries()->labelsOf($ticketIds);
     }
 
     #[Test]
     public function theCapItselfIsRead(): void
     {
-        $ticketIds = array_map(static fn (int $number): TicketId => new TicketId(\sprintf('0197a3c0-0000-7000-8000-0000000089%02x', $number)), range(1, TicketDigestQueries::MAX_TICKET_IDS - 1));
+        $ticketIds = array_map(static fn (int $number): TicketId => new TicketId(\sprintf('0197a3c0-0000-7000-8000-0000000089%02x', $number)), range(1, TicketEmailLabels::MAX_TICKET_IDS - 1));
 
-        self::assertCount(1, $this->linesAs(self::ACME_FOODS, [self::FOR_EVERYONE_TICKET, ...array_map(static fn (TicketId $ticketId): string => $ticketId->toString(), $ticketIds)]));
+        self::assertCount(1, $this->labelsAs(self::ACME_FOODS, [self::FOR_EVERYONE_TICKET, ...array_map(static fn (TicketId $ticketId): string => $ticketId->toString(), $ticketIds)]));
     }
 
     #[Test]
@@ -119,7 +119,7 @@ final class DbalTicketDigestQueriesTest extends KernelTestCase
     {
         $this->expectException(TenantNotSet::class);
 
-        $this->queries()->linesOf([new TicketId(self::FOR_EVERYONE_TICKET)]);
+        $this->queries()->labelsOf([new TicketId(self::FOR_EVERYONE_TICKET)]);
     }
 
     #[Test]
@@ -128,26 +128,26 @@ final class DbalTicketDigestQueriesTest extends KernelTestCase
         self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Digest tickets are read in a transaction under the organization as tenant; none is open.');
+        $this->expectExceptionMessage('Ticket email labels are read in a transaction under the organization as tenant; none is open.');
 
-        $this->queries()->linesOf([new TicketId(self::FOR_EVERYONE_TICKET)]);
+        $this->queries()->labelsOf([new TicketId(self::FOR_EVERYONE_TICKET)]);
     }
 
     /**
      * @param list<string> $ticketIds
      *
-     * @return list<DigestTicket>
+     * @return list<TicketEmailLabel>
      */
-    private function linesAs(string $organizationId, array $ticketIds): array
+    private function labelsAs(string $organizationId, array $ticketIds): array
     {
-        return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->queries()->linesOf(
+        return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->queries()->labelsOf(
             array_map(static fn (string $ticketId): TicketId => new TicketId($ticketId), $ticketIds),
         ));
     }
 
-    private function queries(): DbalTicketDigestQueries
+    private function queries(): DbalTicketEmailLabels
     {
-        return new DbalTicketDigestQueries(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
+        return new DbalTicketEmailLabels(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function ownTransactions(): OwnConnectionTransactions

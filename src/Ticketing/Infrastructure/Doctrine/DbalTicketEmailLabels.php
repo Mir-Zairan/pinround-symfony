@@ -7,24 +7,24 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
-use App\Ticketing\Api\DigestTicket;
-use App\Ticketing\Api\TicketDigestQueries;
+use App\Ticketing\Api\TicketEmailLabel;
+use App\Ticketing\Api\TicketEmailLabels;
 use Doctrine\DBAL\Connection;
 
-final readonly class DbalTicketDigestQueries implements TicketDigestQueries
+final readonly class DbalTicketEmailLabels implements TicketEmailLabels
 {
     public function __construct(private Connection $connection, private TenantContext $tenantContext)
     {
     }
 
-    public function linesOf(array $ticketIds): array
+    public function labelsOf(array $ticketIds): array
     {
         if (\count($ticketIds) > self::MAX_TICKET_IDS) {
-            throw new \InvalidArgumentException(\sprintf('At most %d tickets are read for a digest at once.', self::MAX_TICKET_IDS));
+            throw new \InvalidArgumentException(\sprintf('At most %d ticket labels are read at once.', self::MAX_TICKET_IDS));
         }
         $organizationId = $this->tenantContext->require();
         if (!$this->connection->isTransactionActive()) {
-            throw new \LogicException('Digest tickets are read in a transaction under the organization as tenant; none is open.');
+            throw new \LogicException('Ticket email labels are read in a transaction under the organization as tenant; none is open.');
         }
         $uniqueTicketIds = [];
         foreach ($ticketIds as $ticketId) {
@@ -41,12 +41,12 @@ final readonly class DbalTicketDigestQueries implements TicketDigestQueries
             .' WHERE organization_id = CAST(:organization AS uuid) AND id = ANY(CAST(:ids AS uuid[]))',
             ['organization' => $organizationId->toString(), 'ids' => '{'.implode(',', array_keys($uniqueTicketIds)).'}'],
         );
-        $linesById = [];
+        $labelsById = [];
         foreach ($rows as $row) {
             $ticketId = self::text($row['id'], 'id');
             $teamId = $row['team_id'];
             $title = $row['title'];
-            $linesById[$ticketId] = new DigestTicket(
+            $labelsById[$ticketId] = new TicketEmailLabel(
                 new TicketId($ticketId),
                 self::text($row['key'], 'key'),
                 null === $teamId ? null : new TeamId(self::text($teamId, 'team_id')),
@@ -55,7 +55,7 @@ final readonly class DbalTicketDigestQueries implements TicketDigestQueries
         }
 
         return array_values(array_filter(array_map(
-            static fn (string $ticketId): ?DigestTicket => $linesById[$ticketId] ?? null,
+            static fn (string $ticketId): ?TicketEmailLabel => $labelsById[$ticketId] ?? null,
             array_keys($uniqueTicketIds),
         )));
     }

@@ -12,8 +12,8 @@ use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use App\Ticketing\Api\DigestTicket;
-use App\Ticketing\Api\TicketDigestQueries;
+use App\Ticketing\Api\TicketEmailLabel;
+use App\Ticketing\Api\TicketEmailLabels;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibilities;
 use Doctrine\DBAL\ArrayParameterType;
@@ -22,8 +22,8 @@ use Doctrine\DBAL\Connection;
 /**
  * DigestItems on ntf_notification through the unread digest index, under row-level security and with the tenant's
  * organization_id named as well. Besides the person's visibility it runs at most five queries: the window's tickets,
- * Ticketing's visibility check, the listed rows with the window's count, the listed tickets' lines and their teams'
- * names. Only the TicketDigestQueries::MAX_TICKET_IDS tickets with the newest rows are checked; the rows of any older
+ * Ticketing's visibility check, the listed rows with the window's count, the listed tickets' email labels and their teams'
+ * names. Only the TicketEmailLabels::MAX_TICKET_IDS tickets with the newest rows are checked; the rows of any older
  * ticket are left out as if hidden, so an email never names a ticket nobody checked.
  */
 final readonly class DbalDigestItems implements DigestItems
@@ -37,7 +37,7 @@ final readonly class DbalDigestItems implements DigestItems
         private TenantContext $tenantContext,
         private TicketVisibilities $ticketVisibilities,
         private TicketQueries $ticketQueries,
-        private TicketDigestQueries $ticketDigestQueries,
+        private TicketEmailLabels $ticketEmailLabels,
         private TeamQueries $teamQueries,
     ) {
     }
@@ -64,7 +64,7 @@ final readonly class DbalDigestItems implements DigestItems
 
         $windowTicketIds = $this->connection->fetchFirstColumn(
             'SELECT ticket_id FROM ntf_notification WHERE '.self::WINDOW_ROWS
-            .' GROUP BY ticket_id ORDER BY max(created_at) DESC, ticket_id LIMIT '.TicketDigestQueries::MAX_TICKET_IDS,
+            .' GROUP BY ticket_id ORDER BY max(created_at) DESC, ticket_id LIMIT '.TicketEmailLabels::MAX_TICKET_IDS,
             $parameters,
             $types,
         );
@@ -92,7 +92,7 @@ final readonly class DbalDigestItems implements DigestItems
 
         return new Digest(array_map(static function (array $row) use ($tickets, $teamNames): DigestItem {
             $ticket = $tickets[self::text($row['ticket_id'])]
-                ?? throw new \LogicException('A visible ticket of a digest has no line.');
+                ?? throw new \LogicException('A visible ticket of a digest has no email label.');
             $actorName = $row['actor_name'];
             if (!\is_string($actorName) || '' === $actorName) {
                 throw new \UnexpectedValueException('A notification in a digest has no actorName in its data.');
@@ -112,13 +112,13 @@ final readonly class DbalDigestItems implements DigestItems
     /**
      * @param list<array<string, mixed>> $rows
      *
-     * @return array<string, DigestTicket> by ticket id
+     * @return array<string, TicketEmailLabel> by ticket id
      */
     private function ticketsOf(array $rows): array
     {
         $ticketIds = array_values(array_unique(array_map(static fn (array $row): string => self::text($row['ticket_id']), $rows)));
         $tickets = [];
-        foreach ($this->ticketDigestQueries->linesOf(array_map(static fn (string $ticketId): TicketId => new TicketId($ticketId), $ticketIds)) as $ticket) {
+        foreach ($this->ticketEmailLabels->labelsOf(array_map(static fn (string $ticketId): TicketId => new TicketId($ticketId), $ticketIds)) as $ticket) {
             $tickets[$ticket->ticketId->toString()] = $ticket;
         }
 
@@ -126,7 +126,7 @@ final readonly class DbalDigestItems implements DigestItems
     }
 
     /**
-     * @param array<string, DigestTicket> $tickets
+     * @param array<string, TicketEmailLabel> $tickets
      *
      * @return array<string, string> the names of the restricted tickets' teams, by team id
      */
