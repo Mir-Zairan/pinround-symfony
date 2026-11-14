@@ -293,6 +293,7 @@ test('Cancel closes the Answer form, keeps the text and gives focus back to the 
     await expect(answer.getByLabel('Your answer')).toBeHidden();
     await expect(answer.locator('summary')).toBeFocused();
     await answer.locator('summary').click();
+    await expect(answer.getByLabel('Your answer')).toBeFocused();
     await expect(answer.getByLabel('Your answer')).toHaveValue(draft);
   } finally {
     await lena.context.close();

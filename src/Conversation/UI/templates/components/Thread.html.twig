@@ -68,7 +68,7 @@
                         {% endfor %}
                         {% if message.isAnswerable %}
                             {#- Answering resumes the ticket and changes its header, so the answer's redirect replaces the whole page. -#}
-                            <details class="thread__answer">
+                            <details class="thread__answer" data-action="toggle->thread-composer#focusReplyBox">
                                 <summary class="btn btn-text btn-sm">Answer</summary>
                                 <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::ANSWER_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__answer-form" data-turbo-frame="_top">
                                     <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
@@ -76,7 +76,7 @@
                                     <textarea id="thread-answer-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Your answer" required maxlength="{{ this.maxBodyLength }}" rows="3"></textarea>
                                     <p class="thread__note">{{ constant('App\\Conversation\\UI\\Component\\Thread::ANSWER_NOTE')|format(stepName) }}</p>
                                     <div class="thread__answer-buttons">
-                                        <button type="button" class="btn btn-text btn-sm" data-action="thread-composer#closeAnswer">Cancel</button>
+                                        <button type="button" class="btn btn-text btn-sm" data-action="thread-composer#closeReplyBox">Cancel</button>
                                         <button type="submit" class="btn btn-filled btn-sm">Answer</button>
                                     </div>
                                 </form>
@@ -85,7 +85,7 @@
                         {% if message.isReplyable or message.isResolvable or message.isEditable or message.isRemovable %}
                             <div class="thread__actions">
                                 {% if message.isReplyable %}
-                                    <details class="thread__reply-box">
+                                    <details class="thread__reply-box" data-action="toggle->thread-composer#focusReplyBox">
                                         <summary class="btn btn-text btn-sm">Reply</summary>
                                         <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::REPLY_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__reply-form">
                                             <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
@@ -93,7 +93,7 @@
                                             <textarea id="thread-reply-body-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::REPLY_PLACEHOLDER') }}" required maxlength="{{ this.maxBodyLength }}" rows="3"></textarea>
                                             <p class="thread__note">{{ message.replyNote }}</p>
                                             <div class="thread__answer-buttons">
-                                                <button type="button" class="btn btn-text btn-sm" data-action="thread-composer#closeAnswer">Cancel</button>
+                                                <button type="button" class="btn btn-text btn-sm" data-action="thread-composer#closeReplyBox">Cancel</button>
                                                 <button type="submit" class="btn btn-filled btn-sm">Reply</button>
                                             </div>
                                         </form>
