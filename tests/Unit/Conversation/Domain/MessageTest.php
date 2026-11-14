@@ -345,6 +345,70 @@ final class MessageTest extends TestCase
         self::assertEquals($before, [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()]);
     }
 
+    /**
+     * @return iterable<string, array{string, bool}> resolver, is the team's lead
+     */
+    public static function allowedResolvers(): iterable
+    {
+        yield 'the author' => [self::LENA, false];
+        yield 'the team\'s lead, who did not write it' => [self::OMAR, true];
+    }
+
+    #[Test]
+    #[DataProvider('allowedResolvers')]
+    public function theAuthorOrTheTeamsLeadResolvesAComment(string $resolverId, bool $isTeamLead): void
+    {
+        $comment = self::commentOfLena();
+        $resolvedAt = new \DateTimeImmutable('2027-03-15 11:00:00+00:00');
+
+        $comment->resolve(new UserId($resolverId), $isTeamLead, $resolvedAt);
+
+        self::assertSame([$resolvedAt, $resolverId], [$comment->resolvedAt(), $comment->resolvedBy()?->toString()]);
+        self::assertNull($comment->removedAt());
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Message, string, bool, string}>
+     */
+    public static function refusedResolutions(): iterable
+    {
+        yield 'an open question, by its asker' => [static fn (): Message => self::questionOfLenaToOmar(), self::LENA, false, 'A question is closed by its answer, not by Resolve.'];
+        yield 'an open question, by the team\'s lead' => [static fn (): Message => self::questionOfLenaToOmar(), self::OMAR, true, 'A question is closed by its answer, not by Resolve.'];
+        yield 'a removed comment' => [static function (): Message {
+            $comment = self::commentOfLena();
+            $comment->remove(new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $comment;
+        }, self::LENA, false, 'This comment was removed, so it cannot be resolved.'];
+        yield 'a resolved comment' => [static function (): Message {
+            $comment = self::commentOfLena();
+            $comment->resolve(new UserId(self::LENA), false, new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $comment;
+        }, self::OMAR, true, 'This comment is already resolved.'];
+        yield 'someone else who is not the team\'s lead' => [static fn (): Message => self::commentOfLena(), self::OMAR, false, 'Only the person who wrote a comment or the lead of the ticket\'s team can resolve it.'];
+    }
+
+    /**
+     * @param \Closure(): Message $messageOf
+     */
+    #[Test]
+    #[DataProvider('refusedResolutions')]
+    public function aRefusedResolutionSaysWhyAndLeavesTheMessageAsItWas(\Closure $messageOf, string $resolverId, bool $isTeamLead, string $reason): void
+    {
+        $message = $messageOf();
+        $before = [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()];
+
+        try {
+            $message->resolve(new UserId($resolverId), $isTeamLead, new \DateTimeImmutable('2027-03-15 11:00:00+00:00'));
+            self::fail('The resolution was not refused.');
+        } catch (\DomainException $refusal) {
+            self::assertSame($reason, $refusal->getMessage());
+        }
+
+        self::assertEquals($before, [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()]);
+    }
+
     private static function questionOfLenaToOmar(): Message
     {
         return Message::question(new MessageId(self::ID), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), new UserId(self::OMAR), 'Should cancelled orders count?', new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
