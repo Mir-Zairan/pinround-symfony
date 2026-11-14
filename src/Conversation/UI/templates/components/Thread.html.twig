@@ -32,7 +32,7 @@
                                         <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::EDIT_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__edit-form">
                                             <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
                                             <label class="visually-hidden" for="thread-edit-{{ message.id }}">Edit your message</label>
-                                            <textarea id="thread-edit-{{ message.id }}" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" required maxlength="{{ this.maxBodyLength }}" rows="3">{{ message.body }}</textarea>
+                                            <textarea id="thread-edit-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" required maxlength="{{ this.maxBodyLength }}" rows="3">{{ message.body }}</textarea>
                                             <button type="submit" class="btn btn-filled btn-sm">Save</button>
                                         </form>
                                     </details>
@@ -59,7 +59,7 @@
             <twig:Chip disabled>Ask a question</twig:Chip>
         </div>
         <label class="visually-hidden" for="thread-composer-body">Write a comment</label>
-        <textarea id="thread-composer-body" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Write a comment" required maxlength="{{ this.maxBodyLength }}" rows="3"
+        <textarea id="thread-composer-body" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Write a comment" required maxlength="{{ this.maxBodyLength }}" rows="3"
             {{ stimulus_target('thread-composer', 'body') }} data-action="input->thread-composer#update"></textarea>
         <p class="thread__note">A comment does not change the status and sends no notification.</p>
         <button type="submit" class="btn btn-filled" {{ stimulus_target('thread-composer', 'submit') }}>Comment</button>

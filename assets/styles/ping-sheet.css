@@ -33,18 +33,9 @@
   font-weight: 600;
 }
 
+/* Taller than the shared .text-field: a ping's draft runs to a few lines. */
 .ping-sheet__message {
-  display: block;
-  width: 100%;
   min-height: 112px;
-  padding: var(--space-10) var(--space-12);
-  border: 1px solid var(--outline);
-  border-radius: var(--radius-input);
-  background: var(--s-lowest);
-  color: var(--on-surface);
-  font: inherit;
-  line-height: 1.5;
-  resize: vertical;
 }
 
 .ping-sheet__note,

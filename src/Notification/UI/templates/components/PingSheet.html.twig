@@ -28,7 +28,7 @@
                         <input type="hidden" name="{{ constant(pingController ~ '::CSRF_FIELD') }}" value="{{ pingCsrfToken }}">
                         <p class="ping-sheet__ticket">{{ ticketKey }} · {{ ticketTitle }}</p>
                         <label class="ping-sheet__label" for="{{ pingMessageId }}">Message</label>
-                        <textarea id="{{ pingMessageId }}" class="ping-sheet__message" name="{{ constant(pingController ~ '::MESSAGE_FIELD') }}" rows="4" required
+                        <textarea id="{{ pingMessageId }}" class="text-field ping-sheet__message" name="{{ constant(pingController ~ '::MESSAGE_FIELD') }}" rows="4" required
                             maxlength="{{ constant(pingController ~ '::MESSAGE_MAX_LENGTH') }}" aria-describedby="{{ pingNoteId }}" {{ stimulus_target('ping-sheet', 'message') }}>{{ pingDraft }}</textarea>
                         <p id="{{ pingNoteId }}" class="ping-sheet__note">{{ pingNote }}</p>
                         <p id="{{ pingRefusalId }}" class="ping-sheet__refusal" role="alert" {{ stimulus_target('ping-sheet', 'refusal') }}></p>

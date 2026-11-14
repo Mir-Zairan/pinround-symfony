@@ -133,20 +133,6 @@ turbo-frame#ticket-thread {
   cursor: default;
 }
 
-.thread__composer textarea,
-.thread__edit-form textarea {
-  width: 100%;
-  min-height: 88px;
-  padding: var(--space-10) var(--space-12);
-  border: 1px solid var(--outline);
-  border-radius: var(--radius-input);
-  background: var(--s-lowest);
-  color: var(--on-surface);
-  font: inherit;
-  line-height: 1.5;
-  resize: vertical;
-}
-
 .thread__note {
   margin: 0;
   color: var(--on-surface-var);

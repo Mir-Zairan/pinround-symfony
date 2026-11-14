@@ -295,6 +295,21 @@ a.seg {
   display: none;
 }
 
+/* A multi-line text field: the thread's composer and edit forms, the ping sheet's message. */
+.text-field {
+  display: block;
+  width: 100%;
+  min-height: 88px;
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 .dialog {
   width: min(540px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
