@@ -11,9 +11,10 @@ use Doctrine\DBAL\Connection;
 /**
  * Adds and removes committed tkt_ticket rows of test organizations through the migrator, which owns the table and so
  * may delete from it (the app may not), under each organization as tenant, as FORCE ROW LEVEL SECURITY applies to the
- * owner too. Removing a ticket removes its ins_ticket_turn, tkt_summary and tkt_ticket_event rows by their ON DELETE
- * CASCADE; removing an organization's tickets then removes its projects, which tkt_ticket_project_fkey kept until then.
- * The caller makes sure no transaction is open.
+ * owner too. Removing a ticket removes its ins_ticket_turn, tkt_summary, tkt_ticket_event, cnv_message (with their
+ * cnv_reply), ntf_ping, ntf_notification and ntf_mute rows by their ON DELETE CASCADE; ntf_delivery has no ticket, so
+ * DeliveryRows removes it. Removing an organization's tickets then removes its projects, which tkt_ticket_project_fkey
+ * kept until then. The caller makes sure no transaction is open.
  */
 final readonly class TicketRows
 {
