@@ -30,6 +30,7 @@ use App\Ticketing\Api\TicketVisibilityFacts;
 final readonly class AskQuestion
 {
     public const string NOT_ON_THE_TICKET = 'You can ask only someone on this ticket.';
+    public const string ASKING_YOURSELF = 'You cannot ask yourself.';
     public const string ALREADY_WAITING = 'This ticket already waits for an answer.';
 
     public function __construct(
@@ -55,9 +56,10 @@ final readonly class AskQuestion
      * @throws TicketNotFound         when the ticket is of another organization than the tenant, or the asker may not
      *                                see it; nothing is saved
      * @throws MessageBodyRefused     when the trimmed body is empty or longer than 10,000 characters; nothing is saved
-     * @throws QuestionRefused        when the person asked is the asker or not on the ticket (its assignee, reporter,
-     *                                reviewer, tester or team lead), or the ticket already waits for an answer; nothing
-     *                                is saved, though after a refusal the database raised the caller must roll back
+     * @throws QuestionRefused        when the person asked is the asker (ASKING_YOURSELF) or not on the ticket, its
+     *                                assignee, reporter, reviewer, tester or team lead (NOT_ON_THE_TICKET), or the
+     *                                ticket already waits for an answer (ALREADY_WAITING); nothing is saved, though
+     *                                after a refusal the database raised the caller must roll back
      * @throws TicketChangedMeanwhile when another request saved the ticket after this request read it; the caller rolls
      *                                back
      * @throws \LogicException        when no transaction is open; nothing is saved
@@ -76,7 +78,7 @@ final readonly class AskQuestion
             throw new MessageBodyRefused($invalidBody->getMessage(), 0, $invalidBody);
         }
         if ($askedUserId->equals($askerId)) {
-            throw new QuestionRefused(self::NOT_ON_THE_TICKET);
+            throw new QuestionRefused(self::ASKING_YOURSELF);
         }
 
         try {

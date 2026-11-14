@@ -251,12 +251,12 @@ final class QuestionUseCasesTest extends KernelTestCase
     }
 
     #[Test]
-    public function askingSomeoneNotOnTheTicketOrOneselfIsRefusedAndNothingChanges(): void
+    public function askingSomeoneNotOnTheTicketIsRefusedAndNothingChanges(): void
     {
         $before = $this->stateOf($this->ticketId, self::ACME_FOODS);
 
         $refusals = [];
-        foreach ([[self::OMAR, self::RAJ], [self::OMAR, self::SARA], [self::OMAR, self::OMAR]] as [$askerId, $askedUserId]) {
+        foreach ([[self::OMAR, self::RAJ], [self::OMAR, self::SARA]] as [$askerId, $askedUserId]) {
             $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn () => $this->askQuestion()->ask(
                 $this->ticketId,
                 $this->acmeTicketFacts(),
@@ -268,7 +268,27 @@ final class QuestionUseCasesTest extends KernelTestCase
             $refusals[] = [$refusal::class, $refusal->getMessage()];
         }
 
-        self::assertSame(array_fill(0, 3, [QuestionRefused::class, 'You can ask only someone on this ticket.']), $refusals);
+        self::assertSame(array_fill(0, 2, [QuestionRefused::class, 'You can ask only someone on this ticket.']), $refusals);
+        self::assertSame($before, $this->stateOf($this->ticketId, self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function askingYourselfIsRefusedWithItsOwnMessageAndNothingChanges(): void
+    {
+        $before = $this->stateOf($this->ticketId, self::ACME_FOODS);
+        self::assertSame(['turn_user_id' => self::OMAR, 'kind' => 'build'], $before['turn']);
+
+        // Omar is the assignee, so only the self-ask rule can refuse him.
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn () => $this->askQuestion()->ask(
+            $this->ticketId,
+            $this->acmeTicketFacts(),
+            new UserId(self::OMAR),
+            new UserId(self::OMAR),
+            self::QUESTION_BODY,
+            new \DateTimeImmutable(self::ASKED_AT),
+        )));
+
+        self::assertSame([QuestionRefused::class, 'You cannot ask yourself.'], [$refusal::class, $refusal->getMessage()]);
         self::assertSame($before, $this->stateOf($this->ticketId, self::ACME_FOODS));
     }
 
