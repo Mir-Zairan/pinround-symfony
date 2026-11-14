@@ -18,8 +18,8 @@ use Symfony\Component\Messenger\Stamp\DelayStamp;
 /**
  * Publishes the refresh signal of a ticket in worker-notify, at most once per WINDOW_SECONDS per ticket
  * (realtime-and-notifications.md, Coalescing). A refresh publishes only when it takes the ticket's window lock on the
- * state Valkey; one that finds it taken queues one delayed try, so a burst of moves gives one refresh as it starts and
- * one after it, and the last change of a burst is never left unpublished.
+ * state Valkey; one that finds it taken queues one try delayed until that window ends, so a burst of moves gives one
+ * refresh as it starts and one as its window ends, and the last change of a burst is never left unpublished.
  */
 #[AsMessageHandler(bus: 'command.bus')]
 final readonly class RefreshTicketPagesHandler
@@ -27,6 +27,12 @@ final readonly class RefreshTicketPagesHandler
     public const int WINDOW_MILLISECONDS = 2000;
 
     public const float WINDOW_SECONDS = self::WINDOW_MILLISECONDS / 1000;
+
+    /**
+     * Added to the time a window has left, so a try lands after the store has ended it even when the store's clock runs
+     * a little behind this process's.
+     */
+    public const int WINDOW_END_MARGIN_MILLISECONDS = 50;
 
     /** The SSE event name the live-updates controller listens for. */
     public const string SIGNAL_TYPE = 'refresh';
@@ -42,6 +48,7 @@ final readonly class RefreshTicketPagesHandler
         private LockFactory $lockFactory,
         #[Autowire(service: 'command.bus')]
         private MessageBusInterface $commandBus,
+        private LockLifetimes $lockLifetimes,
     ) {
     }
 
@@ -86,7 +93,7 @@ final readonly class RefreshTicketPagesHandler
         try {
             $this->commandBus->dispatch(
                 new RefreshTicketPages($refresh->organizationId, $refresh->ticketId, $nextAttempt),
-                [new DelayStamp(self::WINDOW_MILLISECONDS)],
+                [new DelayStamp($this->millisecondsUntilWindowEndsOf($ticketId))],
             );
         } catch (\Throwable $dispatchFailure) {
             // A trailing try still held with none queued would make Messenger's retry queue nothing, losing the burst's last change.
@@ -100,7 +107,23 @@ final readonly class RefreshTicketPagesHandler
 
     private function windowOf(TicketId $ticketId): LockInterface
     {
-        return $this->windowLock('realtime-refresh:'.$ticketId->toString());
+        return $this->windowLock(self::windowResourceOf($ticketId));
+    }
+
+    /** A store that cannot say waits a full window, which ends no sooner than the one held. */
+    private function millisecondsUntilWindowEndsOf(TicketId $ticketId): int
+    {
+        $millisecondsLeft = $this->lockLifetimes->millisecondsLeftOf(self::windowResourceOf($ticketId));
+        if (null === $millisecondsLeft) {
+            return self::WINDOW_MILLISECONDS;
+        }
+
+        return min($millisecondsLeft, self::WINDOW_MILLISECONDS) + self::WINDOW_END_MARGIN_MILLISECONDS;
+    }
+
+    private static function windowResourceOf(TicketId $ticketId): string
+    {
+        return 'realtime-refresh:'.$ticketId->toString();
     }
 
     /** Held while a Trailing try waits, so a burst queues one, not one per change. */

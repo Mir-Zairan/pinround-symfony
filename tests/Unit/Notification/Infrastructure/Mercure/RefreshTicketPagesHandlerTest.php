@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Notification\Infrastructure\Mercure;
 
+use App\Notification\Infrastructure\Mercure\LockLifetimes;
 use App\Notification\Infrastructure\Mercure\RealtimeTopics;
 use App\Notification\Infrastructure\Mercure\RefreshAttempt;
 use App\Notification\Infrastructure\Mercure\RefreshTicketPages;
@@ -36,6 +37,8 @@ final class RefreshTicketPagesHandlerTest extends TestCase
 
     private MockClock $clock;
 
+    private ClockedLockStore $lockStore;
+
     private LockFactory $lockFactory;
 
     private RecordingMessageBus $commandBus;
@@ -51,9 +54,10 @@ final class RefreshTicketPagesHandlerTest extends TestCase
     {
         $this->clock = new MockClock(new \DateTimeImmutable('2026-11-06 12:00:00 UTC'));
         $this->startMicroseconds = (int) $this->clock->now()->format('Uu');
-        $this->lockFactory = new LockFactory(new ClockedLockStore($this->clock));
+        $this->lockStore = new ClockedLockStore($this->clock);
+        $this->lockFactory = new LockFactory($this->lockStore);
         $this->commandBus = new RecordingMessageBus();
-        $this->handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->commandBus);
+        $this->handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->commandBus, $this->lockStore);
     }
 
     #[Test]
@@ -83,16 +87,16 @@ final class RefreshTicketPagesHandlerTest extends TestCase
         self::assertSame([0], array_column($this->published, 'atMilliseconds'));
         self::assertCount(1, $this->commandBus->dispatched(), 'one trailing try for the whole burst');
         $trailing = $this->commandBus->dispatched()[0];
-        self::assertSame(2000, $trailing->last(DelayStamp::class)?->getDelay());
+        // Queued with the second move, at 100 ms: it waits out the 1900 ms the window has left, and the margin.
+        self::assertSame(1950, $trailing->last(DelayStamp::class)?->getDelay());
         $trailingRefresh = $trailing->getMessage();
         self::assertInstanceOf(RefreshTicketPages::class, $trailingRefresh);
         self::assertEquals(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Trailing), $trailingRefresh);
 
-        // The trailing try was queued with the second move, at 100 ms, and arrives 2 s later.
-        $this->clock->sleep(1.1);
+        $this->clock->sleep(1.05);
         ($this->handler)($trailingRefresh);
 
-        self::assertSame([0, 2100], array_column($this->published, 'atMilliseconds'));
+        self::assertSame([0, 2050], array_column($this->published, 'atMilliseconds'));
         self::assertCount(1, $this->commandBus->dispatched());
     }
 
@@ -134,7 +138,7 @@ final class RefreshTicketPagesHandlerTest extends TestCase
     }
 
     #[Test]
-    public function aChangeAfterANewerWindowOpenedIsPublishedOneWindowLater(): void
+    public function aChangeAfterANewerWindowOpenedIsPublishedWhenThatWindowEnds(): void
     {
         $this->refreshAsAChangeArrives();
         $this->clock->sleep(0.1);
@@ -147,20 +151,22 @@ final class RefreshTicketPagesHandlerTest extends TestCase
         $this->clock->sleep(0.05);
         $this->refreshAsAChangeArrives();
         self::assertCount(1, $this->commandBus->dispatched());
+        // The trailing try, due at 2050 ms, runs 50 ms late, as a busy worker may run it.
         $this->clock->sleep(0.05);
         self::assertInstanceOf(RefreshTicketPages::class, $trailing);
         ($this->handler)($trailing);
         self::assertCount(2, $this->commandBus->dispatched());
+        self::assertSame(1950, $this->commandBus->dispatched()[1]->last(DelayStamp::class)?->getDelay(), 'until the window from 2000 ms ends');
         $lastTrailing = $this->commandBus->dispatched()[1]->getMessage();
         self::assertInstanceOf(RefreshTicketPages::class, $lastTrailing);
-        $this->clock->sleep(2.0);
+        $this->clock->sleep(1.95);
         ($this->handler)($lastTrailing);
 
-        self::assertSame([0, 2000, 4100], array_column($this->published, 'atMilliseconds'));
+        self::assertSame([0, 2000, 4050], array_column($this->published, 'atMilliseconds'));
     }
 
     #[Test]
-    public function aTrailingTryPublishesNothingWhileTheWindowIsHeldAndWaitsOneMoreWindow(): void
+    public function aTrailingTryPublishesNothingWhileTheWindowIsHeldAndWaitsUntilItEnds(): void
     {
         $window = $this->lockFactory->createLock('realtime-refresh:'.self::TICKET_ID, 2.0, autoRelease: false);
         self::assertTrue($window->acquire());
@@ -171,7 +177,59 @@ final class RefreshTicketPagesHandlerTest extends TestCase
         self::assertTrue($window->isAcquired(), 'the window stays with its holder');
         self::assertCount(1, $this->commandBus->dispatched());
         self::assertEquals(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::LastTrailing), $this->commandBus->dispatched()[0]->getMessage());
+        self::assertSame(2050, $this->commandBus->dispatched()[0]->last(DelayStamp::class)?->getDelay());
+    }
+
+    #[Test]
+    public function aChangeLateInAWindowWaitsOnlyForTheRestOfIt(): void
+    {
+        $this->refreshAsAChangeArrives();
+        $this->clock->sleep(1.5);
+        $this->refreshAsAChangeArrives();
+
+        self::assertCount(1, $this->commandBus->dispatched());
+        $trailing = $this->commandBus->dispatched()[0];
+        self::assertSame(550, $trailing->last(DelayStamp::class)?->getDelay());
+        $this->clock->sleep(0.55);
+        $trailingRefresh = $trailing->getMessage();
+        self::assertInstanceOf(RefreshTicketPages::class, $trailingRefresh);
+        ($this->handler)($trailingRefresh);
+
+        self::assertSame([0, 2050], $this->publishedAtMilliseconds());
+        self::assertCount(1, $this->commandBus->dispatched(), 'the window had ended, so the try published and queued nothing');
+    }
+
+    #[Test]
+    public function aStoreThatCannotSayWhenTheWindowEndsDelaysTheTryAFullWindow(): void
+    {
+        $storeThatCannotSay = new class implements LockLifetimes {
+            public function millisecondsLeftOf(string $resource): ?int
+            {
+                return null;
+            }
+        };
+        $handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->commandBus, $storeThatCannotSay);
+        $handler(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Leading));
+        $this->clock->sleep(1.5);
+
+        $handler(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Leading));
+
+        self::assertSame([0], $this->publishedAtMilliseconds());
+        self::assertCount(1, $this->commandBus->dispatched());
         self::assertSame(2000, $this->commandBus->dispatched()[0]->last(DelayStamp::class)?->getDelay());
+    }
+
+    #[Test]
+    public function aWindowLockLeftWithALongerLifeDelaysTheTryNoMoreThanAWindow(): void
+    {
+        // As RedisStore leaves a lock whose time to live was never shortened from its first 300 s.
+        $window = $this->lockFactory->createLock('realtime-refresh:'.self::TICKET_ID, 300.0, autoRelease: false);
+        self::assertTrue($window->acquire());
+
+        ($this->handler)(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Leading));
+
+        self::assertSame([], $this->published);
+        self::assertSame(2050, $this->commandBus->dispatched()[0]->last(DelayStamp::class)?->getDelay());
     }
 
     #[Test]
@@ -236,7 +294,7 @@ final class RefreshTicketPagesHandlerTest extends TestCase
 
             return 'urn:uuid:published';
         });
-        $handler = new RefreshTicketPagesHandler($hub, $this->lockFactory, $this->commandBus);
+        $handler = new RefreshTicketPagesHandler($hub, $this->lockFactory, $this->commandBus, $this->lockStore);
         $refresh = new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Leading);
 
         try {
@@ -261,7 +319,7 @@ final class RefreshTicketPagesHandlerTest extends TestCase
     #[Test]
     public function aTrailingTryTheBusCannotQueueFreesItsLockSoTheRetryQueuesIt(): void
     {
-        $handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->busFailingFirstDispatch());
+        $handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->busFailingFirstDispatch(), $this->lockStore);
         $refresh = new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Leading);
         $handler($refresh);
         $this->clock->sleep(0.1);
@@ -292,7 +350,7 @@ final class RefreshTicketPagesHandlerTest extends TestCase
         self::assertTrue($window->acquire());
         $waitingTrailingTry = $this->lockFactory->createLock('realtime-refresh-trailing:'.self::TICKET_ID, 2.0, autoRelease: false);
         self::assertTrue($waitingTrailingTry->acquire());
-        $handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->busFailingFirstDispatch());
+        $handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->busFailingFirstDispatch(), $this->lockStore);
 
         try {
             $handler(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Trailing));
