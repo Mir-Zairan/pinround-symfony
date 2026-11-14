@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
-import { bellButton, bellPopover, openBellPopover } from './bell';
+import { bellButton, bellPopover, expectOmarUnderBellCaps, openBellPopover } from './bell';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 const TOAST_REGION = '#toast-region';
@@ -128,6 +128,7 @@ function lenasCardOn(page: Page, key: string) {
 const DONE_TRIES = 3;
 
 test('Done takes the card out of the popover and drops the badge by one', async ({ browser, page }) => {
+  expectOmarUnderBellCaps();
   test.setTimeout(DONE_TRIES * 30_000);
   const drops: number[] = [];
   let key = '';

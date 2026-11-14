@@ -1,10 +1,9 @@
 import { errors, expect, test, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import path from 'node:path';
 import { LENA_EMAIL, LENA_STORAGE_STATE, MIA_EMAIL, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
-import { bellButton, bellPopover, openBellPopover } from './bell';
+import { bellButton, bellPopover, expectOmarUnderBellCaps, openBellPopover } from './bell';
+import { runAsDatabaseOwner } from './database';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 // ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED
@@ -19,7 +18,6 @@ const COALESCED_SHOWS_WITHIN_MS = 2000 + SHOWS_WITHIN_MS;
 const TOKEN_PATH = '/realtime/token';
 const HUB_PATH = '/.well-known/mercure';
 const STATE_CHANGE_KEY = 'e2e-ticket-state-change';
-const REPO_ROOT = path.join(__dirname, '..', '..');
 
 // Lena and Omar each have a browser of their own on one SHOP ticket that Lena makes for the test, so the hub, the
 // outbox relay and the worker that publishes (compose.yaml) all run between them. The signal carries no content: what
@@ -212,22 +210,6 @@ async function moveFromList(page: Page, stepName: string): Promise<void> {
   await moveList.getByText('Move to another step…').click();
   await moveList.getByRole('button', { name: stepName, exact: true }).click();
   expect((await answer).status()).toBe(200);
-}
-
-/**
- * Runs SQL as the database's superuser, which row-level security does not limit, and returns the rows it printed, one
- * per line with '|' between columns; statements split by ';' run in one transaction. No app path removes a team member,
- * so the test does it here.
- * .env.local exists only on a dev machine; COMPOSE_FILE picks CI's compose files.
- */
-function runAsDatabaseOwner(sql: string): string[] {
-  const envFileOptions = ['.env', '.env.dev', '.env.local'].filter((file) => existsSync(path.join(REPO_ROOT, file))).flatMap((file) => ['--env-file', file]);
-  const printed = execFileSync(
-    'docker',
-    ['compose', ...envFileOptions, 'exec', '-T', 'postgres', 'psql', '-U', 'pinround', '-d', 'pinround', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', sql],
-    { cwd: REPO_ROOT, encoding: 'utf8' },
-  );
-  return printed.split('\n').filter((line) => line !== '');
 }
 
 /** The throwaway team a ticket went to and where the ticket stood before, as SQL literals, for putBackAndDropTeam. */
@@ -961,47 +943,61 @@ test.describe('a stream that reconnects', () => {
 
 type StreamOpens = Window & { streamOpens?: number };
 
+const isNewTicketVisit = (request: Request) => pathOf(request) === '/tickets/new' && request.resourceType() === 'fetch';
+
+/**
+ * As Lena: opens /tickets/new, which has no live part, so a reconnect makes the page visit itself again. Its first
+ * stream ends as soon as it is answered, as a dropped connection does; the open of the next one is a reconnect, after
+ * which the page fetches itself again in case a signal was sent meanwhile. Returns every request the page sends.
+ */
+async function openNewTicketWhoseStreamDrops(browser: Browser): Promise<{ lena: { context: BrowserContext; page: Page }; requests: Request[] }> {
+  const lena = await openAs(browser, LENA_STORAGE_STATE);
+  // The lowest draw, so the reopen waits half its step and the refetch has no jitter. Each stream's open is counted
+  // by a listener added before the controller's, so the controller has seen an open once the count shows it.
+  await lena.page.addInitScript(() => {
+    Math.random = () => 0;
+    const NativeEventSource = window.EventSource;
+    (window as StreamOpens).streamOpens = 0;
+    window.EventSource = class extends NativeEventSource {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        this.addEventListener('open', () => {
+          (window as StreamOpens).streamOpens! += 1;
+        });
+      }
+    };
+  });
+  let streamAsks = 0;
+  await lena.page.route(`**${HUB_PATH}**`, async (route) => {
+    streamAsks += 1;
+    if (streamAsks === 1) {
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
+      return;
+    }
+    await route.continue();
+  });
+  const requests = recordRequests(lena.page);
+  await lena.page.goto('/tickets/new', { waitUntil: 'networkidle' });
+  return { lena, requests };
+}
+
+/** Waits for the second stream's open and for the refetch the controller runs after it. */
+async function streamReconnected(page: Page): Promise<void> {
+  // live-updates_controller.js FIRST_REOPEN_STEP_MS / 2, then the hub's answer.
+  await page.waitForFunction(() => (window as StreamOpens).streamOpens === 2, undefined, { timeout: 5000 + SHOWS_WITHIN_MS });
+  await nextTaskOf(page);
+  await nextTaskOf(page);
+}
+
 test.describe('a page with no live parts', () => {
   test("a title Lena is typing stays when her stream reconnects; the page loads again once she clears it", async ({ browser }) => {
-    const lena = await openAs(browser, LENA_STORAGE_STATE);
-    // The lowest draw, so the reopen waits half its step and the refetch has no jitter. Each stream's open is counted
-    // by a listener added before the controller's, so the controller has seen an open once the count shows it.
-    await lena.page.addInitScript(() => {
-      Math.random = () => 0;
-      const NativeEventSource = window.EventSource;
-      (window as StreamOpens).streamOpens = 0;
-      window.EventSource = class extends NativeEventSource {
-        constructor(url: string | URL, init?: EventSourceInit) {
-          super(url, init);
-          this.addEventListener('open', () => {
-            (window as StreamOpens).streamOpens! += 1;
-          });
-        }
-      };
-    });
-    let streamAsks = 0;
-    // The first stream ends as soon as it is answered, as a dropped connection does; the open of the next one is a
-    // reconnect, after which the page fetches itself again in case a signal was sent meanwhile.
-    await lena.page.route(`**${HUB_PATH}**`, async (route) => {
-      streamAsks += 1;
-      if (streamAsks === 1) {
-        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
-        return;
-      }
-      await route.continue();
-    });
-    const requests = recordRequests(lena.page);
-    const isNewTicketVisit = (request: Request) => pathOf(request) === '/tickets/new' && request.resourceType() === 'fetch';
-    await lena.page.goto('/tickets/new', { waitUntil: 'networkidle' });
+    const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
     const title = lena.page.getByLabel('Title');
     const typed = `Receipt footer cuts off the address ${randomUUID().slice(0, 8)}`;
     await title.fill(typed);
     await lena.page.getByRole('heading', { level: 1 }).click();
 
-    // live-updates_controller.js FIRST_REOPEN_STEP_MS / 2, then the hub's answer.
-    await lena.page.waitForFunction(() => (window as StreamOpens).streamOpens === 2, undefined, { timeout: 5000 + SHOWS_WITHIN_MS });
-    await nextTaskOf(lena.page);
-    await nextTaskOf(lena.page);
+    await streamReconnected(lena.page);
 
     expect(requests.filter(isNewTicketVisit)).toHaveLength(0);
     await expect(title).toHaveValue(typed);
@@ -1014,32 +1010,7 @@ test.describe('a page with no live parts', () => {
   });
 
   test('a changed select or a ticked checkbox holds the visit until each is put back', async ({ browser }) => {
-    const lena = await openAs(browser, LENA_STORAGE_STATE);
-    await lena.page.addInitScript(() => {
-      Math.random = () => 0;
-      const NativeEventSource = window.EventSource;
-      (window as StreamOpens).streamOpens = 0;
-      window.EventSource = class extends NativeEventSource {
-        constructor(url: string | URL, init?: EventSourceInit) {
-          super(url, init);
-          this.addEventListener('open', () => {
-            (window as StreamOpens).streamOpens! += 1;
-          });
-        }
-      };
-    });
-    let streamAsks = 0;
-    await lena.page.route(`**${HUB_PATH}**`, async (route) => {
-      streamAsks += 1;
-      if (streamAsks === 1) {
-        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
-        return;
-      }
-      await route.continue();
-    });
-    const requests = recordRequests(lena.page);
-    const isNewTicketVisit = (request: Request) => pathOf(request) === '/tickets/new' && request.resourceType() === 'fetch';
-    await lena.page.goto('/tickets/new', { waitUntil: 'networkidle' });
+    const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
     // The form has no checkbox and no select with an option marked selected of its own, so the test adds one of each.
     await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title') }).evaluate((form) => {
       form.insertAdjacentHTML(
@@ -1061,9 +1032,7 @@ test.describe('a page with no live parts', () => {
     await notify.check();
     await pageHeading.click();
 
-    await lena.page.waitForFunction(() => (window as StreamOpens).streamOpens === 2, undefined, { timeout: 5000 + SHOWS_WITHIN_MS });
-    await nextTaskOf(lena.page);
-    await nextTaskOf(lena.page);
+    await streamReconnected(lena.page);
 
     /** Moves focus away and back, which may end the hold, then proves the visit is still held. */
     const expectVisitHeld = async (): Promise<void> => {
@@ -1089,6 +1058,26 @@ test.describe('a page with no live parts', () => {
     const visit = lena.page.waitForRequest(isNewTicketVisit, { timeout: SHOWS_WITHIN_MS });
     await notify.uncheck();
     await pageHeading.click();
+    expect((await (await visit).response())?.status()).toBe(200);
+    await lena.context.close();
+  });
+  test('an open details box with an untouched text field holds the visit until it is closed', async ({ browser }) => {
+    const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
+    // The form has no disclosure of its own, so the test adds one, open, whose field Lena never types in.
+    await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title') }).evaluate((form) => {
+      form.insertAdjacentHTML('beforeend', '<details open><summary>Add a note</summary><label>Note <input type="text" name="e2e_note"></label></details>');
+    });
+    const note = lena.page.getByLabel('Note');
+    await expect(note).toHaveValue('');
+    await lena.page.getByRole('heading', { level: 1 }).click();
+
+    await streamReconnected(lena.page);
+
+    expect(requests.filter(isNewTicketVisit)).toHaveLength(0);
+    await expect(note).toBeVisible();
+
+    const visit = lena.page.waitForRequest(isNewTicketVisit, { timeout: SHOWS_WITHIN_MS });
+    await lena.page.getByText('Add a note').click();
     expect((await (await visit).response())?.status()).toBe(200);
     await lena.context.close();
   });
@@ -1180,6 +1169,7 @@ test.describe("the bell's push", () => {
       !process.env.CI && !existsSync(MIA_STORAGE_STATE),
       'auth.setup.ts skipped Mia: her two-step login is on in this database. RefreshBellHandlerTest proves the push.',
     );
+    expectOmarUnderBellCaps();
     const key = await makeTicketForOmar(browser, `Coupon field clears itself ${randomUUID().slice(0, 8)}`);
     const omar = await openAs(browser, OMAR_STORAGE_STATE);
     const streamOpened = omar.page.waitForResponse((response) => pathOf(response.request()) === HUB_PATH);
@@ -1209,6 +1199,7 @@ test.describe("the bell's push", () => {
       !process.env.CI && !existsSync(MIA_STORAGE_STATE),
       'auth.setup.ts skipped Mia: her two-step login is on in this database. RefreshBellHandlerTest proves the push.',
     );
+    expectOmarUnderBellCaps();
     // Lena giving Omar the ticket notifies him too; its push may come at any time before Mia's, so the badge is
     // compared with the server's count once Mia's card shows rather than with a count read before her ping.
     const key = await makeTicketForOmar(browser, `Gift card balance shows twice ${randomUUID().slice(0, 8)}`);
@@ -1231,6 +1222,60 @@ test.describe("the bell's push", () => {
     expect(serverCount, "the server counts Mia's ping").toBeGreaterThan(0);
     await expect.poll(() => badgeCountOf(omar.page)).toBe(serverCount);
     await expectSameLoad(omar.page);
+    await mia.context.close();
+    await omar.context.close();
+  });
+
+  test("a push while the popover's first load is still on its way leaves that load to show Mia's card", async ({ browser }) => {
+    test.skip(
+      !process.env.CI && !existsSync(MIA_STORAGE_STATE),
+      'auth.setup.ts skipped Mia: her two-step login is on in this database. RefreshBellHandlerTest proves the push.',
+    );
+    expectOmarUnderBellCaps();
+    const key = await makeTicketForOmar(browser, `Store finder lists closed shops ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    // The popover's first GET /bell waits until the test lets it go, so the push lands while the frame still shows
+    // "Loading pings…"; every later load goes through.
+    let releaseFirstLoad = (): void => undefined;
+    const firstLoadReleased = new Promise<void>((resolve) => {
+      releaseFirstLoad = resolve;
+    });
+    let bellLoads = 0;
+    await omar.page.route(
+      (url) => url.pathname === '/bell',
+      async (route) => {
+        bellLoads += 1;
+        if (bellLoads > 1) {
+          await route.continue();
+          return;
+        }
+        await firstLoadReleased;
+        // The push swaps in a new frame, and the page may cancel the load the old one sent, which ends this route too.
+        await route.continue().catch((error: unknown) => {
+          if (!(error instanceof Error) || !/Request (was aborted|context disposed)|Target (page, context or browser )?(has been )?closed/i.test(error.message)) {
+            throw error;
+          }
+        });
+      },
+    );
+    const streamOpened = omar.page.waitForResponse((response) => pathOf(response.request()) === HUB_PATH);
+    await omar.page.goto('/', { waitUntil: 'networkidle' });
+    expect((await streamOpened).status()).toBe(200);
+    const firstLoadSent = omar.page.waitForRequest((request) => pathOf(request) === '/bell');
+    await expect(async () => {
+      await bellButton(omar.page).click();
+      await expect(bellButton(omar.page)).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+    }).toPass({ intervals: [250, 500, 1_000], timeout: 10_000 });
+    await firstLoadSent;
+    await expect(omar.page.locator('#bell-popover .bell-popover__loading')).toBeVisible();
+
+    const mia = await pingOmarAsMia(browser, key, `Can you check the store finder? ${randomUUID().slice(0, 8)}`);
+    // Counted from her ping's answer, not from before her page opened, so her own page load is not timed.
+    await expect.poll(() => bellLoads, { timeout: SHOWS_WITHIN_MS }).toBeGreaterThan(1);
+    releaseFirstLoad();
+
+    await expect(bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}` })).toBeVisible({ timeout: SHOWS_WITHIN_MS });
+    await expect(omar.page.locator('#bell-popover .bell-popover__loading')).toHaveCount(0);
     await mia.context.close();
     await omar.context.close();
   });
