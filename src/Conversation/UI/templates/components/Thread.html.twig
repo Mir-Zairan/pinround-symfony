@@ -26,9 +26,9 @@
                         {% else %}
                             <p class="thread__body">{{ message.body|linkify }}</p>
                             {% if message.isOpenQuestion %}
-                                <p class="thread__tags"><span class="tag thread__tag--waiting">Waiting on {{ message.askedFirstName }}</span></p>
+                                <p class="thread__tags"><twig:Tag class="thread__tag--waiting">Waiting on {{ message.askedFirstName }}</twig:Tag></p>
                             {% elseif message.isAnswered %}
-                                <p class="thread__tags"><span class="tag thread__tag--answered">Answered</span></p>
+                                <p class="thread__tags"><twig:Tag class="thread__tag--answered">Answered</twig:Tag></p>
                             {% endif %}
                         {% endif %}
                         {% if message.answer %}
