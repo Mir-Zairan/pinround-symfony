@@ -176,30 +176,44 @@ final class ThreadClearsPingsTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, string, bool}>
+     * @return iterable<string, array{string, string, bool, int}> the post, its toast, whether the refusal streams only
+     *                                                            the toast, and the messages on SHOP-1
      */
     public static function refusedPosts(): iterable
     {
-        yield 'a blank comment' => ['comment', 'A message needs a body.', false];
-        yield 'a reply to a removed comment' => ['reply to removed', 'This message was removed, so you cannot reply to it.', true];
+        yield 'a blank comment' => ['comment', 'A message needs a body.', false, 1];
+        yield 'a reply to a removed comment' => ['reply to removed', 'This message was removed, so you cannot reply to it.', true, 1];
+        yield 'a question while the ticket waits for an answer' => ['question while waiting', 'This ticket already waits for an answer.', false, 2];
+        yield 'an answer to a withdrawn question' => ['answer to withdrawn', 'This question was withdrawn.', true, 2];
     }
 
     #[Test]
     #[DataProvider('refusedPosts')]
-    public function aRefusedPostClearsNothing(string $post, string $expectedToast, bool $isToastOnly): void
+    public function aRefusedPostClearsNothing(string $post, string $expectedToast, bool $isToastOnly, int $messageCount): void
     {
         $removedComment = $this->addMessage('Lena', 'comment', null, true);
+        $lenasQuestionToOmar = match ($post) {
+            'question while waiting' => $this->addMessage('Lena', 'question', 'Omar'),
+            'answer to withdrawn' => $this->addMessage('Lena', 'question', 'Omar', true),
+            default => null,
+        };
         $pingsBefore = $this->stateOfPings();
         $this->logIn($this->client, $this->people['Omar']);
 
-        if ('comment' === $post) {
-            $this->client->request('POST', '/t/SHOP-1/comments', $this->formFields(" \n\t "), [], self::TURBO_FORM_HEADERS);
-        } else {
-            $this->client->request('POST', '/t/SHOP-1/messages/'.$removedComment.'/replies', $this->formFields('Thanks.'), [], self::TURBO_FORM_HEADERS);
-        }
+        [$path, $fields] = match ($post) {
+            'comment' => ['/t/SHOP-1/comments', $this->formFields(" \n\t ")],
+            'reply to removed' => ['/t/SHOP-1/messages/'.$removedComment.'/replies', $this->formFields('Thanks.')],
+            'question while waiting' => ['/t/SHOP-1/questions', [
+                ...$this->formFields('Which build shows the wrong sum?'),
+                ThreadController::ASKED_USER_FIELD => $this->people['Lena']->id()->toString(),
+            ]],
+            'answer to withdrawn' => ['/t/SHOP-1/messages/'.$lenasQuestionToOmar.'/answer', $this->formFields('Build 42.')],
+            default => self::fail('Unknown post: '.$post),
+        };
+        $this->client->request('POST', $path, $fields, [], self::TURBO_FORM_HEADERS);
 
         self::assertSame($expectedToast, $this->toastInTheStream(422, $isToastOnly));
-        self::assertSame([1, 0], [$this->rowCountOf('cnv_message'), $this->rowCountOf('cnv_reply')]);
+        self::assertSame([$messageCount, 0], [$this->rowCountOf('cnv_message'), $this->rowCountOf('cnv_reply')]);
         self::assertSame(['cleared' => null, 'done' => false], $pingsBefore['Mia to Omar on SHOP-1, older']);
         self::assertSame($pingsBefore, $this->stateOfPings());
         self::assertSame(0, $this->pingClearedEventsInTheOutbox());
@@ -431,7 +445,7 @@ final class ThreadClearsPingsTest extends WebTestCase
 
     /**
      * A comment, or a question to $askedPerson with SHOP-1 paused on it as TicketPauses leaves it, by $author a minute
-     * before now on SHOP-1.
+     * before now on SHOP-1. A removed question is a withdrawn one, so it leaves SHOP-1 unpaused.
      *
      * @return string its id
      */
@@ -442,13 +456,13 @@ final class ThreadClearsPingsTest extends WebTestCase
         $authorId = $this->people[$author]->id()->toString();
         $askedUserId = null === $askedPerson ? null : $this->people[$askedPerson]->id()->toString();
         $parameters = [$organizationId, $messageId, $this->tickets[self::KEY], $authorId, $kind, $askedUserId, 'Which build shows the wrong sum?', $isRemoved ? '2026-11-06 11:59:30+00' : null];
-        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters, $organizationId, $authorId, $askedUserId): int {
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters, $organizationId, $authorId, $askedUserId, $isRemoved): int {
             $migrator->executeStatement(
                 "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, removed_at, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, TIMESTAMPTZ '2026-11-06 11:59:00+00')",
                 $parameters,
             );
-            if (null === $askedUserId) {
+            if (null === $askedUserId || $isRemoved) {
                 return 0;
             }
 
