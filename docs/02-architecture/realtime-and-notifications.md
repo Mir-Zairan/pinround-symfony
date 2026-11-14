@@ -75,7 +75,7 @@ A bell push is a `RefreshBell` on `async_notify`, sent once the notification row
 
 A redelivered bell push publishes once: `RefreshBell` is handled under `OnceOnlyHandling` with the handler name `notification.refresh_bell`.
 
-Bell pushes are not grouped per user, because each push can carry its own toast and grouping would drop toasts. A Done on a group sends one push per cleared ping. The browser holds the popover swap while the popover is open, so the cost is one small count query and one publish per ping.
+Bell pushes are not grouped per user, because each push can carry its own toast and grouping would drop toasts. A Done on a group sends one push per cleared ping. While the popover is open, the browser does not swap in the push's fresh frame: it reloads the open frame in place on each push (`GET /bell`, focus kept), so a Done on a group costs one small count query, one publish and one popover reload per cleared ping. A push that comes while the popover's first load still runs is swapped in as sent, and its fresh frame loads the cards.
 
 Pushes are hints. If a push is lost, the next page load or frame refresh is still correct, because pages always read from the database.
 
