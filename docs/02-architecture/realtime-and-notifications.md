@@ -28,7 +28,7 @@ No spam, no stale pings, and nobody has to clear the bell by hand.
 2. **One notification per real event.** A question sends one notification. Moves notify only the person whose turn it becomes.
 3. **Limits are kept on the server.**
    - One ping per sender, per recipient, per ticket, per N hours (the admin chooses 1, 4, 8 or 24).
-   - Quiet hours hold pings until 09:00 in the recipient's time zone.
+   - Quiet hours hold every bell row made from 18:00 to 09:00 in the recipient's time zone (a ping, a question, an answer, a reply or an assignment) until 09:00. The row is created at that time, and its push goes out only when the release job releases it.
 4. **Pings clear themselves** when the recipient acts on that ticket (admin switch "auto-clear", on by default).
 5. **Never push what the viewer may not see.** Pushes carry either per-user content or a content-free "refresh" signal ([ADR-0023](../03-adr/0023-realtime-mercure.md)).
 6. **Mutes win.** A user who mutes a ticket in My reports gets no notifications or emails about it. It still shows in their lists.
@@ -71,7 +71,7 @@ Implementation notes:
 | SuggestionReady, SummaryGenerated | user topic of the requester; ticket topic for summaries | refresh the report form or summary frame |
 | MediaReady | user topic of the uploader | replace the "processing" placeholder with the thumbnail |
 
-A bell push is a `RefreshBell` on `async_notify`, sent once the notification row (or the clear) commits: worker-notify publishes the new badge, a fresh lazy popover frame that the page loads again through the person's own session, and the toast when there is one. It never carries bell cards, whose forms need that session's CSRF token. A reply or an assignment that adds a bell row pushes the same way, with no toast; a ping held for quiet hours pushes nothing until it is released.
+A bell push is a `RefreshBell` on `async_notify`, sent once the notification row (or the clear) commits: worker-notify publishes the new badge, a fresh lazy popover frame that the page loads again through the person's own session, and the toast when there is one. It never carries bell cards, whose forms need that session's CSRF token. A reply or an assignment that adds a bell row pushes the same way, with no toast. A row of any kind held for quiet hours pushes nothing when it is made: its push goes out only when `ReleaseHeldNotifications` releases it, one push per released recipient, with no toast.
 
 A redelivered bell push publishes once: `RefreshBell` is handled under `OnceOnlyHandling` with the handler name `notification.refresh_bell`.
 
@@ -126,11 +126,13 @@ The actor never notifies themselves. Muted tickets are skipped. For restricted t
 
 Email is a safety net, not a second inbox.
 
-- **When:** a scheduled job (every 15 minutes) collects bell items that are unread for more than 1 hour. It sends one digest per user, at most every 3 hours, and never during their quiet hours. Users will be able to choose "Daily at 09:00" or "Off" in their settings; that digest setting is not built yet, so every user gets the 3-hour digest, and the email's footer links to the profile without offering to turn it off.
-- **What:** "3 things wait on you in pinround". For each item: the person, the kind, the ticket key, the title, and a link.
+- **When:** every 15 minutes `QueueDigests` reads the resolver `digest_recipients` (no tenant set, see [data-model.md](data-model.md#row-level-security)) and sends one `SendDigest` per (organization, person) with a `ping` or `question` row that is unread, not done, delivered and at least 1 hour old, with that organization's TenantStamp, to `async_notify`. It sends at most 10,000 a run (`QueueDigests::MAX_DIGESTS_PER_RUN`); past that it logs a warning with the cap only and leaves the rest to a later run, in an order shuffled per run so the same people are not left out every time.
+- **Who gets one:** `SendDigestHandler`, in worker-notify under the tenant, sends nothing when the person's last digest is under 3 hours old, when it is their quiet hours (the org's quiet hours on, 18:00–09:00 on their clock; the first run after 09:00 sends it), when nothing new waits, or when they have no address. Each digest lists the items since the previous digest's cover time (send time − 1 hour), so no item is listed twice or falls between two digests.
+- **What:** "3 things wait on you in pinround". Only `ping` and `question` rows are listed (FR-PNG-09); the other kinds marked "yes" under [Notification kinds](#notification-kinds) are not in it yet. At most 20 items are listed, newest first, and all are counted ("And N more in pinround."). For each item: the person, the kind, the ticket key, the title, and an absolute link to `/t/{key}`.
   - For restricted tickets the title is replaced with "a restricted ticket in team Shop".
   - Ticket descriptions, comments and AI text are never in emails.
-- **How:** the Symfony Mailer, sent on the `mail` Messenger transport, with retries and idempotency on (user, digest window).
+- **Settings:** users will be able to choose "Daily at 09:00" or "Off"; that digest setting is not built yet, so every user gets the 3-hour digest, and the footer links to `/me/profile` without offering to turn it off.
+- **How:** the handler first takes the person's digest lock (`Deliveries::lockFor`, a transaction-scoped advisory lock), held until it commits, so a second run, even one just past a slot boundary, waits and then sees the first one's digest; it records the digest in `ntf_delivery` under the 3-hour UTC slot (`digest:<slot start>`), so of two runs in one slot only one sends; the email (`SendEmailMessage`) is dispatched after the bus commits, so a rollback sends nothing, and the Symfony Mailer sends it from worker-notify on `async_notify`, like all app mail ([ADR-0033](../03-adr/0033-valkey-transports-workers-and-outbox-relay.md)).
 
 ## Sequence diagrams
 
@@ -233,5 +235,5 @@ Settings live in `org_settings`.
 |---|---|---|
 | Mercure hub down | Pages stop getting live updates | Pages still work. Turbo refreshes on navigation. Publishing failures are retried twice, then dropped (pushes are hints). An alert fires on a publish error rate > 5 % for 5 minutes ([operations.md](operations.md)) |
 | Valkey down | Rate limits cannot be checked | Pings **fail closed**: "Pings are paused for a moment. Try again soon." Everything else that does not need Valkey keeps working |
-| Email provider down | Digests are delayed | The `mail` transport retries with back-off (1 min, 5 min, 30 min, 2 h), then the failure transport and an alert. Idempotency stops double sends |
+| Email provider down | Digests are delayed | The email's `SendEmailMessage` on `async_notify` retries 3 times (1 s, 10 s, 60 s, [ADR-0009](../03-adr/0009-async-messaging-and-outbox.md)), then waits in `failed`. The digest is already recorded in `ntf_delivery`, so the job never sends those items again: retry the message from `failed`. The record stops a second digest in the same slot, but a redelivered `SendEmailMessage` can send the same email twice |
 | Outbox backlog | Bell and pushes arrive late | An alert fires when the oldest outbox message is > 60 s old. The workers on `outbox` scale out |
