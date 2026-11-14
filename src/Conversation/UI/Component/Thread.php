@@ -16,9 +16,10 @@ use Psr\Clock\ClockInterface;
 use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
 
 /**
- * The ticket page's Questions and comments section (ticket-page.md, Questions and comments): the thread and the
- * composer. Shown only on a ticket the viewer may see, and seeing it is what ConversationPermission COMMENT grants, so
- * the composer is shown to every viewer; ThreadController checks the voter on POST.
+ * The ticket's Questions and comments (ticket-page.md, Questions and comments): the thread and the composer, which
+ * ThreadController serves into ThreadFrame's lazy frame. Shown only on a ticket the viewer may see, and seeing it is
+ * what ConversationPermission COMMENT grants, so the composer is shown to every viewer; ThreadController checks the
+ * voter on every request.
  *
  * Reads the thread in one query and the names of authors outside the ticket's people in one more, so it needs the
  * request's transaction under the tenant.
@@ -26,8 +27,13 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
 #[AsTwigComponent(name: 'Thread', template: '@Conversation/components/Thread.html.twig')]
 final class Thread
 {
-    /** The element a Turbo Stream replaces after a comment, an edit or a removal. */
-    public const string ID = 'ticket-thread';
+    /** The Turbo Frame ThreadController's thread route fills. */
+    public const string FRAME_ID = 'ticket-thread';
+    /**
+     * The message list, the only element a Turbo Stream replaces after a comment, an edit or a removal: the composer
+     * stays, so the text being typed and the focus are not lost.
+     */
+    public const string MESSAGES_ID = 'ticket-thread-messages';
     public const string EMPTY_THREAD = 'Nothing yet. Ask a question when you need someone’s answer, or leave a comment.';
     /** The name of an author Identity no longer knows. */
     public const string UNKNOWN_AUTHOR = 'Someone';
@@ -38,6 +44,9 @@ final class Thread
     public array $messages = [];
 
     public bool $hasEarlierMessages = false;
+
+    /** Renders only the message list, for a Turbo Stream. */
+    public bool $isListOnly = false;
 
     public function __construct(
         private readonly ThreadQueries $threadQueries,

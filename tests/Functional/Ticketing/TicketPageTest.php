@@ -1024,10 +1024,11 @@ final class TicketPageTest extends WebTestCase
      * The costliest page: a project list that does not hold the ticket (the project lookup and the plain list's
      * position), a saved turn of someone outside the ticket's people and team and a move by another such person (one
      * more names query for both), What happened's moves (one query), the lead's Needs input dialog (one membership
-     * read), and Conversation's thread (one query; an empty thread names nobody).
+     * read). Conversation's thread loads in a lazy frame of its own request (TicketThreadTest), so the page reads none
+     * of it.
      */
     #[Test]
-    public function theCostliestWarmPageStaysWithinTheElevenQueryBudget(): void
+    public function theCostliestWarmPageStaysWithinTheTenQueryBudget(): void
     {
         new AddTicketEventPartitions($this->migrator(), new MockClock(new \DateTimeImmutable(self::NOW)))();
         $keys = $this->addTicketsToWalk();
@@ -1044,7 +1045,7 @@ final class TicketPageTest extends WebTestCase
         self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertSame(['1 h ago · Sara moved it to To do', '5 Nov · Created by Lena'], self::activityLinesOf($this->client->getCrawler()));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
-        self::assertSame(11, $pageQueryCount);
+        self::assertSame(10, $pageQueryCount);
     }
 
     /**
@@ -1069,14 +1070,14 @@ final class TicketPageTest extends WebTestCase
             self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'), $uri);
         }
 
-        self::assertSame([8, 9, 8, 10], $queryCounts);
+        self::assertSame([7, 8, 7, 9], $queryCounts);
     }
 
     /**
      * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
      * one query), the ticket, the names of everyone in one batch, What happened's moves in one, the saved turn with the
      * waiting turns in one query, the ticket's place in the plain open list in one, for the lead's Needs input dialog
-     * which of the ticket's people are still members in one, Conversation's thread in one, and for People's Ping
+     * which of the ticket's people are still members in one, and for People's Ping
      * buttons the organization's ping limit in one and the viewer's recent pings of the ticket in one, for all rows.
      */
     #[Test]
@@ -1100,7 +1101,7 @@ final class TicketPageTest extends WebTestCase
             ['Lena · Reporter', 'Omar · Assignee', 'Someone else'],
             $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
         );
-        self::assertSame(10, $pageQueryCount);
+        self::assertSame(9, $pageQueryCount);
     }
 
     /**
@@ -1133,7 +1134,7 @@ final class TicketPageTest extends WebTestCase
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__aside .next-step-box'));
         self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog:not([id^="ping-"])'));
-        self::assertSame(9, $pageQueryCount);
+        self::assertSame(8, $pageQueryCount);
     }
 
     /**

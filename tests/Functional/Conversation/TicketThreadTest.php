@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Conversation;
 
 use App\Conversation\UI\Component\Thread;
+use App\Conversation\UI\Component\ThreadFrame;
 use App\Conversation\UI\ThreadController;
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
@@ -24,8 +25,8 @@ use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
- * The ticket page's Questions and comments, and its POST /t/{key}/comments, /t/{key}/messages/{id}/edit and
- * /t/{key}/messages/{id}/remove, on Acme Foods' SHOP-1 through the real firewall, voter, session and database. The
+ * The ticket page's Questions and comments, its GET /t/{key}/thread, and its POST /t/{key}/comments,
+ * /t/{key}/messages/{id}/edit and /t/{key}/messages/{id}/remove, on Acme Foods' SHOP-1 through the real firewall, voter, session and database. The
  * clock is fixed on 6 Nov 2026, before today: a clock ahead of the login would end the session as idle. Every refusal
  * also proves the thread and the outbox unchanged.
  */
@@ -42,7 +43,10 @@ final class TicketThreadTest extends WebTestCase
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string KEY = 'SHOP-1';
     private const string TICKET_PAGE = '/t/SHOP-1';
+    private const string THREAD_PAGE = '/t/SHOP-1/thread';
     private const string COMMENT_PATH = '/t/SHOP-1/comments';
+    /** What Turbo sends when it loads the thread's frame. */
+    private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => Thread::FRAME_ID];
     /** What Turbo sends with a form it posts. */
     private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
     private const string TOAST_REGION_ID = 'toast-region';
@@ -93,27 +97,162 @@ final class TicketThreadTest extends WebTestCase
         $this->removeUsersAndOrganizations();
     }
 
+    /**
+     * The page holds the section's heading and a lazy frame with a link for when JavaScript is off, and reads nothing
+     * of the thread: no query touches cnv_message, while the frame's request reads it in one.
+     */
     #[Test]
-    public function aTicketWithNoMessageShowsTheEmptyThreadAndTheComposer(): void
+    public function theTicketPageHoldsTheThreadAsALazyFrameAndReadsNoneOfIt(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Raj', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $pageQueries = $this->queriesOf(self::TICKET_PAGE);
+
+        $page = $this->client->getCrawler();
+        $section = $page->filter('section[aria-labelledby="ticket-thread-heading"]');
+        self::assertSame('Questions and comments', trim($section->filter('h2#ticket-thread-heading')->text()));
+        $frame = $section->filter('turbo-frame#'.Thread::FRAME_ID);
+        self::assertSame(self::THREAD_PAGE, $frame->attr('src'));
+        self::assertSame('lazy', $frame->attr('loading'));
+        self::assertSame([[ThreadFrame::SHOW_THREAD, self::THREAD_PAGE]], $frame->filter('a')->each(static fn (Crawler $link): array => [trim($link->text()), (string) $link->attr('href')]));
+        self::assertStringNotContainsString(self::EARLIER_BODY, (string) $this->client->getResponse()->getContent());
+        self::assertCount(1, $page->filter('link[rel="stylesheet"][href*="/styles/thread"]'));
+        self::assertSame([], self::threadQueriesAmong($pageQueries));
+        self::assertCount(1, self::threadQueriesAmong($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS)));
+    }
+
+    #[Test]
+    public function theFrameRequestGetsTheBareFrameWithTheEmptyThreadAndTheComposer(): void
     {
         $this->addTicket();
         $this->logIn($this->client, $this->people['Mia']);
 
-        $page = $this->client->request('GET', self::TICKET_PAGE);
+        $page = $this->client->request('GET', self::THREAD_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
-        $thread = $page->filter('#'.Thread::ID);
+        self::assertSame(['Turbo-Frame'], $this->client->getResponse()->getVary());
+        self::assertCount(0, $page->filter('main, header'), 'A frame request gets no layout.');
+        $thread = $page->filter('turbo-frame#'.Thread::FRAME_ID);
         self::assertCount(1, $thread);
-        self::assertSame('Questions and comments', trim($thread->filter('h2')->text()));
-        self::assertStringContainsString(Thread::EMPTY_THREAD, $thread->text());
+        self::assertStringContainsString(Thread::EMPTY_THREAD, $thread->filter('#'.Thread::MESSAGES_ID)->text());
         self::assertSame(self::COMMENT_PATH, $thread->filter('form.thread__composer')->attr('action'));
         self::assertSame('Write a comment', $thread->filter('form.thread__composer textarea')->attr('placeholder'));
         self::assertStringContainsString('A comment does not change the status and sends no notification.', $thread->text());
         self::assertNotNull($thread->filter('.thread__kinds button')->last()->attr('disabled'));
-        self::assertSame('thread-composer', $thread->filter('form.thread__composer')->attr('data-controller'));
+        self::assertSame('thread-composer', $thread->filter('.thread__content')->attr('data-controller'));
+        self::assertCount(1, $thread->filter('.thread__content #'.Thread::MESSAGES_ID.'[data-thread-composer-target="messages"]'));
         self::assertNotNull($thread->filter('form.thread__composer textarea[data-thread-composer-target="body"]')->attr('required'));
         self::assertSame('Comment', trim($thread->filter('form.thread__composer button[data-thread-composer-target="submit"]')->text()));
+    }
+
+    /**
+     * Without JavaScript the frame's link opens the thread as a page of its own, with a way back to the ticket.
+     */
+    #[Test]
+    public function aRequestOutsideAFrameGetsTheThreadAsAPageOfItsOwn(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::THREAD_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Turbo-Frame'], $this->client->getResponse()->getVary());
+        self::assertSame('Questions and comments', trim($page->filter('main h1')->text()));
+        self::assertSame(self::TICKET_PAGE, $page->filter('main a.ticket__back')->attr('href'));
+        self::assertSame([self::EARLIER_BODY], $page->filter('main turbo-frame#'.Thread::FRAME_ID.' .thread__body')->each(static fn (Crawler $body): string => trim($body->text())));
+        self::assertCount(1, $page->filter('main form.thread__composer'));
         self::assertCount(1, $page->filter('link[rel="stylesheet"][href*="/styles/thread"]'));
+    }
+
+    #[Test]
+    #[DataProvider('peopleWhoMayNotSeeTheTicket')]
+    public function someoneWhoMayNotSeeTheTicketGetsNotFoundForTheThreadAndSeesNoneOfIt(string $person, string $visibility): void
+    {
+        $this->addTicket($visibility);
+        $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $rowsBefore = $this->messageRows();
+        $this->addBen();
+        $this->logIn($this->client, $this->people[$person]);
+
+        foreach ([[], self::TURBO_FRAME_HEADERS] as $headers) {
+            $this->client->request('GET', self::THREAD_PAGE, [], [], $headers);
+            self::assertResponseStatusCodeSame(404);
+            self::assertStringContainsString(ThreadController::NOT_FOUND, (string) $this->client->getResponse()->getContent());
+            self::assertStringNotContainsString(self::EARLIER_BODY, (string) $this->client->getResponse()->getContent());
+        }
+
+        self::assertSame($rowsBefore, $this->messageRows());
+    }
+
+    /**
+     * @return iterable<string, array{string}> a key, as in the URL, of no ticket
+     */
+    public static function keysOfNoTicket(): iterable
+    {
+        yield 'a number no ticket has' => ['SHOP-99'];
+        yield 'the key in lower case' => ['shop-1'];
+        yield 'no number' => ['SHOP-'];
+        yield 'a trailing newline' => ['SHOP-1%0A'];
+        yield 'a number past the integer range' => ['SHOP-99999999999999999999'];
+    }
+
+    #[Test]
+    #[DataProvider('keysOfNoTicket')]
+    public function aKeyOfNoTicketGetsNotFoundForTheThread(string $key): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('GET', '/t/'.$key.'/thread', [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(ThreadController::NOT_FOUND, (string) $this->client->getResponse()->getContent());
+        self::assertStringNotContainsString(self::EARLIER_BODY, (string) $this->client->getResponse()->getContent());
+    }
+
+    #[Test]
+    public function anAnonymousVisitorAskingForTheThreadIsSentToLogIn(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+
+        $this->client->request('GET', self::THREAD_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(302);
+        self::assertStringEndsWith('/login', (string) $this->client->getResponse()->headers->get('Location'));
+    }
+
+    /**
+     * Lena reported SHOP-1 and Omar has it, so the page knows their names; Raj and Sara, outside the ticket's people,
+     * cost one query for both, however many messages they wrote.
+     */
+    #[Test]
+    public function theFrameNamesAuthorsOutsideTheTicketsPeopleInOneQuery(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
+        $this->addMessage('Lena', 'Thanks', '2026-11-06 09:05:00+00');
+        $this->logIn($this->client, $this->people['Mia']);
+        // logIn() leaves the user in the entity manager, and the first request fills the caches.
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $queryCountWithTheTicketsPeople = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+        $this->addMessage('Raj', 'Is this in 2.4?', '2026-11-06 10:00:00+00');
+        $this->addMessage('Sara', 'Yes, it is', '2026-11-06 10:05:00+00');
+        $this->addMessage('Raj', 'Good', '2026-11-06 10:10:00+00');
+
+        $queryCountWithOutsideAuthors = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+
+        self::assertSame(
+            ['Omar', 'Lena', 'Raj', 'Sara', 'Raj'],
+            $this->client->getCrawler()->filter('.thread__author')->each(static fn (Crawler $author): string => trim($author->text())),
+        );
+        self::assertSame($queryCountWithTheTicketsPeople + 1, $queryCountWithOutsideAuthors);
     }
 
     /**
@@ -132,7 +271,7 @@ final class TicketThreadTest extends WebTestCase
         $html = (string) $this->client->getResponse()->getContent();
         self::assertStringNotContainsString("<script>alert('x')</script>", $html);
         self::assertStringContainsString('&lt;script&gt;alert(&apos;x&apos;)&lt;/script&gt;<br>', $html);
-        $message = $this->client->getCrawler()->filter('#'.Thread::ID.' .thread__message');
+        $message = $this->client->getCrawler()->filter('#'.Thread::FRAME_ID.' .thread__message');
         self::assertCount(1, $message);
         self::assertSame(['https://acme.test/build'], $message->filter('.thread__body a')->each(static fn (Crawler $link): ?string => $link->attr('href')));
         self::assertStringStartsWith('Mia · 6 Nov, 13:00 · comment', trim($message->filter('.thread__meta')->text()));
@@ -150,8 +289,8 @@ final class TicketThreadTest extends WebTestCase
 
         $streams = $this->streamsOfTheAnswer(200);
         self::assertSame(ThreadController::COMMENT_ADDED, $this->toastOf($streams));
-        self::assertSame('Fixed on staging', trim($streams[Thread::ID]->filter('.thread__message .thread__body')->text()));
-        self::assertSame('', $streams[Thread::ID]->filter('form.thread__composer textarea')->text());
+        self::assertSame('Fixed on staging', trim($streams[Thread::MESSAGES_ID]->filter('#'.Thread::MESSAGES_ID.' .thread__message .thread__body')->text()));
+        self::assertCount(0, $streams[Thread::MESSAGES_ID]->filter('form.thread__composer'), 'The stream leaves the composer and its focus alone.');
         self::assertCount(1, $this->messageRows());
     }
 
@@ -271,7 +410,7 @@ final class TicketThreadTest extends WebTestCase
         $this->addTicket();
         $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:45:00+00');
         $this->logIn($this->client, $this->people['Omar']);
-        $page = $this->client->request('GET', self::TICKET_PAGE);
+        $page = $this->client->request('GET', self::THREAD_PAGE);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['Edit', 'Remove'], $this->actionsOn($page));
 
@@ -279,7 +418,7 @@ final class TicketThreadTest extends WebTestCase
 
         self::assertSame(ThreadController::MESSAGE_EDITED, $this->toastAfterTheRedirect());
         self::assertSame([['The cart total is right on staging', $this->people['Omar']->id()->toString(), '2026-11-06 12:00:00+00', null]], $this->messageRows());
-        self::assertStringContainsString('· edited', $this->client->getCrawler()->filter('#'.Thread::ID.' .thread__meta')->text());
+        self::assertStringContainsString('· edited', $this->client->getCrawler()->filter('#'.Thread::FRAME_ID.' .thread__meta')->text());
     }
 
     #[Test]
@@ -289,7 +428,7 @@ final class TicketThreadTest extends WebTestCase
         $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:44:59+00');
         $rowsBefore = $this->messageRows();
         $this->logIn($this->client, $this->people['Omar']);
-        $page = $this->client->request('GET', self::TICKET_PAGE);
+        $page = $this->client->request('GET', self::THREAD_PAGE);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['Remove'], $this->actionsOn($page));
 
@@ -309,7 +448,7 @@ final class TicketThreadTest extends WebTestCase
         $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
         $rowsBefore = $this->messageRows();
         $this->logIn($this->client, $this->people['Lena']);
-        $page = $this->client->request('GET', self::TICKET_PAGE);
+        $page = $this->client->request('GET', self::THREAD_PAGE);
         self::assertResponseStatusCodeSame(200);
         self::assertSame([], $this->actionsOn($page));
 
@@ -338,9 +477,9 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame(ThreadController::MESSAGE_REMOVED, $this->toastAfterTheRedirect());
         $html = (string) $this->client->getResponse()->getContent();
         self::assertStringNotContainsString(self::EARLIER_BODY, $html);
-        $bodies = $this->client->getCrawler()->filter('#'.Thread::ID.' .thread__body')->each(static fn (Crawler $body): string => trim($body->text()));
+        $bodies = $this->client->getCrawler()->filter('#'.Thread::FRAME_ID.' .thread__body')->each(static fn (Crawler $body): string => trim($body->text()));
         self::assertSame(['Message removed', 'Thanks, closing this'], $bodies);
-        self::assertSame([], $this->actionsOn($this->client->getCrawler()->filter('#'.Thread::ID.' .thread__message')->first()));
+        self::assertSame([], $this->actionsOn($this->client->getCrawler()->filter('#'.Thread::FRAME_ID.' .thread__message')->first()));
         self::assertSame('2026-11-06 12:00:00+00', $this->messageRows()[0][3]);
         self::assertSame(self::EARLIER_BODY, $this->messageRows()[0][0]);
     }
@@ -355,7 +494,7 @@ final class TicketThreadTest extends WebTestCase
 
         $this->client->request('POST', $this->messagePath($messageId, 'remove'), $this->formFields(''), [], self::TURBO_FORM_HEADERS);
         self::assertSame('This message is already removed.', $this->toastOf($streams = $this->streamsOfTheAnswer(422)));
-        self::assertStringNotContainsString(self::EARLIER_BODY, $streams[Thread::ID]->html());
+        self::assertStringNotContainsString(self::EARLIER_BODY, $streams[Thread::MESSAGES_ID]->html());
         $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Back again'), [], self::TURBO_FORM_HEADERS);
         self::assertSame('This message was removed, so it cannot be edited.', $this->toastOf($this->streamsOfTheAnswer(422)));
 
@@ -399,6 +538,39 @@ final class TicketThreadTest extends WebTestCase
         ];
     }
 
+    /**
+     * @param array<string, string> $server
+     *
+     * @return list<string> the SQL of every query the GET ran, after asserting it answered 200
+     */
+    private function queriesOf(string $uri, array $server = []): array
+    {
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $this->client->request('GET', $uri, [], [], $server);
+        self::assertResponseStatusCodeSame(200);
+
+        $queries = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            foreach ($queriesOfOneConnection as $query) {
+                self::assertIsString($query['sql']);
+                $queries[] = $query['sql'];
+            }
+        }
+
+        return $queries;
+    }
+
+    /**
+     * @param list<string> $queries
+     *
+     * @return list<string> those that read the thread's table
+     */
+    private static function threadQueriesAmong(array $queries): array
+    {
+        return array_values(array_filter($queries, static fn (string $query): bool => str_contains($query, 'cnv_message')));
+    }
+
     private function messagePath(string $messageId, string $action): string
     {
         return '/t/'.self::KEY.'/messages/'.$messageId.'/'.$action;
@@ -423,7 +595,7 @@ final class TicketThreadTest extends WebTestCase
     private function toastAfterTheRedirect(): string
     {
         self::assertResponseStatusCodeSame(303);
-        self::assertSame(self::TICKET_PAGE, $this->client->getResponse()->headers->get('Location'));
+        self::assertSame(self::THREAD_PAGE, $this->client->getResponse()->headers->get('Location'));
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         $toast = $page->filter('.toast-region [data-toast-message-value]');
@@ -433,7 +605,7 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the thread and updates the toast region.
+     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
@@ -448,7 +620,7 @@ final class TicketThreadTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', Thread::ID], ['update', self::TOAST_REGION_ID]],
+            [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];

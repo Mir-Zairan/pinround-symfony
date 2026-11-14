@@ -83,7 +83,7 @@
                 </section>
 
                 {#- Conversation's component, embedded by name: Ticketing's UI may not use Conversation's Api (deptrac). -#}
-                {{ component('Thread', {ticket: ticket}) }}
+                {{ component('ThreadFrame', {key: ticket.key}) }}
 
                 <section class="ticket__section" aria-labelledby="ticket-rounds-heading">
                     <h2 id="ticket-rounds-heading" class="ticket__section-title">Rounds</h2>

@@ -30,17 +30,20 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\UX\Turbo\TurboBundle;
 
 /**
- * The thread's actions on the ticket page (FR-CNV-01, FR-CNV-06, ticket-page.md, Questions and comments): post a
- * comment, and edit or remove one's own message. Each answers with a toast: a Turbo form in a Turbo Stream that also
- * replaces the thread, any other form with a redirect to the ticket page.
+ * The ticket's thread (FR-CNV-01, FR-CNV-06, ticket-page.md, Questions and comments): shows it in ThreadFrame's lazy
+ * frame, or as a page of its own, and posts a comment, and edits or removes one's own message. Each action answers with
+ * a toast: a Turbo form in a Turbo Stream that also replaces the message list, any other form with a redirect to the
+ * thread's page.
  *
- * Without the request transaction, as TicketMoveController: Transactions gives the action a transaction of its own, so
+ * Showing it runs in the request transaction, with the same 404 as the actions. The actions run without it, as
+ * TicketMoveController: Transactions gives the action a transaction of its own, so
  * the toast is set only once the change is committed and a refusal leaves nothing. In that order: a ticket the person
  * may not see is not found, as on its page; ConversationPermission COMMENT is checked; a form token that is not valid
  * changes nothing. Who may edit or remove a message, and until when, is the domain's rule, whose refusal is a toast.
  */
 final class ThreadController extends AbstractController
 {
+    public const string THREAD_ROUTE = 'conversation_thread';
     public const string COMMENT_ROUTE = 'conversation_comment';
     public const string EDIT_ROUTE = 'conversation_message_edit';
     public const string REMOVE_ROUTE = 'conversation_message_remove';
@@ -66,6 +69,8 @@ final class ThreadController extends AbstractController
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
     private const string CSRF_ID_PREFIX = 'conversation_thread:';
+    /** The header Turbo sends when it loads a frame, with the frame's id. */
+    private const string TURBO_FRAME_HEADER = 'Turbo-Frame';
 
     public function __construct(
         private readonly Transactions $transactions,
@@ -86,6 +91,21 @@ final class ThreadController extends AbstractController
     public static function csrfIdOf(string $key): string
     {
         return self::CSRF_ID_PREFIX.$key;
+    }
+
+    /**
+     * A Turbo Frame request gets the bare frame; any other request the thread as a page of its own.
+     */
+    #[Route('/t/{key}/thread', name: self::THREAD_ROUTE, methods: ['GET'])]
+    public function thread(string $key, Request $request): Response
+    {
+        [, , $ticket] = $this->commentableTicketOf($key);
+        $template = $request->headers->has(self::TURBO_FRAME_HEADER) ? '@Conversation/thread_frame.html.twig' : '@Conversation/thread.html.twig';
+
+        $response = $this->render($template, ['ticket' => $ticket]);
+        $response->setVary(self::TURBO_FRAME_HEADER);
+
+        return $response;
     }
 
     #[Route('/t/{key}/comments', name: self::COMMENT_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
@@ -161,7 +181,7 @@ final class ThreadController extends AbstractController
     }
 
     /**
-     * Inside the transaction run opens, as the visibility predicate reads the viewer's roles under row-level security.
+     * Inside a transaction, the request's or the one run opens, as the visibility predicate reads the viewer's roles under row-level security.
      * The same 404 as the ticket's page for a ticket the person may not see.
      *
      * @return array{OrganizationId, UserId, TicketPageView}
@@ -190,9 +210,9 @@ final class ThreadController extends AbstractController
     }
 
     /**
-     * A Turbo form gets a Turbo Stream that shows the toast and replaces the thread as it is now, read in a
+     * A Turbo form gets a Turbo Stream that shows the toast and replaces the message list as it is now, read in a
      * transaction of its own after the action's commit or rollback, with the same 404 as the action. Any other form
-     * gets a redirect to the ticket page with the toast flashed, whatever the outcome.
+     * gets a redirect to the thread's page with the toast flashed, whatever the outcome.
      *
      * @param int $streamStatus 200 for a change made, 422 for one refused
      */
@@ -201,7 +221,7 @@ final class ThreadController extends AbstractController
         if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
             $this->addFlash(self::TOAST, $toast);
 
-            return $this->redirectToRoute(self::TICKET_ROUTE, ['key' => $key], Response::HTTP_SEE_OTHER);
+            return $this->redirectToRoute(self::THREAD_ROUTE, ['key' => $key], Response::HTTP_SEE_OTHER);
         }
 
         // The Thread component reads the thread while it renders, so the template renders inside the transaction.

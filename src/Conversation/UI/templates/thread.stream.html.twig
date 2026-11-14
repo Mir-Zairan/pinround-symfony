@@ -1,3 +1,3 @@
-{#- ThreadController's answer to a Turbo form: the thread as it is now, then the toast. -#}
-<turbo-stream action="replace" target="{{ constant('App\\Conversation\\UI\\Component\\Thread::ID') }}"><template>{{ component('Thread', {ticket: ticket}) }}</template></turbo-stream>
+{#- ThreadController's answer to a Turbo form: the message list as it is now, then the toast. -#}
+<turbo-stream action="replace" target="{{ constant('App\\Conversation\\UI\\Component\\Thread::MESSAGES_ID') }}"><template>{{ component('Thread', {ticket: ticket, isListOnly: true}) }}</template></turbo-stream>
 {{ include('@Web/_toast_stream.html.twig', {message: toast}) }}

@@ -17,7 +17,7 @@ final class ThreadControllerTest extends TestCase
      */
     public static function copiesOfTicketShowControllersConstants(): iterable
     {
-        yield 'the route a thread action redirects to' => [ThreadController::TICKET_ROUTE, TicketShowController::ROUTE];
+        yield 'the ticket page the thread page links back to' => [ThreadController::TICKET_ROUTE, TicketShowController::ROUTE];
         yield 'the not-found text for a ticket nobody may see' => [ThreadController::NOT_FOUND, TicketShowController::NOT_FOUND];
     }
 

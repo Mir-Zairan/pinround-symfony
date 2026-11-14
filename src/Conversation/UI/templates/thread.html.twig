@@ -1,0 +1,23 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- The thread as a page of its own, for ThreadFrame's link without JavaScript and a thread form's redirect. -#}
+
+{% block title %}Questions and comments · {{ ticket.key }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/thread.css') }}">
+{% endblock %}
+
+{% block main %}
+    <article class="ticket thread-page">
+        <header class="ticket__header">
+            <twig:Button variant="text" href="{{ path(constant('App\\Conversation\\UI\\ThreadController::TICKET_ROUTE'), {key: ticket.key}) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> {{ ticket.key }}</twig:Button>
+            <h1 class="ticket__title">Questions and comments</h1>
+            <p class="ticket__key-line">{{ ticket.title }}</p>
+        </header>
+        <div class="ticket__section thread">
+            {{ include('@Conversation/thread_frame.html.twig') }}
+        </div>
+    </article>
+{% endblock %}

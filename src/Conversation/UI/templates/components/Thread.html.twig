@@ -1,7 +1,9 @@
-{#- The ticket's Questions and comments: the thread, oldest first, then the composer. A thread action's Turbo Stream replaces it whole, which also clears the composer. -#}
+{#- The ticket's Questions and comments: the thread, oldest first, then the composer. A thread action's Turbo Stream replaces only the list (isListOnly); thread-composer clears the composer and puts focus back. -#}
 {% set csrf = csrf_token(this.csrfId) %}
-<section{{ attributes.defaults({id: constant('App\\Conversation\\UI\\Component\\Thread::ID'), class: 'ticket__section thread', 'aria-labelledby': 'ticket-thread-heading'}) }}>
-    <h2 id="ticket-thread-heading" class="ticket__section-title">Questions and comments</h2>
+{% if not isListOnly %}
+<div{{ attributes.defaults({class: 'thread__content'}) }} {{ stimulus_controller('thread-composer') }}>
+{% endif %}
+<div id="{{ constant('App\\Conversation\\UI\\Component\\Thread::MESSAGES_ID') }}" class="thread__list" {{ stimulus_target('thread-composer', 'messages') }}>
     {% if hasEarlierMessages %}
         <p class="thread__earlier">Showing the latest {{ constant('App\\Conversation\\Api\\ThreadView::MESSAGE_LIMIT') }} messages.</p>
     {% endif %}
@@ -45,8 +47,9 @@
             {% endfor %}
         </ol>
     {% endif %}
-
-    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer" {{ stimulus_controller('thread-composer') }}>
+</div>
+{% if not isListOnly %}
+    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer">
         <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
         <div class="thread__kinds" role="group" aria-label="What to write">
             <button type="button" class="chip" aria-pressed="true">Comment</button>
@@ -58,4 +61,5 @@
         <p class="thread__note">A comment does not change the status and sends no notification.</p>
         <button type="submit" class="btn btn-filled" {{ stimulus_target('thread-composer', 'submit') }}>Comment</button>
     </form>
-</section>
+</div>
+{% endif %}
