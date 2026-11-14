@@ -78,6 +78,7 @@ Pushes are hints. If a push is lost, the next page load or frame refresh is stil
 | `ping` | someone pings you | recipient | yes | yes |
 | `question` | QuestionAsked to you | asked person | yes | yes |
 | `answer` | QuestionAnswered | asker | yes | no |
+| `reply` | ReplyPosted on a message; a reply within 120 s of the last one folds into the unread `reply` notification for the same message | the message's author | yes | no |
 | `assigned` | TicketAssigned to you | assignee | yes | yes |
 | `your_turn` | a move makes it your turn to review or test | reviewer / tester | no (Home shows it) | yes, in the "waiting on you" list |
 | `check` | a new ticket needs your check | checker | no (Home shows it) | yes |

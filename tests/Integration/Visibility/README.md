@@ -27,7 +27,7 @@ Its data provider `viewers()` yields `[viewer, seesTeamOnly, seesNoTeamTicket]`.
 | Project rail counts (`ProjectCountQueries::countsOfTeam`, from `ins_project_counts`): the ticket's own team and admins count the team-only ticket, anyone else (its outside reporter, a new team of its project) does not | `ProjectCountsLeakTest` | P03.T5 |
 | Person picker "N open" (`AssigneeTicketCounts::openTicketsAssignedTo`): both cast tickets assigned to one person, each viewer counts exactly those they may see | `PersonPickerCountsLeakTest` | P03.T5 |
 | Ticket page (`/t/{key}`): `TicketQueries::pageOf` under the viewer's organization, then `VIEW` on the page's own visibility facts; each viewer gets the title exactly when they may see the ticket, else the 404 an unknown key gets; its parent's key only when they may see the parent; its "N of M" (`TicketQueries::positionOf`) never counts a ticket they may not see, and Previous and Next skip it and always open | `TicketPageLeakTest` | P03.T6 |
-| Bell and email | planned | P04 |
+| Notification delivery (`NotifyRecipients` writing `ntf_notification` as worker-notify handles an event): each viewer, asked a question about each cast ticket, gets a notification exactly when they may see that ticket | `NotificationDeliveryLeakTest` | P04.T5 |
 | Rounds | planned | P05 |
 | Duplicate suggestions | planned | P06 |
 | Home, Whose turn, My reports | planned | P07 |
