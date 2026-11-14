@@ -13,6 +13,7 @@ enum BellKind: string
     case Ping = 'ping';
     case Question = 'question';
     case Answer = 'answer';
+    case Reply = 'reply';
     case Assigned = 'assigned';
     case RoundShared = 'round_shared';
     case ClosedDuplicate = 'closed_duplicate';

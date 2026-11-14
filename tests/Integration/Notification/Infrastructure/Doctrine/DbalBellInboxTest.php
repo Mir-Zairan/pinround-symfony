@@ -20,7 +20,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * Done and Open on Omar's group from Lena about SHOP-1 in Acme Foods, through the BellInbox a page gets, as
- * pinround_app under row-level security, on 20 March 2027. Next to the group's two open notifications sit the rows the
+ * pinround_app under row-level security, on 20 March 2027. Next to the group's three open notifications, a reply among them, sit the rows the
  * changes must leave alone: done already, held for quiet hours, from Mia, about SHOP-2, to Mia, and of a kind Home shows.
  */
 final class DbalBellInboxTest extends KernelTestCase
@@ -47,11 +47,13 @@ final class DbalBellInboxTest extends KernelTestCase
     private const string PING_TO_MIA = '0197a3c0-0000-7000-8000-0000000b3507';
     private const string YOUR_TURN = '0197a3c0-0000-7000-8000-0000000b3508';
     private const string LATE_PING = '0197a3c0-0000-7000-8000-0000000b3509';
+    private const string UNREAD_REPLY = '0197a3c0-0000-7000-8000-0000000b3510';
 
     /** The rows as setUp writes them, by id: read_at and done_at in UTC, or null. */
     private const array ROWS_BEFORE = [
         self::READ_PING => ['2027-03-15 13:00:00', null],
         self::UNREAD_PING => [null, null],
+        self::UNREAD_REPLY => [null, null],
         self::DONE_PING => [null, '2027-03-15 12:30:00'],
         self::HELD_PING => [null, null],
         self::MIAS_QUESTION => [null, null],
@@ -69,6 +71,7 @@ final class DbalBellInboxTest extends KernelTestCase
         $this->notificationRows()->addOf(self::ACME_FOODS, 'ntf_notification', [
             self::notification(self::UNREAD_PING, self::LENA, self::TICKET_A, 'ping', '2027-03-15 11:00:00+00'),
             self::notification(self::READ_PING, self::LENA, self::TICKET_A, 'ping', '2027-03-15 10:00:00+00', ['read_at' => '2027-03-15 13:00:00+00']),
+            self::notification(self::UNREAD_REPLY, self::LENA, self::TICKET_A, 'reply', '2027-03-15 11:30:00+00'),
             self::notification(self::DONE_PING, self::LENA, self::TICKET_A, 'ping', '2027-03-15 12:00:00+00', ['done_at' => '2027-03-15 12:30:00+00']),
             self::notification(self::HELD_PING, self::LENA, self::TICKET_A, 'ping', '2027-03-15 14:00:00+00', ['deliver_after' => '2027-03-20 18:00:00+00']),
             self::notification(self::MIAS_QUESTION, self::MIA, self::TICKET_A, 'question', '2027-03-15 15:00:00+00'),
@@ -87,15 +90,16 @@ final class DbalBellInboxTest extends KernelTestCase
     #[Test]
     public function doneMarksOnlyTheGroupsOpenNotificationsDoneAndTheCountDrops(): void
     {
-        self::assertSame(4, $this->openCountOfOmar());
+        self::assertSame(5, $this->openCountOfOmar());
 
         $marked = $this->transactions()->committedAs(self::ACME_FOODS, fn (): int => $this->bellInbox()->markGroupDone($this->lenasGroupOfOmar(), new \DateTimeImmutable(self::NOW)));
 
-        self::assertSame(2, $marked);
+        self::assertSame(3, $marked);
         self::assertSame([
             ...self::ROWS_BEFORE,
             self::READ_PING => ['2027-03-15 13:00:00', self::NOW_IN_UTC],
             self::UNREAD_PING => [null, self::NOW_IN_UTC],
+            self::UNREAD_REPLY => [null, self::NOW_IN_UTC],
         ], $this->rows());
         self::assertSame(2, $this->openCountOfOmar());
     }
@@ -127,8 +131,12 @@ final class DbalBellInboxTest extends KernelTestCase
         $ticketKey = $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->bellInbox()->markGroupRead($this->lenasGroupOfOmar(), new \DateTimeImmutable(self::NOW)));
 
         self::assertSame('SHOP-1', $ticketKey);
-        self::assertSame([...self::ROWS_BEFORE, self::UNREAD_PING => [self::NOW_IN_UTC, null]], $this->rows());
-        self::assertSame(4, $this->openCountOfOmar());
+        self::assertSame([
+            ...self::ROWS_BEFORE,
+            self::UNREAD_PING => [self::NOW_IN_UTC, null],
+            self::UNREAD_REPLY => [self::NOW_IN_UTC, null],
+        ], $this->rows());
+        self::assertSame(5, $this->openCountOfOmar());
     }
 
     #[Test]
@@ -167,19 +175,19 @@ final class DbalBellInboxTest extends KernelTestCase
     #[Test]
     public function theCountIsDroppedOnceDoneCommitsAndKeptWhenItRollsBack(): void
     {
-        self::assertSame(4, $this->openCountOfOmar());
+        self::assertSame(5, $this->openCountOfOmar());
         $this->notificationRows()->addOf(self::ACME_FOODS, 'ntf_notification', [
             self::notification(self::LATE_PING, self::MIA, self::TICKET_B, 'ping', '2027-03-18 09:00:00+00'),
         ]);
-        self::assertSame(4, $this->openCountOfOmar(), 'The count was not read from the cache.');
+        self::assertSame(5, $this->openCountOfOmar(), 'The count was not read from the cache.');
 
         $countInsideRolledBackDone = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): int {
-            self::assertSame(2, $this->bellInbox()->markGroupDone($this->lenasGroupOfOmar(), new \DateTimeImmutable(self::NOW)));
+            self::assertSame(3, $this->bellInbox()->markGroupDone($this->lenasGroupOfOmar(), new \DateTimeImmutable(self::NOW)));
 
             return $this->bellInbox()->openCountOf(new UserId(self::OMAR), new \DateTimeImmutable(self::NOW));
         });
         self::assertSame(3, $countInsideRolledBackDone, 'Inside the change the count must be read fresh.');
-        self::assertSame(4, $this->openCountOfOmar(), 'The count was dropped before the commit.');
+        self::assertSame(5, $this->openCountOfOmar(), 'The count was dropped before the commit.');
 
         $this->transactions()->committedAs(self::ACME_FOODS, fn (): int => $this->bellInbox()->markGroupDone($this->lenasGroupOfOmar(), new \DateTimeImmutable(self::NOW)));
 

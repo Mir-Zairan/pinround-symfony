@@ -78,6 +78,7 @@ final class DbalBellQueriesTest extends KernelTestCase
             self::notification('0b3251', self::SARA, self::TICKET_B, 'closed_duplicate', '2027-03-19 09:00:00+00', []),
             self::notification('0b3242', self::MIA, self::TICKET_D, 'ping', '2027-03-18 08:00:00+00', ['pingId' => self::TIED_PING]),
             self::notification('0b3241', self::MIA, self::TICKET_D, 'question', '2027-03-18 08:00:00+00', []),
+            self::notification('0b3271', self::RAJ, self::TICKET_B, 'reply', '2027-03-18 12:00:00+00', []),
         ]);
         $this->notificationRows()->addOf(self::BETA_BAKERY, 'ntf_notification', [
             [...self::notification('0b3261', self::LENA, self::BAKERY_TICKET, 'ping', '2027-03-19 18:00:00+00', []), 'organization_id' => self::BETA_BAKERY],
@@ -101,10 +102,11 @@ final class DbalBellQueriesTest extends KernelTestCase
             [self::LENA, 'Lena', self::TICKET_A, 'SHOP-1', 3, true, 'ping', 'Code review is ready when you are.', '2027-03-15 12:00:00.250', true],
             [self::MIA, 'Mia', self::TICKET_D, 'SHOP-4', 2, false, 'ping', 'Is the fix on staging?', '2027-03-18 08:00:00.000', true],
             [self::SARA, 'Sara', self::TICKET_B, 'SHOP-2', 1, false, 'closed_duplicate', null, '2027-03-19 09:00:00.000', true],
+            [self::RAJ, 'Raj', self::TICKET_B, 'SHOP-2', 1, false, 'reply', null, '2027-03-18 12:00:00.000', true],
             [self::MIA, 'Mia', self::TICKET_B, 'SHOP-2', 1, false, 'question', null, '2027-03-17 09:00:00.000', true],
             [self::RAJ, 'Raj', self::TICKET_C, 'SHOP-3', 1, false, 'assigned', null, '2027-03-17 09:00:00.000', false],
         ], array_map(self::summaryOf(...), $bell->groups));
-        self::assertSame(8, $bell->openCount);
+        self::assertSame(9, $bell->openCount);
     }
 
     #[Test]
@@ -123,7 +125,7 @@ final class DbalBellQueriesTest extends KernelTestCase
         $bell = $this->bellOfOmar();
 
         self::assertCount(50, $bell->groups);
-        self::assertSame(63, $bell->openCount);
+        self::assertSame(64, $bell->openCount);
         self::assertSame([self::LENA, self::MIA], [$bell->groups[0]->senderId->toString(), $bell->groups[1]->senderId->toString()]);
     }
 
