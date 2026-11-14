@@ -82,8 +82,8 @@ final class PingedState implements ResetInterface
 
     /**
      * The organization's ping limit, 1, 4, 8 or 24 hours. The settings are read under row-level security, which with no
-     * tenant set shows the 4-hour default, so when no transaction is open, as in a move's stream answer rendered after
-     * the move's transaction ended, the read runs in a transaction of its own; inside an open one it reads there.
+     * tenant set shows the 4-hour default, so inside an open transaction (the ticket page's, a move's stream re-read) it
+     * reads there, and when none is open the read runs in a transaction of its own.
      *
      * @return 1|4|8|24
      *

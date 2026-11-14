@@ -359,9 +359,9 @@ final class TicketMoveController extends AbstractController
     /**
      * A Turbo form gets a Turbo Stream that shows the toast and replaces the header's state and the Your next step box
      * with the ticket as it is now, so a refused or stale page is updated too; their form carries the new version and
-     * token. The ticket is read again in a transaction of its own, after the move's commit or rollback, with the same
-     * 404 and 403 as the move. Any other form gets a redirect to the ticket page with the toast flashed, whatever the
-     * move's outcome.
+     * token. The ticket is read again, and the stream rendered, in a transaction of its own, after the move's commit or
+     * rollback, with the same 404 and 403 as the move. Any other form gets a redirect to the ticket page with the toast
+     * flashed, whatever the move's outcome.
      *
      * @param int $streamStatus 200 for a move made, 422 for one refused
      */
@@ -372,16 +372,17 @@ final class TicketMoveController extends AbstractController
 
             return $this->redirectToRoute(TicketShowController::ROUTE, ['key' => $key], Response::HTTP_SEE_OTHER);
         }
-        $parts = $this->transactions->run(function () use ($key): array {
+
+        // Rendered inside the re-read's transaction, as the ticket page renders inside the request's: People's ping
+        // sheets read the ping limit under the tenant, and outside a transaction they would open one of their own.
+        return $this->transactions->run(function () use ($key, $toast, $streamStatus): Response {
             [$actor, $ticket] = $this->movableTicketOf($key);
 
-            return $this->ticketPageParts->of($ticket, $actor);
+            return $this->render(
+                '@Ticketing/move.stream.html.twig',
+                [...$this->ticketPageParts->of($ticket, $actor), 'toast' => $toast],
+                new Response(null, $streamStatus, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
+            );
         });
-
-        return $this->render(
-            '@Ticketing/move.stream.html.twig',
-            [...$parts, 'toast' => $toast],
-            new Response(null, $streamStatus, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
-        );
     }
 }
