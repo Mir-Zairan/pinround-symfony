@@ -60,8 +60,9 @@ final readonly class DbalThreadQueries implements ThreadQueries
     /**
      * The listed replies of every message among the rows and how many each has, in one query; none when there are no
      * rows. A message without replies is absent from the result. Each message reads its newest replies backwards on
-     * the index; the UNION adds the oldest live answer when it is older than those and drops it when it is one of
-     * them. The CASE keeps a removed reply's text in the database.
+     * the index; for a question, the UNION adds the oldest live answer when it is older than those and drops it when it
+     * is one of them. A comment gets no such answer, as is_answer has no check tying it to a question. The CASE keeps a
+     * removed reply's text in the database.
      *
      * @param list<array<string, mixed>> $rows
      *
@@ -73,13 +74,15 @@ final readonly class DbalThreadQueries implements ThreadQueries
             return [];
         }
         $messageIds = array_map(static fn (array $row): string => self::text($row['id'], 'id'), $rows);
+        $isQuestionFlags = array_map(static fn (array $row): string => MessageKind::Question === MessageKind::from(self::text($row['kind'], 'kind')) ? 'true' : 'false', $rows);
 
-        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace.
+        // pdo_pgsql binds no arrays, so the ids and kinds travel as one uuid[] and one boolean[] literal, in step; a uuid
+        // holds no comma or brace.
         $replyRows = $this->connection->fetchAllAssociative(
             'SELECT listed.message_id, counted.reply_count, reply.id, reply.author_id,'
             .' CASE WHEN reply.removed_at IS NULL THEN reply.body END AS body, reply.created_at, reply.is_answer,'
             .' reply.removed_at IS NOT NULL AS is_removed'
-            .' FROM unnest(CAST(:messages AS uuid[])) AS listed (message_id)'
+            .' FROM unnest(CAST(:messages AS uuid[]), CAST(:questions AS boolean[])) AS listed (message_id, is_question)'
             .' CROSS JOIN LATERAL (SELECT count(*) AS reply_count FROM cnv_reply'
             .' WHERE organization_id = CAST(:organization AS uuid) AND message_id = listed.message_id) AS counted'
             .' JOIN LATERAL ('
@@ -88,7 +91,7 @@ final readonly class DbalThreadQueries implements ThreadQueries
             .' ORDER BY created_at DESC, id DESC LIMIT '.MessageView::REPLY_LIMIT.')'
             .' UNION'
             .' (SELECT id, author_id, body, created_at, is_answer, removed_at FROM cnv_reply'
-            .' WHERE organization_id = CAST(:organization AS uuid) AND message_id = listed.message_id'
+            .' WHERE listed.is_question AND organization_id = CAST(:organization AS uuid) AND message_id = listed.message_id'
             .' AND is_answer AND removed_at IS NULL'
             .' ORDER BY created_at, id LIMIT 1)'
             .') AS reply ON true'
@@ -96,6 +99,7 @@ final readonly class DbalThreadQueries implements ThreadQueries
             [
                 'organization' => $organizationId,
                 'messages' => '{'.implode(',', $messageIds).'}',
+                'questions' => '{'.implode(',', $isQuestionFlags).'}',
             ],
         );
 

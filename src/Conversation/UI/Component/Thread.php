@@ -35,7 +35,7 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
  * and a resolved comment folds into one line.
  *
  * Reads the thread in one query, every message's replies in one more, the names of authors outside the ticket's people
- * in one more, and the viewer's roles once per author of an open comment the viewer wrote or leads, so it needs the
+ * in one more, and the viewer's roles once when an open comment is one the viewer wrote or leads, so it needs the
  * request's transaction under the tenant.
  */
 #[AsTwigComponent(name: 'Thread', template: '@Conversation/components/Thread.html.twig')]
@@ -108,8 +108,8 @@ final class Thread
     {
         $thread = $this->threadQueries->threadOf($ticket->id);
         $names = $this->namesOfThePeopleIn($thread->messages, $ticket->displayNames);
-        $resolvableAuthors = $this->resolvableAuthorsAmong($thread->messages, $ticket);
         $viewerId = $this->currentUser->id();
+        $resolvableComments = $this->resolvableCommentsAmong($thread->messages, $ticket, $viewerId);
         $now = $this->clock->now();
         $zone = $this->currentTimeZone->zone();
         $utc = new \DateTimeZone('UTC');
@@ -121,7 +121,7 @@ final class Thread
             && $this->authorizationChecker->isGranted(ConversationPermission::ASK, $ticket->visibilityFacts);
         $this->hasOpenQuestion = null !== $ticket->turnSnapshot->askedUserId;
         $this->hasEarlierMessages = $thread->hasEarlierMessages;
-        $this->messages = array_map(static function (MessageView $message) use ($names, $resolvableAuthors, $viewerId, $now, $zone, $utc): ThreadMessage {
+        $this->messages = array_map(static function (MessageView $message) use ($names, $resolvableComments, $viewerId, $now, $zone, $utc): ThreadMessage {
             $isOwnMessage = null !== $viewerId && $viewerId->equals($message->authorId);
             // EditMessage and RemoveMessage refuse a question, so its author is offered neither.
             $isOwnComment = MessageView::KIND_COMMENT === $message->kind && $isOwnMessage;
@@ -159,37 +159,41 @@ final class Thread
                 $message->hasEarlierReplies,
                 !$message->isRemoved && !$isAnswerable,
                 $isOwnMessage ? self::REPLY_NOTE_ON_YOUR_OWN : \sprintf(self::REPLY_NOTE, new UserView($message->authorId, $authorName)->firstName()),
-                MessageView::KIND_COMMENT === $message->kind && !$message->isRemoved && !$message->isResolved
-                    && ($resolvableAuthors[$message->authorId->toString()] ?? false),
+                isset($resolvableComments[$message->id]),
                 $message->isResolved ? self::resolvedSummaryOf($message) : null,
             );
         }, $thread->messages);
     }
 
     /**
-     * Asks MessageVoter once per author of a comment Resolve could fold, as each answer past the author and lead check
-     * costs a query; a question, a removed or a resolved comment is never asked about.
+     * The open comments the viewer wrote or leads, picked without a query, then one MessageVoter call for them all:
+     * past its author-or-lead check only the ticket's visibility is left, which is the same for every message on it,
+     * and each call costs a query. A question, a removed or a resolved comment is never offered.
      *
      * @param list<MessageView> $messages
      *
-     * @return array<string, bool> whether ConversationPermission RESOLVE grants the viewer the comments of each author,
-     *                             by author id string
+     * @return array<string, true> the ids of the comments ConversationPermission RESOLVE grants the viewer, by id string
      */
-    private function resolvableAuthorsAmong(array $messages, TicketPageView $ticket): array
+    private function resolvableCommentsAmong(array $messages, TicketPageView $ticket, ?UserId $viewerId): array
     {
-        $resolvableAuthors = [];
-        foreach ($messages as $message) {
-            $authorKey = $message->authorId->toString();
-            if (MessageView::KIND_COMMENT !== $message->kind || $message->isRemoved || $message->isResolved || isset($resolvableAuthors[$authorKey])) {
-                continue;
-            }
-            $resolvableAuthors[$authorKey] = $this->authorizationChecker->isGranted(
-                ConversationPermission::RESOLVE,
-                new MessageOnTicket($ticket->visibilityFacts, $message->authorId, $ticket->turnSnapshot->leadId),
-            );
+        if (null === $viewerId) {
+            return [];
+        }
+        $leadId = $ticket->turnSnapshot->leadId;
+        $isLead = null !== $leadId && $viewerId->equals($leadId);
+        $candidates = array_values(array_filter(
+            $messages,
+            static fn (MessageView $message): bool => MessageView::KIND_COMMENT === $message->kind && !$message->isRemoved && !$message->isResolved
+                && ($isLead || $viewerId->equals($message->authorId)),
+        ));
+        if ([] === $candidates || !$this->authorizationChecker->isGranted(
+            ConversationPermission::RESOLVE,
+            new MessageOnTicket($ticket->visibilityFacts, $candidates[0]->authorId, $leadId),
+        )) {
+            return [];
         }
 
-        return $resolvableAuthors;
+        return array_fill_keys(array_map(static fn (MessageView $message): string => $message->id, $candidates), true);
     }
 
     /**

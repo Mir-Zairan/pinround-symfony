@@ -143,10 +143,10 @@ final class DbalThreadQueriesTest extends KernelTestCase
                 [self::TIED_HIGHER_ID, self::LENA, true, false, null],
             ],
             array_map(static fn (MessageView $message): array => [
-                $message->id, $message->toUserId?->toString(), $message->isOpenQuestion, $message->isAnswered, $message->answer()?->body,
+                $message->id, $message->toUserId?->toString(), $message->isOpenQuestion, $message->isAnswered, self::answerAmong($message)?->body,
             ], $thread->messages),
         );
-        $answer = $thread->messages[0]->answer();
+        $answer = self::answerAmong($thread->messages[0]);
         self::assertNotNull($answer);
         self::assertSame('0197a3c0-0000-7000-8000-00000000d432', $answer->id);
         self::assertSame(self::LENA, $answer->authorId->toString());
@@ -199,7 +199,7 @@ final class DbalThreadQueriesTest extends KernelTestCase
                 [self::TIED_LOWER_ID, 0, false, false, null],
             ],
             array_map(static fn (MessageView $message): array => [
-                $message->id, $message->replyCount, $message->hasEarlierReplies, $message->isResolved, $message->answer()?->body,
+                $message->id, $message->replyCount, $message->hasEarlierReplies, $message->isResolved, self::answerAmong($message)?->body,
             ], $thread->messages),
         );
         self::assertSame([], $thread->messages[2]->replies);
@@ -246,7 +246,26 @@ final class DbalThreadQueriesTest extends KernelTestCase
         self::assertSame('Reply 1', $atTheLimit->replies[0]->body);
         self::assertSame([MessageView::REPLY_LIMIT + 1, false, MessageView::REPLY_LIMIT + 1], [$answered->replyCount, $answered->hasEarlierReplies, \count($answered->replies)]);
         self::assertSame('Build 42.', $answered->replies[0]->body);
-        self::assertSame('Build 42.', $answered->answer()?->body);
+        self::assertSame('Build 42.', self::answerAmong($answered)?->body);
+    }
+
+    /**
+     * cnv_reply.is_answer has no check tying it to a question, so a comment's reply marked as an answer is only one of
+     * its replies: it falls out of the newest REPLY_LIMIT like any other.
+     */
+    #[Test]
+    public function aCommentsReplyMarkedAsAnAnswerIsNotListedOnTopOfItsNewestFifty(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'comment', 'Broken on Safari.', '2027-03-15 10:00:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d431', 'Marked as an answer.', true, '2027-03-15 10:03:00+00');
+        $this->addNumberedReplies(self::FIRST_MESSAGE, '8001', MessageView::REPLY_LIMIT);
+
+        $thread = $this->threadOf(self::THREAD_TICKET);
+
+        [$comment] = $thread->messages;
+        self::assertSame([MessageView::REPLY_LIMIT + 1, true, MessageView::REPLY_LIMIT], [$comment->replyCount, $comment->hasEarlierReplies, \count($comment->replies)]);
+        self::assertSame('Reply 1', $comment->replies[0]->body);
+        self::assertNull(self::answerAmong($comment));
     }
 
     #[Test]
@@ -321,6 +340,20 @@ final class DbalThreadQueriesTest extends KernelTestCase
         } finally {
             $this->tenantContext()->clear();
         }
+    }
+
+    /**
+     * The live reply marked as the answer among the message's listed replies.
+     */
+    private static function answerAmong(MessageView $message): ?ReplyView
+    {
+        foreach ($message->replies as $reply) {
+            if ($reply->isAnswer && !$reply->isRemoved) {
+                return $reply;
+            }
+        }
+
+        return null;
     }
 
     private function threadOf(string $ticketId, ?Connection $connection = null): ThreadView

@@ -317,7 +317,7 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
-     * Whether Resolve is offered is asked once per author, not per message, and every message's replies come in the
+     * Whether Resolve is offered is asked once for the thread, not per message, and every message's replies come in the
      * one replies query: more comments and replies by the same people cost no query.
      */
     #[Test]
@@ -345,6 +345,33 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame(6, $this->client->getCrawler()->filter('.thread__reply')->count());
         self::assertSame($expectedResolveCount, $this->client->getCrawler()->filter('.thread__resolve-form')->count());
         self::assertSame($queryCountWithTwoComments, $queryCountWithMore);
+    }
+
+    /**
+     * Lena leads the ticket, so she may resolve every comment: authors she has not seen before cost no query, as
+     * MessageVoter is asked once for the whole thread, not once per author.
+     */
+    #[Test]
+    public function commentsByMoreAuthorsCostTheLeadNoQuery(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
+        $this->addMessage('Lena', 'Thanks', '2026-11-06 09:05:00+00');
+        $this->addMessage('Raj', 'Any news?', '2026-11-06 09:10:00+00');
+        $this->logIn($this->client, $this->people['Lena']);
+        // logIn() leaves the user in the entity manager, and the first request fills the caches.
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $queryCountWithThreeAuthors = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+        $this->addMessage('Sara', 'Checked the settings', '2026-11-06 10:00:00+00');
+        $this->addMessage('Mia', 'Tested on staging', '2026-11-06 10:05:00+00');
+
+        $queryCountWithFiveAuthors = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(5, $this->client->getCrawler()->filter('.thread__message')->count());
+        self::assertSame(5, $this->client->getCrawler()->filter('.thread__resolve-form')->count());
+        self::assertSame($queryCountWithThreeAuthors, $queryCountWithFiveAuthors);
     }
 
     /**

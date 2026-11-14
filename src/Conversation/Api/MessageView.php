@@ -51,18 +51,4 @@ final readonly class MessageView
         public bool $isResolved,
     ) {
     }
-
-    /**
-     * The answer that closed the question; null when it is removed or the message is no answered question.
-     */
-    public function answer(): ?ReplyView
-    {
-        foreach ($this->replies as $reply) {
-            if ($reply->isAnswer && !$reply->isRemoved) {
-                return $reply;
-            }
-        }
-
-        return null;
-    }
 }
