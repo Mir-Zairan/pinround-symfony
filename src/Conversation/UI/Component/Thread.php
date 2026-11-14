@@ -11,6 +11,7 @@ use App\Conversation\UI\ThreadMessage;
 use App\Identity\Api\CurrentTimeZone;
 use App\Identity\Api\CurrentUser;
 use App\Identity\Api\UserQueries;
+use App\SharedKernel\UI\RelativeTime;
 use App\Ticketing\Api\TicketPageView;
 use Psr\Clock\ClockInterface;
 use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
@@ -64,22 +65,26 @@ final class Thread
         $viewerId = $this->currentUser->id();
         $now = $this->clock->now();
         $zone = $this->currentTimeZone->zone();
+        $utc = new \DateTimeZone('UTC');
 
         $this->key = $ticket->key;
         $this->hasEarlierMessages = $thread->hasEarlierMessages;
-        $this->messages = array_map(static function (MessageView $message) use ($names, $viewerId, $now, $zone): ThreadMessage {
-            $isMine = null !== $viewerId && $viewerId->equals($message->authorId);
+        $this->messages = array_map(static function (MessageView $message) use ($names, $viewerId, $now, $zone, $utc): ThreadMessage {
+            // EditMessage and RemoveMessage refuse a question, so its author is offered neither.
+            $isOwnComment = MessageView::KIND_COMMENT === $message->kind
+                && null !== $viewerId && $viewerId->equals($message->authorId);
 
             return new ThreadMessage(
                 $message->id,
                 $names[$message->authorId->toString()] ?? self::UNKNOWN_AUTHOR,
                 $message->kind,
                 $message->isRemoved ? null : $message->body,
-                $message->createdAt->setTimezone($zone)->format('j M, H:i'),
+                RelativeTime::sinceOf($message->createdAt, $now, $zone),
+                $message->createdAt->setTimezone($utc)->format(\DateTimeInterface::ATOM),
                 null !== $message->editedAt,
                 $message->isRemoved,
-                $isMine && !$message->isRemoved && $now <= $message->editableUntil,
-                $isMine && !$message->isRemoved,
+                $isOwnComment && !$message->isRemoved && $now <= $message->editableUntil,
+                $isOwnComment && !$message->isRemoved,
             );
         }, $thread->messages);
     }

@@ -17,7 +17,8 @@ final readonly class MessageView
     /**
      * @param self::KIND_*       $kind
      * @param ?string            $body          null when the message is removed: a removed message's text never leaves the database
-     * @param \DateTimeImmutable $editableUntil the last instant its author may edit or remove it (inclusive)
+     * @param \DateTimeImmutable $editableUntil the last instant its author may edit it (inclusive); removing has no time
+     *                                          limit (FR-CNV-06)
      */
     public function __construct(
         public string $id,

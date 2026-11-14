@@ -108,7 +108,7 @@ a.seg {
   font-weight: 500;
 }
 
-.chip:hover {
+.chip:hover:not(:disabled, [aria-disabled="true"], [aria-pressed="true"]) {
   background: var(--s-high);
 }
 

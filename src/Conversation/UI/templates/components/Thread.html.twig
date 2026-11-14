@@ -13,36 +13,39 @@
         <ol class="thread__messages">
             {% for message in messages %}
                 <li class="thread__message thread__message--{{ message.kind }}" data-message-id="{{ message.id }}">
-                    <p class="thread__meta">
-                        <span class="thread__author">{{ message.authorName }}</span> · <span class="thread__time">{{ message.postedLine }}</span> · {{ message.kind }}
-                        {%- if message.isEdited and not message.isRemoved %} · <span class="thread__edited">edited</span>{% endif %}
-                    </p>
-                    {% if message.isRemoved %}
-                        <p class="thread__body thread__body--removed">Message removed</p>
-                    {% else %}
-                        <p class="thread__body">{{ message.body|linkify }}</p>
-                    {% endif %}
-                    {% if message.isEditable or message.isRemovable %}
-                        <div class="thread__actions">
-                            {% if message.isEditable %}
-                                <details class="thread__edit">
-                                    <summary class="btn btn-text btn-sm">Edit</summary>
-                                    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::EDIT_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__edit-form">
+                    <twig:Avatar name="{{ message.authorName }}" class="thread__avatar" aria-hidden="true"/>
+                    <div class="thread__message-main">
+                        <p class="thread__meta">
+                            <span class="thread__author">{{ message.authorName }}</span> · <time class="thread__time" datetime="{{ message.postedAt }}">{{ message.postedLine }}</time> · {{ message.kind }}
+                            {%- if message.isEdited and not message.isRemoved %} · <span class="thread__edited">edited</span>{% endif %}
+                        </p>
+                        {% if message.isRemoved %}
+                            <p class="thread__body thread__body--removed">Message removed</p>
+                        {% else %}
+                            <p class="thread__body">{{ message.body|linkify }}</p>
+                        {% endif %}
+                        {% if message.isEditable or message.isRemovable %}
+                            <div class="thread__actions">
+                                {% if message.isEditable %}
+                                    <details class="thread__edit">
+                                        <summary class="btn btn-text btn-sm">Edit</summary>
+                                        <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::EDIT_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__edit-form">
+                                            <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                            <label class="visually-hidden" for="thread-edit-{{ message.id }}">Edit your message</label>
+                                            <textarea id="thread-edit-{{ message.id }}" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" required maxlength="{{ this.maxBodyLength }}" rows="3">{{ message.body }}</textarea>
+                                            <button type="submit" class="btn btn-filled btn-sm">Save</button>
+                                        </form>
+                                    </details>
+                                {% endif %}
+                                {% if message.isRemovable %}
+                                    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::REMOVE_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__remove-form">
                                         <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
-                                        <label class="visually-hidden" for="thread-edit-{{ message.id }}">Edit your message</label>
-                                        <textarea id="thread-edit-{{ message.id }}" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" required maxlength="{{ this.maxBodyLength }}" rows="3">{{ message.body }}</textarea>
-                                        <button type="submit" class="btn btn-filled btn-sm">Save</button>
+                                        <button type="submit" class="btn btn-text btn-sm">Remove</button>
                                     </form>
-                                </details>
-                            {% endif %}
-                            {% if message.isRemovable %}
-                                <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::REMOVE_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__remove-form">
-                                    <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
-                                    <button type="submit" class="btn btn-text btn-sm">Remove</button>
-                                </form>
-                            {% endif %}
-                        </div>
-                    {% endif %}
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
                 </li>
             {% endfor %}
         </ol>
@@ -52,8 +55,8 @@
     <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer">
         <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
         <div class="thread__kinds" role="group" aria-label="What to write">
-            <button type="button" class="chip" aria-pressed="true">Comment</button>
-            <button type="button" class="chip" aria-pressed="false" disabled>Ask a question</button>
+            <twig:Chip :pressed="true">Comment</twig:Chip>
+            <twig:Chip disabled>Ask a question</twig:Chip>
         </div>
         <label class="visually-hidden" for="thread-composer-body">Write a comment</label>
         <textarea id="thread-composer-body" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Write a comment" required maxlength="{{ this.maxBodyLength }}" rows="3"

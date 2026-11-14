@@ -17,6 +17,14 @@
 
 .thread__message {
   display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.thread__message-main {
+  display: flex;
+  flex: 1;
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
@@ -104,18 +112,10 @@
   gap: var(--space-8);
 }
 
-/* Ask a question stays off until questions come: no hover change and no pointer that suggests a choice. */
+/* Ask a question stays off until questions come: no pointer that suggests a choice. */
 .thread__kinds .chip:disabled {
   color: var(--on-surface-var);
   cursor: default;
-}
-
-.thread__kinds .chip:disabled:hover {
-  background: transparent;
-}
-
-.thread__kinds .chip[aria-pressed="true"]:hover {
-  background: var(--secondary-container);
 }
 
 .thread__composer textarea,

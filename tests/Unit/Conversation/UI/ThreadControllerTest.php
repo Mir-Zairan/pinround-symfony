@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Conversation\UI;
 
+use App\Conversation\Domain\Message;
 use App\Conversation\UI\ThreadController;
 use App\Ticketing\UI\TicketShowController;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -24,6 +25,24 @@ final class ThreadControllerTest extends TestCase
     #[Test]
     #[DataProvider('copiesOfTicketShowControllersConstants')]
     public function aThreadActionUsesTheTicketPagesOwnValue(string $copy, string $original): void
+    {
+        self::assertSame($original, $copy);
+    }
+
+    /**
+     * @return iterable<string, array{int, int}>
+     */
+    public static function copiesOfTheDomainsLimits(): iterable
+    {
+        yield 'the most characters a message body may have' => [ThreadController::BODY_MAX_LENGTH, Message::MAX_BODY_LENGTH];
+    }
+
+    /**
+     * Through a data provider: PHPStan reads two constants compared inline as always the same.
+     */
+    #[Test]
+    #[DataProvider('copiesOfTheDomainsLimits')]
+    public function theFormHintsTheLimitTheDomainEnforces(int $copy, int $original): void
     {
         self::assertSame($original, $copy);
     }

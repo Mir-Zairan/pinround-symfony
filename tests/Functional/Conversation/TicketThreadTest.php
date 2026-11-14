@@ -140,7 +140,10 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame(self::COMMENT_PATH, $thread->filter('form.thread__composer')->attr('action'));
         self::assertSame('Write a comment', $thread->filter('form.thread__composer textarea')->attr('placeholder'));
         self::assertStringContainsString('A comment does not change the status and sends no notification.', $thread->text());
-        self::assertNotNull($thread->filter('.thread__kinds button')->last()->attr('disabled'));
+        self::assertSame(
+            [['Comment', 'true', false], ['Ask a question', 'false', true]],
+            $thread->filter('.thread__kinds button.chip[type="button"]')->each(static fn (Crawler $chip): array => [trim($chip->text()), $chip->attr('aria-pressed'), null !== $chip->attr('disabled')]),
+        );
         self::assertSame('thread-composer', $thread->filter('.thread__content')->attr('data-controller'));
         self::assertSame(
             'turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer',
@@ -261,6 +264,65 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
+     * The meta line says how long ago in the words the tickets list uses, the date in Mia's zone from a day on: Lena's
+     * 23:30 UTC on 2 Nov is 3 Nov in Berlin. Each message has its author's avatar, hidden from screen readers, which
+     * read the name next to it.
+     */
+    #[Test]
+    public function eachMessageShowsItsAuthorsAvatarAndHowLongAgoItWasPosted(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Sara', 'Same as last year', '2025-11-06 10:00:00+00');
+        $this->addMessage('Lena', 'Seen again', '2026-11-02 23:30:00+00');
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
+        $this->addMessage('Raj', 'Is this in 2.4?', '2026-11-06 11:15:00+00');
+        $this->addMessage('Mia', 'Yes', '2026-11-06 11:59:30+00');
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::THREAD_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [
+                ['Sara', '6 Nov 2025', '2025-11-06T10:00:00+00:00'],
+                ['Lena', '3 Nov', '2026-11-02T23:30:00+00:00'],
+                ['Omar', '3 h ago', '2026-11-06T09:00:00+00:00'],
+                ['Raj', '45 min ago', '2026-11-06T11:15:00+00:00'],
+                ['Mia', 'now', '2026-11-06T11:59:30+00:00'],
+            ],
+            $page->filter('.thread__message')->each(static fn (Crawler $message): array => [
+                trim($message->filter('.thread__author')->text()),
+                trim($message->filter('time.thread__time')->text()),
+                $message->filter('time.thread__time')->attr('datetime'),
+            ]),
+        );
+        self::assertSame(
+            [['S', 'true'], ['L', 'true'], ['O', 'true'], ['R', 'true'], ['M', 'true']],
+            $page->filter('.thread__message > .thread__avatar.av')->each(static fn (Crawler $avatar): array => [trim($avatar->text()), $avatar->attr('aria-hidden')]),
+        );
+    }
+
+    /**
+     * EditMessage and RemoveMessage refuse a question: Omar's own open question shows neither, his comment both.
+     */
+    #[Test]
+    public function theViewersOwnQuestionShowsNoEditOrRemove(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'Is this in 2.4?', '2026-11-06 11:58:00+00', kind: 'question');
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 11:59:00+00');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::THREAD_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $messages = $page->filter('.thread__message');
+        self::assertSame(['question', 'comment'], $messages->each(static fn (Crawler $message): string => str_replace('thread__message thread__message--', '', (string) $message->attr('class'))));
+        self::assertSame([], $this->actionsOn($messages->eq(0)));
+        self::assertSame(['Edit', 'Remove'], $this->actionsOn($messages->eq(1)));
+    }
+
+    /**
      * Mia is only a viewer of Shop's team, and anyone who may see the ticket may comment. The text comes back escaped,
      * its line break as a <br> and its address as a link, and the comment writes one CommentPosted to the outbox.
      */
@@ -279,7 +341,7 @@ final class TicketThreadTest extends WebTestCase
         $message = $this->client->getCrawler()->filter('#'.Thread::FRAME_ID.' .thread__message');
         self::assertCount(1, $message);
         self::assertSame(['https://acme.test/build'], $message->filter('.thread__body a')->each(static fn (Crawler $link): ?string => $link->attr('href')));
-        self::assertStringStartsWith('Mia · 6 Nov, 13:00 · comment', trim($message->filter('.thread__meta')->text()));
+        self::assertSame('Mia · now · comment', trim($message->filter('.thread__meta')->text()));
         self::assertSame([[self::SCRIPT_BODY, $this->people['Mia']->id()->toString(), null, null]], $this->messageRows());
         self::assertSame(1, $this->outboxCount());
     }
@@ -666,19 +728,22 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
-     * A comment on SHOP-1 by the person, removed at $removedAt when given.
+     * A comment on SHOP-1 by the person, removed at $removedAt when given; or an open question to Lena.
+     *
+     * @param 'comment'|'question' $kind
      *
      * @return string its id
      */
-    private function addMessage(string $author, string $body, string $createdAt, ?string $removedAt = null): string
+    private function addMessage(string $author, string $body, string $createdAt, ?string $removedAt = null, string $kind = 'comment'): string
     {
         $messageId = Uuid::v7()->toRfc4122();
         $organizationId = $this->acmeFoods->toString();
         $authorId = $this->people[$author]->id()->toString();
+        $toUserId = 'question' === $kind ? $this->people['Lena']->id()->toString() : null;
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, body, created_at, removed_at)
-             SELECT organization_id, ?, id, ?, 'comment', ?, ?, ? FROM tkt_ticket WHERE organization_id = ? AND key = 'SHOP-1'",
-            [$messageId, $authorId, $body, $createdAt, $removedAt, $organizationId],
+            "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, created_at, removed_at)
+             SELECT organization_id, ?, id, ?, ?, ?, ?, ?, ? FROM tkt_ticket WHERE organization_id = ? AND key = 'SHOP-1'",
+            [$messageId, $authorId, $kind, $toUserId, $body, $createdAt, $removedAt, $organizationId],
         ));
 
         return $messageId;
