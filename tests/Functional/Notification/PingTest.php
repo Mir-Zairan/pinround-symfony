@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Notification;
 
 use App\Identity\Domain\User;
 use App\Notification\Infrastructure\RateLimit\ValkeyPingWindow;
+use App\Notification\UI\Component\PingSheet;
 use App\Notification\UI\Controller\PingController;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -42,6 +43,8 @@ final class PingTest extends WebTestCase
     private const string KEY = 'SHOP-1';
     private const string TICKET_PAGE = '/t/SHOP-1';
     private const string MESSAGE = 'Hi Lena, could you look at SHOP-1? Now: Code review.';
+    /** The sheet's draft for Lena on SHOP-1, which quotes the ticket's Now line with its own end mark. */
+    private const string DRAFT = 'Hi Lena, could you look at SHOP-1? Now: Lena plans it.';
     private const string NOBODY_ID = '0197a3c0-0000-7000-8000-00000000dead';
     /** What Turbo sends with a form it posts. */
     private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
@@ -117,10 +120,9 @@ final class PingTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, string, array{reporter?: string, visibility?: string}, ?string}> who pings
-     *                                                                                                         whom, the
-     *                                                                                                         ticket, and
-     *                                                                                                         Mia's team role
+     * Who pings whom, the ticket, and Mia's team role.
+     *
+     * @return iterable<string, array{string, string, array{reporter?: string, visibility?: string}, 'member'|'viewer'|null}>
      */
     public static function peopleWhoMayPing(): iterable
     {
@@ -133,6 +135,7 @@ final class PingTest extends WebTestCase
 
     /**
      * @param array{reporter?: string, visibility?: string} $ticket
+     * @param 'member'|'viewer'|null                        $miaTeamRole
      */
     #[Test]
     #[DataProvider('peopleWhoMayPing')]
@@ -149,13 +152,14 @@ final class PingTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, array{reporter?: string, visibility?: string}, ?string}> who pings Lena,
-     *                                                                                                 the ticket, and
-     *                                                                                                 Mia's team role
+     * Who pings Lena, the ticket, and Mia's team role.
+     *
+     * @return iterable<string, array{string, array{reporter?: string, visibility?: string}, 'member'|'viewer'|null}>
      */
     public static function peopleWhoMayNotPing(): iterable
     {
         yield 'Mia, a viewer of the team' => ['Mia', [], 'viewer'];
+        yield 'Mia, a viewer of the team, as the reporter' => ['Mia', ['reporter' => 'Mia'], 'viewer'];
         yield 'Mia, with no team role and not the reporter' => ['Mia', [], null];
         yield 'Raj, a manager who may not see a team-only ticket' => ['Raj', ['visibility' => 'team'], 'viewer'];
         yield 'Ben, of another organization' => ['Ben', [], 'viewer'];
@@ -163,6 +167,7 @@ final class PingTest extends WebTestCase
 
     /**
      * @param array{reporter?: string, visibility?: string} $ticket
+     * @param 'member'|'viewer'|null                        $miaTeamRole
      */
     #[Test]
     #[DataProvider('peopleWhoMayNotPing')]
@@ -183,9 +188,9 @@ final class PingTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, string, array{visibility?: string}, array<string, string>}> who pings whom,
-     *                                                                                                    the ticket, the
-     *                                                                                                    fields, the toast
+     * Whom Omar pings, the ticket, the fields, and the toast.
+     *
+     * @return iterable<string, array{string, array{visibility?: string}, array<string, string>, string}>
      */
     public static function pingsRefusedWithAToast(): iterable
     {
@@ -285,6 +290,91 @@ final class PingTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Pinged Lena. One notification sent.', (string) $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
         self::assertCount(1, $this->storedPings());
+    }
+
+    #[Test]
+    public function theTicketPageGivesOmarAPingSheetForLenaWithTheDraftAndNoneForHimself(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        $sheet = $page->filter('#ping-'.$this->idOf('Lena'));
+        self::assertCount(1, $sheet);
+        self::assertSame('Ping', trim($sheet->filter('button[aria-haspopup="dialog"]')->text()));
+        self::assertSame('Ping Lena', trim($sheet->filter('.dialog__title')->text()));
+        self::assertSame('SHOP-1 · Cart total shows the wrong sum', trim($sheet->filter('.ping-sheet__ticket')->text()));
+        self::assertSame(self::DRAFT, $sheet->filter('textarea[name="message"]')->text());
+        self::assertSame('Lena gets one notification. You can ping again after 4 hours (set by your admin).', trim($sheet->filter('.ping-sheet__note')->text()));
+        $form = $sheet->filter('form.ping-sheet__form');
+        self::assertSame($this->pathTo('Lena'), $form->attr('action'));
+        self::assertSame('true', $form->attr('data-turbo'));
+        self::assertSame(PingSheet::PING_FAILED, $form->attr('data-failed-toast'));
+        self::assertSame(['Cancel', 'Send ping'], $sheet->filter('.dialog__actions button')->each(static fn (Crawler $button): string => trim($button->text())));
+        self::assertCount(0, $page->filter('#ping-'.$this->idOf('Omar')));
+        self::assertGreaterThan(1, $page->filter('.people__row')->count());
+    }
+
+    #[Test]
+    public function theSheetsDraftSentIsStoredAsTheMessage(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submit($page->filter('#ping-'.$this->idOf('Lena').' form.ping-sheet__form')->form(), [], ['HTTP_ACCEPT' => self::TURBO_FORM_HEADERS['HTTP_ACCEPT']]);
+
+        $this->streamsOfTheAnswer(200, 'Lena');
+        self::assertSame([self::DRAFT], array_column($this->storedPings(), 'body'));
+    }
+
+    #[Test]
+    public function miaAViewerOfTheTeamSeesThePeopleButNoPingButton(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertGreaterThan(1, $page->filter('.people__row')->count());
+        self::assertCount(0, $page->filter('.ping-sheet'));
+        self::assertCount(0, $page->filter('[id^="ping-"]'));
+    }
+
+    #[Test]
+    public function afterAPingLenasRowShowsThePingedStateWithTheWaitLeft(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
+        self::assertResponseStatusCodeSame(200);
+        $this->clock->modify('+90 minutes');
+
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        $lenasAction = $page->filter('#ping-'.$this->idOf('Lena'));
+        self::assertSame('Pinged · again in 3 h', trim($lenasAction->text()));
+        self::assertCount(0, $lenasAction->filter('button, form'));
+    }
+
+    #[Test]
+    public function anotherSendersPingLeavesOmarsPingButton(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Sara']);
+        $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
+        self::assertResponseStatusCodeSame(200);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Ping Lena', trim($page->filter('#ping-'.$this->idOf('Lena').' .dialog__title')->text()));
     }
 
     #[Test]
@@ -422,8 +512,12 @@ final class PingTest extends WebTestCase
             return 0;
         });
 
-        /* @var list<array{from_id: string, to_id: string, body: string, created_at: string}> $rows */
-        return $rows;
+        return array_map(static function (array $row): array {
+            ['from_id' => $fromId, 'to_id' => $toId, 'body' => $body, 'created_at' => $createdAt] = $row;
+            \assert(\is_string($fromId) && \is_string($toId) && \is_string($body) && \is_string($createdAt));
+
+            return ['from_id' => $fromId, 'to_id' => $toId, 'body' => $body, 'created_at' => $createdAt];
+        }, $rows);
     }
 
     private function publishedPingEvents(): int
@@ -431,10 +525,11 @@ final class PingTest extends WebTestCase
         $organizationId = $this->acmeFoods->toString();
         $count = 0;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$count): int {
-            $count = (int) $migrator->fetchOne(
+            $count = $migrator->fetchOne(
                 "SELECT count(*) FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0 AND position('PingSent' in body) > 0",
                 [$organizationId],
             );
+            \assert(\is_int($count));
 
             return 0;
         });

@@ -41,8 +41,9 @@ final readonly class DbalRecentPingQueries implements RecentPingQueries
         ]);
 
         $againAtById = [];
-        foreach ($rows as $row) {
-            $againAtById[new UserId((string) $row['to_id'])->toString()] = new \DateTimeImmutable((string) $row['newest_at'])->add($limit);
+        foreach ($rows as ['to_id' => $toId, 'newest_at' => $newestAt]) {
+            \assert(\is_string($toId) && \is_string($newestAt));
+            $againAtById[new UserId($toId)->toString()] = new \DateTimeImmutable($newestAt)->add($limit);
         }
 
         return new RecentPings($limitHours, $againAtById);

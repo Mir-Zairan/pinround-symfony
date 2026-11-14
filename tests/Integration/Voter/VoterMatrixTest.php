@@ -83,10 +83,18 @@ final class VoterMatrixTest extends KernelTestCase
 
     private const array TEAMS = ['Shop' => self::SHOP, 'Mobile' => self::MOBILE, 'Support' => self::SUPPORT, 'Checkout' => self::CHECKOUT];
 
-    /** Each team-only ticket of Acme Foods by its team, null for a ticket with no team yet. */
-    private const array TICKETS = ['Team-only Shop ticket' => self::SHOP, 'Team-only ticket with no team' => null];
+    /**
+     * Each team-only ticket of Acme Foods by its team, null for a ticket with no team yet, and the person of PEOPLE who
+     * reported it, null for REPORTER.
+     */
+    private const array TICKETS = [
+        'Team-only Shop ticket' => [self::SHOP, null],
+        'Team-only ticket with no team' => [null, null],
+        'Team-only Support ticket reported by Mia' => [self::SUPPORT, 'Mia'],
+        'Team-only Support ticket reported by Omar' => [self::SUPPORT, 'Omar'],
+    ];
 
-    /** Reported both tickets and is none of PEOPLE, so no row's actor sees a ticket as its reporter. */
+    /** Reported the tickets no person of PEOPLE reported, so no row's actor sees those as their reporter. */
     private const string REPORTER = '0197a3c0-0000-7000-8000-0000000009c9';
 
     private const string ROLES_DOC = __DIR__.'/../../../docs/00-product/personas-and-roles.md';
@@ -242,13 +250,13 @@ final class VoterMatrixTest extends KernelTestCase
             return new OrganizationId(self::ORGANIZATIONS[$name]);
         }
         if (\array_key_exists($name, self::TICKETS)) {
-            $teamId = self::TICKETS[$name];
+            [$teamId, $reporter] = self::TICKETS[$name];
 
             return new TicketVisibilityFacts(
                 new OrganizationId(self::ACME_FOODS),
                 TicketVisibilityFacts::TEAM_ONLY,
                 null === $teamId ? null : new TeamId($teamId),
-                new UserId(self::REPORTER),
+                new UserId(null === $reporter ? self::REPORTER : self::PEOPLE[$reporter][0]),
             );
         }
         if (\array_key_exists($name, self::INVITATIONS)) {

@@ -20,8 +20,9 @@ use App\Workflow\Api\WorkflowPermission;
  * subject:   an organization (Acme Foods, Beta Bakery), a team (Shop, Mobile, Support of Acme Foods; Checkout of Beta
  *            Bakery) or an open invitation link to Acme Foods ("Invitation of Omar" for Omar's email; "Invitation of a
  *            new email" for an email nobody has an account with). Nobody-logged-in cases are in InvitationVoterTest.
- *            Or a team-only ticket of Acme Foods: "Team-only Shop ticket", or "Team-only ticket with no team"; both
- *            reported by someone who is no actor here.
+ *            Or a team-only ticket of Acme Foods: "Team-only Shop ticket", or "Team-only ticket with no team", both
+ *            reported by someone who is no actor here; or "Team-only Support ticket reported by Mia" (a Viewer of
+ *            Support) or "… reported by Omar" (no role in Support).
  * expected:  granted or denied.
  * twoStepProof: optional; decides for a person whose two-step login is on. true: they typed a code in this session 30
  *            minutes ago, within the 1 hour admin pages allow; an int: the code is that many seconds old; 'noCode': no
@@ -291,4 +292,8 @@ return [
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
     ['source' => $managersOutsideTheTeam, 'attribute' => PingPermission::SEND, 'actor' => 'Raj', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => PingPermission::SEND, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'denied'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Omar', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'denied'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
 ];
