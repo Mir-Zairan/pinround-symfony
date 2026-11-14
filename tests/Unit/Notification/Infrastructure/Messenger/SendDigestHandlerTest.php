@@ -50,13 +50,13 @@ final class SendDigestHandlerTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->deliveries = new InMemoryDeliveries();
-        $this->digestItems = new RecordingDigestItems(self::digestOfOneItem());
+        $this->tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
+        $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $this->deliveries = new InMemoryDeliveries($this->tenantContext);
+        $this->digestItems = new RecordingDigestItems(self::digestOfOneItem(), $this->tenantContext);
         $this->pingSettings = new CountingPingSettings(false);
         $this->memberEmails = new InMemoryMemberEmails([self::LENA => self::LENA_ADDRESS]);
         $this->commandBus = new RecordingBus();
-        $this->tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
-        $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
         $this->clock = new MockClock(self::NOW);
     }
 
@@ -65,6 +65,7 @@ final class SendDigestHandlerTest extends TestCase
     {
         $this->handle();
 
+        self::assertSame(['lockFor '.self::LENA, 'lastDigestSentAt '.self::LENA, 'recordDigest '.self::LENA], $this->deliveries->calls);
         self::assertSame(['digest:2027-03-03T09:00:00+00:00' => '2027-03-03T10:05:00+00:00'], $this->deliveries->recorded());
         self::assertCount(1, $this->commandBus->envelopes);
         $envelope = $this->commandBus->envelopes[0];
@@ -80,11 +81,12 @@ final class SendDigestHandlerTest extends TestCase
     #[Test]
     public function aDigestUnderThreeHoursOldStopsTheRunBeforeAnyOtherRead(): void
     {
-        $this->deliveries = new InMemoryDeliveries(['digest:2027-03-03T06:00:00+00:00' => '2027-03-03 07:05:01 UTC']);
+        $this->deliveries = new InMemoryDeliveries($this->tenantContext, ['digest:2027-03-03T06:00:00+00:00' => '2027-03-03 07:05:01 UTC']);
         $this->pingSettings = new CountingPingSettings(true);
 
         $this->handle();
 
+        self::assertSame(['lockFor '.self::LENA, 'lastDigestSentAt '.self::LENA], $this->deliveries->calls);
         self::assertSame(0, $this->pingSettings->readCount);
         self::assertSame([], $this->digestItems->calls);
         self::assertSame(0, $this->memberEmails->readCount);
@@ -95,7 +97,7 @@ final class SendDigestHandlerTest extends TestCase
     #[Test]
     public function aDigestExactlyThreeHoursOldLetsTheNextOneGoAndItStartsWhereThatOneEnded(): void
     {
-        $this->deliveries = new InMemoryDeliveries(['digest:2027-03-03T06:00:00+00:00' => '2027-03-03 07:05:00 UTC']);
+        $this->deliveries = new InMemoryDeliveries($this->tenantContext, ['digest:2027-03-03T06:00:00+00:00' => '2027-03-03 07:05:00 UTC']);
 
         $this->handle();
 
@@ -141,7 +143,7 @@ final class SendDigestHandlerTest extends TestCase
     #[Test]
     public function anEmptyDigestRecordsNothingAndSendsNothing(): void
     {
-        $this->digestItems = new RecordingDigestItems(new Digest([], 0, Digest::coveredUntilAt(new \DateTimeImmutable(self::NOW))));
+        $this->digestItems = new RecordingDigestItems(new Digest([], 0, Digest::coveredUntilAt(new \DateTimeImmutable(self::NOW))), $this->tenantContext);
 
         $this->handle();
 
@@ -167,7 +169,7 @@ final class SendDigestHandlerTest extends TestCase
     public function aRunThatLosesTheSlotToAnotherRunAtOnceSendsNothing(): void
     {
         // The other run's row is not committed yet, so lastDigestSentAt does not see it; the insert then conflicts.
-        $this->deliveries = new InMemoryDeliveries([], ['digest:2027-03-03T09:00:00+00:00']);
+        $this->deliveries = new InMemoryDeliveries($this->tenantContext, [], ['digest:2027-03-03T09:00:00+00:00']);
 
         $this->handle();
 
@@ -186,7 +188,25 @@ final class SendDigestHandlerTest extends TestCase
             self::assertSame('A message for another organization cannot be dispatched or handled while this organization is set.', $refused->getMessage());
         }
 
-        self::assertSame(0, $this->deliveries->lastReadCount);
+        self::assertSame([], $this->deliveries->calls);
+        self::assertSame([], $this->digestItems->calls);
+        self::assertSame([], $this->deliveries->recorded());
+        self::assertSame([], $this->commandBus->envelopes);
+    }
+
+    #[Test]
+    public function aRunOutsideATransactionIsRefusedBeforeAnyReadAndSendsNothing(): void
+    {
+        $this->deliveries = new InMemoryDeliveries($this->tenantContext, isInTransaction: false);
+
+        try {
+            $this->handle();
+            self::fail('A digest ran outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('A digest delivery is read and recorded in a transaction; none is open.', $refusal->getMessage());
+        }
+
+        self::assertSame([], $this->deliveries->calls);
         self::assertSame([], $this->digestItems->calls);
         self::assertSame([], $this->deliveries->recorded());
         self::assertSame([], $this->commandBus->envelopes);

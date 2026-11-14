@@ -11,6 +11,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Notification\DeliveryRows;
 use App\Tests\Integration\Notification\NotificationRows;
+use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use Doctrine\DBAL\Connection;
@@ -36,6 +37,8 @@ final class DbalDeliveriesTest extends KernelTestCase
     private const string NOT_A_DIGEST = 'welcome:2026-03-03';
     private const string NOW = '2026-03-03 12:05:00+00:00';
 
+    private ?SecondSession $secondSession = null;
+
     protected function setUp(): void
     {
         $this->removeRows();
@@ -52,8 +55,46 @@ final class DbalDeliveriesTest extends KernelTestCase
 
     protected function tearDown(): void
     {
+        $this->secondSession?->entityManager->getConnection()->close();
+        $this->secondSession = null;
         $this->removeRows();
         parent::tearDown();
+    }
+
+    /**
+     * The second session holds Omar's digest lock in Acme Foods. A lock for Mia, or for Omar in Beta Bakery, does not
+     * wait on it; one for Omar in Acme Foods gives up after lock_timeout.
+     */
+    #[Test]
+    public function theLockIsHeldPerPersonAndOrganizationUntilTheTransactionEnds(): void
+    {
+        $lockWithinTimeout = fn (string $organizationId, string $userId): ?string => $this->transactions()->rolledBackAs($organizationId, function () use ($userId): ?string {
+            $this->connection()->executeStatement("SET LOCAL lock_timeout = '300ms'");
+            try {
+                $this->deliveries()->lockFor(new UserId($userId));
+            } catch (DriverException $failure) {
+                return $failure->getSQLState();
+            }
+
+            return null;
+        });
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $holder = $this->secondSession()->entityManager->getConnection();
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $holder->beginTransaction();
+        try {
+            $this->deliveriesOn($holder)->lockFor(new UserId(self::OMAR));
+            $tenantContext->clear();
+
+            self::assertNull($lockWithinTimeout(self::ACME_FOODS, self::MIA));
+            self::assertNull($lockWithinTimeout(self::BETA_BAKERY, self::OMAR));
+            self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $lockWithinTimeout(self::ACME_FOODS, self::OMAR));
+        } finally {
+            $holder->rollBack();
+            $tenantContext->clear();
+        }
+
+        self::assertNull($lockWithinTimeout(self::ACME_FOODS, self::OMAR));
     }
 
     #[Test]
@@ -152,7 +193,7 @@ final class DbalDeliveriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function aReadOrRecordWithoutATenantIsRefusedBeforeAnyQuery(): void
+    public function aLockReadOrRecordWithoutATenantIsRefusedBeforeAnyQuery(): void
     {
         self::getContainer()->get(TenantContext::class)->reset();
 
@@ -166,6 +207,11 @@ final class DbalDeliveriesTest extends KernelTestCase
             self::fail('A read without a tenant was not refused.');
         } catch (TenantNotSet) {
         }
+        try {
+            $this->deliveries()->lockFor(new UserId(self::OMAR));
+            self::fail('A lock without a tenant was not refused.');
+        } catch (TenantNotSet) {
+        }
 
         self::assertSame($this->seededAcmeFoodsDeliveries(), $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->deliveriesOf(self::ACME_FOODS)));
     }
@@ -174,12 +220,13 @@ final class DbalDeliveriesTest extends KernelTestCase
      * Outside a transaction row-level security would hide Omar's digests, and a null would let a second digest go out.
      */
     #[Test]
-    public function aReadOrRecordOutsideATransactionIsRefused(): void
+    public function aLockReadOrRecordOutsideATransactionIsRefused(): void
     {
         $tenantContext = self::getContainer()->get(TenantContext::class);
         $tenantContext->set(new OrganizationId(self::ACME_FOODS));
         try {
             foreach ([
+                fn () => $this->deliveries()->lockFor(new UserId(self::OMAR)),
                 fn (): ?\DateTimeImmutable => $this->deliveries()->lastDigestSentAt(new UserId(self::OMAR)),
                 fn (): bool => $this->deliveries()->recordDigest(new UserId(self::MIA), self::NOON_WINDOW, new \DateTimeImmutable(self::NOW)),
             ] as $work) {
@@ -263,6 +310,14 @@ final class DbalDeliveriesTest extends KernelTestCase
     private function ownTransactions(): OwnConnectionTransactions
     {
         return new OwnConnectionTransactions(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
+    }
+
+    private function secondSession(): SecondSession
+    {
+        return $this->secondSession ??= SecondSession::besideTheApp(
+            self::getContainer()->get('doctrine.orm.default_entity_manager'),
+            self::getContainer()->get(TenantContext::class),
+        );
     }
 
     private function transactions(): TenantTransactions

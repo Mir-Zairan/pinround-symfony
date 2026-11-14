@@ -26,9 +26,10 @@ use Symfony\Component\Mime\Address;
 /**
  * Emails one person their digest (FR-PNG-09), in worker-notify inside the bus transaction under the message's
  * TenantStamp. Nothing is sent when their last digest is under DIGEST_INTERVAL_HOURS old, in their quiet hours, when
- * nothing new waits, or when they have no address (not a member, or blocked). The digest is recorded in ntf_delivery
- * under the window key of the current slot first, so of two runs in one slot only one sends, and the email is
- * dispatched after the bus commits, so a rollback sends nothing. Here, not in Application: the clock and the mailer
+ * nothing new waits, or when they have no address (not a member, or blocked). A run holds the person's digest lock from
+ * before it reads their last digest until it commits, so a second run, even one in the next slot, waits and then sees
+ * the first's digest; the digest is recorded in ntf_delivery under the window key of the current slot, so of two runs
+ * in one slot only one sends; and the email is dispatched after the bus commits, so a rollback sends nothing. Here, not in Application: the clock and the mailer
  * message are vendor classes, which only Infrastructure may use (deptrac.yaml).
  */
 #[AsMessageHandler(bus: 'command.bus')]
@@ -63,8 +64,9 @@ final readonly class SendDigestHandler
         $recipientId = new UserId($sendDigest->userId);
         $now = $this->clock->now();
 
-        // First and alone: digest_recipients offers a person every 15 minutes while old items wait unread, so most
-        // messages stop here on one indexed read.
+        $this->deliveries->lockFor($recipientId);
+        // digest_recipients keeps offering a person whose unread items an earlier digest already listed, so past
+        // DIGEST_INTERVAL_HOURS such a run gets beyond this read every 15 minutes and stops only at the empty digest.
         $lastSentAt = $this->deliveries->lastDigestSentAt($recipientId);
         if (null !== $lastSentAt && $lastSentAt > $now->modify(\sprintf('-%d hours', self::DIGEST_INTERVAL_HOURS))) {
             return;

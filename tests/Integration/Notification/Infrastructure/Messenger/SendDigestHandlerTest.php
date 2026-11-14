@@ -5,17 +5,21 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Notification\Infrastructure\Messenger;
 
 use App\Notification\Application\Digest\SendDigest;
+use App\Notification\Infrastructure\Doctrine\DbalDeliveries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Notification\DeliveryRows;
 use App\Tests\Integration\Notification\NotificationRows;
+use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Monolog\Formatter\JsonFormatter;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -53,6 +57,7 @@ final class SendDigestHandlerTest extends KernelTestCase
     private const string REFUSAL_FUNCTION = 'test_refuse_digest_delivery_e8b';
 
     private MockClock $clock;
+    private ?SecondSession $secondSession = null;
 
     protected function setUp(): void
     {
@@ -81,6 +86,8 @@ final class SendDigestHandlerTest extends KernelTestCase
 
     protected function tearDown(): void
     {
+        $this->secondSession?->entityManager->getConnection()->close();
+        $this->secondSession = null;
         $this->migrator()->executeStatement('DROP FUNCTION IF EXISTS '.self::REFUSAL_FUNCTION.'() CASCADE');
         self::getContainer()->get('doctrine')->resetManager();
         self::getContainer()->get(TenantContext::class)->reset();
@@ -104,6 +111,43 @@ final class SendDigestHandlerTest extends KernelTestCase
         self::assertSame('1 thing waits on you in pinround', $email->getSubject());
         self::assertEmailTextBodyContains($email, '- Mia pinged you on SHOP-7: '.self::FOR_EVERYONE_TITLE."\n");
         self::assertSame([['digest:2027-03-03T09:00:00+00:00', '2027-03-03 10:05:00']], $this->deliveriesOfLena());
+    }
+
+    /**
+     * The second session is a run for Lena at 11:59:59 that recorded its digest and has not committed. A run at 12:00:01
+     * is in the next slot, so its window key differs and only Lena's digest lock keeps it from emailing too.
+     */
+    #[Test]
+    public function aRunInTheNextSlotWaitsForAnOpenRunForTheSamePersonAndThenSendsNothing(): void
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $firstRun = $this->secondSession()->entityManager->getConnection();
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $firstRun->beginTransaction();
+        try {
+            $firstRunDeliveries = new DbalDeliveries($firstRun, $tenantContext);
+            $firstRunDeliveries->lockFor(new UserId(self::LENA));
+            self::assertTrue($firstRunDeliveries->recordDigest(new UserId(self::LENA), 'digest:2027-03-03T09:00:00+00:00', new \DateTimeImmutable('2027-03-03 11:59:59 UTC')));
+            $tenantContext->clear();
+
+            $this->clock->modify('2027-03-03 12:00:01 UTC');
+            $sqlStateWhileTheFirstRunIsOpen = $this->sqlStateOfARunForLenaThatGaveUpWaiting();
+            self::getContainer()->get('doctrine')->resetManager();
+            self::assertSame(0, $this->queuedEmailCount());
+
+            $firstRun->commit();
+        } finally {
+            if ($firstRun->isTransactionActive()) {
+                $firstRun->rollBack();
+            }
+            $tenantContext->clear();
+        }
+        $this->sendDigestToLena();
+        $this->sendTheQueuedEmails();
+
+        self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $sqlStateWhileTheFirstRunIsOpen, 'The run read Lena\'s last digest while another run for her was open.');
+        self::assertEmailCount(0);
+        self::assertSame([['digest:2027-03-03T09:00:00+00:00', '2027-03-03 11:59:59']], $this->deliveriesOfLena());
     }
 
     #[Test]
@@ -243,6 +287,39 @@ final class SendDigestHandlerTest extends KernelTestCase
             new SendDigest(self::ACME_FOODS, self::LENA),
             [new TenantStamp(new OrganizationId(self::ACME_FOODS)), new ReceivedStamp('async_notify')],
         ));
+    }
+
+    /**
+     * Sends Lena's digest under a lock_timeout, as PHP cannot wait in two places.
+     *
+     * @return string the SQLSTATE the run failed with
+     */
+    private function sqlStateOfARunForLenaThatGaveUpWaiting(): string
+    {
+        $this->connection()->executeStatement("SET lock_timeout = '300ms'");
+        try {
+            $this->sendDigestToLena();
+        } catch (\Throwable $failure) {
+            for ($cause = $failure; null !== $cause; $cause = $cause->getPrevious()) {
+                if ($cause instanceof DriverException) {
+                    return (string) $cause->getSQLState();
+                }
+            }
+
+            throw $failure;
+        } finally {
+            $this->connection()->executeStatement('RESET lock_timeout');
+        }
+
+        self::fail('The run went through while another run for Lena was open.');
+    }
+
+    private function secondSession(): SecondSession
+    {
+        return $this->secondSession ??= SecondSession::besideTheApp(
+            self::getContainer()->get('doctrine.orm.default_entity_manager'),
+            self::getContainer()->get(TenantContext::class),
+        );
     }
 
     private function sendTheQueuedEmails(): void

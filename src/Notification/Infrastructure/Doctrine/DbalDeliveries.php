@@ -15,6 +15,9 @@ use Doctrine\DBAL\Connection;
  */
 final readonly class DbalDeliveries implements Deliveries
 {
+    // An advisory lock, not a row lock: a person with no digest yet has no row to lock.
+    private const string LOCK = 'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))';
+
     private const string LAST_DIGEST_SENT_AT = 'SELECT max(sent_at) FROM ntf_delivery'
         .' WHERE organization_id = ? AND user_id = ? AND starts_with(window_key, ?)';
 
@@ -25,6 +28,14 @@ final readonly class DbalDeliveries implements Deliveries
 
     public function __construct(private Connection $connection, private TenantContext $tenantContext)
     {
+    }
+
+    public function lockFor(UserId $userId): void
+    {
+        $organizationId = $this->tenantContext->require();
+        $this->requireTransaction();
+
+        $this->connection->executeStatement(self::LOCK, [\sprintf('ntf_delivery:digest:%s:%s', $organizationId->toString(), $userId->toString())]);
     }
 
     public function lastDigestSentAt(UserId $userId): ?\DateTimeImmutable

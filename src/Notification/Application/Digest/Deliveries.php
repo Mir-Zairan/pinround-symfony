@@ -17,6 +17,13 @@ interface Deliveries
     public const string DIGEST_WINDOW_PREFIX = 'digest:';
 
     /**
+     * Holds the person's digest lock until the transaction ends, waiting while another transaction holds it. Taken
+     * before lastDigestSentAt, it makes a second run for the person read only after the first committed or rolled
+     * back, so two runs on both sides of a window boundary cannot both see no recent digest.
+     */
+    public function lockFor(UserId $userId): void;
+
+    /**
      * @return \DateTimeImmutable|null when the person's latest digest was sent; null when none was
      */
     public function lastDigestSentAt(UserId $userId): ?\DateTimeImmutable;
