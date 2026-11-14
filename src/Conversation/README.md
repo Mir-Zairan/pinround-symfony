@@ -1,6 +1,6 @@
 # Conversation
 
-Comments, questions and replies on a ticket. A question does not change the step; the asked person gets the turn. It owns the tables `cnv_message` and `cnv_reply`. Its Api is `ThreadQueries`. It may use the Api of Ticketing and Insight (`TurnProjector::refresh`).
+Comments, questions and replies on a ticket. A question does not change the step; the asked person gets the turn. It owns the tables `cnv_message` and `cnv_reply`. Its Api is `ThreadQueries`. It may use the Api of Ticketing, Insight (`TurnProjector::refresh`), Identity, and Organization (UI only).
 
 Its events, in `Api\Event`, are `CommentPosted`, `QuestionAsked`, `QuestionAnswered`, `ReplyPosted`, `CommentResolved`, `MessageEdited` and `MessageRemoved` (`ConversationEvent`, ids only, through the outbox to `async_notify`).
 
