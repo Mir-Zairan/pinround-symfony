@@ -57,7 +57,7 @@ final class AnswerTest extends TestCase
             new ThreadMessages($messages),
             $messages,
             new InMemoryReplies(),
-            new InMemoryTicketPauses(self::TICKET),
+            new InMemoryTicketPauses([self::TICKET, self::OTHER_TICKET], [self::TICKET]),
             new TurnProjectorWithoutNotes(),
             new RecordingConversationEvents(),
             $this->pingClearing,
