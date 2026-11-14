@@ -91,4 +91,23 @@ final class MonthlyPartitionsTest extends TestCase
 
         MonthlyPartitions::statementsFor(str_repeat('a', 57), new \DateTimeImmutable('2027-03-15 10:00:00+00'));
     }
+
+    #[Test]
+    public function aPartitionNameOfExactlyTheLengthPostgresKeepsIsAccepted(): void
+    {
+        $parent = str_repeat('a', 56);
+        $partition = $parent.'_202703';
+        self::assertSame(63, \strlen($partition));
+
+        self::assertSame(
+            [
+                "CREATE TABLE {$partition} PARTITION OF {$parent} FOR VALUES FROM ('2027-03-01+00') TO ('2027-04-01+00')",
+                "ALTER TABLE \"{$partition}\" ENABLE ROW LEVEL SECURITY",
+                "ALTER TABLE \"{$partition}\" FORCE ROW LEVEL SECURITY",
+                "CREATE POLICY tenant_isolation ON \"{$partition}\" FOR ALL USING (organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid) WITH CHECK (organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid)",
+                "REVOKE ALL ON {$partition} FROM PUBLIC, pinround_app, pinround_readonly",
+            ],
+            MonthlyPartitions::statementsFor($parent, new \DateTimeImmutable('2027-03-15 10:00:00+00')),
+        );
+    }
 }
