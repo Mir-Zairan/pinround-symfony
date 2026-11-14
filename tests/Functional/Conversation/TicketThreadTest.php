@@ -269,6 +269,41 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
+     * Raj, Sara and Mia are outside the ticket's people, asked and answering: the answers of every answered question
+     * cost one query, and the names of everyone they bring one more, however many questions there are.
+     */
+    #[Test]
+    public function theFrameReadsAnswersInOneQueryAndNamesAnsweringAndAskedPeopleOutsideTheTicketsPeopleInOneMore(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
+        $this->addMessage('Lena', 'Thanks', '2026-11-06 09:05:00+00');
+        $this->logIn($this->client, $this->people['Mia']);
+        // logIn() leaves the user in the entity manager, and the first request fills the caches.
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $queryCountWithTheTicketsPeople = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+        $this->addAnsweredQuestion('Omar', 'Raj', '2026-11-06 10:00:00+00');
+        $this->addAnsweredQuestion('Lena', 'Sara', '2026-11-06 10:10:00+00');
+        $this->addAnsweredQuestion('Omar', 'Mia', '2026-11-06 10:20:00+00');
+
+        $queries = $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+
+        $frame = $this->client->getCrawler();
+        $metaLines = $frame->filter('.thread__message-main > .thread__meta')->each(static fn (Crawler $meta): string => (string) preg_replace('/\s+/', ' ', trim($meta->text())));
+        self::assertSame(
+            ['Omar · 2 h ago · question to Raj', 'Lena · 1 h ago · question to Sara', 'Omar · 1 h ago · question to Mia'],
+            array_values(array_filter($metaLines, static fn (string $metaLine): bool => str_contains($metaLine, 'question to'))),
+        );
+        self::assertSame(
+            ['Raj', 'Sara', 'Mia'],
+            $frame->filter('.thread__reply--answer .thread__author')->each(static fn (Crawler $author): string => trim($author->text())),
+        );
+        self::assertCount(1, array_filter($queries, static fn (string $query): bool => str_contains($query, 'cnv_reply')));
+        self::assertSame($queryCountWithTheTicketsPeople + 2, \count($queries));
+    }
+
+    /**
      * The meta line says how long ago in the words the tickets list uses, the date in Mia's zone from a day on: Lena's
      * 23:30 UTC on 2 Nov is 3 Nov in Berlin. Each message has its author's avatar, hidden from screen readers, which
      * read the name next to it.
@@ -752,6 +787,34 @@ final class TicketThreadTest extends WebTestCase
         ));
 
         return $messageId;
+    }
+
+    /**
+     * A question on SHOP-1 by $asker to $asked, who answered it ten minutes later.
+     */
+    private function addAnsweredQuestion(string $asker, string $asked, string $askedAt): void
+    {
+        $questionId = Uuid::v7()->toRfc4122();
+        $answeredAt = new \DateTimeImmutable($askedAt)->modify('+10 minutes')->format('Y-m-d H:i:sP');
+        $parameters = [
+            'organization' => $this->acmeFoods->toString(), 'question' => $questionId, 'answer' => Uuid::v7()->toRfc4122(),
+            'asker' => $this->people[$asker]->id()->toString(), 'asked' => $this->people[$asked]->id()->toString(),
+            'askedAt' => $askedAt, 'answeredAt' => $answeredAt,
+        ];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters): int {
+            $migrator->executeStatement(
+                "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, created_at, resolved_at, resolved_by)
+                 SELECT organization_id, :question, id, :asker, 'question', :asked, 'Which build?', :askedAt, :answeredAt, :asked
+                 FROM tkt_ticket WHERE organization_id = :organization AND key = 'SHOP-1'",
+                $parameters,
+            );
+
+            return (int) $migrator->executeStatement(
+                "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, created_at)
+                 VALUES (:organization, :answer, :question, :asked, 'Build 42.', true, :answeredAt)",
+                $parameters,
+            );
+        });
     }
 
     /**
