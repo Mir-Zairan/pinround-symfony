@@ -22,23 +22,28 @@ const FORM_FIELDS = 'input, textarea, select';
 // there after they click away; a refresh would close it and lose the text.
 const OPEN_EDITORS = 'dialog[open], details[open] :is(textarea, input[type="text"])';
 
-// A frame with an open editor, or with a field being typed in outside a data-turbo-permanent element (which a frame
-// reload keeps), waits for the next signal rather than lose the text.
-function isFrameInUse(frame) {
-  const focused = document.activeElement;
-  const isTyping = focused !== null && frame.contains(focused) && focused.matches(FORM_FIELDS) && focused.closest('[data-turbo-permanent]') === null;
-  return isTyping || frame.querySelector(OPEN_EDITORS) !== null;
-}
+// Events after which a held part may be free again: focus moved, a disclosure opened or closed, a dialog closed. None
+// of toggle and close bubbles, so they are heard in the capture phase.
+const HOLD_ENDING_EVENTS = ['focusin', 'focusout', 'toggle', 'close'];
 
-// A swapped part loses its focus and open editors, so a part that holds either waits for the next signal.
+// A part with an open editor, or with a field being typed in, is held rather than lose the text: a swapped part loses
+// both, a reloaded frame keeps only what sits in a data-turbo-permanent element. A focused button or link holds nothing.
 function isPartInUse(part) {
-  return part.contains(document.activeElement) || part.querySelector(OPEN_EDITORS) !== null;
+  const focused = document.activeElement;
+  if (part.querySelector(OPEN_EDITORS) !== null) {
+    return true;
+  }
+  if (focused === null || !part.contains(focused) || !focused.matches(FORM_FIELDS)) {
+    return false;
+  }
+  return part.localName !== 'turbo-frame' || focused.closest('[data-turbo-permanent]') === null;
 }
 
 // Follows the live updates of a page (realtime-and-notifications.md): asks POST /realtime/token for the subscriber
 // cookie first, as the page sets none, then opens the hub's stream. A refresh signal carries no content, so on one the
 // page fetches again, with the viewer's own session, what carries data-live-refresh, or else the whole page through
-// Turbo. Signals that come while the tab is hidden are remembered and fetched once when it is shown again.
+// Turbo. Signals that come while the tab is hidden are remembered and fetched once when it is shown again; a part held
+// because it is in use is fetched once the hold ends.
 export default class extends Controller {
   static targets = ['paused', 'reload'];
   static values = { subscribeUrl: String, tokenUrl: String, ticketIds: Array };
@@ -50,9 +55,13 @@ export default class extends Controller {
   #refetchTimer = null;
   #stopTimer = null;
   #reopenAfterMs = FIRST_REOPEN_AFTER_MS;
+  #releaseTimer = null;
   #isSignalMissed = false;
+  // Ids of the parts a signal skipped because they were in use.
+  #heldPartIds = new Set();
   #onSignal = () => this.#refetchWhenVisible();
   #onVisibilityChange = () => this.#refetchMissedSignal();
+  #onHoldMayEnd = () => this.#refreshReleasedPartsSoon();
 
   connect() {
     // The element is data-turbo-permanent: a Turbo visit moves it into the new page, which Stimulus sees as a
@@ -63,23 +72,29 @@ export default class extends Controller {
       return;
     }
     document.addEventListener('visibilitychange', this.#onVisibilityChange);
+    HOLD_ENDING_EVENTS.forEach((type) => document.addEventListener(type, this.#onHoldMayEnd, true));
     this.#renewTimer = setInterval(() => this.#renewCookie(), RENEW_EVERY_MS);
     this.#open();
   }
 
   disconnect() {
+    // The page around the element is new, so what was held belonged to the page before.
+    this.#heldPartIds.clear();
     this.#stopTimer = setTimeout(() => this.#stop(), 0);
   }
 
   #stop() {
     this.#stopTimer = null;
     document.removeEventListener('visibilitychange', this.#onVisibilityChange);
+    HOLD_ENDING_EVENTS.forEach((type) => document.removeEventListener(type, this.#onHoldMayEnd, true));
     clearInterval(this.#renewTimer);
     clearTimeout(this.#pausedTimer);
     clearTimeout(this.#reopenTimer);
     clearTimeout(this.#refetchTimer);
+    clearTimeout(this.#releaseTimer);
     this.#pausedTimer = null;
     this.#refetchTimer = null;
+    this.#releaseTimer = null;
     this.#closeSource();
   }
 
@@ -165,12 +180,40 @@ export default class extends Controller {
       visit(window.location.href, { action: 'replace' });
       return;
     }
-    parts
-      .filter((part) => part.localName === 'turbo-frame' && part.src && !isFrameInUse(part))
-      .forEach((frame) => frame.reload());
-    const pageParts = parts.filter((part) => part.localName !== 'turbo-frame' && part.id !== '');
+    this.#refreshParts(parts);
+  }
+
+  // A held part's id stays in #heldPartIds until a refresh finds it free; a frame reloads, any other part is swapped.
+  #refreshParts(parts) {
+    const freeParts = parts.filter((part) => {
+      if (isPartInUse(part)) {
+        this.#heldPartIds.add(part.id);
+        return false;
+      }
+      this.#heldPartIds.delete(part.id);
+      return true;
+    });
+    freeParts.filter((part) => part.localName === 'turbo-frame' && part.src).forEach((frame) => frame.reload());
+    const pageParts = freeParts.filter((part) => part.localName !== 'turbo-frame' && part.id !== '');
     if (pageParts.length > 0) {
       this.#swapPageParts(pageParts);
+    }
+  }
+
+  // After the event that may end a hold, focus has moved on and a closed dialog or disclosure reads as closed.
+  #refreshReleasedPartsSoon() {
+    if (this.#heldPartIds.size > 0 && this.#releaseTimer === null) {
+      this.#releaseTimer = setTimeout(() => this.#refreshReleasedParts(), 0);
+    }
+  }
+
+  #refreshReleasedParts() {
+    this.#releaseTimer = null;
+    const heldParts = [...this.#heldPartIds].map((id) => document.getElementById(id));
+    this.#heldPartIds = new Set(heldParts.filter((part) => part !== null && isPartInUse(part)).map((part) => part.id));
+    const releasedParts = heldParts.filter((part) => part !== null && !this.#heldPartIds.has(part.id));
+    if (releasedParts.length > 0) {
+      this.#refreshParts(releasedParts);
     }
   }
 
@@ -193,9 +236,15 @@ export default class extends Controller {
     const page = new DOMParser().parseFromString(await response.text(), 'text/html');
     parts.forEach((part) => {
       const freshPart = page.getElementById(part.id);
-      if (freshPart !== null && part.isConnected && !isPartInUse(part)) {
-        part.replaceWith(document.importNode(freshPart, true));
+      if (freshPart === null || !part.isConnected) {
+        return;
       }
+      // Put in use while the page was fetched.
+      if (isPartInUse(part)) {
+        this.#heldPartIds.add(part.id);
+        return;
+      }
+      part.replaceWith(document.importNode(freshPart, true));
     });
   }
 }

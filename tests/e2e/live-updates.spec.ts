@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Request } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Request, type Response } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
@@ -9,7 +9,7 @@ const MESSAGE_EDITED = 'Message edited.';
 const MESSAGE_REMOVED = 'Message removed.';
 // phase-04-conversation-and-pings.md, Definition of done: a change in one browser shows in the other within 3 s.
 const SHOWS_WITHIN_MS = 3000;
-// RefreshTicketPagesHandler::WINDOW_MILLISECONDS: a change within 2 s of the last signal is published when a delayed
+// RefreshTicketPagesHandler::WINDOW_MILLISECONDS: a change within 2 s of the last signal (the ticket's own creation counts) is
 // try runs one window later, so it may show that much later.
 const COALESCED_SHOWS_WITHIN_MS = 2000 + SHOWS_WITHIN_MS;
 const TOKEN_PATH = '/realtime/token';
@@ -75,6 +75,49 @@ async function turboVisit(page: Page, path: string): Promise<void> {
       }),
     path,
   );
+}
+
+/** Omar comments, opens the edit form of his comment and types in it, then clicks away: the open edit holds the thread. */
+async function holdThreadWithOpenEdit(page: Page, key: string, draft: string): Promise<{ message: Locator; editField: Locator }> {
+  const ownText = `A note to edit later ${randomUUID().slice(0, 8)}`;
+  const ownRefresh = page.waitForResponse((response) => pathOf(response.request()) === `/t/${key}/thread`);
+  await postComment(page, ownText);
+  await ownRefresh;
+  const message = messageWithText(page, ownText);
+  await message.getByText('Edit', { exact: true }).click();
+  const editField = message.getByLabel('Edit your message');
+  await editField.fill(draft);
+  await page.getByRole('heading', { level: 2, name: 'Questions and comments' }).click();
+  await expect(editField).not.toBeFocused();
+  return { message, editField };
+}
+
+/** The answer to the next fetch of the ticket page that starts from now on, which only a signal sends. */
+async function pageFetchAfterNow(page: Page, key: string): Promise<Response> {
+  const request = await page.waitForRequest((sent) => pathOf(sent) === `/t/${key}` && sent.resourceType() === 'fetch');
+  const response = await request.response();
+  if (response === null) {
+    throw new Error(`The fetch of /t/${key} got no answer.`);
+  }
+  return response;
+}
+
+/** Resolves once the page has run a task queued after now, so the script's work on an answer already read is done. */
+async function nextTaskOf(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+}
+
+function lenasPeopleRow(page: Page) {
+  return page.locator('#ticket-people .people__row').filter({ has: page.locator('.people__name', { hasText: /^Lena$/ }) });
+}
+
+/** As a lead: picks a step from "Move to another step…" that asks nothing more, and waits for the move's answer. */
+async function moveFromList(page: Page, stepName: string): Promise<void> {
+  const answer = page.waitForResponse((response) => response.url().includes('/move-to/') && response.request().method() === 'POST');
+  const moveList = page.locator('#ticket-next-step details.next-step-box__move-to');
+  await moveList.getByText('Move to another step…').click();
+  await moveList.getByRole('button', { name: stepName, exact: true }).click();
+  expect((await answer).status()).toBe(200);
 }
 
 test.describe('two people on one ticket', () => {
@@ -144,47 +187,146 @@ test.describe('two people on one ticket', () => {
 
     await postComment(lena.page, text);
 
-    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: SHOWS_WITHIN_MS });
+    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: COALESCED_SHOWS_WITHIN_MS });
     await expect(composerBody(omar.page)).toHaveValue(draft);
     await lena.context.close();
     await omar.context.close();
   });
 
-  test("an edit Omar left open keeps its text: the thread waits until he closes it, then shows Lena's comments", async ({ browser }) => {
+  test("an edit Omar left open keeps its text: the thread waits until he closes it, then shows Lena's comment", async ({ browser }) => {
     const key = await makeTicketForOmar(browser, `Gift wrap price shows twice ${randomUUID().slice(0, 8)}`);
     const omar = await openAs(browser, OMAR_STORAGE_STATE);
     const lena = await openAs(browser, LENA_STORAGE_STATE);
     await openFollowedThread(omar.page, key);
     await openThread(lena.page, key);
-    const ownText = `Gift wrap adds its price to the total ${randomUUID().slice(0, 8)}`;
     const editDraft = `Gift wrap adds its price twice ${randomUUID().slice(0, 8)}`;
-    const firstReply = `Only on the basket page ${randomUUID().slice(0, 8)}`;
-    const secondReply = `And on the order email ${randomUUID().slice(0, 8)}`;
-    const ownRefresh = omar.page.waitForResponse((response) => pathOf(response.request()) === `/t/${key}/thread`);
-    await postComment(omar.page, ownText);
-    await ownRefresh;
-    const ownMessage = messageWithText(omar.page, ownText);
-    await ownMessage.getByText('Edit', { exact: true }).click();
-    await ownMessage.getByLabel('Edit your message').fill(editDraft);
-    await omar.page.getByRole('heading', { level: 2, name: 'Questions and comments' }).click();
-    await expect(ownMessage.getByLabel('Edit your message')).not.toBeFocused();
+    const reply = `Only on the basket page ${randomUUID().slice(0, 8)}`;
+    const { message: ownMessage, editField } = await holdThreadWithOpenEdit(omar.page, key, editDraft);
     const requests = recordRequests(omar.page);
-    // A signal fetches the page for its marked parts even when the thread waits, after the thread's own reload would start.
-    const signalHandled = omar.page.waitForResponse((response) => pathOf(response.request()) === `/t/${key}` && response.request().resourceType() === 'fetch');
 
-    await postComment(lena.page, firstReply);
-    await signalHandled;
+    await postComment(lena.page, reply);
+    await expect(messageWithText(lena.page, reply)).toHaveCount(1);
+    // Started after Lena's comment is saved, so it is the fetch of a signal that carries it; the thread's reload, had
+    // it not waited, would have started before it.
+    expect((await pageFetchAfterNow(omar.page, key)).status()).toBe(200);
 
     expect(requests.filter((request) => pathOf(request) === `/t/${key}/thread`).map((request) => request.url())).toEqual([]);
-    await expect(ownMessage.getByLabel('Edit your message')).toHaveValue(editDraft);
-    await expect(messageWithText(omar.page, firstReply)).toHaveCount(0);
+    await expect(editField).toHaveValue(editDraft);
+    await expect(messageWithText(omar.page, reply)).toHaveCount(0);
 
     await ownMessage.getByText('Edit', { exact: true }).click();
-    await expect(ownMessage.getByLabel('Edit your message')).toBeHidden();
-    await postComment(lena.page, secondReply);
+    await expect(editField).toBeHidden();
 
-    await expect(messageWithText(omar.page, firstReply)).toHaveCount(1);
-    await expect(messageWithText(omar.page, secondReply)).toHaveCount(1);
+    await expect(messageWithText(omar.page, reply)).toHaveCount(1, { timeout: SHOWS_WITHIN_MS });
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test("the ping sheet Omar has open keeps its note: People waits until he closes it, then shows Lena's move", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Store picker forgets the town ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(omar.page, key);
+    await openThread(lena.page, key);
+    await markThisLoad(omar.page);
+    const note = `Could you check the town list ${randomUUID().slice(0, 8)}`;
+    const sheet = omar.page.getByRole('dialog', { name: 'Ping Lena' });
+    const lenasTurn = lenasPeopleRow(omar.page).locator('.people__turn');
+    await expect(lenasTurn).toHaveCount(0);
+    await omar.page.getByRole('button', { name: 'Ping Lena' }).click();
+    await sheet.getByLabel('Message').fill(note);
+    // Focus on a button of the sheet: only the open dialog holds People, not a field being typed in.
+    await omar.page.keyboard.press('Tab');
+    await expect(sheet.getByLabel('Message')).not.toBeFocused();
+
+    await moveFromList(lena.page, 'Code review');
+
+    // The state part comes from the same fetch as People, so once it shows the move People was held.
+    await expect(omar.page.locator('#ticket-state .ticket__state')).toContainText('Code review', { timeout: COALESCED_SHOWS_WITHIN_MS });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByLabel('Message')).toHaveValue(note);
+    await expect(lenasTurn).toHaveCount(0);
+
+    await sheet.getByRole('button', { name: 'Cancel' }).click();
+    // The sheet hands focus back to the Ping button inside People, which must not hold it.
+    await expect(sheet).toBeHidden();
+
+    await expect(lenasTurn).toHaveCount(1, { timeout: SHOWS_WITHIN_MS });
+    await expectSameLoad(omar.page);
+    await lena.context.close();
+    await omar.context.close();
+  });
+});
+
+test.describe('a refetch that fails', () => {
+  test("after Omar's session ended, Lena's comment sends his page to the login page with none of it shown", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Opening hours show the wrong day ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(omar.page, key);
+    await openThread(lena.page, key);
+    const reply = `Sunday shows as Monday ${randomUUID().slice(0, 8)}`;
+    // The open edit holds the thread, so only the page's fetch, not the frame's, can reach the login page.
+    await holdThreadWithOpenEdit(omar.page, key, `Opening hours start a day late ${randomUUID().slice(0, 8)}`);
+    // The open stream does not need the cookies again.
+    await omar.context.clearCookies();
+
+    await postComment(lena.page, reply);
+
+    await expect(omar.page).toHaveURL(/\/login$/, { timeout: COALESCED_SHOWS_WITHIN_MS });
+    await expect(omar.page.getByRole('button', { name: 'Log in' })).toBeVisible();
+    await expect(omar.page.getByText(reply)).toHaveCount(0);
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test('a page answer of 404 loads that page for real, with none of the change shown', async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Store map pin sits in the sea ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(omar.page, key);
+    await openThread(lena.page, key);
+    await markThisLoad(omar.page);
+    // As TicketShowController answers a viewer who may no longer see the ticket (TicketPageTest proves the real 404).
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}`,
+      (route) => route.fulfill({ status: 404, contentType: 'text/html', body: '<!doctype html><title>Not found</title><h1>Page not found</h1>' }),
+    );
+
+    await moveFromList(lena.page, 'Code review');
+
+    await expect(omar.page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible({ timeout: COALESCED_SHOWS_WITHIN_MS });
+    await expect(omar.page).toHaveURL(new RegExp(`/t/${key}$`));
+    await expect(omar.page.locator('html')).not.toHaveAttribute('data-e2e-load', 'first');
+    await expect(omar.page.getByText('Code review')).toHaveCount(0);
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test('a page answer of 500 leaves the page as it was', async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Store map zooms out on load ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(omar.page, key);
+    await openThread(lena.page, key);
+    await markThisLoad(omar.page);
+    const omarsStatus = omar.page.locator('#ticket-state .ticket__state');
+    await expect(omarsStatus).toContainText('To do');
+    // An error page that happens to carry a part's id, so a swap from it would show.
+    const failedFetch = omar.page.waitForResponse((response) => pathOf(response.request()) === `/t/${key}` && response.status() === 500);
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}`,
+      (route) => route.fulfill({ status: 500, contentType: 'text/html', body: '<!doctype html><title>Error</title><div id="ticket-state">Something broke</div>' }),
+      { times: 1 },
+    );
+
+    await moveFromList(lena.page, 'Code review');
+    await (await failedFetch).finished();
+    await nextTaskOf(omar.page);
+
+    await expect(omarsStatus).toContainText('To do');
+    await expect(omar.page.getByText('Something broke')).toHaveCount(0);
+    await expectSameLoad(omar.page);
     await lena.context.close();
     await omar.context.close();
   });
@@ -233,7 +375,7 @@ test.describe('the stream across Turbo visits', () => {
     await omar.page.getByRole('heading', { level: 2, name: 'Questions and comments' }).scrollIntoViewIfNeeded();
     const text = `Still following after the visit ${randomUUID().slice(0, 8)}`;
     await postComment(lena.page, text);
-    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: SHOWS_WITHIN_MS });
+    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: COALESCED_SHOWS_WITHIN_MS });
     expect(tokenAsks(requests)).toHaveLength(1);
     expect(hubStreams(requests)).toHaveLength(1);
 

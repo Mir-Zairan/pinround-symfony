@@ -138,6 +138,11 @@ final class TicketThreadTest extends WebTestCase
         self::assertCount(1, $thread);
         self::assertStringContainsString(Thread::EMPTY_THREAD, $thread->filter('#'.Thread::MESSAGES_ID)->text());
         self::assertSame(self::COMMENT_PATH, $thread->filter('form.thread__composer')->attr('action'));
+        self::assertSame(
+            ['thread-composer-'.self::KEY, ''],
+            [$thread->filter('form.thread__composer')->attr('id'), $thread->filter('form.thread__composer')->attr('data-turbo-permanent')],
+            'A live reload of the frame keeps the draft, and the id names the ticket so no other ticket\'s page keeps this form.',
+        );
         self::assertSame('Write a comment', $thread->filter('form.thread__composer textarea')->attr('placeholder'));
         self::assertStringContainsString('A comment does not change the status and sends no notification.', $thread->text());
         self::assertSame(
