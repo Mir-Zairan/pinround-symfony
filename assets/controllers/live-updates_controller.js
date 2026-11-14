@@ -120,6 +120,7 @@ export default class extends Controller {
   #reopenStepMs = FIRST_REOPEN_STEP_MS;
   #releaseTimer = null;
   #isSignalMissed = false;
+  #hasConnected = false;
   // Ids of the parts a signal skipped because they were in use.
   #heldPartIds = new Set();
   #onSignal = () => this.#refetchWhenVisible();
@@ -188,11 +189,17 @@ export default class extends Controller {
     }
   }
 
+  // A reopened stream is a new EventSource that asks the hub for nothing it sent meanwhile, so a signal sent while the
+  // stream was down is lost: the first open of every stream after the first fetches the page's parts again once.
   #showConnected() {
     clearTimeout(this.#pausedTimer);
     this.#pausedTimer = null;
     this.#reopenStepMs = FIRST_REOPEN_STEP_MS;
     this.pausedTarget.hidden = true;
+    if (this.#hasConnected) {
+      this.#refetchWhenVisible();
+    }
+    this.#hasConnected = true;
   }
 
   // The browser would reconnect a dropped stream by itself, with whatever cookie another tab asked for last, which may

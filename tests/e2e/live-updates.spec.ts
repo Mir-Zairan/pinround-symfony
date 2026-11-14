@@ -803,6 +803,56 @@ test.describe('two tabs of one browser', () => {
   });
 });
 
+test.describe('a stream that reconnects', () => {
+  test("Lena's comment sent while Omar's stream was down shows once it reconnects", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Basket total skips the voucher ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    const creationSignalSettled = settleCreationSignal(lena.page, key);
+    await openFollowedThread(lena.page, key);
+    await creationSignalSettled;
+    const omarsStreams: Response[] = [];
+    omar.page.on('response', (response) => {
+      if (pathOf(response.request()) === HUB_PATH) {
+        omarsStreams.push(response);
+      }
+    });
+    let lenasSignalSent: () => void = () => undefined;
+    const isLenasSignalSent = new Promise<void>((resolve) => {
+      lenasSignalSent = resolve;
+    });
+    let streamAsks = 0;
+    // The first stream ends as soon as it is answered, as a dropped connection does; the one that reopens it waits
+    // until the hub has sent the signal of Lena's comment, so Omar's page never hears it.
+    await omar.page.route(`**${HUB_PATH}**`, async (route) => {
+      streamAsks += 1;
+      if (streamAsks === 1) {
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
+        return;
+      }
+      await isLenasSignalSent;
+      await route.continue();
+    });
+    await openThread(omar.page, key);
+    await expect.poll(() => omarsStreams.length).toBe(1);
+    const text = `The voucher drops off at checkout ${randomUUID().slice(0, 8)}`;
+    // Lena's page follows the ticket too, so its fetch proves the hub sent the signal.
+    const lenasSignalFetch = pageFetchAfterNow(lena.page, key);
+
+    await postComment(lena.page, text);
+    expect((await lenasSignalFetch).status()).toBe(200);
+    await expect(messageWithText(omar.page, text)).toHaveCount(0);
+    lenasSignalSent();
+
+    // live-updates_controller.js FIRST_REOPEN_STEP_MS at most, then the hub's answer.
+    await expect.poll(() => omarsStreams.length, { timeout: 5000 + SHOWS_WITHIN_MS }).toBe(2);
+    expect(omarsStreams[1].status()).toBe(200);
+    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: SHOWS_WITHIN_MS });
+    await lena.context.close();
+    await omar.context.close();
+  });
+});
+
 test.describe('the stream across Turbo visits', () => {
   test('a visit back to the same ticket keeps the stream and the cookie; a visit to another ticket opens a new stream', async ({ browser }) => {
     const key = await makeTicketForOmar(browser, `Saved basket loses its note ${randomUUID().slice(0, 8)}`);
