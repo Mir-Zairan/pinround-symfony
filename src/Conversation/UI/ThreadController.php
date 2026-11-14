@@ -38,7 +38,7 @@ use Symfony\UX\Turbo\TurboBundle;
 /**
  * The ticket's thread (FR-CNV-01, FR-CNV-02, FR-CNV-06, ticket-page.md, Questions and comments): shows it in
  * ThreadFrame's lazy frame, or as a page of its own, posts a comment, asks and answers a question, and edits or removes
- * one's own message. Each action answers with a toast: a Turbo form in a Turbo Stream that also replaces the message
+ * one's own message. Each action responds with a toast: a Turbo form in a Turbo Stream that also replaces the message
  * list, any other form with a redirect to the thread's page. Asking and answering pause and resume the ticket, which
  * changes its page's header that the thread's frame cannot replace, so once made they redirect to the ticket's page.
  *
@@ -98,7 +98,7 @@ final class ThreadController extends AbstractController
         private readonly EditMessage $editMessage,
         private readonly RemoveMessage $removeMessage,
         private readonly AskQuestion $askQuestion,
-        private readonly Answer $answerQuestion,
+        private readonly Answer $answer,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -133,7 +133,7 @@ final class ThreadController extends AbstractController
         $body = $request->request->getString(self::BODY_FIELD);
         $now = $this->clock->now();
 
-        return $this->answer($request, $key, function () use ($key, $csrfToken, $body, $now): string {
+        return $this->respondToAction($request, $key, function () use ($key, $csrfToken, $body, $now): string {
             [, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->refuseAnExpiredForm($key, $csrfToken);
             $this->postComment->post($ticket->id, $ticket->visibilityFacts, $userId, $body, $now);
@@ -149,7 +149,7 @@ final class ThreadController extends AbstractController
         $body = $request->request->getString(self::BODY_FIELD);
         $now = $this->clock->now();
 
-        return $this->answer($request, $key, function () use ($key, $messageId, $csrfToken, $body, $now): string {
+        return $this->respondToAction($request, $key, function () use ($key, $messageId, $csrfToken, $body, $now): string {
             [$organizationId, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->refuseAnExpiredForm($key, $csrfToken);
             $this->editMessage->edit($organizationId, $ticket->id, $messageId, $userId, $body, $now);
@@ -164,7 +164,7 @@ final class ThreadController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
         $now = $this->clock->now();
 
-        return $this->answer($request, $key, function () use ($key, $messageId, $csrfToken, $now): string {
+        return $this->respondToAction($request, $key, function () use ($key, $messageId, $csrfToken, $now): string {
             [$organizationId, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->refuseAnExpiredForm($key, $csrfToken);
             $this->removeMessage->remove($organizationId, $ticket->id, $messageId, $userId, $now);
@@ -181,7 +181,7 @@ final class ThreadController extends AbstractController
         $askedUserField = $request->request->getString(self::ASKED_USER_FIELD);
         $now = $this->clock->now();
 
-        return $this->answer($request, $key, function () use ($key, $csrfToken, $body, $askedUserField, $now): string {
+        return $this->respondToAction($request, $key, function () use ($key, $csrfToken, $body, $askedUserField, $now): string {
             [, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->denyAccessUnlessGranted(ConversationPermission::ASK, $ticket->visibilityFacts);
             $this->refuseAnExpiredForm($key, $csrfToken);
@@ -206,24 +206,24 @@ final class ThreadController extends AbstractController
         $body = $request->request->getString(self::BODY_FIELD);
         $now = $this->clock->now();
 
-        return $this->answer($request, $key, function () use ($key, $messageId, $csrfToken, $body, $now): string {
+        return $this->respondToAction($request, $key, function () use ($key, $messageId, $csrfToken, $body, $now): string {
             [$organizationId, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->refuseAnExpiredForm($key, $csrfToken);
-            $this->answerQuestion->answer($organizationId, $ticket->id, $messageId, $userId, $body, $now);
+            $this->answer->answer($organizationId, $ticket->id, $messageId, $userId, $body, $now);
 
             return \sprintf(self::QUESTION_ANSWERED, $ticket->stepName);
         }, self::TICKET_ROUTE);
     }
 
     /**
-     * Runs the action in a transaction of its own and answers with its toast, or the refusal's: the refusals of
+     * Runs the action in a transaction of its own and responds with its toast, or the refusal's: the refusals of
      * Conversation's Api say in their message what the person sees.
      *
      * @param callable(): string $action       returns the toast of a change made
      * @param ?string            $changedRoute the page a change made redirects to, whatever the form, with its toast
-     *                                         flashed; null to answer it as a refusal is answered
+     *                                         flashed; null to respond as to a refusal
      */
-    private function answer(Request $request, string $key, callable $action, ?string $changedRoute = null): Response
+    private function respondToAction(Request $request, string $key, callable $action, ?string $changedRoute = null): Response
     {
         if (null === $this->tenantContext->get()) {
             // Anonymous requests have no tenant, and the firewall sends the AccessDeniedException to the login page.
@@ -234,11 +234,11 @@ final class ThreadController extends AbstractController
         } catch (TicketNotFound|MessageNotFound) {
             throw $this->createNotFoundException(self::NOT_FOUND);
         } catch (ThreadFormExpired) {
-            return $this->answerWithToast($request, $key, self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->respondWithToast($request, $key, self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (TicketChangedMeanwhile) {
-            return $this->answerWithToast($request, $key, self::TICKET_CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->respondWithToast($request, $key, self::TICKET_CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MessageBodyRefused|MessageEditRefused|MessageRemovalRefused|QuestionRefused $refused) {
-            return $this->answerWithToast($request, $key, $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->respondWithToast($request, $key, $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         if (null !== $changedRoute) {
@@ -247,7 +247,7 @@ final class ThreadController extends AbstractController
             return $this->redirectToRoute($changedRoute, ['key' => $key], Response::HTTP_SEE_OTHER);
         }
 
-        return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
+        return $this->respondWithToast($request, $key, $toast, Response::HTTP_OK);
     }
 
     /**
@@ -286,7 +286,7 @@ final class ThreadController extends AbstractController
      *
      * @param int $streamStatus 200 for a change made, 422 for one refused
      */
-    private function answerWithToast(Request $request, string $key, string $toast, int $streamStatus): Response
+    private function respondWithToast(Request $request, string $key, string $toast, int $streamStatus): Response
     {
         if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
             $this->addFlash(self::TOAST, $toast);
