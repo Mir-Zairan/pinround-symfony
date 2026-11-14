@@ -50,6 +50,40 @@ final class MonthlyPartitionsTest extends TestCase
     }
 
     #[Test]
+    public function aPartitionHasEndedOnceItsWholeMonthIsBeforeTheCutoff(): void
+    {
+        $partitions = ['ntf_notification_202610', 'ntf_notification_202611', 'ntf_notification_202612', 'ntf_notification_202701', 'ntf_notification_202704', 'ntf_notification_202707'];
+
+        // 2027-04-15 10:00 less 90 days: 2026-12 ended on 2027-01-01, 2027-01 ends on 2027-02-01.
+        self::assertSame(
+            ['ntf_notification_202610', 'ntf_notification_202611', 'ntf_notification_202612'],
+            MonthlyPartitions::partitionsEndedBy('ntf_notification', $partitions, new \DateTimeImmutable('2027-01-15 10:00:00 UTC')),
+        );
+    }
+
+    #[Test]
+    public function aMonthEndingExactlyAtTheCutoffHasEndedAndOneSecondLaterItHasNot(): void
+    {
+        $partitions = ['ntf_notification_202701'];
+
+        self::assertSame($partitions, MonthlyPartitions::partitionsEndedBy('ntf_notification', $partitions, new \DateTimeImmutable('2027-02-01 00:00:00 UTC')));
+        self::assertSame([], MonthlyPartitions::partitionsEndedBy('ntf_notification', $partitions, new \DateTimeImmutable('2027-01-31 23:59:59 UTC')));
+        // 01:00 on 1 February in UTC+02:00 is still January in UTC.
+        self::assertSame([], MonthlyPartitions::partitionsEndedBy('ntf_notification', $partitions, new \DateTimeImmutable('2027-02-01 01:00:00+02:00')));
+    }
+
+    #[Test]
+    public function aNameOfAnotherShapeOrTableHasNeverEnded(): void
+    {
+        $partitions = [
+            'ntf_notification_202613', 'ntf_notification_202600', 'ntf_notification_20261', 'ntf_notification_2026011',
+            "ntf_notification_202601\n", 'ntf_notification_old', 'tkt_ticket_event_202601', 'xntf_notification_202601',
+        ];
+
+        self::assertSame([], MonthlyPartitions::partitionsEndedBy('ntf_notification', $partitions, new \DateTimeImmutable('2031-01-01 00:00:00 UTC')));
+    }
+
+    #[Test]
     public function aPartitionNameLongerThanPostgresKeepsIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);

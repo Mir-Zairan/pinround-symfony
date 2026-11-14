@@ -77,4 +77,46 @@ final class MonthlyPartitions
 
         return $missingMonths;
     }
+
+    /**
+     * Reads the catalog, so a table named like a partition but not attached to the parent is not in it.
+     *
+     * @return list<string> the partitions attached to the parent, in name order
+     *
+     * @throws \Doctrine\DBAL\Exception when the parent does not exist
+     */
+    public static function attachedPartitions(Connection $connection, string $parent): array
+    {
+        return array_map(static fn (mixed $partition): string => \is_string($partition) ? $partition : throw new \UnexpectedValueException('A partition name is not a string.'), $connection->fetchFirstColumn(
+            'SELECT c.relname FROM pg_catalog.pg_inherits i JOIN pg_catalog.pg_class c ON c.oid = i.inhrelid'
+            .' WHERE i.inhparent = CAST(? AS regclass) ORDER BY c.relname',
+            ['public.'.$parent],
+        ));
+    }
+
+    /**
+     * @param list<string> $partitions
+     *
+     * @return list<string> the partitions named <parent>_YYYYMM whose whole UTC month ends at or before the cutoff, in
+     *                      the given order; a name of any other shape is never in it
+     */
+    public static function partitionsEndedBy(string $parent, array $partitions, \DateTimeImmutable $cutoff): array
+    {
+        $ended = [];
+        foreach ($partitions as $partition) {
+            if (1 !== preg_match('/^'.preg_quote($parent, '/').'_(\d{4})(\d{2})\z/', $partition, $yearAndMonth)) {
+                continue;
+            }
+            $monthNumber = (int) $yearAndMonth[2];
+            if ($monthNumber < 1 || $monthNumber > 12) {
+                continue;
+            }
+            $firstDay = new \DateTimeImmutable(\sprintf('%s-%02d-01 00:00:00', $yearAndMonth[1], $monthNumber), new \DateTimeZone('UTC'));
+            if ($firstDay->modify('first day of next month') <= $cutoff) {
+                $ended[] = $partition;
+            }
+        }
+
+        return $ended;
+    }
 }
