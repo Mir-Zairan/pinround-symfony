@@ -63,6 +63,12 @@ services:
     # The ORM result cache (doctrine.yaml says why it must not store anything).
     Symfony\Component\Cache\Adapter\NullAdapter: ~
 
+    # Media's private bucket through Flysystem (ADR-0011); inject it as FilesystemOperator $mediaObjectStorage.
+    media.object_storage:
+        class: League\Flysystem\FilesystemOperator
+        factory: ['@App\Media\Infrastructure\Storage\ObjectStorageFilesystemFactory', 'create']
+    League\Flysystem\FilesystemOperator $mediaObjectStorage: '@media.object_storage'
+
     # Readiness checks of /health/ready (HealthController) for the two Valkeys: the cache one and the state one, whose
     # host MESSENGER_TRANSPORT_DSN names (ADR-0010). ReadinessWiringTest pins both definitions.
     health.cache_valkey_answers:

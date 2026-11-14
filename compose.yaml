@@ -183,14 +183,20 @@ services:
     depends_on:
       minio:
         condition: service_healthy
-    environment: *minio-credentials
-    # One-shot: creates the private bucket and exits 0.
+    environment:
+      <<: *minio-credentials
+      # The app origin, the only one whose browser may send presigned PUTs (ADR-0011).
+      MINIO_CORS_ALLOW_ORIGIN: ${MINIO_CORS_ALLOW_ORIGIN:-https://localhost}
+    # One-shot: creates the private bucket, limits CORS to the app origin and exits 0.
+    # MinIO answers PutBucketCors with NotImplemented, so the origin list is its server-wide api setting, which cannot
+    # limit methods; a provider with bucket CORS must also allow PUT only.
     entrypoint: ["sh", "-c"]
     command:
       - >-
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
         mc mb --ignore-existing local/pinround &&
-        mc anonymous set none local/pinround
+        mc anonymous set none local/pinround &&
+        mc admin config set local api cors_allow_origin="$$MINIO_CORS_ALLOW_ORIGIN"
 
   mailpit:
     image: axllent/mailpit:v1.27.8
