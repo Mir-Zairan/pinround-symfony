@@ -468,6 +468,30 @@ test.describe('two people on one ticket', () => {
   });
 });
 
+test.describe("the signal of Omar's own change", () => {
+  test("the page his comment form redirects to shows its toast, though his page fetched the signal's refresh first", async ({ browser }) => {
+    const { key, omar } = await openNewTicketAsOmar(browser, `The receipt prints twice ${randomUUID().slice(0, 8)}`);
+    const ownSignalFetch = pageFetchAfterNow(omar.page, key);
+    // The comment's redirect reaches the browser only once the refresh its signal sends has its answer, so that answer
+    // is read with the toast still in his session. A route sees no redirected request, so the redirect itself waits.
+    await omar.page.route(`**/t/${key}/comments`, async (route) => {
+      const redirect = await route.fetch({ maxRedirects: 0 });
+      await (await ownSignalFetch).finished();
+      await route.fulfill({ response: redirect });
+    });
+    const composer = threadFrame(omar.page).locator('form.thread__composer');
+    await composer.evaluate((form) => form.setAttribute('data-turbo', 'false'));
+    await composerBody(omar.page).fill(`Seen on the second till too ${randomUUID().slice(0, 8)}`);
+
+    await composer.locator('button[type="submit"]').click();
+
+    await omar.page.waitForURL(`**/t/${key}/thread`);
+    expect((await ownSignalFetch).status()).toBe(200);
+    await expect(omar.page.locator(TOAST_REGION)).toHaveText(COMMENT_ADDED);
+    await omar.context.close();
+  });
+});
+
 test.describe('a refetch that fails', () => {
   test("after Omar's session ended, Lena's comment sends his page to the login page with none of it shown", async ({ browser }) => {
     const { key, omar } = await openNewTicketAsOmar(browser, `Opening hours show the wrong day ${randomUUID().slice(0, 8)}`);

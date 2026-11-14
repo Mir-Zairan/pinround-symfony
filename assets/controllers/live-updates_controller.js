@@ -24,6 +24,9 @@ const SIGNAL_TYPE = 'refresh';
 // Marks what a signal fetches again: a turbo-frame with a src reloads; any other element with an id is swapped for the
 // element of the same id in the page fetched again.
 const REFRESHED_PARTS = '[data-live-refresh]';
+// Every fetch a signal sends carries it, so base.html.twig leaves the session's toast for the page the person's own
+// action redirects to: a signal of that action can come between its redirect and the redirected page's fetch.
+const LIVE_REFRESH_HEADER = 'X-Live-Refresh';
 const FORM_FIELDS = 'input, textarea, select';
 // An open dialog, or an open disclosure with text to type in (a message's edit form), keeps what the person wrote
 // there after they click away; a refresh would close it and lose the text.
@@ -50,6 +53,14 @@ function isPartInUse(part) {
 // Web Locks exist only in a secure context (HTTPS or localhost); without them a tab asks and connects unguarded.
 function whileHoldingCookieLock(work) {
   return navigator.locks === undefined ? work() : navigator.locks.request(COOKIE_LOCK, work);
+}
+
+// Turbo's own fetches take their headers from turbo:before-fetch-request; only a GET is a refresh, as a form in a
+// reloading frame may be sent meanwhile.
+function markLiveRefresh(event) {
+  if (event.detail.fetchOptions.method.toUpperCase() === 'GET') {
+    event.detail.fetchOptions.headers[LIVE_REFRESH_HEADER] = '1';
+  }
 }
 
 function connectionSettled(source) {
@@ -252,7 +263,13 @@ export default class extends Controller {
     this.#isSignalMissed = false;
     const parts = [...document.querySelectorAll(REFRESHED_PARTS)];
     if (parts.length === 0) {
-      visit(window.location.href, { action: 'replace' });
+      // Turbo sends the visit's fetch within visit(), so the listener marks that fetch and no later one.
+      document.addEventListener('turbo:before-fetch-request', markLiveRefresh);
+      try {
+        visit(window.location.href, { action: 'replace' });
+      } finally {
+        document.removeEventListener('turbo:before-fetch-request', markLiveRefresh);
+      }
       return;
     }
     this.#refreshParts(parts);
@@ -295,7 +312,10 @@ export default class extends Controller {
   async #swapPageParts(parts) {
     let response;
     try {
-      response = await fetch(window.location.href, { headers: { Accept: 'text/html' }, credentials: 'same-origin' });
+      response = await fetch(window.location.href, {
+        headers: { Accept: 'text/html', [LIVE_REFRESH_HEADER]: '1' },
+        credentials: 'same-origin',
+      });
     } catch {
       return;
     }
@@ -334,10 +354,12 @@ export default class extends Controller {
       focusedControl = focusedControlOf(frame);
     };
     frame.addEventListener('turbo:before-frame-render', noteFocusedControl);
+    frame.addEventListener('turbo:before-fetch-request', markLiveRefresh);
     try {
       await frame.reload();
     } finally {
       frame.removeEventListener('turbo:before-frame-render', noteFocusedControl);
+      frame.removeEventListener('turbo:before-fetch-request', markLiveRefresh);
     }
     refocus(focusedControl, frame);
   }

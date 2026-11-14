@@ -119,8 +119,9 @@
         {#- One live updates stream per page: the viewer's own topic here, and a ticket page adds its ticket's topic. -#}
         <main id="main" class="page">{% block live_updates %}{{ component('LiveUpdates') }}{% endblock %}{% block main %}{% endblock %}</main>
         {#- One toast at a time (frontend.md): the last one flashed by the action that redirected here, or the one a
-            Turbo Stream answer (_toast_stream.html.twig) puts in by the region's id. -#}
-        {%- set toasts = app.flashes('toast') %}
+            Turbo Stream answer (_toast_stream.html.twig) puts in by the region's id. A live update's fetch
+            (live-updates_controller.js, X-Live-Refresh) leaves it for the page that action redirected to. -#}
+        {%- set toasts = app.request is not null and app.request.headers.has('X-Live-Refresh') ? [] : app.flashes('toast') %}
         <div id="toast-region" class="toast-region" role="status" aria-live="polite">
             {%- if toasts is not empty %}{{ include('@Web/_toast.html.twig', {message: toasts|last}) }}{% endif -%}
         </div>
