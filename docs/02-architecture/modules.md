@@ -265,7 +265,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Story:** Omar pings Lena twice in an hour. The second ping is blocked by the limit. When Lena approves the code, the ping clears by itself.
 - **Owns:** `ntf_ping`, `ntf_notification` (partitioned), `ntf_mute`, `ntf_delivery` (email digest state).
 - **Api:**
-  - `PingCommands::ping(TicketId, UserId $from, UserId $to, string $body): PingResult` (sent, or rate limited until …)
+  - `PingCommands::ping(OrganizationId, string $ticketKey, UserId $from, UserId $to, string $body, DateTimeImmutable $at): void`; refuses with `PingToYourself`, `PingMessageRefused` (trimmed body not 1–500 characters), Ticketing's `TicketNotFound` (the sender may not see the ticket), `PingRecipientCannotView` (not a member, or may not see the ticket), `PingTooSoon` (carries `againAt`) or `PingsPaused` (the limit store is down)
   - `NotificationQueries::bell(UserId): BellView` (grouped by person and ticket)
   - `NotificationQueries::isMuted(UserId, TicketId): bool`
 - **Commands (more):** MarkPingDone, Mute, Unmute.
