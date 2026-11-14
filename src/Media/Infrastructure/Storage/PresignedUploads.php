@@ -15,8 +15,11 @@ final readonly class PresignedUploads
 {
     public const int VALID_FOR_SECONDS = 300;
 
-    // type/subtype without parameters; \z, because $ would also accept a trailing newline.
-    private const string MEDIA_TYPE = '~^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+\z~i';
+    /** The picture types ADR-0011 accepts; the processing worker checks the bytes again. */
+    public const array MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+
+    /** 15 MB, the largest original ADR-0011 accepts. */
+    public const int MAX_BYTES = 15 * 1024 * 1024;
 
     private S3Client $presigningClient;
 
@@ -42,18 +45,21 @@ final readonly class PresignedUploads
     }
 
     /**
-     * @param string $contentType   a bare media type such as image/png; the client must send exactly this
-     * @param int    $contentLength the exact body size in bytes; the client must send exactly this
+     * @param string $contentType   one of MEDIA_TYPES, exactly; the client must send exactly this
+     * @param int    $contentLength the exact body size in bytes, 1 to MAX_BYTES; the client must send exactly this
      *
-     * @throws \InvalidArgumentException when the type is not a bare media type or the size is below one byte
+     * @throws \InvalidArgumentException when the type is not one of MEDIA_TYPES or the size is outside 1 to MAX_BYTES
      */
     public function forPut(UploadKey $key, string $contentType, int $contentLength): PresignedPut
     {
-        if (1 !== preg_match(self::MEDIA_TYPE, $contentType)) {
-            throw new \InvalidArgumentException('An upload needs a media type such as image/png, without parameters.');
+        if (!\in_array($contentType, self::MEDIA_TYPES, true)) {
+            throw new \InvalidArgumentException('An upload must be image/png, image/jpeg or image/webp, without parameters.');
         }
         if ($contentLength < 1) {
             throw new \InvalidArgumentException('An upload needs a size of at least one byte.');
+        }
+        if ($contentLength > self::MAX_BYTES) {
+            throw new \InvalidArgumentException(\sprintf('An upload may be at most 15 MB (%d bytes).', self::MAX_BYTES));
         }
 
         $signedAt = $this->clock->now();

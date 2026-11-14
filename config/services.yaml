@@ -63,11 +63,11 @@ services:
     # The ORM result cache (doctrine.yaml says why it must not store anything).
     Symfony\Component\Cache\Adapter\NullAdapter: ~
 
-    # Media's private bucket through Flysystem (ADR-0011); inject it as FilesystemOperator $mediaObjectStorage.
+    # Media's private bucket through Flysystem (ADR-0011). No autowiring alias, so no other module can be handed
+    # Media's bucket: give it to a Media service as an explicit argument here.
     media.object_storage:
         class: League\Flysystem\FilesystemOperator
         factory: ['@App\Media\Infrastructure\Storage\ObjectStorageFilesystemFactory', 'create']
-    League\Flysystem\FilesystemOperator $mediaObjectStorage: '@media.object_storage'
 
     # Readiness checks of /health/ready (HealthController) for the two Valkeys: the cache one and the state one, whose
     # host MESSENGER_TRANSPORT_DSN names (ADR-0010). ReadinessWiringTest pins both definitions.
@@ -309,6 +309,14 @@ when@test:
             public: true
         test.conversation_remove_message:
             alias: App\Conversation\Application\RemoveMessage\RemoveMessage
+            public: true
+        # Nothing reads the bucket or signs an upload before the upload intents (P05.T1 step 3); ObjectStorageWiringTest
+        # gets both as Media will.
+        test.media_object_storage:
+            alias: media.object_storage
+            public: true
+        test.media_presigned_uploads:
+            alias: App\Media\Infrastructure\Storage\PresignedUploads
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

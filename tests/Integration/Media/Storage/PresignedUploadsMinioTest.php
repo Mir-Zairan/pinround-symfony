@@ -11,6 +11,7 @@ use App\Media\Infrastructure\Storage\PresignedUploads;
 use App\Media\Infrastructure\Storage\UploadKey;
 use App\SharedKernel\Domain\OrganizationId;
 use League\Flysystem\FilesystemOperator;
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
@@ -24,6 +25,7 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  * OBJECT_STORAGE_PUBLIC_URL (localhost) is not reachable from inside the app container; the signed host is the only
  * difference from production.
  */
+#[Group('object-storage')]
 final class PresignedUploadsMinioTest extends TestCase
 {
     private const string ORGANIZATION = '0192f3a0-7b2c-7d3e-8a4f-5b6c7d8e9f01';
@@ -75,6 +77,7 @@ final class PresignedUploadsMinioTest extends TestCase
         $response = $this->putWithHeaders($put->url, ['Content-Type' => '', 'Content-Length' => (string) \strlen(self::PNG_BODY)], self::PNG_BODY);
 
         self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString('SignatureDoesNotMatch', $response->getContent(false));
         self::assertFalse($this->storage()->fileExists($key->toString()));
     }
 
@@ -101,6 +104,9 @@ final class PresignedUploadsMinioTest extends TestCase
         $response = $this->put($signedLongAgo, self::PNG_BODY);
 
         self::assertSame(403, $response->getStatusCode());
+        $refusal = $response->getContent(false);
+        self::assertStringContainsString('<Code>AccessDenied</Code>', $refusal);
+        self::assertStringContainsString('<Message>Request has expired</Message>', $refusal);
         self::assertFalse($this->storage()->fileExists($key->toString()));
     }
 

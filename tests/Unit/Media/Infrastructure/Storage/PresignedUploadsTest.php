@@ -81,24 +81,75 @@ final class PresignedUploadsTest extends TestCase
     /**
      * @return iterable<string, array{string}>
      */
-    public static function contentTypesThatAreNotBareMediaTypes(): iterable
+    public static function contentTypesThatAreNotAcceptedPictures(): iterable
     {
         yield 'empty' => [''];
         yield 'no subtype' => ['image'];
+        yield 'a GIF' => ['image/gif'];
+        yield 'an SVG' => ['image/svg+xml'];
+        yield 'HTML' => ['text/html'];
+        yield 'upper case' => ['IMAGE/PNG'];
         yield 'with a parameter' => ['image/png; charset=utf-8'];
         yield 'with a trailing newline' => ["image/png\n"];
+        yield 'with a trailing CRLF' => ["image/jpeg\r\n"];
         yield 'with a header injection' => ["image/png\r\nX-Evil: 1"];
+        yield 'with a BOM' => ["\u{FEFF}image/png"];
         yield 'with a space' => ['image/ png'];
     }
 
     #[Test]
-    #[DataProvider('contentTypesThatAreNotBareMediaTypes')]
-    public function itRefusesAContentTypeThatIsNotABareMediaType(string $contentType): void
+    #[DataProvider('contentTypesThatAreNotAcceptedPictures')]
+    public function itRefusesAContentTypeThatIsNotAnAcceptedPicture(string $contentType): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('needs a media type such as image/png');
+        $this->expectExceptionMessage('An upload must be image/png, image/jpeg or image/webp, without parameters.');
 
         $this->uploads()->forPut(self::key(), $contentType, 2048);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function acceptedPictureTypes(): iterable
+    {
+        yield 'PNG' => ['image/png'];
+        yield 'JPEG' => ['image/jpeg'];
+        yield 'WebP' => ['image/webp'];
+    }
+
+    #[Test]
+    #[DataProvider('acceptedPictureTypes')]
+    public function itSignsEachAcceptedPictureType(string $contentType): void
+    {
+        $put = $this->uploads()->forPut(self::key(), $contentType, 2048);
+
+        self::assertSame($contentType, $put->headers['Content-Type']);
+    }
+
+    #[Test]
+    public function itRefusesASizeOverFifteenMegabytes(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('An upload may be at most 15 MB (15728640 bytes).');
+
+        $this->uploads()->forPut(self::key(), 'image/png', 15 * 1024 * 1024 + 1);
+    }
+
+    #[Test]
+    public function itRefusesTheLargestIntegerAsASize(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('An upload may be at most 15 MB');
+
+        $this->uploads()->forPut(self::key(), 'image/png', \PHP_INT_MAX);
+    }
+
+    #[Test]
+    public function itAcceptsExactlyFifteenMegabytes(): void
+    {
+        $put = $this->uploads()->forPut(self::key(), 'image/png', 15 * 1024 * 1024);
+
+        self::assertSame('15728640', $put->headers['Content-Length']);
     }
 
     #[Test]
