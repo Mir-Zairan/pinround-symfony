@@ -251,4 +251,9 @@
         <h2 id="gallery-pin-placer-heading">Screenshot with pins you place</h2>
         <twig:ScreenshotExample :isEditable="true" />
     </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-placed-pins-heading">
+        <h2 id="gallery-placed-pins-heading">Screenshot with pins already placed</h2>
+        <twig:ScreenshotExample :isEditable="true" :hasPins="true" />
+    </section>
 {% endblock %}

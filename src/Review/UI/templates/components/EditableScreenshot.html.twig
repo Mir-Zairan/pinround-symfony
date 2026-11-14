@@ -1,0 +1,11 @@
+<form class="pin-placer" id="{{ this.formId }}" method="post" action="{{ this.action }}"
+    data-controller="pin-placer"
+    data-pin-placer-note-max-value="{{ this.noteMaxLength }}"
+    data-action="click->pin-placer#onClick keydown->pin-placer#onKeydown input->pin-placer#onInput focusin->pin-placer#onFocusin pointerdown->pin-placer#onPointerdown pointermove->pin-placer#onPointermove pointerup->pin-placer#onPointerend pointercancel->pin-placer#onPointerend"
+>
+    <twig:Screenshot :view="this.view" :selectedNumber="this.selectedNumber" />
+    <button type="button" class="btn btn-outline pin-placer__add" data-pin-add data-action="pin-placer#addAtCentre">Add pin</button>
+    <p class="pin-placer__status" role="status" data-pin-placer-target="status"></p>
+    <twig:PinList :view="this.view" :selectedNumber="this.selectedNumber" :isEditable="true" />
+    <div hidden data-pin-placer-target="fields"></div>
+</form>

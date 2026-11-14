@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Review;
 
+use App\Review\UI\Component\EditableScreenshot;
 use App\Review\UI\Component\PinLayer;
 use App\Review\UI\Component\PinList;
 use App\Review\UI\Component\Screenshot;
@@ -132,6 +133,67 @@ final class ScreenshotComponentsTest extends KernelTestCase
         self::assertSame('Note for pin 2', $fields->eq(1)->attr('aria-label'));
         self::assertSame('1000', $fields->eq(1)->attr('maxlength'));
         self::assertSame('header is cut off', $fields->eq(1)->text());
+        $removeButtons = $list->filter('button.pin-list__remove[data-pin-remove]');
+        self::assertCount(3, $removeButtons);
+        self::assertSame('Remove pin 2', $removeButtons->eq(1)->attr('aria-label'));
+        self::assertSame('button', $removeButtons->eq(1)->attr('type'));
+        self::assertCount(1, $list->filter('li[data-pin-number="2"] button[data-pin-remove]'));
+    }
+
+    #[Test]
+    public function theReadOnlyListHasNoNoteFieldsAndNoRemoveButtons(): void
+    {
+        $list = new Crawler($this->render(PinList::class, ['view' => self::view(pins: self::pins())]));
+
+        self::assertCount(0, $list->filter('[data-pin-remove]'));
+        self::assertCount(0, $list->filter('textarea'));
+    }
+
+    #[Test]
+    public function onlyTheSelectedPinsListItemIsMarkedSelected(): void
+    {
+        $list = new Crawler($this->render(PinList::class, ['view' => self::view(pins: self::pins()), 'selectedNumber' => 2]));
+
+        $selected = $list->filter('.pin-list__item--selected');
+        self::assertCount(1, $selected);
+        self::assertSame('2', $selected->attr('data-pin-number'));
+        self::assertCount(3, $list->filter('.pin-list__item'));
+    }
+
+    #[Test]
+    public function theEditableScreenshotIsAFormWithTheControllerItsButtonStatusFieldsAndPinsOnTheServer(): void
+    {
+        $html = $this->render(EditableScreenshot::class, ['view' => self::view(pins: self::pins()), 'action' => '/pins/save']);
+        $form = new Crawler($html)->filter('form.pin-placer');
+
+        self::assertCount(1, $form);
+        self::assertSame('shot-1-form', $form->attr('id'));
+        self::assertSame('post', $form->attr('method'));
+        self::assertSame('/pins/save', $form->attr('action'));
+        self::assertSame('pin-placer', $form->attr('data-controller'));
+        self::assertSame('1000', $form->attr('data-pin-placer-note-max-value'));
+        self::assertStringContainsString('click->pin-placer#onClick', (string) $form->attr('data-action'));
+        self::assertStringContainsString('pointercancel->pin-placer#onPointerend', (string) $form->attr('data-action'));
+        self::assertCount(1, $form->filter('figure#shot-1 [data-pin-placer-target="layer"]'));
+        self::assertCount(3, $form->filter('button.pin'));
+        self::assertCount(1, $form->filter('ol.pin-list[data-pin-placer-target="list"]'));
+        self::assertCount(3, $form->filter('textarea.pin-list__note'));
+        self::assertCount(3, $form->filter('[data-pin-remove]'));
+        self::assertSame('Add pin', $form->filter('button[data-pin-add]')->text());
+        self::assertSame('pin-placer#addAtCentre', $form->filter('button[data-pin-add]')->attr('data-action'));
+        self::assertCount(1, $form->filter('p[role="status"][data-pin-placer-target="status"]'));
+        self::assertCount(1, $form->filter('div[hidden][data-pin-placer-target="fields"]'));
+    }
+
+    #[Test]
+    public function theEditableScreenshotWithoutPinsStillHasTheAddButtonAndAnEmptyList(): void
+    {
+        $form = new Crawler($this->render(EditableScreenshot::class, ['view' => self::view(), 'action' => '#']))->filter('form.pin-placer');
+
+        self::assertCount(0, $form->filter('button.pin'));
+        self::assertCount(1, $form->filter('ol.pin-list'));
+        self::assertCount(0, $form->filter('li'));
+        self::assertCount(1, $form->filter('button[data-pin-add]'));
     }
 
     #[Test]

@@ -24,18 +24,26 @@ final class ScreenshotExample
         .'<rect x="40" y="180" width="440" height="40" rx="8" fill="#ffffff"/>'
         .'<rect x="560" y="110" width="200" height="260" rx="12" fill="#ffffff"/></svg>';
 
-    /** An editable example starts with no pins, so a person can place them with the pin-placer controller. */
+    /** An editable example is the form of the pin-placer controller; it starts empty unless `hasPins`. */
     public bool $isEditable = false;
+
+    /** Pins 1, 2 and 4 come with the page (a deleted pin 3 leaves a gap), as they will from the database. */
+    public bool $hasPins = false;
 
     public function view(): ScreenshotView
     {
         if ($this->isEditable) {
             return new ScreenshotView(
-                'gallery-editable-screenshot',
+                $this->hasPins ? 'gallery-placed-screenshot' : 'gallery-editable-screenshot',
                 'data:image/svg+xml;base64,'.base64_encode(self::PICTURE),
                 800,
                 450,
                 'The Acme Foods checkout page of project SHOP, open for pins',
+                pins: $this->hasPins ? [
+                    new PinView(1, 28.0, 30.0, 'The address field is cut off.'),
+                    new PinView(2, 70.55, 45.5, 'The total is hidden behind the pay button.'),
+                    new PinView(4, 45.0, 62.25, ''),
+                ] : [],
             );
         }
 

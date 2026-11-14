@@ -37,7 +37,8 @@ final class ScreenshotGalleryTest extends WebTestCase
         $client = self::createClient();
         $crawler = $client->request('GET', '/_gallery');
 
-        $form = $crawler->filter('form.pin-placer[data-controller="pin-placer"]');
+        self::assertResponseStatusCodeSame(200);
+        $form = $crawler->filter('form#gallery-editable-screenshot-form[data-controller="pin-placer"]');
         self::assertCount(1, $form);
         self::assertSame('1000', $form->attr('data-pin-placer-note-max-value'));
         self::assertCount(1, $form->filter('figure#gallery-editable-screenshot [data-pin-placer-target="layer"]'));
@@ -46,6 +47,26 @@ final class ScreenshotGalleryTest extends WebTestCase
         self::assertSame('Add pin', $form->filter('button[data-pin-add]')->text());
         self::assertCount(1, $form->filter('[role="status"][data-pin-placer-target="status"]'));
         self::assertCount(1, $form->filter('[hidden][data-pin-placer-target="fields"]'));
-        self::assertCount(0, $crawler->filter('.screenshot-example:not(.pin-placer) [data-pin-remove]'));
+        self::assertCount(0, $crawler->filter('#gallery-screenshot-heading ~ .screenshot-example [data-pin-remove]'));
+    }
+
+    #[Test]
+    public function thePlacedPinsExampleCarriesPinsOneTwoAndFourFromTheServer(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        $form = $crawler->filter('form#gallery-placed-screenshot-form[data-controller="pin-placer"]');
+        self::assertCount(1, $form);
+        self::assertSame(
+            ['1', '2', '4'],
+            $form->filter('button.pin')->each(static fn (Crawler $pin): string => (string) $pin->attr('data-pin-number')),
+        );
+        self::assertSame('70.55', $form->filter('.pin--n2')->attr('data-x-percent'));
+        self::assertSame(
+            ['Remove pin 1', 'Remove pin 2', 'Remove pin 4'],
+            $form->filter('[data-pin-remove]')->each(static fn (Crawler $button): string => (string) $button->attr('aria-label')),
+        );
     }
 }
