@@ -345,10 +345,6 @@
   cursor: default;
 }
 
-.next-step-box .chip[aria-pressed="true"]:hover {
-  background: var(--secondary-container);
-}
-
 /* The Needs input chip's wrappers stay out of the chips' flex row, so its form is a chip like the others. */
 .waiting-on,
 .waiting-on > [data-controller="dialog"] {

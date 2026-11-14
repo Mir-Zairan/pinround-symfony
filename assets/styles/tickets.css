@@ -162,14 +162,6 @@
   cursor: default;
 }
 
-.ticket-filters .chip:disabled:hover {
-  background: transparent;
-}
-
-.ticket-filters .chip[aria-pressed="true"]:disabled:hover {
-  background: var(--secondary-container);
-}
-
 .tickets__header {
   display: flex;
   flex-direction: column;
