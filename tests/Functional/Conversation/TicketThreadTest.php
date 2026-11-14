@@ -142,6 +142,11 @@ final class TicketThreadTest extends WebTestCase
         self::assertStringContainsString('A comment does not change the status and sends no notification.', $thread->text());
         self::assertNotNull($thread->filter('.thread__kinds button')->last()->attr('disabled'));
         self::assertSame('thread-composer', $thread->filter('.thread__content')->attr('data-controller'));
+        self::assertSame(
+            'turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer',
+            $thread->filter('.thread__content')->attr('data-action'),
+            'Focus goes back to the composer or the changed message after a thread form.',
+        );
         self::assertCount(1, $thread->filter('.thread__content #'.Thread::MESSAGES_ID.'[data-thread-composer-target="messages"]'));
         self::assertNotNull($thread->filter('form.thread__composer textarea[data-thread-composer-target="body"]')->attr('required'));
         self::assertSame('Comment', trim($thread->filter('form.thread__composer button[data-thread-composer-target="submit"]')->text()));

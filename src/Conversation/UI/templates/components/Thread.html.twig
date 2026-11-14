@@ -1,7 +1,7 @@
 {#- The ticket's Questions and comments: the thread, oldest first, then the composer. A thread action's Turbo Stream replaces only the list (isListOnly); thread-composer clears the composer and puts focus back. -#}
 {% set csrf = csrf_token(this.csrfId) %}
 {% if not isListOnly %}
-<div{{ attributes.defaults({class: 'thread__content'}) }} {{ stimulus_controller('thread-composer') }}>
+<div{{ attributes.defaults({class: 'thread__content'}) }} {{ stimulus_controller('thread-composer') }} data-action="turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer">
 {% endif %}
 <div id="{{ constant('App\\Conversation\\UI\\Component\\Thread::MESSAGES_ID') }}" class="thread__list" {{ stimulus_target('thread-composer', 'messages') }}>
     {% if hasEarlierMessages %}
