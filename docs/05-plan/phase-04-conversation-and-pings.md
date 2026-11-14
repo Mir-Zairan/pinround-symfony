@@ -124,10 +124,10 @@ FR-CNV-01, FR-CNV-02, FR-CNV-03, FR-CNV-04, FR-CNV-05, FR-CNV-06, FR-CNV-07, FR-
 3. Bell button with badge; popover with groups, "Done" and "Open" (opens the ticket and marks the group read).
 **Files:** `src/Notification/Application/*`, `src/Notification/UI/Component/{Bell,BellPopover,PingCard}.php`.
 **Acceptance criteria:**
-- [ ] Three pings from Mia on one ticket show as one group "3 pings".
+- [x] Three pings from one person on one ticket show as one group "3 pings". (`BellTest::thePopoverShowsOmarsGroupsLargestFirstWithTheirCountAndAge`, seeded with Lena as the sender)
 - [x] "Done" clears the group and the badge count drops. (`BellTest::doneFromThePopoverMarksTheGroupDoneAndAnswersWithTheBadgeThePopoverAndTheToast`, `BellTest::doneFromAPlainFormGoesHomeWithTheToastAndTheHeaderBadgeDrops`)
-- [ ] The bell query uses one indexed query (EXPLAIN check).
-- [ ] A notification about a team-only ticket is dropped at delivery for a user who lost access (case added to the visibility leak suite from P03.T2).
+- [x] The bell rows are read in one indexed query (EXPLAIN check). The visibility pre-read of the open rows' tickets is a second read through the same index. (`BellQueryPlanTest::theBellIsReadThroughTheBellIndex`, `BellQueryPlanTest::theTicketsOfTheOpenRowsAreReadThroughTheBellIndex`)
+- [x] A notification about a team-only ticket is dropped at delivery for a user who lost access (case added to the visibility leak suite from P03.T2). (`NotificationDeliveryLeakTest::aViewerIsNotifiedAboutATicketExactlyWhenTheyMaySeeIt`, `NotifyRecipientsTest::aRecipientWhoLostAccessToTheTeamOnlyTicketGetsNoNotification`)
 **Tests:** integration (grouping, sorting), functional, Playwright bell open/Done.
 **Prototype check:** [Pings popover (bell)](../04-prototype/screens/dialogs-and-popovers.md#pings-popover-bell): header text, group card layout, buttons.
 **Size:** M
