@@ -46,6 +46,7 @@ final class NotifyRecipientsTest extends TestCase
     private const string OTHER_MESSAGE = '0197a3c0-0000-7000-8000-000000006a06';
     private const string REPLY = '0197a3c0-0000-7000-8000-000000006a07';
     private const string SECOND_REPLY = '0197a3c0-0000-7000-8000-000000006a08';
+    private const string THIRD_REPLY = '0197a3c0-0000-7000-8000-000000006a0c';
     private const string PING = '0197a3c0-0000-7000-8000-000000006a09';
     private const string HELD_PING = '0197a3c0-0000-7000-8000-000000006a0a';
     private const string UNKNOWN_PING = '0197a3c0-0000-7000-8000-000000006a0b';
@@ -193,7 +194,8 @@ final class NotifyRecipientsTest extends TestCase
         self::assertCount(1, $this->notifications->rows);
         $row = $this->notifications->rows[0];
         self::assertSame($expectedDeliverAfter, $row->deliverAfter?->format(\DATE_ATOM));
-        self::assertEquals(new \DateTimeImmutable($askedAt), $row->createdAt);
+        // A held row is created at its delivery time, so a digest sent during the hold cannot skip it.
+        self::assertEquals($row->deliverAfter ?? new \DateTimeImmutable($askedAt), $row->createdAt);
         self::assertEquals([[new RefreshBell(self::ACME_FOODS, $recipientId, null), $row->deliverAfter]], $this->bellRefreshes->sent);
     }
 
@@ -335,6 +337,24 @@ final class NotifyRecipientsTest extends TestCase
         );
     }
 
+    #[Test]
+    public function heldRepliesOfOneNightFoldIntoOneRowCreatedAtTheirDeliveryButNotIntoTheShownOneBefore(): void
+    {
+        $this->isQuietHoursOn = true;
+        // 3 March 2026 in Berlin is UTC+1: 17:59 there is shown at once, 18:00 and 23:00 are held until 09:00.
+        $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::REPLY, self::OMAR, self::LENA, new \DateTimeImmutable('2026-03-03 16:59:00 UTC')));
+        $this->onceOnlyHandling->messageId = 'message-2';
+        $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::SECOND_REPLY, self::OMAR, self::MIA, new \DateTimeImmutable('2026-03-03 17:00:00 UTC')));
+        $this->onceOnlyHandling->messageId = 'message-3';
+
+        $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::THIRD_REPLY, self::OMAR, self::LENA, new \DateTimeImmutable('2026-03-03 22:00:00 UTC')));
+
+        self::assertSame(
+            [[self::LENA, '2026-03-03T16:59:00+00:00', null], [self::LENA, '2026-03-04T09:00:00+01:00', '2026-03-04T09:00:00+01:00']],
+            array_map(static fn (NewNotification $row): array => [$row->actorId->toString(), $row->createdAt->format(\DATE_ATOM), $row->deliverAfter?->format(\DATE_ATOM)], $this->notifications->rows),
+        );
+    }
+
     private function questionTo(string $recipientId): QuestionAsked
     {
         return new QuestionAsked(self::ACME_FOODS, self::TICKET, self::MESSAGE, $recipientId, self::LENA, new \DateTimeImmutable(self::OCCURRED_AT));
@@ -361,7 +381,7 @@ final class NotifyRecipientsTest extends TestCase
             $this->notifications,
             $this->bellRefreshes,
             $this->pings,
-            new DeliveryTimes(self::pingSettingsQueries($this->isQuietHoursOn), new InMemoryMemberTimeZones([self::OMAR => 'Europe/Berlin'])),
+            new DeliveryTimes(self::pingSettingsQueries($this->isQuietHoursOn), new InMemoryMemberTimeZones(self::ACME_FOODS, [self::OMAR => 'Europe/Berlin'])),
         );
 
         $handler($event);
@@ -520,7 +540,7 @@ final class NotifyRecipientsTest extends TestCase
 
 /**
  * Like DbalNotifications: a reply folds into an unread, not done reply about the same message created at or after
- * $since; the rows have no read or done state here, so every row is unread.
+ * $since and held until the same time; the rows have no read or done state here, so every row is unread.
  */
 final class NotificationsDouble implements Notifications
 {
@@ -545,6 +565,7 @@ final class NotificationsDouble implements Notifications
                 && $row->recipientId->equals($reply->recipientId)
                 && ($row->data['messageId'] ?? null) === $messageId
                 && $row->createdAt >= $since
+                && $row->deliverAfter?->format('U.u') === $reply->deliverAfter?->format('U.u')
             ) {
                 $this->rows[$index] = new NewNotification($row->organizationId, $row->recipientId, $row->kind, $reply->actorId, $row->ticketId, $reply->data, $reply->createdAt, $row->deliverAfter);
                 $isFolded = true;
@@ -557,5 +578,10 @@ final class NotificationsDouble implements Notifications
     public function markPingsDone(OrganizationId $organizationId, UserId $recipientId, TicketId $ticketId, \DateTimeImmutable $at): int
     {
         throw new \LogicException('NotifyRecipients does not mark pings done.');
+    }
+
+    public function releaseDue(OrganizationId $organizationId, \DateTimeImmutable $at): array
+    {
+        throw new \LogicException('NotifyRecipients does not release held notifications.');
     }
 }

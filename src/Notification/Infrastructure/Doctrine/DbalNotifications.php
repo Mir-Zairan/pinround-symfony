@@ -25,13 +25,18 @@ final readonly class DbalNotifications implements Notifications
 
     private const string FOLD = 'UPDATE ntf_notification SET actor_id = ?, data = ?, created_at = ?'
         ." WHERE organization_id = ? AND user_id = ? AND kind = ? AND data->>'messageId' = ?"
-        .' AND read_at IS NULL AND done_at IS NULL AND created_at >= ?';
+        .' AND read_at IS NULL AND done_at IS NULL AND created_at >= ? AND deliver_after IS NOT DISTINCT FROM ?';
 
     // No index covers user and ticket together: the bell index on (organization_id, user_id, actor_id, ticket_id,
     // created_at) WHERE done_at IS NULL narrows by its (organization_id, user_id) prefix to the person's open rows, or
     // ntf_notification_ticket_id_idx to the ticket's rows, and the rest of the WHERE filters those.
     private const string MARK_PINGS_DONE = 'UPDATE ntf_notification SET done_at = ?'
         .' WHERE organization_id = ? AND user_id = ? AND ticket_id = ? AND kind = ? AND done_at IS NULL';
+
+    // RETURNING gives one user id per released row; the outer SELECT keeps each person once, in user id order.
+    private const string RELEASE_DUE = 'WITH released AS ('
+        .'UPDATE ntf_notification SET deliver_after = NULL WHERE organization_id = ? AND deliver_after <= ? RETURNING user_id'
+        .') SELECT DISTINCT user_id FROM released ORDER BY user_id';
 
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:s.uP';
 
@@ -81,6 +86,7 @@ final readonly class DbalNotifications implements Notifications
             NotificationKind::Reply->value,
             $messageId,
             $since->format(self::TIMESTAMP_FORMAT),
+            $reply->deliverAfter?->format(self::TIMESTAMP_FORMAT),
         ]);
         if ($isFolded) {
             $this->bellCountCache->invalidateAfterCommit($reply->recipientId);
@@ -105,6 +111,24 @@ final readonly class DbalNotifications implements Notifications
         }
 
         return $marked;
+    }
+
+    public function releaseDue(OrganizationId $organizationId, \DateTimeImmutable $at): array
+    {
+        $this->requireTransaction();
+
+        $recipientIds = array_map(static function (mixed $userId): UserId {
+            if (!\is_string($userId)) {
+                throw new \LogicException('The release returned a recipient that is not a uuid.');
+            }
+
+            return new UserId($userId);
+        }, $this->connection->fetchFirstColumn(self::RELEASE_DUE, [$organizationId->toString(), $at->format(self::TIMESTAMP_FORMAT)]));
+        foreach ($recipientIds as $recipientId) {
+            $this->bellCountCache->invalidateAfterCommit($recipientId);
+        }
+
+        return $recipientIds;
     }
 
     private function requireTransaction(): void

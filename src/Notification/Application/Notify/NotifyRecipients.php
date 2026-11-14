@@ -30,7 +30,9 @@ use App\Ticketing\Api\TicketVisibilityFacts;
  * in the bus's transaction under the event's organization. Nobody is notified of their own action, of a ticket they
  * muted or may no longer see, or by or as someone who is no longer a member; a ticket that is gone notifies nobody,
  * and neither does a ping cleared before its event is handled. A row made in the recipient's quiet hours is held until
- * they end (a ping keeps the time stored on it). Replies to one message within REPLY_FOLD_SECONDS of the last unread
+ * they end (a ping keeps the time stored on it) and is created at that end, as a held ping's event already is: a
+ * digest's window starts after the last digest's send time, so a row created at the event would miss every digest
+ * when one went out during the hold. Replies to one message within REPLY_FOLD_SECONDS of the last unread
  * one fold into it instead of adding a row. Each row added or folded refreshes the recipient's bell once the bus
  * commits, or once it is delivered when it is held.
  */
@@ -86,10 +88,10 @@ final readonly class NotifyRecipients
                 return;
             }
 
-            // A ping keeps the time SendPing stored on it. A row that is not held keeps deliver_after null, so only held
-            // rows are ever released later.
+            // A ping keeps the time SendPing stored on it. Only a held row has a deliver_after, so only held rows are
+            // ever released later.
             $deliverAfter = null !== $ping ? $ping->deliverAfter() : $this->deliveryTimes->deliverAfterFor($organizationId, $recipient, $occurredAt);
-            $notification = new NewNotification($organizationId, $recipient, $kind, $actor, $ticketId, [...$snapshot, ...$sourceIds], $occurredAt, $deliverAfter);
+            $notification = new NewNotification($organizationId, $recipient, $kind, $actor, $ticketId, [...$snapshot, ...$sourceIds], $deliverAfter ?? $occurredAt, $deliverAfter);
             $since = $occurredAt->modify(\sprintf('-%d seconds', self::REPLY_FOLD_SECONDS));
             if (NotificationKind::Reply !== $kind || !$this->notifications->foldIntoUnreadReply($notification, $since)) {
                 $this->notifications->add($notification);

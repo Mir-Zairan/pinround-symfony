@@ -15,6 +15,7 @@ use PHPUnit\Framework\TestCase;
 final class DeliveryTimesTest extends TestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-000000005301';
+    private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000005302';
     private const string LENA = '0197a3c0-0000-7000-8000-000000005311';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000005312';
 
@@ -33,7 +34,7 @@ final class DeliveryTimesTest extends TestCase
     #[DataProvider('instantsAndTheirDeliveryInBerlin')]
     public function withQuietHoursOnItHoldsUntil09OnTheRecipientsClock(string $instant, ?string $expectedDeliverAfter): void
     {
-        $deliveryTimes = new DeliveryTimes(self::pingSettingsQueries(true), new InMemoryMemberTimeZones([self::LENA => 'Europe/Berlin']));
+        $deliveryTimes = new DeliveryTimes(self::pingSettingsQueries(true), new InMemoryMemberTimeZones(self::ACME_FOODS, [self::LENA => 'Europe/Berlin']));
 
         $deliverAfter = $deliveryTimes->deliverAfterFor(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new \DateTimeImmutable($instant));
 
@@ -43,7 +44,7 @@ final class DeliveryTimesTest extends TestCase
     #[Test]
     public function withQuietHoursOffNothingIsHeldAndNoZoneIsRead(): void
     {
-        $memberTimeZones = new InMemoryMemberTimeZones([self::LENA => 'Europe/Berlin']);
+        $memberTimeZones = new InMemoryMemberTimeZones(self::ACME_FOODS, [self::LENA => 'Europe/Berlin']);
         $deliveryTimes = new DeliveryTimes(self::pingSettingsQueries(false), $memberTimeZones);
 
         self::assertNull($deliveryTimes->deliverAfterFor(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new \DateTimeImmutable('2026-03-03T21:00:00Z')));
@@ -53,12 +54,34 @@ final class DeliveryTimesTest extends TestCase
     #[Test]
     public function aRecipientWithNoKnownZoneIsTimedOnUtc(): void
     {
-        $deliveryTimes = new DeliveryTimes(self::pingSettingsQueries(true), new InMemoryMemberTimeZones([self::LENA => 'Europe/Berlin']));
+        $deliveryTimes = new DeliveryTimes(self::pingSettingsQueries(true), new InMemoryMemberTimeZones(self::ACME_FOODS, [self::LENA => 'Europe/Berlin']));
 
         // 08:30 UTC is 09:30 in Berlin, so only the UTC fallback holds it.
         $deliverAfter = $deliveryTimes->deliverAfterFor(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), new \DateTimeImmutable('2026-03-03T08:30:00Z'));
 
         self::assertSame('2026-03-03T09:00:00+00:00', $deliverAfter?->format(\DATE_ATOM));
+    }
+
+    /**
+     * @return iterable<string, array{InMemoryMemberTimeZones}>
+     */
+    public static function zonesThatFallBackToUtc(): iterable
+    {
+        yield 'a saved zone PHP does not know' => [new InMemoryMemberTimeZones(self::ACME_FOODS, [self::LENA => 'Mars/Olympus_Mons'])];
+        yield 'a zone saved in another organization only' => [new InMemoryMemberTimeZones(self::BETA_BAKERY, [self::LENA => 'Europe/Berlin'])];
+    }
+
+    #[Test]
+    #[DataProvider('zonesThatFallBackToUtc')]
+    public function aRecipientWithNoUsableZoneInTheOrganizationIsTimedOnUtc(InMemoryMemberTimeZones $memberTimeZones): void
+    {
+        $deliveryTimes = new DeliveryTimes(self::pingSettingsQueries(true), $memberTimeZones);
+
+        // 08:30 UTC is 09:30 in Berlin, so only the UTC fallback holds it.
+        $deliverAfter = $deliveryTimes->deliverAfterFor(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new \DateTimeImmutable('2026-03-03T08:30:00Z'));
+
+        self::assertSame('2026-03-03T09:00:00+00:00', $deliverAfter?->format(\DATE_ATOM));
+        self::assertSame(1, $memberTimeZones->readCount());
     }
 
     private static function pingSettingsQueries(bool $isQuietHoursOn): PingSettingsQueries

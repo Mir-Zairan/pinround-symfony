@@ -9,6 +9,9 @@ use App\Notification\Api\BellGroup;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Api\NotificationQueries;
 use App\Notification\Api\PingCommands;
+use App\Notification\Application\Digest\Digest;
+use App\Notification\Application\Digest\DigestItem;
+use App\Notification\Application\Digest\DigestItems;
 use App\Notification\Application\Notify\NotifyRecipients;
 use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Domain\OrganizationId;
@@ -98,6 +101,34 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
         self::assertSame([self::QUIET_HOURS_END], $rowDeliverAfter);
         self::assertSame([0, []], $bellAt0759);
         self::assertSame([1, [['Raj', 'question', null]]], $bellAt0800);
+    }
+
+    /**
+     * A digest goes out at 23:30 UTC while the 22:00 question is held, listing only the 16:00 one; the next starts
+     * after that send time, so it finds the held question only because the row is created at 08:00, its delivery.
+     */
+    #[Test]
+    public function aQuestionHeldWhileADigestGoesOutIsInTheNextDigest(): void
+    {
+        [$rowCreatedAt, $digestDuringTheHold, $nextDigest] = self::transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $this->setUpLena(isQuietHoursOn: true);
+            $this->handle($this->questionToLenaAsRaj('2027-03-03 16:00:00 UTC'));
+            $this->handle($this->questionToLenaAsRaj('2027-03-03 22:00:00 UTC'));
+            $digestItems = self::getContainer()->get('test.notification_digest_items');
+            \assert($digestItems instanceof DigestItems);
+            $lena = new UserId(self::VIEWERS['Lena'][0]);
+            $digestSentAt = new \DateTimeImmutable('2027-03-03 23:30:00 UTC');
+
+            return [
+                $this->lenasRowsCreatedAt(),
+                $digestItems->digestOf($lena, new \DateTimeImmutable('2027-03-03 00:00:00 UTC'), $digestSentAt),
+                $digestItems->digestOf($lena, $digestSentAt, new \DateTimeImmutable('2027-03-04 09:30:00 UTC')),
+            ];
+        });
+
+        self::assertSame(['2027-03-03 16:00:00+00', self::QUIET_HOURS_END], $rowCreatedAt);
+        self::assertSame([['Raj', 'question', '2027-03-03 16:00:00+00']], self::itemsOf($digestDuringTheHold));
+        self::assertSame([['Raj', 'question', self::QUIET_HOURS_END]], self::itemsOf($nextDigest));
     }
 
     #[Test]
@@ -225,6 +256,46 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
 
             return $deliverAfter;
         }, $rows);
+    }
+
+    private function questionToLenaAsRaj(string $askedAt): QuestionAsked
+    {
+        return new QuestionAsked(
+            self::ACME_FOODS,
+            self::teamOnlyTicketId(),
+            Uuid::v7()->toRfc4122(),
+            self::VIEWERS['Lena'][0],
+            self::VIEWERS['Raj'][0],
+            new \DateTimeImmutable($askedAt),
+        );
+    }
+
+    /**
+     * @return list<string> the UTC created_at of each of Lena's notification rows, oldest first
+     */
+    private function lenasRowsCreatedAt(): array
+    {
+        $rows = self::connection()->fetchFirstColumn(
+            "SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS\"+00\"') FROM ntf_notification WHERE organization_id = ? AND user_id = ? ORDER BY created_at, id",
+            [self::ACME_FOODS, self::VIEWERS['Lena'][0]],
+        );
+
+        return array_map(static function (mixed $createdAt): string {
+            self::assertIsString($createdAt);
+
+            return $createdAt;
+        }, $rows);
+    }
+
+    /**
+     * @return list<array{string, string, string}> each listed item's sender, kind and UTC creation time
+     */
+    private static function itemsOf(Digest $digest): array
+    {
+        return array_map(
+            static fn (DigestItem $item): array => [$item->actorName, $item->kind->value, $item->createdAt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s').'+00'],
+            $digest->items,
+        );
     }
 
     /**

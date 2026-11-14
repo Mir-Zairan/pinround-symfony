@@ -298,7 +298,7 @@ final class SendPingTest extends TestCase
             $this->pingWindow,
             $this->pings,
             $this->pingEvents,
-            new DeliveryTimes($pingSettingsQueries, new InMemoryMemberTimeZones([self::OMAR => 'Europe/Berlin'])),
+            new DeliveryTimes($pingSettingsQueries, new InMemoryMemberTimeZones(self::ACME_FOODS, [self::OMAR => 'Europe/Berlin'])),
         );
     }
 
