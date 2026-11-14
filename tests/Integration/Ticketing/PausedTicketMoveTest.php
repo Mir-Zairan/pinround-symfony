@@ -118,7 +118,7 @@ final class PausedTicketMoveTest extends KernelTestCase
     public function theSameVerbMovesTheTicketOnceTheAnswerResumesIt(): void
     {
         $this->pause();
-        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->pauses()->resumeAfterAnswer($this->ticketId));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->pauses()->endQuestionPause($this->ticketId));
         self::getContainer()->get('doctrine')->resetManager();
         $before = $this->stepAndVersion();
 

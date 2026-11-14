@@ -518,9 +518,9 @@ final class QuestionUseCasesTest extends KernelTestCase
                 $this->ticketPauses->pauseForQuestion($ticketId, $askedUserId, $askerId);
             }
 
-            public function resumeAfterAnswer(TicketId $ticketId): void
+            public function endQuestionPause(TicketId $ticketId): void
             {
-                $this->ticketPauses->resumeAfterAnswer($ticketId);
+                $this->ticketPauses->endQuestionPause($ticketId);
             }
         };
 

@@ -42,7 +42,7 @@ final readonly class LockedTicketPauses implements TicketPauses
         $this->save($ticket);
     }
 
-    public function resumeAfterAnswer(TicketId $ticketId): void
+    public function endQuestionPause(TicketId $ticketId): void
     {
         $ticket = $this->lockedTicket($ticketId);
         $ticket->resume();

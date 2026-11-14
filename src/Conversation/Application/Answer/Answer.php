@@ -78,7 +78,7 @@ final readonly class Answer
         ));
         $this->replies->add($answerReply);
         $this->messages->save($question);
-        $this->ticketPauses->resumeAfterAnswer($ticketId);
+        $this->ticketPauses->endQuestionPause($ticketId);
         $this->turnProjector->refresh($ticketId);
 
         return $answerReply->id()->toString();

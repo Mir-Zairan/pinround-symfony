@@ -8,10 +8,10 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * The question pause of a ticket, for Conversation's AskQuestion and Answer. Each method locks the ticket's row in the
- * organization of TenantContext until the caller's transaction ends, so two requests cannot both pass its check, and
- * saves the ticket at once. The step stays as it is. The caller checks who may ask and answer, and refreshes the
- * ticket's turn after the call in the same transaction.
+ * The question pause of a ticket, for Conversation's AskQuestion, Answer and WithdrawQuestion. Each method locks the
+ * ticket's row in the organization of TenantContext until the caller's transaction ends, so two requests cannot both
+ * pass its check, and saves the ticket at once. The step stays as it is. The caller checks who may ask, answer and
+ * withdraw, and refreshes the ticket's turn after the call in the same transaction.
  */
 interface TicketPauses
 {
@@ -31,12 +31,13 @@ interface TicketPauses
     public function pauseForQuestion(TicketId $ticketId, UserId $askedUserId, UserId $askerId): void;
 
     /**
-     * Ends the question pause, so the turn goes back to the step's normal owner.
+     * Ends the question pause, whether the asked person answered or the asker withdrew the question, so the turn goes
+     * back to the step's normal owner.
      *
      * @throws TicketNotFound         when the organization has no ticket with the id
      * @throws TicketChangedMeanwhile when another request saved the ticket after this request read it; the caller rolls
      *                                back
      * @throws \LogicException        when the ticket waits for no answer, or no transaction is open or no tenant is set
      */
-    public function resumeAfterAnswer(TicketId $ticketId): void;
+    public function endQuestionPause(TicketId $ticketId): void;
 }

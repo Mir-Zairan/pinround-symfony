@@ -64,7 +64,7 @@ final readonly class WithdrawQuestion
             $withdrawnAt,
         ));
         $this->messages->save($question);
-        $this->ticketPauses->resumeAfterAnswer($ticketId);
+        $this->ticketPauses->endQuestionPause($ticketId);
         $this->turnProjector->refresh($ticketId);
     }
 }

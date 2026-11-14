@@ -107,7 +107,7 @@ final class TicketPausesTest extends KernelTestCase
         self::getContainer()->get('doctrine')->resetManager();
 
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
-            $this->pauses()->resumeAfterAnswer($this->ticketId);
+            $this->pauses()->endQuestionPause($this->ticketId);
             $this->turnProjector()->refresh($this->ticketId);
         });
 
@@ -220,7 +220,7 @@ final class TicketPausesTest extends KernelTestCase
         $before = $this->pauseState($this->ticketId, self::ACME_FOODS);
 
         $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
-            $this->pauses()->resumeAfterAnswer($this->ticketId);
+            $this->pauses()->endQuestionPause($this->ticketId);
         }));
 
         self::assertInstanceOf(\LogicException::class, $refusal);
