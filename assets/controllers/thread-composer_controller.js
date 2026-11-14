@@ -56,22 +56,6 @@ export default class extends Controller {
     this.choose(event.currentTarget);
   }
 
-  // toggle of an Answer or Reply box: an opened box takes the focus to its text, so the keyboard user writes at once.
-  focusReplyBox(event) {
-    const box = event.currentTarget;
-    if (box.open) {
-      box.querySelector('textarea')?.focus();
-    }
-  }
-
-  // Cancel in an Answer or Reply box: folds it away, keeps what was typed and puts focus back on its button, which
-  // would otherwise drop to the body with the hidden Cancel (WCAG 2.4.3).
-  closeReplyBox(event) {
-    const box = event.currentTarget.closest('details');
-    box.open = false;
-    box.querySelector('summary').focus();
-  }
-
   // turbo:submit-start of any thread form: an edit or remove form sits inside its message.
   rememberMessage(event) {
     this.changedMessageId = event.target.closest('[data-message-id]')?.dataset.messageId ?? null;
