@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { LENA_STORAGE_STATE, MIA_EMAIL, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { LENA_EMAIL, LENA_STORAGE_STATE, MIA_EMAIL, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 // ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED
@@ -214,8 +214,9 @@ async function moveFromList(page: Page, stepName: string): Promise<void> {
 }
 
 /**
- * Runs one SQL statement as the database's superuser, which row-level security does not limit, and returns the rows
- * it printed, one per line with '|' between columns. No app path removes a team member, so the test does it here.
+ * Runs SQL as the database's superuser, which row-level security does not limit, and returns the rows it printed, one
+ * per line with '|' between columns; statements split by ';' run in one transaction. No app path removes a team member,
+ * so the test does it here.
  * .env.local exists only on a dev machine; COMPOSE_FILE picks CI's compose files.
  */
 function runAsDatabaseOwner(sql: string): string[] {
@@ -228,36 +229,51 @@ function runAsDatabaseOwner(sql: string): string[] {
   return printed.split('\n').filter((line) => line !== '');
 }
 
-/** A seeded open SHOP ticket only the Shop team sees, on which Mia is none of the six people, so only her team shows it to her. */
-function teamOnlyTicketMiaSeesThroughShop(): { key: string; title: string } {
+/** The throwaway team a ticket went to and where the ticket stood before, as SQL literals, for putBackAndDropTeam. */
+type TeamMove = { organizationId: string; ticketKey: string; teamId: string; earlierTeamId: string; earlierVisibility: string };
+
+/**
+ * Makes a throwaway team whose lead and only member is Mia and gives Lena's ticket to it, seen by its team only, so
+ * taking Mia out of it changes no seeded team: ticket-move.spec.ts, which may run at the same time, needs her in Shop.
+ * Mia is none of the ticket's people, as Lena made it for Omar, so only that team shows it to her.
+ */
+function giveToTeamOfOnlyMia(ticketKey: string): TeamMove {
+  const suffix = randomUUID().slice(0, 8);
   const rows = runAsDatabaseOwner(`
-    SELECT t.key, t.title FROM tkt_ticket t
-    JOIN org_team team ON team.organization_id = t.organization_id AND team.id = t.team_id
-    JOIN idn_user mia ON mia.email = '${MIA_EMAIL}'
-    WHERE team.name = 'Shop' AND t.key LIKE 'SHOP-%' AND t.visibility = 'team' AND t.closed_at IS NULL
-      AND mia.id <> t.reporter_id AND mia.id IS DISTINCT FROM t.assignee_id AND mia.id IS DISTINCT FROM t.pending_assignee_id
-      AND mia.id IS DISTINCT FROM t.reviewer_id AND mia.id IS DISTINCT FROM t.tester_id AND mia.id IS DISTINCT FROM t.waiting_on_user_id
-    ORDER BY t.number LIMIT 1`);
-  expect(rows, 'the seeded team-only SHOP tickets are missing: run make seed').toHaveLength(1);
-  const [key, ...titleParts] = rows[0].split('|');
-  return { key, title: titleParts.join('|') };
+    WITH ticket AS (
+      SELECT t.organization_id, t.id, t.team_id, t.visibility FROM tkt_ticket t
+      JOIN idn_user lena ON lena.id = t.reporter_id AND lena.email = '${LENA_EMAIL}'
+      WHERE t.key = '${ticketKey}'
+    ), team AS (
+      INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at, slug)
+      SELECT ticket.organization_id, uuidv7(), 'Only Mia ${suffix}', mia.id, now(), 'only-mia-${suffix}'
+      FROM ticket JOIN idn_user mia ON mia.email = '${MIA_EMAIL}'
+      RETURNING organization_id, id, lead_user_id
+    ), member AS (
+      INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at)
+      SELECT organization_id, id, lead_user_id, 'lead', 'tester', now() FROM team
+    )
+    UPDATE tkt_ticket t SET team_id = team.id, visibility = 'team'
+    FROM team, ticket WHERE t.organization_id = ticket.organization_id AND t.id = ticket.id
+    RETURNING quote_literal(ticket.organization_id), quote_literal(team.id), quote_nullable(ticket.team_id), quote_literal(ticket.visibility)`);
+  expect(rows, `Lena's ticket ${ticketKey} or Mia is missing: run make seed`).toHaveLength(1);
+  const [organizationId, teamId, earlierTeamId, earlierVisibility] = rows[0].split('|');
+  return { organizationId, ticketKey, teamId, earlierTeamId, earlierVisibility };
 }
 
-/** Takes Mia out of Shop and returns her row as SQL values, for putBackInShop. */
-function removeMiaFromShop(): string {
+function removeMiaFromTeam(move: TeamMove): void {
   const rows = runAsDatabaseOwner(`
-    DELETE FROM org_team_member m USING idn_user mia, org_team team
-    WHERE mia.id = m.user_id AND team.organization_id = m.organization_id AND team.id = m.team_id
-      AND mia.email = '${MIA_EMAIL}' AND team.name = 'Shop'
-    RETURNING m.organization_id, m.team_id, m.user_id, m.team_role, m.job, m.created_at`);
-  expect(rows, 'Mia is not in Shop: an earlier run stopped before putting her back, or run make seed').toHaveLength(1);
-  return rows[0].split('|').map((value) => `'${value}'`).join(', ');
+    DELETE FROM org_team_member WHERE organization_id = ${move.organizationId} AND team_id = ${move.teamId} RETURNING user_id`);
+  expect(rows, 'the throwaway team lost its only member before the test removed her').toHaveLength(1);
 }
 
-function putBackInShop(memberValues: string): void {
+/** Runs in finally, so it also cleans up after a test that stopped before removing Mia. */
+function putBackAndDropTeam(move: TeamMove): void {
   runAsDatabaseOwner(`
-    INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (${memberValues})
-    ON CONFLICT (organization_id, team_id, user_id) DO NOTHING`);
+    UPDATE tkt_ticket SET team_id = ${move.earlierTeamId}, visibility = ${move.earlierVisibility}
+    WHERE organization_id = ${move.organizationId} AND key = '${move.ticketKey}';
+    DELETE FROM org_team_member WHERE organization_id = ${move.organizationId} AND team_id = ${move.teamId};
+    DELETE FROM org_team WHERE organization_id = ${move.organizationId} AND id = ${move.teamId}`);
 }
 
 test.describe('two people on one ticket', () => {
@@ -477,47 +493,49 @@ test.describe('a refetch that fails', () => {
       !process.env.CI && !existsSync(MIA_STORAGE_STATE),
       'auth.setup.ts skipped Mia: her two-step login is on in this database. TicketPageTest proves a non-viewer gets 404.',
     );
-    const { key, title } = teamOnlyTicketMiaSeesThroughShop();
-    const mia = await openAs(browser, MIA_STORAGE_STATE);
-    const lena = await openAs(browser, LENA_STORAGE_STATE);
-    await openFollowedThread(mia.page, key);
-    await expect(mia.page.getByRole('heading', { level: 1, name: title })).toBeVisible();
-    await openThread(lena.page, key);
-    await markThisLoad(mia.page);
-    // The signal refetches the page and reloads the thread frame; each answer of 404 loads its own URL for real, and
-    // whichever loads last is the page Mia sees.
-    const refetchedPaths = [`/t/${key}`, `/t/${key}/thread`];
-    const refetches = refetchedPaths.map((refetchedPath) =>
-      mia.page.waitForResponse((response) => pathOf(response.request()) === refetchedPath && response.request().resourceType() === 'fetch'),
-    );
-    const documentStatuses: number[] = [];
-    mia.page.on('response', (response) => {
-      if (response.request().resourceType() === 'document') {
-        documentStatuses.push(response.status());
-      }
-    });
-    const comment = `Delivery date shows a day late ${randomUUID().slice(0, 8)}`;
-
-    // Mia's row goes for the shortest time the test allows: ticket-move.spec.ts, which may run at the same time, needs
-    // her as Shop's tester.
-    const miasShopRow = removeMiaFromShop();
+    const title = `Delivery slot picker skips Sunday ${randomUUID().slice(0, 8)}`;
+    const key = await makeTicketForOmar(browser, title);
+    const move = giveToTeamOfOnlyMia(key);
     try {
+      const mia = await openAs(browser, MIA_STORAGE_STATE);
+      const lena = await openAs(browser, LENA_STORAGE_STATE);
+      const creationSignalSettled = settleCreationSignal(mia.page, key);
+      await openFollowedThread(mia.page, key);
+      await creationSignalSettled;
+      await expect(mia.page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+      await openThread(lena.page, key);
+      await markThisLoad(mia.page);
+      // The signal refetches the page and reloads the thread frame; each answer of 404 loads its own URL for real, and
+      // whichever loads last is the page Mia sees.
+      const refetchedPaths = [`/t/${key}`, `/t/${key}/thread`];
+      const refetches = refetchedPaths.map((refetchedPath) =>
+        mia.page.waitForResponse((response) => pathOf(response.request()) === refetchedPath && response.request().resourceType() === 'fetch'),
+      );
+      const documentStatuses: number[] = [];
+      mia.page.on('response', (response) => {
+        if (response.request().resourceType() === 'document') {
+          documentStatuses.push(response.status());
+        }
+      });
+      const comment = `Delivery date shows a day late ${randomUUID().slice(0, 8)}`;
+
+      removeMiaFromTeam(move);
       await postComment(lena.page, comment);
 
       expect((await Promise.all(refetches)).map((response) => response.status())).toEqual([404, 404]);
       await expect.poll(() => documentStatuses.length).toBeGreaterThan(0);
       await mia.page.waitForLoadState('load');
+      expect(documentStatuses.every((status) => status === 404), `Mia's tab loaded pages answered ${documentStatuses.join(', ')}`).toBe(true);
+      await expect(mia.page).toHaveURL(new RegExp(`/t/${key}(/thread)?$`));
+      await expect(mia.page.locator('html')).not.toHaveAttribute('data-e2e-load', 'first');
+      await expect(mia.page.getByText(title)).toHaveCount(0);
+      await expect(mia.page.getByText(comment)).toHaveCount(0);
+      await expect(mia.page.locator('#ticket-state, turbo-frame#ticket-thread')).toHaveCount(0);
+      await lena.context.close();
+      await mia.context.close();
     } finally {
-      putBackInShop(miasShopRow);
+      putBackAndDropTeam(move);
     }
-    expect(documentStatuses.every((status) => status === 404), `Mia's tab loaded pages answered ${documentStatuses.join(', ')}`).toBe(true);
-    await expect(mia.page).toHaveURL(new RegExp(`/t/${key}(/thread)?$`));
-    await expect(mia.page.locator('html')).not.toHaveAttribute('data-e2e-load', 'first');
-    await expect(mia.page.getByText(title)).toHaveCount(0);
-    await expect(mia.page.getByText(comment)).toHaveCount(0);
-    await expect(mia.page.locator('#ticket-state, turbo-frame#ticket-thread')).toHaveCount(0);
-    await lena.context.close();
-    await mia.context.close();
   });
 
   test('a page answer of 404 loads that page for real, with none of the change shown', async ({ browser }) => {
