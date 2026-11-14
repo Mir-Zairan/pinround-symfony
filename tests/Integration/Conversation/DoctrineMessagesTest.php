@@ -14,13 +14,15 @@ use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\TransactionRequiredException;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * DoctrineMessages::save() on the real tables: it flushes only a message read in the same transaction, as a new one
- * would flush nothing and look saved.
+ * DoctrineMessages on the real tables: save() flushes only a message read in the same transaction, as a new one would
+ * flush nothing and look saved; lockedOf() locks the row whether or not the transaction loaded the message before.
  */
 final class DoctrineMessagesTest extends KernelTestCase
 {
@@ -86,6 +88,75 @@ final class DoctrineMessagesTest extends KernelTestCase
         });
 
         self::assertSame([[self::LENAS_COMMENT, 'The button hides on small screens.']], $this->messageRows());
+    }
+
+    #[Test]
+    public function aMessageTheTransactionLoadedBeforeIsLockedAsTheSameObjectAndKeepsItsUnsavedChange(): void
+    {
+        [$isSameObject, $lockedBody, $refusal] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $loaded = $this->entityManager()->find(Message::class, ['organizationId' => self::ACME_FOODS, 'id' => self::LENAS_COMMENT]);
+            self::assertNotNull($loaded);
+            $loaded->edit(new UserId(self::LENA), 'The button hides on small screens.', new \DateTimeImmutable('2027-03-15 10:05:00+00:00'));
+            $locked = new DoctrineMessages($this->entityManager())->lockedOf(new OrganizationId(self::ACME_FOODS), new MessageId(self::LENAS_COMMENT));
+
+            return [$loaded === $locked, $locked?->body(), $this->refusalOfLockingTheRowElsewhere()];
+        });
+
+        self::assertTrue($isSameObject);
+        self::assertSame('The button hides on small screens.', $lockedBody);
+        self::assertInstanceOf(DriverException::class, $refusal);
+        self::assertSame('55P03', $refusal->getSQLState());
+    }
+
+    #[Test]
+    public function aMessageReadForTheFirstTimeIsLocked(): void
+    {
+        [$lockedId, $refusal] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $locked = new DoctrineMessages($this->entityManager())->lockedOf(new OrganizationId(self::ACME_FOODS), new MessageId(self::LENAS_COMMENT));
+
+            return [$locked?->id()->toString(), $this->refusalOfLockingTheRowElsewhere()];
+        });
+
+        self::assertSame(self::LENAS_COMMENT, $lockedId);
+        self::assertInstanceOf(DriverException::class, $refusal);
+        self::assertSame('55P03', $refusal->getSQLState());
+    }
+
+    #[Test]
+    public function lockingOutsideATransactionIsRefusedBeforeAnyQuery(): void
+    {
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            new DoctrineMessages($this->entityManager())->lockedOf(new OrganizationId(self::ACME_FOODS), new MessageId(self::LENAS_COMMENT));
+            self::fail('The message was locked outside a transaction.');
+        } catch (TransactionRequiredException $refusal) {
+            self::assertSame('An open transaction is required for this operation.', $refusal->getMessage());
+        } finally {
+            $this->tenantContext()->clear();
+        }
+    }
+
+    /**
+     * A second connection in its own transaction, under the same tenant, stands in for a concurrent request; NOWAIT
+     * raises 55P03 (lock_not_available) on a row another transaction holds.
+     */
+    private function refusalOfLockingTheRowElsewhere(): ?\Throwable
+    {
+        try {
+            $this->migrator()->transactional(static fn (Connection $concurrent): array => $concurrent->fetchFirstColumn(
+                'SELECT id FROM cnv_message WHERE organization_id = ? AND id = ? FOR UPDATE NOWAIT',
+                [self::ACME_FOODS, self::LENAS_COMMENT],
+            ));
+        } catch (\Throwable $refusal) {
+            return $refusal;
+        }
+
+        return null;
+    }
+
+    private function migrator(): Connection
+    {
+        return self::getContainer()->get('doctrine.dbal.migrator_connection');
     }
 
     /**

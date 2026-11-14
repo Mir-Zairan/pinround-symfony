@@ -31,11 +31,17 @@ final readonly class DoctrineMessages implements Messages
 
     public function lockedOf(OrganizationId $organizationId, MessageId $id): ?Message
     {
-        return $this->entityManager->find(
-            Message::class,
-            ['organizationId' => $organizationId->toString(), 'id' => $id->toString()],
-            LockMode::PESSIMISTIC_WRITE,
-        );
+        $identifier = ['organizationId' => $organizationId->toString(), 'id' => $id->toString()];
+        // As in DoctrineTickets: find() refreshes a message the transaction has loaded already, which its readonly
+        // fields refuse with a LogicException; lock() only takes the row lock and keeps the loaded object.
+        $loaded = $this->entityManager->getUnitOfWork()->tryGetById($identifier, Message::class);
+        if ($loaded instanceof Message) {
+            $this->entityManager->lock($loaded, LockMode::PESSIMISTIC_WRITE);
+
+            return $loaded;
+        }
+
+        return $this->entityManager->find(Message::class, $identifier, LockMode::PESSIMISTIC_WRITE);
     }
 
     public function save(Message $message): void

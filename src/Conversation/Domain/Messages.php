@@ -18,6 +18,8 @@ interface Messages
 
     /**
      * Reads the message and locks its row until the transaction ends, so a change decided on it cannot race another.
+     * A message this transaction read already is locked and returned as the same object, not read again: its unsaved
+     * changes stay, and a change another transaction committed meanwhile is not seen.
      *
      * @return Message|null null when the organization has no message with that id
      */
