@@ -471,11 +471,20 @@ final class DatabaseRolesTest extends KernelTestCase
         }
 
         /** @var list<string> $partitions */
-        $partitions = $connection->fetchFirstColumn("SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'public.ntf_notification'::regclass");
-        // 2026-11 through 2027-12 at least; a database migrated later has more.
-        self::assertGreaterThanOrEqual(14, \count($partitions));
-        self::assertContains('ntf_notification_202611', $partitions);
-        self::assertContains('ntf_notification_202712', $partitions);
+        $partitions = $connection->fetchFirstColumn("SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'public.ntf_notification'::regclass ORDER BY 1");
+        // A database migrated later has more months, so only the months the migration creates are pinned.
+        self::assertSame(
+            [
+                'ntf_notification_202611', 'ntf_notification_202612', 'ntf_notification_202701', 'ntf_notification_202702',
+                'ntf_notification_202703', 'ntf_notification_202704', 'ntf_notification_202705', 'ntf_notification_202706',
+                'ntf_notification_202707', 'ntf_notification_202708', 'ntf_notification_202709', 'ntf_notification_202710',
+                'ntf_notification_202711', 'ntf_notification_202712',
+            ],
+            array_values(array_filter(
+                $partitions,
+                static fn (string $partition): bool => $partition >= 'ntf_notification_202611' && $partition <= 'ntf_notification_202712',
+            )),
+        );
         foreach ($partitions as $partition) {
             self::assertMatchesRegularExpression('/^ntf_notification_\d{6}$/', $partition);
             self::assertSame([], $this->grantsToOthersThanTheOwner($connection, $partition), $partition);

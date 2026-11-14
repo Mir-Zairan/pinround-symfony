@@ -8,7 +8,7 @@ namespace App\Notification\Api\Event;
  * An open ping was cleared, by its recipient clicking "Done" or by acting on its ticket. A ping archived after 30 days
  * is not cleared and publishes nothing.
  */
-final readonly class PingCleared implements NotificationEvent
+final readonly class PingCleared implements PingEvent
 {
     /**
      * @param string $pingId     the ntf_ping id

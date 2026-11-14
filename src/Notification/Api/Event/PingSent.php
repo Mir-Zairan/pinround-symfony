@@ -8,7 +8,7 @@ namespace App\Notification\Api\Event;
  * A ping was delivered to its recipient: at once, or at the end of their quiet hours for a held ping, so occurredAt is
  * the delivery time. A ping refused by the rate limit publishes nothing.
  */
-final readonly class PingSent implements NotificationEvent
+final readonly class PingSent implements PingEvent
 {
     /**
      * @param string $pingId     the ntf_ping id
