@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Notification\Infrastructure\Mercure;
 
 use App\Notification\Application\Realtime\RefreshBell;
+use App\Notification\Infrastructure\Mercure\RefreshBellHandler;
 use App\SharedKernel\Application\TenantContext;
 use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Notification\NotificationRows;
@@ -66,6 +67,7 @@ final class RefreshBellRoutingTest extends KernelTestCase
 
     protected function tearDown(): void
     {
+        self::getContainer()->get('doctrine.dbal.migrator_connection')->executeStatement('DELETE FROM processed_message WHERE handler = ?', [RefreshBellHandler::HANDLER_NAME]);
         $this->ticketRows()->removeAllOf(self::ACME_FOODS);
         self::getContainer()->get('doctrine')->resetManager();
         parent::tearDown();
@@ -100,6 +102,24 @@ final class RefreshBellRoutingTest extends KernelTestCase
         self::assertStringNotContainsString('<form', $payload);
         self::assertStringNotContainsStringIgnoringCase('_token', $payload);
         self::assertStringNotContainsStringIgnoringCase('csrf', $payload);
+    }
+
+    #[Test]
+    public function aPushDeliveredTwiceOnAsyncNotifyPublishesOneToast(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, static function (): void {
+            self::getContainer()->get('command.bus')->dispatch(new RefreshBell(self::ACME_FOODS, self::OMAR, 'Lena answered your question.'));
+        });
+        $asyncNotify = $this->asyncNotify();
+        self::assertCount(1, $asyncNotify->getSent());
+        $asyncNotify->send($asyncNotify->getSent()[0]);
+
+        self::runTheWorkerUntilIdle('async_notify');
+
+        self::assertCount(2, $asyncNotify->getSent());
+        $toastStreams = array_filter($this->published(), static fn (Update $update): bool => str_contains($update->getData(), 'data-toast-message-value="Lena answered your question."'));
+        self::assertCount(1, $toastStreams);
+        self::assertCount(1, $this->published());
     }
 
     #[Test]

@@ -16,8 +16,6 @@ use App\Notification\Application\Notify\Notifications;
 use App\Notification\Application\Notify\NotifyRecipients;
 use App\Notification\Application\Realtime\RefreshBell;
 use App\Organization\Api\MemberNameQueries;
-use App\SharedKernel\Application\NoMessageBeingHandled;
-use App\SharedKernel\Application\OnceOnlyHandling;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
@@ -401,32 +399,6 @@ final class NotifyRecipientsTest extends TestCase
                 return $names;
             }
         };
-    }
-}
-
-/**
- * Like ProcessedMessageLedger: runs an effect once per message id and handler name.
- */
-final class OnceOnlyHandlingDouble implements OnceOnlyHandling
-{
-    public ?string $messageId = null;
-    /** @var list<string> */
-    public array $handlerNames = [];
-    /** @var array<string, true> */
-    private array $processed = [];
-
-    public function runOnce(string $handlerName, \Closure $effect): bool
-    {
-        $this->handlerNames[] = $handlerName;
-        $messageId = $this->messageId ?? throw new NoMessageBeingHandled();
-        $key = $messageId.'|'.$handlerName;
-        if (isset($this->processed[$key])) {
-            return false;
-        }
-        $this->processed[$key] = true;
-        $effect();
-
-        return true;
     }
 }
 

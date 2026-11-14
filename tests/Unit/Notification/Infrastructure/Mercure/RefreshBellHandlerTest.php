@@ -10,6 +10,7 @@ use App\SharedKernel\Application\MessageForAnotherTenantRefused;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
+use App\Tests\Unit\Notification\Application\Notify\OnceOnlyHandlingDouble;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -40,6 +41,10 @@ final class RefreshBellHandlerTest extends TestCase
     /** @var list<Update> */
     private array $published = [];
 
+    private ?\RuntimeException $nextPublishFailure = null;
+
+    private OnceOnlyHandlingDouble $onceOnlyHandling;
+
     private RefreshBellHandler $handler;
 
     protected function setUp(): void
@@ -50,6 +55,12 @@ final class RefreshBellHandlerTest extends TestCase
             self::BETA_BAKERY => [self::OMAR => 40],
         ]);
         $hub = new MockHub('https://localhost/.well-known/mercure', new StaticTokenProvider('publisher-token'), function (Update $update): string {
+            if (null !== $this->nextPublishFailure) {
+                $failure = $this->nextPublishFailure;
+                $this->nextPublishFailure = null;
+
+                throw $failure;
+            }
             $this->published[] = $update;
 
             return 'urn:uuid:published';
@@ -57,7 +68,9 @@ final class RefreshBellHandlerTest extends TestCase
         $twig = new Environment(new ArrayLoader([
             RefreshBellHandler::TEMPLATE => 'count={{ openCount }};toast={{ toast ?? "none" }}',
         ]));
-        $this->handler = new RefreshBellHandler($hub, $this->bellInbox, $this->tenantContext, $twig, new MockClock(new \DateTimeImmutable(self::NOW)));
+        $this->onceOnlyHandling = new OnceOnlyHandlingDouble();
+        $this->onceOnlyHandling->messageId = 'message-1';
+        $this->handler = new RefreshBellHandler($hub, $this->bellInbox, $this->tenantContext, $twig, new MockClock(new \DateTimeImmutable(self::NOW)), $this->onceOnlyHandling);
     }
 
     #[Test]
@@ -87,11 +100,56 @@ final class RefreshBellHandlerTest extends TestCase
     }
 
     #[Test]
+    public function aPushDeliveredTwicePublishesItsToastOnce(): void
+    {
+        $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $push = new RefreshBell(self::ACME_FOODS, self::OMAR, 'Lena answered your question.');
+
+        ($this->handler)($push);
+        ($this->handler)($push);
+
+        self::assertSame(['count=3;toast=Lena answered your question.'], array_map(static fn (Update $update): string => $update->getData(), $this->published));
+        self::assertSame([RefreshBellHandler::HANDLER_NAME, RefreshBellHandler::HANDLER_NAME], $this->onceOnlyHandling->handlerNames);
+    }
+
+    #[Test]
+    public function aPushTheHubRefusedIsPublishedByTheNextDelivery(): void
+    {
+        $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $push = new RefreshBell(self::ACME_FOODS, self::OMAR, 'Lena answered your question.');
+        $this->nextPublishFailure = new \RuntimeException('The hub is down.');
+
+        try {
+            ($this->handler)($push);
+            self::fail('The refused publish did not fail the delivery.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame('The hub is down.', $failure->getMessage());
+        }
+        self::assertSame([], $this->publishedData());
+
+        ($this->handler)($push);
+
+        self::assertSame(['count=3;toast=Lena answered your question.'], $this->publishedData());
+    }
+
+    /**
+     * The data of the updates the hub took so far; read through a call, as the hub's callback adds to them behind the
+     * analyser's back.
+     *
+     * @return list<string>
+     */
+    private function publishedData(): array
+    {
+        return array_map(static fn (Update $update): string => $update->getData(), $this->published);
+    }
+
+    #[Test]
     public function eachPushGoesOnlyToItsOwnUsersTopicWithThatUsersCount(): void
     {
         $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
 
         ($this->handler)(new RefreshBell(self::ACME_FOODS, self::MIA, null));
+        $this->onceOnlyHandling->messageId = 'message-2';
         ($this->handler)(new RefreshBell(self::ACME_FOODS, self::OMAR, 'Lena answered your question.'));
 
         self::assertSame([
@@ -114,6 +172,7 @@ final class RefreshBellHandlerTest extends TestCase
 
         self::assertSame([], $this->published);
         self::assertSame([], $this->bellInbox->countedFor);
+        self::assertSame([], $this->onceOnlyHandling->handlerNames);
     }
 
     #[Test]
