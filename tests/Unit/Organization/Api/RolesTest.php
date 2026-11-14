@@ -90,6 +90,53 @@ final class RolesTest extends TestCase
     }
 
     #[Test]
+    public function anAdminOrManagerMayAskOrPingOnAnyTicketWithoutReportingIt(): void
+    {
+        $team = new TeamId(self::TEAM_A);
+
+        self::assertTrue(new Roles(true, false, [], [], [])->mayAskOrPingOn($team, false));
+        self::assertTrue(new Roles(false, true, [], [], [])->mayAskOrPingOn($team, false));
+        self::assertTrue(new Roles(true, false, [], [], [])->mayAskOrPingOn(null, false));
+        self::assertTrue(new Roles(false, true, [], [], [])->mayAskOrPingOn(null, false));
+        self::assertTrue(new Roles(false, true, [], [], [$team])->mayAskOrPingOn($team, false), 'a Manager who views the team still asks');
+    }
+
+    #[Test]
+    public function aLeadOrMemberOfTheTicketsTeamMayAskOrPingWithoutReportingIt(): void
+    {
+        $team = new TeamId(self::TEAM_A);
+        $otherTeam = new TeamId(self::TEAM_B);
+
+        self::assertTrue(new Roles(false, false, [$team], [], [])->mayAskOrPingOn($team, false));
+        self::assertTrue(new Roles(false, false, [], [$team], [])->mayAskOrPingOn($team, false));
+        self::assertFalse(new Roles(false, false, [$otherTeam], [$team], [])->mayAskOrPingOn(new TeamId(self::TEAM_C), false), 'a role in another team is no role in this one');
+        self::assertFalse(new Roles(false, false, [$team], [], [])->mayAskOrPingOn(null, false), 'a team role says nothing of a ticket with no team');
+    }
+
+    #[Test]
+    public function aViewerOfTheTicketsTeamMayNotAskOrPingEvenAsItsReporter(): void
+    {
+        $team = new TeamId(self::TEAM_A);
+
+        self::assertFalse(new Roles(false, false, [], [], [$team])->mayAskOrPingOn($team, false));
+        self::assertFalse(new Roles(false, false, [], [], [$team])->mayAskOrPingOn($team, true));
+    }
+
+    #[Test]
+    public function someoneWithNoRoleOnTheTicketMayAskOrPingOnlyAsItsReporter(): void
+    {
+        $team = new TeamId(self::TEAM_A);
+        $roleElsewhere = new Roles(false, false, [], [], [new TeamId(self::TEAM_B)]);
+
+        self::assertFalse(Roles::none()->mayAskOrPingOn($team, false));
+        self::assertTrue(Roles::none()->mayAskOrPingOn($team, true));
+        self::assertFalse(Roles::none()->mayAskOrPingOn(null, false));
+        self::assertTrue(Roles::none()->mayAskOrPingOn(null, true));
+        self::assertFalse($roleElsewhere->mayAskOrPingOn($team, false));
+        self::assertTrue($roleElsewhere->mayAskOrPingOn($team, true));
+    }
+
+    #[Test]
     public function aSlugKeyThatIsNotATeamIdIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);

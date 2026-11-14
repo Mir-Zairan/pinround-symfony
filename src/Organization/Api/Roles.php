@@ -87,6 +87,32 @@ final readonly class Roles
     }
 
     /**
+     * The role rule shared by "Ask a question" and "Ping a person" (personas-and-roles.md): an Admin, a Manager, a Lead
+     * or Member of the ticket's team, or its reporter; a Viewer of the team is denied, also when they reported it. The
+     * caller still checks that the user may see the ticket.
+     *
+     * @param ?TeamId $ticketTeamId the ticket's team, null while it has none
+     * @param bool    $isReporter   whether this user reported the ticket
+     */
+    public function mayAskOrPingOn(?TeamId $ticketTeamId, bool $isReporter): bool
+    {
+        if ($this->isAdmin || $this->isManager) {
+            return true;
+        }
+        if (null !== $ticketTeamId) {
+            if ($this->isLeadOf($ticketTeamId) || $this->isMemberOf($ticketTeamId)) {
+                return true;
+            }
+            // The matrix's "only as reporter" is the Other user column's; its Viewer column has no exception.
+            if ($this->isViewerOf($ticketTeamId)) {
+                return false;
+            }
+        }
+
+        return $isReporter;
+    }
+
+    /**
      * The address part of a team the user has a role in; null when the team's slug was not given, as for a team the
      * user is not in.
      */
