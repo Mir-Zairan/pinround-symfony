@@ -999,8 +999,8 @@ final class MoveTicketTest extends KernelTestCase
      * Both moves run in one transaction under Acme Foods, as a request's would, and are rolled back. The first fills
      * the caches; the entity manager is cleared after it, as a new request starts with an empty one.
      *
-     * @param \Closure(): void $warmingMove
-     * @param \Closure(): void $measuredMove
+     * @param \Closure(): mixed $warmingMove
+     * @param \Closure(): mixed $measuredMove
      *
      * @return list<string> the SQL of each statement of the measured move, in the order sent
      */
