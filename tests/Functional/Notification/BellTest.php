@@ -163,6 +163,23 @@ final class BellTest extends WebTestCase
     }
 
     #[Test]
+    public function aGroupAboutATicketOmarCanNoLongerSeeIsNotFoundAndStaysOpen(): void
+    {
+        $client = $this->omarsClient();
+        $this->hideFromOmar($this->shop1);
+        $rowsBefore = $this->rows();
+        self::assertSame(['read' => false, 'done' => false], $rowsBefore['Lena to Omar on SHOP-1 at 5 min']);
+
+        foreach (['done', 'open'] as $action) {
+            $client->request('POST', $this->groupUrl($this->lena, $this->shop1, $action), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
+            self::assertResponseStatusCodeSame(404, $action);
+            self::assertStringContainsString(BellController::GROUP_NOT_FOUND, (string) $client->getResponse()->getContent(), $action);
+        }
+
+        self::assertSame($rowsBefore, $this->rows());
+    }
+
+    #[Test]
     public function aSecondDoneOfTheSameGroupIsNotFound(): void
     {
         $client = $this->omarsClient();
@@ -383,6 +400,19 @@ final class BellTest extends WebTestCase
         }
 
         return $marked;
+    }
+
+    /**
+     * Moves the ticket into a team of Lena's that Omar is not in and makes it visible to that team only, as when Omar
+     * leaves the ticket's team; his notifications about it stay.
+     */
+    private function hideFromOmar(string $ticketId): void
+    {
+        $lenasTeam = $this->createTeam($this->acmeFoods, 'Payments', $this->lena);
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET visibility = 'team', team_id = ? WHERE id = ?",
+            [$lenasTeam->toString(), $ticketId],
+        ));
     }
 
     private function groupUrl(User $sender, string $ticketId, string $action): string

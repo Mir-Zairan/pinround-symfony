@@ -6,8 +6,8 @@ namespace App\Tests\Integration\Visibility;
 
 use App\Notification\Api\NotificationQueries;
 use App\Notification\Application\Bell\BellInbox;
-use App\Notification\Application\Bell\MarkPingDone;
-use App\Notification\Application\Bell\OpenPing;
+use App\Notification\Application\Bell\MarkBellGroupDone;
+use App\Notification\Application\Bell\OpenBellGroup;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -21,10 +21,10 @@ use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Clock\MockClock;
 
 /**
- * The bell, its count, Done and Open (NotificationQueries::bell, BellInbox, MarkPingDone and OpenPing): every viewer has an open question
- * about each cast ticket, as a notification keeps its ticket after the person loses sight of it, and the bell shows,
- * counts and changes exactly those of tickets they may still see. Raj asks, and Noor asks Raj. Ben's rows are in Acme
- * Foods, which his own organization's bell never reads.
+ * The bell, its count, Done and Open (NotificationQueries::bell, BellInbox, MarkBellGroupDone and OpenBellGroup): every
+ * viewer has an open question about each cast ticket, as a notification keeps its ticket after the person loses sight
+ * of it, and the bell shows, counts and changes exactly those of tickets they may still see. Raj asks, and Noor asks
+ * Raj. Ben's rows are in Acme Foods, which his own organization's bell never reads.
  */
 final class BellLeakTest extends VisibilityLeakCast
 {
@@ -99,8 +99,8 @@ final class BellLeakTest extends VisibilityLeakCast
             $sender = self::userIdOf(self::actorOf($viewer));
             foreach ([self::teamOnlyTicketId(), self::NO_TEAM_TICKET] as $ticketId) {
                 $answers[$ticketId] = [
-                    $this->openPing()->open($visibility, $sender, new TicketId($ticketId), new \DateTimeImmutable(self::NOW)),
-                    $this->markPingDone()->markDone($visibility, $sender, new TicketId($ticketId), new \DateTimeImmutable(self::NOW)),
+                    $this->openBellGroup()->open($visibility, $sender, new TicketId($ticketId), new \DateTimeImmutable(self::NOW)),
+                    $this->markBellGroupDone()->markDone($visibility, $sender, new TicketId($ticketId), new \DateTimeImmutable(self::NOW)),
                 ];
             }
 
@@ -132,7 +132,7 @@ final class BellLeakTest extends VisibilityLeakCast
             [$bell, $openCount, $marked, $rows] = self::asViewer('Lena', fn (): array => [
                 $this->notificationQueries()->bell($lena),
                 $this->bellInbox()->openCountOf($lena, new \DateTimeImmutable(self::NOW)),
-                $this->markPingDone()->markDone(self::visibilityOf('Lena'), self::userIdOf('Raj'), new TicketId(self::teamOnlyTicketId()), new \DateTimeImmutable(self::NOW)),
+                $this->markBellGroupDone()->markDone(self::visibilityOf('Lena'), self::userIdOf('Raj'), new TicketId(self::teamOnlyTicketId()), new \DateTimeImmutable(self::NOW)),
                 $this->rowStatesOf('Lena'),
             ]);
         } finally {
@@ -208,20 +208,20 @@ final class BellLeakTest extends VisibilityLeakCast
         return $bellInbox;
     }
 
-    private function markPingDone(): MarkPingDone
+    private function markBellGroupDone(): MarkBellGroupDone
     {
-        $markPingDone = self::getContainer()->get('test.notification_mark_ping_done');
-        \assert($markPingDone instanceof MarkPingDone);
+        $markBellGroupDone = self::getContainer()->get('test.notification_mark_bell_group_done');
+        \assert($markBellGroupDone instanceof MarkBellGroupDone);
 
-        return $markPingDone;
+        return $markBellGroupDone;
     }
 
-    private function openPing(): OpenPing
+    private function openBellGroup(): OpenBellGroup
     {
-        $openPing = self::getContainer()->get('test.notification_open_ping');
-        \assert($openPing instanceof OpenPing);
+        $openBellGroup = self::getContainer()->get('test.notification_open_bell_group');
+        \assert($openBellGroup instanceof OpenBellGroup);
 
-        return $openPing;
+        return $openBellGroup;
     }
 
     /**

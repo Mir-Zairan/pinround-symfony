@@ -11,8 +11,8 @@ use App\SharedKernel\Domain\UserId;
  * Open means delivered (no deliver_after, or one at or before $now), not done, with a sender and a ticket, and of a
  * BellKind. The count also needs a ticket the person may still see (ADR-0013); as in the bell, only the 200 tickets
  * with the newest open notifications are checked and the rest count as hidden. The changes do not check the ticket:
- * MarkPingDone and OpenPing do before they call them. Every method needs a tenant and throws TenantNotSet before any query
- * without one, and an open transaction, throwing \LogicException without one.
+ * MarkBellGroupDone and OpenBellGroup do before they call them. Every method needs a tenant and throws TenantNotSet
+ * before any query without one, and an open transaction, throwing \LogicException without one.
  */
 interface BellInbox
 {

@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Notification\UI\Controller;
 
 use App\Notification\Api\NotificationQueries;
-use App\Notification\Application\Bell\MarkPingDone;
-use App\Notification\Application\Bell\OpenPing;
+use App\Notification\Application\Bell\MarkBellGroupDone;
+use App\Notification\Application\Bell\OpenBellGroup;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
@@ -26,8 +26,8 @@ use Symfony\UX\Turbo\TurboBundle;
  * The bell's popover (dialogs-and-popovers.md, Pings popover): GET /bell is the popover's lazy frame, and Done and Open
  * act on one group of the signed-in person's open notifications, named by its sender and ticket. The person comes from
  * the request's actor, never from the URL; OrganizationVoter decides ORG_VIEW first (ADR-0013). Both run in the request
- * transaction through MarkPingDone and OpenPing. A malformed id, a group with none open, which includes another person's
- * group, and a ticket the person may no longer see are not found and change nothing.
+ * transaction through MarkBellGroupDone and OpenBellGroup. A malformed id, a group with none open, which includes
+ * another person's group, and a ticket the person may no longer see are not found and change nothing.
  */
 final class BellController extends AbstractController
 {
@@ -57,8 +57,8 @@ final class BellController extends AbstractController
         private readonly CurrentActor $currentActor,
         private readonly NotificationQueries $notificationQueries,
         private readonly TicketVisibilities $ticketVisibilities,
-        private readonly MarkPingDone $markPingDone,
-        private readonly OpenPing $openPing,
+        private readonly MarkBellGroupDone $markBellGroupDone,
+        private readonly OpenBellGroup $openBellGroup,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -86,7 +86,7 @@ final class BellController extends AbstractController
             return self::refusal(self::FORM_EXPIRED);
         }
         [$sender, $ticket] = $this->groupOf($senderId, $ticketId);
-        if (0 === $this->markPingDone->markDone($this->visibilityOf($actor), $sender, $ticket, $this->clock->now())) {
+        if (0 === $this->markBellGroupDone->markDone($this->visibilityOf($actor), $sender, $ticket, $this->clock->now())) {
             throw $this->createNotFoundException(self::GROUP_NOT_FOUND);
         }
 
@@ -114,7 +114,7 @@ final class BellController extends AbstractController
             return self::refusal(self::FORM_EXPIRED);
         }
         [$sender, $ticket] = $this->groupOf($senderId, $ticketId);
-        $ticketKey = $this->openPing->open($this->visibilityOf($actor), $sender, $ticket, $this->clock->now())
+        $ticketKey = $this->openBellGroup->open($this->visibilityOf($actor), $sender, $ticket, $this->clock->now())
             ?? throw $this->createNotFoundException(self::GROUP_NOT_FOUND);
 
         return $this->redirectToRoute(self::TICKET_ROUTE, ['key' => $ticketKey], Response::HTTP_SEE_OTHER);

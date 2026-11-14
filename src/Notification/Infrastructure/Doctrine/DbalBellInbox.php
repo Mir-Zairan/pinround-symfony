@@ -16,7 +16,8 @@ use Doctrine\DBAL\Connection;
 /**
  * BellInbox on ntf_notification through the bell index, under row-level security and with the tenant's
  * organization_id named as well. The open-row filter is the one DbalBellQueries groups, and a row counts only while
- * VisibleBellTickets finds its ticket visible to the person; MarkPingDone and OpenPing check the ticket before a change.
+ * VisibleBellTickets finds its ticket visible to the person; MarkBellGroupDone and OpenBellGroup check the ticket
+ * before a change.
  */
 final readonly class DbalBellInbox implements BellInbox
 {

@@ -276,11 +276,11 @@ when@test:
         test.notification_bell_inbox:
             alias: App\Notification\Application\Bell\BellInbox
             public: true
-        test.notification_mark_ping_done:
-            alias: App\Notification\Application\Bell\MarkPingDone
+        test.notification_mark_bell_group_done:
+            alias: App\Notification\Application\Bell\MarkBellGroupDone
             public: true
-        test.notification_open_ping:
-            alias: App\Notification\Application\Bell\OpenPing
+        test.notification_open_bell_group:
+            alias: App\Notification\Application\Bell\OpenBellGroup
             public: true
         # No route posts, edits or removes a comment before the thread's controllers (P04.T1 slice B); the comment
         # tests get the use cases as a controller would.

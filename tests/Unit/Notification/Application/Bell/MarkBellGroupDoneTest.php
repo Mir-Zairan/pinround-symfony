@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Notification\Application\Bell;
 
 use App\Notification\Application\Bell\BellGroupKey;
-use App\Notification\Application\Bell\OpenPing;
+use App\Notification\Application\Bell\MarkBellGroupDone;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -15,10 +15,10 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Open on Omar's group from Lena about SHOP-1, next to Mia's group from Lena about the same ticket. Ticketing finds
+ * Done on Omar's group from Lena about SHOP-1, next to Mia's group from Lena about the same ticket. Ticketing finds
  * SHOP-1 visible to Omar only when the test says so.
  */
-final class OpenPingTest extends TestCase
+final class MarkBellGroupDoneTest extends TestCase
 {
     private const string NOW = '2027-03-20 10:00:00+00:00';
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000c0001';
@@ -37,28 +37,28 @@ final class OpenPingTest extends TestCase
     }
 
     #[Test]
-    public function openMarksTheViewersGroupReadOnATicketTheyMaySeeAndGivesItsKey(): void
+    public function doneMarksTheViewersGroupOnATicketTheyMaySeeAndLeavesOthers(): void
     {
-        $ticketKey = $this->openPing(isTicketVisible: true)->open(self::omarsVisibility(), new UserId(self::LENA), new TicketId(self::TICKET), new \DateTimeImmutable(self::NOW));
+        $marked = $this->markBellGroupDone(isTicketVisible: true)->markDone(self::omarsVisibility(), new UserId(self::LENA), new TicketId(self::TICKET), new \DateTimeImmutable(self::NOW));
 
-        self::assertSame('SHOP-1', $ticketKey);
-        self::assertSame(2, $this->bellInbox->readCountOfGroup(self::groupOf(self::OMAR)));
-        self::assertSame(0, $this->bellInbox->readCountOfGroup(self::groupOf(self::MIA)));
+        self::assertSame(2, $marked);
+        self::assertSame(0, $this->bellInbox->openCountOfGroup(self::groupOf(self::OMAR)));
+        self::assertSame(1, $this->bellInbox->openCountOfGroup(self::groupOf(self::MIA)));
     }
 
     #[Test]
-    public function openOnATicketTheViewerMayNoLongerSeeGivesNoKeyAndMarksNothing(): void
+    public function doneOnATicketTheViewerMayNoLongerSeeMarksNothing(): void
     {
-        $ticketKey = $this->openPing(isTicketVisible: false)->open(self::omarsVisibility(), new UserId(self::LENA), new TicketId(self::TICKET), new \DateTimeImmutable(self::NOW));
+        $marked = $this->markBellGroupDone(isTicketVisible: false)->markDone(self::omarsVisibility(), new UserId(self::LENA), new TicketId(self::TICKET), new \DateTimeImmutable(self::NOW));
 
-        self::assertNull($ticketKey);
-        self::assertSame(0, $this->bellInbox->readCountOfGroup(self::groupOf(self::OMAR)));
+        self::assertSame(0, $marked);
         self::assertSame(2, $this->bellInbox->openCountOfGroup(self::groupOf(self::OMAR)));
+        self::assertSame(1, $this->bellInbox->openCountOfGroup(self::groupOf(self::MIA)));
     }
 
-    private function openPing(bool $isTicketVisible): OpenPing
+    private function markBellGroupDone(bool $isTicketVisible): MarkBellGroupDone
     {
-        return new OpenPing($this->ticketQueries($isTicketVisible), $this->bellInbox);
+        return new MarkBellGroupDone($this->ticketQueries($isTicketVisible), $this->bellInbox);
     }
 
     /**

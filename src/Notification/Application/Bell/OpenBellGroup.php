@@ -14,7 +14,7 @@ use App\Ticketing\Api\TicketVisibility;
  * notification keeps its ticket after the viewer leaves the ticket's team, so the group changes only while Ticketing
  * finds the ticket visible to them (ADR-0013). Runs in the request transaction under the tenant.
  */
-final readonly class OpenPing
+final readonly class OpenBellGroup
 {
     public function __construct(private TicketQueries $ticketQueries, private BellInbox $bellInbox)
     {
