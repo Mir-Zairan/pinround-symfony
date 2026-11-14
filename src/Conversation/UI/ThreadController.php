@@ -28,6 +28,7 @@ use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
+use App\SharedKernel\UI\PingsClearedToast;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketPageView;
@@ -46,6 +47,8 @@ use Symfony\UX\Turbo\TurboBundle;
  * resolves a comment, and edits or removes one's own message. Each action responds with a toast: a Turbo form in a Turbo Stream that also replaces the message
  * list, except a refused reply, whose open Reply box keeps its draft, any other form with a redirect to the thread's page. Asking and answering pause and resume the ticket, which
  * changes its page's header that the thread's frame cannot replace, so once made they redirect to the ticket's page.
+ * A comment, question, answer or reply that cleared the author's pings on the ticket says how many
+ * ({@see PingsClearedToast}).
  *
  * Showing it runs in the request transaction, with the same 404 as the actions. The actions run without it, as
  * TicketMoveController: Transactions gives the action a transaction of its own, so
@@ -148,9 +151,9 @@ final class ThreadController extends AbstractController
         return $this->respondToAction($request, $key, function () use ($key, $csrfToken, $body, $now): string {
             [, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->refuseAnExpiredForm($key, $csrfToken);
-            $this->postComment->post($ticket->id, $ticket->visibilityFacts, $userId, $body, $now);
+            $comment = $this->postComment->post($ticket->id, $ticket->visibilityFacts, $userId, $body, $now);
 
-            return self::COMMENT_ADDED;
+            return PingsClearedToast::withClearedPings(self::COMMENT_ADDED, $comment->clearedPingCount);
         });
     }
 
@@ -203,11 +206,14 @@ final class ThreadController extends AbstractController
                 // No person on the ticket has an id that is no user id.
                 throw new QuestionRefused(AskQuestion::NOT_ON_THE_TICKET, 0, $malformed);
             }
-            $this->askQuestion->ask($ticket->id, $ticket->visibilityFacts, $userId, $askedUserId, $body, $now);
+            $question = $this->askQuestion->ask($ticket->id, $ticket->visibilityFacts, $userId, $askedUserId, $body, $now);
 
             $askedName = $ticket->displayNames[$askedUserId->toString()] ?? null;
 
-            return \sprintf(self::QUESTION_SENT, null === $askedName ? Thread::UNKNOWN_AUTHOR : new UserView($askedUserId, $askedName)->firstName());
+            return PingsClearedToast::withClearedPings(
+                \sprintf(self::QUESTION_SENT, null === $askedName ? Thread::UNKNOWN_AUTHOR : new UserView($askedUserId, $askedName)->firstName()),
+                $question->clearedPingCount,
+            );
         }, self::TICKET_ROUTE);
     }
 
@@ -221,9 +227,9 @@ final class ThreadController extends AbstractController
         return $this->respondToAction($request, $key, function () use ($key, $messageId, $csrfToken, $body, $now): string {
             [$organizationId, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->refuseAnExpiredForm($key, $csrfToken);
-            $this->answer->answer($organizationId, $ticket->id, $messageId, $userId, $body, $now);
+            $answerReply = $this->answer->answer($organizationId, $ticket->id, $messageId, $userId, $body, $now);
 
-            return \sprintf(self::QUESTION_ANSWERED, $ticket->stepName);
+            return PingsClearedToast::withClearedPings(\sprintf(self::QUESTION_ANSWERED, $ticket->stepName), $answerReply->clearedPingCount);
         }, self::TICKET_ROUTE);
     }
 
@@ -237,9 +243,9 @@ final class ThreadController extends AbstractController
         return $this->respondToAction($request, $key, function () use ($key, $messageId, $csrfToken, $body, $now): string {
             [, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->refuseAnExpiredForm($key, $csrfToken);
-            $this->postReply->post($ticket->id, $ticket->visibilityFacts, $messageId, $userId, $body, $now);
+            $reply = $this->postReply->post($ticket->id, $ticket->visibilityFacts, $messageId, $userId, $body, $now);
 
-            return self::REPLY_ADDED;
+            return PingsClearedToast::withClearedPings(self::REPLY_ADDED, $reply->clearedPingCount);
         }, isRefusalToastOnly: true);
     }
 

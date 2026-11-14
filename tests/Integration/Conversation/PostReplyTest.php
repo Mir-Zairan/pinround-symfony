@@ -8,12 +8,14 @@ use App\Conversation\Api\Event\ReplyPosted;
 use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Api\MessageNotFound;
 use App\Conversation\Api\ReplyRefused;
+use App\Conversation\Application\PostedMessage;
 use App\Conversation\Application\PostReply\PostReply;
 use App\Conversation\Application\RemoveMessage\RemoveMessage;
 use App\Conversation\Application\ThreadMessages;
 use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Infrastructure\Doctrine\DoctrineMessages;
 use App\Conversation\Infrastructure\Doctrine\DoctrineReplies;
+use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -102,14 +104,14 @@ final class PostReplyTest extends KernelTestCase
     #[Test]
     public function aReplyIsSavedTrimmedUnderTheMessageWithOneReplyPostedForTheMessagesAuthorInTheOutbox(): void
     {
-        $replyId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->postReply()->post(
+        $replyId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->postReply()->post(
             new TicketId(self::TICKET_FOR_EVERYONE),
             $this->factsOfTicketForEveryone(),
             self::LENAS_COMMENT,
             new UserId(self::MIA),
             "  Seen on build 42 too.\n",
             new \DateTimeImmutable(self::REPLIED_AT),
-        ));
+        ))->id;
 
         self::assertSame(
             [
@@ -129,14 +131,14 @@ final class PostReplyTest extends KernelTestCase
     #[Test]
     public function aReplyByThePersonAskedIsAPlainReplyAndTheQuestionStaysOpen(): void
     {
-        $replyId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->postReply()->post(
+        $replyId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->postReply()->post(
             new TicketId(self::TICKET_FOR_EVERYONE),
             $this->factsOfTicketForEveryone(),
             self::OPEN_QUESTION_TO_OMAR,
             new UserId(self::OMAR),
             'Let me check.',
             new \DateTimeImmutable(self::REPLIED_AT),
-        ));
+        ))->id;
 
         self::assertSame(
             [[self::ACME_FOODS, $replyId, self::OMAR, 'Let me check.', false, '2027-03-15 10:20:00+00']],
@@ -192,7 +194,7 @@ final class PostReplyTest extends KernelTestCase
     #[Test]
     public function aMemberOutsideTheTeamGetsTicketNotFoundOnATeamOnlyTicketAndNothingIsWritten(): void
     {
-        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): string => $this->postReply()->post(
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): PostedMessage => $this->postReply()->post(
             new TicketId(self::TEAM_ONLY_TICKET),
             new TicketVisibilityFacts(new OrganizationId(self::ACME_FOODS), TicketVisibilityFacts::TEAM_ONLY, new TeamId(self::SHOP_TEAM), new UserId(self::LENA)),
             self::TEAM_ONLY_COMMENT,
@@ -212,7 +214,7 @@ final class PostReplyTest extends KernelTestCase
         $betaTicketFacts = new TicketVisibilityFacts(new OrganizationId(self::BETA_BAKERY), TicketVisibilityFacts::FOR_EVERYONE, null, new UserId(self::LENA));
         $refusals = [];
         foreach ([[self::TICKET_FOR_EVERYONE, $this->factsOfTicketForEveryone()], [self::BETA_TICKET, $betaTicketFacts]] as [$ticketId, $ticketFacts]) {
-            $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): string => $this->postReply()->post(
+            $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): PostedMessage => $this->postReply()->post(
                 new TicketId($ticketId),
                 $ticketFacts,
                 self::BETA_COMMENT,
@@ -234,7 +236,7 @@ final class PostReplyTest extends KernelTestCase
     {
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         try {
-            $refusal = $this->refusalOf(fn (): string => $this->postReply()->post(
+            $refusal = $this->refusalOf(fn (): PostedMessage => $this->postReply()->post(
                 new TicketId(self::TICKET_FOR_EVERYONE),
                 $this->factsOfTicketForEveryone(),
                 self::LENAS_COMMENT,
@@ -263,8 +265,9 @@ final class PostReplyTest extends KernelTestCase
             new ThreadMessages(new DoctrineMessages($secondSession->entityManager)),
             new DoctrineReplies($secondSession->entityManager),
             $secondSessionEvents,
+            $this->pingClearing(),
         );
-        $postOmarsReply = fn (): string => $replyInSecondSession->post(
+        $postOmarsReply = fn (): PostedMessage => $replyInSecondSession->post(
             new TicketId(self::TICKET_FOR_EVERYONE),
             $this->factsOfTicketForEveryone(),
             self::LENAS_COMMENT,
@@ -302,7 +305,7 @@ final class PostReplyTest extends KernelTestCase
 
     private function refusalOfReply(string $messageId, string $authorId, string $body = 'Thanks.', string $ticketId = self::TICKET_FOR_EVERYONE): \Throwable
     {
-        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): string => $this->postReply()->post(
+        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): PostedMessage => $this->postReply()->post(
             new TicketId($ticketId),
             $this->factsOfTicketForEveryone(),
             $messageId,
@@ -416,6 +419,14 @@ final class PostReplyTest extends KernelTestCase
         self::assertInstanceOf(RemoveMessage::class, $removeMessage);
 
         return $removeMessage;
+    }
+
+    private function pingClearing(): PingClearing
+    {
+        $pingClearing = self::getContainer()->get('test.shared_kernel_ping_clearing');
+        self::assertInstanceOf(PingClearing::class, $pingClearing);
+
+        return $pingClearing;
     }
 
     private function entityManager(): EntityManagerInterface

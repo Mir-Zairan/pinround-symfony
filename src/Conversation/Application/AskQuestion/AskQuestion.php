@@ -8,11 +8,13 @@ use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Api\QuestionRefused;
 use App\Conversation\Application\ConversationEvents;
+use App\Conversation\Application\PostedMessage;
 use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\Messages;
 use App\Conversation\Domain\QuestionAlreadyOpen;
 use App\Insight\Api\TurnProjector;
+use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\AskedPersonNotOnTicket;
@@ -25,6 +27,7 @@ use App\Ticketing\Api\TicketVisibilityFacts;
 /**
  * Asks one person on the ticket a question (FR-CNV-02): the ticket pauses on its step and the turn goes to the person
  * asked until they answer or the asker withdraws the question. A ticket waits on one question at a time (FR-CNV-08).
+ * Asking is acting on the ticket, so it clears the asker's pings on it (FR-PNG-05).
  */
 final readonly class AskQuestion
 {
@@ -38,18 +41,19 @@ final readonly class AskQuestion
         private TurnProjector $turnProjector,
         private Messages $messages,
         private ConversationEvents $conversationEvents,
+        private PingClearing $pingClearing,
     ) {
     }
 
     /**
-     * Pauses the ticket, refreshes its turn, saves the question and writes QuestionAsked to the outbox, all in the open
-     * transaction, whose tenant must be the ticket's organization. The ticket's row is locked first and both checks
+     * Pauses the ticket, refreshes its turn, saves the question, writes QuestionAsked to the outbox and clears the
+     * asker's open pings on the ticket, all in the open transaction, whose tenant must be the ticket's organization. The ticket's row is locked first and both checks
      * read it, so two asks cannot both pass the one-question check and a reassignment saved meanwhile decides who is
      * on the ticket. That the asker may ask at all (ConversationPermission ASK) is the caller's check.
      *
      * @param TicketVisibilityFacts $ticket the visibility facts of the ticket $ticketId, as the ticket page read them
      *
-     * @return string the new question's id
+     * @return PostedMessage the new question's id and how many pings it cleared
      *
      * @throws TicketNotFound         when the ticket is of another organization than the tenant, or the asker may not
      *                                see it; nothing is saved
@@ -62,7 +66,7 @@ final readonly class AskQuestion
      *                                back
      * @throws \LogicException        when no transaction is open; nothing is saved
      */
-    public function ask(TicketId $ticketId, TicketVisibilityFacts $ticket, UserId $askerId, UserId $askedUserId, string $body, \DateTimeImmutable $askedAt): string
+    public function ask(TicketId $ticketId, TicketVisibilityFacts $ticket, UserId $askerId, UserId $askedUserId, string $body, \DateTimeImmutable $askedAt): PostedMessage
     {
         $this->visibleTickets->refuseUnlessVisibleTo($ticket, $askerId);
         try {
@@ -98,6 +102,6 @@ final readonly class AskQuestion
             throw new QuestionRefused(self::ALREADY_WAITING, 0, $alreadyOpen);
         }
 
-        return $question->id()->toString();
+        return new PostedMessage($question->id()->toString(), $this->pingClearing->clearForActor($ticket->organizationId, $ticketId, $askerId, $askedAt));
     }
 }

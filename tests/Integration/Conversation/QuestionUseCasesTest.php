@@ -9,6 +9,7 @@ use App\Conversation\Api\MessageNotFound;
 use App\Conversation\Api\QuestionRefused;
 use App\Conversation\Application\Answer\Answer;
 use App\Conversation\Application\AskQuestion\AskQuestion;
+use App\Conversation\Application\PostedMessage;
 use App\Conversation\Application\ThreadMessages;
 use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Application\WithdrawQuestion\WithdrawQuestion;
@@ -16,6 +17,7 @@ use App\Conversation\Infrastructure\Doctrine\DoctrineMessages;
 use App\Conversation\Infrastructure\Doctrine\DoctrineReplies;
 use App\Conversation\Infrastructure\Messenger\MessengerConversationEvents;
 use App\Insight\Api\TurnProjector;
+use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -132,14 +134,14 @@ final class QuestionUseCasesTest extends KernelTestCase
         $questionId = $this->askedByOmarOfMia();
         $asked = $this->ticketStateOf($this->ticketId, self::ACME_FOODS);
 
-        $replyId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->answer()->answer(
+        $replyId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->answer()->answer(
             new OrganizationId(self::ACME_FOODS),
             $this->ticketId,
             $questionId,
             new UserId(self::MIA),
             '  '.self::ANSWER_BODY.' ',
             new \DateTimeImmutable(self::ANSWERED_AT),
-        ));
+        ))->id;
 
         self::assertSame(
             ['asked_user_id' => null, 'asker_id' => null, 'step_id' => $asked['step_id'], 'version' => $asked['version'] + 1],
@@ -165,7 +167,7 @@ final class QuestionUseCasesTest extends KernelTestCase
         $asked = $this->stateOf($this->ticketId, self::ACME_FOODS);
         self::assertSame(['turn_user_id' => self::MIA, 'kind' => 'answer'], $asked['turn']);
 
-        $failure = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->answerThatFailsAfterTheTurnRefresh()->answer(
+        $failure = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->answerThatFailsAfterTheTurnRefresh()->answer(
             new OrganizationId(self::ACME_FOODS),
             $this->ticketId,
             $questionId,
@@ -263,7 +265,7 @@ final class QuestionUseCasesTest extends KernelTestCase
         self::assertCount(1, $before['messages']);
 
         // The unique violation aborts PostgreSQL's transaction, so the refusal leaves it and the transaction rolls back.
-        $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->askQuestion()->ask(
+        $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->askQuestion()->ask(
             $this->ticketId,
             $this->acmeTicketFacts(),
             new UserId(self::OMAR),
@@ -348,14 +350,14 @@ final class QuestionUseCasesTest extends KernelTestCase
     #[Test]
     public function askingTheTeamLeadIsAllowedThoughTheLeadIsNotNamedOnTheTicket(): void
     {
-        $questionId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->askQuestion()->ask(
+        $questionId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->askQuestion()->ask(
             $this->ticketId,
             $this->acmeTicketFacts(),
             new UserId(self::OMAR),
             new UserId(self::LENA),
             self::QUESTION_BODY,
             new \DateTimeImmutable(self::ASKED_AT),
-        ));
+        ))->id;
 
         self::assertSame(['turn_user_id' => self::LENA, 'kind' => 'answer'], $this->turnOf($this->ticketId, self::ACME_FOODS));
         self::assertSame([$questionId], array_column($this->messagesOf($this->ticketId, self::ACME_FOODS), 0));
@@ -535,14 +537,14 @@ final class QuestionUseCasesTest extends KernelTestCase
 
     private function askedByOmarOfMia(): string
     {
-        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->askQuestion()->ask(
+        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->askQuestion()->ask(
             $this->ticketId,
             $this->acmeTicketFacts(),
             new UserId(self::OMAR),
             new UserId(self::MIA),
             ' '.self::QUESTION_BODY."\n",
             new \DateTimeImmutable(self::ASKED_AT),
-        ));
+        ))->id;
     }
 
     private function acmeTicketFacts(): TicketVisibilityFacts
@@ -584,6 +586,7 @@ final class QuestionUseCasesTest extends KernelTestCase
             $this->turnProjector(),
             new DoctrineMessages($this->entityManager()),
             new MessengerConversationEvents(self::getContainer()->get('event.bus'), $this->connection()),
+            $this->pingClearing(),
         );
     }
 
@@ -607,6 +610,7 @@ final class QuestionUseCasesTest extends KernelTestCase
             $this->ticketPauses(),
             $this->turnProjectorThatFailsAfterTheRefresh(),
             new MessengerConversationEvents(self::getContainer()->get('event.bus'), $this->connection()),
+            $this->pingClearing(),
         );
     }
 
@@ -777,6 +781,14 @@ final class QuestionUseCasesTest extends KernelTestCase
         self::assertInstanceOf(Answer::class, $answer);
 
         return $answer;
+    }
+
+    private function pingClearing(): PingClearing
+    {
+        $pingClearing = self::getContainer()->get('test.shared_kernel_ping_clearing');
+        self::assertInstanceOf(PingClearing::class, $pingClearing);
+
+        return $pingClearing;
     }
 
     private function withdrawQuestion(): WithdrawQuestion

@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Conversation;
 use App\Conversation\Api\Event\CommentPosted;
 use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Application\PostComment\PostComment;
+use App\Conversation\Application\PostedMessage;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -67,13 +68,13 @@ final class PostCommentTest extends KernelTestCase
     #[Test]
     public function aCommentIsSavedTrimmedInTheTicketsOrganizationWithOneCommentPostedInTheOutbox(): void
     {
-        $messageId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->postComment()->post(
+        $messageId = $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->postComment()->post(
             new TicketId(self::TICKET_FOR_EVERYONE),
             $this->factsOfTicketForEveryone(),
             new UserId(self::OMAR),
             "  The button moves on small screens.\n",
             new \DateTimeImmutable(self::POSTED_AT),
-        ));
+        ))->id;
 
         self::assertSame(
             [[self::ACME_FOODS, $messageId, self::TICKET_FOR_EVERYONE, self::OMAR, 'comment', 'The button moves on small screens.', null, null, '2027-03-15 10:00:00+00']],
@@ -89,7 +90,7 @@ final class PostCommentTest extends KernelTestCase
     #[Test]
     public function aMemberOutsideTheTeamGetsTicketNotFoundOnATeamOnlyTicketAndNothingIsWritten(): void
     {
-        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): string => $this->postComment()->post(
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): PostedMessage => $this->postComment()->post(
             new TicketId(self::TEAM_ONLY_TICKET),
             $this->factsOfTeamOnlyTicket(),
             new UserId(self::MIA),
@@ -107,7 +108,7 @@ final class PostCommentTest extends KernelTestCase
     public function aTeamMemberAndAnAdminWithNoTeamRoleCanPostOnATeamOnlyTicket(): void
     {
         foreach ([self::OMAR => '10:00', self::SARA => '10:05'] as $authorId => $time) {
-            $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->postComment()->post(
+            $this->transactions()->committedAs(self::ACME_FOODS, fn (): PostedMessage => $this->postComment()->post(
                 new TicketId(self::TEAM_ONLY_TICKET),
                 $this->factsOfTeamOnlyTicket(),
                 new UserId($authorId),
@@ -126,7 +127,7 @@ final class PostCommentTest extends KernelTestCase
     #[Test]
     public function anotherOrganizationsTicketGetsTicketNotFoundAndNothingIsWrittenInEither(): void
     {
-        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): string => $this->postComment()->post(
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): PostedMessage => $this->postComment()->post(
             new TicketId(self::BETA_TICKET),
             new TicketVisibilityFacts(new OrganizationId(self::BETA_BAKERY), TicketVisibilityFacts::FOR_EVERYONE, null, new UserId(self::LENA)),
             new UserId(self::LENA),
@@ -144,7 +145,7 @@ final class PostCommentTest extends KernelTestCase
     #[Test]
     public function aBlankBodyIsRefusedWithItsReasonAndNothingIsWritten(): void
     {
-        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): string => $this->postComment()->post(
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn (): PostedMessage => $this->postComment()->post(
             new TicketId(self::TICKET_FOR_EVERYONE),
             $this->factsOfTicketForEveryone(),
             new UserId(self::OMAR),
@@ -163,7 +164,7 @@ final class PostCommentTest extends KernelTestCase
     {
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         try {
-            $refusal = $this->refusalOf(fn (): string => $this->postComment()->post(
+            $refusal = $this->refusalOf(fn (): PostedMessage => $this->postComment()->post(
                 new TicketId(self::TICKET_FOR_EVERYONE),
                 $this->factsOfTicketForEveryone(),
                 new UserId(self::OMAR),

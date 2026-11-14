@@ -8,6 +8,7 @@ use App\Conversation\Api\Event\ReplyPosted;
 use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Api\MessageNotFound;
 use App\Conversation\Api\ReplyRefused;
+use App\Conversation\Application\PostedMessage;
 use App\Conversation\Application\PostReply\PostReply;
 use App\Conversation\Application\ThreadMessages;
 use App\Conversation\Application\VisibleTickets;
@@ -21,6 +22,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Conversation\Application\InMemoryMessages;
+use App\Tests\Unit\Conversation\Application\InMemoryPingClearing;
 use App\Tests\Unit\Conversation\Application\InMemoryReplies;
 use App\Tests\Unit\Conversation\Application\RecordingConversationEvents;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
@@ -56,6 +58,7 @@ final class PostReplyTest extends TestCase
     private InMemoryReplies $replies;
     private RecordingConversationEvents $conversationEvents;
     private TenantContext $tenantContext;
+    private InMemoryPingClearing $pingClearing;
     private PostReply $postReply;
 
     protected function setUp(): void
@@ -78,7 +81,33 @@ final class PostReplyTest extends TestCase
         $this->conversationEvents = new RecordingConversationEvents();
         $this->tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $this->tenantContext->set($acmeFoods);
-        $this->postReply = new PostReply(new VisibleTickets(self::visibilitiesWithShopTeam([self::LENA, self::OMAR]), $this->tenantContext), new ThreadMessages($this->messages), $this->replies, $this->conversationEvents);
+        $this->pingClearing = new InMemoryPingClearing();
+        $this->postReply = new PostReply(new VisibleTickets(self::visibilitiesWithShopTeam([self::LENA, self::OMAR]), $this->tenantContext), new ThreadMessages($this->messages), $this->replies, $this->conversationEvents, $this->pingClearing);
+    }
+
+    #[Test]
+    public function aReplyClearsTheAuthorsPingsOnTheTicketAndSaysHowMany(): void
+    {
+        $acmeFoods = new OrganizationId(self::ACME_FOODS);
+        $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::TICKET), new UserId(self::OMAR), 2);
+        $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::OTHER_TICKET), new UserId(self::OMAR), 1);
+        $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::TICKET), new UserId(self::LENA), 1);
+        $repliedAt = new \DateTimeImmutable(self::REPLIED_AT);
+
+        $reply = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::OMAR), 'Seen on build 42 too.', $repliedAt);
+
+        self::assertSame(2, $reply->clearedPingCount);
+        self::assertEquals([[self::ACME_FOODS, self::TICKET, self::OMAR, $repliedAt]], $this->pingClearing->calls());
+    }
+
+    #[Test]
+    public function aReplyBySomeoneWithNoOpenPingClearsNone(): void
+    {
+        $this->pingClearing->addOpenPings(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::OMAR), 2);
+
+        $reply = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::LENA), 'Fixed in build 43.', new \DateTimeImmutable(self::REPLIED_AT));
+
+        self::assertSame(0, $reply->clearedPingCount);
     }
 
     #[Test]
@@ -86,7 +115,7 @@ final class PostReplyTest extends TestCase
     {
         $repliedAt = new \DateTimeImmutable(self::REPLIED_AT);
 
-        $replyId = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::OMAR), "  Seen on build 42 too.\n", $repliedAt);
+        $replyId = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::OMAR), "  Seen on build 42 too.\n", $repliedAt)->id;
 
         $newReply = $this->replies->added()[1] ?? null;
         self::assertNotNull($newReply, 'No reply was added.');
@@ -111,7 +140,7 @@ final class PostReplyTest extends TestCase
     #[Test]
     public function aReplyToOnesOwnMessageIsPublishedWithTheReplierAsTheMessagesAuthor(): void
     {
-        $replyId = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::LENA), 'Fixed in build 43.', new \DateTimeImmutable(self::REPLIED_AT));
+        $replyId = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::LENA), 'Fixed in build 43.', new \DateTimeImmutable(self::REPLIED_AT))->id;
 
         self::assertEquals(
             [new ReplyPosted(self::ACME_FOODS, self::TICKET, self::LENAS_COMMENT, $replyId, self::LENA, self::LENA, new \DateTimeImmutable(self::REPLIED_AT))],
@@ -135,8 +164,8 @@ final class PostReplyTest extends TestCase
     #[Test]
     public function twoRepliesGetDifferentIdsAndStayInTheOrderPosted(): void
     {
-        $firstId = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::OMAR), 'First.', new \DateTimeImmutable(self::REPLIED_AT));
-        $secondId = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::LENA), 'Second.', new \DateTimeImmutable(self::REPLIED_AT));
+        $firstId = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::OMAR), 'First.', new \DateTimeImmutable(self::REPLIED_AT))->id;
+        $secondId = $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::LENA), 'Second.', new \DateTimeImmutable(self::REPLIED_AT))->id;
 
         self::assertNotSame($firstId, $secondId);
         self::assertSame(
@@ -168,7 +197,7 @@ final class PostReplyTest extends TestCase
     #[DataProvider('refusedReplies')]
     public function aRefusedReplyAddsNothingPublishesNothingAndLeavesTheMessage(string $ticketId, string $messageId, string $authorId, string $body, string $refusalClass, string $reason): void
     {
-        $refusal = $this->refusalOf(fn (): string => $this->postReply->post(new TicketId($ticketId), self::teamOnlyTicket(), $messageId, new UserId($authorId), $body, new \DateTimeImmutable(self::REPLIED_AT)));
+        $refusal = $this->refusalOf(fn (): PostedMessage => $this->postReply->post(new TicketId($ticketId), self::teamOnlyTicket(), $messageId, new UserId($authorId), $body, new \DateTimeImmutable(self::REPLIED_AT)));
 
         self::assertSame([$refusalClass, $reason], [$refusal::class, $refusal->getMessage()]);
         $this->assertNothingChanged();
@@ -179,7 +208,7 @@ final class PostReplyTest extends TestCase
     {
         $betaTicket = new TicketVisibilityFacts(new OrganizationId(self::BETA_BAKERY), TicketVisibilityFacts::FOR_EVERYONE, null, new UserId(self::LENA));
 
-        $refusal = $this->refusalOf(fn (): string => $this->postReply->post(new TicketId(self::TICKET), $betaTicket, self::LENAS_COMMENT, new UserId(self::LENA), 'Thanks.', new \DateTimeImmutable(self::REPLIED_AT)));
+        $refusal = $this->refusalOf(fn (): PostedMessage => $this->postReply->post(new TicketId(self::TICKET), $betaTicket, self::LENAS_COMMENT, new UserId(self::LENA), 'Thanks.', new \DateTimeImmutable(self::REPLIED_AT)));
 
         self::assertSame([TicketNotFound::class, 'That ticket does not exist.'], [$refusal::class, $refusal->getMessage()]);
         $this->assertNothingChanged();
@@ -190,7 +219,7 @@ final class PostReplyTest extends TestCase
     {
         $this->tenantContext->clear();
 
-        $refusal = $this->refusalOf(fn (): string => $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::LENA), 'Thanks.', new \DateTimeImmutable(self::REPLIED_AT)));
+        $refusal = $this->refusalOf(fn (): PostedMessage => $this->postReply->post(new TicketId(self::TICKET), self::teamOnlyTicket(), self::LENAS_COMMENT, new UserId(self::LENA), 'Thanks.', new \DateTimeImmutable(self::REPLIED_AT)));
 
         self::assertSame([TicketNotFound::class, 'That ticket does not exist.'], [$refusal::class, $refusal->getMessage()]);
         $this->assertNothingChanged();
@@ -201,10 +230,11 @@ final class PostReplyTest extends TestCase
         self::assertSame([self::OMARS_REPLY], array_map(static fn (Reply $reply): string => $reply->id()->toString(), $this->replies->added()));
         self::assertSame([], $this->conversationEvents->published());
         self::assertSame([], $this->messages->savedIds());
+        self::assertSame([], $this->pingClearing->calls());
     }
 
     /**
-     * @param \Closure(): string $post
+     * @param \Closure(): PostedMessage $post
      */
     private function refusalOf(\Closure $post): \Throwable
     {
