@@ -17,8 +17,10 @@ A person's Claude Code may prepare a report, but only a person turns it into a l
 
 Accepted · 2026-11-14 · Deciders: product owner.
 
-It adds to [ADR-0017](0017-private-draft-rounds.md), [ADR-0020](0020-ai-safety-and-prompt-injection.md) and
-[ADR-0021](0021-mcp-server.md). Their decisions stand.
+It adds to [ADR-0017](0017-private-draft-rounds.md) and [ADR-0020](0020-ai-safety-and-prompt-injection.md); their
+decisions stand. It supersedes only the scope list and tool list of [ADR-0021](0021-mcp-server.md): the scope
+`reports:write` and the tool `create_report` are added, and the rule below also covers the REST API. The rest of
+ADR-0021 stands.
 
 ## Context and problem statement
 
@@ -52,8 +54,17 @@ typing.
   ([FR-MCP-12](../01-requirements/functional-requirements.md#mcp--mcp-server-and-agent-api)).
 - It creates a **report draft** that only its owner can see; the ADR-0017 privacy rules apply (not admins, not the lead,
   not the team). Other users get "not found".
-- A token can never create a live ticket. The owner opens the draft in "Report drafts", can edit it, and clicks Send;
+- A token can never create a live ticket, through MCP or through the REST API `/api/v1`. No token endpoint creates a
+  ticket or a round on a ticket from a report; the REST endpoint `POST /api/v1/reports` is the same report draft as
+  `create_report` (same scope, same caps, same privacy). The owner opens the draft in "Report drafts", can edit it, and clicks Send;
   Send runs the same path as the Report a problem form and calls `RoundCommands::createReport` (Round 0).
+- **Owning module: Review (`rvw_`).** The draft holds screenshots with title, summary and pins, which Review owns, and
+  Send hands the same content to `RoundCommands::createReport`. It is stored in the new table `rvw_report_draft`
+  ([data-model.md](../02-architecture/data-model.md#review-and-media)): tenant table, `organization_id` first in the
+  primary key and in every index, row-level security on. Api: `Review\Api\ReportDrafts::create(OrganizationId, UserId $owner, ProjectId, ReportDraftContent): ReportDraftId`
+  (called by `create_report` and `POST /api/v1/reports`), `ReportDrafts::forOwner(UserId): list<ReportDraftView>` and
+  `ReportDrafts::send(ReportDraftId, UserId): TicketKey` (only the UI calls `send`; the project is checked through the
+  Ticketing Api).
 - New token scope `reports:write`. It is not part of Claude Code's default scopes (`read` + `rounds:write`); the user
   ticks it when creating the token. A call without it gets an MCP error and nothing is created.
 - Screenshots use the same upload path: `create_upload`, presigned PUT, then the tool takes the `upload_id`.
@@ -72,9 +83,11 @@ typing.
 ## Confirmation
 
 - MCP contract tests for `create_report`: other organization's project → not found, missing `reports:write` → error,
-  invalid input → error, no ticket row exists after the call.
+  invalid input → error, no ticket row exists after the call. The same for `POST /api/v1/reports`.
 - Visibility tests: the report draft is invisible to the lead, an admin and another user (HTML, queries, direct URL).
-- A functional test that Send, as a person in the UI, creates the ticket with Round 0, and that the tool cannot do it.
+- A functional test that Send, as a person in the UI, creates the ticket with Round 0, and that neither the tool nor
+  a REST call can do it.
+- A test that `rvw_report_draft` has RLS on (`CatalogTest`) and that `ReportDrafts::send` refuses a non-owner.
 
 ## Pros and cons of the options
 

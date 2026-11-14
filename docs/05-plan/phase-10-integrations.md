@@ -152,7 +152,7 @@ NFR-SEC-01, NFR-SEC-05, NFR-SEC-10, NFR-SEC-14, NFR-AVL-05, NFR-PERF-09, NFR-OPS
 - **Why:** reporting should start with one click on the broken page.
 - **Steps:**
   1. Create `extension/` (Chrome MV3): popup with "Capture this page".
-  2. Capture the visible tab, ask `/api/v1/uploads` for an upload intent, PUT the image to the presigned URL, then open pinround "Report a problem" (or the draft round of a chosen ticket) with the media attached. The popup has an optional "Title" (≤ 120 characters) and "What this picture shows" (≤ 600 characters) per capture; they are sent with the report or draft screenshot ([FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds)) and checked against the same caps.
+  2. Capture the visible tab, ask `/api/v1/uploads` for an upload intent, PUT the image to the presigned URL, then open pinround "Report a problem" (or the draft round of a chosen ticket) with the media attached. The popup has an optional "Title" (≤ 120 characters) and "What this picture shows" (≤ 600 characters) per capture; they are sent with the report or draft screenshot ([FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds)) and checked against the same caps. The extension's token has scope `rounds:write` only: it never creates a ticket or a report draft; a person sends the report in the app ([ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)).
   3. Minimal permissions in the manifest (verify the exact permission names in the Chrome docs).
 - **Files:** `extension/manifest.json`, `extension/src/capture/*`.
 - **Acceptance:**
