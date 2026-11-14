@@ -1,0 +1,544 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Functional\Conversation;
+
+use App\Conversation\UI\Component\Thread;
+use App\Conversation\UI\ThreadController;
+use App\Identity\Domain\User;
+use App\SharedKernel\Domain\OrganizationId;
+use App\Tests\Functional\Identity\LogsInUsers;
+use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
+use App\Tests\Functional\Web\CreatesTeams;
+use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
+use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bundle\FrameworkBundle\KernelBrowser;
+use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\Uid\Uuid;
+use Zenstruck\Foundry\Test\Factories;
+
+/**
+ * The ticket page's Questions and comments, and its POST /t/{key}/comments, /t/{key}/messages/{id}/edit and
+ * /t/{key}/messages/{id}/remove, on Acme Foods' SHOP-1 through the real firewall, voter, session and database. The
+ * clock is fixed on 6 Nov 2026, before today: a clock ahead of the login would end the session as idle. Every refusal
+ * also proves the thread and the outbox unchanged.
+ */
+final class TicketThreadTest extends WebTestCase
+{
+    use CreatesAcmeFoodsTeams;
+    use CreatesTeams;
+    use Factories;
+    use IssuesCsrfTokens;
+    use LogsInUsers {
+        tearDown as private removeUsersAndOrganizations;
+    }
+
+    private const string NOW = '2026-11-06 12:00:00 UTC';
+    private const string KEY = 'SHOP-1';
+    private const string TICKET_PAGE = '/t/SHOP-1';
+    private const string COMMENT_PATH = '/t/SHOP-1/comments';
+    /** What Turbo sends with a form it posts. */
+    private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
+    private const string TOAST_REGION_ID = 'toast-region';
+    private const string SCRIPT_BODY = "<script>alert('x')</script>\nSecond line";
+    private const string EARLIER_BODY = 'The cart total is right again';
+    private const string EDIT_WINDOW_PASSED = 'You can edit a message for 15 minutes after you post it.';
+
+    private KernelBrowser $client;
+
+    /** @var array<string, User> */
+    private array $people;
+
+    private string $shopProject;
+
+    private string $stepId;
+
+    protected function setUp(): void
+    {
+        $this->client = self::createClient([], ['HTTPS' => 'on']);
+        $this->client->disableReboot();
+        $clock = new MockClock(new \DateTimeImmutable(self::NOW));
+        self::getContainer()->set('clock', $clock);
+        new AddTicketEventPartitions($this->migrator(), $clock)();
+        $this->people = $this->createAcmeFoodsPeople();
+        $this->shopProject = $this->addProject($this->shop, 'SHOP', 'Shop');
+        $this->stepId = Uuid::v7()->toRfc4122();
+        $organizationId = $this->acmeFoods->toString();
+        $stepId = $this->stepId;
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'To do', 'todo', 'todo', 'core', 1)",
+            [$organizationId, $stepId],
+        ));
+    }
+
+    protected function tearDown(): void
+    {
+        foreach ($this->createdOrganizationIds as $organizationId) {
+            $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
+                foreach (['cnv_message', 'tkt_ticket_event', 'ins_ticket_turn', 'ins_project_count_ticket', 'ins_project_counts', 'tkt_ticket', 'wf_step', 'wf_rule_set'] as $table) {
+                    $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
+                }
+                $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
+
+                return 0;
+            });
+        }
+        $this->removeCommittedProjects();
+        $this->removeUsersAndOrganizations();
+    }
+
+    #[Test]
+    public function aTicketWithNoMessageShowsTheEmptyThreadAndTheComposer(): void
+    {
+        $this->addTicket();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        $thread = $page->filter('#'.Thread::ID);
+        self::assertCount(1, $thread);
+        self::assertSame('Questions and comments', trim($thread->filter('h2')->text()));
+        self::assertStringContainsString(Thread::EMPTY_THREAD, $thread->text());
+        self::assertSame(self::COMMENT_PATH, $thread->filter('form.thread__composer')->attr('action'));
+        self::assertSame('Write a comment', $thread->filter('form.thread__composer textarea')->attr('placeholder'));
+        self::assertStringContainsString('A comment does not change the status and sends no notification.', $thread->text());
+        self::assertNotNull($thread->filter('.thread__kinds button')->last()->attr('disabled'));
+    }
+
+    /**
+     * Mia is only a viewer of Shop's team, and anyone who may see the ticket may comment. The text comes back escaped,
+     * its line break as a <br>, and the comment writes one CommentPosted to the outbox.
+     */
+    #[Test]
+    public function aViewerPostsACommentAndThePageShowsItsTextEscaped(): void
+    {
+        $this->addTicket();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->client->request('POST', self::COMMENT_PATH, $this->formFields(self::SCRIPT_BODY));
+
+        self::assertSame(ThreadController::COMMENT_ADDED, $this->toastAfterTheRedirect());
+        $html = (string) $this->client->getResponse()->getContent();
+        self::assertStringNotContainsString("<script>alert('x')</script>", $html);
+        self::assertStringContainsString('&lt;script&gt;alert(&#039;x&#039;)&lt;/script&gt;<br />', $html);
+        $message = $this->client->getCrawler()->filter('#'.Thread::ID.' .thread__message');
+        self::assertCount(1, $message);
+        self::assertStringStartsWith('Mia · 6 Nov, 13:00 · comment', trim($message->filter('.thread__meta')->text()));
+        self::assertSame([[self::SCRIPT_BODY, $this->people['Mia']->id()->toString(), null, null]], $this->messageRows());
+        self::assertSame(1, $this->outboxCount());
+    }
+
+    #[Test]
+    public function aTurboCommentAnswersAStreamOfTheThreadAndTheToast(): void
+    {
+        $this->addTicket();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::COMMENT_PATH, $this->formFields('Fixed on staging'), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame(ThreadController::COMMENT_ADDED, $this->toastOf($streams));
+        self::assertSame('Fixed on staging', trim($streams[Thread::ID]->filter('.thread__message .thread__body')->text()));
+        self::assertSame('', $streams[Thread::ID]->filter('form.thread__composer textarea')->text());
+        self::assertCount(1, $this->messageRows());
+    }
+
+    /**
+     * Sara is an Admin with no team role; she may see the team-only ticket, so she may comment on it.
+     */
+    #[Test]
+    public function anAdminWithoutATeamRoleCommentsOnATeamOnlyTicket(): void
+    {
+        $this->addTicket('team');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $this->client->request('POST', self::COMMENT_PATH, $this->formFields('Please check the logs'));
+
+        self::assertSame(ThreadController::COMMENT_ADDED, $this->toastAfterTheRedirect());
+        self::assertSame([['Please check the logs', $this->people['Sara']->id()->toString(), null, null]], $this->messageRows());
+    }
+
+    /**
+     * @return iterable<string, array{string, string}> who posts, and the ticket's visibility
+     */
+    public static function peopleWhoMayNotSeeTheTicket(): iterable
+    {
+        yield 'a manager with no team role, on a team-only ticket' => ['Raj', 'team'];
+        yield 'an admin of another organization, on a ticket for everyone' => ['Ben', 'all'];
+    }
+
+    #[Test]
+    #[DataProvider('peopleWhoMayNotSeeTheTicket')]
+    public function someoneWhoMayNotSeeTheTicketGetsNotFoundToEveryActionAndNothingIsWritten(string $person, string $visibility): void
+    {
+        $this->addTicket($visibility);
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $rowsBefore = $this->messageRows();
+        $this->addBen();
+        $this->logIn($this->client, $this->people[$person]);
+
+        foreach ([self::COMMENT_PATH, $this->messagePath($messageId, 'edit'), $this->messagePath($messageId, 'remove')] as $path) {
+            $this->client->request('POST', $path, $this->formFields('Let me in'));
+            self::assertResponseStatusCodeSame(404, $path);
+            self::assertStringNotContainsString(self::EARLIER_BODY, (string) $this->client->getResponse()->getContent());
+        }
+
+        self::assertSame($rowsBefore, $this->messageRows());
+        self::assertSame(0, $this->outboxCount());
+    }
+
+    #[Test]
+    public function anAnonymousVisitorIsSentToLogInAndNothingIsWritten(): void
+    {
+        $this->addTicket();
+
+        $this->client->request('POST', self::COMMENT_PATH, ['body' => 'Hello']);
+
+        self::assertResponseStatusCodeSame(302);
+        self::assertStringEndsWith('/login', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertSame([], $this->messageRows());
+    }
+
+    /**
+     * @return iterable<string, array{string, string}> the body sent, and the refusal
+     */
+    public static function bodiesOfNoUse(): iterable
+    {
+        yield 'blank' => [" \n ", 'A message needs a body.'];
+        yield 'one character too long' => [str_repeat('é', 10001), 'A message can have at most 10000 characters.'];
+    }
+
+    #[Test]
+    #[DataProvider('bodiesOfNoUse')]
+    public function aBodyOfNoUseIsRefusedWithTheReasonAndNothingIsWritten(string $body, string $expectedToast): void
+    {
+        $this->addTicket();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::COMMENT_PATH, $this->formFields($body), [], self::TURBO_FORM_HEADERS);
+
+        self::assertSame($expectedToast, $this->toastOf($this->streamsOfTheAnswer(422)));
+        self::assertSame([], $this->messageRows());
+        self::assertSame(0, $this->outboxCount());
+    }
+
+    /**
+     * @return iterable<string, array{string}> the token sent
+     */
+    public static function formTokensOfNoUse(): iterable
+    {
+        yield 'missing' => [''];
+        yield 'made up' => ['not-a-token'];
+    }
+
+    #[Test]
+    #[DataProvider('formTokensOfNoUse')]
+    public function aFormTokenOfNoUseIsRefusedAndNothingIsWritten(string $token): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $rowsBefore = $this->messageRows();
+        $this->logIn($this->client, $this->people['Omar']);
+        $fields = [ThreadController::CSRF_FIELD => $token, ThreadController::BODY_FIELD => 'Changed'];
+
+        foreach ([self::COMMENT_PATH, $this->messagePath($messageId, 'edit'), $this->messagePath($messageId, 'remove')] as $path) {
+            $this->client->request('POST', $path, $fields, [], self::TURBO_FORM_HEADERS);
+            self::assertSame(ThreadController::FORM_EXPIRED, $this->toastOf($this->streamsOfTheAnswer(422)), $path);
+        }
+
+        self::assertSame($rowsBefore, $this->messageRows());
+        self::assertSame(0, $this->outboxCount());
+    }
+
+    /**
+     * The window holds up to and including 15 minutes after posting, and the page shows Edit just as long.
+     */
+    #[Test]
+    public function theAuthorEditsWithinFifteenMinutesAndTheMessageIsMarkedEdited(): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:45:00+00');
+        $this->logIn($this->client, $this->people['Omar']);
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Edit', 'Remove'], $this->actionsOn($page));
+
+        $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('The cart total is right on staging'));
+
+        self::assertSame(ThreadController::MESSAGE_EDITED, $this->toastAfterTheRedirect());
+        self::assertSame([['The cart total is right on staging', $this->people['Omar']->id()->toString(), '2026-11-06 12:00:00+00', null]], $this->messageRows());
+        self::assertStringContainsString('· edited', $this->client->getCrawler()->filter('#'.Thread::ID.' .thread__meta')->text());
+    }
+
+    #[Test]
+    public function anEditAfterFifteenMinutesIsRefusedWithTheReasonAndTheBodyIsUnchanged(): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:44:59+00');
+        $rowsBefore = $this->messageRows();
+        $this->logIn($this->client, $this->people['Omar']);
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Remove'], $this->actionsOn($page));
+
+        $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Too late'), [], self::TURBO_FORM_HEADERS);
+
+        self::assertSame(self::EDIT_WINDOW_PASSED, $this->toastOf($this->streamsOfTheAnswer(422)));
+        self::assertSame($rowsBefore, $this->messageRows());
+    }
+
+    /**
+     * Lena leads the team, and still may not edit or remove Omar's message; she is shown no Edit or Remove for it.
+     */
+    #[Test]
+    public function someoneOtherThanTheAuthorIsRefusedAnEditAndARemovalAndNothingChanges(): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $rowsBefore = $this->messageRows();
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([], $this->actionsOn($page));
+
+        $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Lena was here'), [], self::TURBO_FORM_HEADERS);
+        self::assertSame('Only the person who wrote a message can edit it.', $this->toastOf($this->streamsOfTheAnswer(422)));
+        $this->client->request('POST', $this->messagePath($messageId, 'remove'), $this->formFields(''), [], self::TURBO_FORM_HEADERS);
+        self::assertSame('Only the person who wrote a message can remove it.', $this->toastOf($this->streamsOfTheAnswer(422)));
+
+        self::assertSame($rowsBefore, $this->messageRows());
+    }
+
+    /**
+     * FR-CNV-06: removal has no time limit. The removed message keeps its row and its text in the database, and the
+     * page shows "Message removed" in its place, never the text.
+     */
+    #[Test]
+    public function theAuthorRemovesAnOldMessageAndThePageShowsMessageRemovedWithoutItsText(): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-03 09:00:00+00');
+        $this->addMessage('Lena', 'Thanks, closing this', '2026-11-03 10:00:00+00');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', $this->messagePath($messageId, 'remove'), $this->formFields(''));
+
+        self::assertSame(ThreadController::MESSAGE_REMOVED, $this->toastAfterTheRedirect());
+        $html = (string) $this->client->getResponse()->getContent();
+        self::assertStringNotContainsString(self::EARLIER_BODY, $html);
+        $bodies = $this->client->getCrawler()->filter('#'.Thread::ID.' .thread__body')->each(static fn (Crawler $body): string => trim($body->text()));
+        self::assertSame(['Message removed', 'Thanks, closing this'], $bodies);
+        self::assertSame([], $this->actionsOn($this->client->getCrawler()->filter('#'.Thread::ID.' .thread__message')->first()));
+        self::assertSame('2026-11-06 12:00:00+00', $this->messageRows()[0][3]);
+        self::assertSame(self::EARLIER_BODY, $this->messageRows()[0][0]);
+    }
+
+    #[Test]
+    public function aRemovedMessageIsRefusedASecondRemovalAndAnEdit(): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00', '2026-11-06 11:59:30+00');
+        $rowsBefore = $this->messageRows();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', $this->messagePath($messageId, 'remove'), $this->formFields(''), [], self::TURBO_FORM_HEADERS);
+        self::assertSame('This message is already removed.', $this->toastOf($streams = $this->streamsOfTheAnswer(422)));
+        self::assertStringNotContainsString(self::EARLIER_BODY, $streams[Thread::ID]->html());
+        $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Back again'), [], self::TURBO_FORM_HEADERS);
+        self::assertSame('This message was removed, so it cannot be edited.', $this->toastOf($this->streamsOfTheAnswer(422)));
+
+        self::assertSame($rowsBefore, $this->messageRows());
+    }
+
+    /**
+     * @return iterable<string, array{string}> a message id no message of the ticket has
+     */
+    public static function messageIdsOfNoMessage(): iterable
+    {
+        yield 'malformed' => ['not-a-uuid'];
+        yield 'unknown' => ['0197a3c0-0000-7000-8000-00000000dead'];
+    }
+
+    #[Test]
+    #[DataProvider('messageIdsOfNoMessage')]
+    public function aMessageIdOfNoMessageIsNotFound(string $messageId): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $rowsBefore = $this->messageRows();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        foreach (['edit', 'remove'] as $action) {
+            $this->client->request('POST', $this->messagePath($messageId, $action), $this->formFields('Changed'));
+            self::assertResponseStatusCodeSame(404, $action);
+        }
+
+        self::assertSame($rowsBefore, $this->messageRows());
+    }
+
+    /**
+     * @return array<string, string> the thread's form token, then the body
+     */
+    private function formFields(string $body): array
+    {
+        return [
+            ThreadController::CSRF_FIELD => $this->csrfTokenFor($this->client, ThreadController::csrfIdOf(self::KEY)),
+            ThreadController::BODY_FIELD => $body,
+        ];
+    }
+
+    private function messagePath(string $messageId, string $action): string
+    {
+        return '/t/'.self::KEY.'/messages/'.$messageId.'/'.$action;
+    }
+
+    private function addBen(): void
+    {
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->people['Ben'] = $this->createUserWithoutOrganization('Ben');
+        $this->addMembership($this->people['Ben'], $betaBakery);
+        $this->setOrgRoles($this->people['Ben'], $betaBakery, '{admin}');
+    }
+
+    /**
+     * @return list<string> the labels of the Edit and Remove of the messages shown
+     */
+    private function actionsOn(Crawler $page): array
+    {
+        return $page->filter('.thread__edit summary, .thread__remove-form button')->each(static fn (Crawler $action): string => trim($action->text()));
+    }
+
+    private function toastAfterTheRedirect(): string
+    {
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame(self::TICKET_PAGE, $this->client->getResponse()->headers->get('Location'));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $toast = $page->filter('.toast-region [data-toast-message-value]');
+        self::assertCount(1, $toast);
+
+        return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /**
+     * Asserts the answer is a Turbo Stream of the status that replaces the thread and updates the toast region.
+     *
+     * @return array<string, Crawler> each stream's template content by its target
+     */
+    private function streamsOfTheAnswer(int $expectedStatus): array
+    {
+        self::assertResponseStatusCodeSame($expectedStatus);
+        self::assertSame('text/vnd.turbo-stream.html; charset=UTF-8', $this->client->getResponse()->headers->get('Content-Type'));
+        preg_match_all(
+            '#<turbo-stream action="([a-z]+)" target="([a-z-]+)"><template>(.*?)</template></turbo-stream>#s',
+            (string) $this->client->getResponse()->getContent(),
+            $matches,
+            \PREG_SET_ORDER,
+        );
+        self::assertSame(
+            [['replace', Thread::ID], ['update', self::TOAST_REGION_ID]],
+            array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
+        );
+        $streams = [];
+        foreach ($matches as [, , $target, $content]) {
+            $streams[$target] = new Crawler('<!DOCTYPE html><html><body>'.$content.'</body></html>');
+        }
+
+        return $streams;
+    }
+
+    /**
+     * @param array<string, Crawler> $streams
+     */
+    private function toastOf(array $streams): string
+    {
+        $toast = $streams[self::TOAST_REGION_ID]->filter('[data-toast-message-value]');
+        self::assertCount(1, $toast);
+
+        return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /**
+     * SHOP-1, a bug of Shop's team reported by Lena and assigned to Omar, for everyone or for the team only.
+     */
+    private function addTicket(string $visibility = 'all'): void
+    {
+        $parameters = [
+            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), $this->stepId,
+            $this->people['Lena']->id()->toString(), $this->people['Omar']->id()->toString(), $visibility,
+        ];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
+                 step_id, reporter_id, assignee_id, visibility, version, components, check_reasons, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 1, 'SHOP-1', 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, ?, 3, '{}', '{}',
+                 TIMESTAMPTZ '2026-11-04 10:00:00+00', TIMESTAMPTZ '2026-11-05 10:00:00+00')",
+            $parameters,
+        ));
+    }
+
+    /**
+     * A comment on SHOP-1 by the person, removed at $removedAt when given.
+     *
+     * @return string its id
+     */
+    private function addMessage(string $author, string $body, string $createdAt, ?string $removedAt = null): string
+    {
+        $messageId = Uuid::v7()->toRfc4122();
+        $organizationId = $this->acmeFoods->toString();
+        $authorId = $this->people[$author]->id()->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, body, created_at, removed_at)
+             SELECT organization_id, ?, id, ?, 'comment', ?, ?, ? FROM tkt_ticket WHERE organization_id = ? AND key = 'SHOP-1'",
+            [$messageId, $authorId, $body, $createdAt, $removedAt, $organizationId],
+        ));
+
+        return $messageId;
+    }
+
+    /**
+     * Acme Foods' messages, oldest first.
+     *
+     * @return list<array{string, string, string|null, string|null}> body, author id, edited at and removed at (UTC)
+     */
+    private function messageRows(): array
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$rows): int {
+            $migrator->executeStatement("SET LOCAL TIME ZONE 'UTC'");
+            $rows = $migrator->fetchAllNumeric(
+                'SELECT body, author_id::text, edited_at::text, removed_at::text FROM cnv_message WHERE organization_id = ? ORDER BY created_at, id',
+                [$organizationId],
+            );
+
+            return 0;
+        });
+
+        return array_map(static function (array $row): array {
+            [$body, $authorId, $editedAt, $removedAt] = $row;
+            \assert(\is_string($body) && \is_string($authorId) && (null === $editedAt || \is_string($editedAt)) && (null === $removedAt || \is_string($removedAt)));
+
+            return [$body, $authorId, $editedAt, $removedAt];
+        }, $rows);
+    }
+
+    private function outboxCount(): int
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $count = 0;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$count): int {
+            $count = (int) $migrator->fetchOne("SELECT count(*) FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
+
+            return 0;
+        });
+
+        return $count;
+    }
+}
