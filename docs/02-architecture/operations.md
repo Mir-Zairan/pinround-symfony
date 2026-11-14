@@ -150,9 +150,9 @@ Symfony Scheduler, run by the `scheduler` service. Each job is idempotent and us
 | Signed export cleanup | hourly | Remove export files older than 24 h (also a bucket lifecycle rule) |
 | AI budget reset | monthly | Reset per-org monthly AI budgets; send usage summary to admins |
 | Jira reconcile | nightly | Re-fetch tickets updated in Jira since the last webhook to catch missed events |
+| Token expiry notice | daily | Warn users 7 days before a personal access token expires |
 
 Built so far, all daily on the `default` schedule and outside prod only (they need the migrator connection): `AddTicketEventPartitions`, `AddNotificationPartitions` (the current UTC month and three ahead) and `DropExpiredNotificationPartitions` (drops each `ntf_notification_YYYYMM` whose whole UTC month ended at least 90 days ago; the current and later months never).
-| Token expiry notice | daily | Warn users 7 days before a personal access token expires |
 
 ## Capacity alarms
 
