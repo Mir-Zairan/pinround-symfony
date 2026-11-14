@@ -313,7 +313,7 @@ deptrac:
     Conversation_Domain: [SharedKernel]
     Conversation_Application: [Conversation_Domain, Conversation_Api, SharedKernel, Ticketing_Api, Insight_Api, Identity_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
     Conversation_Infrastructure: [Conversation_Domain, Conversation_Application, Conversation_Api, SharedKernel, Vendor, Ticketing_Api, Insight_Api, Identity_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    Conversation_UI: [Conversation_Application, Conversation_Api, SharedKernel, Vendor, Ticketing_Api, Insight_Api, Identity_Api]
+    Conversation_UI: [Conversation_Application, Conversation_Api, SharedKernel, Vendor, Ticketing_Api, Insight_Api, Identity_Api, Organization_Api]
 
     Review_Api: [SharedKernel]
     Review_Event: [SharedKernel]
