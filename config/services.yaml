@@ -315,6 +315,9 @@ when@test:
         test.conversation_withdraw_question:
             alias: App\Conversation\Application\WithdrawQuestion\WithdrawQuestion
             public: true
+        test.conversation_post_reply:
+            alias: App\Conversation\Application\PostReply\PostReply
+            public: true
         test.conversation_resolve_comment:
             alias: App\Conversation\Application\ResolveComment\ResolveComment
             public: true
