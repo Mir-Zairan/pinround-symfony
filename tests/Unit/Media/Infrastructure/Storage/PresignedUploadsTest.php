@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Media\Infrastructure\Storage;
 
+use App\Media\Domain\UploadIntentId;
 use App\Media\Infrastructure\Storage\ObjectStorageSettings;
 use App\Media\Infrastructure\Storage\PresignedUploads;
 use App\Media\Infrastructure\Storage\UploadKey;
@@ -12,7 +13,6 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
-use Symfony\Component\Uid\Uuid;
 
 final class PresignedUploadsTest extends TestCase
 {
@@ -189,7 +189,7 @@ final class PresignedUploadsTest extends TestCase
 
     private static function key(): UploadKey
     {
-        return UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), Uuid::fromString(self::INTENT));
+        return UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), new UploadIntentId(self::INTENT));
     }
 
     /**

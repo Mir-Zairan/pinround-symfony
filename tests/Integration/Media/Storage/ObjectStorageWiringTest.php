@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Media\Storage;
 
+use App\Media\Domain\UploadIntentId;
 use App\Media\Infrastructure\Storage\PresignedUploads;
 use App\Media\Infrastructure\Storage\UploadKey;
 use App\SharedKernel\Domain\OrganizationId;
@@ -72,7 +73,7 @@ final class ObjectStorageWiringTest extends KernelTestCase
 
     private function newKey(): UploadKey
     {
-        return $this->uploadedKey = UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), Uuid::v7());
+        return $this->uploadedKey = UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), new UploadIntentId(Uuid::v7()->toRfc4122()));
     }
 
     private static function presignedUploads(): PresignedUploads

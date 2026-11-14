@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Media\Infrastructure\Storage;
 
+use App\Media\Domain\UploadIntentId;
 use App\SharedKernel\Domain\OrganizationId;
-use Symfony\Component\Uid\Uuid;
 
 /**
  * The bucket key a browser uploads an original to: `uploads/{orgId}/{intentId}` (media-pipeline.md, Storage layout).
@@ -17,9 +17,9 @@ final readonly class UploadKey
     {
     }
 
-    public static function forIntent(OrganizationId $organizationId, Uuid $intentId): self
+    public static function forIntent(OrganizationId $organizationId, UploadIntentId $intentId): self
     {
-        return new self(\sprintf('uploads/%s/%s', $organizationId->toString(), $intentId->toRfc4122()));
+        return new self(\sprintf('uploads/%s/%s', $organizationId->toString(), $intentId->toString()));
     }
 
     public function toString(): string

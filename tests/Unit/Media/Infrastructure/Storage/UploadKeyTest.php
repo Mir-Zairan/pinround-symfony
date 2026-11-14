@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Media\Infrastructure\Storage;
 
+use App\Media\Domain\UploadIntentId;
 use App\Media\Infrastructure\Storage\UploadKey;
 use App\SharedKernel\Domain\OrganizationId;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Uid\Uuid;
 
 final class UploadKeyTest extends TestCase
 {
@@ -19,7 +19,7 @@ final class UploadKeyTest extends TestCase
     #[Test]
     public function itBuildsUploadsSlashOrganizationSlashIntent(): void
     {
-        $key = UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), Uuid::fromString(self::INTENT));
+        $key = UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), new UploadIntentId(self::INTENT));
 
         self::assertSame('uploads/'.self::ORGANIZATION.'/'.self::INTENT, $key->toString());
     }
@@ -29,7 +29,7 @@ final class UploadKeyTest extends TestCase
     {
         $key = UploadKey::forIntent(
             new OrganizationId(strtoupper(self::ORGANIZATION)),
-            Uuid::fromString(strtoupper(self::INTENT)),
+            new UploadIntentId(strtoupper(self::INTENT)),
         );
 
         self::assertSame('uploads/'.self::ORGANIZATION.'/'.self::INTENT, $key->toString());
@@ -40,8 +40,8 @@ final class UploadKeyTest extends TestCase
     {
         $organizationId = new OrganizationId(self::ORGANIZATION);
 
-        $first = UploadKey::forIntent($organizationId, Uuid::fromString(self::INTENT));
-        $second = UploadKey::forIntent($organizationId, Uuid::fromString('0192f3a0-aaaa-7bbb-8ccc-ddddeeee0000'));
+        $first = UploadKey::forIntent($organizationId, new UploadIntentId(self::INTENT));
+        $second = UploadKey::forIntent($organizationId, new UploadIntentId('0192f3a0-aaaa-7bbb-8ccc-ddddeeee0000'));
 
         self::assertNotSame($first->toString(), $second->toString());
     }
@@ -64,23 +64,6 @@ final class UploadKeyTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('canonical UUIDv7');
 
-        UploadKey::forIntent(new OrganizationId($text), Uuid::fromString(self::INTENT));
-    }
-
-    #[Test]
-    public function textThatIsNotAUuidIsRefusedAsTheIntentId(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-
-        UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), Uuid::fromString('../etc/passwd'));
-    }
-
-    #[Test]
-    public function sixteenArbitraryBytesAsTheIntentIdOnlyEverReachTheKeyAsHexDigits(): void
-    {
-        // Uuid::fromString() reads exactly 16 bytes as a binary uuid.
-        $key = UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), Uuid::fromString('../../etc/passwd'));
-
-        self::assertMatchesRegularExpression('~\Auploads/'.self::ORGANIZATION.'/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\z~', $key->toString());
+        UploadKey::forIntent(new OrganizationId($text), new UploadIntentId(self::INTENT));
     }
 }

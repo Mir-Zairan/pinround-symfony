@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Media\Storage;
 
+use App\Media\Domain\UploadIntentId;
 use App\Media\Infrastructure\Storage\ObjectStorageFilesystemFactory;
 use App\Media\Infrastructure\Storage\ObjectStorageSettings;
 use App\Media\Infrastructure\Storage\PresignedPut;
@@ -138,7 +139,7 @@ final class PresignedUploadsMinioTest extends TestCase
 
     private function newKey(): UploadKey
     {
-        $key = UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), Uuid::v7());
+        $key = UploadKey::forIntent(new OrganizationId(self::ORGANIZATION), new UploadIntentId(Uuid::v7()->toRfc4122()));
         $this->uploadedKeys[] = $key;
 
         return $key;
