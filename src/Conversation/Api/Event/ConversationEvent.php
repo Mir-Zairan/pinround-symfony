@@ -15,7 +15,7 @@ interface ConversationEvent
 
     public string $ticketId { get; }
 
-    /** The person who posted, asked, answered, replied or resolved. */
+    /** The person who posted, asked, answered, replied, resolved, edited or removed. */
     public string $actorId { get; }
 
     public \DateTimeImmutable $occurredAt { get; }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Conversation;
 
+use App\Conversation\Api\Event\MessageRemoved;
 use App\Conversation\Api\MessageNotFound;
 use App\Conversation\Api\MessageRemovalRefused;
 use App\Conversation\Application\RemoveMessage\RemoveMessage;
@@ -49,16 +50,18 @@ final class RemoveMessageTest extends KernelTestCase
         $this->threadRows()->addCommentOf(self::ACME_FOODS, self::TICKET, self::LENAS_COMMENT, self::LENA, self::ORIGINAL_BODY, '2027-03-15 10:00:00+00');
         $this->threadRows()->addOpenQuestionOf(self::ACME_FOODS, self::TICKET, self::OPEN_QUESTION, self::LENA, self::OMAR, self::ORIGINAL_BODY, '2027-03-15 10:00:00+00');
         $this->threadRows()->addCommentOf(self::BETA_BAKERY, self::BETA_TICKET, self::BETA_COMMENT, self::LENA, self::ORIGINAL_BODY, '2027-03-15 10:00:00+00');
+        $this->deleteOutboxRowsNaming(self::TICKET);
     }
 
     protected function tearDown(): void
     {
         $this->threadRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->deleteOutboxRowsNaming(self::TICKET);
         parent::tearDown();
     }
 
     #[Test]
-    public function theAuthorRemovesTheirCommentADayLaterAndItKeepsItsBody(): void
+    public function theAuthorRemovesTheirCommentADayLaterAndItKeepsItsBodyWithOneMessageRemovedInTheOutbox(): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->removeMessage()->remove(
             new OrganizationId(self::ACME_FOODS),
@@ -69,15 +72,20 @@ final class RemoveMessageTest extends KernelTestCase
         ));
 
         self::assertSame([self::ORIGINAL_BODY, null, '2027-03-16 09:00:00+00'], $this->messageRowOf(self::ACME_FOODS, self::LENAS_COMMENT));
+        $outboxBodies = $this->outboxBodiesNaming(self::LENAS_COMMENT);
+        self::assertCount(1, $outboxBodies);
+        self::assertStringContainsString(str_replace('\\', '', MessageRemoved::class), str_replace('\\', '', $outboxBodies[0]));
+        self::assertStringContainsString(self::TICKET, $outboxBodies[0]);
     }
 
     #[Test]
-    public function someoneElsesRemovalIsRefusedWithItsReasonAndTheCommentStays(): void
+    public function someoneElsesRemovalIsRefusedWithItsReasonAndTheCommentStaysWithNoOutboxRow(): void
     {
         $refusal = $this->refusalOfRemoval(self::LENAS_COMMENT, self::OMAR, '2027-03-15 10:05:00+00:00');
 
         self::assertSame([MessageRemovalRefused::class, 'Only the person who wrote a message can remove it.'], [$refusal::class, $refusal->getMessage()]);
         self::assertSame(self::UNCHANGED, $this->messageRowOf(self::ACME_FOODS, self::LENAS_COMMENT));
+        self::assertSame([], $this->outboxBodiesNaming(self::TICKET));
     }
 
     #[Test]
@@ -176,6 +184,27 @@ final class RemoveMessageTest extends KernelTestCase
         self::assertIsArray($row, 'The message row is gone.');
 
         return $row;
+    }
+
+    /**
+     * Only the outbox rows naming this test's ids: other tests delete outbox rows at the same time.
+     *
+     * @return list<string>
+     */
+    private function outboxBodiesNaming(string $id): array
+    {
+        $bodies = [];
+        foreach ($this->connection()->fetchFirstColumn("SELECT body FROM messenger_outbox WHERE queue_name = 'outbox' AND body LIKE ? ORDER BY id", ['%'.$id.'%']) as $body) {
+            self::assertIsString($body);
+            $bodies[] = $body;
+        }
+
+        return $bodies;
+    }
+
+    private function deleteOutboxRowsNaming(string $id): void
+    {
+        $this->connection()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND body LIKE ?", ['%'.$id.'%']);
     }
 
     private function removeMessage(): RemoveMessage

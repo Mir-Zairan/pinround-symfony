@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Conversation;
 
+use App\Conversation\Api\Event\MessageEdited;
 use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Api\MessageEditRefused;
 use App\Conversation\Api\MessageNotFound;
@@ -17,6 +18,7 @@ use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
+use App\Tests\Unit\Conversation\Application\RecordingConversationEvents;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -58,6 +60,7 @@ final class EditMessageTest extends KernelTestCase
         $this->threadRows()->addCommentOf(self::ACME_FOODS, self::TICKET, self::REMOVED_COMMENT, self::LENA, self::ORIGINAL_BODY, '2027-03-15 10:00:00+00', '2027-03-15 10:02:00+00');
         $this->threadRows()->addOpenQuestionOf(self::ACME_FOODS, self::TICKET, self::OPEN_QUESTION, self::LENA, self::OMAR, self::ORIGINAL_BODY, '2027-03-15 10:00:00+00');
         $this->threadRows()->addCommentOf(self::BETA_BAKERY, self::BETA_TICKET, self::BETA_COMMENT, self::LENA, self::ORIGINAL_BODY, '2027-03-15 10:00:00+00');
+        $this->deleteOutboxRowsNaming(self::TICKET);
     }
 
     protected function tearDown(): void
@@ -66,11 +69,12 @@ final class EditMessageTest extends KernelTestCase
             $otherSession->getConnection()->close();
         }
         $this->threadRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->deleteOutboxRowsNaming(self::TICKET);
         parent::tearDown();
     }
 
     #[Test]
-    public function theAuthorsEditAtTheLastSecondOfTheFifteenMinutesIsSavedTrimmed(): void
+    public function theAuthorsEditAtTheLastSecondOfTheFifteenMinutesIsSavedTrimmedWithOneMessageEditedInTheOutbox(): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->editMessage()->edit(
             new OrganizationId(self::ACME_FOODS),
@@ -85,6 +89,18 @@ final class EditMessageTest extends KernelTestCase
             ['The button hides on small screens.', '2027-03-15 10:15:00+00', null],
             $this->messageRowOf(self::ACME_FOODS, self::LENAS_COMMENT),
         );
+        $outboxBodies = $this->outboxBodiesNaming(self::LENAS_COMMENT);
+        self::assertCount(1, $outboxBodies);
+        self::assertStringContainsString(str_replace('\\', '', MessageEdited::class), str_replace('\\', '', $outboxBodies[0]));
+        self::assertStringContainsString(self::TICKET, $outboxBodies[0]);
+    }
+
+    #[Test]
+    public function aRefusedEditWritesNoOutboxRow(): void
+    {
+        $this->refusalOfEdit(self::LENAS_COMMENT, self::OMAR, '2027-03-15 10:05:00+00:00');
+
+        self::assertSame([], $this->outboxBodiesNaming(self::TICKET));
     }
 
     #[Test]
@@ -171,7 +187,9 @@ final class EditMessageTest extends KernelTestCase
         $secondSession = SecondSession::besideTheApp($this->entityManager(), $this->tenantContext());
         $this->otherSessions[] = $secondSession->entityManager;
         $secondSessionMessages = new DoctrineMessages($secondSession->entityManager);
-        $editInSecondSession = new EditMessage(new ThreadMessages($secondSessionMessages), $secondSessionMessages);
+        // The app's event bus writes to the outbox through the first session's connection, so the second publishes here.
+        $secondSessionEvents = new RecordingConversationEvents();
+        $editInSecondSession = new EditMessage(new ThreadMessages($secondSessionMessages), $secondSessionMessages, $secondSessionEvents);
         $connection = $this->connection();
 
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
@@ -208,6 +226,11 @@ final class EditMessageTest extends KernelTestCase
 
         self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $sqlStateWhileTheFirstRuns, 'The second edit read the message while the first held it.');
         self::assertSame(['Second edit.', '2027-03-15 10:07:00+00', null], $this->messageRowOf(self::ACME_FOODS, self::LENAS_COMMENT));
+        self::assertEquals(
+            [new MessageEdited(self::ACME_FOODS, self::TICKET, self::LENAS_COMMENT, self::LENA, new \DateTimeImmutable('2027-03-15 10:07:00+00:00'))],
+            $secondSessionEvents->published(),
+            'Only the edit that was saved published.',
+        );
     }
 
     private function refusalOfEdit(string $messageId, string $editorId, string $editedAt, string $body = 'Changed.', string $ticketId = self::TICKET): \Throwable
@@ -249,6 +272,27 @@ final class EditMessageTest extends KernelTestCase
         self::assertIsArray($row, 'The message row is gone.');
 
         return $row;
+    }
+
+    /**
+     * Only the outbox rows naming this test's ids: other tests delete outbox rows at the same time.
+     *
+     * @return list<string>
+     */
+    private function outboxBodiesNaming(string $id): array
+    {
+        $bodies = [];
+        foreach ($this->connection()->fetchFirstColumn("SELECT body FROM messenger_outbox WHERE queue_name = 'outbox' AND body LIKE ? ORDER BY id", ['%'.$id.'%']) as $body) {
+            self::assertIsString($body);
+            $bodies[] = $body;
+        }
+
+        return $bodies;
+    }
+
+    private function deleteOutboxRowsNaming(string $id): void
+    {
+        $this->connection()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND body LIKE ?", ['%'.$id.'%']);
     }
 
     private function editMessage(): EditMessage
