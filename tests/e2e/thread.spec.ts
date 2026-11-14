@@ -10,7 +10,7 @@ const COMMENT_ADDED = 'Comment added.';
 const MESSAGE_EDITED = 'Message edited.';
 const MESSAGE_REMOVED = 'Message removed.';
 const REPLY_ADDED = 'Reply added.';
-const COMMENT_RESOLVED = 'Comment resolved.';
+const COMMENT_RESOLVED = 'Resolved. It folds away for everyone.';
 // Thread::REPLY_PLACEHOLDER, REPLY_NOTE for Omar's message and REPLY_NOTE_ON_YOUR_OWN
 const REPLY_PLACEHOLDER = 'Write a reply';
 const REPLY_NOTE_TO_OMAR = 'Replies stay under this message. Omar gets one notification.';
@@ -317,6 +317,36 @@ test('Cancel closes the Reply box, keeps the text and gives focus back to the Re
     await box.locator(':scope > summary').press('Enter');
     await expect(box.getByLabel(REPLY_PLACEHOLDER)).toBeFocused();
     await expect(box.getByLabel(REPLY_PLACEHOLDER)).toHaveValue(draft);
+  } finally {
+    await omar.context.close();
+  }
+});
+
+test('a refused reply keeps its text in the open Reply box, shows the toast and puts focus back in the text', async ({ browser }) => {
+  const key = await makeTicketForOmar(browser, `Search shows sold-out items ${randomUUID().slice(0, 8)}`);
+  const comment = `Only for the shoe category ${randomUUID().slice(0, 8)}`;
+  const draft = `Also for bags ${randomUUID().slice(0, 8)}`;
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  try {
+    await openThread(omar.page, key);
+    await postComment(omar.page, comment);
+    const box = replyBox(omar.page, comment);
+    await box.locator(':scope > summary').click();
+    // An expired form is the refusal a browser can cause; tests/Functional/Conversation covers the others.
+    await box.locator('input[name="_csrf_token"]').evaluate((input) => {
+      (input as HTMLInputElement).value = 'expired';
+    });
+    await box.getByLabel(REPLY_PLACEHOLDER).fill(draft);
+    const answer = omar.page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/replies') && response.request().method() === 'POST');
+
+    await box.getByRole('button', { name: 'Reply', exact: true }).click();
+
+    expect((await answer).status()).toBe(422);
+    await expect(omar.page.locator(TOAST_REGION)).toHaveText(FORM_EXPIRED);
+    await expect(box).toHaveAttribute('open');
+    await expect(box.getByLabel(REPLY_PLACEHOLDER)).toHaveValue(draft);
+    await expect(box.getByLabel(REPLY_PLACEHOLDER)).toBeFocused();
+    await expect(messageWithText(omar.page, comment).locator('.thread__reply')).toHaveCount(0);
   } finally {
     await omar.context.close();
   }
