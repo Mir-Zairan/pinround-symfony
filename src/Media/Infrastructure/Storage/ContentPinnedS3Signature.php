@@ -13,7 +13,7 @@ use Aws\Signature\S3SignatureV4;
 final class ContentPinnedS3Signature extends S3SignatureV4
 {
     /**
-     * @return array<string, true>
+     * @return array<mixed>
      */
     #[\Override]
     protected function getHeaderBlacklist(): array
@@ -25,7 +25,7 @@ final class ContentPinnedS3Signature extends S3SignatureV4
     }
 
     /**
-     * @return array<string, true>
+     * @return array<mixed>
      */
     #[\Override]
     protected function getPresignHeaderDenyList(): array
