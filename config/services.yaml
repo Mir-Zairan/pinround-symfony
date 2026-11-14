@@ -304,6 +304,17 @@ when@test:
         test.conversation_remove_message:
             alias: App\Conversation\Application\RemoveMessage\RemoveMessage
             public: true
+        # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
+        # get the use cases as a controller would.
+        test.conversation_ask_question:
+            alias: App\Conversation\Application\AskQuestion\AskQuestion
+            public: true
+        test.conversation_answer:
+            alias: App\Conversation\Application\Answer\Answer
+            public: true
+        test.conversation_withdraw_question:
+            alias: App\Conversation\Application\WithdrawQuestion\WithdrawQuestion
+            public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
         tracing.in_memory_exporter:
