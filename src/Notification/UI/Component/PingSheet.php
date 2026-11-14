@@ -7,7 +7,6 @@ namespace App\Notification\UI\Component;
 use App\Notification\UI\Controller\PingController;
 use App\Notification\UI\PingedState;
 use App\Organization\Api\CurrentActor;
-use App\Organization\Api\PingSettingsQueries;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use Psr\Clock\ClockInterface;
@@ -64,7 +63,6 @@ final class PingSheet
 
     public function __construct(
         private readonly PingedState $pingedState,
-        private readonly PingSettingsQueries $pingSettingsQueries,
         private readonly CurrentActor $currentActor,
         private readonly Security $security,
         private readonly ClockInterface $clock,
@@ -74,10 +72,10 @@ final class PingSheet
     /**
      * Reads the viewer's held ping slots for all People rows once per request and ticket, through PingedState, so a
      * page of many rows asks the ping window once; a row missing from peopleUserIds is asked along with them. The
-     * ping limit comes from the settings the ticket page and the move's stream answer already read in their
-     * transaction, so neither costs a query.
+     * ping limit comes through PingedState too, once per request, in a transaction of its own when none is open.
      *
-     * @throws \LogicException when the stored ping limit is not one of 1, 4, 8 or 24, or a slot is unreadable
+     * @throws \LogicException when the stored ping limit is not one of 1, 4, 8 or 24, a slot is unreadable, or no
+     *                         transaction is open and the request has no tenant
      */
     #[PostMount]
     public function readPingedState(): void
@@ -98,7 +96,7 @@ final class PingSheet
         }
         $heldUntilById = $this->pingedState->heldUntilOf($actor->organizationId(), $actor->userId(), new TicketId($this->ticketId), $recipientIds);
         $againAt = $heldUntilById[new UserId($this->toUserId)->toString()] ?? null;
-        $this->limitHours = $this->pingSettingsQueries->pingLimitHoursOf($actor->organizationId());
+        $this->limitHours = $this->pingedState->pingLimitHoursOf($actor->organizationId());
         $this->againIn = null === $againAt ? null : PingedState::againInOf($againAt, $this->clock->now());
         $this->isShown = true;
     }

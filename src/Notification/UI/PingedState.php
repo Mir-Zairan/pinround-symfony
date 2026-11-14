@@ -6,15 +6,19 @@ namespace App\Notification\UI;
 
 use App\Notification\Api\PingsPaused;
 use App\Notification\Application\Ping\PingWindow;
+use App\Organization\Api\PingSettingsQueries;
+use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use Doctrine\DBAL\Connection;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * Whom the current person may not ping again yet about a ticket, read from the ping window once per request, ticket and
- * People rows for every row of the ticket page's People, so the page shows what a POST would refuse, with no SQL. Kept
- * until the kernel resets it between requests (ADR-0008).
+ * People rows for every row of the ticket page's People, so the page shows what a POST would refuse, with no SQL; and the
+ * organization's ping limit for the sheet's note, read once per request. Kept until the kernel resets it between
+ * requests (ADR-0008).
  *
  * The wait is shown relative ("again in 3 h"), as Notification's UI may not read the person's time zone from Identity.
  */
@@ -23,8 +27,15 @@ final class PingedState implements ResetInterface
     /** @var array<string, array<string, \DateTimeImmutable>> by organization, sender, ticket and sorted recipients */
     private array $heldUntilByKey = [];
 
-    public function __construct(private readonly PingWindow $pingWindow)
-    {
+    /** @var array<string, 1|4|8|24> by organization */
+    private array $pingLimitHoursByOrganization = [];
+
+    public function __construct(
+        private readonly PingWindow $pingWindow,
+        private readonly PingSettingsQueries $pingSettingsQueries,
+        private readonly Transactions $transactions,
+        private readonly Connection $connection,
+    ) {
     }
 
     /**
@@ -70,10 +81,28 @@ final class PingedState implements ResetInterface
     }
 
     /**
-     * Forgets the slots read, after a ping is sent in this request too, so the next read sees it.
+     * The organization's ping limit, 1, 4, 8 or 24 hours. The settings are read under row-level security, which with no
+     * tenant set shows the 4-hour default, so when no transaction is open, as in a move's stream answer rendered after
+     * the move's transaction ended, the read runs in a transaction of its own; inside an open one it reads there.
+     *
+     * @return 1|4|8|24
+     *
+     * @throws \LogicException when the stored ping limit is not one of 1, 4, 8 or 24, or no transaction is open and
+     *                         the request has no tenant
+     */
+    public function pingLimitHoursOf(OrganizationId $organizationId): int
+    {
+        $read = fn (): int => $this->pingSettingsQueries->pingLimitHoursOf($organizationId);
+
+        return $this->pingLimitHoursByOrganization[$organizationId->toString()] ??= $this->connection->isTransactionActive() ? $read() : $this->transactions->run($read);
+    }
+
+    /**
+     * Forgets the slots and limits read, after a ping is sent in this request too, so the next read sees it.
      */
     public function reset(): void
     {
         $this->heldUntilByKey = [];
+        $this->pingLimitHoursByOrganization = [];
     }
 }

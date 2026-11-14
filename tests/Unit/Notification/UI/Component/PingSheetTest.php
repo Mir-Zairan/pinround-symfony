@@ -12,10 +12,12 @@ use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\PingSettingsQueries;
 use App\Organization\Api\Roles;
+use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Notification\Application\Ping\InMemoryPingWindow;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -145,7 +147,7 @@ final class PingSheetTest extends TestCase
     }
 
     /**
-     * As Omar of Acme Foods, whose ping limit is 8 hours (any other organization's would be 24).
+     * As Omar of Acme Foods.
      *
      * @param list<string> $peopleUserIds
      */
@@ -153,10 +155,8 @@ final class PingSheetTest extends TestCase
     {
         $currentActor = self::createStub(CurrentActor::class);
         $currentActor->method('actorFor')->willReturn($hasActor ? new ActorContext(new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS), Roles::none()) : null);
-        $pingSettingsQueries = self::createStub(PingSettingsQueries::class);
-        $pingSettingsQueries->method('pingLimitHoursOf')->willReturnCallback(static fn (OrganizationId $organizationId): int => self::ACME_FOODS === $organizationId->toString() ? 8 : 24);
 
-        $sheet = new PingSheet($pingedState, $pingSettingsQueries, $currentActor, self::createStub(Security::class), $clock);
+        $sheet = new PingSheet($pingedState, $currentActor, self::createStub(Security::class), $clock);
         $sheet->ticketId = self::SHOP_1;
         $sheet->ticketKey = 'SHOP-1';
         $sheet->toUserId = $toUserId;
@@ -169,10 +169,16 @@ final class PingSheetTest extends TestCase
     }
 
     /**
-     * Over the in-memory window, recording the recipients of each read that reaches it.
+     * Over the in-memory window, recording the recipients of each read that reaches it, inside an open transaction
+     * where Omar's Acme Foods waits 8 hours (any other organization would wait 24).
      */
     private function pingedState(): PingedState
     {
+        $pingSettingsQueries = self::createStub(PingSettingsQueries::class);
+        $pingSettingsQueries->method('pingLimitHoursOf')->willReturnCallback(static fn (OrganizationId $organizationId): int => self::ACME_FOODS === $organizationId->toString() ? 8 : 24);
+        $connection = self::createStub(Connection::class);
+        $connection->method('isTransactionActive')->willReturn(true);
+
         return new PingedState(new class($this->pingWindow, $this) implements PingWindow {
             public function __construct(private readonly InMemoryPingWindow $window, private readonly PingSheetTest $test)
             {
@@ -194,7 +200,7 @@ final class PingSheetTest extends TestCase
 
                 return $this->window->heldUntilOf($organizationId, $fromUserId, $toUserIds, $ticketId);
             }
-        });
+        }, $pingSettingsQueries, self::createStub(Transactions::class), $connection);
     }
 
     /**

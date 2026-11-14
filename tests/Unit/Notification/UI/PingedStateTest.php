@@ -7,10 +7,13 @@ namespace App\Tests\Unit\Notification\UI;
 use App\Notification\Application\Ping\PingWindow;
 use App\Notification\Domain\PingId;
 use App\Notification\UI\PingedState;
+use App\Organization\Api\PingSettingsQueries;
+use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Notification\Application\Ping\InMemoryPingWindow;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -31,6 +34,13 @@ final class PingedStateTest extends TestCase
 
     /** @var list<array{string, string, string, list<string>}> organization, sender, ticket and recipients, per read */
     private array $reads = [];
+
+    private bool $isTransactionOpen = false;
+
+    private int $transactionsRun = 0;
+
+    /** @var list<string> the organization of each ping limit read that reached the settings */
+    private array $pingLimitReads = [];
 
     protected function setUp(): void
     {
@@ -140,6 +150,58 @@ final class PingedStateTest extends TestCase
         self::assertSame(1, $this->pingWindow->heldSlotCount());
     }
 
+    #[Test]
+    public function withNoTransactionOpenThePingLimitIsReadInATransactionOfItsOwn(): void
+    {
+        $pingLimitHours = $this->pingedState()->pingLimitHoursOf(new OrganizationId(self::ACME_FOODS));
+
+        self::assertSame(8, $pingLimitHours);
+        self::assertSame(1, $this->transactionsRun);
+        self::assertFalse($this->isTransactionOpen);
+    }
+
+    #[Test]
+    public function insideAnOpenTransactionThePingLimitIsReadThere(): void
+    {
+        $this->isTransactionOpen = true;
+
+        $pingLimitHours = $this->pingedState()->pingLimitHoursOf(new OrganizationId(self::ACME_FOODS));
+
+        self::assertSame(8, $pingLimitHours);
+        self::assertSame(0, $this->transactionsRun);
+    }
+
+    #[Test]
+    public function thePingLimitIsReadOncePerRequestAndOrganizationUntilAReset(): void
+    {
+        $pingedState = $this->pingedState();
+
+        $acmeFirst = $pingedState->pingLimitHoursOf(new OrganizationId(self::ACME_FOODS));
+        $acmeAgain = $pingedState->pingLimitHoursOf(new OrganizationId(self::ACME_FOODS));
+        $betaBakery = $pingedState->pingLimitHoursOf(new OrganizationId(self::BETA_BAKERY));
+        $pingedState->reset();
+        $acmeAfterReset = $pingedState->pingLimitHoursOf(new OrganizationId(self::ACME_FOODS));
+
+        self::assertSame([8, 8, 24, 8], [$acmeFirst, $acmeAgain, $betaBakery, $acmeAfterReset]);
+        self::assertSame([self::ACME_FOODS, self::BETA_BAKERY, self::ACME_FOODS], $this->pingLimitReads);
+        self::assertSame(3, $this->transactionsRun);
+    }
+
+    #[Test]
+    public function withNoTenantThePingLimitIsRefusedRatherThanReadAsTheDefault(): void
+    {
+        $pingedState = $this->pingedState(hasTenant: false);
+
+        try {
+            $pingedState->pingLimitHoursOf(new OrganizationId(self::ACME_FOODS));
+            self::fail('With no tenant the ping limit must not be read.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('A transaction of its own needs the request\'s tenant.', $refusal->getMessage());
+        }
+
+        self::assertSame([], $this->pingLimitReads);
+    }
+
     private function takeSlot(string $organization, string $from, string $to, string $ticket, int $hours): void
     {
         $this->pingWindow->take(new OrganizationId($organization), new UserId($from), new UserId($to), new TicketId($ticket), new PingId('0197a3c0-0000-7000-8000-0000000c5199'), $hours, new \DateTimeImmutable(self::NOW));
@@ -161,10 +223,40 @@ final class PingedStateTest extends TestCase
     }
 
     /**
-     * Over the in-memory window, recording each read that reaches it.
+     * Over the in-memory window, recording each read that reaches it. The settings answer as row-level security does:
+     * Acme Foods' 8 hours or Beta Bakery's 24 only inside a transaction, else the 4-hour default. The transactions
+     * refuse, as DoctrineTransactions does, with no tenant or inside an open transaction.
      */
-    private function pingedState(): PingedState
+    private function pingedState(bool $hasTenant = true): PingedState
     {
+        $pingSettingsQueries = self::createStub(PingSettingsQueries::class);
+        $pingSettingsQueries->method('pingLimitHoursOf')->willReturnCallback(function (OrganizationId $organizationId): int {
+            $this->pingLimitReads[] = $organizationId->toString();
+            if (!$this->isTransactionOpen) {
+                return 4;
+            }
+
+            return self::ACME_FOODS === $organizationId->toString() ? 8 : 24;
+        });
+        $transactions = self::createStub(Transactions::class);
+        $transactions->method('run')->willReturnCallback(function (\Closure $read) use ($hasTenant): mixed {
+            if (!$hasTenant) {
+                throw new \LogicException('A transaction of its own needs the request\'s tenant.');
+            }
+            if ($this->isTransactionOpen) {
+                throw new \LogicException('A transaction of its own must not run inside another transaction.');
+            }
+            ++$this->transactionsRun;
+            $this->isTransactionOpen = true;
+            try {
+                return $read();
+            } finally {
+                $this->isTransactionOpen = false;
+            }
+        });
+        $connection = self::createStub(Connection::class);
+        $connection->method('isTransactionActive')->willReturnCallback(fn (): bool => $this->isTransactionOpen);
+
         return new PingedState(new class($this->pingWindow, $this) implements PingWindow {
             public function __construct(private readonly InMemoryPingWindow $window, private readonly PingedStateTest $test)
             {
@@ -186,7 +278,7 @@ final class PingedStateTest extends TestCase
 
                 return $this->window->heldUntilOf($organizationId, $fromUserId, $toUserIds, $ticketId);
             }
-        });
+        }, $pingSettingsQueries, $transactions, $connection);
     }
 
     /**
