@@ -1,0 +1,21 @@
+{#- A non-modal popover, not a menu: it holds cards with forms, all in the Tab order. "bell" opens and closes it, and
+    reloads the frame on each open so the cards are never older than the badge. -#}
+{% if this.openCount is not null %}
+    <div{{ attributes.defaults({class: 'bell'}) }} {{ stimulus_controller('bell') }}
+        data-action="focusout->bell#closeOnFocusLeave turbo:before-stream-render@document->bell#keepFocusAfterStream">
+        <button type="button" class="icon-btn bell__trigger" aria-label="Pings" aria-describedby="bell-badge" aria-expanded="false" aria-controls="bell-popover"
+            {{ stimulus_target('bell', 'trigger') }} data-action="bell#toggle keydown->bell#triggerKey click@window->bell#closeOnOutsideClick">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+            </svg>
+            {{- include('@Notification/_bell_badge.html.twig', {openCount: this.openCount}) -}}
+        </button>
+        <div id="bell-popover" class="bell__popover" role="dialog" aria-labelledby="bell-popover-title" tabindex="-1" hidden
+            {{ stimulus_target('bell', 'popover') }} data-action="keydown->bell#closeOnEscape">
+            <turbo-frame id="{{ this.frameId }}" src="{{ path(this.frameRoute) }}" loading="lazy" {{ stimulus_target('bell', 'frame') }}>
+                <p class="bell-popover__loading">Loading pings…</p>
+            </turbo-frame>
+        </div>
+    </div>
+{% endif %}

@@ -1,0 +1,17 @@
+{#- "A ping clears itself when you act on that ticket." joins the muted line once P04.T6 clears pings on an action. -#}
+<div id="{{ constant('App\\Notification\\UI\\Component\\BellPopover::ROOT_ID') }}" class="bell-popover">
+    <div class="bell-popover__head">
+        <h2 id="bell-popover-title" class="bell-popover__title">Pings · {{ this.bell.openCount }} open</h2>
+        <button type="button" class="btn btn-text btn-sm" data-action="bell#closeToTrigger">Close</button>
+    </div>
+    <p class="bell-popover__muted">Grouped by person and ticket.</p>
+    {% if this.bell.groups is empty %}
+        <p class="bell-popover__empty">No open pings.</p>
+    {% else %}
+        <ul class="bell-popover__groups">
+            {% for group in this.bell.groups %}
+                <li><twig:PingCard :group="group"/></li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+</div>
