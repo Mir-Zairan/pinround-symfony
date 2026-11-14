@@ -80,6 +80,14 @@ final class InMemoryMessages implements Messages
         return $this->savedIds;
     }
 
+    /**
+     * @return list<string> ids of the messages stored, in the order they were added
+     */
+    public function storedIds(): array
+    {
+        return array_values(array_map(static fn (Message $message): string => $message->id()->toString(), $this->stored));
+    }
+
     private static function keyOf(OrganizationId $organizationId, MessageId $id): string
     {
         return $organizationId->toString().'/'.$id->toString();

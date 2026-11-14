@@ -38,6 +38,9 @@ final class AskQuestionTest extends TestCase
     private const string ASKED_AT = '2027-03-15 10:20:00+00:00';
 
     private InMemoryPingClearing $pingClearing;
+    private InMemoryTicketPauses $ticketPauses;
+    private InMemoryMessages $messages;
+    private RecordingConversationEvents $conversationEvents;
     private AskQuestion $askQuestion;
 
     protected function setUp(): void
@@ -49,12 +52,15 @@ final class AskQuestionTest extends TestCase
         $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::TICKET), new UserId(self::OMAR), 2);
         $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::OTHER_TICKET), new UserId(self::OMAR), 4);
         $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::TICKET), new UserId(self::LENA), 1);
+        $this->ticketPauses = new InMemoryTicketPauses([self::TICKET, self::OTHER_TICKET]);
+        $this->messages = new InMemoryMessages();
+        $this->conversationEvents = new RecordingConversationEvents();
         $this->askQuestion = new AskQuestion(
             new VisibleTickets(self::everyoneSeesTicketsForEveryone(), $tenantContext),
-            new InMemoryTicketPauses([self::TICKET, self::OTHER_TICKET]),
+            $this->ticketPauses,
             new TurnProjectorWithoutNotes(),
-            new InMemoryMessages(),
-            new RecordingConversationEvents(),
+            $this->messages,
+            $this->conversationEvents,
             $this->pingClearing,
         );
     }
@@ -68,6 +74,7 @@ final class AskQuestionTest extends TestCase
 
         self::assertSame(2, $question->clearedPingCount);
         self::assertEquals([[self::ACME_FOODS, self::TICKET, self::OMAR, $askedAt]], $this->pingClearing->calls());
+        self::assertSame([self::TICKET], $this->ticketPauses->pausedTicketIds());
     }
 
     #[Test]
@@ -84,6 +91,9 @@ final class AskQuestionTest extends TestCase
         }
 
         self::assertEquals([[self::ACME_FOODS, self::TICKET, self::LENA, $lenaAskedAt]], $this->pingClearing->calls());
+        self::assertCount(1, $this->messages->storedIds(), 'only the first question is saved');
+        self::assertCount(1, $this->conversationEvents->published(), 'only the first question is announced');
+        self::assertSame([self::TICKET], $this->ticketPauses->pausedTicketIds());
     }
 
     #[Test]
@@ -98,6 +108,9 @@ final class AskQuestionTest extends TestCase
         }
 
         self::assertSame([], $this->pingClearing->calls());
+        self::assertSame([], $this->messages->storedIds());
+        self::assertSame([], $this->conversationEvents->published());
+        self::assertSame([], $this->ticketPauses->pausedTicketIds());
     }
 
     private static function ticketForEveryone(): TicketVisibilityFacts

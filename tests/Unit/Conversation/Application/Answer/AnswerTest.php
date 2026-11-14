@@ -38,6 +38,10 @@ final class AnswerTest extends TestCase
     private const string ANSWERED_AT = '2027-03-15 10:20:00+00:00';
 
     private InMemoryPingClearing $pingClearing;
+    private InMemoryTicketPauses $ticketPauses;
+    private InMemoryMessages $messages;
+    private InMemoryReplies $replies;
+    private RecordingConversationEvents $conversationEvents;
     private Answer $answer;
 
     protected function setUp(): void
@@ -45,6 +49,7 @@ final class AnswerTest extends TestCase
         $acmeFoods = new OrganizationId(self::ACME_FOODS);
         $askedAt = new \DateTimeImmutable(self::ASKED_AT);
         $messages = new InMemoryMessages();
+        $this->messages = $messages;
         $withdrawnQuestion = Message::question(new MessageId(self::WITHDRAWN_QUESTION_TO_OMAR), $acmeFoods, new TicketId(self::TICKET), new UserId(self::LENA), new UserId(self::OMAR), 'Which phone?', $askedAt);
         $withdrawnQuestion->withdraw(new UserId(self::LENA), $askedAt->modify('+1 minute'));
         $messages->add($withdrawnQuestion);
@@ -53,13 +58,16 @@ final class AnswerTest extends TestCase
         $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::TICKET), new UserId(self::OMAR), 2);
         $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::OTHER_TICKET), new UserId(self::OMAR), 4);
         $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::TICKET), new UserId(self::LENA), 1);
+        $this->replies = new InMemoryReplies();
+        $this->ticketPauses = new InMemoryTicketPauses([self::TICKET, self::OTHER_TICKET], [self::TICKET]);
+        $this->conversationEvents = new RecordingConversationEvents();
         $this->answer = new Answer(
             new ThreadMessages($messages),
             $messages,
-            new InMemoryReplies(),
-            new InMemoryTicketPauses([self::TICKET, self::OTHER_TICKET], [self::TICKET]),
+            $this->replies,
+            $this->ticketPauses,
             new TurnProjectorWithoutNotes(),
-            new RecordingConversationEvents(),
+            $this->conversationEvents,
             $this->pingClearing,
         );
     }
@@ -73,6 +81,7 @@ final class AnswerTest extends TestCase
 
         self::assertSame(2, $answerReply->clearedPingCount);
         self::assertEquals([[self::ACME_FOODS, self::TICKET, self::OMAR, $answeredAt]], $this->pingClearing->calls());
+        self::assertSame([], $this->ticketPauses->pausedTicketIds(), 'the answer ends the pause');
     }
 
     #[Test]
@@ -86,5 +95,9 @@ final class AnswerTest extends TestCase
         }
 
         self::assertSame([], $this->pingClearing->calls());
+        self::assertSame([], $this->replies->added());
+        self::assertSame([], $this->messages->savedIds());
+        self::assertSame([], $this->conversationEvents->published());
+        self::assertSame([self::TICKET], $this->ticketPauses->pausedTicketIds(), 'the open question still pauses the ticket');
     }
 }

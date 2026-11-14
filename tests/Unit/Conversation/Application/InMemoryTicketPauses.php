@@ -58,6 +58,14 @@ final class InMemoryTicketPauses implements TicketPauses
         $this->isPausedByTicketId[$ticketId->toString()] = false;
     }
 
+    /**
+     * @return list<string> ids of the tickets a question pauses, in the order the tickets were given
+     */
+    public function pausedTicketIds(): array
+    {
+        return array_keys(array_filter($this->isPausedByTicketId));
+    }
+
     private function isPaused(TicketId $ticketId): bool
     {
         return $this->isPausedByTicketId[$ticketId->toString()]
