@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Conversation\Api\ConversationPermission;
+use App\Notification\Api\PingPermission;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamPermission;
@@ -62,6 +63,8 @@ $teamOnlyTickets = 'visible to members of the ticket\'s team, to admins, and to 
 $triagerOfANoTeamTicket = 'and to the triager while it has no team';
 $managersOutsideTheTeam = 'Not to managers outside the team.';
 $commentAndReply = '| Comment, reply |';
+$pingAPerson = '| Ping a person | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
+$adminPings = 'An admin with no team role may see every ticket in the org (including team-only ones), comment, ask questions and ping';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
 return [
@@ -280,4 +283,12 @@ return [
     ['source' => $triagerOfANoTeamTicket, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Noor', 'subject' => 'Team-only ticket with no team', 'expected' => 'granted'],
     ['source' => $managersOutsideTheTeam, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Raj', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Mia', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $adminPings, 'attribute' => PingPermission::SEND, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $teamOnlyTickets, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+    ['source' => $managersOutsideTheTeam, 'attribute' => PingPermission::SEND, 'actor' => 'Raj', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => PingPermission::SEND, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
 ];
