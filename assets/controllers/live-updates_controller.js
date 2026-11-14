@@ -14,14 +14,31 @@ const FIRST_REOPEN_AFTER_MS = 5000;
 const MAX_REOPEN_AFTER_MS = 60 * 1000;
 // RefreshTicketPagesHandler::SIGNAL_TYPE.
 const SIGNAL_TYPE = 'refresh';
+// Marks what a signal fetches again: a turbo-frame with a src reloads; any other element with an id is swapped for the
+// element of the same id in the page fetched again.
+const REFRESHED_PARTS = '[data-live-refresh]';
+const FORM_FIELDS = 'input, textarea, select';
+
+// A frame with an open dialog, or with a field being typed in outside a data-turbo-permanent element (which a frame
+// reload keeps), waits for the next signal rather than lose the text.
+function isFrameInUse(frame) {
+  const focused = document.activeElement;
+  const isTyping = focused !== null && frame.contains(focused) && focused.matches(FORM_FIELDS) && focused.closest('[data-turbo-permanent]') === null;
+  return isTyping || frame.querySelector('dialog[open]') !== null;
+}
+
+// A swapped part loses its focus and open dialogs, so a part that holds either waits for the next signal.
+function isPartInUse(part) {
+  return part.contains(document.activeElement) || part.querySelector('dialog[open]') !== null;
+}
 
 // Follows the live updates of a page (realtime-and-notifications.md): asks POST /realtime/token for the subscriber
 // cookie first, as the page sets none, then opens the hub's stream. A refresh signal carries no content, so on one the
-// page fetches itself again with the viewer's own session: the frame named by the frame value, or else the whole page
-// through Turbo. Signals that come while the tab is hidden are remembered and fetched once when it is shown again.
+// page fetches again, with the viewer's own session, what carries data-live-refresh, or else the whole page through
+// Turbo. Signals that come while the tab is hidden are remembered and fetched once when it is shown again.
 export default class extends Controller {
   static targets = ['paused', 'reload'];
-  static values = { subscribeUrl: String, tokenUrl: String, ticketIds: Array, frame: String };
+  static values = { subscribeUrl: String, tokenUrl: String, ticketIds: Array };
 
   #source = null;
   #renewTimer = null;
@@ -140,11 +157,42 @@ export default class extends Controller {
       return;
     }
     this.#isSignalMissed = false;
-    const frame = this.frameValue === '' ? null : document.getElementById(this.frameValue);
-    if (frame !== null && typeof frame.reload === 'function') {
-      frame.reload();
-    } else {
+    const parts = [...document.querySelectorAll(REFRESHED_PARTS)];
+    if (parts.length === 0) {
       visit(window.location.href, { action: 'replace' });
+      return;
     }
+    parts
+      .filter((part) => part.localName === 'turbo-frame' && part.src && !isFrameInUse(part))
+      .forEach((frame) => frame.reload());
+    const pageParts = parts.filter((part) => part.localName !== 'turbo-frame' && part.id !== '');
+    if (pageParts.length > 0) {
+      this.#swapPageParts(pageParts);
+    }
+  }
+
+  async #swapPageParts(parts) {
+    let response;
+    try {
+      response = await fetch(window.location.href, { headers: { Accept: 'text/html' }, credentials: 'same-origin' });
+    } catch {
+      return;
+    }
+    // A session that ended redirects to the login page, and a ticket the viewer may no longer see answers 404: load
+    // that page for real. Any other failure keeps the page as it is until the next signal.
+    if (response.redirected || response.status === 404) {
+      window.location.assign(response.url);
+      return;
+    }
+    if (!response.ok) {
+      return;
+    }
+    const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+    parts.forEach((part) => {
+      const freshPart = page.getElementById(part.id);
+      if (freshPart !== null && part.isConnected && !isPartInUse(part)) {
+        part.replaceWith(document.importNode(freshPart, true));
+      }
+    });
   }
 }

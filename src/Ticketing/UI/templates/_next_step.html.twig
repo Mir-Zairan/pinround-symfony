@@ -1,5 +1,5 @@
 {# The Your next step box, from TicketPageParts: the page renders it, and a move's Turbo Stream answer replaces it. #}
-<div id="{{ constant('App\\Ticketing\\UI\\TicketPageParts::NEXT_STEP_ID') }}" class="ticket__next-step">
+<div id="{{ constant('App\\Ticketing\\UI\\TicketPageParts::NEXT_STEP_ID') }}" class="ticket__next-step" data-live-refresh>
     {% if nextStep is not null %}
         <twig:NextStepBox ticketKey="{{ ticket.key }}" :version="ticket.version" :nextStep="nextStep"
             teamId="{{ ticket.visibilityFacts.teamId is null ? '' : ticket.visibilityFacts.teamId.toString }}"

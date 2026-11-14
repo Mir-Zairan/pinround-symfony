@@ -1,7 +1,7 @@
 {% set threadPath = path(constant('App\\Conversation\\UI\\ThreadController::THREAD_ROUTE'), {key: key}) %}
 <section{{ attributes.defaults({class: 'ticket__section thread', 'aria-labelledby': 'ticket-thread-heading'}) }}>
     <h2 id="ticket-thread-heading" class="ticket__section-title">Questions and comments</h2>
-    <turbo-frame id="{{ constant('App\\Conversation\\UI\\Component\\Thread::FRAME_ID') }}" src="{{ threadPath }}" loading="lazy">
+    <turbo-frame id="{{ constant('App\\Conversation\\UI\\Component\\Thread::FRAME_ID') }}" src="{{ threadPath }}" loading="lazy" data-live-refresh>
         <a href="{{ threadPath }}" class="thread__show">{{ constant('App\\Conversation\\UI\\Component\\ThreadFrame::SHOW_THREAD') }}</a>
     </turbo-frame>
 </section>

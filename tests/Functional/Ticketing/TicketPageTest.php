@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Ticketing;
 
+use App\Conversation\UI\Component\Thread;
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -327,6 +328,46 @@ final class TicketPageTest extends WebTestCase
         $this->client->request('GET', '/t/'.$key);
 
         $this->assertNotFoundWithNoWordOfTheTicket();
+    }
+
+    /**
+     * The page follows its own ticket's topic and no other ticket's, and marks what a refresh signal fetches again: the
+     * header's state, the thread's frame, the next step box, People and What happened.
+     */
+    #[Test]
+    public function aMemberFollowsTheLiveUpdatesOfThisTicketOnly(): void
+    {
+        $otherKey = $this->addTicket('Add a gift note');
+        $key = $this->addTicket('Search shows no results');
+        $ticketId = $this->ticketIdOf($key);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $liveUpdates = $page->filter('[data-controller="live-updates"]');
+        self::assertCount(1, $liveUpdates);
+        self::assertSame('["'.$ticketId.'"]', $liveUpdates->attr('data-live-updates-ticket-ids-value'));
+        $subscribeUrl = (string) $liveUpdates->attr('data-live-updates-subscribe-url-value');
+        self::assertStringContainsString('match='.rawurlencode('https://pinround.app/o/'.$this->acmeFoods->toString().'/t/'.$ticketId), $subscribeUrl);
+        self::assertSame(1, substr_count($subscribeUrl, rawurlencode('/t/')));
+        self::assertStringNotContainsString($this->ticketIdOf($otherKey), (string) $this->client->getResponse()->getContent());
+        self::assertSame(
+            [TicketPageParts::STATE_ID, Thread::FRAME_ID, TicketPageParts::NEXT_STEP_ID, TicketPageParts::PEOPLE_ID, TicketPageParts::ACTIVITY_ID],
+            $page->filter('[data-live-refresh]')->each(static fn (Crawler $part): ?string => $part->attr('id')),
+        );
+    }
+
+    #[Test]
+    public function aPersonWhoMayNotSeeTheTicketGetsNotFoundWithNoLiveUpdates(): void
+    {
+        $key = $this->addTicket(self::HIDDEN_TITLE, ['visibility' => 'team']);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $this->client->request('GET', '/t/'.$key);
+
+        $this->assertNotFoundWithNoWordOfTheTicket();
+        self::assertStringNotContainsString($this->ticketIdOf($key), (string) $this->client->getResponse()->getContent());
     }
 
     #[Test]
@@ -1388,6 +1429,19 @@ final class TicketPageTest extends WebTestCase
         self::assertIsInt($row['version']);
 
         return [$row['step_id'], $row['version']];
+    }
+
+    private function ticketIdOf(string $key): string
+    {
+        $ticketId = null;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($key, &$ticketId): int {
+            $ticketId = $migrator->fetchOne('SELECT id FROM tkt_ticket WHERE key = ?', [$key]);
+
+            return 0;
+        });
+        self::assertIsString($ticketId);
+
+        return $ticketId;
     }
 
     private function addSteps(): void

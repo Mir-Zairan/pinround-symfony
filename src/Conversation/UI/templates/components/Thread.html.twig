@@ -52,7 +52,8 @@
     {% endif %}
 </div>
 {% if not isListOnly %}
-    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer">
+    {#- Permanent, so a live refresh that reloads the frame keeps a comment being written; the id names the ticket, so the form of one ticket never stays on another's page. -#}
+    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer" id="thread-composer-{{ key }}" data-turbo-permanent>
         <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
         <div class="thread__kinds" role="group" aria-label="What to write">
             <twig:Chip :pressed="true">Comment</twig:Chip>
