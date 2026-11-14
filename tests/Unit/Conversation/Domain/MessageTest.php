@@ -10,6 +10,7 @@ use App\Conversation\Domain\MessageKind;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -235,6 +236,118 @@ final class MessageTest extends TestCase
         }
 
         self::assertSame($firstRemovedAt, $comment->removedAt());
+    }
+
+    #[Test]
+    public function theAskedPersonAnswersAnOpenQuestionAndResolvesIt(): void
+    {
+        $question = self::questionOfLenaToOmar();
+        $answeredAt = new \DateTimeImmutable('2027-03-15 11:00:00+00:00');
+
+        $question->answer(new UserId(self::OMAR), $answeredAt);
+
+        self::assertSame($answeredAt, $question->resolvedAt());
+        self::assertSame(self::OMAR, $question->resolvedBy()?->toString());
+        self::assertNull($question->removedAt());
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Message, string, string}>
+     */
+    public static function refusedAnswers(): iterable
+    {
+        yield 'a comment' => [static fn (): Message => self::commentOfLena(), self::OMAR, 'Only a question can be answered.'];
+        yield 'a withdrawn question' => [static function (): Message {
+            $question = self::questionOfLenaToOmar();
+            $question->withdraw(new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $question;
+        }, self::OMAR, 'This question was withdrawn.'];
+        yield 'an answered question' => [static function (): Message {
+            $question = self::questionOfLenaToOmar();
+            $question->answer(new UserId(self::OMAR), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $question;
+        }, self::OMAR, 'This question is already answered.'];
+        yield 'someone not asked, the asker included' => [static fn (): Message => self::questionOfLenaToOmar(), self::LENA, 'Only the person asked can answer this question.'];
+    }
+
+    /**
+     * @param \Closure(): Message $messageOf
+     */
+    #[Test]
+    #[DataProvider('refusedAnswers')]
+    public function aRefusedAnswerSaysWhyAndLeavesTheMessageAsItWas(\Closure $messageOf, string $answererId, string $reason): void
+    {
+        $message = $messageOf();
+        $before = [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()];
+
+        try {
+            $message->answer(new UserId($answererId), new \DateTimeImmutable('2027-03-15 11:00:00+00:00'));
+            self::fail('The answer was not refused.');
+        } catch (\DomainException $refusal) {
+            self::assertSame($reason, $refusal->getMessage());
+        }
+
+        self::assertEquals($before, [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()]);
+    }
+
+    #[Test]
+    public function theAskerWithdrawsTheirOpenQuestionAndItIsRemoved(): void
+    {
+        $question = self::questionOfLenaToOmar();
+        $withdrawnAt = new \DateTimeImmutable('2027-03-15 11:00:00+00:00');
+
+        $question->withdraw(new UserId(self::LENA), $withdrawnAt);
+
+        self::assertSame($withdrawnAt, $question->removedAt());
+        self::assertNull($question->resolvedAt());
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Message, string, string}>
+     */
+    public static function refusedWithdrawals(): iterable
+    {
+        yield 'a comment' => [static fn (): Message => self::commentOfLena(), self::LENA, 'Only a question can be withdrawn.'];
+        yield 'a withdrawn question' => [static function (): Message {
+            $question = self::questionOfLenaToOmar();
+            $question->withdraw(new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $question;
+        }, self::LENA, 'This question is already withdrawn.'];
+        yield 'an answered question' => [static function (): Message {
+            $question = self::questionOfLenaToOmar();
+            $question->answer(new UserId(self::OMAR), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $question;
+        }, self::LENA, 'An answered question cannot be withdrawn.'];
+        yield 'the asked person' => [static fn (): Message => self::questionOfLenaToOmar(), self::OMAR, 'Only the person who asked a question can withdraw it.'];
+    }
+
+    /**
+     * @param \Closure(): Message $messageOf
+     */
+    #[Test]
+    #[DataProvider('refusedWithdrawals')]
+    public function aRefusedWithdrawalSaysWhyAndLeavesTheMessageAsItWas(\Closure $messageOf, string $withdrawerId, string $reason): void
+    {
+        $message = $messageOf();
+        $before = [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()];
+
+        try {
+            $message->withdraw(new UserId($withdrawerId), new \DateTimeImmutable('2027-03-15 11:00:00+00:00'));
+            self::fail('The withdrawal was not refused.');
+        } catch (\DomainException $refusal) {
+            self::assertSame($reason, $refusal->getMessage());
+        }
+
+        self::assertEquals($before, [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()]);
+    }
+
+    private static function questionOfLenaToOmar(): Message
+    {
+        return Message::question(new MessageId(self::ID), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), new UserId(self::OMAR), 'Should cancelled orders count?', new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
     }
 
     private static function commentOfLena(): Message

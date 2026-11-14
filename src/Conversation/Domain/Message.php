@@ -11,7 +11,8 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * A comment or a question in a ticket's thread. A question names the person asked and stays open until an answer
- * closes it, which sets resolvedAt, so the open-question indexes drop it; a ticket has at most one open question that is
+ * closes it, which sets resolvedAt, or its asker withdraws it, which sets removedAt; either way the open-question
+ * indexes drop it. A ticket has at most one open question that is
  * not removed (cnv_message_ticket_id_open_question_key). Only a comment is folded by Resolve (FR-CNV-05).
  */
 final class Message implements TenantOwned
@@ -103,6 +104,56 @@ final class Message implements TenantOwned
         }
 
         $this->removedAt = $removedAt;
+    }
+
+    /**
+     * Closes an open question: sets resolvedAt and resolvedBy, so the open-question indexes drop it.
+     *
+     * @throws \DomainException when the message is a comment, the question is withdrawn or already answered, or the
+     *                          answerer is not the person asked; the message stays as it was
+     */
+    public function answer(UserId $answererId, \DateTimeImmutable $answeredAt): void
+    {
+        if (MessageKind::Question !== $this->kind) {
+            throw new \DomainException('Only a question can be answered.');
+        }
+        if (null !== $this->removedAt) {
+            throw new \DomainException('This question was withdrawn.');
+        }
+        if (null !== $this->resolvedAt) {
+            throw new \DomainException('This question is already answered.');
+        }
+        if (null === $this->toUserId || !$answererId->equals(new UserId($this->toUserId))) {
+            throw new \DomainException('Only the person asked can answer this question.');
+        }
+
+        $this->resolvedAt = $answeredAt;
+        $this->resolvedBy = $answererId->toString();
+    }
+
+    /**
+     * The asker takes back their open question: marks it removed, so the open-question indexes drop it and the thread
+     * shows "Message removed" where it was (workflow-engine.md, "or the asker withdraws it").
+     *
+     * @throws \DomainException when the message is a comment, the question is already withdrawn or answered, or the
+     *                          withdrawer is not its asker; the message stays as it was
+     */
+    public function withdraw(UserId $withdrawerId, \DateTimeImmutable $withdrawnAt): void
+    {
+        if (MessageKind::Question !== $this->kind) {
+            throw new \DomainException('Only a question can be withdrawn.');
+        }
+        if (null !== $this->removedAt) {
+            throw new \DomainException('This question is already withdrawn.');
+        }
+        if (null !== $this->resolvedAt) {
+            throw new \DomainException('An answered question cannot be withdrawn.');
+        }
+        if (!$withdrawerId->equals($this->authorId())) {
+            throw new \DomainException('Only the person who asked a question can withdraw it.');
+        }
+
+        $this->removedAt = $withdrawnAt;
     }
 
     /**
