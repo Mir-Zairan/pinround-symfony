@@ -10,9 +10,10 @@ namespace App\Conversation\Api;
 final class ConversationPermission
 {
     /**
-     * Write in a ticket's thread: post a comment, and edit or remove one's own message there; the subject is the
-     * ticket's TicketVisibilityFacts. Whoever may see the ticket, an admin with no team role included. That only the
-     * author edits (within 15 minutes) or removes a message is the use case's rule, checked on the locked row.
+     * Write in a ticket's thread: post a comment, edit or remove one's own message there, and answer a question; the
+     * subject is the ticket's TicketVisibilityFacts. Whoever may see the ticket, an admin with no team role included.
+     * That only the author edits (within 15 minutes) or removes a message, and that only the person asked answers a
+     * question, are the use cases' rules (Answer's for the answer), checked on the locked message row.
      */
     public const string COMMENT = 'CONVERSATION_COMMENT';
 
