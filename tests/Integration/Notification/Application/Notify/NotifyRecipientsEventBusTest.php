@@ -31,7 +31,8 @@ use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
  * of these events, which publishes to the hub. That handler also keeps a missing tag from throwing, so only the
  * missing row shows it. Each row also sends one RefreshBell to async_notify, held by its stamp until the delivery's
  * event.bus transaction commits, and none for a retried delivery or a ping held past the frozen clock; a cleared ping
- * writes no row and refreshes the bell through PushBellOnPingCleared. Everything commits, so tearDown removes the rows.
+ * writes no row and refreshes the bell through PushBellOnPingCleared. NotifyRecipients reads each ping's ntf_ping row
+ * for its delivery time, so the ping case stores them first. Everything commits, so tearDown removes the rows.
  */
 final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
 {
@@ -101,6 +102,8 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         $lena = self::VIEWERS['Lena'][0];
         $mia = self::VIEWERS['Mia'][0];
         $sara = self::VIEWERS['Sara'][0];
+        self::addCommittedPing(self::PING, $mia, $lena, null, self::PINGED_AT);
+        self::addCommittedPing(self::HELD_PING, $lena, $sara, self::HELD_PING_DELIVERED_AT, self::NOW);
         self::transactions()->committedAs(self::ACME_FOODS, static function () use ($lena, $mia, $sara): void {
             $eventBus = self::getContainer()->get('event.bus');
             $eventBus->dispatch(new PingSent(self::ACME_FOODS, self::teamOnlyTicketId(), self::PING, $mia, $lena, $mia, new \DateTimeImmutable(self::PINGED_AT)));
@@ -124,6 +127,7 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
             ['assigned', $lena, $mia, null, null, null],
             ['ping', $sara, $lena, self::HELD_PING, null, null],
         ], $this->acmeNotifications());
+        self::assertSame([[self::PING, null], [self::HELD_PING, '2027-03-18 07:00:00+00']], $this->pingRowsDeliverAfter());
         $messageIds = array_values(array_map(self::messageIdOf(...), $relayed));
         self::assertCount(4, array_unique($messageIds));
         self::assertSame(4, $this->processedRowCount($messageIds));
@@ -150,6 +154,25 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
 
         self::assertSame([], $this->acmeNotifications());
         self::assertSame([[self::ACME_FOODS, $lena, null]], $this->sentBellRefreshes());
+    }
+
+    private static function addCommittedPing(string $pingId, string $fromId, string $toId, ?string $deliverAfter, string $createdAt): void
+    {
+        self::asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'INSERT INTO ntf_ping (organization_id, id, ticket_id, from_id, to_id, body, deliver_after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [self::ACME_FOODS, $pingId, self::teamOnlyTicketId(), $fromId, $toId, 'Any news?', $deliverAfter, $createdAt],
+        ));
+    }
+
+    /**
+     * @return list<list<mixed>> ping id and deliver_after of every Acme Foods ping notification, by ping id
+     */
+    private function pingRowsDeliverAfter(): array
+    {
+        return self::transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array => self::connection()->fetchAllNumeric(
+            "SELECT data->>'pingId', deliver_after FROM ntf_notification WHERE organization_id = ? AND kind = 'ping' ORDER BY data->>'pingId'",
+            [self::ACME_FOODS],
+        ));
     }
 
     private static function deliverFromAsyncNotify(Envelope $envelope): void
@@ -221,6 +244,10 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         self::asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             'DELETE FROM ntf_notification WHERE organization_id = ?',
             [self::ACME_FOODS],
+        ));
+        self::asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'DELETE FROM ntf_ping WHERE organization_id = ? AND id IN (?, ?)',
+            [self::ACME_FOODS, self::PING, self::HELD_PING],
         ));
         self::migrator()->executeStatement('DELETE FROM processed_message WHERE handler = ?', [NotifyRecipients::HANDLER_NAME]);
         self::migrator()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");

@@ -10,17 +10,23 @@ use App\Conversation\Api\Event\ReplyPosted;
 use App\Notification\Api\BellView;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Api\NotificationQueries;
+use App\Notification\Application\Notify\DeliveryTimes;
 use App\Notification\Application\Notify\NewNotification;
 use App\Notification\Application\Notify\NotificationKind;
 use App\Notification\Application\Notify\Notifications;
 use App\Notification\Application\Notify\NotifyRecipients;
 use App\Notification\Application\Realtime\RefreshBell;
+use App\Notification\Domain\Ping;
+use App\Notification\Domain\PingClearedReason;
+use App\Notification\Domain\PingId;
 use App\Organization\Api\MemberNameQueries;
+use App\Organization\Api\PingSettingsQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Unit\Notification\Application\Ping\InMemoryPings;
 use App\Tests\Unit\Notification\Application\Realtime\BellRefreshesDouble;
 use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\TicketKeyQueries;
@@ -41,6 +47,8 @@ final class NotifyRecipientsTest extends TestCase
     private const string REPLY = '0197a3c0-0000-7000-8000-000000006a07';
     private const string SECOND_REPLY = '0197a3c0-0000-7000-8000-000000006a08';
     private const string PING = '0197a3c0-0000-7000-8000-000000006a09';
+    private const string HELD_PING = '0197a3c0-0000-7000-8000-000000006a0a';
+    private const string UNKNOWN_PING = '0197a3c0-0000-7000-8000-000000006a0b';
     private const string LENA = '0197a3c0-0000-7000-8000-000000006a11';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000006a12';
     private const string MIA = '0197a3c0-0000-7000-8000-000000006a13';
@@ -51,6 +59,8 @@ final class NotifyRecipientsTest extends TestCase
     private OnceOnlyHandlingDouble $onceOnlyHandling;
     private NotificationsDouble $notifications;
     private BellRefreshesDouble $bellRefreshes;
+    private InMemoryPings $pings;
+    private bool $isQuietHoursOn = false;
     /** @var list<string> user id strings with TICKET muted */
     private array $mutedBy = [];
     private bool $isTicketGone = false;
@@ -61,20 +71,23 @@ final class NotifyRecipientsTest extends TestCase
         $this->onceOnlyHandling->messageId = 'message-1';
         $this->notifications = new NotificationsDouble();
         $this->bellRefreshes = new BellRefreshesDouble();
+        $this->pings = new InMemoryPings();
+        $this->pings->actAsTenant(new OrganizationId(self::ACME_FOODS));
+        $this->pings->add(self::pingToOmar(self::PING, null));
     }
 
     /**
-     * @return iterable<string, array{object, NotificationKind, string, array<string, string>, bool}>
+     * @return iterable<string, array{object, NotificationKind, string, array<string, string>}>
      */
     public static function events(): iterable
     {
         $at = new \DateTimeImmutable(self::OCCURRED_AT);
 
-        yield 'ping' => [new PingSent(self::ACME_FOODS, self::TICKET, self::PING, self::LENA, self::OMAR, self::LENA, $at), NotificationKind::Ping, self::OMAR, ['pingId' => self::PING], true];
-        yield 'question' => [new QuestionAsked(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::OMAR, self::LENA, $at), NotificationKind::Question, self::OMAR, ['messageId' => self::MESSAGE], false];
-        yield 'answer' => [new QuestionAnswered(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::OMAR, self::LENA, $at), NotificationKind::Answer, self::OMAR, ['messageId' => self::MESSAGE], false];
-        yield 'reply' => [new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::REPLY, self::OMAR, self::LENA, $at), NotificationKind::Reply, self::OMAR, ['messageId' => self::MESSAGE, 'replyId' => self::REPLY], false];
-        yield 'assigned' => [new TicketAssigned(self::ACME_FOODS, self::TICKET, 'SHOP-42', null, self::OMAR, self::LENA, $at), NotificationKind::Assigned, self::OMAR, [], false];
+        yield 'ping' => [new PingSent(self::ACME_FOODS, self::TICKET, self::PING, self::LENA, self::OMAR, self::LENA, $at), NotificationKind::Ping, self::OMAR, ['pingId' => self::PING]];
+        yield 'question' => [new QuestionAsked(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::OMAR, self::LENA, $at), NotificationKind::Question, self::OMAR, ['messageId' => self::MESSAGE]];
+        yield 'answer' => [new QuestionAnswered(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::OMAR, self::LENA, $at), NotificationKind::Answer, self::OMAR, ['messageId' => self::MESSAGE]];
+        yield 'reply' => [new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::REPLY, self::OMAR, self::LENA, $at), NotificationKind::Reply, self::OMAR, ['messageId' => self::MESSAGE, 'replyId' => self::REPLY]];
+        yield 'assigned' => [new TicketAssigned(self::ACME_FOODS, self::TICKET, 'SHOP-42', null, self::OMAR, self::LENA, $at), NotificationKind::Assigned, self::OMAR, []];
     }
 
     /**
@@ -82,7 +95,7 @@ final class NotifyRecipientsTest extends TestCase
      */
     #[Test]
     #[DataProvider('events')]
-    public function eachEventNotifiesItsRecipientOnceWithTheActorAndTicketSnapshot(object $event, NotificationKind $kind, string $recipientId, array $sourceIds, bool $isHeldUntilDelivery): void
+    public function eachEventNotifiesItsRecipientOnceWithTheActorAndTicketSnapshot(object $event, NotificationKind $kind, string $recipientId, array $sourceIds): void
     {
         $this->notify($event);
 
@@ -94,7 +107,7 @@ final class NotifyRecipientsTest extends TestCase
             [$row->organizationId->toString(), $row->recipientId->toString(), $row->kind, $row->actorId->toString(), $row->ticketId->toString(), $row->data],
         );
         self::assertEquals($at, $row->createdAt);
-        self::assertEquals($isHeldUntilDelivery ? $at : null, $row->deliverAfter);
+        self::assertNull($row->deliverAfter);
         self::assertSame([NotifyRecipients::HANDLER_NAME], $this->onceOnlyHandling->handlerNames);
         $toast = NotificationKind::Answer === $kind ? 'Lena answered your question.' : null;
         self::assertEquals([[new RefreshBell(self::ACME_FOODS, $recipientId, $toast), $row->deliverAfter]], $this->bellRefreshes->sent);
@@ -112,13 +125,85 @@ final class NotifyRecipientsTest extends TestCase
     }
 
     #[Test]
-    public function aHeldPingPassesItsDeliveryTimeSoItsRefreshWaitsForTheRelease(): void
+    public function aHeldPingKeepsTheDeliveryTimeStoredOnItSoItsRefreshWaitsForTheRelease(): void
     {
-        $deliveredAt = new \DateTimeImmutable('2027-03-16 09:00:00 UTC');
+        $deliveredAt = new \DateTimeImmutable('2026-03-04 09:00:00 Europe/Berlin');
+        $this->pings->add(self::pingToOmar(self::HELD_PING, $deliveredAt));
 
-        $this->notify(new PingSent(self::ACME_FOODS, self::TICKET, self::PING, self::LENA, self::OMAR, self::LENA, $deliveredAt));
+        $this->notify(new PingSent(self::ACME_FOODS, self::TICKET, self::HELD_PING, self::LENA, self::OMAR, self::LENA, $deliveredAt));
 
+        self::assertCount(1, $this->notifications->rows);
+        self::assertEquals($deliveredAt, $this->notifications->rows[0]->deliverAfter);
         self::assertEquals([[new RefreshBell(self::ACME_FOODS, self::OMAR, null), $deliveredAt]], $this->bellRefreshes->sent);
+    }
+
+    #[Test]
+    public function aPingIsTimedBySendPingNotAgainWhenItsEventIsHandled(): void
+    {
+        $this->isQuietHoursOn = true;
+
+        // 23:00 in Berlin, but the ping was stored as not held, so the row is not held either.
+        $this->notify(new PingSent(self::ACME_FOODS, self::TICKET, self::PING, self::LENA, self::OMAR, self::LENA, new \DateTimeImmutable('2026-03-03 22:00:00 UTC')));
+
+        self::assertCount(1, $this->notifications->rows);
+        self::assertNull($this->notifications->rows[0]->deliverAfter);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function pingsThatNotifyNobody(): iterable
+    {
+        yield 'cleared before its event is handled' => [self::HELD_PING];
+        yield 'unknown' => [self::UNKNOWN_PING];
+    }
+
+    #[Test]
+    #[DataProvider('pingsThatNotifyNobody')]
+    public function aPingThatIsNoLongerOpenNotifiesNobody(string $pingId): void
+    {
+        $clearedPing = self::pingToOmar(self::HELD_PING, null);
+        $clearedPing->clear(PingClearedReason::Acted, new \DateTimeImmutable(self::OCCURRED_AT));
+        $this->pings->add($clearedPing);
+
+        $this->notify(new PingSent(self::ACME_FOODS, self::TICKET, $pingId, self::LENA, self::OMAR, self::LENA, new \DateTimeImmutable(self::OCCURRED_AT)));
+
+        self::assertSame([[], [], [NotifyRecipients::HANDLER_NAME]], [$this->notifications->rows, $this->bellRefreshes->sent, $this->onceOnlyHandling->handlerNames]);
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string|null}>
+     */
+    public static function questionsInQuietHours(): iterable
+    {
+        // 3 March 2026 in Berlin is UTC+1; Mia has no known zone, so she is timed on UTC.
+        yield '23:00 in Berlin is held until 09:00 Berlin' => [self::OMAR, '2026-03-03 22:00:00 UTC', '2026-03-04T09:00:00+01:00'];
+        yield '09:00 in Berlin is delivered at once' => [self::OMAR, '2026-03-03 08:00:00 UTC', null];
+        yield '08:30 UTC is held until 09:00 UTC for Mia' => [self::MIA, '2026-03-03 08:30:00 UTC', '2026-03-03T09:00:00+00:00'];
+    }
+
+    #[Test]
+    #[DataProvider('questionsInQuietHours')]
+    public function withQuietHoursOnAQuestionIsHeldUntil09OnTheRecipientsClock(string $recipientId, string $askedAt, ?string $expectedDeliverAfter): void
+    {
+        $this->isQuietHoursOn = true;
+
+        $this->notify(new QuestionAsked(self::ACME_FOODS, self::TICKET, self::MESSAGE, $recipientId, self::LENA, new \DateTimeImmutable($askedAt)));
+
+        self::assertCount(1, $this->notifications->rows);
+        $row = $this->notifications->rows[0];
+        self::assertSame($expectedDeliverAfter, $row->deliverAfter?->format(\DATE_ATOM));
+        self::assertEquals(new \DateTimeImmutable($askedAt), $row->createdAt);
+        self::assertEquals([[new RefreshBell(self::ACME_FOODS, $recipientId, null), $row->deliverAfter]], $this->bellRefreshes->sent);
+    }
+
+    #[Test]
+    public function withQuietHoursOffAQuestionAtNightIsDeliveredAtOnce(): void
+    {
+        $this->notify(new QuestionAsked(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::OMAR, self::LENA, new \DateTimeImmutable('2026-03-03 22:00:00 UTC')));
+
+        self::assertCount(1, $this->notifications->rows);
+        self::assertNull($this->notifications->rows[0]->deliverAfter);
     }
 
     #[Test]
@@ -275,9 +360,40 @@ final class NotifyRecipientsTest extends TestCase
             self::memberNameQueries(),
             $this->notifications,
             $this->bellRefreshes,
+            $this->pings,
+            new DeliveryTimes(self::pingSettingsQueries($this->isQuietHoursOn), new InMemoryMemberTimeZones([self::OMAR => 'Europe/Berlin'])),
         );
 
         $handler($event);
+    }
+
+    private static function pingToOmar(string $pingId, ?\DateTimeImmutable $deliverAfter): Ping
+    {
+        return Ping::send(new PingId($pingId), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), new UserId(self::OMAR), 'Any news?', $deliverAfter, new \DateTimeImmutable('2026-03-03 21:00:00 UTC'));
+    }
+
+    private static function pingSettingsQueries(bool $isQuietHoursOn): PingSettingsQueries
+    {
+        return new readonly class($isQuietHoursOn) implements PingSettingsQueries {
+            public function __construct(private bool $isQuietHoursOn)
+            {
+            }
+
+            public function pingLimitHoursOf(OrganizationId $organizationId): int
+            {
+                throw new \LogicException('NotifyRecipients does not read the ping limit.');
+            }
+
+            public function isAutoClearOn(OrganizationId $organizationId): bool
+            {
+                throw new \LogicException('NotifyRecipients does not read the auto-clear switch.');
+            }
+
+            public function isQuietHoursOn(OrganizationId $organizationId): bool
+            {
+                return $this->isQuietHoursOn;
+            }
+        };
     }
 
     private function notificationQueries(): NotificationQueries
