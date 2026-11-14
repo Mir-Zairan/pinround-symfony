@@ -242,13 +242,14 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 ### Review (`rvw_`)
 
 - **Story:** Omar's private draft round has three screenshots. He shares it as round 2 when he sends the ticket to review. Mia marks each pin.
-- **Owns:** `rvw_round` (kind: report, checklist, review, draft; owner; `shared_at`), `rvw_screenshot` (media id, position, verdict, note), `rvw_pin` (number, x/y in percent, note, verdict, source human/ai, state kept/dismissed), `rvw_check_item` (the Round 1 checklist, made from report pins).
+- **Owns:** `rvw_round` (kind: report, checklist, review, draft; owner; `shared_at`), `rvw_screenshot` (media id, position, verdict, title, summary), `rvw_report_draft` (a report prepared by a person's Claude Code, owner only, sent by the owner; [ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)), `rvw_pin` (number, x/y in percent, note, verdict, source human/ai, state kept/dismissed), `rvw_check_item` (the Round 1 checklist, made from report pins).
 - **Api:**
   - `RoundQueries::forTicket(TicketId, UserId $viewer): list<RoundView>` (private drafts filtered out)
   - `RoundQueries::roundNotes(TicketId, UserId $owner): RoundNotes` (for MCP `get_round_notes`)
   - `RoundCommands::addScreenshot(RoundId, MediaId, UserId): ScreenshotId`
   - `RoundCommands::setVerdict(ScreenshotId|PinId, Verdict, UserId): void`
   - `RoundCommands::shareDraft(RoundId, UserId): int $roundNumber`
+  - `ReportDrafts::create(OrganizationId, UserId $owner, ProjectId, ReportDraftContent): ReportDraftId`, `ReportDrafts::forOwner(UserId): list<ReportDraftView>`, `ReportDrafts::send(ReportDraftId, UserId): TicketKey` (owner only; the UI calls `send`, never a token)
 - **Commands (more):** StartDraftRound, AddPin, EditPinNote, RemovePin, MarkChecklistItem, DeleteDraft, KeepOrDismissAiPin.
 - **Events:** `RoundStarted`, `RoundShared`, `PinVerdictSet`, `ChecklistItemChanged`, `DraftDeleted`.
 - **Depends on:** Ticketing Api, Media Api.

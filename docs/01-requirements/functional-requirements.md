@@ -486,7 +486,7 @@ Full-screen view of one section with After/Before toggle, pins, a bar with the c
 - Accept: AI suggestion pins show only on the After picture; choosing a verdict moves to the next pin.
 
 **FR-RND-09 — Draft round** · Must · 🏁 · Prototype: `Main › Ticket` (Draft round · only you can see this)
-The assignee of an open ticket can start one draft round per ticket: add screenshots, drop pins with notes, set a verdict per screenshot (**Looks right** / **Not right yet**), write a note per screenshot (this is the screenshot's summary, [FR-RND-16](#rnd--screenshots-pins-and-rounds)), remove screenshots. Status "1 of 2 look right".
+The assignee of an open ticket can start one draft round per ticket: add screenshots, drop pins with notes, set a verdict per screenshot (**Looks right** / **Not right yet**), write a summary per screenshot ([FR-RND-16](#rnd--screenshots-pins-and-rounds)), remove screenshots. Status "1 of 2 look right".
 
 **FR-RND-10 — Draft visibility** · Must · 🏁 · Prototype: same, tag PRIVATE
 Only the owner sees an unshared draft (not admins, not the lead). The owner's personal access token with scope `read` can read it through MCP.
@@ -512,7 +512,7 @@ Every screenshot in every round kind (report, checklist, review, draft) has an o
 - Who fills it: a person types it. A person's own Claude Code may fill it through MCP ([FR-MCP-05](#mcp--mcp-server-and-agent-api), [FR-MCP-12](#mcp--mcp-server-and-agent-api)), but only into a draft its owner checks. Pinround AI may only suggest summary text, which a person accepts with "Use this" or ignores with "Dismiss"; AI never saves it alone ([ADR-0020](../03-adr/0020-ai-safety-and-prompt-injection.md)).
 - Title and summary are untrusted user text: wrapped in delimiters when sent to AI or returned by MCP.
 - Carry-forward: a review round's "before" is the earlier round's "after" screenshot row, so its title and summary show there read-only.
-- Accept: a title over 120 characters or a summary over 600 characters is refused with a plain message ("Keep the summary under 600 characters."), and nothing is saved.
+- Accept: a title over 120 characters or a summary over 600 characters is refused with a plain message ("Keep the summary to 600 characters or fewer."; likewise "Keep the title to 120 characters or fewer." and "Keep the pin note to 1,000 characters or fewer."), and nothing is saved.
 - Accept: a review round's before picture shows the earlier after picture's title and summary, read-only.
 - Accept: with no title and no summary nothing extra is shown and nothing is required.
 
@@ -705,11 +705,11 @@ An MCP server over Streamable HTTP at `/mcp`, authenticated with a personal acce
 
 **FR-MCP-03 — get_ticket** · Must — key, title, description, step, Now/Next, people, open questions, checklist. Scope `read`. The caller gets only what they may see in the UI; the AI "what is sent" policy does not apply, because the caller's own tool reads the data, not pinround's AI.
 
-**FR-MCP-04 — get_round_notes** · Must · 🏁 — for a ticket: the latest round and the caller's draft round: screenshots (ids, signed URLs), pins with notes, verdicts, notes, and each screenshot's title and summary (inside delimiters, as untrusted text, [FR-RND-16](#rnd--screenshots-pins-and-rounds)). Scope `read`.
+**FR-MCP-04 — get_round_notes** · Must · 🏁 — for a ticket: the latest round and the caller's draft round: screenshots (ids, signed URLs), pins with notes, verdicts, and each screenshot's title and summary (inside delimiters, as untrusted text, [FR-RND-16](#rnd--screenshots-pins-and-rounds)). Scope `read`.
 
 **FR-MCP-05 — add_screenshot** · Must · 🏁 — add an image to the caller's draft round in two calls: `create_upload` returns a presigned upload URL and an `upload_id`; after the PUT, `add_screenshot` takes the `upload_id` (never image bytes in the tool call), optional title, summary and pins with notes. Scope `rounds:write`. Same file rules as [FR-RND-01](#rnd--screenshots-pins-and-rounds).
 
-**FR-MCP-06 — set_verdict** · Must · 🏁 — set "Looks right"/"Not right yet" and note on a draft screenshot, or mark a checklist item fixed (assignee only). Scope `rounds:write`.
+**FR-MCP-06 — set_verdict** · Must · 🏁 — set "Looks right"/"Not right yet" and optionally the screenshot's `summary` (max 600 characters, [FR-RND-16](#rnd--screenshots-pins-and-rounds)) on a draft screenshot, or mark a checklist item fixed (assignee only). Scope `rounds:write`.
 
 **FR-MCP-07 — add_comment** · Should — comment on a ticket (never a question). Scope `comments:write`.
 
@@ -721,7 +721,7 @@ An MCP server over Streamable HTTP at `/mcp`, authenticated with a personal acce
 
 **FR-MCP-11 — Token page** · Must · 🏁 — profile page to create/revoke tokens ([FR-ID-05](#id--identity-and-access)) with the copyable setup line.
 
-**FR-MCP-12 — create_report** · Should — a reporter's Claude Code reproduces a customer issue, takes screenshots and calls `create_report` {project, title, detail, screenshots[{upload_id, title?, summary?, pins?[]}]}. It creates a **report draft** visible only to its owner (the [ADR-0017](../03-adr/0017-private-draft-rounds.md) privacy rules); it never creates a live ticket. The reporter opens it in the app, can edit it, and clicks **Send**, which creates the ticket with Round 0. Scope `reports:write`, which is not in Claude Code's default scopes: the user ticks it when creating the token. Screenshots use the same upload path (`create_upload`, presigned PUT, then the tool); same rate limits; audited without content ([ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)).
+**FR-MCP-12 — create_report** · Should — a reporter's Claude Code reproduces a customer issue, takes screenshots and calls `create_report` {project, title, detail, screenshots[{upload_id, title?, summary?, pins?[]}]}. It creates a **report draft** visible only to its owner (the [ADR-0017](../03-adr/0017-private-draft-rounds.md) privacy rules); it never creates a live ticket, and no token endpoint does, MCP or REST (`POST /api/v1/reports` makes the same draft). The reporter opens it in the app, can edit it, and clicks **Send**, which creates the ticket with Round 0. Scope `reports:write`, which is not in Claude Code's default scopes: the user ticks it when creating the token. Screenshots use the same upload path (`create_upload`, presigned PUT, then the tool); same rate limits; audited without content ([ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)).
 - Accept: a token without `reports:write` gets an MCP error and nothing is created.
 - Accept: the report draft is invisible to everyone but its owner (not admins, not the team), and a project of another organization is "not found".
 - Accept: no ticket exists until a person clicks Send in the app.
