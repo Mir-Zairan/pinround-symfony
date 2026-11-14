@@ -47,6 +47,8 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_jira_connection' => "resolve_jira_connection('".self::UNKNOWN_ID."'::uuid)",
         'resolve_laptop_package' => "resolve_laptop_package('".self::UNKNOWN_ID."'::uuid)",
         'search_ticket_ids' => "search_ticket_ids('".self::UNKNOWN_ID."'::uuid, 'checkout', '".self::UNKNOWN_ID."'::uuid, '{}'::uuid[], true, true, NULL, NULL, NULL)",
+        // No notification is held until before 1970.
+        'organizations_with_due_notifications' => "organizations_with_due_notifications('1970-01-01 00:00:00+00'::timestamptz)",
     ];
 
     private const array OUTPUT_COLUMNS = [
@@ -57,6 +59,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_jira_connection' => ['organization_id'],
         'resolve_laptop_package' => ['organization_id', 'user_id'],
         'search_ticket_ids' => ['ticket_id'],
+        'organizations_with_due_notifications' => ['organization_id'],
     ];
 
     /**
@@ -211,6 +214,41 @@ final class ResolverFunctionTest extends KernelTestCase
                  WHERE schemaname = 'public' AND tablename = 'tkt_ticket' AND policyname <> 'tenant_isolation'",
             ),
         );
+    }
+
+    /**
+     * organizations_with_due_notifications reads ntf_notification through resolver_read on the parent only, and only
+     * the organization it returns and the time it matches on: never who a notification is for, its kind or its data.
+     */
+    #[Test]
+    public function theReleaseOfHeldNotificationsReadsOnlyTheOrganizationAndTheDeliveryTimeOfTheParent(): void
+    {
+        $connection = $this->connection();
+        self::assertEqualsCanonicalizing(
+            ['organization_id', 'deliver_after'],
+            $connection->fetchFirstColumn(
+                "SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl
+                 WHERE a.attrelid = 'public.ntf_notification'::regclass AND acl.grantee = 'pinround_resolver'::regrole AND acl.privilege_type = 'SELECT'",
+            ),
+        );
+        self::assertSame(
+            [['policyname' => 'resolver_read', 'roles' => '{pinround_resolver}', 'cmd' => 'SELECT', 'qual' => 'true']],
+            $connection->fetchAllAssociative(
+                "SELECT policyname, roles::text AS roles, cmd, qual FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'ntf_notification' AND policyname <> 'tenant_isolation'",
+            ),
+        );
+        self::assertSame([], $connection->fetchFirstColumn(
+            "SELECT c.relname || ' ' || a.attname FROM pg_inherits i
+             JOIN pg_class c ON c.oid = i.inhrelid
+             JOIN pg_attribute a ON a.attrelid = c.oid, aclexplode(a.attacl) acl
+             WHERE i.inhparent = 'public.ntf_notification'::regclass AND acl.grantee = 'pinround_resolver'::regrole",
+        ));
+        self::assertSame([], $connection->fetchFirstColumn(
+            "SELECT c.relname || ' ' || pol.polname FROM pg_inherits i
+             JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_policy pol ON pol.polrelid = c.oid
+             WHERE i.inhparent = 'public.ntf_notification'::regclass AND pol.polname = 'resolver_read'",
+        ));
     }
 
     /**

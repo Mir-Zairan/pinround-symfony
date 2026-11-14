@@ -6,8 +6,9 @@ namespace App\SharedKernel\Infrastructure\Doctrine\Migration;
 
 /**
  * The SECURITY DEFINER functions, the only row-level security exceptions (ADR-0005, data-model.md ›
- * Lookups before the tenant is known): the lookups that run before the tenant is known, and the
- * ticket search, which must reach the GIN indexes the planner skips under a policy (ADR-0022). Each
+ * Lookups before the tenant is known): the lookups that run before the tenant is known, the
+ * ticket search, which must reach the GIN indexes the planner skips under a policy (ADR-0022), and
+ * the organizations a scheduled job with no tenant must visit, such as the release of held notifications. Each
  * is owned by pinround_resolver, returns ids only, and only pinround_app may execute it.
  */
 final class ResolverFunctions
@@ -24,5 +25,6 @@ final class ResolverFunctions
         'resolve_jira_connection',
         'resolve_laptop_package',
         'search_ticket_ids',
+        'organizations_with_due_notifications',
     ];
 }
