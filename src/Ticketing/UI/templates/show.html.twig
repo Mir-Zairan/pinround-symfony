@@ -13,6 +13,12 @@
     <link rel="stylesheet" href="{{ asset('styles/ping-sheet.css') }}">
 {% endblock %}
 
+{% block live_updates %}
+    {#- Notification's component, by name, as Ticketing's UI may not use Notification (deptrac.yaml). A refresh signal
+        fetches again what carries data-live-refresh: the thread's frame and the parts a move's Turbo Stream replaces. -#}
+    {{ component('LiveUpdates', {ticketId: ticket.id.toString}) }}
+{% endblock %}
+
 {% block main %}
     {% if queueBar is not null %}
         <twig:QueueBar
@@ -26,9 +32,6 @@
             csrfToken="{{ csrf_token(queueBar.csrfId) }}"
         />
     {% endif %}
-    {#- Notification's component, by name, as Ticketing's UI may not use Notification (deptrac.yaml). A refresh signal
-        fetches again what carries data-live-refresh: the thread's frame and the parts a move's Turbo Stream replaces. -#}
-    {{ component('LiveUpdates', {ticketId: ticket.id.toString}) }}
     <article class="ticket" data-ticket-key="{{ ticket.key }}">
         <header class="ticket__header">
             {# One wrapping row, as the prototype has it: back, key · type · project, tags, then the position on the right edge. #}
