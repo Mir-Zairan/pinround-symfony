@@ -4,7 +4,13 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Conversation;
 
+use App\Conversation\Domain\MessageId;
+use App\Conversation\Domain\Reply;
+use App\Conversation\Domain\ReplyId;
+use App\Conversation\Infrastructure\Doctrine\DoctrineReplies;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
@@ -101,6 +107,26 @@ final class ConversationTablesIsolationTest extends KernelTestCase
     }
 
     #[Test]
+    public function doctrineRepliesAddsAReplyUnderItsOwnTenant(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->repliesAdd(self::ACME_FOODS, self::SMUGGLED_REPLY));
+
+        self::assertSame([self::ACME_REPLY, self::SMUGGLED_REPLY], $this->idsAs(self::ACME_FOODS, 'cnv_reply'));
+        self::assertSame([self::OTHER_REPLY], $this->idsAs(self::OTHER_ORGANIZATION, 'cnv_reply'));
+    }
+
+    #[Test]
+    public function doctrineRepliesCannotAddAReplyInTheNameOfAnotherOrganization(): void
+    {
+        $this->assertRefusedByRowLevelSecurity(
+            'cnv_reply',
+            fn () => $this->transactions()->rolledBackAs(self::OTHER_ORGANIZATION, fn () => $this->repliesAdd(self::ACME_FOODS, self::SMUGGLED_REPLY)),
+        );
+
+        self::assertSame([self::ACME_REPLY], $this->idsAs(self::ACME_FOODS, 'cnv_reply'));
+    }
+
+    #[Test]
     public function removingATicketRemovesItsMessagesAndTheirReplies(): void
     {
         $this->ticketRows()->removeAllOf(self::ACME_FOODS);
@@ -117,6 +143,19 @@ final class ConversationTablesIsolationTest extends KernelTestCase
             $this->connection()->executeStatement(self::MESSAGE_INSERT, [$organizationId, $messageId, $ticketId, $authorId]);
             $this->connection()->executeStatement(self::REPLY_INSERT, [$organizationId, $replyId, $messageId, $authorId]);
         });
+    }
+
+    private function repliesAdd(string $organizationId, string $replyId): void
+    {
+        new DoctrineReplies(self::getContainer()->get('doctrine.orm.default_entity_manager'))->add(Reply::post(
+            new ReplyId($replyId),
+            new OrganizationId($organizationId),
+            new MessageId(self::ACME_MESSAGE),
+            new UserId(self::OMAR),
+            'Seen it on a tablet too.',
+            false,
+            new \DateTimeImmutable('2027-03-15 12:00:00+00:00'),
+        ));
     }
 
     /**
