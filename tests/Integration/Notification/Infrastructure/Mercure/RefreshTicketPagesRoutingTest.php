@@ -28,8 +28,9 @@ use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 
 /**
  * Two moves of one ticket through the real event.bus, outbox, relay, async_notify routing and window locks on the
- * state Valkey of the tests: worker-notify publishes one refresh and leaves one Trailing try waiting its 2 s. The clock
- * is fixed on 15 Mar 2027, so the in-memory async_notify keeps the delayed try waiting whatever the wall clock says.
+ * state Valkey of the tests: worker-notify publishes one refresh and leaves one Trailing try waiting until the window
+ * of that refresh ends, read from the window lock's PTTL. The clock is fixed on 15 Mar 2027, so the in-memory
+ * async_notify keeps the delayed try waiting whatever the wall clock says.
  */
 final class RefreshTicketPagesRoutingTest extends KernelTestCase
 {
@@ -93,8 +94,12 @@ final class RefreshTicketPagesRoutingTest extends KernelTestCase
         self::assertSame([], $this->asyncNotify()->getRejected());
 
         $waiting = $sentRefreshes[2];
-        self::assertSame(RefreshTicketPagesHandler::WINDOW_MILLISECONDS, $waiting->last(DelayStamp::class)?->getDelay());
-        self::assertSame([], [...$this->asyncNotify()->get()], 'The Trailing try is not due before its 2 s have passed.');
+        $delayMilliseconds = $waiting->last(DelayStamp::class)?->getDelay() ?? self::fail('The Trailing try has no delay.');
+        $windowMillisecondsLeftNow = self::getContainer()->get('state_valkey.connection')->pttl('realtime-refresh:'.self::SHOP_12);
+        self::assertGreaterThan(0, $windowMillisecondsLeftNow, 'The window of the published refresh is still open.');
+        self::assertGreaterThanOrEqual($windowMillisecondsLeftNow + RefreshTicketPagesHandler::WINDOW_END_MARGIN_MILLISECONDS, $delayMilliseconds, 'The Trailing try waits until the window ends.');
+        self::assertLessThanOrEqual(RefreshTicketPagesHandler::WINDOW_MILLISECONDS + RefreshTicketPagesHandler::WINDOW_END_MARGIN_MILLISECONDS, $delayMilliseconds);
+        self::assertSame([], [...$this->asyncNotify()->get()], 'The Trailing try is not due before its window ends.');
     }
 
     private function shop12Moved(string $fromStepId, string $toStepId): TicketMoved
