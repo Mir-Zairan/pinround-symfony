@@ -289,6 +289,10 @@ when@test:
         test.notification_digest_mail:
             alias: App\Notification\Infrastructure\Mail\DigestMail
             public: true
+        # Nothing calls auto-clear before Ticketing and Conversation do; ClearPingsOnActionTest gets the port as they will.
+        test.shared_kernel_ping_clearing:
+            alias: App\SharedKernel\Application\PingClearing
+            public: true
         # No route posts, edits or removes a comment before the thread's controllers (P04.T1 slice B); the comment
         # tests get the use cases as a controller would.
         test.conversation_post_comment:
