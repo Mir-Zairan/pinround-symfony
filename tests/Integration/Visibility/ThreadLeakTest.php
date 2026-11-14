@@ -91,7 +91,7 @@ final class ThreadLeakTest extends VisibilityLeakCast
                 ? null
                 : array_map(static fn (MessageView $message): array => [
                     array_map(static fn (ReplyView $reply): ?string => $reply->body, $message->replies),
-                    $message->answer()?->body,
+                    array_values(array_filter($message->replies, static fn (ReplyView $reply): bool => $reply->isAnswer && !$reply->isRemoved))[0]->body ?? null,
                 ], $shownMessages);
         }
 
