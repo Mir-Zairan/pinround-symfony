@@ -51,4 +51,9 @@ final class ZonedUserQueries implements UserQueries
 
         return $zones;
     }
+
+    public function emailsOf(array $userIds): array
+    {
+        throw new \LogicException('Only timeZonesOf is expected.');
+    }
 }

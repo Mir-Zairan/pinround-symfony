@@ -123,6 +123,42 @@ final class DbalUserQueriesTest extends KernelTestCase
         self::assertSame([self::USER_ID], array_keys($this->userQueries()->timeZonesOf(array_fill(0, UserQueries::MAX_TIME_ZONE_USER_IDS, new UserId(self::USER_ID)))));
     }
 
+    #[Test]
+    public function emailsOfGivesEachKnownActiveUsersAddressByIdInIdOrder(): void
+    {
+        new DoctrineUsers($this->entityManager)->add(
+            new User(new UserId(self::LENA_ID), new Email(' Lena@Acme-Foods.example'), 'Lena Fischer', 'en', 'Europe/Berlin', new \DateTimeImmutable('2026-11-02 09:30:00 UTC')),
+        );
+
+        $emails = $this->userQueries()->emailsOf([new UserId(self::USER_ID), new UserId(self::UNKNOWN_ID), new UserId(self::LENA_ID)]);
+
+        self::assertSame([self::LENA_ID => 'lena@acme-foods.example', self::USER_ID => 'mia@acme-foods.example'], $emails);
+    }
+
+    #[Test]
+    public function emailsOfLeavesOutABlockedUser(): void
+    {
+        new DoctrineUsers($this->entityManager)->add(
+            new User(new UserId(self::LENA_ID), new Email('lena@acme-foods.example'), 'Lena Fischer', 'en', 'Europe/Berlin', new \DateTimeImmutable('2026-11-02 09:30:00 UTC')),
+        );
+        $this->entityManager->getConnection()->executeStatement("UPDATE idn_user SET status = 'blocked' WHERE id = ?", [self::USER_ID]);
+
+        self::assertSame([self::LENA_ID => 'lena@acme-foods.example'], $this->userQueries()->emailsOf([new UserId(self::USER_ID), new UserId(self::LENA_ID)]));
+    }
+
+    #[Test]
+    public function emailsOfRefusesMoreThanTheCapAndTakesTheCap(): void
+    {
+        try {
+            $this->userQueries()->emailsOf(array_fill(0, UserQueries::MAX_EMAIL_USER_IDS + 1, new UserId(self::USER_ID)));
+            self::fail('101 ids should be refused.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertSame('Ask for the email addresses of at most 100 people at once.', $refusal->getMessage());
+        }
+
+        self::assertSame([self::USER_ID => 'mia@acme-foods.example'], $this->userQueries()->emailsOf(array_fill(0, UserQueries::MAX_EMAIL_USER_IDS, new UserId(self::USER_ID))));
+    }
+
     private function userQueries(): DbalUserQueries
     {
         return new DbalUserQueries($this->entityManager->getConnection());

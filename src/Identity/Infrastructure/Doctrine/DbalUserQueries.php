@@ -76,6 +76,30 @@ final readonly class DbalUserQueries implements UserQueries
         return $zones;
     }
 
+    public function emailsOf(array $userIds): array
+    {
+        if (\count($userIds) > self::MAX_EMAIL_USER_IDS) {
+            throw new \InvalidArgumentException(\sprintf('Ask for the email addresses of at most %d people at once.', self::MAX_EMAIL_USER_IDS));
+        }
+        if ([] === $userIds) {
+            return [];
+        }
+
+        $rows = $this->connection->fetchAllAssociative(
+            "SELECT id, email FROM idn_user WHERE id = ANY(?::uuid[]) AND status = 'active' ORDER BY id",
+            ['{'.implode(',', array_map(static fn (UserId $userId): string => $userId->toString(), $userIds)).'}'],
+        );
+        $emails = [];
+        foreach ($rows as $row) {
+            if (!\is_string($row['id']) || !\is_string($row['email'])) {
+                throw new \LogicException('A user id or email from the database is not a string.');
+            }
+            $emails[$row['id']] = $row['email'];
+        }
+
+        return $emails;
+    }
+
     /**
      * User only stores zones PHP knows, but a zone can leave PHP's list in a later tzdata release.
      */

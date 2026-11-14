@@ -13,6 +13,8 @@ interface UserQueries
 {
     public const int MAX_TIME_ZONE_USER_IDS = 100;
 
+    public const int MAX_EMAIL_USER_IDS = 100;
+
     /**
      * Reads with plain SQL and holds no entity, so it may run while another module's tenant is being switched.
      *
@@ -42,4 +44,17 @@ interface UserQueries
      * @throws \InvalidArgumentException when $userIds holds more than MAX_TIME_ZONE_USER_IDS ids, before any query
      */
     public function timeZonesOf(array $userIds): array;
+
+    /**
+     * One query; an empty $userIds runs none. Not limited to the tenant, like byIds: pass only ids read under it. An
+     * unknown id is left out, and so is a blocked user, who may not sign in and so is sent nothing.
+     *
+     * @param list<UserId> $userIds at most MAX_EMAIL_USER_IDS
+     *
+     * @return array<string, string> the person's email address, trimmed and in lowercase, keyed by user id string, in
+     *                               user id order
+     *
+     * @throws \InvalidArgumentException when $userIds holds more than MAX_EMAIL_USER_IDS ids, before any query
+     */
+    public function emailsOf(array $userIds): array;
 }
