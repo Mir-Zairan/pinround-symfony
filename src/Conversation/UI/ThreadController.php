@@ -10,14 +10,21 @@ use App\Conversation\Api\MessageEditRefused;
 use App\Conversation\Api\MessageNotFound;
 use App\Conversation\Api\MessageRemovalRefused;
 use App\Conversation\Api\QuestionRefused;
+use App\Conversation\Api\ReplyRefused;
+use App\Conversation\Api\ResolveRefused;
 use App\Conversation\Application\Answer\Answer;
 use App\Conversation\Application\AskQuestion\AskQuestion;
 use App\Conversation\Application\EditMessage\EditMessage;
 use App\Conversation\Application\PostComment\PostComment;
+use App\Conversation\Application\PostReply\PostReply;
 use App\Conversation\Application\RemoveMessage\RemoveMessage;
+use App\Conversation\Application\ResolveComment\ResolveComment;
+use App\Conversation\Application\ThreadMessages;
 use App\Conversation\UI\Component\Thread;
+use App\Conversation\UI\Voter\MessageOnTicket;
 use App\Identity\Api\CurrentUser;
 use App\Identity\Api\UserView;
+use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
@@ -37,8 +44,8 @@ use Symfony\UX\Turbo\TurboBundle;
 
 /**
  * The ticket's thread (FR-CNV-01, FR-CNV-02, FR-CNV-06, ticket-page.md, Questions and comments): shows it in
- * ThreadFrame's lazy frame, or as a page of its own, posts a comment, asks and answers a question, and edits or removes
- * one's own message. Each action responds with a toast: a Turbo form in a Turbo Stream that also replaces the message
+ * ThreadFrame's lazy frame, or as a page of its own, posts a comment, asks and answers a question, replies to a message,
+ * resolves a comment, and edits or removes one's own message. Each action responds with a toast: a Turbo form in a Turbo Stream that also replaces the message
  * list, any other form with a redirect to the thread's page. Asking and answering pause and resume the ticket, which
  * changes its page's header that the thread's frame cannot replace, so once made they redirect to the ticket's page.
  *
@@ -46,7 +53,8 @@ use Symfony\UX\Turbo\TurboBundle;
  * TicketMoveController: Transactions gives the action a transaction of its own, so
  * the toast is set only once the change is committed and a refusal leaves nothing. In that order: a ticket the person
  * may not see is not found, as on its page; ConversationPermission COMMENT is checked, and ASK for a question; a form
- * token that is not valid changes nothing. Who may edit or remove a message, and until when, and who may be asked or
+ * token that is not valid changes nothing; a message id of no message of the ticket is not found; RESOLVE is checked
+ * on the message. Who may edit or remove a message, and until when, and who may be asked or
  * answer, is the domain's rule, whose refusal is a toast.
  */
 final class ThreadController extends AbstractController
@@ -57,6 +65,8 @@ final class ThreadController extends AbstractController
     public const string REMOVE_ROUTE = 'conversation_message_remove';
     public const string ASK_ROUTE = 'conversation_question_ask';
     public const string ANSWER_ROUTE = 'conversation_question_answer';
+    public const string REPLY_ROUTE = 'conversation_message_reply';
+    public const string RESOLVE_ROUTE = 'conversation_message_resolve';
 
     public const string CSRF_FIELD = '_csrf_token';
     public const string BODY_FIELD = 'body';
@@ -68,6 +78,8 @@ final class ThreadController extends AbstractController
     public const string COMMENT_ADDED = 'Comment added.';
     public const string MESSAGE_EDITED = 'Message edited.';
     public const string MESSAGE_REMOVED = 'Message removed.';
+    public const string REPLY_ADDED = 'Reply added.';
+    public const string COMMENT_RESOLVED = 'Comment resolved.';
     public const string FORM_EXPIRED = 'This page was open too long. Reload it and try again.';
     /** With the first name of the person asked. */
     public const string QUESTION_SENT = 'Question sent. %s gets one notification. Ticket paused.';
@@ -99,6 +111,10 @@ final class ThreadController extends AbstractController
         private readonly RemoveMessage $removeMessage,
         private readonly AskQuestion $askQuestion,
         private readonly Answer $answer,
+        private readonly PostReply $postReply,
+        private readonly ResolveComment $resolveComment,
+        private readonly ThreadMessages $threadMessages,
+        private readonly TeamQueries $teamQueries,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -215,6 +231,44 @@ final class ThreadController extends AbstractController
         }, self::TICKET_ROUTE);
     }
 
+    #[Route('/t/{key}/messages/{messageId}/replies', name: self::REPLY_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function reply(string $key, string $messageId, Request $request): Response
+    {
+        $csrfToken = $request->request->getString(self::CSRF_FIELD);
+        $body = $request->request->getString(self::BODY_FIELD);
+        $now = $this->clock->now();
+
+        return $this->respondToAction($request, $key, function () use ($key, $messageId, $csrfToken, $body, $now): string {
+            [, $userId, $ticket] = $this->commentableTicketOf($key);
+            $this->refuseAnExpiredForm($key, $csrfToken);
+            $this->postReply->post($ticket->id, $ticket->visibilityFacts, $messageId, $userId, $body, $now);
+
+            return self::REPLY_ADDED;
+        });
+    }
+
+    /**
+     * MessageVoter decides on the locked message, so its author is read once the row can no longer change.
+     */
+    #[Route('/t/{key}/messages/{messageId}/resolve', name: self::RESOLVE_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function resolve(string $key, string $messageId, Request $request): Response
+    {
+        $csrfToken = $request->request->getString(self::CSRF_FIELD);
+        $now = $this->clock->now();
+
+        return $this->respondToAction($request, $key, function () use ($key, $messageId, $csrfToken, $now): string {
+            [$organizationId, $userId, $ticket] = $this->commentableTicketOf($key);
+            $this->refuseAnExpiredForm($key, $csrfToken);
+            $message = $this->threadMessages->lockedOf($organizationId, $ticket->id, $messageId);
+            $teamId = $ticket->visibilityFacts->teamId;
+            $teamLeadId = null === $teamId ? null : $this->teamQueries->leadOf($teamId);
+            $this->denyAccessUnlessGranted(ConversationPermission::RESOLVE, new MessageOnTicket($ticket->visibilityFacts, $message->authorId(), $teamLeadId));
+            $this->resolveComment->resolve($organizationId, $ticket->id, $messageId, $userId, $teamLeadId, $now);
+
+            return self::COMMENT_RESOLVED;
+        });
+    }
+
     /**
      * Runs the action in a transaction of its own and responds with its toast, or the refusal's: the refusals of
      * Conversation's Api say in their message what the person sees.
@@ -237,7 +291,7 @@ final class ThreadController extends AbstractController
             return $this->respondWithToast($request, $key, self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (TicketChangedMeanwhile) {
             return $this->respondWithToast($request, $key, self::TICKET_CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
-        } catch (MessageBodyRefused|MessageEditRefused|MessageRemovalRefused|QuestionRefused $refused) {
+        } catch (MessageBodyRefused|MessageEditRefused|MessageRemovalRefused|QuestionRefused|ReplyRefused|ResolveRefused $refused) {
             return $this->respondWithToast($request, $key, $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
