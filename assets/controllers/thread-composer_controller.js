@@ -103,15 +103,20 @@ export default class extends Controller {
     this.followOpenQuestion(messages.dataset.hasOpenQuestion === 'true');
   }
 
-  // The markup is the server's Twig render, escaped like the rest of the page. A question being written stays with the
-  // person chosen while they are still there to ask, else with the first.
+  // The markup is the server's Twig render, escaped like the rest of the page. Unchanged people are left alone, so a
+  // focused chip keeps focus on every live refresh (WCAG 2.4.3). A question being written stays with the person chosen
+  // while they are still there to ask, else with the first; a focused chip hands focus to the same person, else the first.
   renewAskChoices(markup) {
     if (markup === undefined || !this.hasAskChoicesTarget) {
       return;
     }
-    const askedUserId = this.isAsking() && this.hasAskedUserTarget ? this.askedUserTarget.value : null;
     const freshChoices = document.createElement('template');
     freshChoices.innerHTML = markup;
+    if (this.describeChoices(freshChoices.content) === this.describeChoices(this.askChoicesTarget)) {
+      return;
+    }
+    const askedUserId = this.isAsking() && this.hasAskedUserTarget ? this.askedUserTarget.value : null;
+    const focusedUserId = this.personTargets.find((each) => each === document.activeElement)?.dataset.userId ?? null;
     this.askChoicesTarget.replaceChildren(freshChoices.content);
     if (askedUserId === null) {
       return;
@@ -119,9 +124,23 @@ export default class extends Controller {
     const person = this.personTargets.find((each) => each.dataset.userId === askedUserId) ?? this.personTargets[0];
     if (person === undefined) {
       this.writeComment();
-    } else {
-      this.ask(person);
+      if (focusedUserId !== null) {
+        this.commentChipTarget.focus();
+      }
+      return;
     }
+    this.ask(person);
+    if (focusedUserId !== null) {
+      (this.personTargets.find((each) => each.dataset.userId === focusedUserId) ?? this.personTargets[0]).focus();
+    }
+  }
+
+  // What the people chips offer, leaving out which one is pressed and whether they show: that is the composer's state.
+  describeChoices(root) {
+    const people = [...root.querySelectorAll('[data-thread-composer-target~="person"]')].map((person) =>
+      [person.dataset.userId, person.dataset.note, person.dataset.button, person.textContent.trim()].join('\u0000'),
+    );
+    return JSON.stringify([root.querySelector('[data-thread-composer-target~="askedUser"]') !== null, people]);
   }
 
   // A Turbo Stream renders only the list, so mayAsk may be older than the people: nobody left to ask turns Ask off too.
