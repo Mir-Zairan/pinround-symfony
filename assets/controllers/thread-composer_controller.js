@@ -47,9 +47,12 @@ export default class extends Controller {
     this.choose(event.currentTarget);
   }
 
-  // Cancel in an answer form: folds it away and keeps what was typed.
+  // Cancel in an answer form: folds it away, keeps what was typed and puts focus back on its Answer button, which
+  // would otherwise drop to the body with the hidden Cancel (WCAG 2.4.3).
   closeAnswer(event) {
-    event.currentTarget.closest('details').open = false;
+    const answer = event.currentTarget.closest('details');
+    answer.open = false;
+    answer.querySelector('summary').focus();
   }
 
   // turbo:submit-start of any thread form: an edit or remove form sits inside its message.
