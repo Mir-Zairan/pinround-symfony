@@ -7,8 +7,8 @@ namespace App\SharedKernel\Infrastructure\Http;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
- * Tells the requests a page sends without the person asking for them, which must never write the session
- * (BackgroundReadOnlySessionHandler): they can run beside the person's own POST and write back an older copy of it.
+ * Tells the requests a page sends without the person asking for them, which write the session only to keep a new CSRF
+ * token (BackgroundReadOnlySessionHandler): they can run beside the person's own POST and write back an older copy of it.
  *
  * A Turbo prefetch and a lazy frame are not background: the page they fetch is the one the person then sees, and the
  * CSRF tokens it makes must be saved for its forms to post.

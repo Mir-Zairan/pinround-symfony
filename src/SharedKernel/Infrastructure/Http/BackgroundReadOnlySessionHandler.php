@@ -11,7 +11,10 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * background request beside the person's own POST would write back the copy it read before the POST: a flash or a
  * CSRF token the POST saved would be lost, or a flash already shown would come back. Such a request neither writes
  * the session nor renews its TTL, and answers true, so PHP sees a saved session. It decides from the main request on
- * the stack at the time of the write and holds no state, so nothing carries over to the next request of a worker.
+ * the stack at the time of the write.
+ *
+ * Except when it stored a CSRF token: a refreshed part can show a form for the first time, which would post a token the
+ * session never kept. That rare write keeps the old race.
  */
 final readonly class BackgroundReadOnlySessionHandler implements \SessionHandlerInterface, \SessionUpdateTimestampHandlerInterface
 {
@@ -19,6 +22,7 @@ final readonly class BackgroundReadOnlySessionHandler implements \SessionHandler
         private \SessionHandlerInterface&\SessionUpdateTimestampHandlerInterface $sessionHandler,
         private RequestStack $requestStack,
         private BackgroundRequests $backgroundRequests,
+        private RecordingCsrfTokenStorage $csrfTokenStorage,
     ) {
     }
 
@@ -39,7 +43,7 @@ final readonly class BackgroundReadOnlySessionHandler implements \SessionHandler
 
     public function write(string $id, string $data): bool
     {
-        return $this->isInBackgroundRequest() || $this->sessionHandler->write($id, $data);
+        return $this->isReadOnlyRequest() || $this->sessionHandler->write($id, $data);
     }
 
     public function destroy(string $id): bool
@@ -59,13 +63,15 @@ final readonly class BackgroundReadOnlySessionHandler implements \SessionHandler
 
     public function updateTimestamp(string $id, string $data): bool
     {
-        return $this->isInBackgroundRequest() || $this->sessionHandler->updateTimestamp($id, $data);
+        return $this->isReadOnlyRequest() || $this->sessionHandler->updateTimestamp($id, $data);
     }
 
-    private function isInBackgroundRequest(): bool
+    private function isReadOnlyRequest(): bool
     {
         $mainRequest = $this->requestStack->getMainRequest();
 
-        return null !== $mainRequest && $this->backgroundRequests->isBackground($mainRequest);
+        return null !== $mainRequest
+            && $this->backgroundRequests->isBackground($mainRequest)
+            && !$this->csrfTokenStorage->hasStoredToken();
     }
 }
