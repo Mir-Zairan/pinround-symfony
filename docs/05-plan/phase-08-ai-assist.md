@@ -39,7 +39,7 @@ Acme Foods cannot pay for an AI service. Sara sets "Where the AI runs: Each pers
 - MCP tools (phase 09) — they are not "pinround's AI", they are the user's own agent.
 
 ## Requirements covered
-FR-AI-01, FR-AI-02, FR-AI-03, FR-AI-04, FR-AI-05, FR-AI-06, FR-AI-07, FR-AI-08, FR-AI-09, FR-AI-10, FR-AI-11, FR-AI-12, FR-AI-13, FR-AI-14, FR-AI-15, FR-AI-16, FR-AI-17, FR-AI-18, FR-ADM-05, FR-INT-03 (AI part), FR-INT-08 (AI risk/missing reasons), FR-INT-15 (AI layer), FR-RND-06, FR-RND-07, FR-AUD-01 (AI policy changes).
+FR-AI-01, FR-AI-02, FR-AI-03, FR-AI-04, FR-AI-05, FR-AI-06, FR-AI-07, FR-AI-08, FR-AI-09, FR-AI-10, FR-AI-11, FR-AI-12, FR-AI-13, FR-AI-14, FR-AI-15, FR-AI-16, FR-AI-17, FR-AI-18, FR-ADM-05, FR-INT-03 (AI part), FR-INT-08 (AI risk/missing reasons), FR-INT-15 (AI layer), FR-RND-06, FR-RND-07, FR-RND-16 (AI summary suggestion only), FR-AUD-01 (AI policy changes).
 NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-PERF-09, NFR-AVL-05.
 
 ## Design notes
@@ -218,10 +218,12 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
   1. "Looks fixed" hint per earlier pin: vision model compares before/after crop; advice only.
   2. "Look for visual problems": vision model returns `{x_pct, y_pct, note}` candidates (schema `pins.v1.schema.json`); shown as dashed AI pins with Keep / Dismiss; Keep creates a normal pin with `source = ai`.
   3. Cloud only (small laptop models are weak at vision); hidden for laptop-only orgs.
-- **Files:** `src/Assist/Infrastructure/Prompt/templates/pins.v1.md.twig`, `src/Review/UI/Component/AiPinLayer.php`.
+  4. Summary suggestion ([FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds)): AI suggests a screenshot summary (≤ 600 characters) from the ticket text, the pin notes and the picture, shown beside the summary box with "Use this" / "Dismiss". Never saved alone ([ADR-0020](../03-adr/0020-ai-safety-and-prompt-injection.md)); ticket text, pin notes, title and summary go inside delimiters as data, and the output is validated against a schema and the 600 character cap.
+- **Files:** `src/Assist/Infrastructure/Prompt/templates/pins.v1.md.twig`, `src/Assist/Infrastructure/Prompt/templates/shot_summary.v1.md.twig`, `src/Review/UI/Component/AiPinLayer.php`.
 - **Acceptance:**
   - [ ] AI pins never change verdicts without a click; Keep/Dismiss audited in ticket activity.
-- **Tests:** schema parsing (mocked); voter (only people who can review).
+  - [ ] A suggested summary is saved only after "Use this"; "Dismiss" and doing nothing leave the summary unchanged.
+- **Tests:** schema parsing (mocked); voter (only people who can review); summary over 600 characters rejected; injection text in a pin note stays inside the delimiters.
 - **Prototype check:** [review-round.md › Screenshots and pins](../04-prototype/screens/review-round.md#screenshots-and-pins) and [full-screen-review.md](../04-prototype/screens/full-screen-review.md).
 - **Size:** L
 

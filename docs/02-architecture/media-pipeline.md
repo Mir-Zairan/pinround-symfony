@@ -143,3 +143,4 @@ exports/{orgId}/{exportId}.zip                   # org exports, lifecycle rule: 
 - The UI places pins over the image with `left: x%; top: y%`, so they stay on the same spot at any display size.
 - Because coordinates are relative to the re-encoded image, which keeps the aspect ratio of the original, pins placed on the local preview before processing finishes are still correct.
 - Pin numbers are per screenshot, in order of creation. Deleting a pin does not renumber the others (people refer to "pin 3" in comments).
+- The look is not part of the stored model: the UI draws each pin as a hollow ring (dark outer and white inner outline, number in a tab at the ring edge, note in a bubble on hover, focus or select) centred on that point, so the element under it stays readable. See FR-RND-02.

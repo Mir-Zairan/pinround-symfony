@@ -36,7 +36,7 @@ Ben from support hears customers see a doubled total. He opens "Report a problem
 - Home "New tickets to check" group (P07 reads the same data). The full admin area layout (P11).
 
 ## Requirements covered
-FR-INT-01, FR-INT-02, FR-INT-03, FR-INT-04, FR-INT-05, FR-INT-06, FR-INT-07, FR-INT-08, FR-INT-09, FR-INT-10, FR-INT-11, FR-INT-12, FR-INT-13, FR-INT-14, FR-INT-15, FR-TKT-07 (to-check chip), FR-ORG-09, FR-ADM-07 (minimal), FR-WF-08 (rule 2), NFR-SEC-13, NFR-USE-02.
+FR-INT-01, FR-INT-02, FR-INT-03, FR-INT-04, FR-INT-05, FR-INT-06, FR-INT-07, FR-INT-08, FR-INT-09, FR-INT-10, FR-INT-11, FR-INT-12, FR-INT-13, FR-INT-14, FR-INT-15, FR-RND-16, FR-MCP-12, FR-TKT-07 (to-check chip), FR-ORG-09, FR-ADM-07 (minimal), FR-WF-08 (rule 2), NFR-SEC-13, NFR-USE-02.
 
 ## Design notes
 - **One create command** `TicketCommands::create` gains: team (or none), pending assignee, check reasons, visibility, duplicate links, Round 0 screenshots/pins (via `Review\Api\RoundCommands::createReport` in the same transaction).
@@ -53,15 +53,18 @@ FR-INT-01, FR-INT-02, FR-INT-03, FR-INT-04, FR-INT-05, FR-INT-06, FR-INT-07, FR-
 **Why:** reporting must take under two minutes and never need approval ([FR-INT-01, FR-INT-02, FR-INT-05, FR-INT-06](../01-requirements/functional-requirements.md#int--intake-and-checks)).
 **Steps:**
 1. Route `GET/POST /report` (`report_new`) for everyone in the org; header button "Report a problem" points here.
-2. `ReportForm` Live Component: "What is wrong, in one line", "More detail · optional", Screenshot ("Capture with pinround" disabled until P10 with a tooltip, "Upload a file", paste), pins with notes, "Where it goes": Team (teams + "Not sure"), Give it to (only for a chosen team: "The team (Lena decides)" + up to 4 members sorted by load), Project, Type (default Bug), Priority (default Normal).
+2. `ReportForm` Live Component: "What is wrong, in one line", "More detail · optional", Screenshot ("Capture with pinround" disabled until P10 with a tooltip, "Upload a file", paste), pins with notes, and per screenshot an optional "Title" (≤ 120 characters) and "What this picture shows" summary (≤ 600 characters; [FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds)), "Where it goes": Team (teams + "Not sure"), Give it to (only for a chosen team: "The team (Lena decides)" + up to 4 members sorted by load), Project, Type (default Bug), Priority (default Normal).
 3. Create: ticket + Round 0 in one transaction; start in To do with an assignee and no lead-check rule, else Backlog; land on the ticket.
 4. Keep `/tickets/new` for leads only, or remove it (decide and note it in hand-off).
+5. Report drafts made by Claude Code ([FR-MCP-12](../01-requirements/functional-requirements.md#mcp--mcp-server-and-agent-api), [ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md); the tool itself is P09.T9): a list "Report drafts" on the Report a problem page, visible to the owner only, and a page to open one in the same `ReportForm`, edit it (title, detail, pictures with title, summary and pins) and **Send**. Send creates the ticket with Round 0 through the same create command as step 3 and deletes the draft in that transaction; a draft of another user is "not found". Decide the retention of unsent drafts and note it in hand-off.
 **Files:** `src/Ticketing/UI/Component/ReportForm.php`, `src/Ticketing/Application/CreateTicket/*` (extended), templates.
 **Acceptance criteria:**
 - [ ] A report with a screenshot and 2 pins creates the ticket and "Round 0 · Report · by Ben · 2 pins".
 - [ ] "Give it to" appears only after a team is chosen.
 - [ ] The whole form works with keyboard only.
-**Tests:** functional create (with and without screenshot), Playwright journey with a stopwatch check (< 2 minutes scripted), axe.
+- [ ] A summary over 600 characters or a title over 120 is refused with a plain message and the form keeps its text.
+- [ ] A report draft is visible only to its owner; Send creates the ticket with Round 0 and the draft is gone; nobody else can open or send it.
+**Tests:** functional create (with and without screenshot, with title and summary, report draft open and send, other user's draft → not found), Playwright journey with a stopwatch check (< 2 minutes scripted), axe.
 **Prototype check:** [fields and copy](../04-prototype/screens/report-a-problem.md#fields-and-copy), [where it goes](../04-prototype/screens/report-a-problem.md#where-it-goes): labels, placeholders, order, defaults.
 **Size:** L
 

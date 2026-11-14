@@ -15,7 +15,7 @@ Goal: the heart of pinround: safe screenshot uploads, numbered pins, Round 0 and
 
 ## Before you start
 1. **Prototype.** Open https://claude.ai/artifact/FmbJosB3s5mDi75cLqMFQ2 with the Artifact tool (`action: "read"`). Read three boards: `path: "project/Main.dc.html"` (ticket page Rounds section, draft round as the developer, the share dialog), `path: "project/Review.dc.html"` (review round), `path: "project/Focus.dc.html"` (full-screen review); `project/Shot.dc.html` is only the simulated screenshot. Fallback docs: [Ticket page: rounds](../04-prototype/screens/ticket-page.md#rounds), [Review round](../04-prototype/screens/review-round.md) (all sections), [Full-screen review](../04-prototype/screens/full-screen-review.md#elements-and-rules), [Share draft dialog](../04-prototype/screens/dialogs-and-popovers.md#share-draft-dialog), [Report a problem](../04-prototype/screens/report-a-problem.md) (screenshot and pins part).
-2. **Requirements:** [FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-RND-08, FR-RND-09, FR-RND-10, FR-RND-11, FR-RND-12, FR-RND-13, FR-RND-14](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds) (FR-RND-06 and FR-RND-07 AI parts are filled in P08; FR-RND-15 plugin in P10), [NFR-SEC-06 upload rules](../01-requirements/non-functional-requirements.md#sec--security), [NFR-PERF-05, NFR-PERF-08](../01-requirements/non-functional-requirements.md#perf--performance), [NFR-A11Y-02](../01-requirements/non-functional-requirements.md#a11y--accessibility) (keyboard pins), [C-11](../01-requirements/constraints.md#c-11-screenshots-are-large-and-many).
+2. **Requirements:** [FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-RND-08, FR-RND-09, FR-RND-10, FR-RND-11, FR-RND-12, FR-RND-13, FR-RND-14, FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds) (FR-RND-06 and FR-RND-07 AI parts are filled in P08; FR-RND-15 plugin in P10), [NFR-SEC-06 upload rules](../01-requirements/non-functional-requirements.md#sec--security), [NFR-PERF-05, NFR-PERF-08](../01-requirements/non-functional-requirements.md#perf--performance), [NFR-A11Y-02](../01-requirements/non-functional-requirements.md#a11y--accessibility) (keyboard pins), [C-11](../01-requirements/constraints.md#c-11-screenshots-are-large-and-many).
 3. **ADRs:** [0011 screenshot storage and processing](../03-adr/0011-screenshot-storage-and-processing.md), [0017 private draft rounds](../03-adr/0017-private-draft-rounds.md), [0009 outbox and media queue](../03-adr/0009-async-messaging-and-outbox.md), [0013 authorization](../03-adr/0013-authorization.md), [0027 secrets](../03-adr/0027-secrets-and-encryption.md).
 4. **Architecture docs:** [media pipeline](../02-architecture/media-pipeline.md) — all sections, especially [upload flow](../02-architecture/media-pipeline.md#upload-flow), [validation rules](../02-architecture/media-pipeline.md#validation-rules), [processing worker](../02-architecture/media-pipeline.md#processing-worker), [storage key layout](../02-architecture/media-pipeline.md#storage-key-layout), [serving images](../02-architecture/media-pipeline.md#serving-images), [pin coordinate model](../02-architecture/media-pipeline.md#pin-coordinate-model); [upload security](../02-architecture/security.md#upload-security); [Review module](../02-architecture/modules.md#review-rvw_), [Media module](../02-architecture/modules.md#media-med_); tables [Review and Media](../02-architecture/data-model.md#review-and-media); [Stimulus controllers](../02-architecture/frontend.md#stimulus-controllers) (`pin-placer`, `presigned-upload`); [screenshot view hot path](../02-architecture/performance-and-scale.md#screenshot-view).
 5. **Previous phase:** check the [P03 Definition of done](phase-03-tickets-core.md#definition-of-done) and the [P04 Definition of done](phase-04-conversation-and-pings.md#definition-of-done): P05.T6 clears pings (one action path) and P05.T7 opens the question composer, both built in P04. 🏁 Hackathon exception: P04 is cut from the slice, so the 🏁 tasks here (T1–T5, T8, T9) must not call P04 code; the ping clearing and question parts of T6 and T7 come after the hackathon.
@@ -36,7 +36,7 @@ Omar fixed SHOP-88. Before he sends it on, he starts a draft round that only he 
 - MCP tools (P09) and the browser capture extension (P10).
 
 ## Requirements covered
-FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-RND-08, FR-RND-09, FR-RND-10, FR-RND-11, FR-RND-12, FR-RND-13, FR-RND-14 (FR-RND-06 and FR-RND-07: display and Keep/Dismiss only), FR-WF-17 (verdicts clear pings), NFR-SEC-06, NFR-PERF-05, NFR-PERF-08, NFR-A11Y-02, C-11.
+FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-RND-08, FR-RND-09, FR-RND-10, FR-RND-11, FR-RND-12, FR-RND-13, FR-RND-14, FR-RND-16 (FR-RND-06 and FR-RND-07: display and Keep/Dismiss only), FR-WF-17 (verdicts clear pings), NFR-SEC-06, NFR-PERF-05, NFR-PERF-08, NFR-A11Y-02, C-11.
 
 ## Design notes
 - **Tables:** `med_object`, `med_upload_intent`, `rvw_round`, `rvw_screenshot`, `rvw_pin`, `rvw_check_item`, plus a new `rvw_area` for review rounds (round id, name, position, verdict `pass`/`needs_fix`/`question`/NULL, note, decided_by) in P05.T7. All with RLS.
@@ -91,27 +91,30 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 1. `Screenshot` component with `PinLayer` (absolutely positioned numbered markers at x/y percent) and `PinList` (the text equivalent: number + note, editable or read-only).
 2. `pin-placer` controller: click adds a pin at `(clientX - left) / width × 100` (and y), rounded to 0.1, limited to 0–100; keyboard: "Add pin" puts one in the centre, arrows move 1 % (Shift 5 %), Enter confirms, Delete removes.
 3. Pin note max 1,000 characters; numbering is per screenshot and stable.
-4. Marker styles as in the prototype: human pins orange-brown with white border; AI pins dashed in AI colours; selected ring in primary.
+4. Marker look ([FR-RND-02](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds), product owner's decision 2026-11-14; differs from the prototype's filled marker on purpose): a hollow ring with a dark outer and a white inner outline (visible on any background, WCAG 1.4.11), no fill, the number in a small tab at the ring's edge, and the note in a bubble beside the spot on hover, focus or select. AI pins stay dashed in AI colours; the selected ring stays `--primary`. Still x/y percent only, no width or height.
 **Files:** `src/Review/UI/Component/{Screenshot,PinLayer,PinList}.php`, `assets/controllers/pin-placer_controller.js`.
 **Acceptance criteria:**
 - [ ] Pins stay on the same spot when the window is resized.
 - [ ] A keyboard-only user can add, move, describe and remove a pin.
 - [ ] Each marker has an accessible name "Pin 2: header is cut off".
+- [ ] The field under a pin stays readable (the ring has no fill).
+- [ ] The note bubble shows on hover, on keyboard focus and when the pin is selected.
 **Tests:** unit (coordinate maths), Playwright (mouse and keyboard), axe.
-**Prototype check:** marker look and the pin list in [Review round: screenshots and pins](../04-prototype/screens/review-round.md#screenshots-and-pins) and the report form pin list.
+**Prototype check:** the pin list in [Review round: screenshots and pins](../04-prototype/screens/review-round.md#screenshots-and-pins) and the report form pin list; the marker look is not checked against the prototype (ring pins differ on purpose).
 **Size:** M
 
 ### P05.T4 — Round model and the Rounds section 🏁
 **Why:** every round, from report to self-check, lives in one model ([FR-RND-03, FR-RND-14](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds)).
 **Steps:**
-1. Review domain: `Round` (kind report/checklist/review/draft, owner, number, shared_at, state, version), `Screenshot` (media id, position, before/after label, verdict, note), `Pin` (number, x/y, note, verdict, source, ai_state, author).
+1. Review domain: `Round` (kind report/checklist/review/draft, owner, number, shared_at, state, version), `Screenshot` (media id, position, before/after label, verdict, optional title ≤ 120 characters, optional summary ≤ 600 characters; [FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds); the summary is the former per-screenshot note), `Pin` (number, x/y, note, verdict, source, ai_state, author).
 2. Migrations `rvw_round`, `rvw_screenshot`, `rvw_pin` with RLS and the partial unique index "one open draft per owner per ticket".
 3. `Review\Api\RoundCommands` and `RoundQueries::forTicket(TicketId, UserId $viewer)` (drafts filtered for non-owners; rounds of tickets the viewer may not see are filtered by the TicketVisibility predicate through `Ticketing\Api\TicketVisibility`). Register the Review `MediaTargetAuthorizer` (round and draft targets) for P05.T1.
 4. `RoundCommands::createReport(TicketId, list<ScreenshotWithPins>)` for P06 (Round 0).
-5. Rounds section on the ticket page: Round 0 card "Round 0 · Report · by Mia · 2 pins" with the screenshot and pins; review rounds with "Open round"; shared drafts; the empty state text when there are none.
+5. Rounds section on the ticket page: Round 0 card "Round 0 · Report · by Mia · 2 pins" with the screenshot and pins, its title and summary shown above the picture as text; review rounds with "Open round"; shared drafts; the empty state text when there are none.
 **Files:** `src/Review/**`, ticket page partial.
 **Acceptance criteria:**
 - [ ] Rounds list in order (0, 1, then by number).
+- [ ] A title over 120 or a summary over 600 characters is refused with a plain message and nothing is saved.
 - [ ] A round of a team-only ticket is invisible to people outside the team (isolation + voter tests; case added to the visibility leak suite).
 **Tests:** domain unit tests; integration (queries, draft filter); functional render.
 **Prototype check:** [Ticket page: rounds](../04-prototype/screens/ticket-page.md#rounds).
@@ -152,7 +155,7 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 **Steps:**
 1. Route `GET /t/{key}/rounds/{number}`; header "Round 2 · shot today, 09:12 · Ready for Mia"; compare control Side by side / Before / After; "Full screen" button.
 2. `rvw_area` table (add to [data-model.md](../02-architecture/data-model.md#review-and-media)); area tabs with state chips (Passed, "3 pins", Not reviewed).
-3. Before = the previous round's after screenshot (or Round 0); after = this round's.
+3. Before = the previous round's after screenshot (or Round 0), with its title and summary, read-only; after = this round's.
 4. Side panel: pins from the earlier round with Fixed / Still wrong (+ Undo); AI check line and "AI found N more" with "Keep as my pin" / "Dismiss" when AI data exists (P08); area verdict chips Pass / Needs fix / Question, note "What should Lena know?", "Then: Lena, team lead", "Save verdict".
 5. After every area has a verdict: offer the matching verb (see [design notes](#design-notes)); Question opens the question composer to the lead.
 6. Toasts as in the prototype ("Verdict saved. Lena can see it.", "Pick Pass, Needs fix or Question first.").
@@ -169,10 +172,10 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 **Why:** the developer checks their own work, privately, before anyone else sees it; Claude Code reads the notes ([FR-RND-09, FR-RND-10, FR-RND-12, FR-RND-13](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds), [ADR-0017](../03-adr/0017-private-draft-rounds.md)).
 **Steps:**
 1. "Start a draft round" for the assignee of an open ticket (one open draft per owner per ticket); tag PRIVATE; title "Draft round · only you can see this".
-2. `DraftRoundEditor` Live Component: add screenshot (upload/paste), pins with notes, verdict per screenshot "Looks right" / "Not right yet" (toggle), note per screenshot, remove screenshot; status "1 of 2 look right".
+2. `DraftRoundEditor` Live Component: add screenshot (upload/paste), pins with notes, verdict per screenshot "Looks right" / "Not right yet" (toggle), a title and a note per screenshot (the note is the summary, [FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds)), remove screenshot; status "1 of 2 look right".
 3. Buttons "Add screenshot", "Share with the team now", "Delete draft" (files deleted after retention).
 4. "For Claude Code" box: copyable line "Read my pinround notes for SHOP-88 and fix what is marked "Not right yet"." and the tool names `get_round_notes`, `add_screenshot`, `set_verdict` (served in P09).
-5. `RoundQueries::roundNotes(TicketId, UserId $owner)` returning a stable JSON-ready DTO (screenshots, verdicts, notes, pins) for P09.
+5. `RoundQueries::roundNotes(TicketId, UserId $owner)` returning a stable JSON-ready DTO (screenshots with title and summary, verdicts, notes, pins) for P09.
 **Files:** `src/Review/UI/Component/DraftRoundEditor.php`, `src/Review/Application/Draft/*`.
 **Acceptance criteria:**
 - [ ] The lead, the tester and an admin cannot see an unshared draft (HTML, queries and direct URLs; voter + isolation tests).
@@ -223,4 +226,10 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 - P06 creates Round 0 through `RoundCommands::createReport` and reuses the screenshot partial from P05.T5.
 - P08 fills the AI check line per pin and AI suggestion pins (vision); this phase already renders them.
 - P09 exposes `roundNotes`, `addScreenshot` and `setVerdict` as MCP tools for the owner's token.
+- **2026-11-14 — product owner decisions (plan change only; nothing built or ticked):**
+  - (a) Every screenshot in every round kind has an optional title (≤ 120 characters) and an optional summary (≤ 600 characters, one free text box, "what this picture shows"; on a before picture what is wrong, on an after picture what changed and what it shows now). Shown above the picture as text, never drawn into pixels. A review round's before is the earlier round's after row, so title and summary carry forward read-only. See [FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds). `rvw_screenshot` gets `title` and `summary` (the old `note` is the summary) in [data-model.md](../02-architecture/data-model.md#review-and-media).
+  - (b) Pins are see-through rings (dark outer, white inner outline, number tab, note bubble on hover, focus or select). This deliberately differs from the prototype's filled `#b4470a` marker in [review-round.md](../04-prototype/screens/review-round.md#screenshots-and-pins): the requirement wins.
+  - (c) A person types title and summary. In P09 the person's own Claude Code may fill them through MCP, only into a draft its owner checks. In P08 pinround AI may suggest summary text ("Use this" / "Dismiss"); never saved alone ([ADR-0020](../03-adr/0020-ai-safety-and-prompt-injection.md)). Both are untrusted text, wrapped in delimiters for AI and MCP.
+  - (d) New flow: a reporter's Claude Code files a report draft with the MCP tool `create_report` (scope `reports:write`); the reporter checks it and clicks Send, which calls `RoundCommands::createReport`. See [ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md); built in P06 (UI) and P09.T9 (tool).
+  - **PR split for this phase:** the first PR is T1–T4; the next PR is T5, T8, T9; T6, T7 and T10 come after the P04 Definition of done.
 - (add dated notes here)
