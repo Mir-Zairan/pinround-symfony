@@ -118,7 +118,7 @@ final class QueueDigestsTest extends KernelTestCase
     }
 
     #[Test]
-    public function aRunAtOrUnderTheCapLogsNothing(): void
+    public function aRunUnderTheCapLogsNothing(): void
     {
         $logger = new RecordingLogger();
         $job = new QueueDigests(
