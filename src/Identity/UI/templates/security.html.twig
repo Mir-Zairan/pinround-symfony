@@ -11,7 +11,7 @@
 {% block main %}
     <div class="security">
         <h1 class="security__title">Security</h1>
-        {% for notice in app.flashes('notice') %}
+        {% for notice in page_flashes('notice') %}
             <p class="login__notice" role="status">{{ notice }}</p>
         {% endfor %}
 
