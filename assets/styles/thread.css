@@ -1,5 +1,20 @@
 /* The ticket page's Questions and comments: Conversation's Thread component inside a .ticket__section. */
 
+/* The lazy frame and Thread's two wrappers sit between .ticket__section and the thread's parts, so they carry its
+   column gap down to the earlier-messages note, the list and the composer. */
+turbo-frame#ticket-thread {
+  display: block;
+  min-width: 0;
+}
+
+.thread__content,
+.thread__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
 .thread__earlier {
   margin: 0;
   color: var(--on-surface-var);

@@ -9,6 +9,10 @@ const TOAST_REGION = '#toast-region';
 const COMMENT_ADDED = 'Comment added.';
 const MESSAGE_EDITED = 'Message edited.';
 const MESSAGE_REMOVED = 'Message removed.';
+// ThreadController::FORM_EXPIRED
+const FORM_EXPIRED = 'This page was open too long. Reload it and try again.';
+// --space-12, the column gap of .ticket__section that the frame and Thread's wrappers carry on
+const SECTION_GAP_PX = 12;
 // Thread::EMPTY_THREAD and ThreadFrame::SHOW_THREAD, the frame's link before it loads
 const EMPTY_THREAD = 'Nothing yet. Ask a question when you need someone’s answer, or leave a comment.';
 const SHOW_THREAD = 'Show questions and comments';
@@ -73,6 +77,14 @@ async function postComment(page: Page, text: string): Promise<void> {
   await expect(page.locator(TOAST_REGION)).toHaveText(COMMENT_ADDED);
 }
 
+async function expectNoSidewaysScroll(page: Page): Promise<void> {
+  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+}
+
 test.describe('the thread of a new ticket', () => {
   let key = '';
 
@@ -88,6 +100,21 @@ test.describe('the thread of a new ticket', () => {
     await expect(threadFrame(page).getByText(EMPTY_THREAD)).toBeVisible();
     await expect(threadFrame(page).locator('li[data-message-id]')).toHaveCount(0);
     await expect(threadFrame(page).getByLabel('Write a comment')).toBeVisible();
+  });
+
+  test('the list and the composer keep the section gap inside the frame', async ({ page }) => {
+    await openThread(page, key);
+    await postComment(page, 'Spacing check');
+
+    const content = threadFrame(page).locator('.thread__content');
+    for (const part of [content, content.locator('.thread__list')]) {
+      expect(await part.evaluate((element) => getComputedStyle(element).rowGap)).toBe(`${SECTION_GAP_PX}px`);
+    }
+    const list = await content.locator('.thread__list').boundingBox();
+    const composer = await content.locator('form.thread__composer').boundingBox();
+    expect(list).not.toBeNull();
+    expect(composer).not.toBeNull();
+    expect((composer?.y ?? 0) - ((list?.y ?? 0) + (list?.height ?? 0))).toBeCloseTo(SECTION_GAP_PX, 0);
   });
 
   test('Comment is disabled while the text is empty or only spaces', async ({ page }) => {
@@ -114,6 +141,27 @@ test.describe('the thread of a new ticket', () => {
     await expect(composerBody(page)).toBeFocused();
     await expect(composerBody(page)).toHaveValue('');
     await expect(commentButton(page)).toBeDisabled();
+  });
+
+  test('a refused comment keeps its text, shows the toast and puts focus back in the composer', async ({ page }) => {
+    const text = `Kept after a refusal ${randomUUID().slice(0, 8)}`;
+    await openThread(page, key);
+    // An expired form is the refusal a browser can cause; tests/Functional/Conversation covers the others, which
+    // answer with the same 422 Turbo Stream.
+    await threadFrame(page).locator('form.thread__composer input[name="_csrf_token"]').evaluate((input) => {
+      (input as HTMLInputElement).value = 'expired';
+    });
+    await composerBody(page).fill(text);
+    const answer = page.waitForResponse((response) => new URL(response.url()).pathname === `/t/${key}/comments` && response.request().method() === 'POST');
+
+    await commentButton(page).click();
+
+    expect((await answer).status()).toBe(422);
+    await expect(page.locator(TOAST_REGION)).toHaveText(FORM_EXPIRED);
+    await expect(composerBody(page)).toHaveValue(text);
+    await expect(composerBody(page)).toBeFocused();
+    await expect(commentButton(page)).toBeEnabled();
+    await expect(threadFrame(page).locator('li[data-message-id]')).toHaveCount(0);
   });
 
   test('Save on an edit and Remove each put focus on the changed message', async ({ page }) => {
@@ -169,4 +217,30 @@ test.describe('the thread of a new ticket', () => {
       expect(await seriousViolations(page)).toEqual([]);
     });
   }
+});
+
+test.describe('the thread at 360 px', () => {
+  test.use({ viewport: { width: 360, height: 800 } });
+
+  test('a long unbroken link with its edit form open scrolls nothing sideways, in the frame and on the thread page', async ({ page }) => {
+    const key = await makeTicket(page);
+    // Letters only after the last slash: a hyphen or a slash would be a place to break the line without any CSS.
+    const longLink = `https://shop.example.com/basket/${'taxtwice'.repeat(40)}${randomUUID().replaceAll('-', '')}`;
+    await openThread(page, key);
+    await postComment(page, longLink);
+    const message = messageWithText(page, longLink);
+    await expect(message.locator('.thread__body a')).toHaveCount(1);
+
+    await message.getByText('Edit', { exact: true }).click();
+
+    await expect(message.getByLabel('Edit your message')).toBeVisible();
+    await expectNoSidewaysScroll(page);
+
+    await page.goto(`/t/${key}/thread`);
+    const pageMessage = messageWithText(page, longLink);
+    await pageMessage.getByText('Edit', { exact: true }).click();
+
+    await expect(pageMessage.getByLabel('Edit your message')).toBeVisible();
+    await expectNoSidewaysScroll(page);
+  });
 });
