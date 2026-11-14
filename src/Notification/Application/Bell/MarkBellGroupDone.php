@@ -33,7 +33,8 @@ final readonly class MarkBellGroupDone
     }
 
     /**
-     * Locks the viewer's open pings on the ticket until the transaction ends once a notification was marked.
+     * Locks the viewer's open pings on the ticket until the transaction ends whenever the ticket is visible to them, a
+     * group with none open included, before it marks any notification.
      *
      * @return int how many notifications it marked done; 0 when the group has none open or the viewer may no longer
      *             see the ticket, and then nothing changed, its pings included
@@ -47,12 +48,15 @@ final readonly class MarkBellGroupDone
             return 0;
         }
 
+        // ClearPingsOnAction locks the pings before it marks their bell rows; the same order here keeps the two from
+        // deadlocking.
+        $openPings = $this->pings->lockedOpenPingsTo($viewer->viewerId(), $ticketId);
         $markedCount = $this->bellInbox->markGroupDone(new BellGroupKey($viewer->viewerId(), $senderId, $ticketId), $now);
         if (0 === $markedCount) {
             return 0;
         }
 
-        foreach ($this->pings->lockedOpenPingsTo($viewer->viewerId(), $ticketId) as $ping) {
+        foreach ($openPings as $ping) {
             if ($ping->fromId()->equals($senderId) && self::isDelivered($ping, $now)) {
                 $this->clearAsDone($ping, $viewer->viewerId(), $now);
             }

@@ -27,7 +27,9 @@ final readonly class DbalNotifications implements Notifications
         ." WHERE organization_id = ? AND user_id = ? AND kind = ? AND data->>'messageId' = ?"
         .' AND read_at IS NULL AND done_at IS NULL AND created_at >= ?';
 
-    // Served by the bell index on (organization_id, user_id, actor_id, ticket_id, created_at) WHERE done_at IS NULL.
+    // No index covers user and ticket together: the bell index on (organization_id, user_id, actor_id, ticket_id,
+    // created_at) WHERE done_at IS NULL narrows by its (organization_id, user_id) prefix to the person's open rows, or
+    // ntf_notification_ticket_id_idx to the ticket's rows, and the rest of the WHERE filters those.
     private const string MARK_PINGS_DONE = 'UPDATE ntf_notification SET done_at = ?'
         .' WHERE organization_id = ? AND user_id = ? AND ticket_id = ? AND kind = ? AND done_at IS NULL';
 
