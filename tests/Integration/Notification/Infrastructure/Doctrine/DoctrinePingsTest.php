@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Notification\Infrastructure\Doctrine;
 
 use App\Notification\Domain\Ping;
+use App\Notification\Domain\PingClearedReason;
 use App\Notification\Infrastructure\Doctrine\DoctrinePings;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -66,6 +67,55 @@ final class DoctrinePingsTest extends KernelTestCase
         }
 
         self::assertSame(0, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): mixed => $this->connection()->fetchOne('SELECT count(*) FROM ntf_ping WHERE ticket_id = ?', [self::TICKET])));
+    }
+
+    #[Test]
+    public function savingAPingOutsideATransactionIsRefusedAndLeavesItsRowAsItWas(): void
+    {
+        $ping = $this->transactions()->committedAs(self::ACME_FOODS, function (): Ping {
+            $ping = $this->ping();
+            $this->pings()->add($ping);
+
+            return $ping;
+        });
+        $ping->clear(PingClearedReason::Acted, new \DateTimeImmutable('2027-03-15 11:00:00+00:00'));
+
+        try {
+            $this->pings()->save($ping);
+            self::fail('A ping was saved outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('Saving a ping needs an open transaction.', $refusal->getMessage());
+        }
+
+        self::assertSame([['id' => $ping->id()->toString(), 'cleared_at' => null, 'cleared_reason' => null]], $this->storedPings());
+    }
+
+    #[Test]
+    public function lockingPingsOutsideATransactionIsRefusedAndLeavesThemOpen(): void
+    {
+        $pingId = $this->transactions()->committedAs(self::ACME_FOODS, function (): string {
+            $ping = $this->ping();
+            $this->pings()->add($ping);
+
+            return $ping->id()->toString();
+        });
+
+        try {
+            $this->pings()->lockedOpenPingsTo(new UserId(self::OMAR), new TicketId(self::TICKET));
+            self::fail('Pings were locked outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('Locking pings needs an open transaction.', $refusal->getMessage());
+        }
+
+        self::assertSame([['id' => $pingId, 'cleared_at' => null, 'cleared_reason' => null]], $this->storedPings());
+    }
+
+    /**
+     * @return list<array<string, mixed>> the ticket's pings in Acme Foods with their cleared state
+     */
+    private function storedPings(): array
+    {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchAllAssociative('SELECT id, cleared_at, cleared_reason FROM ntf_ping WHERE ticket_id = ? ORDER BY id', [self::TICKET]));
     }
 
     private function ping(): Ping

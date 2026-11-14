@@ -91,6 +91,25 @@ final class DbalNotificationsTest extends KernelTestCase
     }
 
     #[Test]
+    public function markingPingsDoneOutsideATransactionIsRefusedAndLeavesThemOpen(): void
+    {
+        $at = new \DateTimeImmutable(self::FIRST_REPLY_AT);
+        $ping = new NewNotification(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), NotificationKind::Ping, new UserId(self::LENA), new TicketId(self::TICKET), ['actorName' => 'Lena', 'ticketKey' => 'SHOP-1', 'pingId' => self::MESSAGE], $at);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($ping));
+        $rowsBefore = $this->rowsOf(self::ACME_FOODS);
+        self::assertSame([null], array_column($rowsBefore, 'done_at'));
+
+        try {
+            $this->notifications()->markPingsDone(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), new TicketId(self::TICKET), $at->modify('+1 minute'));
+            self::fail('Pings were marked done outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('A notification is written in the transaction of the event it is about; none is open.', $refusal->getMessage());
+        }
+
+        self::assertSame($rowsBefore, $this->rowsOf(self::ACME_FOODS));
+    }
+
+    #[Test]
     public function aReplyFoldsOnlyIntoTheRecipientsUnreadOpenReplyAboutTheSameMessageSinceTheGivenTime(): void
     {
         $this->seedRowsAroundTheFoldTarget();

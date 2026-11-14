@@ -10,6 +10,7 @@ use App\Notification\Application\Bell\OpenBellGroup;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
+use App\Organization\Api\PingSettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -59,6 +60,7 @@ final class BellController extends AbstractController
         private readonly TicketVisibilities $ticketVisibilities,
         private readonly MarkBellGroupDone $markBellGroupDone,
         private readonly OpenBellGroup $openBellGroup,
+        private readonly PingSettingsQueries $pingSettingsQueries,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -71,6 +73,7 @@ final class BellController extends AbstractController
         return $this->render('@Notification/bell_frame.html.twig', [
             'frameId' => self::FRAME_ID,
             'bell' => $this->notificationQueries->bell($actor->userId()),
+            'isAutoClearOn' => $this->pingSettingsQueries->isAutoClearOn($actor->organizationId()),
         ]);
     }
 
@@ -98,7 +101,11 @@ final class BellController extends AbstractController
 
         return $this->render(
             '@Notification/bell.stream.html.twig',
-            ['bell' => $this->notificationQueries->bell($actor->userId()), 'toast' => self::MARKED_DONE],
+            [
+                'bell' => $this->notificationQueries->bell($actor->userId()),
+                'isAutoClearOn' => $this->pingSettingsQueries->isAutoClearOn($actor->organizationId()),
+                'toast' => self::MARKED_DONE,
+            ],
             new Response(null, Response::HTTP_OK, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
         );
     }
