@@ -420,4 +420,15 @@ final class NotificationsDouble implements Notifications
 
         return $isFolded;
     }
+
+    public function markPingsDone(OrganizationId $organizationId, UserId $recipientId, TicketId $ticketId, \DateTimeImmutable $at): int
+    {
+        $rowCountBefore = \count($this->rows);
+        $this->rows = array_values(array_filter($this->rows, static fn (NewNotification $row): bool => NotificationKind::Ping !== $row->kind
+            || !$row->organizationId->equals($organizationId)
+            || !$row->recipientId->equals($recipientId)
+            || !$row->ticketId->equals($ticketId)));
+
+        return $rowCountBefore - \count($this->rows);
+    }
 }

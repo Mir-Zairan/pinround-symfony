@@ -433,6 +433,16 @@ final class SendPingTest extends TestCase
             {
                 return $this->pingLimitHours;
             }
+
+            public function isAutoClearOn(OrganizationId $organizationId): bool
+            {
+                return true;
+            }
+
+            public function isQuietHoursOn(OrganizationId $organizationId): bool
+            {
+                return false;
+            }
         };
     }
 }
