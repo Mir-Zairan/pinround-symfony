@@ -84,8 +84,39 @@ final class MoveTicketTest extends KernelTestCase
     private const string MIA = '0197a3c0-0000-7000-8000-00000000e753';
     private const string RAJ = '0197a3c0-0000-7000-8000-00000000e754';
     private const string SARA = '0197a3c0-0000-7000-8000-00000000e755';
+    private const string FIRST_PING_TO_OMAR = '0197a3c0-0000-7000-8000-00000000e761';
+    private const string SECOND_PING_TO_OMAR = '0197a3c0-0000-7000-8000-00000000e762';
+    private const string PING_TO_MIA = '0197a3c0-0000-7000-8000-00000000e763';
+    private const string OMARS_PING_BELL_ROW = '0197a3c0-0000-7000-8000-00000000e771';
+    private const string OMARS_ASSIGNED_BELL_ROW = '0197a3c0-0000-7000-8000-00000000e772';
+    private const string MIAS_PING_BELL_ROW = '0197a3c0-0000-7000-8000-00000000e773';
     private const string KEY = 'SHOP-7';
     private const string MOVED_AT = '2027-03-16 09:30:00+00:00';
+    // Each ping as [id, to_id, cleared_at, cleared_reason] and each bell row as [id, user_id, kind, done_at], in UTC.
+    private const array OPEN_PINGS_AND_BELL_ROWS = [
+        'pings' => [
+            [self::FIRST_PING_TO_OMAR, self::OMAR, null, null],
+            [self::SECOND_PING_TO_OMAR, self::OMAR, null, null],
+            [self::PING_TO_MIA, self::MIA, null, null],
+        ],
+        'bell' => [
+            [self::OMARS_PING_BELL_ROW, self::OMAR, 'ping', null],
+            [self::OMARS_ASSIGNED_BELL_ROW, self::OMAR, 'assigned', null],
+            [self::MIAS_PING_BELL_ROW, self::MIA, 'ping', null],
+        ],
+    ];
+    private const array PINGS_AND_BELL_ROWS_CLEARED_BY_OMARS_MOVE = [
+        'pings' => [
+            [self::FIRST_PING_TO_OMAR, self::OMAR, '2027-03-16 09:30:00', 'acted'],
+            [self::SECOND_PING_TO_OMAR, self::OMAR, '2027-03-16 09:30:00', 'acted'],
+            [self::PING_TO_MIA, self::MIA, null, null],
+        ],
+        'bell' => [
+            [self::OMARS_PING_BELL_ROW, self::OMAR, 'ping', '2027-03-16 09:30:00'],
+            [self::OMARS_ASSIGNED_BELL_ROW, self::OMAR, 'assigned', null],
+            [self::MIAS_PING_BELL_ROW, self::MIA, 'ping', null],
+        ],
+    ];
     private const string NO_TEAM_ROLE_NOTE = 'Managers can read and comment. Only the team moves tickets.';
     private const string TICKET_BY_KEY = 'SELECT t0.project_id AS project_id_1, t0.number AS number_2, t0.key AS key_3,';
     private const string WAITING_TURNS = 'SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn';
@@ -799,17 +830,22 @@ final class MoveTicketTest extends KernelTestCase
     #[Test]
     public function aThrowAfterTheEventIsWrittenLeavesNoMoveNoHistoryNoEventAndTheTurnRowAsItWas(): void
     {
+        $this->addOpenPingsAndTheirBellRows();
         $stateBefore = $this->storedState();
+        $pingsAndBellRowsBefore = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->pingsAndBellRows());
+        self::assertSame(self::OPEN_PINGS_AND_BELL_ROWS, $pingsAndBellRowsBefore);
 
         $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, function () use ($stateBefore): never {
             $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'start_work', $stateBefore['version'], new \DateTimeImmutable(self::MOVED_AT));
             self::assertCount(1, $this->movedEvents());
+            self::assertSame(self::PINGS_AND_BELL_ROWS_CLEARED_BY_OMARS_MOVE, $this->pingsAndBellRows());
             throw new \RuntimeException('Forced after the publish.');
         }));
 
         self::assertInstanceOf(\RuntimeException::class, $refusal);
         self::assertSame('Forced after the publish.', $refusal->getMessage());
         self::getContainer()->get('doctrine')->resetManager();
+        self::assertSame(self::OPEN_PINGS_AND_BELL_ROWS, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->pingsAndBellRows()));
         self::assertSame($stateBefore, $this->storedState());
     }
 
@@ -1194,6 +1230,46 @@ final class MoveTicketTest extends KernelTestCase
         } finally {
             $this->tenantContext()->clear();
         }
+    }
+
+    /**
+     * Lena's two open pings to Omar and one to Mia on Acme Foods' SHOP-7, with Omar's and Mia's ping bell rows and an
+     * assigned bell row of Omar's that clearing pings must leave alone. Removing the ticket removes them all.
+     */
+    private function addOpenPingsAndTheirBellRows(): void
+    {
+        $ticketId = $this->ticketId()->toString();
+        $this->asMigratorOf(self::ACME_FOODS, static function (Connection $connection) use ($ticketId): void {
+            foreach ([[self::FIRST_PING_TO_OMAR, self::OMAR], [self::SECOND_PING_TO_OMAR, self::OMAR], [self::PING_TO_MIA, self::MIA]] as [$pingId, $toId]) {
+                $connection->executeStatement(
+                    "INSERT INTO ntf_ping (organization_id, id, ticket_id, from_id, to_id, body, created_at) VALUES (?, ?, ?, ?, ?, 'Can you look at this today?', '2027-03-16 08:00:00+00')",
+                    [self::ACME_FOODS, $pingId, $ticketId, self::LENA, $toId],
+                );
+            }
+            foreach ([[self::OMARS_PING_BELL_ROW, self::OMAR, 'ping'], [self::OMARS_ASSIGNED_BELL_ROW, self::OMAR, 'assigned'], [self::MIAS_PING_BELL_ROW, self::MIA, 'ping']] as [$notificationId, $userId, $kind]) {
+                $connection->executeStatement(
+                    "INSERT INTO ntf_notification (organization_id, id, user_id, kind, actor_id, ticket_id, data, created_at) VALUES (?, ?, ?, ?, ?, ?, '{}', '2027-03-16 08:00:00+00')",
+                    [self::ACME_FOODS, $notificationId, $userId, $kind, self::LENA, $ticketId],
+                );
+            }
+        });
+    }
+
+    /**
+     * Reads in the transaction already open, so the caller opens one.
+     *
+     * @return array{pings: list<list<mixed>>, bell: list<list<mixed>>} shaped as OPEN_PINGS_AND_BELL_ROWS
+     */
+    private function pingsAndBellRows(): array
+    {
+        return [
+            'pings' => $this->connection()->fetchAllNumeric(
+                "SELECT id, to_id, to_char(cleared_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), cleared_reason FROM ntf_ping ORDER BY id",
+            ),
+            'bell' => $this->connection()->fetchAllNumeric(
+                "SELECT id, user_id, kind, to_char(done_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') FROM ntf_notification ORDER BY id",
+            ),
+        ];
     }
 
     /**
