@@ -63,7 +63,7 @@ Implementation notes:
 |---|---|---|
 | TicketMoved, TicketAssigned, TicketChecked, TicketVisibilityChanged | ticket topic; user topics of the old and new turn owners | refresh ticket frames; refresh the Home "needs you" frame for the users whose list changed |
 | QuestionAsked / QuestionAnswered | ticket topic; user topic of the asked person (and of the asker on answer) | refresh; bell item; toast "Mia answered your question" |
-| CommentPosted, ReplyPosted, CommentResolved | ticket topic | refresh the thread frame |
+| CommentPosted, ReplyPosted, CommentResolved, MessageEdited, MessageRemoved | ticket topic | refresh the thread frame |
 | RoundShared, PinVerdictSet, ChecklistItemChanged | ticket topic; user topic of the next turn owner | refresh the rounds frame |
 | PingSent (delivered) / PingCleared | user topic of the recipient | bell count + items |
 | SuggestionReady, SummaryGenerated | user topic of the requester; ticket topic for summaries | refresh the report form or summary frame |
