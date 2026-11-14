@@ -263,12 +263,19 @@ when@test:
         test.insight_home_queries:
             alias: App\Insight\Api\HomeQueries
             public: true
-        # No page shows the bell before its controllers (P04.T5); the bell tests get both as a page would.
+        # The bell tests call the bell's ports and commands without a request, as BellController does; the test
+        # container drops a private service once it is inlined, so these public aliases keep them reachable.
         test.notification_queries:
             alias: App\Notification\Api\NotificationQueries
             public: true
         test.notification_bell_inbox:
             alias: App\Notification\Application\Bell\BellInbox
+            public: true
+        test.notification_mark_ping_done:
+            alias: App\Notification\Application\Bell\MarkPingDone
+            public: true
+        test.notification_open_ping:
+            alias: App\Notification\Application\Bell\OpenPing
             public: true
         # No route posts, edits or removes a comment before the thread's controllers (P04.T1 slice B); the comment
         # tests get the use cases as a controller would.

@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Visibility;
 
 use App\Notification\Api\NotificationQueries;
-use App\Notification\Application\Bell\BellGroupKey;
 use App\Notification\Application\Bell\BellInbox;
+use App\Notification\Application\Bell\MarkPingDone;
+use App\Notification\Application\Bell\OpenPing;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Notification\NotificationRows;
+use App\Ticketing\Api\TicketVisibilities;
+use App\Ticketing\Api\TicketVisibility;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -17,7 +21,7 @@ use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Clock\MockClock;
 
 /**
- * The bell, its count, Done and Open (NotificationQueries::bell and BellInbox): every viewer has an open question
+ * The bell, its count, Done and Open (NotificationQueries::bell, BellInbox, MarkPingDone and OpenPing): every viewer has an open question
  * about each cast ticket, as a notification keeps its ticket after the person loses sight of it, and the bell shows,
  * counts and changes exactly those of tickets they may still see. Raj asks, and Noor asks Raj. Ben's rows are in Acme
  * Foods, which his own organization's bell never reads.
@@ -91,11 +95,12 @@ final class BellLeakTest extends VisibilityLeakCast
 
         [$answers, $rows] = self::asViewer($viewer, function () use ($viewer): array {
             $answers = [];
+            $visibility = self::visibilityOf($viewer);
+            $sender = self::userIdOf(self::actorOf($viewer));
             foreach ([self::teamOnlyTicketId(), self::NO_TEAM_TICKET] as $ticketId) {
-                $group = new BellGroupKey(self::userIdOf($viewer), self::userIdOf(self::actorOf($viewer)), new TicketId($ticketId));
                 $answers[$ticketId] = [
-                    $this->bellInbox()->markGroupRead($group, new \DateTimeImmutable(self::NOW)),
-                    $this->bellInbox()->markGroupDone($group, new \DateTimeImmutable(self::NOW)),
+                    $this->openPing()->open($visibility, $sender, new TicketId($ticketId), new \DateTimeImmutable(self::NOW)),
+                    $this->markPingDone()->markDone($visibility, $sender, new TicketId($ticketId), new \DateTimeImmutable(self::NOW)),
                 ];
             }
 
@@ -127,7 +132,7 @@ final class BellLeakTest extends VisibilityLeakCast
             [$bell, $openCount, $marked, $rows] = self::asViewer('Lena', fn (): array => [
                 $this->notificationQueries()->bell($lena),
                 $this->bellInbox()->openCountOf($lena, new \DateTimeImmutable(self::NOW)),
-                $this->bellInbox()->markGroupDone(new BellGroupKey($lena, self::userIdOf('Raj'), new TicketId(self::teamOnlyTicketId())), new \DateTimeImmutable(self::NOW)),
+                $this->markPingDone()->markDone(self::visibilityOf('Lena'), self::userIdOf('Raj'), new TicketId(self::teamOnlyTicketId()), new \DateTimeImmutable(self::NOW)),
                 $this->rowStatesOf('Lena'),
             ]);
         } finally {
@@ -201,5 +206,32 @@ final class BellLeakTest extends VisibilityLeakCast
         \assert($bellInbox instanceof BellInbox);
 
         return $bellInbox;
+    }
+
+    private function markPingDone(): MarkPingDone
+    {
+        $markPingDone = self::getContainer()->get('test.notification_mark_ping_done');
+        \assert($markPingDone instanceof MarkPingDone);
+
+        return $markPingDone;
+    }
+
+    private function openPing(): OpenPing
+    {
+        $openPing = self::getContainer()->get('test.notification_open_ping');
+        \assert($openPing instanceof OpenPing);
+
+        return $openPing;
+    }
+
+    /**
+     * The viewer's visibility as BellController builds it: TicketVisibilities::of() under their own organization.
+     */
+    private static function visibilityOf(string $viewer): TicketVisibility
+    {
+        $ticketVisibilities = self::getContainer()->get('test.ticketing_ticket_visibilities');
+        \assert($ticketVisibilities instanceof TicketVisibilities);
+
+        return $ticketVisibilities->of(new OrganizationId(self::VIEWERS[$viewer][1]), self::userIdOf($viewer));
     }
 }

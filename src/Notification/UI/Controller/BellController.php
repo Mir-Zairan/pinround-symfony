@@ -5,14 +5,16 @@ declare(strict_types=1);
 namespace App\Notification\UI\Controller;
 
 use App\Notification\Api\NotificationQueries;
-use App\Notification\Application\Bell\BellGroupKey;
-use App\Notification\Application\Bell\BellInbox;
+use App\Notification\Application\Bell\MarkPingDone;
+use App\Notification\Application\Bell\OpenPing;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\TicketVisibilities;
+use App\Ticketing\Api\TicketVisibility;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -24,8 +26,8 @@ use Symfony\UX\Turbo\TurboBundle;
  * The bell's popover (dialogs-and-popovers.md, Pings popover): GET /bell is the popover's lazy frame, and Done and Open
  * act on one group of the signed-in person's open notifications, named by its sender and ticket. The person comes from
  * the request's actor, never from the URL; OrganizationVoter decides ORG_VIEW first (ADR-0013). Both run in the request
- * transaction. A malformed id, and a group with none open, which includes another person's group, are not found and
- * change nothing.
+ * transaction through MarkPingDone and OpenPing. A malformed id, a group with none open, which includes another person's
+ * group, and a ticket the person may no longer see are not found and change nothing.
  */
 final class BellController extends AbstractController
 {
@@ -54,7 +56,9 @@ final class BellController extends AbstractController
         private readonly TenantContext $tenantContext,
         private readonly CurrentActor $currentActor,
         private readonly NotificationQueries $notificationQueries,
-        private readonly BellInbox $bellInbox,
+        private readonly TicketVisibilities $ticketVisibilities,
+        private readonly MarkPingDone $markPingDone,
+        private readonly OpenPing $openPing,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -81,8 +85,8 @@ final class BellController extends AbstractController
         if (!$this->isCsrfTokenValid(self::CSRF_ID, $request->request->getString(self::CSRF_FIELD))) {
             return self::refusal(self::FORM_EXPIRED);
         }
-        $group = $this->groupOf($actor, $senderId, $ticketId);
-        if (0 === $this->bellInbox->markGroupDone($group, $this->clock->now())) {
+        [$sender, $ticket] = $this->groupOf($senderId, $ticketId);
+        if (0 === $this->markPingDone->markDone($this->visibilityOf($actor), $sender, $ticket, $this->clock->now())) {
             throw $this->createNotFoundException(self::GROUP_NOT_FOUND);
         }
 
@@ -109,7 +113,8 @@ final class BellController extends AbstractController
         if (!$this->isCsrfTokenValid(self::CSRF_ID, $request->request->getString(self::CSRF_FIELD))) {
             return self::refusal(self::FORM_EXPIRED);
         }
-        $ticketKey = $this->bellInbox->markGroupRead($this->groupOf($actor, $senderId, $ticketId), $this->clock->now())
+        [$sender, $ticket] = $this->groupOf($senderId, $ticketId);
+        $ticketKey = $this->openPing->open($this->visibilityOf($actor), $sender, $ticket, $this->clock->now())
             ?? throw $this->createNotFoundException(self::GROUP_NOT_FOUND);
 
         return $this->redirectToRoute(self::TICKET_ROUTE, ['key' => $ticketKey], Response::HTTP_SEE_OTHER);
@@ -123,13 +128,21 @@ final class BellController extends AbstractController
         return $this->currentActor->actorFor($this->getUser()) ?? throw $this->createAccessDeniedException();
     }
 
-    private function groupOf(ActorContext $actor, string $senderId, string $ticketId): BellGroupKey
+    /**
+     * @return array{UserId, TicketId} the group's sender and ticket
+     */
+    private function groupOf(string $senderId, string $ticketId): array
     {
         try {
-            return new BellGroupKey($actor->userId(), new UserId($senderId), new TicketId($ticketId));
+            return [new UserId($senderId), new TicketId($ticketId)];
         } catch (\InvalidArgumentException) {
             throw $this->createNotFoundException(self::GROUP_NOT_FOUND);
         }
+    }
+
+    private function visibilityOf(ActorContext $actor): TicketVisibility
+    {
+        return $this->ticketVisibilities->of($actor->organizationId(), $actor->userId());
     }
 
     private static function refusal(string $message): Response

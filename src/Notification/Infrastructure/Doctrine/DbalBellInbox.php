@@ -15,8 +15,8 @@ use Doctrine\DBAL\Connection;
 
 /**
  * BellInbox on ntf_notification through the bell index, under row-level security and with the tenant's
- * organization_id named as well. The open-row filter is the one DbalBellQueries groups, and a row counts or changes
- * only while VisibleBellTickets finds its ticket visible to the person.
+ * organization_id named as well. The open-row filter is the one DbalBellQueries groups, and a row counts only while
+ * VisibleBellTickets finds its ticket visible to the person; MarkPingDone and OpenPing check the ticket before a change.
  */
 final readonly class DbalBellInbox implements BellInbox
 {
@@ -55,9 +55,6 @@ final readonly class DbalBellInbox implements BellInbox
     public function markGroupDone(BellGroupKey $group, \DateTimeImmutable $now): int
     {
         $this->requireTransaction();
-        if (!$this->visibleTickets->isVisibleTo($group->recipientId, $group->ticketId)) {
-            return 0;
-        }
         $marked = (int) $this->connection->executeStatement(
             'UPDATE ntf_notification SET done_at = :now WHERE '.VisibleBellTickets::OPEN_ROWS.self::GROUP,
             $this->groupParameters($group, $now),
@@ -73,9 +70,6 @@ final readonly class DbalBellInbox implements BellInbox
     public function markGroupRead(BellGroupKey $group, \DateTimeImmutable $now): ?string
     {
         $this->requireTransaction();
-        if (!$this->visibleTickets->isVisibleTo($group->recipientId, $group->ticketId)) {
-            return null;
-        }
         $ticketKeys = $this->connection->fetchFirstColumn(
             'UPDATE ntf_notification SET read_at = COALESCE(read_at, :now) WHERE '.VisibleBellTickets::OPEN_ROWS.self::GROUP
             ." RETURNING data->>'ticketKey'",

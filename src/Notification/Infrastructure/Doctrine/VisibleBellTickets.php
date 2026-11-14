@@ -15,7 +15,7 @@ use Doctrine\DBAL\Connection;
 
 /**
  * The tickets of a person's open bell rows that they may still see (ADR-0013). A notification keeps its ticket after
- * the person leaves the ticket's team, so the bell asks Ticketing on every read and change instead of joining
+ * the person leaves the ticket's team, so the bell asks Ticketing on every read instead of joining
  * tkt_ticket, which another module owns. It needs an open transaction under the tenant, as Ticketing's reads do.
  */
 final readonly class VisibleBellTickets
@@ -66,17 +66,6 @@ final readonly class VisibleBellTickets
                 return new TicketId($ticketId);
             }, $ticketIds),
         );
-    }
-
-    /**
-     * @throws \App\SharedKernel\Application\TenantNotSet when no tenant is set, before any query
-     * @throws \LogicException                            when no transaction is open
-     */
-    public function isVisibleTo(UserId $recipientId, TicketId $ticketId): bool
-    {
-        $visibility = $this->ticketVisibilities->of($this->tenantContext->require(), $recipientId);
-
-        return [] !== $this->ticketQueries->visibleTicketIdsOf($visibility, [$ticketId]);
     }
 
     /**
