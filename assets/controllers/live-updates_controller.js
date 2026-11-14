@@ -18,18 +18,21 @@ const SIGNAL_TYPE = 'refresh';
 // element of the same id in the page fetched again.
 const REFRESHED_PARTS = '[data-live-refresh]';
 const FORM_FIELDS = 'input, textarea, select';
+// An open dialog, or an open disclosure with text to type in (a message's edit form), keeps what the person wrote
+// there after they click away; a refresh would close it and lose the text.
+const OPEN_EDITORS = 'dialog[open], details[open] :is(textarea, input[type="text"])';
 
-// A frame with an open dialog, or with a field being typed in outside a data-turbo-permanent element (which a frame
+// A frame with an open editor, or with a field being typed in outside a data-turbo-permanent element (which a frame
 // reload keeps), waits for the next signal rather than lose the text.
 function isFrameInUse(frame) {
   const focused = document.activeElement;
   const isTyping = focused !== null && frame.contains(focused) && focused.matches(FORM_FIELDS) && focused.closest('[data-turbo-permanent]') === null;
-  return isTyping || frame.querySelector('dialog[open]') !== null;
+  return isTyping || frame.querySelector(OPEN_EDITORS) !== null;
 }
 
-// A swapped part loses its focus and open dialogs, so a part that holds either waits for the next signal.
+// A swapped part loses its focus and open editors, so a part that holds either waits for the next signal.
 function isPartInUse(part) {
-  return part.contains(document.activeElement) || part.querySelector('dialog[open]') !== null;
+  return part.contains(document.activeElement) || part.querySelector(OPEN_EDITORS) !== null;
 }
 
 // Follows the live updates of a page (realtime-and-notifications.md): asks POST /realtime/token for the subscriber

@@ -1,15 +1,15 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE, RAJ_STORAGE_STATE } from './auth';
+import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
 // The spec moves tickets, so it never touches the seeded ones the other specs read: Lena makes a SHOP ticket for Omar
 // in To do for each journey, with a title no earlier run used, and the run leaves it where its last move put it.
 // tests/Functional/Ticketing/TicketMoveTest.php proves every verb, refusal and the redirect without Turbo on the server.
-const TOAST_REGION = '#toast-region';
 const MOVE_FAILED = 'Could not move the ticket. Try again.';
 const PENDING_TOAST_KEY = 'pinround.pendingToast';
 
@@ -20,29 +20,6 @@ async function seriousViolations(page: Page): Promise<string[]> {
   return violations
     .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
     .map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(' ')).join(' | ')}`);
-}
-
-/** As Lena, who leads Shop and so may give a new ticket to someone: it starts in To do, given to Omar. */
-async function makeTicketForOmar(browser: Browser, title: string): Promise<string> {
-  const context = await browser.newContext({ storageState: LENA_STORAGE_STATE, ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  await page.goto('/tickets/new');
-  const shopValue = await page.locator('select[name="project_id"] option', { hasText: /^SHOP · / }).getAttribute('value');
-  expect(shopValue, 'the seeded SHOP project is missing: run make seed').not.toBeNull();
-  await page.getByLabel('Project').selectOption(shopValue ?? '');
-  await page.getByLabel('Title').fill(title);
-  await page.getByLabel('Give it to').selectOption({ label: 'Omar' });
-  await page.getByRole('button', { name: 'Make ticket' }).click();
-  await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
-  const key = new URL(page.url()).pathname.replace('/t/', '');
-  await expect(page.locator(TOAST_REGION)).toHaveText(`Ticket ${key} made.`);
-  await context.close();
-  return key;
-}
-
-async function openAs(browser: Browser, storageState: string): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ storageState, ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
-  return { context, page: await context.newPage() };
 }
 
 async function openTicket(page: Page, key: string, title: string): Promise<void> {

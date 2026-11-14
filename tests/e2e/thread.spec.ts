@@ -2,9 +2,9 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE } from './auth';
+import { composerBody, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
-const TOAST_REGION = '#toast-region';
 // ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED
 const COMMENT_ADDED = 'Comment added.';
 const MESSAGE_EDITED = 'Message edited.';
@@ -43,14 +43,6 @@ async function makeTicket(page: Page): Promise<string> {
   return key;
 }
 
-function threadFrame(page: Page) {
-  return page.locator('turbo-frame#ticket-thread');
-}
-
-function composerBody(page: Page) {
-  return threadFrame(page).locator('#thread-composer-body');
-}
-
 function commentButton(page: Page) {
   // The "Comment" kind chip above the text has the same name; the submit button is the last control of the form.
   return threadFrame(page).locator('form.thread__composer button[type="submit"]');
@@ -58,17 +50,6 @@ function commentButton(page: Page) {
 
 function messageWithText(page: Page, text: string) {
   return threadFrame(page).locator('li[data-message-id]').filter({ has: page.locator('.thread__body', { hasText: text }) });
-}
-
-/** Opens the ticket and scrolls to its thread, whose lazy frame loads from GET /t/{key}/thread once it is in view. */
-async function openThread(page: Page, key: string): Promise<void> {
-  const frameLoaded = page.waitForResponse((response) => new URL(response.url()).pathname === `/t/${key}/thread` && response.request().method() === 'GET');
-  await page.goto(`/t/${key}`);
-  await page.getByRole('heading', { level: 2, name: 'Questions and comments' }).scrollIntoViewIfNeeded();
-  expect((await frameLoaded).status()).toBe(200);
-  await expect(composerBody(page)).toBeVisible();
-  // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
-  await page.waitForLoadState('networkidle');
 }
 
 async function postComment(page: Page, text: string): Promise<void> {

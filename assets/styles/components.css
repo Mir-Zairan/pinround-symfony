@@ -295,6 +295,22 @@ a.seg {
   display: none;
 }
 
+/* LiveUpdates' "Updates paused" banner, above the page it follows. No display here, so its hidden attribute hides it. */
+.live-updates__paused {
+  margin: 0 0 var(--space-16);
+  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-input);
+  background: var(--waiting-container);
+  color: var(--on-waiting-container);
+  font-size: 14px;
+}
+
+.live-updates__reload {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 /* A multi-line text field: the thread's composer and edit forms, the ping sheet's message. */
 .text-field {
   display: block;
