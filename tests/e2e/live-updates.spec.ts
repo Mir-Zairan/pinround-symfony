@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { LENA_EMAIL, LENA_STORAGE_STATE, MIA_EMAIL, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { bellButton, bellPopover, openBellPopover } from './bell';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 // ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED
@@ -914,6 +915,66 @@ test.describe('the stream across Turbo visits', () => {
     expect(hubStreams(requests)).toHaveLength(2);
     await expect(omar.page.locator('[data-controller="live-updates"]')).toHaveCount(1);
     await lena.context.close();
+    await omar.context.close();
+  });
+});
+
+/** The badge's count on the open page, 0 when it shows none. */
+async function badgeCountOf(page: Page): Promise<number> {
+  const spokenCount = page.locator('#bell-badge .visually-hidden');
+  if ((await spokenCount.count()) === 0) {
+    return 0;
+  }
+  return Number(/^(\d+) open$/.exec((await spokenCount.innerText()).trim())?.[1] ?? Number.NaN);
+}
+
+/** The badge's count as the server renders it now, from a fresh Home page in the page's session. */
+async function serverBadgeCountOf(page: Page): Promise<number> {
+  const home = await page.request.get('/');
+  expect(home.status()).toBe(200);
+  const spokenCount = await page.evaluate(
+    (html) => new DOMParser().parseFromString(html, 'text/html').querySelector('#bell-badge .visually-hidden')?.textContent ?? null,
+    await home.text(),
+  );
+  return spokenCount === null ? 0 : Number(/^(\d+) open$/.exec(spokenCount.trim())?.[1] ?? Number.NaN);
+}
+
+test.describe("the bell's push", () => {
+  test("Mia's ping shows on Omar's badge within 3 s, and his open popover loads again with her card, without a reload", async ({ browser }) => {
+    test.skip(
+      !process.env.CI && !existsSync(MIA_STORAGE_STATE),
+      'auth.setup.ts skipped Mia: her two-step login is on in this database. RefreshBellHandlerTest proves the push.',
+    );
+    // Lena giving Omar the ticket notifies him too; its push may come at any time before Mia's, so the badge is
+    // compared with the server's count once Mia's card shows rather than with a count read before her ping.
+    const key = await makeTicketForOmar(browser, `Gift card balance shows twice ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const streamOpened = omar.page.waitForResponse((response) => pathOf(response.request()) === HUB_PATH);
+    await omar.page.goto('/', { waitUntil: 'networkidle' });
+    expect((await streamOpened).status()).toBe(200);
+    await openBellPopover(omar.page);
+    await markThisLoad(omar.page);
+    const miasCard = bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}` });
+    await expect(miasCard).toHaveCount(0);
+    const mia = await openAs(browser, MIA_STORAGE_STATE);
+    await mia.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    await mia.page.getByRole('button', { name: 'Ping Omar' }).click();
+    const sheet = mia.page.getByRole('dialog', { name: 'Ping Omar' });
+    const message = `Can you check the gift card total? ${randomUUID().slice(0, 8)}`;
+    await sheet.getByLabel('Message').fill(message);
+    const pingAnswer = mia.page.waitForResponse((response) => response.url().includes(`/t/${key}/ping/`) && response.request().method() === 'POST');
+
+    await sheet.getByRole('button', { name: 'Send ping' }).click();
+
+    expect((await pingAnswer).status()).toBe(200);
+    await expect(miasCard).toBeVisible({ timeout: SHOWS_WITHIN_MS });
+    await expect(miasCard.getByText(`“${message}”`)).toBeVisible();
+    await expect(bellButton(omar.page)).toHaveAttribute('aria-expanded', 'true');
+    const serverCount = await serverBadgeCountOf(omar.page);
+    expect(serverCount, "the server counts Mia's ping").toBeGreaterThan(0);
+    await expect.poll(() => badgeCountOf(omar.page)).toBe(serverCount);
+    await expectSameLoad(omar.page);
+    await mia.context.close();
     await omar.context.close();
   });
 });
