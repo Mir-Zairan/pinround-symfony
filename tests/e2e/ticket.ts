@@ -26,6 +26,18 @@ export async function makeTicketGivenTo(browser: Browser, title: string, assigne
   return key;
 }
 
+/** As someone who may give the ticket, on its page: gives it to the person with that first name through the picker. */
+export async function giveTicketTo(page: Page, key: string, firstName: string): Promise<void> {
+  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+  await page.locator('#ticket-next-step').getByRole('button', { name: /^Give it to/ }).click();
+  const dialog = page.getByRole('dialog', { name: `Give ${key} to…` });
+  const person = dialog.locator('.pick').filter({ has: page.locator('.pick__name', { hasText: new RegExp(`^${firstName}$`) }) });
+  const given = page.waitForResponse((response) => new URL(response.url()).pathname === `/t/${key}/assign` && response.request().method() === 'POST');
+  await person.click();
+  expect((await given).status()).toBe(200);
+  await expect(page.locator(TOAST_REGION)).toHaveText(`Given to ${firstName}.`);
+}
+
 export async function openAs(browser: Browser, storageState: string): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({ storageState, ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
   return { context, page: await context.newPage() };

@@ -3,7 +3,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
-import { composerBody, makeTicketForOmar, makeTicketGivenTo, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
+import { composerBody, giveTicketTo, makeTicketForOmar, makeTicketGivenTo, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // ThreadController::QUESTION_SENT and QUESTION_ANSWERED for Lena and the step a new ticket for Omar starts in
@@ -326,6 +326,60 @@ test('Ask a question turns off on Lena’s open tab once Omar’s question reach
     await lena.context.close();
     await omar.context.close();
     await closeQuestionLeftOpen(browser, key, question);
+  }
+});
+
+test('on Omar’s open tab the people to ask follow live refreshes and keep his choice, his focus and his text', async ({ browser }) => {
+  // Given to Mia: Omar, a Shop member not on the ticket, may ask Mia (the assignee, first) or Lena (reporter and lead).
+  const key = await makeTicketGivenTo(browser, `Saved cards list shows expired ones ${randomUUID().slice(0, 8)}`, 'Mia');
+  const omarsDraft = `Which cards count as expired? ${randomUUID().slice(0, 8)}`;
+  const lenasComment = `Seen on the phone app too ${randomUUID().slice(0, 8)}`;
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  const lena = await openAs(browser, LENA_STORAGE_STATE);
+  try {
+    await openThread(omar.page, key);
+    await askChip(omar.page).click();
+    const chips = peopleToAsk(omar.page).getByRole('button');
+    await expect(chips).toHaveText(['Mia', 'Lena']);
+    await composerBody(omar.page).fill(omarsDraft);
+    await chips.nth(0).focus();
+    // A rebuilt chip loses this mark, so it shows the refresh left the chip itself in place, not a copy given focus.
+    await chips.nth(0).evaluate((chip) => Object.assign(chip, { keptAcrossRefresh: true }));
+
+    await openThread(lena.page, key);
+    await composerBody(lena.page).fill(lenasComment);
+    await composerSubmit(lena.page).click();
+    await expect(lena.page.locator(TOAST_REGION)).toHaveText(COMMENT_ADDED);
+
+    // No navigation on Omar's tab: only the live refresh can bring Lena's comment.
+    await expect(threadFrame(omar.page).locator('.thread__body', { hasText: lenasComment })).toHaveCount(1, { timeout: 15_000 });
+    await expect(chips.nth(0)).toBeFocused();
+    expect(await omar.page.evaluate(() => (document.activeElement as { keptAcrossRefresh?: boolean } | null)?.keptAcrossRefresh)).toBe(true);
+    await expect(chips.nth(0)).toHaveAttribute('aria-pressed', 'true');
+
+    await giveTicketTo(lena.page, key, 'Omar');
+
+    // Mia, the person chosen, is no longer on the ticket and Omar may not ask himself: the first chip left takes over.
+    await expect(chips).toHaveText(['Lena'], { timeout: 15_000 });
+    await expect(chips.nth(0)).toHaveAttribute('aria-pressed', 'true');
+    await expect(chips.nth(0)).toBeFocused();
+    await expect(askChip(omar.page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(composerSubmit(omar.page)).toHaveText('Ask Lena');
+    await expect(composerBody(omar.page)).toHaveValue(omarsDraft);
+
+    await giveTicketTo(lena.page, key, 'Mia');
+
+    // Lena, the person chosen now, is still on the ticket: she stays chosen and keeps the focus beside Mia.
+    await expect(chips).toHaveText(['Mia', 'Lena'], { timeout: 15_000 });
+    await expect(chips.nth(0)).toHaveAttribute('aria-pressed', 'false');
+    await expect(chips.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    await expect(chips.nth(1)).toBeFocused();
+    await expect(composerSubmit(omar.page)).toHaveText('Ask Lena');
+    await expect(composerForm(omar.page)).toHaveAttribute('action', `/t/${key}/questions`);
+    await expect(composerBody(omar.page)).toHaveValue(omarsDraft);
+  } finally {
+    await lena.context.close();
+    await omar.context.close();
   }
 });
 
