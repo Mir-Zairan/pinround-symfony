@@ -240,6 +240,8 @@ final class RefreshTicketPagesHandlerTest extends TestCase
         $this->refreshAsAChangeArrives();
 
         $this->clock->sleep(0.549);
+        $earlyProbe = $this->lockFactory->createLock('realtime-refresh-trailing:'.self::TICKET_ID, 2.0, autoRelease: false);
+        self::assertFalse($earlyProbe->acquire(), 'held at 2049 ms, 1 ms before the try is due');
         $this->refreshAsAChangeArrives();
         self::assertCount(1, $this->commandBus->dispatched(), 'held until the try is due at 2050 ms');
 
