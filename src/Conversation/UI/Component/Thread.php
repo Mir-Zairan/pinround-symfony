@@ -6,11 +6,13 @@ namespace App\Conversation\UI\Component;
 
 use App\Conversation\Api\ConversationPermission;
 use App\Conversation\Api\MessageView;
+use App\Conversation\Api\ReplyView;
 use App\Conversation\Api\ThreadQueries;
 use App\Conversation\UI\AskablePerson;
 use App\Conversation\UI\ThreadController;
 use App\Conversation\UI\ThreadMessage;
 use App\Conversation\UI\ThreadReply;
+use App\Conversation\UI\Voter\MessageOnTicket;
 use App\Identity\Api\CurrentTimeZone;
 use App\Identity\Api\CurrentUser;
 use App\Identity\Api\UserQueries;
@@ -29,8 +31,11 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
  * voter on every request. The composer's Ask a question is on only for a viewer ConversationPermission ASK grants,
  * with someone else on the ticket to ask, while no question pauses the ticket.
  *
- * Reads the thread in one query, its answers in one more when a question is answered, and the names of authors outside
- * the ticket's people in one more, so it needs the
+ * Every message offers Reply, or Answer to the person an open question asks; Resolve only where MessageVoter grants it,
+ * and a resolved comment folds into one line.
+ *
+ * Reads the thread in one query, every message's replies in one more, the names of authors outside the ticket's people
+ * in one more, and the viewer's roles once per author of an open comment the viewer wrote or leads, so it needs the
  * request's transaction under the tenant.
  */
 #[AsTwigComponent(name: 'Thread', template: '@Conversation/components/Thread.html.twig')]
@@ -57,6 +62,15 @@ final class Thread
     public const string WAIT_FOR_THE_OPEN_QUESTION = 'Wait for the open question first.';
     /** With the name of the ticket's step, which a pause leaves unchanged. */
     public const string ANSWER_NOTE = 'Your answer closes the question. The ticket goes back to %s.';
+    public const string REPLY_PLACEHOLDER = 'Write a reply';
+    /** With the first name of the message's author. */
+    public const string REPLY_NOTE = 'Replies stay under this message. %s gets one notification.';
+    /** A reply to the viewer's own message notifies nobody. */
+    public const string REPLY_NOTE_ON_YOUR_OWN = 'Replies stay under this message.';
+    public const string REMOVED_MESSAGE = 'Message removed';
+    public const string REMOVED_REPLY = 'Reply removed';
+    /** How many characters of a resolved comment its folded line shows. */
+    public const int RESOLVED_PREVIEW_LENGTH = 60;
 
     public string $key = '';
 
@@ -94,6 +108,7 @@ final class Thread
     {
         $thread = $this->threadQueries->threadOf($ticket->id);
         $names = $this->namesOfThePeopleIn($thread->messages, $ticket->displayNames);
+        $resolvableAuthors = $this->resolvableAuthorsAmong($thread->messages, $ticket);
         $viewerId = $this->currentUser->id();
         $now = $this->clock->now();
         $zone = $this->currentTimeZone->zone();
@@ -106,18 +121,19 @@ final class Thread
             && $this->authorizationChecker->isGranted(ConversationPermission::ASK, $ticket->visibilityFacts);
         $this->hasOpenQuestion = null !== $ticket->turnSnapshot->askedUserId;
         $this->hasEarlierMessages = $thread->hasEarlierMessages;
-        $this->messages = array_map(static function (MessageView $message) use ($names, $viewerId, $now, $zone, $utc): ThreadMessage {
+        $this->messages = array_map(static function (MessageView $message) use ($names, $resolvableAuthors, $viewerId, $now, $zone, $utc): ThreadMessage {
+            $isOwnMessage = null !== $viewerId && $viewerId->equals($message->authorId);
             // EditMessage and RemoveMessage refuse a question, so its author is offered neither.
-            $isOwnComment = MessageView::KIND_COMMENT === $message->kind
-                && null !== $viewerId && $viewerId->equals($message->authorId);
-            $answer = $message->answer();
+            $isOwnComment = MessageView::KIND_COMMENT === $message->kind && $isOwnMessage;
+            $isAnswerable = $message->isOpenQuestion && null !== $viewerId && null !== $message->toUserId && $viewerId->equals($message->toUserId);
+            $authorName = $names[$message->authorId->toString()] ?? self::UNKNOWN_AUTHOR;
             $asked = null === $message->toUserId
                 ? null
                 : new UserView($message->toUserId, $names[$message->toUserId->toString()] ?? self::UNKNOWN_AUTHOR);
 
             return new ThreadMessage(
                 $message->id,
-                $names[$message->authorId->toString()] ?? self::UNKNOWN_AUTHOR,
+                $authorName,
                 $message->kind,
                 $message->isRemoved ? null : $message->body,
                 RelativeTime::sinceOf($message->createdAt, $now, $zone),
@@ -126,20 +142,69 @@ final class Thread
                 $message->isRemoved,
                 $isOwnComment && !$message->isRemoved && $now <= $message->editableUntil,
                 $isOwnComment && !$message->isRemoved,
-                $message->isOpenQuestion && null !== $viewerId && null !== $message->toUserId && $viewerId->equals($message->toUserId),
+                $isAnswerable,
                 $asked?->displayName,
                 $asked?->firstName(),
                 $message->isOpenQuestion,
                 $message->isAnswered,
-                null === $answer ? null : new ThreadReply(
-                    $answer->id,
-                    $names[$answer->authorId->toString()] ?? self::UNKNOWN_AUTHOR,
-                    $answer->body,
-                    RelativeTime::sinceOf($answer->createdAt, $now, $zone),
-                    $answer->createdAt->setTimezone($utc)->format(\DateTimeInterface::ATOM),
-                ),
+                array_map(static fn (ReplyView $reply): ThreadReply => new ThreadReply(
+                    $reply->id,
+                    $names[$reply->authorId->toString()] ?? self::UNKNOWN_AUTHOR,
+                    $reply->isRemoved ? null : $reply->body,
+                    RelativeTime::sinceOf($reply->createdAt, $now, $zone),
+                    $reply->createdAt->setTimezone($utc)->format(\DateTimeInterface::ATOM),
+                    $reply->isAnswer,
+                    $reply->isRemoved,
+                ), $message->replies),
+                $message->hasEarlierReplies,
+                !$message->isRemoved && !$isAnswerable,
+                $isOwnMessage ? self::REPLY_NOTE_ON_YOUR_OWN : \sprintf(self::REPLY_NOTE, new UserView($message->authorId, $authorName)->firstName()),
+                MessageView::KIND_COMMENT === $message->kind && !$message->isRemoved && !$message->isResolved
+                    && ($resolvableAuthors[$message->authorId->toString()] ?? false),
+                $message->isResolved ? self::resolvedSummaryOf($message) : null,
             );
         }, $thread->messages);
+    }
+
+    /**
+     * Asks MessageVoter once per author of a comment Resolve could fold, as each answer past the author and lead check
+     * costs a query; a question, a removed or a resolved comment is never asked about.
+     *
+     * @param list<MessageView> $messages
+     *
+     * @return array<string, bool> whether ConversationPermission RESOLVE grants the viewer the comments of each author,
+     *                             by author id string
+     */
+    private function resolvableAuthorsAmong(array $messages, TicketPageView $ticket): array
+    {
+        $resolvableAuthors = [];
+        foreach ($messages as $message) {
+            $authorKey = $message->authorId->toString();
+            if (MessageView::KIND_COMMENT !== $message->kind || $message->isRemoved || $message->isResolved || isset($resolvableAuthors[$authorKey])) {
+                continue;
+            }
+            $resolvableAuthors[$authorKey] = $this->authorizationChecker->isGranted(
+                ConversationPermission::RESOLVE,
+                new MessageOnTicket($ticket->visibilityFacts, $message->authorId, $ticket->turnSnapshot->leadId),
+            );
+        }
+
+        return $resolvableAuthors;
+    }
+
+    /**
+     * "Resolved: <the first 60 characters on one line>… · N replies"; the reply count is left out when there is none.
+     */
+    private static function resolvedSummaryOf(MessageView $message): string
+    {
+        $text = null === $message->body ? self::REMOVED_MESSAGE : (string) preg_replace('/\s+/u', ' ', trim($message->body));
+        $summary = 'Resolved: '.(mb_strlen($text) > self::RESOLVED_PREVIEW_LENGTH ? rtrim(mb_substr($text, 0, self::RESOLVED_PREVIEW_LENGTH)).'…' : $text);
+
+        return match ($message->replyCount) {
+            0 => $summary,
+            1 => $summary.' · 1 reply',
+            default => \sprintf('%s · %d replies', $summary, $message->replyCount),
+        };
     }
 
     public function csrfId(): string
@@ -172,7 +237,7 @@ final class Thread
     }
 
     /**
-     * The ticket page's names first; one query for the authors of messages and answers and the people questions ask
+     * The ticket page's names first; one query for the authors of messages and replies and the people questions ask
      * outside the ticket's people, none when there are none.
      *
      * @param list<MessageView>     $messages
@@ -184,7 +249,8 @@ final class Thread
     {
         $missingIds = [];
         foreach ($messages as $message) {
-            foreach ([$message->authorId, $message->answer()?->authorId, $message->toUserId] as $personId) {
+            $replyAuthorIds = array_map(static fn (ReplyView $reply): UserId => $reply->authorId, $message->replies);
+            foreach ([$message->authorId, $message->toUserId, ...$replyAuthorIds] as $personId) {
                 if (null !== $personId && !isset($displayNames[$personId->toString()])) {
                     $missingIds[$personId->toString()] = $personId;
                 }

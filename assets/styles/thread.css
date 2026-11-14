@@ -85,23 +85,29 @@ turbo-frame#ticket-thread {
   gap: var(--space-8);
 }
 
-.thread__remove-form {
+.thread__remove-form,
+.thread__resolve-form {
   margin: 0;
 }
 
 .thread__edit > summary,
-.thread__answer > summary {
+.thread__answer > summary,
+.thread__reply-box > summary,
+.thread__fold > summary {
   cursor: pointer;
   list-style: none;
 }
 
 .thread__edit > summary::-webkit-details-marker,
-.thread__answer > summary::-webkit-details-marker {
+.thread__answer > summary::-webkit-details-marker,
+.thread__reply-box > summary::-webkit-details-marker,
+.thread__fold > summary::-webkit-details-marker {
   display: none;
 }
 
 .thread__edit-form,
 .thread__answer-form,
+.thread__reply-form,
 .thread__composer {
   display: flex;
   flex-direction: column;
@@ -109,8 +115,38 @@ turbo-frame#ticket-thread {
 }
 
 .thread__edit-form,
-.thread__answer-form {
+.thread__answer-form,
+.thread__reply-form {
   margin-top: var(--space-8);
+}
+
+/* A resolved comment folds into one line for everyone; opened, the line gives way to Hide above the message. */
+.thread__fold {
+  flex: 1;
+  min-width: 0;
+}
+
+.thread__fold > summary {
+  color: var(--on-surface-var);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.thread__fold[open] .thread__fold-line,
+.thread__fold:not([open]) .thread__fold-hide {
+  display: none;
+}
+
+.thread__fold-message {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  margin-top: var(--space-8);
+  min-width: 0;
+}
+
+.thread__earlier-replies {
+  margin-left: var(--space-16);
 }
 
 .thread__edit-form > .btn,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Conversation;
 
+use App\Conversation\Api\MessageView;
 use App\Conversation\UI\Component\Thread;
 use App\Conversation\UI\ThreadController;
 use App\Identity\Domain\User;
@@ -193,7 +194,15 @@ final class ReplyAndResolveTest extends WebTestCase
 
         $this->client->request('POST', $this->messagePath($commentId, 'resolve'), $this->formFields(''), [], self::TURBO_FORM_HEADERS);
 
-        self::assertSame(ThreadController::COMMENT_RESOLVED, $this->toastOf($this->streamsOfTheAnswer(200)));
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame(ThreadController::COMMENT_RESOLVED, $this->toastOf($streams));
+        self::assertSame(
+            [[$commentId, 1], [$otherCommentId, 0]],
+            $streams[Thread::MESSAGES_ID]->filter('.thread__message')->each(static fn (Crawler $message): array => [
+                (string) $message->attr('data-message-id'),
+                $message->filter('details.thread__fold')->count(),
+            ]),
+        );
         self::assertSame(
             [[$commentId, '2026-11-06 12:00:00+00', $this->people[$resolver]->id()->toString()], [$otherCommentId, null, null]],
             $this->resolutionsOf([$commentId, $otherCommentId]),
@@ -344,6 +353,185 @@ final class ReplyAndResolveTest extends WebTestCase
     }
 
     /**
+     * Sara is outside the ticket's people and still named. A removed reply keeps its meta but not its text, and no
+     * reply has an action: replies are one level only.
+     */
+    #[Test]
+    public function theThreadShowsEachReplyUnderItsMessageWithNoActionOnIt(): void
+    {
+        $this->addTicket();
+        $commentId = $this->addMessage('Omar', 'comment', self::COMMENT);
+        $this->addReply($commentId, 'Sara', self::REPLY);
+        $this->addReply($commentId, 'Lena', 'Removed later.', isRemoved: true);
+        $otherCommentId = $this->addMessage('Lena', 'comment', 'Another comment.');
+
+        $frame = $this->threadFrameAs('Mia');
+
+        $messages = $frame->filter('.thread__message');
+        self::assertSame(
+            [['Sara · now', self::REPLY], ['Lena · now', 'Reply removed']],
+            $messages->eq(0)->filter('.thread__reply')->each(static fn (Crawler $reply): array => [
+                self::oneLineOf($reply->filter('.thread__meta')->text()),
+                trim($reply->filter('.thread__body')->text()),
+            ]),
+        );
+        self::assertCount(1, $messages->eq(0)->filter('.thread__reply .thread__body--removed'));
+        self::assertCount(0, $messages->eq(1)->filter('.thread__reply'));
+        self::assertCount(0, $frame->filter('.thread__reply form, .thread__reply summary, .thread__reply button'));
+        self::assertSame(
+            [$this->messagePath($commentId, 'replies'), $this->messagePath($otherCommentId, 'replies')],
+            $frame->filter('.thread__reply-box form')->each(static fn (Crawler $form): string => (string) $form->attr('action')),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{string, list<list<string>>}> the viewer and the actions each message offers:
+     *                                                             Omar's open comment, his question to Lena, his
+     *                                                             removed comment, his resolved comment, Lena's comment
+     */
+    public static function actionsByViewer(): iterable
+    {
+        yield 'Omar, the author' => ['Omar', [['Reply', 'Resolve'], ['Reply'], [], ['Reply'], ['Reply']]];
+        yield 'Lena, the lead and the person asked' => ['Lena', [['Reply', 'Resolve'], ['Answer'], [], ['Reply'], ['Reply', 'Resolve']]];
+        yield 'Mia, a viewer of the team' => ['Mia', [['Reply'], ['Reply'], [], ['Reply'], ['Reply']]];
+        yield 'Sara, an admin' => ['Sara', [['Reply'], ['Reply'], [], ['Reply'], ['Reply']]];
+    }
+
+    /**
+     * One reply button per message, Answer for the person an open question asks; Resolve only on an open comment and
+     * only for its author or the team's lead (T3 criterion 2: never on a question).
+     *
+     * @param list<list<string>> $expectedActions
+     */
+    #[Test]
+    #[DataProvider('actionsByViewer')]
+    public function eachMessageOffersReplyOrAnswerAndResolveOnlyToTheAuthorOrTheLead(string $viewer, array $expectedActions): void
+    {
+        $this->addTicket();
+        $openCommentId = $this->addMessage('Omar', 'comment', self::COMMENT);
+        $this->addMessage('Omar', 'question', self::QUESTION);
+        $this->addMessage('Omar', 'comment', 'Removed comment.', isRemoved: true);
+        $resolvedCommentId = $this->addMessage('Omar', 'comment', 'Resolved comment.');
+        $this->resolve($resolvedCommentId, 'Lena');
+        $leadsCommentId = $this->addMessage('Lena', 'comment', 'Another comment.');
+
+        $frame = $this->threadFrameAs($viewer);
+
+        self::assertSame(
+            $expectedActions,
+            $frame->filter('.thread__message')->each(static fn (Crawler $message): array => $message
+                ->filter('.thread__answer > summary, .thread__reply-box > summary, .thread__resolve-form button')
+                ->each(static fn (Crawler $action): string => trim($action->text()))),
+        );
+        $expectedResolvePaths = array_values(array_filter([
+            [] !== array_intersect(['Resolve'], $expectedActions[0]) ? $this->messagePath($openCommentId, 'resolve') : null,
+            [] !== array_intersect(['Resolve'], $expectedActions[4]) ? $this->messagePath($leadsCommentId, 'resolve') : null,
+        ], static fn (?string $path): bool => null !== $path));
+        self::assertSame($expectedResolvePaths, $frame->filter('.thread__resolve-form')->each(static fn (Crawler $form): string => (string) $form->attr('action')));
+    }
+
+    /**
+     * A resolved comment folds into one closed line for everyone, its text cut after 60 characters on one line;
+     * opened, it shows the message and its replies. An open comment does not fold.
+     */
+    #[Test]
+    public function aResolvedCommentFoldsIntoOneLineWithItsReplyCount(): void
+    {
+        $this->addTicket();
+        // The 60th character is the space after "has", which the line drops before its ellipsis.
+        $longCommentId = $this->addMessage('Omar', 'comment', "The cart total is off by the shipping fee\nwhen an order has two items in it.");
+        $this->addReply($longCommentId, 'Lena', self::REPLY);
+        $this->addReply($longCommentId, 'Mia', 'Removed later.', isRemoved: true);
+        $this->resolve($longCommentId, 'Omar');
+        $shortCommentId = $this->addMessage('Lena', 'comment', 'Fixed in build 42.');
+        $this->addReply($shortCommentId, 'Omar', 'Thanks.');
+        $this->resolve($shortCommentId, 'Lena');
+        $silentCommentId = $this->addMessage('Omar', 'comment', 'Café menu is fine.');
+        $this->resolve($silentCommentId, 'Omar');
+        $this->addMessage('Omar', 'comment', self::COMMENT);
+        $removedCommentId = $this->addMessage('Omar', 'comment', 'Removed after it was resolved.', isRemoved: true);
+        $this->resolve($removedCommentId, 'Omar');
+
+        $frame = $this->threadFrameAs('Mia');
+
+        $folds = $frame->filter('.thread__message details.thread__fold');
+        self::assertSame(
+            [
+                ['✓ Resolved: The cart total is off by the shipping fee when an order has… · 2 replies · show', 'Hide', null],
+                ['✓ Resolved: Fixed in build 42. · 1 reply · show', 'Hide', null],
+                ['✓ Resolved: Café menu is fine. · show', 'Hide', null],
+                ['✓ Resolved: Message removed · show', 'Hide', null],
+            ],
+            $folds->each(static fn (Crawler $fold): array => [
+                self::oneLineOf($fold->filter('summary .thread__fold-line')->text()),
+                trim($fold->filter('summary .thread__fold-hide')->text()),
+                $fold->attr('open'),
+            ]),
+        );
+        self::assertSame(self::REPLY, trim($folds->eq(0)->filter('.thread__reply .thread__body')->first()->text()));
+        self::assertCount(0, $frame->filter('.thread__message')->eq(3)->filter('.thread__fold'));
+        self::assertSame(self::COMMENT, trim($frame->filter('.thread__message')->eq(3)->filter('.thread__body')->text()));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}> the viewer and the note under the reply box of Omar's comment
+     */
+    public static function replyNotesByViewer(): iterable
+    {
+        yield 'Mia, replying to Omar' => ['Mia', 'Replies stay under this message. Omar gets one notification.'];
+        yield 'Omar, replying to himself' => ['Omar', 'Replies stay under this message.'];
+    }
+
+    #[Test]
+    #[DataProvider('replyNotesByViewer')]
+    public function theReplyNoteNamesTheAuthorUnlessTheViewerWroteTheMessage(string $viewer, string $expectedNote): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'comment', self::COMMENT);
+
+        $frame = $this->threadFrameAs($viewer);
+
+        self::assertSame([$expectedNote], $frame->filter('.thread__reply-box .thread__note')->each(static fn (Crawler $note): string => trim($note->text())));
+    }
+
+    /**
+     * MessageView::REPLY_LIMIT replies are listed, the newest; a message with more says so, one with fewer does not.
+     */
+    #[Test]
+    public function aMessageWithMoreRepliesThanTheLimitShowsTheNewestAndSaysSo(): void
+    {
+        $this->addTicket();
+        $busyCommentId = $this->addMessage('Omar', 'comment', self::COMMENT);
+        $this->addNumberedReplies($busyCommentId, MessageView::REPLY_LIMIT + 1);
+        $quietCommentId = $this->addMessage('Lena', 'comment', 'Another comment.');
+        $this->addReply($quietCommentId, 'Omar', self::REPLY);
+
+        $frame = $this->threadFrameAs('Mia');
+
+        $messages = $frame->filter('.thread__message');
+        $replyBodies = $messages->eq(0)->filter('.thread__reply .thread__body')->each(static fn (Crawler $body): string => trim($body->text()));
+        self::assertCount(MessageView::REPLY_LIMIT, $replyBodies);
+        self::assertSame(['Reply 2', 'Reply 51'], [$replyBodies[0], $replyBodies[MessageView::REPLY_LIMIT - 1]]);
+        self::assertSame(['Showing the latest 50 replies.'], $messages->eq(0)->filter('.thread__earlier-replies')->each(static fn (Crawler $note): string => trim($note->text())));
+        self::assertCount(1, $messages->eq(1)->filter('.thread__reply'));
+        self::assertCount(0, $messages->eq(1)->filter('.thread__earlier-replies'));
+    }
+
+    private function threadFrameAs(string $viewer): Crawler
+    {
+        $this->logIn($this->client, $this->people[$viewer]);
+        $frame = $this->client->request('GET', '/t/'.self::KEY.'/thread', [], [], ['HTTP_TURBO_FRAME' => Thread::FRAME_ID]);
+        self::assertResponseStatusCodeSame(200);
+
+        return $frame;
+    }
+
+    private static function oneLineOf(string $text): string
+    {
+        return (string) preg_replace('/\s+/u', ' ', trim($text));
+    }
+
+    /**
      * Asserts the answer is a 303 to the thread's page and returns the one toast that page shows.
      */
     private function toastAfterTheRedirect(): string
@@ -464,17 +652,40 @@ final class ReplyAndResolveTest extends WebTestCase
     /**
      * @return string its id
      */
-    private function addReply(string $messageId, string $author, string $body): string
+    private function addReply(string $messageId, string $author, string $body, bool $isRemoved = false): string
     {
         $replyId = Uuid::v7()->toRfc4122();
-        $parameters = [$this->acmeFoods->toString(), $replyId, $messageId, $this->people[$author]->id()->toString(), $body];
+        $parameters = [$this->acmeFoods->toString(), $replyId, $messageId, $this->people[$author]->id()->toString(), $body, $isRemoved ? '2026-11-06 11:59:40+00' : null];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, created_at)
-             VALUES (?, ?, ?, ?, ?, false, TIMESTAMPTZ '2026-11-06 11:59:20+00')",
+            "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, removed_at, created_at)
+             VALUES (?, ?, ?, ?, ?, false, ?, TIMESTAMPTZ '2026-11-06 11:59:20+00')",
             $parameters,
         ));
 
         return $replyId;
+    }
+
+    /**
+     * Replies "Reply 1" to "Reply <count>" by Lena, a second apart and oldest first, in one statement.
+     */
+    private function addNumberedReplies(string $messageId, int $count): void
+    {
+        $parameters = [$this->acmeFoods->toString(), $messageId, $this->people['Lena']->id()->toString(), $count];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, created_at)
+             SELECT ?::uuid, gen_random_uuid(), ?::uuid, ?::uuid, 'Reply ' || n, false, TIMESTAMPTZ '2026-11-06 11:00:00+00' + n * INTERVAL '1 second'
+             FROM generate_series(1, ?::int) AS n",
+            $parameters,
+        ));
+    }
+
+    private function resolve(string $messageId, string $resolver): void
+    {
+        $parameters = [$this->people[$resolver]->id()->toString(), $this->acmeFoods->toString(), $messageId];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE cnv_message SET resolved_at = TIMESTAMPTZ '2026-11-06 11:59:50+00', resolved_by = ? WHERE organization_id = ? AND id = ?",
+            $parameters,
+        ));
     }
 
     /**

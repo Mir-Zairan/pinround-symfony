@@ -31,6 +31,7 @@
         <ol class="thread__messages">
             {% for message in messages %}
                 <li id="thread-message-{{ message.id }}" class="thread__message thread__message--{{ message.kind }}" data-message-id="{{ message.id }}">
+                    {% set messageMarkup %}
                     <twig:Avatar name="{{ message.authorName }}" class="thread__avatar" aria-hidden="true"/>
                     <div class="thread__message-main{{ message.isOpenQuestion ? ' thread__message-main--open' }}">
                         <p class="thread__meta">
@@ -39,7 +40,7 @@
                             {%- if message.isEdited and not message.isRemoved %} · <span class="thread__edited">edited</span>{% endif %}
                         </p>
                         {% if message.isRemoved %}
-                            <p class="thread__body thread__body--removed">Message removed</p>
+                            <p class="thread__body thread__body--removed">{{ constant('App\\Conversation\\UI\\Component\\Thread::REMOVED_MESSAGE') }}</p>
                         {% else %}
                             <p class="thread__body">{{ message.body|linkify }}</p>
                             {% if message.isOpenQuestion %}
@@ -48,14 +49,23 @@
                                 <p class="thread__tags"><twig:Tag class="thread__tag--answered">Answered</twig:Tag></p>
                             {% endif %}
                         {% endif %}
-                        {% if message.answer %}
-                            <div class="thread__reply thread__reply--answer" id="thread-reply-{{ message.answer.id }}">
-                                <p class="thread__meta">
-                                    <span class="thread__author">{{ message.answer.authorName }}</span> · <time class="thread__time" datetime="{{ message.answer.postedAt }}">{{ message.answer.postedLine }}</time> · answer
-                                </p>
-                                <p class="thread__body">{{ message.answer.body|linkify }}</p>
-                            </div>
+                        {% if message.hasEarlierReplies %}
+                            <p class="thread__earlier thread__earlier-replies">Showing the latest {{ constant('App\\Conversation\\Api\\MessageView::REPLY_LIMIT') }} replies.</p>
                         {% endif %}
+                        {#- Replies are one level only, so a reply has no actions. -#}
+                        {% for reply in message.replies %}
+                            <div class="thread__reply{{ reply.isAnswer ? ' thread__reply--answer' }}" id="thread-reply-{{ reply.id }}">
+                                <p class="thread__meta">
+                                    <span class="thread__author">{{ reply.authorName }}</span> · <time class="thread__time" datetime="{{ reply.postedAt }}">{{ reply.postedLine }}</time>
+                                    {%- if reply.isAnswer %} · answer{% endif %}
+                                </p>
+                                {% if reply.isRemoved %}
+                                    <p class="thread__body thread__body--removed">{{ constant('App\\Conversation\\UI\\Component\\Thread::REMOVED_REPLY') }}</p>
+                                {% else %}
+                                    <p class="thread__body">{{ reply.body|linkify }}</p>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
                         {% if message.isAnswerable %}
                             {#- Answering resumes the ticket and changes its header, so the answer's redirect replaces the whole page. -#}
                             <details class="thread__answer">
@@ -72,8 +82,29 @@
                                 </form>
                             </details>
                         {% endif %}
-                        {% if message.isEditable or message.isRemovable %}
+                        {% if message.isReplyable or message.isResolvable or message.isEditable or message.isRemovable %}
                             <div class="thread__actions">
+                                {% if message.isReplyable %}
+                                    <details class="thread__reply-box">
+                                        <summary class="btn btn-text btn-sm">Reply</summary>
+                                        <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::REPLY_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__reply-form">
+                                            <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                            <label class="visually-hidden" for="thread-reply-body-{{ message.id }}">{{ constant('App\\Conversation\\UI\\Component\\Thread::REPLY_PLACEHOLDER') }}</label>
+                                            <textarea id="thread-reply-body-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::REPLY_PLACEHOLDER') }}" required maxlength="{{ this.maxBodyLength }}" rows="3"></textarea>
+                                            <p class="thread__note">{{ message.replyNote }}</p>
+                                            <div class="thread__answer-buttons">
+                                                <button type="button" class="btn btn-text btn-sm" data-action="thread-composer#closeAnswer">Cancel</button>
+                                                <button type="submit" class="btn btn-filled btn-sm">Reply</button>
+                                            </div>
+                                        </form>
+                                    </details>
+                                {% endif %}
+                                {% if message.isResolvable %}
+                                    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::RESOLVE_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__resolve-form">
+                                        <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                        <button type="submit" class="btn btn-text btn-sm">Resolve</button>
+                                    </form>
+                                {% endif %}
                                 {% if message.isEditable %}
                                     <details class="thread__edit">
                                         <summary class="btn btn-text btn-sm">Edit</summary>
@@ -94,6 +125,16 @@
                             </div>
                         {% endif %}
                     </div>
+                    {% endset %}
+                    {% if message.resolvedSummary is not null %}
+                        {#- Folded for everyone; thread.css swaps the line for Hide while it is open. -#}
+                        <details class="thread__fold">
+                            <summary class="thread__fold-summary"><span class="thread__fold-line"><span aria-hidden="true">✓</span> {{ message.resolvedSummary }} · show</span><span class="thread__fold-hide">Hide</span></summary>
+                            <div class="thread__fold-message">{{ messageMarkup }}</div>
+                        </details>
+                    {% else %}
+                        {{ messageMarkup }}
+                    {% endif %}
                 </li>
             {% endfor %}
         </ol>

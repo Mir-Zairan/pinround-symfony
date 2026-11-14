@@ -307,6 +307,47 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
+     * @return iterable<string, array{string, int}> a viewer MessageVoter grants Resolve on some comments, and how many
+     *                                              of the eight comments it grants
+     */
+    public static function viewersWhoMayResolve(): iterable
+    {
+        yield 'Omar, the author of his four' => ['Omar', 4];
+        yield 'Lena, the lead, of all eight' => ['Lena', 8];
+    }
+
+    /**
+     * Whether Resolve is offered is asked once per author, not per message, and every message's replies come in the
+     * one replies query: more comments and replies by the same people cost no query.
+     */
+    #[Test]
+    #[DataProvider('viewersWhoMayResolve')]
+    public function moreCommentsAndRepliesByTheSamePeopleCostNoQuery(string $viewer, int $expectedResolveCount): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
+        $this->addMessage('Lena', 'Thanks', '2026-11-06 09:05:00+00');
+        $this->logIn($this->client, $this->people[$viewer]);
+        // logIn() leaves the user in the entity manager, and the first request fills the caches.
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $queryCountWithTwoComments = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+        foreach (['10:00', '10:05', '10:10'] as $time) {
+            $omarsCommentId = $this->addMessage('Omar', 'Still on it', '2026-11-06 '.$time.':00+00');
+            $this->addReply($omarsCommentId, 'Lena', 'Good');
+            $leadsCommentId = $this->addMessage('Lena', 'One more thing', '2026-11-06 '.$time.':30+00');
+            $this->addReply($leadsCommentId, 'Omar', 'Noted');
+        }
+
+        $queryCountWithMore = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+
+        self::assertSame(8, $this->client->getCrawler()->filter('.thread__message')->count());
+        self::assertSame(6, $this->client->getCrawler()->filter('.thread__reply')->count());
+        self::assertSame($expectedResolveCount, $this->client->getCrawler()->filter('.thread__resolve-form')->count());
+        self::assertSame($queryCountWithTwoComments, $queryCountWithMore);
+    }
+
+    /**
      * The meta line says how long ago in the words the tickets list uses, the date in Mia's zone from a day on: Lena's
      * 23:30 UTC on 2 Nov is 3 Nov in Berlin. Each message has its author's avatar, hidden from screen readers, which
      * read the name next to it.
@@ -874,6 +915,19 @@ final class TicketThreadTest extends WebTestCase
                 $parameters,
             );
         });
+    }
+
+    /**
+     * A plain reply by $author a minute before now.
+     */
+    private function addReply(string $messageId, string $author, string $body): void
+    {
+        $parameters = [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $messageId, $this->people[$author]->id()->toString(), $body];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, created_at)
+             VALUES (?, ?, ?, ?, ?, false, TIMESTAMPTZ '2026-11-06 11:59:00+00')",
+            $parameters,
+        ));
     }
 
     /**
