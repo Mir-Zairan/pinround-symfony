@@ -8,7 +8,9 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\TicketId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketKeyQueries;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -52,6 +54,19 @@ final class DbalTicketKeyQueriesTest extends KernelTestCase
         self::assertNull($this->keyAs(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000072d9'));
     }
 
+    /**
+     * The SQL names Acme Foods while the transaction's tenant is Beta Bakery, so only row-level security hides the
+     * Acme Foods ticket; the same query under Acme Foods finds its key.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsKey(): void
+    {
+        $keyOfAcmeTicket = static fn (Connection $connection): ?string => new DbalTicketKeyQueries($connection, self::getContainer()->get(TenantContext::class))->keyOf(new TicketId(self::ACME_TICKET));
+        self::assertSame('SHOP-412', $this->ownTransactions()->rolledBackAs(self::ACME_FOODS, $keyOfAcmeTicket));
+
+        self::assertNull($this->ownTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $keyOfAcmeTicket));
+    }
+
     #[Test]
     public function noTenantIsRefused(): void
     {
@@ -68,6 +83,11 @@ final class DbalTicketKeyQueriesTest extends KernelTestCase
     private function queries(): DbalTicketKeyQueries
     {
         return new DbalTicketKeyQueries(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
+    }
+
+    private function ownTransactions(): OwnConnectionTransactions
+    {
+        return new OwnConnectionTransactions(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function transactions(): TenantTransactions

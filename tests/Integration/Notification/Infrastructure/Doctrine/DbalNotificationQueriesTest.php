@@ -5,12 +5,19 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Notification\Infrastructure\Doctrine;
 
 use App\Notification\Api\NotificationQueries;
+use App\Notification\Infrastructure\Doctrine\DbalBellQueries;
+use App\Notification\Infrastructure\Doctrine\DbalNotificationQueries;
+use App\Notification\Infrastructure\Doctrine\VisibleBellTickets;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Notification\NotificationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
+use App\Ticketing\Api\TicketQueries;
+use App\Ticketing\Api\TicketVisibilities;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -77,6 +84,32 @@ final class DbalNotificationQueriesTest extends KernelTestCase
     public function aMuteInAnotherOrganizationDoesNotCount(): void
     {
         self::assertFalse($this->isMutedInAcmeFoods(self::OMAR, self::BAKERY_TICKET));
+    }
+
+    /**
+     * The SQL names Acme Foods while the transaction's tenant is Beta Bakery, so only row-level security hides Omar's
+     * Acme Foods mute; the same objects under Acme Foods find it.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsMute(): void
+    {
+        $isOmarMuted = fn (Connection $connection): bool => $this->notificationQueriesOn($connection)->isMuted(new UserId(self::OMAR), new TicketId(self::MUTED_TICKET));
+        self::assertTrue($this->ownTransactions()->rolledBackAs(self::ACME_FOODS, $isOmarMuted));
+
+        self::assertFalse($this->ownTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $isOmarMuted));
+    }
+
+    private function notificationQueriesOn(Connection $connection): DbalNotificationQueries
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $visibleTickets = new VisibleBellTickets($connection, $tenantContext, self::createStub(TicketVisibilities::class), self::createStub(TicketQueries::class));
+
+        return new DbalNotificationQueries($connection, $tenantContext, new DbalBellQueries($connection, $tenantContext, new MockClock(self::NOW), $visibleTickets));
+    }
+
+    private function ownTransactions(): OwnConnectionTransactions
+    {
+        return new OwnConnectionTransactions(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function isMutedInAcmeFoods(string $userId, string $ticketId): bool
