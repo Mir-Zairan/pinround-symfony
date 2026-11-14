@@ -74,7 +74,7 @@ FR-CNV-01, FR-CNV-02, FR-CNV-03, FR-CNV-04, FR-CNV-05, FR-CNV-06, FR-CNV-07, FR-
 3. `Answer`: the asked person's reply (`is_answer`), resolves the question, reprojects the turn to the step's normal owner; toast "Answered. The ticket goes back to In progress."
 4. "Answer" button on the question for the asked person; the reply box hint "Your answer" and the note "Your answer closes the question. The ticket goes back to In progress."
 5. Notification kinds `question` (to asked) and `answer` (to asker).
-**Files:** `src/Conversation/Application/{AskQuestion,Answer}/*`; the ASK attribute and rule in `src/Conversation/Api/ConversationPermission.php` and `src/Conversation/UI/Voter/ConversationVoter.php`.
+**Files:** `src/Conversation/Application/{AskQuestion,Answer,WithdrawQuestion}/*`; the ASK attribute and rule in `src/Conversation/Api/ConversationPermission.php` and `src/Conversation/UI/Voter/ConversationVoter.php`; the ask and answer routes in `src/Conversation/UI/ThreadController.php`; the composer's people and the Answer form in `src/Conversation/UI/Component/Thread.php` and `src/Conversation/UI/templates/components/Thread.html.twig`; choosing whom to ask in `assets/controllers/thread-composer_controller.js`; the journey in `tests/e2e/question.spec.ts`.
 **Acceptance criteria:**
 - [x] A second open question on the same ticket is refused with "This ticket already waits for an answer." (`QuestionJourneyTest::aSecondQuestionIsRefusedWhileOneWaitsAndNothingChanges`)
 - [x] The step does not change while paused; Now says "Lena answers Omar's question". (`PausedTicketPageTest::thePillNamesTheAskedPersonInTheWaitingColoursAndNowNamesTheAsker`; moves refused with the step unchanged: `PausedTicketMoveTest`)
