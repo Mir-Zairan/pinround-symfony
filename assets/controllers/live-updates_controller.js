@@ -8,10 +8,15 @@ const RENEW_EVERY_MS = 8 * 60 * 1000;
 const PAUSED_AFTER_MS = 60 * 1000;
 // Spreads the re-fetches of everyone looking at the ticket over a second instead of one spike.
 const MAX_JITTER_MS = 1000;
-// A stream the hub closed (an expired cookie answers 401) is not reopened by the browser; this one tries again after
-// 5 s, doubling to at most a minute, so a signed-out tab does not ask for a cookie every few seconds.
+// A stream that drops or that the hub refuses (an expired cookie answers 401) is opened again after 5 s, doubling to at
+// most a minute, so a signed-out tab does not ask for a cookie every few seconds.
 const FIRST_REOPEN_AFTER_MS = 5000;
 const MAX_REOPEN_AFTER_MS = 60 * 1000;
+// Every tab of the browser shares one subscriber cookie, set by whichever tab asked last, and the hub reads it only as a
+// stream connects. A tab holds this lock from its ask until its stream has connected, so no other tab's ask, for other
+// topics, lands in between; it holds it at most MAX_CONNECT_WAIT_MS, so a hub that never answers stops no other tab.
+const COOKIE_LOCK = 'pinround-live-updates-cookie';
+const MAX_CONNECT_WAIT_MS = 5000;
 // RefreshTicketPagesHandler::SIGNAL_TYPE.
 const SIGNAL_TYPE = 'refresh';
 // Marks what a signal fetches again: a turbo-frame with a src reloads; any other element with an id is swapped for the
@@ -38,6 +43,25 @@ function isPartInUse(part) {
     return false;
   }
   return part.localName !== 'turbo-frame' || focused.closest('[data-turbo-permanent]') === null;
+}
+
+// Web Locks exist only on HTTPS; without them a tab asks and connects unguarded.
+function whileHoldingCookieLock(work) {
+  return navigator.locks === undefined ? work() : navigator.locks.request(COOKIE_LOCK, work);
+}
+
+function connectionSettled(source) {
+  return new Promise((resolve) => {
+    const settle = () => {
+      clearTimeout(timer);
+      source.removeEventListener('open', settle);
+      source.removeEventListener('error', settle);
+      resolve();
+    };
+    const timer = setTimeout(settle, MAX_CONNECT_WAIT_MS);
+    source.addEventListener('open', settle);
+    source.addEventListener('error', settle);
+  });
 }
 
 function labelOf(control) {
@@ -110,7 +134,7 @@ export default class extends Controller {
     }
     document.addEventListener('visibilitychange', this.#onVisibilityChange);
     HOLD_ENDING_EVENTS.forEach((type) => document.addEventListener(type, this.#onHoldMayEnd, true));
-    this.#renewTimer = setInterval(() => this.#renewCookie(), RENEW_EVERY_MS);
+    this.#renewTimer = setInterval(() => whileHoldingCookieLock(() => this.#renewCookie()), RENEW_EVERY_MS);
     this.#open();
   }
 
@@ -137,15 +161,19 @@ export default class extends Controller {
 
   async #open() {
     this.#startPausedTimer();
-    await this.#renewCookie();
-    if (!this.element.isConnected) {
-      return;
-    }
-    this.#closeSource();
-    this.#source = new EventSource(this.subscribeUrlValue, { withCredentials: true });
-    this.#source.addEventListener(SIGNAL_TYPE, this.#onSignal);
-    this.#source.addEventListener('open', () => this.#showConnected());
-    this.#source.addEventListener('error', () => this.#showDisconnected());
+    await whileHoldingCookieLock(async () => {
+      await this.#renewCookie();
+      if (!this.element.isConnected) {
+        return;
+      }
+      this.#closeSource();
+      const source = new EventSource(this.subscribeUrlValue, { withCredentials: true });
+      this.#source = source;
+      source.addEventListener(SIGNAL_TYPE, this.#onSignal);
+      source.addEventListener('open', () => this.#showConnected());
+      source.addEventListener('error', () => this.#reopenLater());
+      await connectionSettled(source);
+    });
   }
 
   async #renewCookie() {
@@ -165,13 +193,14 @@ export default class extends Controller {
     this.pausedTarget.hidden = true;
   }
 
-  #showDisconnected() {
+  // The browser would reconnect a dropped stream by itself, with whatever cookie another tab asked for last, which may
+  // not hold this page's ticket; closing it and opening it through #open asks for this page's cookie first.
+  #reopenLater() {
     this.#startPausedTimer();
-    if (this.#source?.readyState === EventSource.CLOSED) {
-      clearTimeout(this.#reopenTimer);
-      this.#reopenTimer = setTimeout(() => this.#open(), this.#reopenAfterMs);
-      this.#reopenAfterMs = Math.min(this.#reopenAfterMs * 2, MAX_REOPEN_AFTER_MS);
-    }
+    this.#closeSource();
+    clearTimeout(this.#reopenTimer);
+    this.#reopenTimer = setTimeout(() => this.#open(), this.#reopenAfterMs);
+    this.#reopenAfterMs = Math.min(this.#reopenAfterMs * 2, MAX_REOPEN_AFTER_MS);
   }
 
   #startPausedTimer() {

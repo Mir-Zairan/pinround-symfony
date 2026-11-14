@@ -617,6 +617,114 @@ test.describe('a lost stream', () => {
   });
 });
 
+// The tabs of one browser share one subscriber cookie, and each page asks for it with its own topics: Omar's home page
+// asks for one with no ticket in it. The hub reads the cookie only as a stream connects.
+test.describe('two tabs of one browser', () => {
+  test("Omar's ticket tab reconnects with its own cookie after his home tab asked for one without the ticket", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Gift card balance shows twice ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const homeTab = await omar.context.newPage();
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openThread(lena.page, key);
+    const ticketTabStreams: Response[] = [];
+    omar.page.on('response', (response) => {
+      if (pathOf(response.request()) === HUB_PATH) {
+        ticketTabStreams.push(response);
+      }
+    });
+    let streamHeld: () => void = () => undefined;
+    const isStreamHeld = new Promise<void>((resolve) => {
+      streamHeld = resolve;
+    });
+    let homeTabAsked: () => void = () => undefined;
+    const hasHomeTabAsked = new Promise<void>((resolve) => {
+      homeTabAsked = resolve;
+    });
+    // The first stream ends as soon as it is answered, as a dropped connection does, and only once the home tab's
+    // cookie is the one the browser holds; its retry would have the browser reconnect after 100 ms.
+    await omar.page.route(
+      `**${HUB_PATH}**`,
+      async (route) => {
+        streamHeld();
+        await hasHomeTabAsked;
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
+      },
+      { times: 1 },
+    );
+
+    const ticketTabOpened = openThread(omar.page, key);
+    await isStreamHeld;
+    const homeTabCookie = homeTab.waitForResponse((response) => pathOf(response.request()) === TOKEN_PATH);
+    await homeTab.goto('/');
+    expect((await homeTabCookie).status()).toBe(204);
+    homeTabAsked();
+    await ticketTabOpened;
+    // live-updates_controller.js FIRST_REOPEN_AFTER_MS, then the hub's answer.
+    await expect.poll(() => ticketTabStreams.length, { timeout: 5000 + SHOWS_WITHIN_MS }).toBe(2);
+    expect(ticketTabStreams[1].status()).toBe(200);
+    const text = `Still following after the drop ${randomUUID().slice(0, 8)}`;
+
+    await postComment(lena.page, text);
+
+    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: COALESCED_SHOWS_WITHIN_MS });
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test("a tab Omar opens while his ticket tab connects asks for its cookie only once that tab's stream has connected", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Gift card expiry date is blank ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const homeTab = await omar.context.newPage();
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openThread(lena.page, key);
+    const order: string[] = [];
+    omar.page.on('response', (response) => {
+      if (pathOf(response.request()) === HUB_PATH) {
+        order.push('ticket tab stream answered');
+      }
+    });
+    homeTab.on('request', (request) => {
+      if (pathOf(request) === TOKEN_PATH) {
+        order.push('home tab asked');
+      }
+    });
+    let streamHeld: () => void = () => undefined;
+    const isStreamHeld = new Promise<void>((resolve) => {
+      streamHeld = resolve;
+    });
+    // Held until the home tab asks for its cookie, or for 3 s when it waits, as it should, for this stream to connect.
+    await omar.page.route(
+      `**${HUB_PATH}**`,
+      async (route) => {
+        streamHeld();
+        try {
+          await homeTab.waitForRequest((request) => pathOf(request) === TOKEN_PATH, { timeout: 3000 });
+        } catch (error) {
+          if (!(error instanceof errors.TimeoutError)) {
+            throw error;
+          }
+        }
+        await route.continue();
+      },
+      { times: 1 },
+    );
+
+    const ticketTabOpened = openThread(omar.page, key);
+    await isStreamHeld;
+    const homeTabCookie = homeTab.waitForResponse((response) => pathOf(response.request()) === TOKEN_PATH);
+    await homeTab.goto('/');
+    expect((await homeTabCookie).status()).toBe(204);
+    await ticketTabOpened;
+
+    expect(order).toEqual(['ticket tab stream answered', 'home tab asked']);
+    const text = `Still following beside the home tab ${randomUUID().slice(0, 8)}`;
+    await postComment(lena.page, text);
+    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: COALESCED_SHOWS_WITHIN_MS });
+    await lena.context.close();
+    await omar.context.close();
+  });
+});
+
 test.describe('the stream across Turbo visits', () => {
   test('a visit back to the same ticket keeps the stream and the cookie; a visit to another ticket opens a new stream', async ({ browser }) => {
     const key = await makeTicketForOmar(browser, `Saved basket loses its note ${randomUUID().slice(0, 8)}`);
