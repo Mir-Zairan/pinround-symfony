@@ -15,7 +15,7 @@ use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * The organization's settings read at most once per organization and request, in one query that gives the step policy,
- * the triager and the ping limit together: the Team page, the workflow voter and the workflow caches each ask for the
+ * the triager, the ping limit and the auto-clear and quiet-hours switches together: the Team page, the workflow voter and the workflow caches each ask for the
  * step policy, each ticket visibility check for the triager, and the ticket page's ping sheets for the ping limit. The kernel resets it at the start of the next request or message
  * (ADR-0008), so a policy change takes effect from the next request on. The tenant is part of the key, because under
  * another tenant row-level security hides the row and the answer is the default. A stored value that
@@ -46,6 +46,16 @@ final class RequestScopedSettingsQueries implements SettingsQueries, PingSetting
     public function pingLimitHoursOf(OrganizationId $organizationId): int
     {
         return $this->settingsOf($organizationId)->pingLimitHours;
+    }
+
+    public function isAutoClearOn(OrganizationId $organizationId): bool
+    {
+        return $this->settingsOf($organizationId)->isAutoClearOn;
+    }
+
+    public function isQuietHoursOn(OrganizationId $organizationId): bool
+    {
+        return $this->settingsOf($organizationId)->isQuietHoursOn;
     }
 
     public function reset(): void

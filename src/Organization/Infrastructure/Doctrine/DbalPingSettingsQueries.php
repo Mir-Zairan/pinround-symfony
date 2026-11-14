@@ -14,6 +14,13 @@ final readonly class DbalPingSettingsQueries implements PingSettingsQueries
 
     private const array ALLOWED_PING_LIMIT_HOURS = ['1' => 1, '4' => 4, '8' => 8, '24' => 24];
 
+    public const bool DEFAULT_AUTO_CLEAR = true;
+
+    public const bool DEFAULT_QUIET_HOURS = false;
+
+    // How -> renders a JSON boolean; ->> would render the string "true" the same.
+    private const array STORED_SWITCHES = ['true' => true, 'false' => false];
+
     public function __construct(private Connection $connection)
     {
     }
@@ -24,6 +31,22 @@ final readonly class DbalPingSettingsQueries implements PingSettingsQueries
             "SELECT data->>'ping_limit_hours' FROM org_settings WHERE organization_id = ?",
             [$organizationId->toString()],
         ));
+    }
+
+    public function isAutoClearOn(OrganizationId $organizationId): bool
+    {
+        return self::switchFrom('auto_clear', $this->connection->fetchOne(
+            "SELECT data->'auto_clear' FROM org_settings WHERE organization_id = ?",
+            [$organizationId->toString()],
+        ), self::DEFAULT_AUTO_CLEAR);
+    }
+
+    public function isQuietHoursOn(OrganizationId $organizationId): bool
+    {
+        return self::switchFrom('quiet_hours', $this->connection->fetchOne(
+            "SELECT data->'quiet_hours' FROM org_settings WHERE organization_id = ?",
+            [$organizationId->toString()],
+        ), self::DEFAULT_QUIET_HOURS);
     }
 
     /**
@@ -46,5 +69,25 @@ final readonly class DbalPingSettingsQueries implements PingSettingsQueries
         }
 
         return self::ALLOWED_PING_LIMIT_HOURS[$pingLimitHours];
+    }
+
+    /**
+     * An on/off setting from what a read of data->$key gave, for every reader of org_settings.
+     *
+     * @param mixed $storedSwitch false for no row; null for no such key; "null" for a JSON null
+     *
+     * @throws \LogicException when the stored switch is not a JSON boolean
+     */
+    public static function switchFrom(string $key, mixed $storedSwitch, bool $default): bool
+    {
+        if (false === $storedSwitch || null === $storedSwitch || 'null' === $storedSwitch) {
+            return $default;
+        }
+
+        if (!\is_string($storedSwitch) || !\array_key_exists($storedSwitch, self::STORED_SWITCHES)) {
+            throw new \LogicException(\sprintf('org_settings holds an unknown %s switch.', $key));
+        }
+
+        return self::STORED_SWITCHES[$storedSwitch];
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Notification\Domain;
 
 use App\Notification\Domain\Ping;
+use App\Notification\Domain\PingClearedReason;
 use App\Notification\Domain\PingId;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -67,6 +68,34 @@ final class PingTest extends TestCase
         $this->expectExceptionMessageIsOrContains('A ping needs a message of 1 to 500 characters.');
 
         $this->send($body, null, new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
+    }
+
+    #[Test]
+    public function clearingAPingKeepsWhenAndWhy(): void
+    {
+        $ping = $this->send('Any news?', null, new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
+        $clearedAt = new \DateTimeImmutable('2027-03-15 11:30:00+00:00');
+
+        $ping->clear(PingClearedReason::Acted, $clearedAt);
+
+        self::assertSame([$clearedAt, PingClearedReason::Acted], [$ping->clearedAt(), $ping->clearedReason()]);
+    }
+
+    #[Test]
+    public function aClearedPingIsNotClearedAgain(): void
+    {
+        $ping = $this->send('Any news?', null, new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
+        $firstClearedAt = new \DateTimeImmutable('2027-03-15 11:30:00+00:00');
+        $ping->clear(PingClearedReason::Done, $firstClearedAt);
+
+        try {
+            $ping->clear(PingClearedReason::Acted, new \DateTimeImmutable('2027-03-15 12:00:00+00:00'));
+            self::fail('A cleared ping was cleared again.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('The ping is cleared already.', $refusal->getMessage());
+        }
+
+        self::assertSame([$firstClearedAt, PingClearedReason::Done], [$ping->clearedAt(), $ping->clearedReason()]);
     }
 
     private function send(string $body, ?\DateTimeImmutable $deliverAfter, \DateTimeImmutable $createdAt): Ping

@@ -8,6 +8,9 @@ use App\Notification\Application\Notify\NewNotification;
 use App\Notification\Application\Notify\NotificationKind;
 use App\Notification\Application\Notify\Notifications;
 use App\Notification\Infrastructure\Cache\BellCountCache;
+use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\UserId;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Uid\UuidV7;
 
@@ -23,6 +26,10 @@ final readonly class DbalNotifications implements Notifications
     private const string FOLD = 'UPDATE ntf_notification SET actor_id = ?, data = ?, created_at = ?'
         ." WHERE organization_id = ? AND user_id = ? AND kind = ? AND data->>'messageId' = ?"
         .' AND read_at IS NULL AND done_at IS NULL AND created_at >= ?';
+
+    // Served by the bell index on (organization_id, user_id, actor_id, ticket_id, created_at) WHERE done_at IS NULL.
+    private const string MARK_PINGS_DONE = 'UPDATE ntf_notification SET done_at = ?'
+        .' WHERE organization_id = ? AND user_id = ? AND ticket_id = ? AND kind = ? AND done_at IS NULL';
 
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:s.uP';
 
@@ -78,6 +85,24 @@ final readonly class DbalNotifications implements Notifications
         }
 
         return $isFolded;
+    }
+
+    public function markPingsDone(OrganizationId $organizationId, UserId $recipientId, TicketId $ticketId, \DateTimeImmutable $at): int
+    {
+        $this->requireTransaction();
+
+        $marked = (int) $this->connection->executeStatement(self::MARK_PINGS_DONE, [
+            $at->format(self::TIMESTAMP_FORMAT),
+            $organizationId->toString(),
+            $recipientId->toString(),
+            $ticketId->toString(),
+            NotificationKind::Ping->value,
+        ]);
+        if ($marked > 0) {
+            $this->bellCountCache->invalidateAfterCommit($recipientId);
+        }
+
+        return $marked;
     }
 
     private function requireTransaction(): void

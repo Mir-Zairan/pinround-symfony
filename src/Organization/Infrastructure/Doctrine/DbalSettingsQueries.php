@@ -37,13 +37,21 @@ final readonly class DbalSettingsQueries implements SettingsQueries, StoredSetti
     public function settingsOf(OrganizationId $organizationId): StoredSettings
     {
         $row = $this->connection->fetchNumeric(
-            "SELECT data->>'step_policy', data->>'triager_id', data->>'ping_limit_hours' FROM org_settings WHERE organization_id = ?",
+            "SELECT data->>'step_policy', data->>'triager_id', data->>'ping_limit_hours', data->'auto_clear', data->'quiet_hours'"
+            .' FROM org_settings WHERE organization_id = ?',
             [$organizationId->toString()],
         );
+        if (false === $row) {
+            return new StoredSettings(StepPolicy::Extend, null, DbalPingSettingsQueries::pingLimitHoursFrom(false));
+        }
 
-        return false === $row
-            ? new StoredSettings(StepPolicy::Extend, null, DbalPingSettingsQueries::pingLimitHoursFrom(false))
-            : new StoredSettings(self::stepPolicyFrom($row[0]), self::triagerFrom($row[1]), DbalPingSettingsQueries::pingLimitHoursFrom($row[2]));
+        return new StoredSettings(
+            self::stepPolicyFrom($row[0]),
+            self::triagerFrom($row[1]),
+            DbalPingSettingsQueries::pingLimitHoursFrom($row[2]),
+            DbalPingSettingsQueries::switchFrom('auto_clear', $row[3], DbalPingSettingsQueries::DEFAULT_AUTO_CLEAR),
+            DbalPingSettingsQueries::switchFrom('quiet_hours', $row[4], DbalPingSettingsQueries::DEFAULT_QUIET_HOURS),
+        );
     }
 
     private static function stepPolicyFrom(mixed $stepPolicy): StepPolicy

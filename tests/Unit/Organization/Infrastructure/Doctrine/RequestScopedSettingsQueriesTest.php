@@ -107,6 +107,25 @@ final class RequestScopedSettingsQueriesTest extends TestCase
         self::assertSame([self::BETA_BAKERY], $this->reads);
     }
 
+    /**
+     * Beta Bakery has both switches the other way round from their defaults, so a reader that fell back to them would
+     * differ.
+     */
+    #[Test]
+    public function theSwitchesShareTheOneReadOfThePolicy(): void
+    {
+        $this->storedSettings[self::BETA_BAKERY] = new StoredSettings(StepPolicy::Locked, null, 24, false, true);
+        $this->tenantContext->set(new OrganizationId(self::BETA_BAKERY));
+        $organizationId = new OrganizationId(self::BETA_BAKERY);
+
+        $autoClearFirst = $this->settingsQueries->isAutoClearOn($organizationId);
+        $quietHoursAfter = $this->settingsQueries->isQuietHoursOn($organizationId);
+        $policyAfter = $this->settingsQueries->stepPolicyOf($organizationId);
+
+        self::assertSame([false, true, StepPolicy::Locked], [$autoClearFirst, $quietHoursAfter, $policyAfter]);
+        self::assertSame([self::BETA_BAKERY], $this->reads);
+    }
+
     #[Test]
     public function noTriagerIsReadOnceHoweverOftenItIsAskedFor(): void
     {

@@ -51,6 +51,21 @@ final class Ping implements TenantOwned
         return new self($id, $organizationId, $ticketId, $fromId, $toId, $trimmedBody, $deliverAfter, $createdAt);
     }
 
+    /**
+     * Takes the ping out of the tray for good.
+     *
+     * @throws \LogicException when the ping is cleared already; it keeps its first clearing
+     */
+    public function clear(PingClearedReason $reason, \DateTimeImmutable $at): void
+    {
+        if (null !== $this->clearedAt) {
+            throw new \LogicException('The ping is cleared already.');
+        }
+
+        $this->clearedAt = $at;
+        $this->clearedReason = $reason;
+    }
+
     public function id(): PingId
     {
         return new PingId($this->id);

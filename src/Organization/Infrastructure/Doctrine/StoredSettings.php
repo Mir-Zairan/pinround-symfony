@@ -15,7 +15,12 @@ final readonly class StoredSettings
     /**
      * @param 1|4|8|24 $pingLimitHours
      */
-    public function __construct(public StepPolicy $stepPolicy, public ?UserId $triagerId, public int $pingLimitHours)
-    {
+    public function __construct(
+        public StepPolicy $stepPolicy,
+        public ?UserId $triagerId,
+        public int $pingLimitHours,
+        public bool $isAutoClearOn = DbalPingSettingsQueries::DEFAULT_AUTO_CLEAR,
+        public bool $isQuietHoursOn = DbalPingSettingsQueries::DEFAULT_QUIET_HOURS,
+    ) {
     }
 }

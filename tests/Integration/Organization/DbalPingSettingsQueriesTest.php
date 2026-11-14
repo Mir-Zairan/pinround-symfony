@@ -127,6 +127,113 @@ final class DbalPingSettingsQueriesTest extends KernelTestCase
         $this->pingLimitHoursWith(self::ACME_FOODS, "jsonb_set(data, '{ping_limit_hours}', '".$storedJson."')");
     }
 
+    #[Test]
+    public function aNewOrganizationClearsPingsOnActionAndHoldsNothing(): void
+    {
+        self::assertSame([true, false], $this->switchesAs(self::ACME_FOODS, self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function eachStoredSwitchIsReadBack(): void
+    {
+        self::assertSame([false, true], $this->switchesWith(self::ACME_FOODS, "data || '{\"auto_clear\": false, \"quiet_hours\": true}'::jsonb"));
+    }
+
+    #[Test]
+    public function anotherOrganizationsSwitchesAreNeverRead(): void
+    {
+        $this->storeSwitches(self::BETA_BAKERY, false, true);
+
+        self::assertSame([false, true], $this->switchesAs(self::BETA_BAKERY, self::BETA_BAKERY));
+        self::assertSame([true, false], $this->switchesAs(self::ACME_FOODS, self::BETA_BAKERY));
+    }
+
+    #[Test]
+    public function noTenantReadsTheDefaultSwitches(): void
+    {
+        $this->storeSwitches(self::ACME_FOODS, false, true);
+        $organizationId = new OrganizationId(self::ACME_FOODS);
+
+        self::assertSame([true, false], [$this->queries()->isAutoClearOn($organizationId), $this->queries()->isQuietHoursOn($organizationId)]);
+    }
+
+    #[Test]
+    public function anOrganizationWithoutSettingsHasTheDefaultSwitches(): void
+    {
+        $this->storeSwitches(self::BETA_BAKERY, false, true);
+        $this->rows()->removeAllOf(self::ACME_FOODS);
+
+        self::assertSame([true, false], $this->switchesAs(self::ACME_FOODS, self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function settingsWithoutTheSwitchesHaveTheDefaults(): void
+    {
+        self::assertSame([true, false], $this->switchesWith(self::ACME_FOODS, "data - 'auto_clear' - 'quiet_hours'"));
+    }
+
+    #[Test]
+    public function switchesStoredAsJsonNullHaveTheDefaults(): void
+    {
+        self::assertSame([true, false], $this->switchesWith(self::ACME_FOODS, "data || '{\"auto_clear\": null, \"quiet_hours\": null}'::jsonb"));
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function unknownSwitches(): iterable
+    {
+        yield 'auto_clear as a word' => ['auto_clear', '"yes"', 'org_settings holds an unknown auto_clear switch.'];
+        yield 'auto_clear as a number' => ['auto_clear', '1', 'org_settings holds an unknown auto_clear switch.'];
+        yield 'auto_clear as the string true' => ['auto_clear', '"true"', 'org_settings holds an unknown auto_clear switch.'];
+        yield 'quiet_hours as a word' => ['quiet_hours', '"on"', 'org_settings holds an unknown quiet_hours switch.'];
+        yield 'quiet_hours as an object' => ['quiet_hours', '{"on": true}', 'org_settings holds an unknown quiet_hours switch.'];
+    }
+
+    #[Test]
+    #[DataProvider('unknownSwitches')]
+    public function anUnknownStoredSwitchIsRefused(string $key, string $storedJson, string $expectedMessage): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageIsOrContains($expectedMessage);
+
+        $this->switchesWith(self::ACME_FOODS, "jsonb_set(data, '{".$key."}', '".$storedJson."')");
+    }
+
+    /**
+     * @return array{bool, bool} auto-clear, then quiet hours
+     */
+    private function switchesAs(string $tenantId, string $askedId): array
+    {
+        return $this->transactions()->rolledBackAs($tenantId, function () use ($askedId): array {
+            $organizationId = new OrganizationId($askedId);
+
+            return [$this->queries()->isAutoClearOn($organizationId), $this->queries()->isQuietHoursOn($organizationId)];
+        });
+    }
+
+    /**
+     * Reads both switches after replacing the organization's settings data with $newData, all rolled back.
+     *
+     * @return array{bool, bool} auto-clear, then quiet hours
+     */
+    private function switchesWith(string $organizationId, string $newData): array
+    {
+        return $this->transactions()->rolledBackAs($organizationId, function () use ($organizationId, $newData): array {
+            $this->connection()->executeStatement('UPDATE org_settings SET data = '.$newData);
+
+            return [$this->queries()->isAutoClearOn(new OrganizationId($organizationId)), $this->queries()->isQuietHoursOn(new OrganizationId($organizationId))];
+        });
+    }
+
+    private function storeSwitches(string $organizationId, bool $isAutoClearOn, bool $isQuietHoursOn): void
+    {
+        $this->transactions()->committedAs($organizationId, fn () => $this->connection()->executeStatement(
+            "UPDATE org_settings SET data = data || jsonb_build_object('auto_clear', ?::boolean, 'quiet_hours', ?::boolean)",
+            [$isAutoClearOn ? 'true' : 'false', $isQuietHoursOn ? 'true' : 'false'],
+        ));
+    }
+
     private function pingLimitHoursAs(string $tenantId, string $askedId): int
     {
         return $this->transactions()->rolledBackAs($tenantId, fn (): int => $this->queries()->pingLimitHoursOf(new OrganizationId($askedId)));

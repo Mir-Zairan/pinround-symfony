@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace App\Notification\Application\Notify;
 
+use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\UserId;
+
 /**
  * Writes ntf_notification rows under row-level security, in the caller's transaction under the notification's
  * organization.
@@ -27,4 +31,14 @@ interface Notifications
      *                         write
      */
     public function foldIntoUnreadReply(NewNotification $reply, \DateTimeImmutable $since): bool;
+
+    /**
+     * Marks done, at $at, the recipient's ping notifications about the ticket that are not done yet, held ones
+     * included, and drops their bell count once the transaction commits.
+     *
+     * @return int how many it marked
+     *
+     * @throws \LogicException when no transaction is open, before any write
+     */
+    public function markPingsDone(OrganizationId $organizationId, UserId $recipientId, TicketId $ticketId, \DateTimeImmutable $at): int;
 }
