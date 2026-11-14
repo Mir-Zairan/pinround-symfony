@@ -8,13 +8,21 @@ use App\Notification\Application\Digest\Digest;
 use App\Notification\Application\Digest\DigestItem;
 use App\Notification\Application\Digest\DigestItems;
 use App\Notification\Application\Notify\NotificationKind;
+use App\Notification\Infrastructure\Doctrine\DbalDigestItems;
+use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Notification\NotificationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
+use App\Ticketing\Api\TicketQueries;
+use App\Ticketing\Api\TicketVisibilities;
+use App\Ticketing\Api\TicketVisibility;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketEmailLabels;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -132,6 +140,41 @@ final class DbalDigestItemsTest extends KernelTestCase
     }
 
     /**
+     * One ping on each of 101 tickets for everyone, SHOP-101 the oldest: only the 100 tickets with the newest rows are
+     * checked, so SHOP-101's row is neither listed nor counted.
+     */
+    #[Test]
+    public function aDigestLeavesOutTheRowsOfTicketsPastTheNewestHundred(): void
+    {
+        $this->notificationRows()->executeOf(
+            self::ACME_FOODS,
+            "INSERT INTO tkt_ticket (organization_id, id, project_id, number, key, title, description, type, priority, priority_rank,
+                 step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
+             SELECT ?, CAST(format('0197a3c0-0000-7000-8000-000000c0%s', lpad(to_hex(n), 4, '0')) AS uuid), ?, 100 + n,
+                 'SHOP-' || (100 + n), 'Checkout button is hidden', '', 'bug', 'major', 2, '0197a3c0-0000-7000-8000-00000000f0d0', ?,
+                 'all', '{}', '{}', '2027-03-15 10:00:00+00', '2027-03-15 10:00:00+00'
+             FROM generate_series(1, 101) AS n",
+            [self::ACME_FOODS, self::SHOP_PROJECT, self::LENA],
+        );
+        $this->notificationRows()->executeOf(
+            self::ACME_FOODS,
+            "INSERT INTO ntf_notification (organization_id, id, user_id, kind, actor_id, ticket_id, data, created_at)
+             SELECT ?, CAST(format('0197a3c0-0000-7000-8000-000000d0%s', lpad(to_hex(n), 4, '0')) AS uuid), ?, 'ping', ?,
+                 CAST(format('0197a3c0-0000-7000-8000-000000c0%s', lpad(to_hex(n), 4, '0')) AS uuid),
+                 jsonb_build_object('actorName', 'Lena'), CAST(? AS timestamptz) + n * interval '1 minute'
+             FROM generate_series(1, 101) AS n",
+            [self::ACME_FOODS, self::OMAR, self::LENA, '2027-03-19 10:00:00+00'],
+        );
+
+        $digest = $this->digestOfOmar(self::SINCE);
+
+        self::assertSame(100, $digest->itemCount);
+        self::assertCount(Digest::MAX_LISTED_ITEMS, $digest->items);
+        self::assertSame('SHOP-201', $digest->items[0]->ticketKey);
+        self::assertSame('SHOP-182', $digest->items[19]->ticketKey);
+    }
+
+    /**
      * A ping just inside the hour before $now would be listed by a later digest, so no digest made now lists it.
      */
     #[Test]
@@ -149,6 +192,33 @@ final class DbalDigestItemsTest extends KernelTestCase
             self::assertSame([], $digest->items);
             self::assertEquals(new \DateTimeImmutable('2027-03-20 09:00:00+00:00'), $digest->coveredUntil);
         }
+    }
+
+    /**
+     * The SQL names Acme Foods while the transaction's tenant is Beta Bakery, so only row-level security keeps Omar's
+     * Acme Foods row out; the same call under Acme Foods finds it.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneKeepsAnotherOrganizationsRowsOutOfADigest(): void
+    {
+        $this->notificationRows()->addOf(self::ACME_FOODS, 'ntf_notification', [
+            self::notification('8a01', self::LENA, self::FOR_EVERYONE_TICKET, 'ping', '2027-03-20 08:30:00+00'),
+        ]);
+        $digestOfOmar = fn (Connection $connection): Digest => $this->digestItemsOn($connection)->digestOf(
+            new UserId(self::OMAR),
+            new \DateTimeImmutable(self::SINCE),
+            new \DateTimeImmutable(self::NOW),
+        );
+
+        $underBetaBakery = $this->ownConnectionTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $digestOfOmar);
+        $underAcmeFoods = $this->ownConnectionTransactions()->rolledBackUnderAnotherContext(self::ACME_FOODS, self::ACME_FOODS, $digestOfOmar);
+
+        self::assertTrue($underBetaBakery->isEmpty());
+        self::assertSame([], $underBetaBakery->items);
+        self::assertEquals([
+            self::item('Lena', NotificationKind::Ping, 'SHOP-12', 'Checkout button is hidden', null, '2027-03-20 08:30:00+00'),
+        ], $underAcmeFoods->items);
+        self::assertSame(1, $underAcmeFoods->itemCount);
     }
 
     #[Test]
@@ -211,6 +281,27 @@ final class DbalDigestItemsTest extends KernelTestCase
         \assert($digestItems instanceof DigestItems);
 
         return $digestItems;
+    }
+
+    /**
+     * Ticketing's visibility check sees every ticket here, so only the SQL and row-level security decide.
+     */
+    private function digestItemsOn(Connection $connection): DbalDigestItems
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $ticketVisibilities = self::createStub(TicketVisibilities::class);
+        $ticketVisibilities->method('of')->willReturn(TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], false, null));
+        $ticketQueries = self::createStub(TicketQueries::class);
+        $ticketQueries->method('visibleTicketIdsOf')->willReturnCallback(static fn (TicketVisibility $viewer, array $ticketIds): array => array_values($ticketIds));
+        $teamQueries = self::createStub(TeamQueries::class);
+        $teamQueries->method('summariesOf')->willReturn([]);
+
+        return new DbalDigestItems($connection, $tenantContext, $ticketVisibilities, $ticketQueries, new DbalTicketEmailLabels($connection, $tenantContext), $teamQueries);
+    }
+
+    private function ownConnectionTransactions(): OwnConnectionTransactions
+    {
+        return new OwnConnectionTransactions(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     private function transactions(): TenantTransactions
