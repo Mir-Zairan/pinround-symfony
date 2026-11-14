@@ -19,7 +19,8 @@ use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
  * The digest job on 12 May 2027 at 10:05 UTC, through digest_recipients, the real command.bus and async_notify.
  * Acme Foods has a ping for Omar and a question for Lena, both over an hour old, and a ping for Mia made at 09:30;
  * Beta Bakery has a question for Omar and a ping for Lena. Other tests share the database and may hold due rows of
- * their own organizations, so only these two organizations' messages are read.
+ * their own organizations, so only these two organizations' messages are read; a test whose cap counts every due
+ * person first asserts that the resolver offers only this test's people, so leftover rows fail it by name.
  */
 final class QueueDigestsTest extends KernelTestCase
 {
@@ -35,6 +36,14 @@ final class QueueDigestsTest extends KernelTestCase
     private const string RAJ = '0197a3c0-0000-7000-8000-0000000fa134';
 
     private const string NOW = '2027-05-12 10:05:00+00';
+
+    /** "organization user" of each person with an item due at NOW; Mia's 09:30 ping is not an hour old yet. */
+    private const array PEOPLE_DUE = [
+        self::ACME_FOODS.' '.self::LENA,
+        self::ACME_FOODS.' '.self::OMAR,
+        self::BETA_BAKERY.' '.self::LENA,
+        self::BETA_BAKERY.' '.self::OMAR,
+    ];
 
     protected function setUp(): void
     {
@@ -64,14 +73,8 @@ final class QueueDigestsTest extends KernelTestCase
     {
         $queued = self::getContainer()->get(QueueDigests::class)();
 
-        $expected = [
-            self::ACME_FOODS.' '.self::LENA,
-            self::ACME_FOODS.' '.self::OMAR,
-            self::BETA_BAKERY.' '.self::LENA,
-            self::BETA_BAKERY.' '.self::OMAR,
-        ];
-        self::assertEqualsCanonicalizing($expected, self::pairsOfTheseOrganizations($queued));
-        self::assertEqualsCanonicalizing($expected, $this->digestsSentForTheseOrganizations());
+        self::assertEqualsCanonicalizing(self::PEOPLE_DUE, self::pairsOfTheseOrganizations($queued));
+        self::assertEqualsCanonicalizing(self::PEOPLE_DUE, $this->digestsSentForTheseOrganizations());
     }
 
     #[Test]
@@ -130,6 +133,26 @@ final class QueueDigestsTest extends KernelTestCase
         self::assertSame([], $logger->records);
     }
 
+    #[Test]
+    public function aRunWithExactlyTheCapOfPeopleDueQueuesThemAllAndLogsNothing(): void
+    {
+        $this->assertOnlyThisTestsPeopleAreDueAt(self::NOW);
+        $logger = new RecordingLogger();
+        $job = new QueueDigests(
+            self::getContainer()->get('doctrine.dbal.default_connection'),
+            self::getContainer()->get('command.bus'),
+            new MockClock(new \DateTimeImmutable(self::NOW)),
+            $logger,
+            \count(self::PEOPLE_DUE),
+        );
+
+        $queued = $job();
+
+        self::assertEqualsCanonicalizing(self::PEOPLE_DUE, self::pairsOfTheseOrganizations($queued));
+        self::assertCount(\count(self::PEOPLE_DUE), $queued);
+        self::assertSame([], $logger->records);
+    }
+
     /**
      * digest_recipients offers a person every run while their old items wait unread, also after their digest went
      * out, so a cap that always kept the same people first would leave the others without a digest for good.
@@ -141,19 +164,36 @@ final class QueueDigestsTest extends KernelTestCase
         $this->notificationRows()->executeOf(self::ACME_FOODS, "UPDATE ntf_notification SET read_at = '2027-05-12 09:40:00+00' WHERE organization_id = ? AND user_id = ?", [self::ACME_FOODS, self::MIA]);
         $reached = [];
         foreach (['10:05', '10:20', '10:35', '10:50', '11:05', '11:20', '11:35', '11:50'] as $time) {
+            $runAt = '2027-05-12 '.$time.':00+00';
+            $this->assertOnlyThisTestsPeopleAreDueAt($runAt);
             $job = new QueueDigests(
                 self::getContainer()->get('doctrine.dbal.default_connection'),
                 self::getContainer()->get('command.bus'),
-                new MockClock(new \DateTimeImmutable('2027-05-12 '.$time.':00+00')),
+                new MockClock(new \DateTimeImmutable($runAt)),
                 new RecordingLogger(),
                 3,
             );
             $reached = [...$reached, ...self::pairsOfTheseOrganizations($job())];
         }
 
+        self::assertEqualsCanonicalizing(self::PEOPLE_DUE, array_values(array_unique($reached)));
+    }
+
+    /**
+     * A cap counts every due person, so a test that relies on how many are due fails here by name, not by chance,
+     * when rows another test left behind are due too.
+     */
+    private function assertOnlyThisTestsPeopleAreDueAt(string $at): void
+    {
+        $due = self::getContainer()->get('doctrine.dbal.default_connection')->fetchFirstColumn(
+            "SELECT organization_id::text || ' ' || user_id::text FROM digest_recipients(CAST(? AS timestamptz))",
+            [$at],
+        );
+
         self::assertEqualsCanonicalizing(
-            [self::ACME_FOODS.' '.self::LENA, self::ACME_FOODS.' '.self::OMAR, self::BETA_BAKERY.' '.self::LENA, self::BETA_BAKERY.' '.self::OMAR],
-            array_values(array_unique($reached)),
+            self::PEOPLE_DUE,
+            $due,
+            'Other organizations have items due at '.$at.'; remove the rows another test left behind before this test counts against a cap.',
         );
     }
 

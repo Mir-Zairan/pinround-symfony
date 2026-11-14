@@ -27,8 +27,8 @@ use Symfony\Component\Scheduler\Attribute\AsPeriodicTask;
 final readonly class QueueDigests
 {
     /**
-     * Most messages stop at SendDigestHandler's first indexed read, so worker-notify gets through this many well within
-     * the 15 minutes before the next run.
+     * Most SendDigestHandler runs take the person's digest lock and stop at the last-digest read or, past its interval,
+     * at an empty digest: a few indexed reads, so worker-notify gets through this many well within the 15 minutes.
      */
     public const int MAX_DIGESTS_PER_RUN = 10_000;
 
