@@ -9,12 +9,14 @@ parameters:
         # Short jobs for worker-notify too, today the second invalidation of the workflow cache
         # (InvalidateWorkflowCacheHandler).
         App\Workflow\Api\Event\WorkflowEvent: async_notify
-        # Short jobs for worker-notify too; no handler yet, the consumers come with Insight, Notification and Audit.
+        # Short jobs for worker-notify too, today queueing the ticket page refresh (QueueTicketPagesRefreshHandler); more
+        # consumers come with Insight, Notification and Audit.
         App\Ticketing\Api\Event\TicketEvent: async_notify
-        # Short jobs for worker-notify too; no handler yet, the consumers come with Notification, Insight and
-        # Integration.
+        # Short jobs for worker-notify too, today queueing the ticket page refresh (QueueTicketPagesRefreshHandler); more
+        # consumers come with Notification, Insight and Integration.
         App\Conversation\Api\Event\ConversationEvent: async_notify
-        # Short jobs for worker-notify too; no handler yet, the consumers come with Insight and Audit.
+        # Short jobs for worker-notify too, today queueing the ticket page refresh of a PingEvent
+        # (QueueTicketPagesRefreshHandler); more consumers come with Insight and Audit.
         App\Notification\Api\Event\NotificationEvent: async_notify
         # Short jobs for worker-notify too, today clearing a renamed person's cached teams (ForgetRenamedPersonHandler).
         App\Identity\Api\Event\IdentityEvent: async_notify
@@ -142,6 +144,9 @@ framework:
             # Mail sent through MailerInterface goes out from worker-notify (ADR-0033). Symfony's handler of it is not
             # once-only: a redelivered message can send the email twice.
             Symfony\Component\Mailer\Messenger\SendEmailMessage: async_notify
+            # Sent at once by QueueTicketPagesRefreshHandler, and again with a DelayStamp by RefreshTicketPagesHandler;
+            # the hub is published to from worker-notify only (ADR-0023).
+            App\Notification\Infrastructure\Mercure\RefreshTicketPages: async_notify
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.

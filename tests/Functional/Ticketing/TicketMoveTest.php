@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
+use App\Notification\Infrastructure\Mercure\RefreshTicketPagesHandler;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -27,6 +28,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\DomCrawler\Form;
+use Symfony\Component\Mercure\Debug\TraceableHub;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -234,6 +236,26 @@ final class TicketMoveTest extends WebTestCase
             [...$stateBefore, 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
             $this->stateOfTicket(),
         );
+    }
+
+    #[Test]
+    public function aMovePublishesNoLiveUpdateInTheRequestOnlyItsEventToTheOutbox(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields());
+
+        // Read before the redirect is followed: the next request resets the hub's trace.
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame([], $this->tracedHub()->getMessages(), 'the refresh is published by worker-notify, never by the request');
+        self::assertSame('Moved to In progress.', $this->toastAfterTheRedirect());
+        self::assertSame($stateBefore['outbox'] + 1, $this->stateOfTicket()['outbox']);
+
+        // The trace is of the hub the refresh handler publishes to, so its empty list is not one nobody writes to.
+        $refreshTicketPages = self::getContainer()->get(RefreshTicketPagesHandler::class);
+        self::assertSame($this->tracedHub(), new \ReflectionProperty(RefreshTicketPagesHandler::class, 'hub')->getValue($refreshTicketPages));
     }
 
     /**
@@ -1367,6 +1389,12 @@ final class TicketMoveTest extends WebTestCase
         self::assertCount(1, $toast);
 
         return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /** The test env's default hub: kernel.debug wraps it in the bundle's trace for the profiler. */
+    private function tracedHub(): TraceableHub
+    {
+        return self::getContainer()->get('mercure.hub.default.traceable');
     }
 
     /**
