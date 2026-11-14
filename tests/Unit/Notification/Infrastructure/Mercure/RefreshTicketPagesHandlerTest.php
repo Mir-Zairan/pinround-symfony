@@ -146,23 +146,29 @@ final class RefreshTicketPagesHandlerTest extends TestCase
         $trailing = $this->commandBus->dispatched()[0]->getMessage();
         $this->clock->sleep(1.9);
         $this->refreshAsAChangeArrives();
-        // At 2050 ms the window from 2000 ms is held and the trailing try from 100 ms still waits, so this change has
-        // no try of its own.
+        // At 2050 ms the window from 2000 ms is held and the trailing try from 100 ms is due, so it holds nothing more
+        // and this change queues a try of its own.
         $this->clock->sleep(0.05);
         $this->refreshAsAChangeArrives();
-        self::assertCount(1, $this->commandBus->dispatched());
+        self::assertCount(2, $this->commandBus->dispatched());
+        self::assertSame(2000, $this->commandBus->dispatched()[1]->last(DelayStamp::class)?->getDelay(), 'until the window from 2000 ms ends');
+        $trailingOfTheNewerWindow = $this->commandBus->dispatched()[1]->getMessage();
         // The trailing try, due at 2050 ms, runs 50 ms late, as a busy worker may run it.
         $this->clock->sleep(0.05);
         self::assertInstanceOf(RefreshTicketPages::class, $trailing);
         ($this->handler)($trailing);
-        self::assertCount(2, $this->commandBus->dispatched());
-        self::assertSame(1950, $this->commandBus->dispatched()[1]->last(DelayStamp::class)?->getDelay(), 'until the window from 2000 ms ends');
-        $lastTrailing = $this->commandBus->dispatched()[1]->getMessage();
+        self::assertCount(3, $this->commandBus->dispatched());
+        self::assertSame(1950, $this->commandBus->dispatched()[2]->last(DelayStamp::class)?->getDelay(), 'until the window from 2000 ms ends');
+        $lastTrailing = $this->commandBus->dispatched()[2]->getMessage();
         self::assertInstanceOf(RefreshTicketPages::class, $lastTrailing);
+        self::assertEquals(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::LastTrailing), $lastTrailing);
         $this->clock->sleep(1.95);
+        self::assertInstanceOf(RefreshTicketPages::class, $trailingOfTheNewerWindow);
+        ($this->handler)($trailingOfTheNewerWindow);
         ($this->handler)($lastTrailing);
 
         self::assertSame([0, 2000, 4050], array_column($this->published, 'atMilliseconds'));
+        self::assertCount(3, $this->commandBus->dispatched(), 'the last trailing try found the window from 4050 ms held and queued nothing');
     }
 
     #[Test]
@@ -197,6 +203,49 @@ final class RefreshTicketPagesHandlerTest extends TestCase
 
         self::assertSame([0, 2050], $this->publishedAtMilliseconds());
         self::assertCount(1, $this->commandBus->dispatched(), 'the window had ended, so the try published and queued nothing');
+    }
+
+    #[Test]
+    public function aChangeAfterTheTrailingTryPublishedIsPublishedAfterTheWindowThatTryOpened(): void
+    {
+        $this->refreshAsAChangeArrives();
+        $this->clock->sleep(1.5);
+        $this->refreshAsAChangeArrives();
+        $trailing = $this->commandBus->dispatched()[0]->getMessage();
+        self::assertInstanceOf(RefreshTicketPages::class, $trailing);
+        $this->clock->sleep(0.55);
+        ($this->handler)($trailing);
+        self::assertSame([0, 2050], $this->publishedAtMilliseconds());
+
+        // At 2500 ms a trailing try taken for a full window at 1500 ms would still be held, and this change lost.
+        $this->clock->sleep(0.45);
+        $this->refreshAsAChangeArrives();
+
+        self::assertCount(2, $this->commandBus->dispatched(), 'the change queues a try of its own');
+        $secondTrailing = $this->commandBus->dispatched()[1];
+        self::assertSame(1600, $secondTrailing->last(DelayStamp::class)?->getDelay(), 'until the window from 2050 ms ends');
+        $secondTrailingRefresh = $secondTrailing->getMessage();
+        self::assertInstanceOf(RefreshTicketPages::class, $secondTrailingRefresh);
+        $this->clock->sleep(1.6);
+        ($this->handler)($secondTrailingRefresh);
+
+        self::assertSame([0, 2050, 4100], $this->publishedAtMilliseconds());
+    }
+
+    #[Test]
+    public function aTrailingTryIsHeldUntilItIsDueAndNoLonger(): void
+    {
+        $this->refreshAsAChangeArrives();
+        $this->clock->sleep(1.5);
+        $this->refreshAsAChangeArrives();
+
+        $this->clock->sleep(0.549);
+        $this->refreshAsAChangeArrives();
+        self::assertCount(1, $this->commandBus->dispatched(), 'held until the try is due at 2050 ms');
+
+        $this->clock->sleep(0.001);
+        $probe = $this->lockFactory->createLock('realtime-refresh-trailing:'.self::TICKET_ID, 2.0, autoRelease: false);
+        self::assertTrue($probe->acquire(), 'free once the try is due');
     }
 
     #[Test]
