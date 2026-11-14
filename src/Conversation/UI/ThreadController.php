@@ -19,12 +19,10 @@ use App\Conversation\Application\PostComment\PostComment;
 use App\Conversation\Application\PostReply\PostReply;
 use App\Conversation\Application\RemoveMessage\RemoveMessage;
 use App\Conversation\Application\ResolveComment\ResolveComment;
-use App\Conversation\Application\ThreadMessages;
 use App\Conversation\UI\Component\Thread;
 use App\Conversation\UI\Voter\MessageOnTicket;
 use App\Identity\Api\CurrentUser;
 use App\Identity\Api\UserView;
-use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
@@ -46,7 +44,7 @@ use Symfony\UX\Turbo\TurboBundle;
  * The ticket's thread (FR-CNV-01, FR-CNV-02, FR-CNV-06, ticket-page.md, Questions and comments): shows it in
  * ThreadFrame's lazy frame, or as a page of its own, posts a comment, asks and answers a question, replies to a message,
  * resolves a comment, and edits or removes one's own message. Each action responds with a toast: a Turbo form in a Turbo Stream that also replaces the message
- * list, any other form with a redirect to the thread's page. Asking and answering pause and resume the ticket, which
+ * list, except a refused reply, whose open Reply box keeps its draft, any other form with a redirect to the thread's page. Asking and answering pause and resume the ticket, which
  * changes its page's header that the thread's frame cannot replace, so once made they redirect to the ticket's page.
  *
  * Showing it runs in the request transaction, with the same 404 as the actions. The actions run without it, as
@@ -79,7 +77,7 @@ final class ThreadController extends AbstractController
     public const string MESSAGE_EDITED = 'Message edited.';
     public const string MESSAGE_REMOVED = 'Message removed.';
     public const string REPLY_ADDED = 'Reply added.';
-    public const string COMMENT_RESOLVED = 'Comment resolved.';
+    public const string COMMENT_RESOLVED = 'Resolved. It folds away for everyone.';
     public const string FORM_EXPIRED = 'This page was open too long. Reload it and try again.';
     /** With the first name of the person asked. */
     public const string QUESTION_SENT = 'Question sent. %s gets one notification. Ticket paused.';
@@ -113,8 +111,6 @@ final class ThreadController extends AbstractController
         private readonly Answer $answer,
         private readonly PostReply $postReply,
         private readonly ResolveComment $resolveComment,
-        private readonly ThreadMessages $threadMessages,
-        private readonly TeamQueries $teamQueries,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -244,11 +240,12 @@ final class ThreadController extends AbstractController
             $this->postReply->post($ticket->id, $ticket->visibilityFacts, $messageId, $userId, $body, $now);
 
             return self::REPLY_ADDED;
-        });
+        }, isRefusalToastOnly: true);
     }
 
     /**
-     * MessageVoter decides on the locked message, so its author is read once the row can no longer change.
+     * MessageVoter decides inside ResolveComment, on the locked message, so its author is read once the row can no
+     * longer change.
      */
     #[Route('/t/{key}/messages/{messageId}/resolve', name: self::RESOLVE_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
     public function resolve(string $key, string $messageId, Request $request): Response
@@ -259,11 +256,10 @@ final class ThreadController extends AbstractController
         return $this->respondToAction($request, $key, function () use ($key, $messageId, $csrfToken, $now): string {
             [$organizationId, $userId, $ticket] = $this->commentableTicketOf($key);
             $this->refuseAnExpiredForm($key, $csrfToken);
-            $message = $this->threadMessages->lockedOf($organizationId, $ticket->id, $messageId);
-            $teamId = $ticket->visibilityFacts->teamId;
-            $teamLeadId = null === $teamId ? null : $this->teamQueries->leadOf($teamId);
-            $this->denyAccessUnlessGranted(ConversationPermission::RESOLVE, new MessageOnTicket($ticket->visibilityFacts, $message->authorId(), $teamLeadId));
-            $this->resolveComment->resolve($organizationId, $ticket->id, $messageId, $userId, $teamLeadId, $now);
+            $teamLeadId = $ticket->turnSnapshot->leadId;
+            $this->resolveComment->resolve($organizationId, $ticket->id, $messageId, $userId, $teamLeadId, $now, function (UserId $authorId) use ($ticket, $teamLeadId): void {
+                $this->denyAccessUnlessGranted(ConversationPermission::RESOLVE, new MessageOnTicket($ticket->visibilityFacts, $authorId, $teamLeadId));
+            });
 
             return self::COMMENT_RESOLVED;
         });
@@ -273,11 +269,13 @@ final class ThreadController extends AbstractController
      * Runs the action in a transaction of its own and responds with its toast, or the refusal's: the refusals of
      * Conversation's Api say in their message what the person sees.
      *
-     * @param callable(): string $action       returns the toast of a change made
-     * @param ?string            $changedRoute the page a change made redirects to, whatever the form, with its toast
-     *                                         flashed; null to respond as to a refusal
+     * @param callable(): string $action             returns the toast of a change made
+     * @param ?string            $changedRoute       the page a change made redirects to, whatever the form, with its
+     *                                               toast flashed; null to respond as to a refusal
+     * @param bool               $isRefusalToastOnly whether a Turbo form's refusal gets only its toast, so the message
+     *                                               list, and an open box with its draft in it, stays as it is
      */
-    private function respondToAction(Request $request, string $key, callable $action, ?string $changedRoute = null): Response
+    private function respondToAction(Request $request, string $key, callable $action, ?string $changedRoute = null, bool $isRefusalToastOnly = false): Response
     {
         if (null === $this->tenantContext->get()) {
             // Anonymous requests have no tenant, and the firewall sends the AccessDeniedException to the login page.
@@ -288,11 +286,11 @@ final class ThreadController extends AbstractController
         } catch (TicketNotFound|MessageNotFound) {
             throw $this->createNotFoundException(self::NOT_FOUND);
         } catch (ThreadFormExpired) {
-            return $this->respondWithToast($request, $key, self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->respondToRefusal($request, $key, self::FORM_EXPIRED, $isRefusalToastOnly);
         } catch (TicketChangedMeanwhile) {
-            return $this->respondWithToast($request, $key, self::TICKET_CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->respondToRefusal($request, $key, self::TICKET_CHANGED_MEANWHILE, $isRefusalToastOnly);
         } catch (MessageBodyRefused|MessageEditRefused|MessageRemovalRefused|QuestionRefused|ReplyRefused|ResolveRefused $refused) {
-            return $this->respondWithToast($request, $key, $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->respondToRefusal($request, $key, $refused->getMessage(), $isRefusalToastOnly);
         }
 
         if (null !== $changedRoute) {
@@ -302,6 +300,22 @@ final class ThreadController extends AbstractController
         }
 
         return $this->respondWithToast($request, $key, $toast, Response::HTTP_OK);
+    }
+
+    /**
+     * A toast-only refusal of a Turbo form is the toast's stream alone, which reads nothing, so it needs no transaction.
+     */
+    private function respondToRefusal(Request $request, string $key, string $toast, bool $isToastOnly): Response
+    {
+        if (!$isToastOnly || TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
+            return $this->respondWithToast($request, $key, $toast, Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return $this->render(
+            '@Web/_toast_stream.html.twig',
+            ['message' => $toast],
+            new Response(null, Response::HTTP_UNPROCESSABLE_ENTITY, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
+        );
     }
 
     /**

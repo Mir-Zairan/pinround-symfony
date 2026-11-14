@@ -132,7 +132,7 @@ final class QuestionJourneyTest extends WebTestCase
         self::assertSame('_top', $answerForm->attr('data-turbo-frame'));
         self::assertSame('Your answer closes the question. The ticket goes back to To do.', trim($answerForm->filter('.thread__note')->text()));
         self::assertSame(
-            [['Cancel', 'button', 'thread-composer#closeReplyBox'], ['Answer', 'submit', null]],
+            [['Cancel', 'button', 'reply-box#close'], ['Answer', 'submit', null]],
             $answerForm->filter('button')->each(static fn (Crawler $button): array => [trim($button->text()), $button->attr('type'), $button->attr('data-action')]),
         );
 

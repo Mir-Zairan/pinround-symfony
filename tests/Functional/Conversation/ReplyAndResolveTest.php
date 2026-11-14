@@ -169,7 +169,22 @@ final class ReplyAndResolveTest extends WebTestCase
 
         $this->client->request('POST', $this->messagePath($messageId, 'replies'), $this->formFields('kept' === $removal ? " \n " : self::REPLY), [], self::TURBO_FORM_HEADERS);
 
-        self::assertSame($expectedToast, $this->toastOf($this->streamsOfTheAnswer(422)));
+        // Only the toast: a new message list would close the open Reply box and lose its draft.
+        self::assertSame($expectedToast, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
+        self::assertSame([], $this->replyRows());
+        self::assertSame(0, $this->outboxCount());
+    }
+
+    #[Test]
+    public function aReplyRefusedFromAFormWithoutTurboRedirectsToTheThreadWithTheReason(): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', 'comment', self::COMMENT, isRemoved: true);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->client->request('POST', $this->messagePath($messageId, 'replies'), $this->formFields(self::REPLY));
+
+        self::assertSame('This message was removed, so you cannot reply to it.', $this->toastAfterTheRedirect());
         self::assertSame([], $this->replyRows());
         self::assertSame(0, $this->outboxCount());
     }
@@ -344,7 +359,7 @@ final class ReplyAndResolveTest extends WebTestCase
 
         foreach (['replies', 'resolve'] as $action) {
             $this->client->request('POST', $this->messagePath($commentId, $action), [ThreadController::BODY_FIELD => self::REPLY], [], self::TURBO_FORM_HEADERS);
-            self::assertSame(ThreadController::FORM_EXPIRED, $this->toastOf($this->streamsOfTheAnswer(422)), $action);
+            self::assertSame(ThreadController::FORM_EXPIRED, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: 'replies' === $action)), $action);
         }
 
         self::assertSame([], $this->replyRows());
@@ -451,6 +466,11 @@ final class ReplyAndResolveTest extends WebTestCase
         $this->addMessage('Omar', 'comment', self::COMMENT);
         $removedCommentId = $this->addMessage('Omar', 'comment', 'Removed after it was resolved.', isRemoved: true);
         $this->resolve($removedCommentId, 'Omar');
+        // 60 and 61 characters, with "é" taking two bytes, so a byte count would cut the first one too.
+        $sixtyCharacters = 'Café orders over fifty euros fail at checkout on most Friday';
+        $sixtyOneCharacters = $sixtyCharacters.'s';
+        $this->resolve($this->addMessage('Omar', 'comment', $sixtyCharacters), 'Omar');
+        $this->resolve($this->addMessage('Omar', 'comment', $sixtyOneCharacters), 'Omar');
 
         $frame = $this->threadFrameAs('Mia');
 
@@ -461,6 +481,8 @@ final class ReplyAndResolveTest extends WebTestCase
                 ['✓ Resolved: Fixed in build 42. · 1 reply · show', 'Hide', null],
                 ['✓ Resolved: Café menu is fine. · show', 'Hide', null],
                 ['✓ Resolved: Message removed · show', 'Hide', null],
+                ['✓ Resolved: Café orders over fifty euros fail at checkout on most Friday · show', 'Hide', null],
+                ['✓ Resolved: Café orders over fifty euros fail at checkout on most Friday… · show', 'Hide', null],
             ],
             $folds->each(static fn (Crawler $fold): array => [
                 self::oneLineOf($fold->filter('summary .thread__fold-line')->text()),
@@ -547,11 +569,12 @@ final class ReplyAndResolveTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region.
+     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region,
+     * or, for a toast-only answer, only updates the toast region.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
-    private function streamsOfTheAnswer(int $expectedStatus): array
+    private function streamsOfTheAnswer(int $expectedStatus, bool $isToastOnly = false): array
     {
         self::assertResponseStatusCodeSame($expectedStatus);
         self::assertSame('text/vnd.turbo-stream.html; charset=UTF-8', $this->client->getResponse()->headers->get('Content-Type'));
@@ -562,7 +585,7 @@ final class ReplyAndResolveTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
+            $isToastOnly ? [['update', self::TOAST_REGION_ID]] : [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];

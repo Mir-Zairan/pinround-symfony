@@ -19,6 +19,7 @@ use App\Tests\Unit\Conversation\Application\RecordingConversationEvents;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 
 final class ResolveCommentTest extends TestCase
 {
@@ -71,7 +72,7 @@ final class ResolveCommentTest extends TestCase
     {
         $resolvedAt = new \DateTimeImmutable(self::RESOLVED_AT);
 
-        $this->resolveComment->resolve(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), self::OMARS_COMMENT, new UserId($resolverId), null === $teamLeadId ? null : new UserId($teamLeadId), $resolvedAt);
+        $this->resolveComment->resolve(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), self::OMARS_COMMENT, new UserId($resolverId), null === $teamLeadId ? null : new UserId($teamLeadId), $resolvedAt, self::allowEveryone(...));
 
         $comment = $this->messages->lockedOf(new OrganizationId(self::ACME_FOODS), new MessageId(self::OMARS_COMMENT));
         self::assertNotNull($comment);
@@ -105,7 +106,7 @@ final class ResolveCommentTest extends TestCase
         $before = $this->resolvedStateOfAll();
 
         try {
-            $this->resolveComment->resolve(new OrganizationId(self::ACME_FOODS), new TicketId($ticketId), $messageId, new UserId($resolverId), null === $teamLeadId ? null : new UserId($teamLeadId), new \DateTimeImmutable(self::RESOLVED_AT));
+            $this->resolveComment->resolve(new OrganizationId(self::ACME_FOODS), new TicketId($ticketId), $messageId, new UserId($resolverId), null === $teamLeadId ? null : new UserId($teamLeadId), new \DateTimeImmutable(self::RESOLVED_AT), self::allowEveryone(...));
             self::fail('The comment was resolved.');
         } catch (ResolveRefused|MessageNotFound $refusal) {
             self::assertSame([$refusalClass, $reason], [$refusal::class, $refusal->getMessage()]);
@@ -114,6 +115,35 @@ final class ResolveCommentTest extends TestCase
         self::assertSame([], $this->conversationEvents->published());
         self::assertSame([], $this->messages->savedIds());
         self::assertEquals($before, $this->resolvedStateOfAll());
+    }
+
+    #[Test]
+    public function theResolveCheckReceivesTheLockedCommentsAuthorAndItsRefusalSavesAndPublishesNothing(): void
+    {
+        $checkedAuthorIds = [];
+        $before = $this->resolvedStateOfAll();
+        $refusal = null;
+
+        try {
+            // Lena, the lead, would pass the domain's own check, so only the check passed in can stop her.
+            $this->resolveComment->resolve(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), self::OMARS_COMMENT, new UserId(self::LENA), new UserId(self::LENA), new \DateTimeImmutable(self::RESOLVED_AT), static function (UserId $authorId) use (&$checkedAuthorIds): void {
+                $checkedAuthorIds[] = $authorId;
+
+                throw new AccessDeniedException('Access denied by the check.');
+            });
+        } catch (\Throwable $thrown) {
+            $refusal = $thrown;
+        }
+
+        self::assertSame([AccessDeniedException::class, 'Access denied by the check.'], [null === $refusal ? null : $refusal::class, $refusal?->getMessage()]);
+        self::assertEquals([new UserId(self::OMAR)], $checkedAuthorIds);
+        self::assertSame([], $this->conversationEvents->published());
+        self::assertSame([], $this->messages->savedIds());
+        self::assertEquals($before, $this->resolvedStateOfAll());
+    }
+
+    private static function allowEveryone(UserId $authorId): void
+    {
     }
 
     private function commentOf(string $messageId): Message

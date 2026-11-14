@@ -96,6 +96,7 @@ final class ResolveCommentTest extends KernelTestCase
             new UserId(self::OMAR),
             null,
             new \DateTimeImmutable('2027-03-15 11:30:00+00:00'),
+            self::allowEveryone(...),
         ));
 
         self::assertSame(['2027-03-15 11:30:00+00', self::OMAR], $this->resolvedStateOf(self::ACME_FOODS, self::OMARS_COMMENT));
@@ -169,6 +170,7 @@ final class ResolveCommentTest extends KernelTestCase
                 new UserId(self::OMAR),
                 new UserId(self::LENA),
                 new \DateTimeImmutable('2027-03-15 11:30:00+00:00'),
+                self::allowEveryone(...),
             )));
             $refusals[] = [$refusal::class, $refusal->getMessage()];
         }
@@ -194,6 +196,7 @@ final class ResolveCommentTest extends KernelTestCase
             new UserId(self::OMAR),
             new UserId(self::LENA),
             new \DateTimeImmutable('2027-03-15 11:31:00+00:00'),
+            self::allowEveryone(...),
         );
         $connection = $this->connection();
         $refusalAfterTheFirst = null;
@@ -201,7 +204,7 @@ final class ResolveCommentTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         try {
             $connection->beginTransaction();
-            $this->resolveComment()->resolve(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), self::OMARS_COMMENT, new UserId(self::LENA), new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 11:30:00+00:00'));
+            $this->resolveComment()->resolve(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), self::OMARS_COMMENT, new UserId(self::LENA), new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 11:30:00+00:00'), self::allowEveryone(...));
             // Omar's resolve would pass the "already resolved" check unless reading the comment waits for the first.
             $sqlStateWhileTheFirstRuns = $secondSession->sqlStateOfFailedAttempt($resolveAsTheAuthor);
             $connection->commit();
@@ -236,7 +239,15 @@ final class ResolveCommentTest extends KernelTestCase
             new UserId(self::LENA),
             new UserId(self::LENA),
             new \DateTimeImmutable($resolvedAt),
+            self::allowEveryone(...),
         ));
+    }
+
+    /**
+     * The controller's MessageVoter check, which ResolveCommentTest (unit) and ReplyAndResolveTest cover.
+     */
+    private static function allowEveryone(UserId $authorId): void
+    {
     }
 
     private function refusalOfResolve(string $messageId, string $resolverId, string $ticketId = self::TICKET): \Throwable
@@ -248,6 +259,7 @@ final class ResolveCommentTest extends KernelTestCase
             new UserId($resolverId),
             new UserId(self::LENA),
             new \DateTimeImmutable('2027-03-15 11:45:00+00:00'),
+            self::allowEveryone(...),
         )));
     }
 

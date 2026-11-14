@@ -33,16 +33,19 @@ final readonly class ResolveComment
      * then writes CommentResolved to the outbox and saves, both in the open transaction, whose tenant must be
      * $organizationId.
      *
-     * @param UserId|null $teamLeadId the lead of the ticket's team, null when the ticket has no team or the team no lead
+     * @param UserId|null            $teamLeadId             the lead of the ticket's team, null when the ticket has no team or the team no lead
+     * @param \Closure(UserId): void $refuseUnlessMayResolve the caller's permission check, given the locked message's
+     *                                                       author; whatever it throws leaves everything unchanged
      *
      * @throws MessageNotFound when the id is malformed or names no message of that ticket; nothing changes
      * @throws ResolveRefused  when the message is a question, the comment is removed or already resolved, or the
      *                         resolver is neither its author nor $teamLeadId; nothing changes
      * @throws \LogicException when no transaction is open; nothing is saved
      */
-    public function resolve(OrganizationId $organizationId, TicketId $ticketId, string $messageId, UserId $resolverId, ?UserId $teamLeadId, \DateTimeImmutable $resolvedAt): void
+    public function resolve(OrganizationId $organizationId, TicketId $ticketId, string $messageId, UserId $resolverId, ?UserId $teamLeadId, \DateTimeImmutable $resolvedAt, \Closure $refuseUnlessMayResolve): void
     {
         $message = $this->threadMessages->lockedOf($organizationId, $ticketId, $messageId);
+        $refuseUnlessMayResolve($message->authorId());
         try {
             $message->resolve($resolverId, null !== $teamLeadId && $teamLeadId->equals($resolverId), $resolvedAt);
         } catch (\DomainException $refusal) {
