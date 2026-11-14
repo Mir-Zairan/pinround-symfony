@@ -119,7 +119,7 @@ The actor never notifies themselves. Muted tickets are skipped. For restricted t
 
 Email is a safety net, not a second inbox.
 
-- **When:** a scheduled job (every 15 minutes) collects bell items that are unread for more than 1 hour. It sends one digest per user, at most every 3 hours, and never during their quiet hours. Users can choose "Daily at 09:00" or "Off" in their settings.
+- **When:** a scheduled job (every 15 minutes) collects bell items that are unread for more than 1 hour. It sends one digest per user, at most every 3 hours, and never during their quiet hours. Users will be able to choose "Daily at 09:00" or "Off" in their settings; that digest setting is not built yet, so every user gets the 3-hour digest, and the email's footer links to the profile without offering to turn it off.
 - **What:** "3 things wait on you in pinround". For each item: the person, the kind, the ticket key, the title, and a link.
   - For restricted tickets the title is replaced with "a restricted ticket in team Shop".
   - Ticket descriptions, comments and AI text are never in emails.
@@ -208,7 +208,7 @@ sequenceDiagram
 
 | Setting (user) | Values | Default |
 |---|---|---|
-| Email digest | Every 3 hours / Daily at 09:00 / Off | Every 3 hours |
+| Email digest (not built yet) | Every 3 hours / Daily at 09:00 / Off | Every 3 hours |
 | Time zone | IANA name | from the browser at sign-up |
 
 Tables (details in [data-model.md](data-model.md)):
