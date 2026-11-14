@@ -60,10 +60,15 @@ final class TicketMoveTest extends WebTestCase
     private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
     /** base.html.twig's toast region, which a streamed toast updates. */
     private const string TOAST_REGION_ID = 'toast-region';
+    /**
+     * People's Ping buttons read the ping limit and the viewer's recent pings once, in a transaction of their own, as
+     * the stream renders People after the re-read's COMMIT.
+     */
+    private const array PING_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'org_settings', 'ntf_ping', '"COMMIT"'];
     /** The stream answer's re-read of the ticket page, warm, by the first table each statement reads. */
-    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', '"COMMIT"'];
+    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', '"COMMIT"', ...self::PING_READ_STATEMENTS];
     /** A lead's re-read: their box offers the Needs input dialog, so it also reads which of the ticket's people are members. */
-    private const array LEAD_RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', 'org_membership', '"COMMIT"'];
+    private const array LEAD_RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', 'org_membership', '"COMMIT"', ...self::PING_READ_STATEMENTS];
     /**
      * The tenant middleware's transaction-local setting, matched rather than written out: bin/check-tenant-setting
      * allows the literal call only in the files that set it.
@@ -920,7 +925,8 @@ final class TicketMoveTest extends WebTestCase
      * The stream answer reads the ticket's page again after the move's transaction, in one of its own: the same refusal
      * answered by stream and by redirect differs by that read alone, warm: 7 queries with the transaction's own
      * statements, the ticket, the names, What happened's moves and the saved turn among them, and for a lead an 8th,
-     * the Needs input dialog's one read of which of the ticket's people are members.
+     * the Needs input dialog's one read of which of the ticket's people are members; then People's Ping buttons, 5
+     * more in a transaction of their own (PING_READ_STATEMENTS).
      */
     #[Test]
     public function theStreamAnswerReadsTheTicketAgainInTheBudgetedQueries(): void
@@ -937,7 +943,7 @@ final class TicketMoveTest extends WebTestCase
         $streamStatements = $this->statementsOfAMove($staleFields, self::TURBO_FORM_HEADERS);
 
         self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->toastOf($this->streamsOfTheAnswer(422)));
-        self::assertSame(8, \count($streamStatements) - \count($redirectStatements), 'the re-read takes 7 and the lead’s Needs input dialog 1');
+        self::assertSame(13, \count($streamStatements) - \count($redirectStatements), 'the re-read takes 7, the lead’s Needs input dialog 1 and People’s ping read 5');
         self::assertSame(
             1,
             \count(array_keys($streamStatements, 'org_membership', true)) - \count(array_keys($redirectStatements, 'org_membership', true)),
@@ -1187,7 +1193,7 @@ final class TicketMoveTest extends WebTestCase
 
         $sql = self::sqlOf($debugData);
         $commits = array_keys($sql, '"COMMIT"', true);
-        self::assertCount(2, $commits, 'the move and the re-read each commit once');
+        self::assertCount(3, $commits, 'the move, the re-read and People’s ping read each commit once');
 
         return self::firstTablesOf(\array_slice($sql, $commits[0] + 1));
     }

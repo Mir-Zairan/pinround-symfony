@@ -1,6 +1,22 @@
 {# The People section, from TicketPageParts: the page renders it, and a move's Turbo Stream answer replaces it. #}
 <div id="{{ constant('App\\Ticketing\\UI\\TicketPageParts::PEOPLE_ID') }}" class="ticket__people">
     {% if people is not empty %}
-        <twig:People :people="people" />
+        {# Notification's PingSheet, by name only, as Ticketing's UI may not use Notification (deptrac.yaml). #}
+        {% set mayPing = is_granted('PING_SEND', ticket.visibilityFacts) %}
+        <twig:People :people="people">
+            <twig:block name="person_actions">
+                {% if outerScope.mayPing %}
+                    {{ component('PingSheet', {
+                        ticketId: outerScope.ticket.id.toString,
+                        ticketKey: outerScope.ticket.key,
+                        ticketTitle: outerScope.ticket.title,
+                        toUserId: person.userId,
+                        toFirstName: person.firstName,
+                        nowText: outerScope.turnLines is null ? null : outerScope.turnLines.now,
+                        isViewer: person.isViewer,
+                    }) }}
+                {% endif %}
+            </twig:block>
+        </twig:People>
     {% endif %}
 </div>

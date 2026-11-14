@@ -628,7 +628,7 @@ final class TicketPageTest extends WebTestCase
         self::assertSame(array_fill(0, $moveForms->count(), MoveToasts::MOVE_FAILED), $moveForms->each(static fn (Crawler $form): ?string => $form->attr('data-failed-toast')));
         $moveList = $box->filter('details.next-step-box__move-to');
         self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog#needs-input-'.$this->stepsByCore['input']));
-        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog:not(#give-it-to-picker)'));
+        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog:not(#give-it-to-picker):not([id^="ping-"])'));
         if (!$hasMoveList) {
             self::assertCount(0, $moveList);
             self::assertCount(\count($expectedVerbs), $page->filter('form[action*="/move"]'));
@@ -1076,7 +1076,8 @@ final class TicketPageTest extends WebTestCase
      * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
      * one query), the ticket, the names of everyone in one batch, What happened's moves in one, the saved turn with the
      * waiting turns in one query, the ticket's place in the plain open list in one, for the lead's Needs input dialog
-     * which of the ticket's people are still members in one, and Conversation's thread in one.
+     * which of the ticket's people are still members in one, Conversation's thread in one, and for People's Ping
+     * buttons the organization's ping limit in one and the viewer's recent pings of the ticket in one, for all rows.
      */
     #[Test]
     public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
@@ -1099,7 +1100,7 @@ final class TicketPageTest extends WebTestCase
             ['Lena · Reporter', 'Omar · Assignee', 'Someone else'],
             $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
         );
-        self::assertSame(8, $pageQueryCount);
+        self::assertSame(10, $pageQueryCount);
     }
 
     /**
@@ -1131,8 +1132,8 @@ final class TicketPageTest extends WebTestCase
 
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__aside .next-step-box'));
-        self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog'));
-        self::assertSame(7, $pageQueryCount);
+        self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog:not([id^="ping-"])'));
+        self::assertSame(9, $pageQueryCount);
     }
 
     /**
