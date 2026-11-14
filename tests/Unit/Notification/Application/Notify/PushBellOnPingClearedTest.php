@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Notification\Infrastructure\Mercure;
+namespace App\Tests\Unit\Notification\Application\Notify;
 
 use App\Notification\Api\Event\PingCleared;
 use App\Notification\Api\Event\PingClearedReason;
+use App\Notification\Application\Notify\PushBellOnPingCleared;
 use App\Notification\Application\Realtime\RefreshBell;
-use App\Notification\Infrastructure\Mercure\PushBellOnPingCleared;
 use App\Tests\Unit\Notification\Application\Realtime\BellRefreshesDouble;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;

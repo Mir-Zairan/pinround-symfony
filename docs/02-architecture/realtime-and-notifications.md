@@ -73,6 +73,10 @@ Implementation notes:
 
 A bell push is a `RefreshBell` on `async_notify`, sent once the notification row (or the clear) commits: worker-notify publishes the new badge, a fresh lazy popover frame that the page loads again through the person's own session, and the toast when there is one. It never carries bell cards, whose forms need that session's CSRF token. A reply or an assignment that adds a bell row pushes the same way, with no toast; a ping held for quiet hours pushes nothing until it is released.
 
+A redelivered bell push publishes once: `RefreshBell` is handled under `OnceOnlyHandling` with the handler name `notification.refresh_bell`.
+
+Bell pushes are not grouped per user, because each push can carry its own toast and grouping would drop toasts. A Done on a group sends one push per cleared ping. The browser holds the popover swap while the popover is open, so the cost is one small count query and one publish per ping.
+
 Pushes are hints. If a push is lost, the next page load or frame refresh is still correct, because pages always read from the database.
 
 ## Notification kinds
