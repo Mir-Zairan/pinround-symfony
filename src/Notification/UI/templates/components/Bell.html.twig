@@ -13,9 +13,7 @@
         </button>
         <div id="bell-popover" class="bell__popover" role="dialog" aria-labelledby="bell-popover-title" tabindex="-1" hidden
             {{ stimulus_target('bell', 'popover') }} data-action="keydown->bell#closeOnEscape">
-            <turbo-frame id="{{ this.frameId }}" src="{{ path(this.frameRoute) }}" loading="lazy" {{ stimulus_target('bell', 'frame') }}>
-                <p class="bell-popover__loading">Loading pings…</p>
-            </turbo-frame>
+            {{ include('@Notification/_bell_lazy_frame.html.twig', {frameId: this.frameId, frameSrc: path(this.frameRoute)}) }}
         </div>
     </div>
 {% endif %}
