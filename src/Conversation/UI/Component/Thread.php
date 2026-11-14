@@ -110,7 +110,7 @@ final class Thread
             // EditMessage and RemoveMessage refuse a question, so its author is offered neither.
             $isOwnComment = MessageView::KIND_COMMENT === $message->kind
                 && null !== $viewerId && $viewerId->equals($message->authorId);
-            $answer = $message->answer;
+            $answer = $message->answer();
             $asked = null === $message->toUserId
                 ? null
                 : new UserView($message->toUserId, $names[$message->toUserId->toString()] ?? self::UNKNOWN_AUTHOR);
@@ -184,7 +184,7 @@ final class Thread
     {
         $missingIds = [];
         foreach ($messages as $message) {
-            foreach ([$message->authorId, $message->answer?->authorId, $message->toUserId] as $personId) {
+            foreach ([$message->authorId, $message->answer()?->authorId, $message->toUserId] as $personId) {
                 if (null !== $personId && !isset($displayNames[$personId->toString()])) {
                     $missingIds[$personId->toString()] = $personId;
                 }

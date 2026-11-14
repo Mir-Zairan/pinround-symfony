@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Visibility;
 
 use App\Conversation\Api\MessageView;
+use App\Conversation\Api\ReplyView;
 use App\Conversation\Api\ThreadQueries;
 use App\Identity\Api\CurrentUser;
 use App\SharedKernel\Domain\TicketId;
@@ -18,8 +19,8 @@ use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 /**
  * The ticket thread's read, as the Thread component and ThreadController make it: the ticket page from
  * TicketQueries::pageOf with TicketVisibilities::of the viewer, then ThreadQueries::threadOf that page's ticket. A
- * comment on the cast's team-only ticket carrying LEAK_MARKER, and an answered question whose answer carries it,
- * reach exactly the viewers who may see the ticket.
+ * comment on the cast's team-only ticket carrying LEAK_MARKER with a reply carrying it, and an answered question whose
+ * answer carries it, reach exactly the viewers who may see the ticket.
  */
 final class ThreadLeakTest extends VisibilityLeakCast
 {
@@ -27,6 +28,8 @@ final class ThreadLeakTest extends VisibilityLeakCast
     private const string QUESTION_ID = '0197a3c0-0000-7000-8000-0000000058a2';
     private const string ANSWER_ID = '0197a3c0-0000-7000-8000-0000000058a3';
     private const string QUESTION_BODY = self::LEAK_MARKER.' question';
+    private const string REPLY_ID = '0197a3c0-0000-7000-8000-0000000058a4';
+    private const string REPLY_BODY = self::LEAK_MARKER.' reply';
 
     public static function setUpBeforeClass(): void
     {
@@ -48,6 +51,11 @@ final class ThreadLeakTest extends VisibilityLeakCast
                  VALUES (?, ?, ?, ?, ?, true, TIMESTAMPTZ '2027-03-15 10:10:00+00')",
                 [self::ACME_FOODS, self::ANSWER_ID, self::QUESTION_ID, self::VIEWERS['Lena'][0], self::LEAK_MARKER],
             );
+            $migrator->executeStatement(
+                "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, created_at)
+                 VALUES (?, ?, ?, ?, ?, false, TIMESTAMPTZ '2027-03-15 10:02:00+00')",
+                [self::ACME_FOODS, self::REPLY_ID, self::MESSAGE_ID, self::VIEWERS['Mia'][0], self::REPLY_BODY],
+            );
         });
         self::ensureKernelShutdown();
     }
@@ -66,25 +74,28 @@ final class ThreadLeakTest extends VisibilityLeakCast
     }
 
     /**
-     * The answer rides on its question's MessageView, read by a separate query on cnv_reply: it shows to the same
-     * viewers as the ticket, never to the rest.
+     * Replies ride on their message's MessageView, read by a separate query on cnv_reply: the comment's plain reply and
+     * the question's answer show to the same viewers as the ticket, never to the rest.
      */
     #[Test]
-    public function theAnswerOfAQuestionOnTheTeamOnlyTicketShowsOnlyToAViewerWhoMaySeeTheTicket(): void
+    public function theRepliesOnTheTeamOnlyTicketShowOnlyToAViewerWhoMaySeeTheTicket(): void
     {
         $viewers = iterator_to_array(self::viewers());
         self::assertNotEmpty($viewers);
-        $expectedAnswers = [];
-        $shownAnswers = [];
+        $expectedReplies = [];
+        $shownReplies = [];
         foreach ($viewers as [$viewer, $seesTeamOnly]) {
-            $expectedAnswers[$viewer] = $seesTeamOnly ? [null, self::LEAK_MARKER] : null;
+            $expectedReplies[$viewer] = $seesTeamOnly ? [[[self::REPLY_BODY], null], [[self::LEAK_MARKER], self::LEAK_MARKER]] : null;
             $shownMessages = self::threadOfTheTeamOnlyTicketAs($viewer);
-            $shownAnswers[$viewer] = null === $shownMessages
+            $shownReplies[$viewer] = null === $shownMessages
                 ? null
-                : array_map(static fn (MessageView $message): ?string => $message->answer?->body, $shownMessages);
+                : array_map(static fn (MessageView $message): array => [
+                    array_map(static fn (ReplyView $reply): ?string => $reply->body, $message->replies),
+                    $message->answer()?->body,
+                ], $shownMessages);
         }
 
-        self::assertSame($expectedAnswers, $shownAnswers);
+        self::assertSame($expectedReplies, $shownReplies);
     }
 
     /**

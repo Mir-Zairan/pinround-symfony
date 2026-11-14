@@ -17,7 +17,7 @@ use Doctrine\DBAL\Connection;
 
 /**
  * ThreadQueries on cnv_message_ticket_id_created_at_id_idx (organization_id, ticket_id, created_at, id), read backwards,
- * then the answers of the listed answered questions on cnv_reply_message_id_created_at_id_idx.
+ * then the replies of the listed messages on cnv_reply_message_id_created_at_id_idx.
  */
 final readonly class DbalThreadQueries implements ThreadQueries
 {
@@ -49,65 +49,78 @@ final readonly class DbalThreadQueries implements ThreadQueries
 
         $hasEarlierMessages = \count($rows) > ThreadView::MESSAGE_LIMIT;
         $oldestFirst = array_reverse(\array_slice($rows, 0, ThreadView::MESSAGE_LIMIT));
-        $answers = $this->answersOf($organizationId, $oldestFirst);
+        $replies = $this->repliesOf($organizationId, $oldestFirst);
 
         return new ThreadView(
-            array_map(static fn (array $row): MessageView => self::messageOf($row, $answers), $oldestFirst),
+            array_map(static fn (array $row): MessageView => self::messageOf($row, $replies), $oldestFirst),
             $hasEarlierMessages,
         );
     }
 
     /**
-     * The answer of each answered question among the rows, in one query; none when no question is answered. Only an
-     * answer closes a question, so a resolved question is an answered one.
+     * The listed replies of every message among the rows and how many each has, in one query; none when there are no
+     * rows. A message without replies is absent from the result. Each message reads its newest replies backwards on
+     * the index; the UNION adds the oldest live answer when it is older than those and drops it when it is one of
+     * them. The CASE keeps a removed reply's text in the database.
      *
      * @param list<array<string, mixed>> $rows
      *
-     * @return array<string, ReplyView> by question id
+     * @return array<string, array{replies: list<ReplyView>, count: int<0, max>}> by message id
      */
-    private function answersOf(string $organizationId, array $rows): array
+    private function repliesOf(string $organizationId, array $rows): array
     {
-        $answeredQuestionIds = [];
-        foreach ($rows as $row) {
-            if (MessageKind::Question->value === $row['kind'] && true === $row['is_resolved']) {
-                $answeredQuestionIds[] = self::text($row['id'], 'id');
-            }
-        }
-        if ([] === $answeredQuestionIds) {
+        if ([] === $rows) {
             return [];
         }
+        $messageIds = array_map(static fn (array $row): string => self::text($row['id'], 'id'), $rows);
 
         // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace.
         $replyRows = $this->connection->fetchAllAssociative(
-            'SELECT message_id, id, author_id, body, created_at FROM cnv_reply'
-            .' WHERE organization_id = CAST(:organization AS uuid) AND message_id = ANY(CAST(:questions AS uuid[]))'
+            'SELECT listed.message_id, counted.reply_count, reply.id, reply.author_id,'
+            .' CASE WHEN reply.removed_at IS NULL THEN reply.body END AS body, reply.created_at, reply.is_answer,'
+            .' reply.removed_at IS NOT NULL AS is_removed'
+            .' FROM unnest(CAST(:messages AS uuid[])) AS listed (message_id)'
+            .' CROSS JOIN LATERAL (SELECT count(*) AS reply_count FROM cnv_reply'
+            .' WHERE organization_id = CAST(:organization AS uuid) AND message_id = listed.message_id) AS counted'
+            .' JOIN LATERAL ('
+            .'(SELECT id, author_id, body, created_at, is_answer, removed_at FROM cnv_reply'
+            .' WHERE organization_id = CAST(:organization AS uuid) AND message_id = listed.message_id'
+            .' ORDER BY created_at DESC, id DESC LIMIT '.MessageView::REPLY_LIMIT.')'
+            .' UNION'
+            .' (SELECT id, author_id, body, created_at, is_answer, removed_at FROM cnv_reply'
+            .' WHERE organization_id = CAST(:organization AS uuid) AND message_id = listed.message_id'
             .' AND is_answer AND removed_at IS NULL'
-            .' ORDER BY message_id, created_at, id',
+            .' ORDER BY created_at, id LIMIT 1)'
+            .') AS reply ON true'
+            .' ORDER BY reply.created_at, reply.id',
             [
                 'organization' => $organizationId,
-                'questions' => '{'.implode(',', $answeredQuestionIds).'}',
+                'messages' => '{'.implode(',', $messageIds).'}',
             ],
         );
 
-        $answers = [];
+        $replies = [];
         foreach ($replyRows as $replyRow) {
-            // Answer closes the question it answers, so a second answer cannot exist; the first one wins if it did.
-            $answers[self::text($replyRow['message_id'], 'message_id')] ??= new ReplyView(
+            $messageId = self::text($replyRow['message_id'], 'message_id');
+            $replies[$messageId] ??= ['replies' => [], 'count' => self::count($replyRow['reply_count'], 'reply_count')];
+            $replies[$messageId]['replies'][] = new ReplyView(
                 self::text($replyRow['id'], 'id'),
                 new UserId(self::text($replyRow['author_id'], 'author_id')),
-                self::text($replyRow['body'], 'body'),
+                self::textOrNull($replyRow['body'], 'body'),
                 new \DateTimeImmutable(self::text($replyRow['created_at'], 'created_at')),
+                self::boolean($replyRow['is_answer'], 'is_answer'),
+                self::boolean($replyRow['is_removed'], 'is_removed'),
             );
         }
 
-        return $answers;
+        return $replies;
     }
 
     /**
-     * @param array<string, mixed>     $row
-     * @param array<string, ReplyView> $answers by question id
+     * @param array<string, mixed>                                               $row
+     * @param array<string, array{replies: list<ReplyView>, count: int<0, max>}> $replies by message id
      */
-    private static function messageOf(array $row, array $answers): MessageView
+    private static function messageOf(array $row, array $replies): MessageView
     {
         $id = self::text($row['id'], 'id');
         $createdAt = new \DateTimeImmutable(self::text($row['created_at'], 'created_at'));
@@ -117,6 +130,8 @@ final readonly class DbalThreadQueries implements ThreadQueries
         $isResolved = self::boolean($row['is_resolved'], 'is_resolved');
         $kind = MessageKind::from(self::text($row['kind'], 'kind'));
         $isQuestion = MessageKind::Question === $kind;
+        $listedReplies = $replies[$id]['replies'] ?? [];
+        $replyCount = $replies[$id]['count'] ?? 0;
 
         return new MessageView(
             $id,
@@ -133,8 +148,26 @@ final readonly class DbalThreadQueries implements ThreadQueries
             null === $toUserId ? null : new UserId($toUserId),
             $isQuestion && !$isResolved && !$isRemoved,
             $isQuestion && $isResolved,
-            $answers[$id] ?? null,
+            $listedReplies,
+            $replyCount,
+            $replyCount > \count($listedReplies),
+            !$isQuestion && $isResolved,
         );
+    }
+
+    /**
+     * @return int<0, max>
+     */
+    private static function count(mixed $value, string $column): int
+    {
+        if (\is_string($value) && ctype_digit($value)) {
+            $value = (int) $value;
+        }
+        if (!\is_int($value) || $value < 0) {
+            throw new \LogicException(\sprintf('A thread message %s from the database is not a count.', $column));
+        }
+
+        return $value;
     }
 
     private static function text(mixed $value, string $column): string

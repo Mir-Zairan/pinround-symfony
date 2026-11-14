@@ -271,11 +271,12 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
-     * Raj, Sara and Mia are outside the ticket's people, asked and answering: the answers of every answered question
-     * cost one query, and the names of everyone they bring one more, however many questions there are.
+     * Raj, Sara and Mia are outside the ticket's people, asked and answering: the replies of every message, answers
+     * included, cost one query already read for the comments, and the names of everyone the questions bring one more,
+     * however many questions there are.
      */
     #[Test]
-    public function theFrameReadsAnswersInOneQueryAndNamesAnsweringAndAskedPeopleOutsideTheTicketsPeopleInOneMore(): void
+    public function theFrameReadsAnswersInTheRepliesQueryAndNamesAnsweringAndAskedPeopleOutsideTheTicketsPeopleInOneMore(): void
     {
         $this->addTicket();
         $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
@@ -302,7 +303,7 @@ final class TicketThreadTest extends WebTestCase
             $frame->filter('.thread__reply--answer .thread__author')->each(static fn (Crawler $author): string => trim($author->text())),
         );
         self::assertCount(1, array_filter($queries, static fn (string $query): bool => str_contains($query, 'cnv_reply')));
-        self::assertSame($queryCountWithTheTicketsPeople + 2, \count($queries));
+        self::assertSame($queryCountWithTheTicketsPeople + 1, \count($queries));
     }
 
     /**
