@@ -404,6 +404,33 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
+     * The message list carries whom the viewer may ask, for thread-composer to copy into the permanent composer after
+     * a live reload or a Turbo Stream: the ticket's people in their order (assignee, reporter, reviewer, tester, lead),
+     * each once, without the viewer. Lena reports and leads; Omar, the assignee, views; Raj is on no ticket role.
+     */
+    #[Test]
+    public function theMessageListCarriesTheTicketsPeopleOnceWithoutTheViewer(): void
+    {
+        $this->addTicket();
+        $this->setReviewerAndTester('Sara', 'Mia');
+        $this->logIn($this->client, $this->people['Omar']);
+        $expected = array_map(fn (string $name): array => [$name, $this->people[$name]->id()->toString()], ['Lena', 'Sara', 'Mia']);
+
+        $frame = $this->client->request('GET', self::THREAD_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $carried = (string) $frame->filter('#'.Thread::MESSAGES_ID)->attr('data-ask-choices');
+        self::assertSame($expected, self::askChoicesIn($carried));
+        self::assertSame($expected, self::askChoicesIn($frame->filter('form.thread__composer .thread__ask-choices')->html()), 'The composer starts with the same people.');
+        self::assertSame($expected[0][1], new Crawler('<!DOCTYPE html><html><body>'.$carried.'</body></html>')->filter('input[name="'.ThreadController::ASKED_USER_FIELD.'"]')->attr('value'));
+
+        $this->client->request('POST', self::COMMENT_PATH, $this->formFields('Fixed on staging'), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame($expected, self::askChoicesIn((string) $streams[Thread::MESSAGES_ID]->filter('#'.Thread::MESSAGES_ID)->attr('data-ask-choices')));
+    }
+
+    /**
      * Sara is an Admin with no team role; she may see the team-only ticket, so she may comment on it.
      */
     #[Test]
@@ -776,6 +803,25 @@ final class TicketThreadTest extends WebTestCase
                  TIMESTAMPTZ '2026-11-04 10:00:00+00', TIMESTAMPTZ '2026-11-05 10:00:00+00')",
             $parameters,
         ));
+    }
+
+    private function setReviewerAndTester(string $reviewer, string $tester): void
+    {
+        $parameters = [$this->people[$reviewer]->id()->toString(), $this->people[$tester]->id()->toString(), $this->acmeFoods->toString(), self::KEY];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET reviewer_id = ?, tester_id = ? WHERE organization_id = ? AND key = ?',
+            $parameters,
+        ));
+    }
+
+    /**
+     * @return list<array{string, string}> the first name and user id of each person chip in the markup, in order
+     */
+    private static function askChoicesIn(string $markup): array
+    {
+        return new Crawler('<!DOCTYPE html><html><body>'.$markup.'</body></html>')
+            ->filter('[data-thread-composer-target="person"]')
+            ->each(static fn (Crawler $chip): array => [trim($chip->text()), (string) $chip->attr('data-user-id')]);
     }
 
     /**
