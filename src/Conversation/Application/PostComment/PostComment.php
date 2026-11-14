@@ -9,6 +9,7 @@ use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Application\ConversationEvents;
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\Messages;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketNotFound;
@@ -24,6 +25,7 @@ final readonly class PostComment
         private TicketVisibilities $ticketVisibilities,
         private Messages $messages,
         private ConversationEvents $conversationEvents,
+        private TenantContext $tenantContext,
     ) {
     }
 
@@ -35,13 +37,16 @@ final readonly class PostComment
      *
      * @return string the new message's id
      *
-     * @throws TicketNotFound     when the author may not see the ticket; nothing is saved
+     * @throws TicketNotFound     when the ticket is of another organization than the tenant, or the author may not see
+     *                            it; nothing is saved
      * @throws MessageBodyRefused when the trimmed body is empty or longer than 10,000 characters; nothing is saved
-     * @throws \LogicException    when no transaction is open
+     * @throws \LogicException    when no transaction is open; nothing is saved
      */
     public function post(TicketId $ticketId, TicketVisibilityFacts $ticket, UserId $authorId, string $body, \DateTimeImmutable $postedAt): string
     {
-        if (!$this->ticketVisibilities->of($ticket->organizationId, $authorId)->isVisible($ticket)) {
+        // The visibility predicate trusts the organization it is given: a ticket for everyone of any organization passes it.
+        if (true !== $this->tenantContext->get()?->equals($ticket->organizationId)
+            || !$this->ticketVisibilities->of($ticket->organizationId, $authorId)->isVisible($ticket)) {
             throw new TicketNotFound('That ticket does not exist.');
         }
 
@@ -50,7 +55,7 @@ final readonly class PostComment
         } catch (\InvalidArgumentException $invalidBody) {
             throw new MessageBodyRefused($invalidBody->getMessage(), 0, $invalidBody);
         }
-        $this->messages->add($comment);
+        // Published before the save: publish refuses when no transaction is open, and add would then commit on its own.
         $this->conversationEvents->publish(new CommentPosted(
             $ticket->organizationId->toString(),
             $ticketId->toString(),
@@ -58,6 +63,7 @@ final readonly class PostComment
             $authorId->toString(),
             $postedAt,
         ));
+        $this->messages->add($comment);
 
         return $comment->id()->toString();
     }
