@@ -11,6 +11,9 @@ parameters:
         App\Workflow\Api\Event\WorkflowEvent: async_notify
         # Short jobs for worker-notify too; no handler yet, the consumers come with Insight, Notification and Audit.
         App\Ticketing\Api\Event\TicketEvent: async_notify
+        # Short jobs for worker-notify too; no handler yet, the consumers come with Notification, Insight and Audit.
+        App\Conversation\Api\Event\ConversationEvent: async_notify
+        App\Notification\Api\Event\NotificationEvent: async_notify
         # Short jobs for worker-notify too, today clearing a renamed person's cached teams (ForgetRenamedPersonHandler).
         App\Identity\Api\Event\IdentityEvent: async_notify
 
@@ -143,6 +146,9 @@ framework:
             App\Workflow\Api\Event\WorkflowEvent: outbox
             # Domain events of Ticketing, the same way.
             App\Ticketing\Api\Event\TicketEvent: outbox
+            # Domain events of Conversation and Notification, the same way.
+            App\Conversation\Api\Event\ConversationEvent: outbox
+            App\Notification\Api\Event\NotificationEvent: outbox
             # Domain events of Identity, the same way.
             App\Identity\Api\Event\IdentityEvent: outbox
 
@@ -152,6 +158,8 @@ when@test:
             App\Organization\Api\Event\OrganizationEvent: async_notify
             App\Workflow\Api\Event\WorkflowEvent: async_notify
             App\Ticketing\Api\Event\TicketEvent: async_notify
+            App\Conversation\Api\Event\ConversationEvent: async_notify
+            App\Notification\Api\Event\NotificationEvent: async_notify
             App\Identity\Api\Event\IdentityEvent: async_notify
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey

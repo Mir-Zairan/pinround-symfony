@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Architecture;
 
+use App\Conversation\Api\Event\ConversationEvent;
 use App\Identity\Api\Event\IdentityEvent;
+use App\Notification\Api\Event\NotificationEvent;
 use App\Organization\Api\Event\OrganizationEvent;
 use App\Ticketing\Api\Event\TicketEvent;
 use App\Workflow\Api\Event\WorkflowEvent;
@@ -18,20 +20,26 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class OutboxRelayRoutesConfigTest extends TestCase
 {
-    #[Test]
-    public function theRelaySendsExactlyTheOrganizationWorkflowTicketAndIdentityEventsOnToAsyncNotify(): void
-    {
-        $config = self::messengerConfig();
-        self::assertIsArray($config['parameters'] ?? null);
+    private const array DOMAIN_EVENTS = [
+        OrganizationEvent::class,
+        WorkflowEvent::class,
+        TicketEvent::class,
+        ConversationEvent::class,
+        NotificationEvent::class,
+        IdentityEvent::class,
+    ];
 
+    #[Test]
+    public function theRelaySendsExactlyTheDomainEventsOfEachModuleOnToAsyncNotify(): void
+    {
         self::assertEqualsCanonicalizing(
-            [OrganizationEvent::class => 'async_notify', WorkflowEvent::class => 'async_notify', TicketEvent::class => 'async_notify', IdentityEvent::class => 'async_notify'],
-            $config['parameters']['outbox_relay.target_transports'] ?? null,
+            array_fill_keys(self::DOMAIN_EVENTS, 'async_notify'),
+            self::relayTargets(self::messengerConfig()),
         );
     }
 
     #[Test]
-    public function theOrganizationWorkflowTicketAndIdentityEventsAreRoutedToTheOutbox(): void
+    public function theDomainEventsOfEachModuleAreRoutedToTheOutbox(): void
     {
         $framework = self::messengerConfig()['framework'] ?? null;
         self::assertIsArray($framework);
@@ -39,10 +47,38 @@ final class OutboxRelayRoutesConfigTest extends TestCase
         $routing = $framework['messenger']['routing'] ?? null;
         self::assertIsArray($routing);
 
-        self::assertSame('outbox', $routing[OrganizationEvent::class] ?? null);
-        self::assertSame('outbox', $routing[WorkflowEvent::class] ?? null);
-        self::assertSame('outbox', $routing[TicketEvent::class] ?? null);
-        self::assertSame('outbox', $routing[IdentityEvent::class] ?? null);
+        foreach (self::DOMAIN_EVENTS as $event) {
+            self::assertSame('outbox', $routing[$event] ?? null, $event);
+        }
+    }
+
+    #[Test]
+    public function theTestEnvironmentRepeatsEveryRelayTargetOfTheOthers(): void
+    {
+        $config = self::messengerConfig();
+        $testConfig = $config['when@test'] ?? null;
+        self::assertIsArray($testConfig);
+        $testTargets = self::relayTargets($testConfig);
+
+        $productionTargets = self::relayTargets($config);
+        self::assertNotSame([], $productionTargets);
+        foreach ($productionTargets as $message => $transport) {
+            self::assertSame($transport, $testTargets[$message] ?? null, $message);
+        }
+    }
+
+    /**
+     * @param array<mixed> $config
+     *
+     * @return array<mixed>
+     */
+    private static function relayTargets(array $config): array
+    {
+        self::assertIsArray($config['parameters'] ?? null);
+        $targets = $config['parameters']['outbox_relay.target_transports'] ?? null;
+        self::assertIsArray($targets);
+
+        return $targets;
     }
 
     /**

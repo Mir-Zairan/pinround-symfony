@@ -227,7 +227,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `ThreadQueries::openQuestionsTo(UserId): list<QuestionView>`
 - **Commands:** PostComment, AskQuestion, Reply, Answer (a reply that resolves the question), Resolve.
 - **Events:** `CommentPosted`, `QuestionAsked`, `QuestionAnswered`, `CommentResolved`, `ReplyPosted`.
-- **Depends on:** Ticketing Api (visibility check, ticket exists).
+- **Depends on:** Ticketing Api (visibility check, ticket exists), Insight Api (`TurnProjector::refresh` in the transaction of a question or answer).
 - **How pausing works:** a question does not change the ticket's step. Insight sees `QuestionAsked` and makes the asked person the turn owner. The page shows "Waiting · question to Mia" ([workflow-engine.md](workflow-engine.md#questions-pause-and-resume)).
 
 ### Review (`rvw_`)
@@ -361,7 +361,7 @@ All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `oc
 | TicketClosedAsDuplicate | Ticketing | Insight, Notification, Audit | ticketId, duplicateOfId | outbox |
 | TicketVisibilityChanged | Ticketing | Insight, Notification, Audit | ticketId, visibility | outbox |
 | SummaryChanged | Ticketing | Audit | ticketId, source, authorId | outbox |
-| CommentPosted | Conversation | Notification, Integration | ticketId, messageId | outbox |
+| CommentPosted | Conversation | Notification, Integration | `Conversation\Api\Event\ConversationEvent` (as every Conversation event): ticketId, messageId | outbox |
 | QuestionAsked | Conversation | Insight, Notification | ticketId, messageId, toUserId | outbox (turn row synchronous) |
 | QuestionAnswered | Conversation | Insight, Notification | ticketId, messageId | outbox (turn row synchronous) |
 | ReplyPosted | Conversation | Notification | ticketId, messageId, replyId | outbox |
@@ -371,7 +371,7 @@ All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `oc
 | PinVerdictSet | Review | Insight, Notification | ticketId, roundId, pinId, verdict | outbox |
 | ChecklistItemChanged | Review | Insight | ticketId, itemId, state | outbox |
 | MediaReady / MediaRejected | Media | Review, Ticketing | mediaId, reason? | outbox |
-| PingSent / PingCleared | Notification | Insight (bell counts), Audit | pingId, ticketId, from, to | outbox |
+| PingSent / PingCleared | Notification | Insight (bell counts), Audit | `Notification\Api\Event\NotificationEvent`: pingId, ticketId, fromUserId, toUserId; PingCleared also reason (`PingClearedReason`: `acted` or `done`; an archived ping publishes nothing). PingSent's `occurredAt` is the delivery time, after quiet hours for a held ping | outbox |
 | SummaryGenerated | Assist | Ticketing (stores the summary), Notification | ticketId, model, source | outbox |
 | ExplanationShared | Assist | Notification | ticketId, explanationId | outbox |
 | SuggestionReady | Assist | Web (Mercure push to the requester) | requestId, userId | outbox |
