@@ -18,6 +18,11 @@ final class TicketTurnSnapshotTest extends TestCase
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000c0c1';
     private const string LENA = '0197a3c0-0000-7000-8000-00000000c0b1';
     private const string MIA = '0197a3c0-0000-7000-8000-00000000c0b3';
+    private const string OMAR = '0197a3c0-0000-7000-8000-00000000c0b2';
+    private const string RAJ = '0197a3c0-0000-7000-8000-00000000c0b4';
+    private const string SARA = '0197a3c0-0000-7000-8000-00000000c0b5';
+    private const string NOOR = '0197a3c0-0000-7000-8000-00000000c0b6';
+    private const string BEN = '0197a3c0-0000-7000-8000-00000000c0b7';
 
     /**
      * @return iterable<string, array{bool, bool, bool, string}>
@@ -122,6 +127,69 @@ final class TicketTurnSnapshotTest extends TestCase
         $this->expectExceptionMessageIsOrContains('A paused ticket has both the asked person and the asker.');
 
         self::pausedSnapshot($hasAsked, $hasAsker);
+    }
+
+    /**
+     * The team's other developers and testers, a pending assignee and whoever the ticket waits on are not on it.
+     */
+    #[Test]
+    public function thePeopleOnTheTicketAreItsAssigneeReporterReviewerTesterAndLeadInThatOrder(): void
+    {
+        $snapshot = self::staffedSnapshot(assigneeId: self::OMAR, reviewerId: self::RAJ, testerId: self::SARA, teamId: self::SHOP_TEAM, leadId: self::LENA);
+
+        self::assertSame([self::OMAR, self::MIA, self::RAJ, self::SARA, self::LENA], self::idsOf($snapshot->peopleOnTheTicket()));
+    }
+
+    #[Test]
+    public function aPersonInTwoRolesIsOnTheTicketOnceAtTheFirstRole(): void
+    {
+        $snapshot = self::staffedSnapshot(assigneeId: self::LENA, reviewerId: self::MIA, testerId: null, teamId: self::SHOP_TEAM, leadId: self::LENA);
+
+        self::assertSame([self::LENA, self::MIA], self::idsOf($snapshot->peopleOnTheTicket()));
+    }
+
+    #[Test]
+    public function aTicketNoTeamOwnsAndNobodyWorksOnHasOnlyItsReporterOnIt(): void
+    {
+        $snapshot = self::staffedSnapshot(assigneeId: null, reviewerId: null, testerId: null, teamId: null, leadId: null);
+
+        self::assertSame([self::MIA], self::idsOf($snapshot->peopleOnTheTicket()));
+    }
+
+    /**
+     * @param list<UserId> $userIds
+     *
+     * @return list<string>
+     */
+    private static function idsOf(array $userIds): array
+    {
+        return array_map(static fn (UserId $userId): string => $userId->toString(), $userIds);
+    }
+
+    private static function staffedSnapshot(?string $assigneeId, ?string $reviewerId, ?string $testerId, ?string $teamId, ?string $leadId): TicketTurnSnapshot
+    {
+        return new TicketTurnSnapshot(
+            new TicketId(self::TICKET),
+            '0197a3c0-0000-7000-8000-00000000c0e1',
+            '0197a3c0-0000-7000-8000-00000000c0f1',
+            'review',
+            'check',
+            null === $teamId ? null : new TeamId($teamId),
+            null === $leadId ? null : new UserId($leadId),
+            null === $leadId ? null : 'Lena',
+            [new UserId(self::NOOR)],
+            [new UserId(self::BEN)],
+            'all',
+            'major',
+            null,
+            new UserId(self::MIA),
+            assigneeId: null === $assigneeId ? null : new UserId($assigneeId),
+            pendingAssigneeId: new UserId(self::NOOR),
+            reviewerId: null === $reviewerId ? null : new UserId($reviewerId),
+            testerId: null === $testerId ? null : new UserId($testerId),
+            waitingOnUserId: new UserId(self::BEN),
+            waitingOnLabel: 'Ben',
+        );
     }
 
     private static function pausedSnapshot(bool $hasAsked, bool $hasAsker): TicketTurnSnapshot

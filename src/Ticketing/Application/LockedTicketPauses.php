@@ -6,7 +6,6 @@ namespace App\Ticketing\Application;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
-use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\AskedPersonNotOnTicket;
 use App\Ticketing\Api\TicketAlreadyPaused;
@@ -31,7 +30,7 @@ final readonly class LockedTicketPauses implements TicketPauses
     {
         $ticket = $this->lockedTicket($ticketId);
         // Read from the locked row, so a reassignment saved since the caller read the ticket cannot slip past it.
-        if (!self::isOnTheTicket($this->ticketTurnSnapshots->of($ticket), $askedUserId)) {
+        if (!self::isOnTheTicket($this->ticketTurnSnapshots->of($ticket)->peopleOnTheTicket(), $askedUserId)) {
             throw new AskedPersonNotOnTicket('The person asked is not on this ticket.');
         }
         try {
@@ -49,10 +48,13 @@ final readonly class LockedTicketPauses implements TicketPauses
         $this->save($ticket);
     }
 
-    private static function isOnTheTicket(TicketTurnSnapshot $ticket, UserId $userId): bool
+    /**
+     * @param list<UserId> $peopleOnTheTicket
+     */
+    private static function isOnTheTicket(array $peopleOnTheTicket, UserId $userId): bool
     {
-        foreach ([$ticket->assigneeId, $ticket->reporterId, $ticket->reviewerId, $ticket->testerId, $ticket->leadId] as $listedId) {
-            if (null !== $listedId && $listedId->equals($userId)) {
+        foreach ($peopleOnTheTicket as $personId) {
+            if ($personId->equals($userId)) {
                 return true;
             }
         }
