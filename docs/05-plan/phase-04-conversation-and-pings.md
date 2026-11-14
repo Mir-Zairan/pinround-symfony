@@ -92,8 +92,8 @@ FR-CNV-01, FR-CNV-02, FR-CNV-03, FR-CNV-04, FR-CNV-05, FR-CNV-06, FR-CNV-07, FR-
 3. "Resolve" for comments only, by the author or a lead; folds to "Resolved: … · 2 replies", openable by anyone.
 **Files:** `src/Conversation/Application/{PostReply,ResolveComment}/*`.
 **Acceptance criteria:**
-- [ ] A reply to a reply is not possible (no button, API refuses).
-- [ ] Questions cannot be resolved by "Resolve" (only by an answer).
+- [x] A reply to a reply is not possible (no button, API refuses). Tests: `PostReplyTest` (unit) case "a reply to a reply", `PostReplyTest::aReplysIdPostedAsTheMessageIsNotFoundAndNoReplyIsWritten` (integration), `ReplyAndResolveTest::aReplyToAReplyIsNotFoundAndNoReplyIsWritten` and `theThreadShowsEachReplyUnderItsMessageWithNoActionOnIt` (functional), `thread.spec.ts` "Lena replies to Omar’s comment, and the reply shows under it with no actions of its own" (e2e).
+- [x] Questions cannot be resolved by "Resolve" (only by an answer). Tests: `MessageTest::aRefusedResolutionSaysWhyAndLeavesTheMessageAsItWas` and `ResolveCommentTest` case "a question, even by its asker" (unit), `ResolveCommentTest::aQuestionIsNotResolvableByResolveAndStaysOpen` (integration), `ReplyAndResolveTest::aQuestionIsRefusedResolveAndStaysOpen` (functional).
 **Tests:** unit, functional, voter rows for resolve.
 **Prototype check:** reply and resolve states in [Questions and comments](../04-prototype/screens/ticket-page.md#questions-and-comments).
 **Size:** S
@@ -235,3 +235,5 @@ FR-CNV-01, FR-CNV-02, FR-CNV-03, FR-CNV-04, FR-CNV-05, FR-CNV-06, FR-CNV-07, FR-
 - 2026-11-14 (P04.T7b-2 B): the live updates controller's 'message' listener renders the bell push; a page visit waits while a field has unsaved input or an editor is open (#visitPageUnlessInUse); a live frame reload answered 404 loads the page URL (#reloadFrame). Tests in live-updates.spec.ts: "the bell's push", "a page with no live parts", "taken out". The own-change toast test passed 5/5, nothing to fix.
 - 2026-11-14 (P04.T7b-3): a live refresh GET and `notification_realtime_token` never write the session (`BackgroundReadOnlySessionHandler`, `BackgroundReadOnlySessionHandlerTest`); `metadata_update_threshold: 120`.
 - 2026-11-14 Q5-B1: PostReply built. A reply id as messageId is 404 (MessageNotFound). A removed comment or withdrawn question is refused with 'This message was removed, so you cannot reply to it.' Auto-clear not wired (T6-D).
+- 2026-11-14 Q6: reply and resolve routes and thread UI. The thread shows the newest 50 replies per message (one query for all messages). Refusal wording and the toasts 'Reply added.' / 'Comment resolved.' are our choice, not in the prototype, unconfirmed. The Reply and Answer boxes put focus in their text when opened and back on their button on Cancel (`thread-composer#focusReplyBox`, `#closeReplyBox`); `tests/e2e/thread.spec.ts` covers reply, resolve fold show/Hide, axe light + dark and 360 px.
+- 2026-11-14 Q6 (our choices, unconfirmed): the fold leaves out the reply count when there are 0 replies; a removed resolved comment folds as "Resolved: Message removed"; the reply note "<author> gets one notification." promises a notification T6-D has not wired yet.
