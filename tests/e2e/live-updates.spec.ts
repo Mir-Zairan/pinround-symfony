@@ -651,7 +651,13 @@ test.describe('a lost stream', () => {
 
     await expect(banner).toBeVisible();
     await expect(banner).toHaveText('Updates paused. Reload to see the latest.');
-    await expect(banner).toHaveRole('status');
+    // The region was there, empty, before the line showed in it, so the line is announced as it appears.
+    await expect(page.locator('.live-updates')).toHaveRole('status');
+    await expect(page.getByRole('status').filter({ hasText: 'Updates paused.' })).toHaveCount(1);
+    // Above the page it follows, aligned with main's content.
+    const [bannerBox, mainBox] = [await banner.boundingBox(), await page.locator('main#main').boundingBox()];
+    expect(bannerBox !== null && mainBox !== null && bannerBox.y + bannerBox.height <= mainBox.y).toBe(true);
+    expect(bannerBox?.x).toBe((mainBox?.x ?? 0) + 24);
     // --waiting-container and --on-waiting-container of the light theme (tokens.css)
     await expect(banner).toHaveCSS('background-color', 'rgb(255, 224, 136)');
     await expect(banner).toHaveCSS('color', 'rgb(36, 26, 0)');

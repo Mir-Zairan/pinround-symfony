@@ -295,9 +295,10 @@ a.seg {
   display: none;
 }
 
-/* LiveUpdates' "Updates paused" banner, above the page it follows. No display here, so its hidden attribute hides it. */
+/* LiveUpdates' "Updates paused" banner, above the page it follows; its top margin is main's top padding (.page). No
+   display here, so its hidden attribute hides it. */
 .live-updates__paused {
-  margin: 0 0 var(--space-16);
+  margin: 28px 0 0;
   padding: var(--space-10) var(--space-12);
   border-radius: var(--radius-input);
   background: var(--waiting-container);

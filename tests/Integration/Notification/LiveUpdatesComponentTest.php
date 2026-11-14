@@ -62,8 +62,10 @@ final class LiveUpdatesComponentTest extends KernelTestCase
         );
         self::assertSame('/realtime/token', $liveUpdates->attr('data-live-updates-token-url-value'));
         self::assertSame('["'.self::TICKET.'"]', $liveUpdates->attr('data-live-updates-ticket-ids-value'));
+        self::assertSame(['status', 'polite', null], [$liveUpdates->attr('role'), $liveUpdates->attr('aria-live'), $liveUpdates->attr('hidden')]);
         $paused = $liveUpdates->filter('.live-updates__paused');
-        self::assertSame(['Updates paused. Reload to see the latest.', 'status', ''], [$paused->text(), $paused->attr('role'), $paused->attr('hidden')]);
+        self::assertSame(['Updates paused. Reload to see the latest.', null, ''], [$paused->text(), $paused->attr('role'), $paused->attr('hidden')]);
+        self::assertCount(1, $liveUpdates->filter('[role="status"]'), 'one live region, which a hidden line inside does not repeat');
         self::assertSame(self::PAGE, $paused->filter('a.live-updates__reload')->attr('href'));
         self::assertSame('reload', $paused->filter('a.live-updates__reload')->attr('data-live-updates-target'));
     }
