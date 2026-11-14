@@ -195,3 +195,27 @@ textarea.pin-list__note {
   font: inherit;
   resize: vertical;
 }
+
+/* The editable screenshot (pin-placer controller). */
+.pin-placer__add {
+  margin-top: var(--space-16);
+}
+
+.pin-placer__status {
+  min-height: 1.4em;
+  margin: var(--space-8) 0 0;
+  color: var(--on-surface-var);
+}
+
+/* touch-action: a finger on a marker drags it instead of scrolling the page. */
+.pin-placer .pin {
+  touch-action: none;
+}
+
+.pin-placer .screenshot__frame {
+  cursor: crosshair;
+}
+
+.pin-list__remove {
+  flex: none;
+}

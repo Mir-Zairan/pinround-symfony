@@ -30,4 +30,22 @@ final class ScreenshotGalleryTest extends WebTestCase
         self::assertCount(3, $crawler->filter('#gallery-screenshot-heading ~ .screenshot-example .pin-list__item'));
         self::assertStringContainsString('left:28.00%;top:30.00%', (string) $client->getResponse()->getContent());
     }
+
+    #[Test]
+    public function theEditableExampleIsAFormWithThePinPlacerAndAnEmptyList(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        $form = $crawler->filter('form.pin-placer[data-controller="pin-placer"]');
+        self::assertCount(1, $form);
+        self::assertSame('1000', $form->attr('data-pin-placer-note-max-value'));
+        self::assertCount(1, $form->filter('figure#gallery-editable-screenshot [data-pin-placer-target="layer"]'));
+        self::assertCount(0, $form->filter('button.pin'));
+        self::assertCount(1, $form->filter('ol.pin-list[data-pin-placer-target="list"]'));
+        self::assertSame('Add pin', $form->filter('button[data-pin-add]')->text());
+        self::assertCount(1, $form->filter('[role="status"][data-pin-placer-target="status"]'));
+        self::assertCount(1, $form->filter('[hidden][data-pin-placer-target="fields"]'));
+        self::assertCount(0, $crawler->filter('.screenshot-example:not(.pin-placer) [data-pin-remove]'));
+    }
 }
