@@ -90,6 +90,14 @@ function markLiveRefresh(event) {
   }
 }
 
+// Going to the page's own URL with a hash only scrolls to the anchor (as after "Skip to main content" left #main in
+// it); without the hash the page loads for real.
+function pageUrlWithoutHash() {
+  const url = new URL(window.location.href);
+  url.hash = '';
+  return url.href;
+}
+
 function connectionSettled(source) {
   return new Promise((resolve) => {
     const settle = () => {
@@ -259,7 +267,7 @@ export default class extends Controller {
     if (this.#pausedTimer === null) {
       this.#pausedTimer = setTimeout(() => {
         // The element outlives Turbo visits, so the link the server rendered may name an earlier page.
-        this.reloadTarget.href = window.location.href;
+        this.reloadTarget.href = pageUrlWithoutHash();
         this.pausedTarget.hidden = false;
       }, PAUSED_AFTER_MS);
     }
@@ -404,7 +412,7 @@ export default class extends Controller {
       if (response.status === 404 && !response.redirected) {
         event.preventDefault();
         event.stopPropagation();
-        window.location.assign(window.location.href);
+        window.location.assign(pageUrlWithoutHash());
       }
     };
     frame.addEventListener('turbo:before-frame-render', noteFocusedControl);

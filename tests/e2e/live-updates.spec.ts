@@ -651,6 +651,64 @@ test.describe('a refetch that fails', () => {
     await lena.context.close();
     await omar.context.close();
   });
+
+  test('a thread answer of 404 on a page opened at #main loads the ticket page for real, not only its anchor', async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Store finder skips the nearest shop ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(omar.page, key);
+    await openThread(lena.page, key);
+    await omar.page.getByRole('link', { name: 'Skip to main content' }).focus();
+    await omar.page.keyboard.press('Enter');
+    await expect(omar.page).toHaveURL(new RegExp(`/t/${key}#main$`));
+    await markThisLoad(omar.page);
+    // Only the thread frame's answer can move the tab: the page's own refetch fails, and its 404 path drops the hash anyway.
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}/thread`,
+      (route) => route.fulfill({ status: 404, contentType: 'text/html', body: '<!doctype html><title>Not found</title><h1>Page not found</h1>' }),
+    );
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}`,
+      (route) =>
+        route.request().resourceType() === 'document'
+          ? route.fulfill({ status: 404, contentType: 'text/html', body: '<!doctype html><title>Not found</title><h1>Page not found</h1>' })
+          : route.abort(),
+    );
+
+    await moveFromList(lena.page, 'Code review');
+
+    await expect(omar.page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible({ timeout: COALESCED_SHOWS_WITHIN_MS });
+    await expect(omar.page).toHaveURL(new RegExp(`/t/${key}$`));
+    await expect(omar.page.locator('html')).not.toHaveAttribute('data-e2e-load', 'first');
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test("a thread answer of 200 without the thread's frame loads that answer as app.js does, not the ticket page again", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Store finder shows closed shops ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(omar.page, key);
+    await openThread(lena.page, key);
+    await markThisLoad(omar.page);
+    // As a login page or an error page answered with 200 would come back: no turbo-frame#ticket-thread in it.
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}/thread`,
+      (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Elsewhere</title><h1>Not the thread</h1>' }),
+    );
+    // The page's own refetch fails, so only the frame's answer can move the tab.
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}`,
+      (route) => (route.request().resourceType() === 'document' ? route.continue() : route.abort()),
+    );
+
+    await moveFromList(lena.page, 'Code review');
+
+    await expect(omar.page.getByRole('heading', { level: 1, name: 'Not the thread' })).toBeVisible({ timeout: COALESCED_SHOWS_WITHIN_MS });
+    await expect(omar.page).toHaveURL(new RegExp(`/t/${key}/thread$`));
+    await lena.context.close();
+    await omar.context.close();
+  });
 });
 
 test.describe('a lost stream', () => {
@@ -951,6 +1009,86 @@ test.describe('a page with no live parts', () => {
     const visit = lena.page.waitForRequest(isNewTicketVisit, { timeout: SHOWS_WITHIN_MS });
     await title.fill('');
     await lena.page.getByRole('heading', { level: 1 }).click();
+    expect((await (await visit).response())?.status()).toBe(200);
+    await lena.context.close();
+  });
+
+  test('a changed select or a ticked checkbox holds the visit until each is put back', async ({ browser }) => {
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await lena.page.addInitScript(() => {
+      Math.random = () => 0;
+      const NativeEventSource = window.EventSource;
+      (window as StreamOpens).streamOpens = 0;
+      window.EventSource = class extends NativeEventSource {
+        constructor(url: string | URL, init?: EventSourceInit) {
+          super(url, init);
+          this.addEventListener('open', () => {
+            (window as StreamOpens).streamOpens! += 1;
+          });
+        }
+      };
+    });
+    let streamAsks = 0;
+    await lena.page.route(`**${HUB_PATH}**`, async (route) => {
+      streamAsks += 1;
+      if (streamAsks === 1) {
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
+        return;
+      }
+      await route.continue();
+    });
+    const requests = recordRequests(lena.page);
+    const isNewTicketVisit = (request: Request) => pathOf(request) === '/tickets/new' && request.resourceType() === 'fetch';
+    await lena.page.goto('/tickets/new', { waitUntil: 'networkidle' });
+    // The form has no checkbox and no select with an option marked selected of its own, so the test adds one of each.
+    await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title') }).evaluate((form) => {
+      form.insertAdjacentHTML(
+        'beforeend',
+        '<label>Notify the team <input type="checkbox" name="e2e_notify"></label>' +
+          '<label>Size <select name="e2e_size"><option>Small</option><option selected>Medium</option></select></label>',
+      );
+    });
+    const giveItTo = lena.page.getByLabel('Give it to');
+    const size = lena.page.getByLabel('Size');
+    const notify = lena.page.getByLabel('Notify the team');
+    const pageHeading = lena.page.getByRole('heading', { level: 1 });
+    // "Give it to" marks no option selected, so its first option, No one yet, is its default.
+    await expect(giveItTo.locator('option[selected]')).toHaveCount(0);
+    await expect(giveItTo).toHaveValue('');
+
+    await giveItTo.selectOption({ label: 'Omar' });
+    await size.selectOption('Small');
+    await notify.check();
+    await pageHeading.click();
+
+    await lena.page.waitForFunction(() => (window as StreamOpens).streamOpens === 2, undefined, { timeout: 5000 + SHOWS_WITHIN_MS });
+    await nextTaskOf(lena.page);
+    await nextTaskOf(lena.page);
+
+    /** Moves focus away and back, which may end the hold, then proves the visit is still held. */
+    const expectVisitHeld = async (): Promise<void> => {
+      await pageHeading.click();
+      await lena.page.getByLabel('Title').focus();
+      await pageHeading.click();
+      await nextTaskOf(lena.page);
+      await nextTaskOf(lena.page);
+      expect(requests.filter(isNewTicketVisit)).toHaveLength(0);
+    };
+    await expectVisitHeld();
+    // Each field in turn is the only one still changed: first "Give it to", then Size, then the checkbox.
+    await notify.uncheck();
+    await size.selectOption('Medium');
+    await expectVisitHeld();
+    await size.selectOption('Small');
+    await giveItTo.selectOption({ label: 'No one yet' });
+    await expectVisitHeld();
+    await notify.check();
+    await size.selectOption('Medium');
+    await expectVisitHeld();
+
+    const visit = lena.page.waitForRequest(isNewTicketVisit, { timeout: SHOWS_WITHIN_MS });
+    await notify.uncheck();
+    await pageHeading.click();
     expect((await (await visit).response())?.status()).toBe(200);
     await lena.context.close();
   });
