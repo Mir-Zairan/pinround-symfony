@@ -22,6 +22,7 @@ use Symfony\Component\Cache\Adapter\RedisAdapter;
 final class ValkeyPingWindowTest extends KernelTestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-000000003ca1';
+    private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000003cb1';
     private const string LENA = '0197a3c0-0000-7000-8000-000000003c01';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000003c02';
     private const string MIA = '0197a3c0-0000-7000-8000-000000003c03';
@@ -211,10 +212,18 @@ final class ValkeyPingWindowTest extends KernelTestCase
         $this->window()->take(...$this->slot(self::LENA, self::OMAR, self::SHOP_12), pingId: new PingId(self::FIRST_PING), hours: 4, at: $at);
         $this->window()->take(...$this->slot(self::LENA, self::MIA, self::SHOP_13), pingId: new PingId(self::SECOND_PING), hours: 8, at: $at);
         $this->window()->take(...$this->slot(self::MIA, self::OMAR, self::SHOP_12), pingId: new PingId(self::SECOND_PING), hours: 24, at: $at);
+        // The same ids in Beta Bakery, so only the organization in the key keeps its slots off Acme Foods' answer.
+        $this->window()->take(...$this->slot(self::LENA, self::OMAR, self::SHOP_12, self::BETA_BAKERY), pingId: new PingId(self::FIRST_PING), hours: 24, at: $at);
+        $this->window()->take(...$this->slot(self::LENA, self::MIA, self::SHOP_12, self::BETA_BAKERY), pingId: new PingId(self::SECOND_PING), hours: 8, at: $at);
 
-        $heldUntilById = $this->window()->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::MIA), new UserId(self::OMAR)], new TicketId(self::SHOP_12));
+        $acmeHeldUntilById = $this->window()->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::MIA), new UserId(self::OMAR)], new TicketId(self::SHOP_12));
+        $betaHeldUntilById = $this->window()->heldUntilOf(new OrganizationId(self::BETA_BAKERY), new UserId(self::LENA), [new UserId(self::MIA), new UserId(self::OMAR)], new TicketId(self::SHOP_12));
 
-        self::assertEquals([self::OMAR => new \DateTimeImmutable('2027-03-15 14:00:00 UTC')], $heldUntilById);
+        self::assertEquals([self::OMAR => new \DateTimeImmutable('2027-03-15 14:00:00 UTC')], $acmeHeldUntilById);
+        self::assertEquals([
+            self::MIA => new \DateTimeImmutable('2027-03-15 18:00:00 UTC'),
+            self::OMAR => new \DateTimeImmutable('2027-03-16 10:00:00 UTC'),
+        ], $betaHeldUntilById);
     }
 
     #[Test]
@@ -262,27 +271,29 @@ final class ValkeyPingWindowTest extends KernelTestCase
     /**
      * @return array{organizationId: OrganizationId, fromUserId: UserId, toUserId: UserId, ticketId: TicketId}
      */
-    private function slot(string $from, string $to, string $ticket): array
+    private function slot(string $from, string $to, string $ticket, string $organization = self::ACME_FOODS): array
     {
         return [
-            'organizationId' => new OrganizationId(self::ACME_FOODS),
+            'organizationId' => new OrganizationId($organization),
             'fromUserId' => new UserId($from),
             'toUserId' => new UserId($to),
             'ticketId' => new TicketId($ticket),
         ];
     }
 
-    private function keyOf(string $from, string $to, string $ticket): string
+    private function keyOf(string $from, string $to, string $ticket, string $organization = self::ACME_FOODS): string
     {
-        return 'ping:'.self::ACME_FOODS.':'.$from.':'.$to.':'.$ticket;
+        return 'ping:'.$organization.':'.$from.':'.$to.':'.$ticket;
     }
 
     private function forgetSlots(): void
     {
-        foreach ([self::LENA, self::MIA] as $from) {
-            foreach ([self::OMAR, self::MIA] as $to) {
-                foreach ([self::SHOP_12, self::SHOP_13] as $ticket) {
-                    $this->stateValkey()->del($this->keyOf($from, $to, $ticket));
+        foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organization) {
+            foreach ([self::LENA, self::MIA] as $from) {
+                foreach ([self::OMAR, self::MIA] as $to) {
+                    foreach ([self::SHOP_12, self::SHOP_13] as $ticket) {
+                        $this->stateValkey()->del($this->keyOf($from, $to, $ticket, $organization));
+                    }
                 }
             }
         }
