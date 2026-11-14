@@ -149,6 +149,8 @@ framework:
             App\Notification\Infrastructure\Mercure\RefreshTicketPages: async_notify
             # Sent after the current bus by worker-notify's handlers; RefreshBellHandler publishes it there (ADR-0023).
             App\Notification\Application\Realtime\RefreshBell: async_notify
+            # Sent with a TenantStamp by ReleaseHeldNotifications every 5 minutes, one per organization with due notifications.
+            App\Notification\Infrastructure\Scheduler\ReleaseDueNotifications: async_notify
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.
