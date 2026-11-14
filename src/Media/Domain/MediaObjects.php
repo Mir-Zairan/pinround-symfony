@@ -17,9 +17,10 @@ interface MediaObjects
 
     /**
      * Stores the changes of a media object read through this port at once (flushes), under the tenant of the open
-     * transaction.
+     * transaction. A copy read before lockById() of the same id is no longer one the port tracks: save the locked one.
      *
-     * @throws \LogicException when no transaction is open
+     * @throws \LogicException when no transaction is open, or when $mediaObject was not read through this port in this
+     *                         unit of work or was replaced by lockById(); nothing is written then
      */
     public function save(MediaObject $mediaObject): void;
 
@@ -32,7 +33,8 @@ interface MediaObjects
 
     /**
      * Like byId(), and the row stays locked until the open transaction ends, so the processing worker is the only one
-     * to change it meanwhile. The object is read fresh: unsaved changes to one already loaded are lost.
+     * to change it meanwhile. The object is read fresh: unsaved changes to one already loaded are lost, and save()
+     * refuses that older copy.
      *
      * @throws \LogicException when no transaction is open, before any read
      */

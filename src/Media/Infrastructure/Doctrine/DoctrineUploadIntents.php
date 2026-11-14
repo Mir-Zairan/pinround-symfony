@@ -45,8 +45,8 @@ final readonly class DoctrineUploadIntents implements UploadIntents
     /**
      * The WHERE is the check, so it holds against what is committed, not against the copy in memory: a second use at
      * the same time waits for the row lock of the first and then finds used_at set. The copy is not refreshed, as
-     * Doctrine refuses to refresh its readonly expiresAt; it is marked used only after the row was, and the next flush
-     * writes the same used_at once more.
+     * Doctrine refuses to refresh its readonly expiresAt; it is marked used only after the row was, and the unit of
+     * work is told used_at is stored, so the next flush does not write it again.
      *
      * @throws \LogicException when the tenant has no stored intent with that id
      */
@@ -64,6 +64,10 @@ final readonly class DoctrineUploadIntents implements UploadIntents
         );
         if (1 === $changedRows) {
             $intent->markUsed($now);
+            $unitOfWork = $this->entityManager->getUnitOfWork();
+            if ($unitOfWork->isInIdentityMap($intent)) {
+                $unitOfWork->setOriginalEntityProperty(spl_object_id($intent), 'usedAt', $now);
+            }
 
             return;
         }

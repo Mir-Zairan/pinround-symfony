@@ -17,6 +17,7 @@ use App\Tests\Integration\Organization\TenantTransactions;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\DBAL\Exception\DriverException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -91,6 +92,85 @@ final class DoctrineMediaObjectsTest extends KernelTestCase
         self::assertSame(self::SAME_PICTURE, $found->sha256());
         self::assertSame([1280, 800], [$found->width(), $found->height()]);
         self::assertSame(['full' => 'acme/full.webp', 'thumb' => 'acme/thumb.webp'], $found->variants());
+    }
+
+    #[Test]
+    public function savingAReadyObjectAgainLeavesTheStoredRowAsTheFirstSaveLeftIt(): void
+    {
+        $this->addMedia(self::ACME_FOODS, self::ACME_PENDING, '2026-03-02 10:00:00+00:00', null);
+
+        [$afterFirstSave, $afterSecondSave] = $this->transactions()->committedAs(self::ACME_FOODS, function (): array {
+            $mediaObject = $this->mediaObjects()->byId(new MediaId(self::ACME_PENDING));
+            self::assertNotNull($mediaObject);
+            $mediaObject->markReady(self::SAME_PICTURE, 1280, 800, ['thumb' => 'acme/thumb.webp', 'full' => 'acme/full.webp']);
+            $this->mediaObjects()->save($mediaObject);
+            $afterFirstSave = $this->storedRow(self::ACME_PENDING);
+            $this->mediaObjects()->save($mediaObject);
+
+            return [$afterFirstSave, $this->storedRow(self::ACME_PENDING)];
+        });
+        $afterSaveInALaterTransaction = $this->transactions()->committedAs(self::ACME_FOODS, function (): string {
+            $mediaObject = $this->mediaObjects()->byId(new MediaId(self::ACME_PENDING));
+            self::assertNotNull($mediaObject);
+            $this->mediaObjects()->save($mediaObject);
+
+            return $this->storedRow(self::ACME_PENDING);
+        });
+
+        self::assertSame('ready '.self::SAME_PICTURE.' 1280 800 {"full": "acme/full.webp", "thumb": "acme/thumb.webp"}', $afterFirstSave);
+        self::assertSame($afterFirstSave, $afterSecondSave);
+        self::assertSame($afterFirstSave, $afterSaveInALaterTransaction);
+    }
+
+    #[Test]
+    public function addingASecondObjectWithAStoredIdIsRefusedAndKeepsTheFirstRow(): void
+    {
+        $this->addMedia(self::ACME_FOODS, self::ACME_PENDING, '2026-03-02 10:00:00+00:00', null);
+        $secondWithTheSameId = MediaObject::upload(new MediaId(self::ACME_PENDING), new OrganizationId(self::ACME_FOODS), 'acme/second', 'image/webp', 1024, new UserId(self::MIA), new \DateTimeImmutable('2026-03-02 10:05:00+00:00'));
+
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->mediaObjects()->add($secondWithTheSameId));
+            self::fail('A second media object with a stored id was added.');
+        } catch (UniqueConstraintViolationException $refusal) {
+            self::assertStringContainsString('med_object_pkey', $refusal->getMessage());
+        } finally {
+            self::getContainer()->get('doctrine')->resetManager();
+        }
+
+        self::assertSame(
+            ['acme/'.self::ACME_PENDING.' image/png 524288'],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn(
+                "SELECT storage_key || ' ' || mime || ' ' || bytes FROM med_object WHERE id = ?",
+                [self::ACME_PENDING],
+            )),
+        );
+    }
+
+    /**
+     * lockById() detached the copy read first, so saving that copy would INSERT its row again.
+     */
+    #[Test]
+    public function savingACopyReadBeforeLockByIdIsRefusedAndKeepsTheLockedRow(): void
+    {
+        $this->addMedia(self::ACME_FOODS, self::ACME_PENDING, '2026-03-02 10:00:00+00:00', null);
+
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $readFirst = $this->mediaObjects()->byId(new MediaId(self::ACME_PENDING));
+            self::assertNotNull($readFirst);
+            self::assertNotNull($this->mediaObjects()->lockById(new MediaId(self::ACME_PENDING)));
+            $readFirst->reject('Not a picture.');
+            try {
+                $this->mediaObjects()->save($readFirst);
+                self::fail('A copy read before lockById() was saved.');
+            } catch (\LogicException $refusal) {
+                self::assertSame('Only a media object read through this port, and not replaced by lockById() since, can be saved.', $refusal->getMessage());
+            }
+        });
+
+        self::assertSame(
+            ['pending'],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn('SELECT status FROM med_object WHERE id = ?', [self::ACME_PENDING])),
+        );
     }
 
     #[Test]
@@ -269,6 +349,20 @@ final class DoctrineMediaObjectsTest extends KernelTestCase
             }
             $this->mediaObjects()->add($mediaObject);
         });
+    }
+
+    /**
+     * The columns markReady() and reject() change, as one line, read inside the caller's transaction.
+     */
+    private function storedRow(string $id): string
+    {
+        $row = $this->connection()->fetchOne(
+            "SELECT concat_ws(' ', status, sha256, width, height, variants::text, reject_reason) FROM med_object WHERE id = ?",
+            [$id],
+        );
+        self::assertIsString($row, 'The media object has no row.');
+
+        return $row;
     }
 
     private function mediaOf(string $organizationId, string $id, string $createdAt): MediaObject

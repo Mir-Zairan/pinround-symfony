@@ -28,7 +28,9 @@ interface UploadIntents
      * $intent in memory to match.
      *
      * @throws UploadIntentUnusable when the intent is used already or has expired; nothing is written then
-     * @throws \LogicException      when no transaction is open
+     * @throws \LogicException      when no transaction is open, or when the tenant has no stored intent with that id
+     *                              (it belongs to another organization or was never added), which a caller answers
+     *                              as not found; nothing is written then
      */
     public function recordUse(UploadIntent $intent): void;
 }

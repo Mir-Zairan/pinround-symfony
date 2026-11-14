@@ -13,9 +13,9 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * What Version20261115120000 builds besides the columns: the CHECKs refuse every row the domain could not write, named
- * in the error; the grants, the row-level security and the indexes, each led by organization_id. Every row is written
- * as pinround_app under its organization and rolled back.
+ * The CHECKs of Version20261115120000 refuse every row the domain could not write, named in the error; its grants,
+ * row-level security and indexes are pinned in DatabaseRolesTest with the other tenant tables. Every row is written as
+ * pinround_app under its organization and rolled back.
  */
 final class MediaTableTest extends KernelTestCase
 {
@@ -33,9 +33,13 @@ final class MediaTableTest extends KernelTestCase
     {
         yield 'an open upload intent' => ['med_upload_intent', []];
         yield 'a used upload intent' => ['med_upload_intent', ['used_at' => '2027-03-15 10:07:30+00']];
+        yield 'an upload intent used a second before it expires' => ['med_upload_intent', ['used_at' => '2027-03-15 10:14:59+00']];
+        yield 'an upload intent for two media types' => ['med_upload_intent', ['mime_allowed' => '{"image/png","image/webp"}']];
         yield 'a pending picture' => ['med_object', []];
         yield 'a ready picture' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => self::VARIANTS]];
+        yield 'a ready picture with one variant' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => '{"full": "acme/media/full.webp"}']];
         yield 'a rejected picture with a reason of 200 characters' => ['med_object', ['status' => 'rejected', 'reject_reason' => str_repeat('é', 200)]];
+        yield 'a rejected picture with a reason of two lines' => ['med_object', ['status' => 'rejected', 'reject_reason' => "Not a picture.\nTry again."]];
     }
 
     /**
@@ -48,6 +52,14 @@ final class MediaTableTest extends KernelTestCase
         yield 'an unknown purpose' => ['med_upload_intent', ['purpose' => 'avatar'], 'med_upload_intent_purpose_check'];
         yield 'a maximum size of zero' => ['med_upload_intent', ['max_bytes' => 0], 'med_upload_intent_max_bytes_check'];
         yield 'no allowed media type' => ['med_upload_intent', ['mime_allowed' => '{}'], 'med_upload_intent_mime_allowed_check'];
+        yield 'an empty allowed media type' => ['med_upload_intent', ['mime_allowed' => '{"image/png",""}'], 'med_upload_intent_mime_allowed_check'];
+        yield 'a NULL allowed media type' => ['med_upload_intent', ['mime_allowed' => '{"image/png",NULL}'], 'med_upload_intent_mime_allowed_check'];
+        yield 'allowed media types nested in two dimensions' => ['med_upload_intent', ['mime_allowed' => '{{"image/png"},{"image/webp"}}'], 'med_upload_intent_mime_allowed_check'];
+        yield 'an empty upload storage key' => ['med_upload_intent', ['storage_key' => ''], 'med_upload_intent_storage_key_check'];
+        yield 'an upload intent used at its expiry' => ['med_upload_intent', ['used_at' => '2027-03-15 10:15:00+00'], 'med_upload_intent_used_at_check'];
+        yield 'an upload intent used after its expiry' => ['med_upload_intent', ['used_at' => '2027-03-15 10:20:00+00'], 'med_upload_intent_used_at_check'];
+        yield 'an empty picture storage key' => ['med_object', ['storage_key' => ''], 'med_object_storage_key_check'];
+        yield 'an empty media type' => ['med_object', ['mime' => ''], 'med_object_mime_check'];
         yield 'an unknown status' => ['med_object', ['status' => 'done'], 'med_object_status_check'];
         yield 'a ready picture without a hash' => ['med_object', ['status' => 'ready', 'width' => 1440, 'height' => 900, 'variants' => self::VARIANTS], 'med_object_ready_check'];
         yield 'a ready picture without variants' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900], 'med_object_ready_check'];
@@ -56,12 +68,21 @@ final class MediaTableTest extends KernelTestCase
         yield 'a pending picture with a reason' => ['med_object', ['reject_reason' => 'Not a picture'], 'med_object_rejected_check'];
         yield 'an empty reason' => ['med_object', ['status' => 'rejected', 'reject_reason' => ''], 'med_object_reject_reason_check'];
         yield 'a reason of 201 characters' => ['med_object', ['status' => 'rejected', 'reject_reason' => str_repeat('é', 201)], 'med_object_reject_reason_check'];
+        yield 'a reason with a leading space' => ['med_object', ['status' => 'rejected', 'reject_reason' => ' Not a picture.'], 'med_object_reject_reason_check'];
+        yield 'a reason ending in CRLF' => ['med_object', ['status' => 'rejected', 'reject_reason' => "Not a picture.\r\n"], 'med_object_reject_reason_check'];
+        yield 'a reason ending in a vertical tab' => ['med_object', ['status' => 'rejected', 'reject_reason' => "Not a picture.\v"], 'med_object_reject_reason_check'];
+        yield 'a reason of only a tab' => ['med_object', ['status' => 'rejected', 'reject_reason' => "\t"], 'med_object_reject_reason_check'];
         yield 'an uppercase hash' => ['med_object', ['status' => 'ready', 'sha256' => strtoupper(self::SHA256), 'width' => 1440, 'height' => 900, 'variants' => self::VARIANTS], 'med_object_sha256_check'];
         yield 'a hash with a trailing newline' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256."\n", 'width' => 1440, 'height' => 900, 'variants' => self::VARIANTS], 'med_object_sha256_check'];
         yield 'a size of zero' => ['med_object', ['bytes' => 0], 'med_object_bytes_check'];
         yield 'a width of zero' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 0, 'height' => 900, 'variants' => self::VARIANTS], 'med_object_dimensions_check'];
         yield 'a negative height' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => -1, 'variants' => self::VARIANTS], 'med_object_dimensions_check'];
         yield 'variants as a list' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => '["acme/media/full.webp"]'], 'med_object_variants_check'];
+        yield 'no variant' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => '{}'], 'med_object_variants_check'];
+        yield 'a variant without a name' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => '{"full": "acme/media/full.webp", "": "acme/media/thumb.webp"}'], 'med_object_variants_check'];
+        yield 'a variant without a storage key' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => '{"full": "acme/media/full.webp", "thumb": ""}'], 'med_object_variants_check'];
+        yield 'a variant whose storage key is a number' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => '{"full": "acme/media/full.webp", "thumb": 1}'], 'med_object_variants_check'];
+        yield 'a variant whose storage key is null' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => '{"full": "acme/media/full.webp", "thumb": null}'], 'med_object_variants_check'];
     }
 
     /**
@@ -90,43 +111,6 @@ final class MediaTableTest extends KernelTestCase
         }
 
         self::assertSame(0, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): mixed => $this->connection()->fetchOne(\sprintf('SELECT count(*) FROM %s WHERE id = ?', $table), [self::ROW])));
-    }
-
-    #[Test]
-    public function theAppMayReadAddAndChangeButNotRemoveAndTheReaderMayOnlyRead(): void
-    {
-        foreach (['med_upload_intent', 'med_object'] as $table) {
-            self::assertEqualsCanonicalizing(
-                ['pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
-                $this->connection()->fetchFirstColumn(
-                    "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type
-                     FROM pg_class c, aclexplode(c.relacl) acl
-                     WHERE c.oid = to_regclass('public.' || quote_ident(?)) AND acl.grantee <> c.relowner",
-                    [$table],
-                ),
-                $table,
-            );
-            self::assertSame(
-                ['pinround_migrator', true, true],
-                $this->connection()->fetchNumeric('SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]),
-                $table,
-            );
-        }
-    }
-
-    #[Test]
-    public function everyIndexStartsWithTheOrganization(): void
-    {
-        self::assertEqualsCanonicalizing(
-            [
-                'CREATE UNIQUE INDEX med_upload_intent_pkey ON public.med_upload_intent USING btree (organization_id, id)',
-                'CREATE INDEX med_upload_intent_expires_at_idx ON public.med_upload_intent USING btree (organization_id, expires_at)',
-                'CREATE UNIQUE INDEX med_object_pkey ON public.med_object USING btree (organization_id, id)',
-                'CREATE INDEX med_object_sha256_idx ON public.med_object USING btree (organization_id, sha256)',
-                'CREATE INDEX med_object_status_created_at_idx ON public.med_object USING btree (organization_id, status, created_at)',
-            ],
-            $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('med_upload_intent', 'med_object')"),
-        );
     }
 
     /**

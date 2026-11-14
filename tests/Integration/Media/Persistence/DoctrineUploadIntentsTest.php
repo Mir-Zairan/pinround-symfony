@@ -15,9 +15,11 @@ use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection;
 use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDO\PgSQL\Driver as PgSQLDriver;
 use Doctrine\DBAL\Exception\DriverException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -30,6 +32,8 @@ use Symfony\Component\Clock\MockClock;
  */
 final class DoctrineUploadIntentsTest extends KernelTestCase
 {
+    use ReadsSentSql;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000e1401';
     private const string OTHER_ORGANIZATION = '0197a3c0-0000-7000-8000-0000000e1402';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000e1403';
@@ -101,6 +105,72 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
 
         self::assertEquals(new \DateTimeImmutable(self::NOW), $usedAtInMemory);
         self::assertEquals(new \DateTimeImmutable(self::NOW), $this->storedUsedAt(self::ACME_INTENT));
+    }
+
+    #[Test]
+    public function aUseIsOneWriteEvenWhenTheWorkFlushesAfterIt(): void
+    {
+        $this->addIntent(self::ACME_FOODS, self::ACME_INTENT, self::MIA, '2026-03-02 10:15:00+00:00');
+
+        $sentSql = $this->transactions()->committedAs(self::ACME_FOODS, function (): array {
+            $intent = $this->uploadIntents()->byId(new UploadIntentId(self::ACME_INTENT));
+            self::assertNotNull($intent);
+            $debugData = $this->debugData();
+            $debugData->reset();
+            $this->uploadIntents()->recordUse($intent);
+            $this->entityManager()->flush();
+
+            return self::sqlOf($debugData);
+        });
+
+        $writes = array_values(array_filter($sentSql, static fn (string $sql): bool => str_starts_with($sql, 'UPDATE med_upload_intent')));
+        self::assertCount(1, $writes, implode("\n", $sentSql));
+        self::assertStringContainsString('used_at IS NULL', $writes[0]);
+        self::assertEquals(new \DateTimeImmutable(self::NOW), $this->storedUsedAt(self::ACME_INTENT));
+    }
+
+    /**
+     * Original data for an object the unit of work does not manage would make a later persist() of it an update.
+     */
+    #[Test]
+    public function usingACopyTheUnitOfWorkDoesNotManageLeavesItUntracked(): void
+    {
+        $this->addIntent(self::ACME_FOODS, self::ACME_INTENT, self::MIA, '2026-03-02 10:15:00+00:00');
+        $untrackedCopy = $this->intentOf(self::ACME_FOODS, self::ACME_INTENT, self::MIA, '2026-03-02 10:15:00+00:00');
+
+        $originalData = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($untrackedCopy): array {
+            $this->uploadIntents()->recordUse($untrackedCopy);
+
+            return $this->entityManager()->getUnitOfWork()->getOriginalEntityData($untrackedCopy);
+        });
+
+        self::assertSame([], $originalData);
+        self::assertEquals(new \DateTimeImmutable(self::NOW), $untrackedCopy->usedAt());
+        self::assertEquals(new \DateTimeImmutable(self::NOW), $this->storedUsedAt(self::ACME_INTENT));
+    }
+
+    #[Test]
+    public function addingASecondIntentWithAStoredIdIsRefusedAndKeepsTheFirstRow(): void
+    {
+        $this->addIntent(self::ACME_FOODS, self::ACME_INTENT, self::MIA, '2026-03-02 10:15:00+00:00');
+        $secondWithTheSameId = UploadIntent::open(new UploadIntentId(self::ACME_INTENT), new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, 1024, ['image/webp'], 'acme/second', new \DateTimeImmutable('2026-03-02 10:30:00+00:00'));
+
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->uploadIntents()->add($secondWithTheSameId));
+            self::fail('A second upload intent with a stored id was added.');
+        } catch (UniqueConstraintViolationException $refusal) {
+            self::assertStringContainsString('med_upload_intent_pkey', $refusal->getMessage());
+        } finally {
+            self::getContainer()->get('doctrine')->resetManager();
+        }
+
+        self::assertSame(
+            ['acme/'.self::ACME_INTENT.' 10485760 {image/png,image/webp}'],
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn(
+                "SELECT storage_key || ' ' || max_bytes || ' ' || mime_allowed::text FROM med_upload_intent WHERE id = ?",
+                [self::ACME_INTENT],
+            )),
+        );
     }
 
     #[Test]

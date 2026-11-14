@@ -33,8 +33,11 @@ final readonly class DoctrineMediaObjects implements MediaObjects
     public function save(MediaObject $mediaObject): void
     {
         $this->requireTransaction('Saving a media object needs an open transaction.');
+        // persist() of a copy lockById() detached would INSERT it again and fail on the key.
+        if (!$this->entityManager->contains($mediaObject)) {
+            throw new \LogicException('Only a media object read through this port, and not replaced by lockById() since, can be saved.');
+        }
 
-        $this->entityManager->persist($mediaObject);
         $this->entityManager->flush();
     }
 
@@ -50,7 +53,7 @@ final readonly class DoctrineMediaObjects implements MediaObjects
 
     /**
      * A loaded copy is detached rather than refreshed, as Doctrine refuses to refresh the readonly createdAt; the
-     * locked row is then read into a new object.
+     * locked row is then read into a new object, and save() refuses the detached one.
      */
     public function lockById(MediaId $id): ?MediaObject
     {
