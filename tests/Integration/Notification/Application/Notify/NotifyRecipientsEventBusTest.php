@@ -9,12 +9,14 @@ use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\Event\ReplyPosted;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Application\Notify\NotifyRecipients;
+use App\Notification\Application\Realtime\RefreshBell;
 use App\SharedKernel\Infrastructure\Messenger\MessageIdStamp;
 use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Visibility\VisibilityLeakCast;
 use App\Ticketing\Api\Event\TicketAssigned;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
@@ -25,7 +27,9 @@ use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
  * ntf_notification row. The deliveries are dispatched on event.bus as the worker would, not run through the worker: on
  * async_notify the worker would also run the RefreshTicketPages that QueueTicketPagesRefreshHandler queues for each
  * of these events, which publishes to the hub. That handler also keeps a missing tag from throwing, so only the
- * missing row shows it. Everything commits, so tearDown removes the rows.
+ * missing row shows it. Each row also sends one RefreshBell to async_notify, held by its stamp until the delivery's
+ * event.bus transaction commits, and none for a retried delivery or a ping held past the frozen clock. Everything
+ * commits, so tearDown removes the rows.
  */
 final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
 {
@@ -40,9 +44,13 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
     private const string REPLY = '0197a3c0-0000-7000-8000-0000000058e1';
     private const string REPLIED_AT = '2027-03-16 10:00:00 UTC';
     private const string ASSIGNED_AT = '2027-03-16 11:00:00 UTC';
+    private const string NOW = '2027-03-17 12:00:00 UTC';
+    private const string HELD_PING = '0197a3c0-0000-7000-8000-0000000058d2';
+    private const string HELD_PING_DELIVERED_AT = '2027-03-18 07:00:00 UTC';
 
     protected function setUp(): void
     {
+        self::getContainer()->set('clock', new MockClock(new \DateTimeImmutable(self::NOW)));
         $this->removeCommittedRows();
     }
 
@@ -79,6 +87,10 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         $messageIds = array_values(array_map(self::messageIdOf(...), $relayed));
         self::assertCount(2, array_unique($messageIds));
         self::assertSame(2, $this->processedRowCount($messageIds));
+        self::assertEqualsCanonicalizing([
+            [self::ACME_FOODS, $mia, null],
+            [self::ACME_FOODS, $lena, 'Mia answered your question.'],
+        ], $this->sentBellRefreshes());
     }
 
     #[Test]
@@ -86,16 +98,18 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
     {
         $lena = self::VIEWERS['Lena'][0];
         $mia = self::VIEWERS['Mia'][0];
-        self::transactions()->committedAs(self::ACME_FOODS, static function () use ($lena, $mia): void {
+        $sara = self::VIEWERS['Sara'][0];
+        self::transactions()->committedAs(self::ACME_FOODS, static function () use ($lena, $mia, $sara): void {
             $eventBus = self::getContainer()->get('event.bus');
             $eventBus->dispatch(new PingSent(self::ACME_FOODS, self::teamOnlyTicketId(), self::PING, $mia, $lena, $mia, new \DateTimeImmutable(self::PINGED_AT)));
             $eventBus->dispatch(new ReplyPosted(self::ACME_FOODS, self::teamOnlyTicketId(), self::COMMENT, self::REPLY, $mia, $lena, new \DateTimeImmutable(self::REPLIED_AT)));
             $eventBus->dispatch(new TicketAssigned(self::ACME_FOODS, self::teamOnlyTicketId(), 'SHOP-1', null, $lena, $mia, new \DateTimeImmutable(self::ASSIGNED_AT)));
+            $eventBus->dispatch(new PingSent(self::ACME_FOODS, self::teamOnlyTicketId(), self::HELD_PING, $lena, $sara, $lena, new \DateTimeImmutable(self::HELD_PING_DELIVERED_AT)));
         });
         self::runTheWorkerUntilIdle('outbox');
         $relayed = $this->asyncNotify()->getSent();
         // In any order: the relay sends the events of one second in no set order (data-model.md, messenger_outbox).
-        self::assertEqualsCanonicalizing([PingSent::class, ReplyPosted::class, TicketAssigned::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
+        self::assertEqualsCanonicalizing([PingSent::class, ReplyPosted::class, TicketAssigned::class, PingSent::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
 
         foreach ($relayed as $envelope) {
             self::deliverFromAsyncNotify($envelope);
@@ -106,10 +120,16 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
             ['ping', $lena, $mia, self::PING, null, null],
             ['reply', $mia, $lena, null, self::COMMENT, self::REPLY],
             ['assigned', $lena, $mia, null, null, null],
+            ['ping', $sara, $lena, self::HELD_PING, null, null],
         ], $this->acmeNotifications());
         $messageIds = array_values(array_map(self::messageIdOf(...), $relayed));
-        self::assertCount(3, array_unique($messageIds));
-        self::assertSame(3, $this->processedRowCount($messageIds));
+        self::assertCount(4, array_unique($messageIds));
+        self::assertSame(4, $this->processedRowCount($messageIds));
+        self::assertEqualsCanonicalizing([
+            [self::ACME_FOODS, $lena, null],
+            [self::ACME_FOODS, $mia, null],
+            [self::ACME_FOODS, $lena, null],
+        ], $this->sentBellRefreshes());
     }
 
     private static function deliverFromAsyncNotify(Envelope $envelope): void
@@ -141,6 +161,23 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         self::assertIsInt($count);
 
         return $count;
+    }
+
+    /**
+     * @return list<array{string, string, string|null}> organization, user and toast of every RefreshBell async_notify
+     *                                                  got so far
+     */
+    private function sentBellRefreshes(): array
+    {
+        $refreshes = [];
+        foreach ($this->asyncNotify()->getSent() as $envelope) {
+            $message = $envelope->getMessage();
+            if ($message instanceof RefreshBell) {
+                $refreshes[] = [$message->organizationId, $message->userId, $message->toast];
+            }
+        }
+
+        return $refreshes;
     }
 
     private static function messageIdOf(Envelope $envelope): string
