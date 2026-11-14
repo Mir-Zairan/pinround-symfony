@@ -134,7 +134,7 @@ final class VisibleTicketIdsLeakTest extends VisibilityLeakCast
             self::fail('Lena\'s visibility was read under Beta Bakery.');
         });
 
-        self::assertSame('Ticket visibility is read under the viewer\'s own organization as tenant.', $refusal);
+        self::assertSame('Visible tickets are read under the viewer\'s own organization as tenant.', $refusal);
         self::assertSame(0, $queryCount);
     }
 
@@ -148,7 +148,7 @@ final class VisibleTicketIdsLeakTest extends VisibilityLeakCast
             $this->ticketQueries()->visibleTicketIdsOf($saraVisibility, [new TicketId(self::teamOnlyTicketId())]);
             self::fail('The check ran outside a transaction.');
         } catch (\LogicException $refusal) {
-            self::assertSame('Ticket visibility is read in a transaction under the organization as tenant; none is open.', $refusal->getMessage());
+            self::assertSame('Visible tickets are read in a transaction under the organization as tenant; none is open.', $refusal->getMessage());
         } finally {
             self::tenantContext()->clear();
         }

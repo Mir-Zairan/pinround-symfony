@@ -175,11 +175,11 @@ final readonly class DbalTicketQueries implements TicketQueries
             throw new \InvalidArgumentException(\sprintf('At most %d tickets are checked for visibility at once.', self::MAX_CHECKED_TICKET_IDS));
         }
         if (!$this->connection->isTransactionActive()) {
-            throw new \LogicException('Ticket visibility is read in a transaction under the organization as tenant; none is open.');
+            throw new \LogicException('Visible tickets are read in a transaction under the organization as tenant; none is open.');
         }
         $organizationId = $this->tenantContext->require();
         if (!$organizationId->equals($viewer->organizationId())) {
-            throw new \LogicException('Ticket visibility is read under the viewer\'s own organization as tenant.');
+            throw new \LogicException('Visible tickets are read under the viewer\'s own organization as tenant.');
         }
         $uniqueTicketIds = [];
         foreach ($ticketIds as $ticketId) {
