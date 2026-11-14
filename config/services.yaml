@@ -270,6 +270,17 @@ when@test:
         test.notification_bell_inbox:
             alias: App\Notification\Application\Bell\BellInbox
             public: true
+        # No route posts, edits or removes a comment before the thread's controllers (P04.T1 slice B); the comment
+        # tests get the use cases as a controller would.
+        test.conversation_post_comment:
+            alias: App\Conversation\Application\PostComment\PostComment
+            public: true
+        test.conversation_edit_message:
+            alias: App\Conversation\Application\EditMessage\EditMessage
+            public: true
+        test.conversation_remove_message:
+            alias: App\Conversation\Application\RemoveMessage\RemoveMessage
+            public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
         tracing.in_memory_exporter:
