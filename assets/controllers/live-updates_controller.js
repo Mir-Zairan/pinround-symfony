@@ -14,7 +14,8 @@ const FIRST_REOPEN_AFTER_MS = 5000;
 const MAX_REOPEN_AFTER_MS = 60 * 1000;
 // Every tab of the browser shares one subscriber cookie, set by whichever tab asked last, and the hub reads it only as a
 // stream connects. A tab holds this lock from its ask until its stream has connected, so no other tab's ask, for other
-// topics, lands in between; it holds it at most MAX_CONNECT_WAIT_MS, so a hub that never answers stops no other tab.
+// topics, lands in between. The ask and the connect each wait at most MAX_CONNECT_WAIT_MS, so the lock is held at most
+// twice that, and a token route or a hub that never answers stops no other tab.
 const COOKIE_LOCK = 'pinround-live-updates-cookie';
 const MAX_CONNECT_WAIT_MS = 5000;
 // RefreshTicketPagesHandler::SIGNAL_TYPE.
@@ -45,7 +46,7 @@ function isPartInUse(part) {
   return part.localName !== 'turbo-frame' || focused.closest('[data-turbo-permanent]') === null;
 }
 
-// Web Locks exist only on HTTPS; without them a tab asks and connects unguarded.
+// Web Locks exist only in a secure context (HTTPS or localhost); without them a tab asks and connects unguarded.
 function whileHoldingCookieLock(work) {
   return navigator.locks === undefined ? work() : navigator.locks.request(COOKIE_LOCK, work);
 }
@@ -180,9 +181,9 @@ export default class extends Controller {
     const body = new FormData();
     this.ticketIdsValue.forEach((ticketId) => body.append('ticketIds[]', ticketId));
     try {
-      await fetch(this.tokenUrlValue, { method: 'POST', body, credentials: 'same-origin' });
+      await fetch(this.tokenUrlValue, { method: 'POST', body, credentials: 'same-origin', signal: AbortSignal.timeout(MAX_CONNECT_WAIT_MS) });
     } catch {
-      // Offline: the stream fails to open or drops, and the paused banner says so after 60 s.
+      // Offline, or no answer in time: the stream fails to open or drops, and the paused banner says so after 60 s.
     }
   }
 

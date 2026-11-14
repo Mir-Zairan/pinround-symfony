@@ -741,6 +741,45 @@ test.describe('two tabs of one browser', () => {
     await lena.context.close();
     await omar.context.close();
   });
+
+  test("a cookie ask of Omar's ticket tab that never answers lets his home tab ask once it gives up", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Gift card form hangs on submit ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const homeTab = await omar.context.newPage();
+    let askHeld: () => void = () => undefined;
+    const isAskHeld = new Promise<void>((resolve) => {
+      askHeld = resolve;
+    });
+    let releaseAsk: () => void = () => undefined;
+    const isAskReleased = new Promise<void>((resolve) => {
+      releaseAsk = resolve;
+    });
+    // Unanswered until the test ends, as a token route that hangs would leave it; the tab gave up on it by then.
+    await omar.page.route(
+      `**${TOKEN_PATH}`,
+      async (route) => {
+        askHeld();
+        await isAskReleased;
+        await route.abort().catch(() => undefined);
+      },
+      { times: 1 },
+    );
+    try {
+      await omar.page.goto(`/t/${key}`);
+      await isAskHeld;
+      const homeTabCookie = homeTab.waitForResponse((response) => pathOf(response.request()) === TOKEN_PATH, {
+        // live-updates_controller.js MAX_CONNECT_WAIT_MS for the ask, then as long for the stream without a cookie.
+        timeout: 2 * 5000 + SHOWS_WITHIN_MS,
+      });
+
+      await homeTab.goto('/');
+
+      expect((await homeTabCookie).status()).toBe(204);
+    } finally {
+      releaseAsk();
+      await omar.context.close();
+    }
+  });
 });
 
 test.describe('the stream across Turbo visits', () => {
