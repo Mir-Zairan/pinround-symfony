@@ -1,6 +1,6 @@
 {#- A ping's answer: the person's Ping button becomes the pinged state when the sender has to wait (againIn not null),
     and the toast says what happened. -#}
 {%- if againIn is not null -%}
-<turbo-stream action="replace" target="{{ pingTargetId }}"><template><span id="{{ pingTargetId }}" class="pinged">Pinged · {{ againIn }}</span></template></turbo-stream>
+<turbo-stream action="replace" target="{{ pingTargetId }}"><template>{{ include('@Notification/_pinged.html.twig') }}</template></turbo-stream>
 {%- endif -%}
 {{ include('@Web/_toast_stream.html.twig', {message: toast}) }}

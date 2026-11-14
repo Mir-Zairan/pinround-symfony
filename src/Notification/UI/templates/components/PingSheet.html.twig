@@ -1,0 +1,37 @@
+{% if isShown %}
+    {% set pingTargetId = this.targetId %}
+    {% if againIn is not null %}
+        {{ include('@Notification/_pinged.html.twig') }}
+    {% else %}
+        {% set pingFormId = pingTargetId ~ '-form' %}
+        {% set pingMessageId = pingTargetId ~ '-message' %}
+        {% set pingAction = path(this.route, {key: ticketKey, userId: toUserId}) %}
+        {% set pingCsrfToken = csrf_token(this.csrfId) %}
+        {% set pingDraft = this.draftMessage %}
+        {% set pingNote = this.limitNote %}
+        {% set pingFailedToast = constant('App\\Notification\\UI\\Component\\PingSheet::PING_FAILED') %}
+        {% set pingController = 'App\\Notification\\UI\\Controller\\PingController' %}
+        {# With Drive off, Turbo posts a form only when it, and its submitter, sit in a data-turbo="true" element. #}
+        <div id="{{ pingTargetId }}" class="ping-sheet" data-turbo="true">
+            <twig:Dialog id="{{ pingTargetId }}-dialog" title="Ping {{ toFirstName }}">
+                <twig:block name="trigger">
+                    <twig:Button variant="outline" size="sm" aria-haspopup="dialog" aria-label="Ping {{ toFirstName }}" data-action="dialog#open">Ping</twig:Button>
+                </twig:block>
+                <twig:block name="content">
+                    <form method="post" id="{{ pingFormId }}" class="ping-sheet__form" action="{{ pingAction }}" data-turbo="true" data-failed-toast="{{ pingFailedToast }}">
+                        <input type="hidden" name="{{ constant(pingController ~ '::CSRF_FIELD') }}" value="{{ pingCsrfToken }}">
+                        <p class="ping-sheet__ticket">{{ ticketKey }} · {{ ticketTitle }}</p>
+                        <label class="ping-sheet__label" for="{{ pingMessageId }}">Message</label>
+                        <textarea id="{{ pingMessageId }}" class="ping-sheet__message" name="{{ constant(pingController ~ '::MESSAGE_FIELD') }}" rows="4" required
+                            maxlength="{{ constant(pingController ~ '::MESSAGE_MAX_LENGTH') }}">{{ pingDraft }}</textarea>
+                        <p class="ping-sheet__note">{{ pingNote }}</p>
+                    </form>
+                </twig:block>
+                <twig:block name="actions">
+                    <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+                    <twig:Button type="submit" form="{{ pingFormId }}">Send ping</twig:Button>
+                </twig:block>
+            </twig:Dialog>
+        </div>
+    {% endif %}
+{% endif %}
