@@ -148,12 +148,17 @@ export default class extends Controller {
     if (!this.hasAskChipTarget) {
       return;
     }
+    const hadAskFocus = document.activeElement === this.askChipTarget || this.personTargets.includes(document.activeElement);
     this.askChipTarget.disabled = !this.mayAskValue || !this.hasPersonTarget || hasOpenQuestion;
     if (this.hasWaitNoteTarget) {
       this.waitNoteTarget.hidden = !(this.mayAskValue && hasOpenQuestion);
     }
     if (this.askChipTarget.disabled && this.isAsking()) {
       this.writeComment();
+    }
+    // A disabled Ask chip and hidden people drop the focus they held to the body (WCAG 2.4.3).
+    if (this.askChipTarget.disabled && hadAskFocus) {
+      this.commentChipTarget.focus();
     }
   }
 

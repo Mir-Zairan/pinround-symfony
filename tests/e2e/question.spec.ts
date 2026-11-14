@@ -312,6 +312,7 @@ test('Ask a question turns off on Lena’s open tab once Omar’s question reach
     await askChip(lena.page).click();
     await expect(composerSubmit(lena.page)).toHaveText('Ask Omar');
     await composerBody(lena.page).fill(lenasDraft);
+    await peopleToAsk(lena.page).getByRole('button', { name: 'Omar', exact: true }).focus();
     await openThread(omar.page, key);
 
     await askLena(omar.page, key, question);
@@ -319,6 +320,8 @@ test('Ask a question turns off on Lena’s open tab once Omar’s question reach
     // No navigation on Lena's tab: only the live refresh can bring the open question.
     await expect(questionWithText(lena.page, question)).toHaveCount(1, { timeout: 15_000 });
     await expect(askChip(lena.page)).toBeDisabled();
+    // The focused Omar chip is hidden now, so the focus goes to the Comment chip rather than the body.
+    await expect(threadFrame(lena.page).locator('.thread__kinds').getByRole('button', { name: 'Comment' })).toBeFocused();
     await expect(threadFrame(lena.page).getByText(WAIT_FOR_THE_OPEN_QUESTION)).toBeVisible();
     await expectCommentComposer(lena.page, key);
     await expect(composerBody(lena.page)).toHaveValue(lenasDraft);
