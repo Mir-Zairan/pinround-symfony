@@ -633,6 +633,27 @@ test.describe('a lost stream', () => {
     await expect(banner).toHaveCSS('color', 'rgb(36, 26, 0)');
     await expect(banner.getByRole('link', { name: 'Reload' })).toHaveAttribute('href', page.url());
   });
+
+  test('a dropped stream is opened again after a random wait of half to all of its 5 s step', async ({ browser, page }) => {
+    const key = await makeTicketForOmar(browser, `Basket shows an old price ${randomUUID().slice(0, 8)}`);
+    // The lowest draw, so the wait is half the step: a fixed 5 s, or a draw from 0, would miss the bounds below.
+    await page.addInitScript(() => {
+      Math.random = () => 0;
+    });
+    const streamAskedAtMs: number[] = [];
+    await page.route(`**${HUB_PATH}**`, (route) => {
+      streamAskedAtMs.push(Date.now());
+      return route.abort();
+    });
+
+    await page.goto(`/t/${key}`);
+
+    await expect.poll(() => streamAskedAtMs.length, { timeout: 5000 + SHOWS_WITHIN_MS }).toBeGreaterThanOrEqual(2);
+    const waitedMs = streamAskedAtMs[1] - streamAskedAtMs[0];
+    // live-updates_controller.js FIRST_REOPEN_STEP_MS / 2, plus the cookie ask before the stream.
+    expect(waitedMs).toBeGreaterThanOrEqual(2500);
+    expect(waitedMs).toBeLessThan(4500);
+  });
 });
 
 // The tabs of one browser share one subscriber cookie, and each page asks for it with its own topics: Omar's home page
@@ -677,7 +698,7 @@ test.describe('two tabs of one browser', () => {
     expect((await homeTabCookie).status()).toBe(204);
     homeTabAsked();
     await ticketTabOpened;
-    // live-updates_controller.js FIRST_REOPEN_AFTER_MS, then the hub's answer.
+    // live-updates_controller.js FIRST_REOPEN_STEP_MS, then the hub's answer.
     await expect.poll(() => ticketTabStreams.length, { timeout: 5000 + SHOWS_WITHIN_MS }).toBe(2);
     expect(ticketTabStreams[1].status()).toBe(200);
     const text = `Still following after the drop ${randomUUID().slice(0, 8)}`;

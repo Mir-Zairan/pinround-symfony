@@ -8,10 +8,11 @@ const RENEW_EVERY_MS = 8 * 60 * 1000;
 const PAUSED_AFTER_MS = 60 * 1000;
 // Spreads the re-fetches of everyone looking at the ticket over a second instead of one spike.
 const MAX_JITTER_MS = 1000;
-// A stream that drops or that the hub refuses (an expired cookie answers 401) is opened again after 5 s, doubling to at
-// most a minute, so a signed-out tab does not ask for a cookie every few seconds.
-const FIRST_REOPEN_AFTER_MS = 5000;
-const MAX_REOPEN_AFTER_MS = 60 * 1000;
+// A stream that drops or that the hub refuses (an expired cookie answers 401) is opened again after a step of 5 s,
+// doubling to at most a minute, so a signed-out tab does not ask for a cookie every few seconds. Each wait is a random
+// time between half its step and the whole, so after a hub restart the tabs do not all reconnect at once.
+const FIRST_REOPEN_STEP_MS = 5000;
+const MAX_REOPEN_STEP_MS = 60 * 1000;
 // Every tab of the browser shares one subscriber cookie, set by whichever tab asked last, and the hub reads it only as a
 // stream connects. A tab holds this lock from its ask until its stream has connected, so no other tab's ask, for other
 // topics, lands in between. The ask and the connect each wait at most MAX_CONNECT_WAIT_MS, so the lock is held at most
@@ -116,7 +117,7 @@ export default class extends Controller {
   #reopenTimer = null;
   #refetchTimer = null;
   #stopTimer = null;
-  #reopenAfterMs = FIRST_REOPEN_AFTER_MS;
+  #reopenStepMs = FIRST_REOPEN_STEP_MS;
   #releaseTimer = null;
   #isSignalMissed = false;
   // Ids of the parts a signal skipped because they were in use.
@@ -190,7 +191,7 @@ export default class extends Controller {
   #showConnected() {
     clearTimeout(this.#pausedTimer);
     this.#pausedTimer = null;
-    this.#reopenAfterMs = FIRST_REOPEN_AFTER_MS;
+    this.#reopenStepMs = FIRST_REOPEN_STEP_MS;
     this.pausedTarget.hidden = true;
   }
 
@@ -200,8 +201,8 @@ export default class extends Controller {
     this.#startPausedTimer();
     this.#closeSource();
     clearTimeout(this.#reopenTimer);
-    this.#reopenTimer = setTimeout(() => this.#open(), this.#reopenAfterMs);
-    this.#reopenAfterMs = Math.min(this.#reopenAfterMs * 2, MAX_REOPEN_AFTER_MS);
+    this.#reopenTimer = setTimeout(() => this.#open(), (this.#reopenStepMs / 2) * (1 + Math.random()));
+    this.#reopenStepMs = Math.min(this.#reopenStepMs * 2, MAX_REOPEN_STEP_MS);
   }
 
   #startPausedTimer() {
