@@ -139,7 +139,7 @@ FR-CNV-01, FR-CNV-02, FR-CNV-03, FR-CNV-04, FR-CNV-05, FR-CNV-06, FR-CNV-07, FR-
 2. The one action path: the action's toast gets the suffix "2 pings on this ticket cleared." Do this inside the request (count before commit) so the toast is right.
 3. Quiet hours (org switch, 18:00–09:00 in the recipient's time zone): `deliver_after` set; a scheduler job every 5 minutes releases held items.
 4. Mute per ticket (`ntf_mute`): no notifications, still in lists.
-**Files:** `src/Notification/Application/{AutoClear,ReleaseHeld,Mute}/*`, scheduler entry.
+**Files:** `src/Notification/Application/{AutoClear,ReleaseHeld,Mute}/*`, scheduler entry; for mute also `src/Notification/Api/MutePermission.php`, `src/Notification/Infrastructure/Doctrine/DbalMutes.php`, `src/Notification/UI/Controller/MuteController.php`, `src/Notification/UI/Voter/MuteVoter.php`.
 **Acceptance criteria:**
 - [ ] Omar approving code clears his pings on that ticket and the toast says how many.
 - [ ] A ping at 22:00 recipient time appears at 09:00.
