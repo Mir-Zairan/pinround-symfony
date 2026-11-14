@@ -269,11 +269,7 @@ final class ResolverFunctionTest extends KernelTestCase
 
         self::assertContains('search_ticket_ids', array_keys($bodiesByName));
         foreach ($bodiesByName as $name => $body) {
-            self::assertMatchesRegularExpression(
-                "/\\bp_organization_id\\s*=\\s*NULLIF\\(\\s*current_setting\\('app\\.org_id',\\s*true\\),\\s*''\\s*\\)::uuid/",
-                $body,
-                $name,
-            );
+            self::assertMatchesRegularExpression(TenancyCatalog::TENANT_BINDING, $body, $name);
         }
     }
 
