@@ -39,7 +39,8 @@ final readonly class NowNextSentences
 
     /**
      * @param list<UserId> $otherPeopleIds people the page names besides the ticket's own and its team, such as the
-     *                                     movers of What happened; their names come in the turn person's one query
+     *                                     movers of What happened; their names come in the one query of the turn
+     *                                     person and of the asker of the question that pauses the ticket
      *
      * @return PageTurn|null null when the ticket has no team: no turn is chosen for it, so the page shows no lines and
      *                       no next step
@@ -60,9 +61,10 @@ final readonly class NowNextSentences
         $rules = $this->ruleQueries->rulesFor($snapshot->teamId);
         $context = new NowNextContext(
             $page->stepName,
-            $this->displayNamesWith($page->displayNames, null === $turn->userId ? $otherPeopleIds : [$turn->userId, ...$otherPeopleIds]),
+            $this->displayNamesWith($page->displayNames, array_values(array_filter([$turn->userId, $snapshot->askerId, ...$otherPeopleIds]))),
             $team,
             $rules->reviewBeforeTest,
+            askerId: $snapshot->askerId,
         );
 
         return new PageTurn($snapshot->teamId, $ticket, $team, $turn, $context, $rules);
@@ -98,11 +100,16 @@ final readonly class NowNextSentences
      */
     public function displayNamesWith(array $displayNames, array $userIds): array
     {
-        $missingIds = array_values(array_filter($userIds, static fn (UserId $userId): bool => !isset($displayNames[$userId->toString()])));
+        $missingIds = [];
+        foreach ($userIds as $userId) {
+            if (!isset($displayNames[$userId->toString()])) {
+                $missingIds[$userId->toString()] = $userId;
+            }
+        }
         if ([] === $missingIds) {
             return $displayNames;
         }
-        foreach ($this->userQueries->byIds($missingIds) as $userKey => $user) {
+        foreach ($this->userQueries->byIds(array_values($missingIds)) as $userKey => $user) {
             $displayNames[$userKey] = $user->displayName;
         }
 
