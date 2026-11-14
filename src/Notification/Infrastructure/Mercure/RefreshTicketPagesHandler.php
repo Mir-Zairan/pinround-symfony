@@ -97,7 +97,7 @@ final readonly class RefreshTicketPagesHandler
 
     private function windowLock(string $resource): LockInterface
     {
-        // Not released once taken: the lock is the window, and it ends when its time to live runs out.
+        // The lock is the window: released only when the publish fails (so Messenger's retry can take it again), otherwise it ends when its time to live runs out.
         return $this->lockFactory->createLock($resource, self::WINDOW_SECONDS, autoRelease: false);
     }
 }
