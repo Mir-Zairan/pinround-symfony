@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DoctrineMigrations;
 
 use App\Notification\Infrastructure\Doctrine\NotificationPartitions;
+use App\SharedKernel\Infrastructure\Doctrine\Migration\MonthlyPartitions;
 use App\SharedKernel\Infrastructure\Doctrine\Migration\TenantTable;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Migrations\AbstractMigration;
@@ -104,7 +105,7 @@ final class Version20261114130000 extends AbstractMigration
         $firstMonth = new \DateTimeImmutable(self::FIRST_MONTH, new \DateTimeZone('UTC'));
         $lastMonth = max(
             new \DateTimeImmutable(self::LAST_MONTH, new \DateTimeZone('UTC')),
-            NotificationPartitions::monthOf(new \DateTimeImmutable('now'))->modify(\sprintf('+%d months', self::MONTHS_AHEAD)),
+            MonthlyPartitions::monthOf(new \DateTimeImmutable('now'))->modify(\sprintf('+%d months', self::MONTHS_AHEAD)),
         );
         for ($month = $firstMonth; $month <= $lastMonth; $month = $month->modify('first day of next month')) {
             foreach (NotificationPartitions::statementsFor($month) as $statement) {
