@@ -16,6 +16,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Mercure\Exception\RuntimeException;
 use Symfony\Component\Mercure\Jwt\StaticTokenProvider;
 use Symfony\Component\Mercure\MockHub;
 use Symfony\Component\Mercure\Update;
@@ -224,6 +225,46 @@ final class RefreshTicketPagesHandlerTest extends TestCase
             array_map(static fn (array $published): array => $published['update']->getTopics(), $this->published),
         );
         self::assertSame([], $this->commandBus->dispatched());
+    }
+
+    #[Test]
+    public function aPublishTheHubRefusesFreesTheWindowSoTheRetryPublishes(): void
+    {
+        $attempts = 0;
+        $hub = new MockHub('http://app/.well-known/mercure', new StaticTokenProvider('publisher-token'), function (Update $update) use (&$attempts): string {
+            if (1 === ++$attempts) {
+                throw new RuntimeException('The hub is down.');
+            }
+            $this->published[] = ['atMilliseconds' => $this->elapsedMilliseconds(), 'update' => $update];
+
+            return 'urn:uuid:published';
+        });
+        $handler = new RefreshTicketPagesHandler($hub, $this->lockFactory, $this->commandBus);
+        $refresh = new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Leading);
+
+        try {
+            $handler($refresh);
+            self::fail('the hub failure reaches Messenger, so the message is retried');
+        } catch (RuntimeException $publishFailure) {
+            self::assertSame('The hub is down.', $publishFailure->getMessage());
+        }
+        self::assertSame([], $this->publishedAtMilliseconds());
+        self::assertSame([], $this->commandBus->dispatched());
+
+        // Messenger's first retry comes after 1 s, inside what would have been the window.
+        $this->clock->sleep(1.0);
+        $handler($refresh);
+
+        self::assertSame(2, $attempts);
+        self::assertSame([1000], $this->publishedAtMilliseconds());
+        self::assertSame([], $this->commandBus->dispatched());
+        self::assertFalse($this->lockFactory->createLock('realtime-refresh:'.self::TICKET_ID, 2.0, autoRelease: false)->acquire(), 'the published retry holds the window');
+    }
+
+    /** @return list<int> */
+    private function publishedAtMilliseconds(): array
+    {
+        return array_column($this->published, 'atMilliseconds');
     }
 
     private function refreshAsAChangeArrives(): void

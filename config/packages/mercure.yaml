@@ -6,6 +6,8 @@ mercure:
         default:
             url: '%env(default::MERCURE_URL)%'
             public_url: '%env(default::MERCURE_PUBLIC_URL)%'
+            # Without it a stalled hub holds worker-notify for http_client's default of 60 s per refresh.
+            http_client: 'mercure.publisher_http_client'
             # The name the hub reads under protocol 1.0; the bundle would pick a prefix-less one in debug mode.
             cookie_name: '__Secure-mercure_access_token'
             publisher:
@@ -22,3 +24,11 @@ mercure:
                 secret: '%env(MERCURE_SUBSCRIBER_JWT_KEY)%'
                 algorithm: 'hmac.sha256'
                 claims: *claims
+
+services:
+    # A failed or timed-out publish throws, and Messenger retries the RefreshTicketPages (RefreshTicketPagesHandler).
+    # timeout is the longest wait for the next byte, max_duration the longest whole request.
+    mercure.publisher_http_client:
+        class: Symfony\Contracts\HttpClient\HttpClientInterface
+        factory: ['@http_client', 'withOptions']
+        arguments: [{ timeout: 2, max_duration: 2 }]

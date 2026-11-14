@@ -8,6 +8,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\LockInterface;
 use Symfony\Component\Mercure\HubInterface;
 use Symfony\Component\Mercure\Update;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
@@ -23,9 +24,9 @@ use Symfony\Component\Messenger\Stamp\DelayStamp;
 #[AsMessageHandler(bus: 'command.bus')]
 final readonly class RefreshTicketPagesHandler
 {
-    public const float WINDOW_SECONDS = 2.0;
-
     public const int WINDOW_MILLISECONDS = 2000;
+
+    public const float WINDOW_SECONDS = self::WINDOW_MILLISECONDS / 1000;
 
     /** The SSE event name the live-updates controller listens for. */
     public const string SIGNAL_TYPE = 'refresh';
@@ -51,13 +52,21 @@ final readonly class RefreshTicketPagesHandler
     public function __invoke(RefreshTicketPages $refresh): void
     {
         $ticketId = new TicketId($refresh->ticketId);
-        if ($this->takesWindowOf($ticketId)) {
-            $this->hub->publish(new Update(
-                RealtimeTopics::ofTicket(new OrganizationId($refresh->organizationId), $ticketId),
-                self::SIGNAL_DATA,
-                private: true,
-                type: self::SIGNAL_TYPE,
-            ));
+        $window = $this->windowOf($ticketId);
+        if ($window->acquire()) {
+            try {
+                $this->hub->publish(new Update(
+                    RealtimeTopics::ofTicket(new OrganizationId($refresh->organizationId), $ticketId),
+                    self::SIGNAL_DATA,
+                    private: true,
+                    type: self::SIGNAL_TYPE,
+                ));
+            } catch (\Throwable $publishFailure) {
+                // Messenger retries this message; a window still held would turn that retry into a silent no-op.
+                $window->release();
+
+                throw $publishFailure;
+            }
 
             return;
         }
@@ -75,20 +84,20 @@ final readonly class RefreshTicketPagesHandler
         }
     }
 
-    private function takesWindowOf(TicketId $ticketId): bool
+    private function windowOf(TicketId $ticketId): LockInterface
     {
-        return $this->takesLock('realtime-refresh:'.$ticketId->toString());
+        return $this->windowLock('realtime-refresh:'.$ticketId->toString());
     }
 
     /** Held while a Trailing try waits, so a burst queues one, not one per change. */
     private function takesTrailingTryOf(TicketId $ticketId): bool
     {
-        return $this->takesLock('realtime-refresh-trailing:'.$ticketId->toString());
+        return $this->windowLock('realtime-refresh-trailing:'.$ticketId->toString())->acquire();
     }
 
-    private function takesLock(string $resource): bool
+    private function windowLock(string $resource): LockInterface
     {
-        // Not released: the lock is the window, and it ends when its time to live runs out.
-        return $this->lockFactory->createLock($resource, self::WINDOW_SECONDS, autoRelease: false)->acquire();
+        // Not released once taken: the lock is the window, and it ends when its time to live runs out.
+        return $this->lockFactory->createLock($resource, self::WINDOW_SECONDS, autoRelease: false);
     }
 }

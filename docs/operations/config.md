@@ -11,7 +11,7 @@ One page that lists every environment variable pinround reads: its default, who 
 - [Valkey and messaging](#valkey-and-messaging) — cache, state (sessions, login counters) and queue DSNs
 - [Mail](#mail) — the mailer DSN and the From address
 - [Field encryption](#field-encryption) — the key ring for secrets stored in the database
-- [Mercure](#mercure) — hub keys and the public hub URL
+- [Mercure](#mercure) — hub keys, issuer, the public and internal hub URLs
 - [Object storage](#object-storage) — health endpoint, public URL, MinIO credentials
 - [Tracing](#tracing) — the OpenTelemetry settings
 - [Web server and runtime](#web-server-and-runtime) — FrankenPHP and Caddy settings
@@ -88,12 +88,15 @@ Secrets stored in the database (MFA seeds, and later integration tokens, client 
 ## Mercure
 | Variable | Default | Read by | Secret | What it does |
 |---|---|---|---|---|
-| `MERCURE_PUBLISHER_JWT_KEY` | empty on purpose in `.env`; dev placeholder in `.env.dev` and `compose.yaml`; none, required in prod | app (Caddy hub) | yes | Key that signs publish tokens. Prod refuses an empty or `change-me` value. |
+| `MERCURE_PUBLISHER_JWT_KEY` | empty on purpose in `.env`; dev placeholder in `.env.dev` and `compose.yaml`; none, required in prod | app (Caddy hub), worker (worker-notify signs its publish tokens with it, `mercure.yaml`) | yes | Key that signs publish tokens. Prod refuses an empty or `change-me` value. |
 | `MERCURE_PUBLISHER_JWT_ALG` | `HS256` | app (Caddy hub) | no | Signing algorithm of the publisher key. |
 | `MERCURE_SUBSCRIBER_JWT_KEY` | empty on purpose in `.env`; dev placeholder in `.env.dev` and `compose.yaml`; none, required in prod | app (Caddy hub) | yes | Key that checks subscribe tokens. Prod refuses an empty or `change-me` value. |
 | `MERCURE_SUBSCRIBER_JWT_ALG` | `HS256` | app (Caddy hub) | no | Algorithm of the subscriber key. |
 | `MERCURE_PUBLIC_URL` | empty on purpose in `.env`; `https://localhost/.well-known/mercure` in `.env.dev`, `.env.test` and `compose.yaml` (app); none, required in prod | app, workers (Caddy hub) | no | The hub URL browsers subscribe to. Its origin joins the CSP `connect-src`. It is also the `aud` of every hub token: the Caddyfile pins it as the hub's `resource_identifier` and `mercure.yaml` signs it, so the hub refuses a token with any other audience. Caddy does not start when it is unset. |
 | `MERCURE_TRUSTED_ISSUERS` | `https://localhost` | app (Caddyfile only) | no | Issuer name the hub accepts in tokens. Not in an env file; set it in prod to the public origin. |
+| `MERCURE_URL` | empty on purpose in `.env`; `http://app/.well-known/mercure` in `compose.yaml` (worker); none, required in prod for worker | worker (`mercure.yaml`) | no | The hub URL worker-notify publishes the ticket refresh signal to, through a client that gives up after 2 s. Required wherever `RefreshTicketPages` is handled: empty makes the bundle publish through FrankenPHP's own hub, which works only inside the app container's requests, so every refresh in worker-notify fails. |
+| `MERCURE_JWT_ISSUER` | `https://localhost` in `.env` | app, worker (`mercure.yaml`) | no | The `iss` of every hub token the app signs, publisher and subscriber. Must equal `MERCURE_TRUSTED_ISSUERS`, or the hub refuses every token; set both to the public origin in prod. |
+| `MERCURE_INTERNAL_HOST` | `app` (the Caddyfile's default) | app (Caddyfile only) | no | Host name of the hub's plain-HTTP site the workers publish to, and the `Host` the browser proxy sends it. Not in an env file; set it in prod only when the workers reach the app container by another name, and keep `MERCURE_URL` on the same host. |
 
 ## Object storage
 | Variable | Default | Read by | Secret | What it does |

@@ -20,7 +20,7 @@ const SIGNAL_TYPE = 'refresh';
 // page fetches itself again with the viewer's own session: the frame named by the frame value, or else the whole page
 // through Turbo. Signals that come while the tab is hidden are remembered and fetched once when it is shown again.
 export default class extends Controller {
-  static targets = ['paused'];
+  static targets = ['paused', 'reload'];
   static values = { subscribeUrl: String, tokenUrl: String, ticketIds: Array, frame: String };
 
   #source = null;
@@ -28,18 +28,31 @@ export default class extends Controller {
   #pausedTimer = null;
   #reopenTimer = null;
   #refetchTimer = null;
+  #stopTimer = null;
   #reopenAfterMs = FIRST_REOPEN_AFTER_MS;
   #isSignalMissed = false;
   #onSignal = () => this.#refetchWhenVisible();
   #onVisibilityChange = () => this.#refetchMissedSignal();
 
   connect() {
+    // The element is data-turbo-permanent: a Turbo visit moves it into the new page, which Stimulus sees as a
+    // disconnect and a connect of the same controller. Keeping the stream then loses no signal and asks for no cookie.
+    if (this.#stopTimer !== null) {
+      clearTimeout(this.#stopTimer);
+      this.#stopTimer = null;
+      return;
+    }
     document.addEventListener('visibilitychange', this.#onVisibilityChange);
     this.#renewTimer = setInterval(() => this.#renewCookie(), RENEW_EVERY_MS);
     this.#open();
   }
 
   disconnect() {
+    this.#stopTimer = setTimeout(() => this.#stop(), 0);
+  }
+
+  #stop() {
+    this.#stopTimer = null;
     document.removeEventListener('visibilitychange', this.#onVisibilityChange);
     clearInterval(this.#renewTimer);
     clearTimeout(this.#pausedTimer);
@@ -92,6 +105,8 @@ export default class extends Controller {
   #startPausedTimer() {
     if (this.#pausedTimer === null) {
       this.#pausedTimer = setTimeout(() => {
+        // The element outlives Turbo visits, so the link the server rendered may name an earlier page.
+        this.reloadTarget.href = window.location.href;
         this.pausedTarget.hidden = false;
       }, PAUSED_AFTER_MS);
     }

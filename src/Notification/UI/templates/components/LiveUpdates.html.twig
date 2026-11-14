@@ -1,5 +1,7 @@
 {% if this.subscribeUrl is not null %}
     <div{{ attributes.defaults({
+        id: this.elementId,
+        'data-turbo-permanent': '',
         class: 'live-updates',
         'data-controller': 'live-updates',
         'data-live-updates-subscribe-url-value': this.subscribeUrl,
@@ -7,7 +9,7 @@
         'data-live-updates-ticket-ids-value': (this.ticketId is null ? [] : [this.ticketId])|json_encode,
     }) }}>
         <p class="live-updates__paused" role="status" data-live-updates-target="paused" hidden>
-            Updates paused. <a href="{{ app.request.requestUri }}" class="live-updates__reload" data-turbo="false">Reload</a> to see the latest.
+            Updates paused. <a href="{{ app.request.requestUri }}" class="live-updates__reload" data-live-updates-target="reload" data-turbo="false">Reload</a> to see the latest.
         </p>
     </div>
 {% endif %}

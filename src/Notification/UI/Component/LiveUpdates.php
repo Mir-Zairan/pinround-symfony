@@ -49,6 +49,15 @@ final class LiveUpdates
         $this->ticketId = $ticketId?->toString();
     }
 
+    /**
+     * The element is data-turbo-permanent, and Turbo keeps it across a visit to a page with an element of the same id.
+     * The id follows the subscribe URL, so a page for another ticket or another person gets a new element and stream.
+     */
+    public function elementId(): string
+    {
+        return 'live-updates-'.hash('xxh128', (string) $this->subscribeUrl);
+    }
+
     public function tokenRoute(): string
     {
         return RealtimeTokenController::ROUTE;
