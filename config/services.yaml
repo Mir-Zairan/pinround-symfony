@@ -101,6 +101,15 @@ services:
         tags:
             - { name: messenger.message_handler, bus: event.bus, handles: App\Organization\Api\Event\OrganizationEvent }
 
+    # Tagged here for the same reason; the five events reach it from async_notify on event.bus (messenger.yaml).
+    App\Notification\Application\Notify\NotifyRecipients:
+        tags:
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Notification\Api\Event\PingSent }
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Conversation\Api\Event\QuestionAsked }
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Conversation\Api\Event\QuestionAnswered }
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Conversation\Api\Event\ReplyPosted }
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Ticketing\Api\Event\TicketAssigned }
+
     # Wired here, not with #[AutowireIterator]: the Application layer may not use a Vendor class (deptrac.yaml).
     # The tag is the one the _instanceof rule above gives every OrganizationSetupStep.
     App\Organization\Application\CreateOrganization:
