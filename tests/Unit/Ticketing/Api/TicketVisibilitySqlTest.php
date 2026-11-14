@@ -80,12 +80,35 @@ final class TicketVisibilitySqlTest extends TestCase
     }
 
     #[Test]
+    public function theForEveryoneConditionKeepsToTheOrganizationAndTicketsForEveryone(): void
+    {
+        $condition = TicketVisibilitySql::forEveryoneIn(new OrganizationId(self::ACME_FOODS), 'tt');
+
+        self::assertSame(
+            "(tt.organization_id = CAST(:tt_visible_org AS uuid) AND tt.visibility = '".TicketVisibilityFacts::FOR_EVERYONE."')",
+            $condition->sql(),
+        );
+        self::assertSame(['tt_visible_org' => self::ACME_FOODS], $condition->parameters());
+    }
+
+    #[Test]
     #[DataProvider('aliasesThatAreNotPlainIdentifiers')]
     public function anAliasThatIsNotAPlainIdentifierIsRefused(string $alias): void
     {
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A table alias must be a plain lower-case SQL identifier.');
 
         TicketVisibilitySql::of(TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], false, new UserId(self::SARA)), $alias);
+    }
+
+    #[Test]
+    #[DataProvider('aliasesThatAreNotPlainIdentifiers')]
+    public function theForEveryoneConditionRefusesAnAliasThatIsNotAPlainIdentifier(string $alias): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A table alias must be a plain lower-case SQL identifier.');
+
+        TicketVisibilitySql::forEveryoneIn(new OrganizationId(self::ACME_FOODS), $alias);
     }
 
     /**
