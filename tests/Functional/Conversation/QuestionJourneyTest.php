@@ -564,11 +564,12 @@ final class QuestionJourneyTest extends WebTestCase
         $organizationId = $this->acmeFoods->toString();
         $pause = [];
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$pause): int {
-            $pause = $migrator->fetchNumeric("SELECT asked_user_id::text, asker_id::text FROM tkt_ticket WHERE organization_id = ? AND key = 'SHOP-1'", [$organizationId]);
+            $row = $migrator->fetchNumeric("SELECT asked_user_id::text, asker_id::text FROM tkt_ticket WHERE organization_id = ? AND key = 'SHOP-1'", [$organizationId]);
+            self::assertIsArray($row, 'SHOP-1 has no ticket row.');
+            $pause = $row;
 
             return 0;
         });
-        self::assertIsArray($pause);
         [$askedUserId, $askerId] = $pause;
         \assert((null === $askedUserId || \is_string($askedUserId)) && (null === $askerId || \is_string($askerId)));
 
@@ -583,11 +584,12 @@ final class QuestionJourneyTest extends WebTestCase
         $organizationId = $this->acmeFoods->toString();
         $turn = [];
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$turn): int {
-            $turn = $migrator->fetchNumeric('SELECT turn_user_id::text, kind FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]);
+            $row = $migrator->fetchNumeric('SELECT turn_user_id::text, kind FROM ins_ticket_turn WHERE organization_id = ?', [$organizationId]);
+            self::assertIsArray($row, 'SHOP-1 has no saved turn.');
+            $turn = $row;
 
             return 0;
         });
-        self::assertIsArray($turn);
         [$turnUserId, $kind] = $turn;
         \assert((null === $turnUserId || \is_string($turnUserId)) && \is_string($kind));
 
