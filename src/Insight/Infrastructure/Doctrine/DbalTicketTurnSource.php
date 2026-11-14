@@ -50,7 +50,8 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
             $waitingTurns ?? $this->teamLoadQueries->waitingTurnsOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId),
         );
 
-        // No organization has a current release yet, and the quick check and questions come later in P03.
+        // No organization has a current release yet, and the quick check comes later. An open question arrives through
+        // the snapshot's askedUserId, which ticketStateOf passes on.
         return new TicketTurnFacts($snapshot->ticketId, $snapshot->projectId, TurnInputs::ticketStateOf($snapshot), $team, $snapshot->visibility, isRiskCheck: $snapshot->isRiskCheck);
     }
 

@@ -84,6 +84,68 @@ final class TicketTurnSnapshotTest extends TestCase
         self::snapshot(true, true, true, $visibility);
     }
 
+    /**
+     * @return iterable<string, array{bool, bool}>
+     */
+    public static function matchedQuestionPauses(): iterable
+    {
+        yield 'a paused ticket' => [true, true];
+        yield 'a ticket that waits for no answer' => [false, false];
+    }
+
+    #[Test]
+    #[DataProvider('matchedQuestionPauses')]
+    public function anAskedPersonAndAskerBothPresentOrBothAbsentMakeASnapshot(bool $hasAsked, bool $hasAsker): void
+    {
+        $snapshot = self::pausedSnapshot($hasAsked, $hasAsker);
+
+        self::assertSame(
+            [$hasAsked ? self::LENA : null, $hasAsker ? self::MIA : null],
+            [$snapshot->askedUserId?->toString(), $snapshot->askerId?->toString()],
+        );
+    }
+
+    /**
+     * @return iterable<string, array{bool, bool}>
+     */
+    public static function mismatchedQuestionPauses(): iterable
+    {
+        yield 'an asked person with no asker' => [true, false];
+        yield 'an asker with no asked person' => [false, true];
+    }
+
+    #[Test]
+    #[DataProvider('mismatchedQuestionPauses')]
+    public function anAskedPersonWithoutAnAskerOrTheOtherWayRoundIsRefused(bool $hasAsked, bool $hasAsker): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A paused ticket has both the asked person and the asker.');
+
+        self::pausedSnapshot($hasAsked, $hasAsker);
+    }
+
+    private static function pausedSnapshot(bool $hasAsked, bool $hasAsker): TicketTurnSnapshot
+    {
+        return new TicketTurnSnapshot(
+            new TicketId(self::TICKET),
+            '0197a3c0-0000-7000-8000-00000000c0e1',
+            '0197a3c0-0000-7000-8000-00000000c0f1',
+            'progress',
+            'doing',
+            new TeamId(self::SHOP_TEAM),
+            new UserId(self::LENA),
+            'Lena',
+            [],
+            [],
+            'all',
+            'major',
+            null,
+            new UserId(self::MIA),
+            askedUserId: $hasAsked ? new UserId(self::LENA) : null,
+            askerId: $hasAsker ? new UserId(self::MIA) : null,
+        );
+    }
+
     private static function snapshot(bool $hasTeam, bool $hasLead, bool $hasLeadName, string $visibility): TicketTurnSnapshot
     {
         return new TicketTurnSnapshot(

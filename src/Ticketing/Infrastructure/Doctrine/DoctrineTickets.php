@@ -10,6 +10,7 @@ use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
 use App\Ticketing\Domain\TicketVersionConflict;
+use Doctrine\DBAL\LockMode;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
@@ -100,5 +101,19 @@ final readonly class DoctrineTickets implements Tickets
             'organizationId' => $organizationId->toString(),
             'key' => $key->toString(),
         ]);
+    }
+
+    public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket
+    {
+        // A lock taken outside a transaction ends with its statement and would protect nothing.
+        if (!$this->entityManager->getConnection()->isTransactionActive()) {
+            throw new \LogicException('A ticket is locked only inside a transaction.');
+        }
+
+        return $this->entityManager->find(
+            Ticket::class,
+            ['organizationId' => $organizationId->toString(), 'id' => $ticketId->toString()],
+            LockMode::PESSIMISTIC_WRITE,
+        );
     }
 }

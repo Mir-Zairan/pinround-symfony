@@ -13,6 +13,7 @@ use App\Ticketing\Domain\InvalidWaitingOn;
 use App\Ticketing\Domain\Priority;
 use App\Ticketing\Domain\ProjectId;
 use App\Ticketing\Domain\ProjectKey;
+use App\Ticketing\Domain\QuestionAlreadyOpen;
 use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketDescriptionTooLong;
 use App\Ticketing\Domain\TicketKey;
@@ -296,6 +297,85 @@ final class TicketTest extends TestCase
                 $ticket->waitingOnLabel(), $ticket->release(), $ticket->isRiskCheck(), $ticket->version(),
             ],
         );
+    }
+
+    #[Test]
+    public function aNewTicketWaitsForNoAnswer(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+
+        self::assertSame([null, null], [$ticket->askedUser(), $ticket->asker()]);
+    }
+
+    #[Test]
+    public function aQuestionPausesTheTicketOnTheAskedPersonAndKeepsItsStep(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+
+        $ticket->pauseForQuestion(new UserId(self::LENA), new UserId(self::OMAR));
+
+        self::assertSame(
+            [self::LENA, self::OMAR, self::TO_DO_STEP],
+            [$ticket->askedUser()?->toString(), $ticket->asker()?->toString(), $ticket->stepId()],
+        );
+    }
+
+    #[Test]
+    public function aSecondQuestionIsRefusedAndTheFirstPauseStays(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $ticket->pauseForQuestion(new UserId(self::LENA), new UserId(self::OMAR));
+
+        try {
+            $ticket->pauseForQuestion(new UserId(self::MIA), new UserId(self::LENA));
+            self::fail('A second question was accepted.');
+        } catch (QuestionAlreadyOpen $refusal) {
+            self::assertSame('This ticket already waits for an answer.', $refusal->getMessage());
+        }
+
+        self::assertSame(
+            [self::LENA, self::OMAR],
+            [$ticket->askedUser()?->toString(), $ticket->asker()?->toString()],
+        );
+    }
+
+    #[Test]
+    public function nobodyAsksThemselvesAndTheTicketStaysUnpaused(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+
+        try {
+            $ticket->pauseForQuestion(new UserId(self::OMAR), new UserId(self::OMAR));
+            self::fail('A question to the asker was accepted.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertSame('A person cannot ask themselves a question.', $refusal->getMessage());
+        }
+
+        self::assertSame([null, null], [$ticket->askedUser(), $ticket->asker()]);
+    }
+
+    #[Test]
+    public function resumingClearsThePauseSoAnotherQuestionCanFollow(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+        $ticket->pauseForQuestion(new UserId(self::LENA), new UserId(self::OMAR));
+
+        $ticket->resume();
+
+        self::assertSame([null, null, self::TO_DO_STEP], [$ticket->askedUser(), $ticket->asker(), $ticket->stepId()]);
+        $ticket->pauseForQuestion(new UserId(self::MIA), new UserId(self::LENA));
+        self::assertSame(self::MIA, $ticket->askedUser()?->toString());
+    }
+
+    #[Test]
+    public function resumingATicketThatWaitsForNoAnswerIsRefused(): void
+    {
+        $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('This ticket waits for no answer.');
+
+        $ticket->resume();
     }
 
     /**

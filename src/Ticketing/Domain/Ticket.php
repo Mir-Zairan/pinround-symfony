@@ -39,6 +39,8 @@ final class Ticket implements TenantOwned
     private ?string $testerId = null;
     private ?string $waitingOnUserId = null;
     private ?string $waitingOnLabel = null;
+    private ?string $askedUserId = null;
+    private ?string $askerId = null;
     private readonly string $reporterId;
     private ?string $teamId;
     private Visibility $visibility;
@@ -256,6 +258,22 @@ final class Ticket implements TenantOwned
         return $this->waitingOnLabel;
     }
 
+    /**
+     * The person who must answer the ticket's open question; null while no question pauses the ticket.
+     */
+    public function askedUser(): ?UserId
+    {
+        return null === $this->askedUserId ? null : new UserId($this->askedUserId);
+    }
+
+    /**
+     * The person who asked the ticket's open question; null exactly when askedUser() is null.
+     */
+    public function asker(): ?UserId
+    {
+        return null === $this->askerId ? null : new UserId($this->askerId);
+    }
+
     public function release(): ?string
     {
         return $this->release;
@@ -349,6 +367,41 @@ final class Ticket implements TenantOwned
         }
         $this->assigneeId = $assigneeId;
         $this->updatedAt = $givenAt;
+    }
+
+    /**
+     * Pauses the ticket until the asked person answers the asker's question (FR-CNV-08); the step stays as it is. The
+     * caller has checked the asked person is on the ticket. A refused pause changes nothing.
+     *
+     * @throws QuestionAlreadyOpen       when another question already pauses the ticket
+     * @throws \InvalidArgumentException when the asker asks themselves
+     */
+    public function pauseForQuestion(UserId $asked, UserId $asker): void
+    {
+        if (null !== $this->askedUserId) {
+            throw new QuestionAlreadyOpen('This ticket already waits for an answer.');
+        }
+        if ($asked->equals($asker)) {
+            throw new \InvalidArgumentException('A person cannot ask themselves a question.');
+        }
+
+        $this->askedUserId = $asked->toString();
+        $this->askerId = $asker->toString();
+    }
+
+    /**
+     * Ends the question pause, so the turn goes back to the step's normal owner.
+     *
+     * @throws \LogicException when no question pauses the ticket
+     */
+    public function resume(): void
+    {
+        if (null === $this->askedUserId) {
+            throw new \LogicException('This ticket waits for no answer.');
+        }
+
+        $this->askedUserId = null;
+        $this->askerId = null;
     }
 
     private static function checkedTitle(string $title): string

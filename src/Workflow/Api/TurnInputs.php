@@ -28,6 +28,7 @@ final class TurnInputs
      * @param string      $groupCode      one of todo, doing, check, wait, done
      * @param string|null $waitingOnLabel who the ticket waits on when that is not a user
      * @param string|null $priority       one of blocker, critical, major, normal, minor
+     * @param UserId|null $askedUserId    the person an open question waits on; null while no question is open
      */
     public static function ticketState(
         string $stepId,
@@ -44,6 +45,7 @@ final class TurnInputs
         ?string $waitingOnLabel,
         ?string $priority,
         ?string $release,
+        ?UserId $askedUserId,
     ): TicketState {
         return new TicketState(
             $stepId,
@@ -60,6 +62,7 @@ final class TurnInputs
             waitingOnLabel: $waitingOnLabel,
             priority: $priority,
             release: $release,
+            askedUserId: $askedUserId,
         );
     }
 
@@ -83,6 +86,7 @@ final class TurnInputs
             waitingOnLabel: $snapshot->waitingOnLabel,
             priority: $snapshot->priority,
             release: $snapshot->release,
+            askedUserId: $snapshot->askedUserId,
         );
     }
 

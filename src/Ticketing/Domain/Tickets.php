@@ -45,4 +45,16 @@ interface Tickets
      * @return Ticket|null null when the organization has no ticket with the key
      */
     public function ofKey(OrganizationId $organizationId, TicketKey $key): ?Ticket;
+
+    /**
+     * The ticket of the organization with the id, loaded for a change and locked (SELECT ... FOR UPDATE) until the
+     * transaction ends, so two requests cannot both pass a check on it before their writes. A ticket of another
+     * organization is not found. When the request has loaded the ticket already, the row is locked but the object is
+     * not reloaded: its fields, and any unsaved change to them, stay as they were, and save still refuses a stale one.
+     *
+     * @return Ticket|null null when the organization has no ticket with the id
+     *
+     * @throws \LogicException when no transaction is open, before any query
+     */
+    public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket;
 }

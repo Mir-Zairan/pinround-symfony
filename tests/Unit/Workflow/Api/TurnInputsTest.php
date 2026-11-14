@@ -39,14 +39,16 @@ final class TurnInputsTest extends TestCase
             'Supplier',
             'major',
             '2.4',
+            new UserId('0197a3c0-0000-7000-8000-00000000c767'),
         );
 
         self::assertSame(
-            ['0197a3c0-0000-7000-8000-00000000c7a1', 'review', 'check', self::TEAM, self::OMAR, self::LENA, self::MIA, self::NOOR, '0197a3c0-0000-7000-8000-00000000c7a2', self::LENA, self::MIA, 'Supplier', 'major', '2.4'],
+            ['0197a3c0-0000-7000-8000-00000000c7a1', 'review', 'check', self::TEAM, self::OMAR, self::LENA, self::MIA, self::NOOR, '0197a3c0-0000-7000-8000-00000000c7a2', self::LENA, self::MIA, 'Supplier', 'major', '2.4', '0197a3c0-0000-7000-8000-00000000c767'],
             [
                 $state->stepId, $state->coreCode, $state->groupCode, $state->teamId?->toString(), $state->assigneeId?->toString(),
                 $state->reviewerId?->toString(), $state->testerId?->toString(), $state->pendingAssigneeId?->toString(), $state->previousStepId,
                 $state->reporterId?->toString(), $state->waitingOnUserId?->toString(), $state->waitingOnLabel, $state->priority, $state->release,
+                $state->askedUserId?->toString(),
             ],
         );
     }
@@ -76,6 +78,8 @@ final class TurnInputsTest extends TestCase
             waitingOnUserId: new UserId('0197a3c0-0000-7000-8000-00000000c766'),
             waitingOnLabel: 'Supplier',
             previousStepId: '0197a3c0-0000-7000-8000-00000000c7a2',
+            askedUserId: new UserId('0197a3c0-0000-7000-8000-00000000c767'),
+            askerId: new UserId('0197a3c0-0000-7000-8000-00000000c768'),
         );
 
         $state = TurnInputs::ticketStateOf($snapshot);
@@ -85,12 +89,13 @@ final class TurnInputsTest extends TestCase
                 '0197a3c0-0000-7000-8000-00000000c7a1', 'review', 'check', self::TEAM, '0197a3c0-0000-7000-8000-00000000c762',
                 '0197a3c0-0000-7000-8000-00000000c764', '0197a3c0-0000-7000-8000-00000000c765', '0197a3c0-0000-7000-8000-00000000c763',
                 '0197a3c0-0000-7000-8000-00000000c7a2', '0197a3c0-0000-7000-8000-00000000c761', '0197a3c0-0000-7000-8000-00000000c766',
-                'Supplier', 'major', '2.4',
+                'Supplier', 'major', '2.4', '0197a3c0-0000-7000-8000-00000000c767',
             ],
             [
                 $state->stepId, $state->coreCode, $state->groupCode, $state->teamId?->toString(), $state->assigneeId?->toString(),
                 $state->reviewerId?->toString(), $state->testerId?->toString(), $state->pendingAssigneeId?->toString(), $state->previousStepId,
                 $state->reporterId?->toString(), $state->waitingOnUserId?->toString(), $state->waitingOnLabel, $state->priority, $state->release,
+                $state->askedUserId?->toString(),
             ],
         );
     }
@@ -98,9 +103,9 @@ final class TurnInputsTest extends TestCase
     #[Test]
     public function aTicketNoTeamOwnsKeepsNullsAndNoCoreCode(): void
     {
-        $state = TurnInputs::ticketState('0197a3c0-0000-7000-8000-00000000c7a1', null, 'doing', null, null, null, null, null, null, null, null, null, null, null);
+        $state = TurnInputs::ticketState('0197a3c0-0000-7000-8000-00000000c7a1', null, 'doing', null, null, null, null, null, null, null, null, null, null, null, null);
 
-        self::assertSame([null, null, 'doing'], [$state->coreCode, $state->teamId, $state->groupCode]);
+        self::assertSame([null, null, 'doing', null], [$state->coreCode, $state->teamId, $state->groupCode, $state->askedUserId]);
     }
 
     #[Test]

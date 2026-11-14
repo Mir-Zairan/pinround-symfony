@@ -82,6 +82,14 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         );
     }
 
+    public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket
+    {
+        return array_find(
+            $this->addedTickets,
+            static fn (Ticket $ticket): bool => $ticket->organizationId()->equals($organizationId) && $ticket->id()->equals($ticketId),
+        );
+    }
+
     public function recordCreated(OrganizationId $organizationId, TicketId $ticketId, UserId $reporter, string $stepId, \DateTimeImmutable $at): void
     {
         $this->writes[] = \sprintf('created %s by %s in %s at %s', $ticketId->toString(), $reporter->toString(), $stepId, $at->format('Y-m-d H:i'));

@@ -322,6 +322,11 @@ final class CreateTicketTest extends KernelTestCase
             {
                 return $this->doctrineTickets->ofKey($organizationId, $key);
             }
+
+            public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket
+            {
+                return $this->doctrineTickets->lockedOf($organizationId, $ticketId);
+            }
         };
     }
 

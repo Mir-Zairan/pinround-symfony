@@ -770,6 +770,11 @@ final class MoveTicketTest extends KernelTestCase
 
                 return $ticket;
             }
+
+            public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket
+            {
+                return new DoctrineTickets($this->entityManager)->lockedOf($organizationId, $ticketId);
+            }
         });
 
         $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $moveTicket->move(

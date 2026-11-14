@@ -25,8 +25,11 @@ final readonly class TicketTurnSnapshot
      * @param string       $visibility      all, or team for a restricted ticket
      * @param string       $priority        one of blocker, critical, major, normal, minor
      * @param bool         $isRiskCheck     true while the ticket's check reasons include "risk"
+     * @param UserId|null  $askedUserId     who must answer the question that pauses the ticket; null while none does
+     * @param UserId|null  $askerId         who asked that question; null exactly when $askedUserId is null
      *
-     * @throws \InvalidArgumentException when the lead does not match the team, or the visibility is not all or team
+     * @throws \InvalidArgumentException when the lead does not match the team, the asker does not match the asked
+     *                                   person, or the visibility is not all or team
      */
     public function __construct(
         public TicketId $ticketId,
@@ -51,9 +54,14 @@ final readonly class TicketTurnSnapshot
         public ?string $waitingOnLabel = null,
         public ?string $previousStepId = null,
         public bool $isRiskCheck = false,
+        public ?UserId $askedUserId = null,
+        public ?UserId $askerId = null,
     ) {
         if ((null === $teamId) !== (null === $leadId) || (null === $leadId) !== (null === $leadDisplayName)) {
             throw new \InvalidArgumentException('A ticket has a team lead and their name exactly when it has a team.');
+        }
+        if ((null === $askedUserId) !== (null === $askerId)) {
+            throw new \InvalidArgumentException('A paused ticket has both the asked person and the asker.');
         }
         // The values of Ticketing's TicketVisibilityFacts::FOR_EVERYONE and TEAM_ONLY, which SharedKernel cannot see.
         if (!\in_array($visibility, ['all', 'team'], true)) {
