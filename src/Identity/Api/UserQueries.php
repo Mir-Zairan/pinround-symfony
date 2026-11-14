@@ -11,6 +11,8 @@ use App\SharedKernel\Domain\UserId;
  */
 interface UserQueries
 {
+    public const int MAX_TIME_ZONE_USER_IDS = 100;
+
     /**
      * Reads with plain SQL and holds no entity, so it may run while another module's tenant is being switched.
      *
@@ -28,4 +30,16 @@ interface UserQueries
      * @return array<string, UserView> keyed by user id string, in user id order
      */
     public function byIds(array $userIds): array;
+
+    /**
+     * One query; an empty $userIds runs none. Not limited to the tenant, like byIds: pass only ids read under it. An
+     * unknown id is left out; a saved zone PHP does not know gives UTC.
+     *
+     * @param list<UserId> $userIds at most MAX_TIME_ZONE_USER_IDS
+     *
+     * @return array<string, \DateTimeZone> the person's saved IANA time zone, keyed by user id string, in user id order
+     *
+     * @throws \InvalidArgumentException when $userIds holds more than MAX_TIME_ZONE_USER_IDS ids, before any query
+     */
+    public function timeZonesOf(array $userIds): array;
 }

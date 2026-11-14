@@ -19,4 +19,13 @@ final class DbalUserQueriesTest extends TestCase
 
         self::assertSame([], new DbalUserQueries($connection)->byIds([]));
     }
+
+    #[Test]
+    public function noUserIdsGiveNoTimeZonesWithoutAQuery(): void
+    {
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method(self::anything());
+
+        self::assertSame([], new DbalUserQueries($connection)->timeZonesOf([]));
+    }
 }

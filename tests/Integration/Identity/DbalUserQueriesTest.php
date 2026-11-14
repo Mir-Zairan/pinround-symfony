@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Identity;
 
+use App\Identity\Api\UserQueries;
 use App\Identity\Api\UserView;
 use App\Identity\Domain\Email;
 use App\Identity\Domain\User;
@@ -87,6 +88,39 @@ final class DbalUserQueriesTest extends KernelTestCase
     public function byIdsFindsNoOneForOnlyUnknownIds(): void
     {
         self::assertSame([], $this->userQueries()->byIds([new UserId(self::UNKNOWN_ID)]));
+    }
+
+    #[Test]
+    public function timeZonesOfGivesEachKnownUsersSavedZoneByIdInIdOrder(): void
+    {
+        new DoctrineUsers($this->entityManager)->add(
+            new User(new UserId(self::LENA_ID), new Email('lena@acme-foods.example'), 'Lena Fischer', 'en', 'Asia/Tokyo', new \DateTimeImmutable('2026-11-02 09:30:00 UTC')),
+        );
+
+        $zones = $this->userQueries()->timeZonesOf([new UserId(self::USER_ID), new UserId(self::UNKNOWN_ID), new UserId(self::LENA_ID)]);
+
+        self::assertSame([self::LENA_ID => 'Asia/Tokyo', self::USER_ID => 'Europe/Berlin'], array_map(static fn (\DateTimeZone $zone): string => $zone->getName(), $zones));
+    }
+
+    #[Test]
+    public function timeZonesOfGivesUtcForASavedZonePhpDoesNotKnow(): void
+    {
+        $this->entityManager->getConnection()->executeStatement("UPDATE idn_user SET time_zone = 'Mars/Olympus_Mons' WHERE id = ?", [self::USER_ID]);
+
+        self::assertSame([self::USER_ID => 'UTC'], array_map(static fn (\DateTimeZone $zone): string => $zone->getName(), $this->userQueries()->timeZonesOf([new UserId(self::USER_ID)])));
+    }
+
+    #[Test]
+    public function timeZonesOfRefusesMoreThanTheCapAndTakesTheCap(): void
+    {
+        try {
+            $this->userQueries()->timeZonesOf(array_fill(0, UserQueries::MAX_TIME_ZONE_USER_IDS + 1, new UserId(self::USER_ID)));
+            self::fail('101 ids should be refused.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertSame('Ask for the time zones of at most 100 people at once.', $refusal->getMessage());
+        }
+
+        self::assertSame([self::USER_ID], array_keys($this->userQueries()->timeZonesOf(array_fill(0, UserQueries::MAX_TIME_ZONE_USER_IDS, new UserId(self::USER_ID)))));
     }
 
     private function userQueries(): DbalUserQueries

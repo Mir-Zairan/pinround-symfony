@@ -30,4 +30,9 @@ final readonly class FixedUserQueries implements UserQueries
     {
         throw new \LogicException('Only idByEmail is expected.');
     }
+
+    public function timeZonesOf(array $userIds): array
+    {
+        throw new \LogicException('Only idByEmail is expected.');
+    }
 }
