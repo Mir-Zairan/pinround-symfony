@@ -65,6 +65,7 @@ $triagerOfANoTeamTicket = 'and to the triager while it has no team';
 $managersOutsideTheTeam = 'Not to managers outside the team.';
 $commentAndReply = '| Comment, reply |';
 $pingAPerson = '| Ping a person | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
+$askAQuestion = '| Ask a question (pauses ticket) | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
 $adminPings = 'An admin with no team role may see every ticket in the org (including team-only ones), comment, ask questions and ping';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
@@ -296,4 +297,15 @@ return [
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Omar', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'denied'],
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $adminPings, 'attribute' => ConversationPermission::ASK, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $teamOnlyTickets, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+    ['source' => $managersOutsideTheTeam, 'attribute' => ConversationPermission::ASK, 'actor' => 'Raj', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => ConversationPermission::ASK, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'denied'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Omar', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'denied'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
 ];
