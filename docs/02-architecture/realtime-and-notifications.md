@@ -104,7 +104,7 @@ The actor never notifies themselves. Muted tickets are skipped. For restricted t
 2. **Rate limit.** A Symfony RateLimiter (storage: Valkey, policy: fixed window of N hours) uses the key `ping:{org}:{from}:{to}:{ticket}`.
    - If the limit is hit, nothing is stored. The sender sees "You can ping Lena again at 21:50."
    - The dialog always says the rule: "Lena gets one notification. You can ping again after 4 hours (set by your admin)."
-3. **Deliver or hold.** If quiet hours are on and it is between 18:00 and 09:00 in the recipient's time zone, `deliver_after` is set to the next 09:00. A scheduler job releases held pings every 5 minutes. Otherwise the ping is delivered at once: a `ntf_ping` row, then `PingSent` → push to the recipient's topic.
+3. **Deliver or hold.** If quiet hours are on and it is between 18:00 and 09:00 in the recipient's time zone, `deliver_after` is set to the next 09:00. Every 5 minutes a scheduler job (`ReleaseHeldNotifications`) releases the held bell rows that are due and pushes the recipients' bells; the bell already shows a due row on its next read, so the release only adds the push. Otherwise the ping is delivered at once: a `ntf_ping` row, then `PingSent` → push to the recipient's topic.
 4. **Group.** The bell groups pings by (sender, ticket): "Omar · 2 pings · SHOP-412", with the newest text shown. Groups are sorted by size, then by age.
 5. **Clear.** A ping is cleared when either:
    - the recipient clicks "Done" (`cleared_reason = done`); or
