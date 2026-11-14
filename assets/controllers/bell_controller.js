@@ -71,6 +71,11 @@ export default class extends Controller {
 
   // Done's stream replaces the card that held focus; focus goes back to the popover instead of the page's start.
   keepFocusAfterStream(event) {
+    if (this.isOpen && this.isFrameSwap(event.target) && this.hasFrameLoaded()) {
+      event.preventDefault();
+      this.reloadFrameKeepingFocus();
+      return;
+    }
     const render = event.detail.render;
     event.detail.render = async (streamElement) => {
       await render(streamElement);
@@ -78,5 +83,28 @@ export default class extends Controller {
         this.popoverTarget.focus();
       }
     };
+  }
+
+  // The bell push replaces the frame with a fresh lazy one, which would wipe the open cards for "Loading pings…" and
+  // drop focus; an open popover loads its cards in place instead.
+  isFrameSwap(streamElement) {
+    return streamElement.getAttribute('action') === 'replace' && streamElement.getAttribute('target') === this.frameTarget.id;
+  }
+
+  // While the lazy first load runs, a reload would cancel it and Turbo never loads the frame again.
+  hasFrameLoaded() {
+    return this.frameTarget.querySelector('.bell-popover__loading') === null;
+  }
+
+  // Each card's forms post to their own group's URL, so the form's action finds the same control in the new cards.
+  async reloadFrameKeepingFocus() {
+    const hadFocus = this.element.contains(document.activeElement);
+    const focusedAction = this.frameTarget.contains(document.activeElement) ? document.activeElement.closest('form')?.action : undefined;
+    await this.frameTarget.reload();
+    if (!hadFocus || !this.isOpen || this.element.contains(document.activeElement)) {
+      return;
+    }
+    const sameForm = [...this.frameTarget.querySelectorAll('form')].find((form) => form.action === focusedAction);
+    (sameForm?.querySelector('button') ?? this.popoverTarget).focus();
   }
 }

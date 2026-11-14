@@ -1149,7 +1149,61 @@ async function serverBadgeCountOf(page: Page): Promise<number> {
   return spokenCount === null ? 0 : Number(/^(\d+) open$/.exec(spokenCount.trim())?.[1] ?? Number.NaN);
 }
 
+/** As Mia, pings Omar on the ticket and waits for the answer; returns her open session for the caller to close. */
+async function pingOmarAsMia(browser: Browser, key: string, message: string): Promise<{ context: BrowserContext; page: Page }> {
+  const mia = await openAs(browser, MIA_STORAGE_STATE);
+  await mia.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+  await mia.page.getByRole('button', { name: 'Ping Omar' }).click();
+  const sheet = mia.page.getByRole('dialog', { name: 'Ping Omar' });
+  await sheet.getByLabel('Message').fill(message);
+  const pingAnswer = mia.page.waitForResponse((response) => response.url().includes(`/t/${key}/ping/`) && response.request().method() === 'POST');
+  await sheet.getByRole('button', { name: 'Send ping' }).click();
+  expect((await pingAnswer).status()).toBe(200);
+  return mia;
+}
+
+/** Marks the document once the popover shows "Loading pings…" from now on, however briefly. */
+async function recordBellLoadingText(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const popover = document.getElementById('bell-popover')!;
+    new MutationObserver(() => {
+      if (popover.querySelector('.bell-popover__loading')) {
+        document.documentElement.setAttribute('data-e2e-bell-loading-shown', '');
+      }
+    }).observe(popover, { childList: true, subtree: true });
+  });
+}
+
 test.describe("the bell's push", () => {
+  test("a push while the popover is open keeps focus on the card that had it and never shows the loading text", async ({ browser }) => {
+    test.skip(
+      !process.env.CI && !existsSync(MIA_STORAGE_STATE),
+      'auth.setup.ts skipped Mia: her two-step login is on in this database. RefreshBellHandlerTest proves the push.',
+    );
+    const key = await makeTicketForOmar(browser, `Coupon field clears itself ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const streamOpened = omar.page.waitForResponse((response) => pathOf(response.request()) === HUB_PATH);
+    await omar.page.goto('/', { waitUntil: 'networkidle' });
+    expect((await streamOpened).status()).toBe(200);
+    await openBellPopover(omar.page);
+    const cards = bellPopover(omar.page).getByRole('article');
+    await expect(cards.nth(1), 'Omar has at least two cards: run make seed').toBeVisible();
+    const secondCardName = await cards.nth(1).getAttribute('aria-label');
+    expect(secondCardName).not.toBeNull();
+    const secondCardsDone = bellPopover(omar.page).getByRole('article', { name: secondCardName!, exact: true }).getByRole('button', { name: 'Done' });
+    await secondCardsDone.focus();
+    await recordBellLoadingText(omar.page);
+    const miasCard = bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}` });
+
+    const mia = await pingOmarAsMia(browser, key, `Can you check the coupon field? ${randomUUID().slice(0, 8)}`);
+
+    await expect(miasCard).toBeVisible({ timeout: SHOWS_WITHIN_MS });
+    await expect(secondCardsDone).toBeFocused();
+    await expect(omar.page.locator('html')).not.toHaveAttribute('data-e2e-bell-loading-shown');
+    await mia.context.close();
+    await omar.context.close();
+  });
+
   test("Mia's ping shows on Omar's badge within 3 s, and his open popover loads again with her card, without a reload", async ({ browser }) => {
     test.skip(
       !process.env.CI && !existsSync(MIA_STORAGE_STATE),
@@ -1166,17 +1220,10 @@ test.describe("the bell's push", () => {
     await markThisLoad(omar.page);
     const miasCard = bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}` });
     await expect(miasCard).toHaveCount(0);
-    const mia = await openAs(browser, MIA_STORAGE_STATE);
-    await mia.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-    await mia.page.getByRole('button', { name: 'Ping Omar' }).click();
-    const sheet = mia.page.getByRole('dialog', { name: 'Ping Omar' });
     const message = `Can you check the gift card total? ${randomUUID().slice(0, 8)}`;
-    await sheet.getByLabel('Message').fill(message);
-    const pingAnswer = mia.page.waitForResponse((response) => response.url().includes(`/t/${key}/ping/`) && response.request().method() === 'POST');
 
-    await sheet.getByRole('button', { name: 'Send ping' }).click();
+    const mia = await pingOmarAsMia(browser, key, message);
 
-    expect((await pingAnswer).status()).toBe(200);
     await expect(miasCard).toBeVisible({ timeout: SHOWS_WITHIN_MS });
     await expect(miasCard.getByText(`“${message}”`)).toBeVisible();
     await expect(bellButton(omar.page)).toHaveAttribute('aria-expanded', 'true');
