@@ -87,6 +87,9 @@ services:
     restart: unless-stopped
     # Short jobs; read in this order, so notifications go before Jira sync.
     command: php bin/console messenger:consume async_notify async_integration --time-limit=3600 --memory-limit=256M -vv
+    environment:
+      # The app container's hub through its internal address (docker/frankenphp/Caddyfile); only this worker publishes.
+      MERCURE_URL: ${MERCURE_URL:-http://app/.well-known/mercure}
     volumes:
       - .:/app
     depends_on: *consumer-dependencies
