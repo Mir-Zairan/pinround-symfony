@@ -151,6 +151,8 @@ framework:
             App\Notification\Application\Realtime\RefreshBell: async_notify
             # Sent with a TenantStamp by ReleaseHeldNotifications every 5 minutes, one per organization with due notifications.
             App\Notification\Infrastructure\Scheduler\ReleaseDueNotifications: async_notify
+            # Sent with a TenantStamp by QueueDigests every 15 minutes, one per person with a ping or question due in a digest.
+            App\Notification\Application\Digest\SendDigest: async_notify
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.
