@@ -33,14 +33,14 @@ final readonly class UseCaseTicketCommands implements TicketCommands
         return $this->createTicket->create($organizationId, $reporter, $projectId, $title, $description, $type, $priority, $assignee, $reportedAt);
     }
 
-    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int
     {
-        $this->moveTicket->move($organizationId, $actor, $key, $verb, $expectedVersion, $at);
+        return $this->moveTicket->move($organizationId, $actor, $key, $verb, $expectedVersion, $at);
     }
 
-    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
+    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): int
     {
-        $this->moveTicket->giveTo($organizationId, $actor, $key, $assignee, $expectedVersion, $at);
+        return $this->moveTicket->giveTo($organizationId, $actor, $key, $assignee, $expectedVersion, $at);
     }
 
     public function moveTo(
@@ -52,7 +52,7 @@ final readonly class UseCaseTicketCommands implements TicketCommands
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
-    ): void {
-        $this->moveTicket->moveTo($organizationId, $actor, $key, $stepId, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $at);
+    ): int {
+        return $this->moveTicket->moveTo($organizationId, $actor, $key, $stepId, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $at);
     }
 }

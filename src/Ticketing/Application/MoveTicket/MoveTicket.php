@@ -8,6 +8,7 @@ use App\Insight\Api\TeamLoadQueries;
 use App\Insight\Api\TurnProjector;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPeopleQueries;
+use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
@@ -67,17 +68,20 @@ final readonly class MoveTicket
         private TurnProjector $turnProjector,
         private TicketEvents $ticketEvents,
         private TurnPeopleChoice $turnPeopleChoice,
+        private PingClearing $pingClearing,
     ) {
     }
 
     /**
+     * @return int how many of the actor's pings on the ticket the move cleared
+     *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
      * @throws MoveRefused            when the ticket has no team, the policy refuses the verb, the verb is give_it_to
      *                                (which {@see self::giveTo} takes), or it leads to Needs input and the reporter is no
      *                                member of the organization
      */
-    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int
     {
         $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
         $teamId = $ticket->team() ?? throw new MoveRefused(null);
@@ -88,12 +92,14 @@ final readonly class MoveTicket
         $allowed = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, $verb);
         $waitingOn = self::NEEDS_INPUT === $allowed->target->coreCode() ? $this->waitingOnReporter($ticket) : null;
 
-        $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts);
+        return $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts);
     }
 
     /**
      * "Give it to…": the give_it_to verb with the person it names. From Backlog the ticket also goes to To do in the same
      * save (FR-WF-16); in To do it stays there.
+     *
+     * @return int how many of the actor's pings on the ticket the give cleared
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
@@ -101,7 +107,7 @@ final readonly class MoveTicket
      *                                team's lead or a member (ASSIGNEE_NOT_IN_TEAM_NOTE), or already has the ticket
      *                                (ALREADY_GIVEN_NOTE)
      */
-    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
+    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): int
     {
         $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
         $teamId = $ticket->team() ?? throw new MoveRefused(null);
@@ -121,7 +127,7 @@ final readonly class MoveTicket
         }
         $ticket->giveTo($assignee, $at);
 
-        $this->saveAndRecord($ticket, $team, $allowed->before, $actor, $fromStepId, $target->id(), self::GIVE_IT_TO, $assignee, $at, $allowed->waitingTurns);
+        $clearedPingCount = $this->saveAndRecord($ticket, $team, $allowed->before, $actor, $fromStepId, $target->id(), self::GIVE_IT_TO, $assignee, $at, $allowed->waitingTurns);
         $this->ticketEvents->publish(new TicketAssigned(
             $ticket->organizationId()->toString(),
             $allowed->before->ticketId->toString(),
@@ -131,6 +137,8 @@ final readonly class MoveTicket
             $actor->toString(),
             $at,
         ));
+
+        return $clearedPingCount;
     }
 
     /**
@@ -159,6 +167,8 @@ final readonly class MoveTicket
     }
 
     /**
+     * @return int how many of the actor's pings on the ticket the move cleared
+     *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team, is its step now,
@@ -177,7 +187,7 @@ final readonly class MoveTicket
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
-    ): void {
+    ): int {
         if (null !== $waitingOnUserId && null !== $waitingOnLabel) {
             throw new WaitingOnRefused('A ticket waits on a person or a label, not both.');
         }
@@ -209,7 +219,7 @@ final readonly class MoveTicket
         };
         $waitingTurns = $this->waitingTurnsOf($before);
 
-        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns));
+        return $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns));
     }
 
     /**
@@ -299,6 +309,8 @@ final readonly class MoveTicket
      *
      * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
      * @param TeamFacts                         $teamFacts    the team facts built from $before and $waitingTurns
+     *
+     * @return int how many of the actor's pings on the ticket the move cleared
      */
     private function moveAndRecord(
         Ticket $ticket,
@@ -311,7 +323,7 @@ final readonly class MoveTicket
         \DateTimeImmutable $at,
         array $waitingTurns,
         TeamFacts $teamFacts,
-    ): void {
+    ): int {
         $fromStepId = $ticket->stepId();
         if ($target->id() === $fromStepId) {
             throw new MoveRefused(null);
@@ -326,15 +338,18 @@ final readonly class MoveTicket
             self::TEST === $target->coreCode() ? $this->turnPeopleChoice->testerToStore($teamFacts) : null,
         );
 
-        $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
+        return $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
     }
 
     /**
-     * Saves the changed ticket under its version lock, refreshes its turn row, and writes its "moved" history row and,
-     * when it left its step, TicketMoved.
+     * Saves the changed ticket under its version lock, refreshes its turn row, writes its "moved" history row and,
+     * when it left its step, TicketMoved, and clears the actor's pings on the ticket (FR-PNG-05), all in the caller's
+     * transaction.
      *
      * @param UserId|null                       $givenTo      the person a give_it_to names, recorded in the history row
      * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
+     *
+     * @return int how many of the actor's pings on the ticket it cleared
      *
      * @throws TicketChangedMeanwhile when another request saved the ticket first
      */
@@ -349,12 +364,13 @@ final readonly class MoveTicket
         ?UserId $givenTo,
         \DateTimeImmutable $at,
         array $waitingTurns,
-    ): void {
+    ): int {
         try {
             $this->tickets->save($ticket);
         } catch (TicketVersionConflict $conflict) {
             throw new TicketChangedMeanwhile('The ticket was changed after it was read.', 0, $conflict);
         }
+        $clearedPingCount = $this->pingClearing->clearForActor($ticket->organizationId(), $before->ticketId, $actor, $at);
         $overrideNote = $this->turnProjector->refreshFrom($this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people), $waitingTurns);
         if (null === $givenTo) {
             $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $verb, $overrideNote, $at);
@@ -364,7 +380,7 @@ final readonly class MoveTicket
         // Only a give inside To do stays in its step (a move to the same step is refused); its TicketAssigned is its one
         // event.
         if ($fromStepId === $toStepId) {
-            return;
+            return $clearedPingCount;
         }
         $this->ticketEvents->publish(new TicketMoved(
             $ticket->organizationId()->toString(),
@@ -376,6 +392,8 @@ final readonly class MoveTicket
             $actor->toString(),
             $at,
         ));
+
+        return $clearedPingCount;
     }
 
     private static function refuseUnlessAllowed(Decision $decision): void

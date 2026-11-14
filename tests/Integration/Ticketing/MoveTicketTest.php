@@ -9,6 +9,7 @@ use App\Insight\Api\TurnProjector;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPeopleQueries;
 use App\Organization\Infrastructure\Cache\TeamPeopleCache;
+use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -89,9 +90,11 @@ final class MoveTicketTest extends KernelTestCase
     private const string TICKET_BY_KEY = 'SELECT t0.project_id AS project_id_1, t0.number AS number_2, t0.key AS key_3,';
     private const string WAITING_TURNS = 'SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn';
     private const string SAVED = 'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?,';
-    // The turn projector's writes, the history row, then the event bus's doctrine_transaction savepoint around the
-    // outbox's own.
+    // Auto-clear's lock of the actor's open pings on the ticket (the auto_clear switch comes with the settings already
+    // read), the turn projector's writes, the history row, then the event bus's doctrine_transaction savepoint around
+    // the outbox's own.
     private const array PROJECTED_AND_PUBLISHED = [
+        'SELECT n0_.ticket_id AS ticket_id_0, ',
         'INSERT INTO ins_project_count_ticket ',
         'INSERT INTO ins_ticket_turn ',
         'INSERT INTO tkt_ticket_event ',
@@ -864,10 +867,11 @@ final class MoveTicketTest extends KernelTestCase
 
     /**
      * The team's steps, people and rules come from the caches the first move filled, so a verb move reads the ticket
-     * and the team's waiting reviews and tests, then saves, projects and publishes.
+     * and the team's waiting reviews and tests, then saves, locks the actor's open pings on the ticket, projects and
+     * publishes.
      */
     #[Test]
-    public function aWarmVerbMoveRunsEightQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveRunsNineQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -877,11 +881,11 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T7: a move uses at most 8 queries');
+        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P04.T6: a move uses at most 9 queries');
     }
 
     #[Test]
-    public function aWarmMoveToAPlainStepRunsEightQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToAPlainStepRunsNineQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -891,14 +895,14 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T7: a move uses at most 8 queries');
+        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P04.T6: a move uses at most 9 queries');
     }
 
     /**
      * Raj is in the team, but who a ticket waits on may be any member of the organization, so his membership is read.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsTenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -908,15 +912,15 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        // Nine, not eight: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
-        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
+        // Ten, not nine: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
     }
 
     /**
      * With nobody named the ticket waits on Mia, its reporter, whose membership is read as a named person's is.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsTenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -926,14 +930,14 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the reporter\'s membership check');
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the reporter\'s membership check');
     }
 
     /**
      * Put on hold and Go on bring the ticket back to Backlog with the caches warm.
      */
     #[Test]
-    public function aWarmGiveOutOfBacklogRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmGiveOutOfBacklogRunsElevenQueriesBesideItsSavepoints(): void
     {
         $this->setColumns(['step_id' => ShopTeamRows::BACKLOG_STEP, 'assignee_id' => null]);
         $versionBefore = $this->stepAndVersion()[1];
@@ -947,12 +951,12 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::PUBLISHED_AGAIN], $statements);
-        // Ten, not eight: TicketAssigned is a second outbox row with its own notify.
-        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T8: a move plus the TicketAssigned outbox row');
+        // Eleven, not nine: TicketAssigned is a second outbox row with its own notify.
+        self::assertCount(11, self::queriesBesideSavepoints($statements), 'P03.T8: a move plus the TicketAssigned outbox row');
     }
 
     #[Test]
-    public function aWarmGiveInsideToDoRunsEightQueriesBesideItsSavepoints(): void
+    public function aWarmGiveInsideToDoRunsNineQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -962,7 +966,7 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, 'UPDATE tkt_ticket SET assignee_id = ?,', ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T8: a give inside To do publishes only TicketAssigned');
+        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T8: a give inside To do publishes only TicketAssigned');
     }
 
     /**
@@ -1499,6 +1503,8 @@ final class MoveTicketTest extends KernelTestCase
         $container = self::getContainer();
         $snapshots = $container->get('test.ticketing_ticket_turn_snapshots');
         self::assertInstanceOf(TicketTurnSnapshots::class, $snapshots);
+        $pingClearing = $container->get('test.shared_kernel_ping_clearing');
+        \assert($pingClearing instanceof PingClearing);
 
         return new MoveTicket(
             $tickets,
@@ -1513,6 +1519,7 @@ final class MoveTicketTest extends KernelTestCase
             $this->turnProjector(),
             new MessengerTicketEvents($container->get('event.bus'), $this->connection()),
             $container->get(TurnPeopleChoice::class),
+            $pingClearing,
         );
     }
 

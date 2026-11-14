@@ -9,8 +9,8 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * Changes to the tickets of the current organization. Each command runs in the caller's transaction, begun under the
- * organization as tenant, and writes the ticket, its history row, its turn row and its outbox event there, so a
- * rollback leaves none of them. Who may run it is the voter's question, asked by the caller.
+ * organization as tenant, and writes the ticket, its history row, its turn row, its outbox event and, for a move, the
+ * actor's cleared pings there, so a rollback leaves none of them. Who may run it is the voter's question, asked by the caller.
  */
 interface TicketCommands
 {
@@ -54,6 +54,9 @@ interface TicketCommands
      * @param string $verb            a Workflow verb's code, for example "start_work"
      * @param int    $expectedVersion the ticket's version the caller read
      *
+     * @return int how many of the actor's open pings on the ticket the move cleared, in the same transaction (FR-PNG-05):
+     *             0 when the organization's auto-clear is off or none were open
+     *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it; nothing is saved
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first;
      *                                nothing of the move is saved and the ticket is not reloaded
@@ -63,7 +66,7 @@ interface TicketCommands
      *                                input and the reporter is no member of the organization; nothing is saved
      * @throws \LogicException        when no transaction is open
      */
-    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void;
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int;
 
     /**
      * "Give it to…", the give_it_to verb with its person: makes them the assignee, moving a Backlog ticket to To do in
@@ -74,6 +77,8 @@ interface TicketCommands
      *
      * @param UserId $assignee the person to give it to: the lead or a member of the ticket's team, not a viewer
      *
+     * @return int how many of the actor's open pings on the ticket it cleared, as move does
+     *
      * @throws TicketNotFound         as move does
      * @throws TicketChangedMeanwhile as move does
      * @throws MoveRefused            when the ticket has no team, the policy refuses give_it_to to this person (with the
@@ -82,13 +87,15 @@ interface TicketCommands
      *                                (with the note "{assignee} already has this ticket."); nothing is saved
      * @throws \LogicException        when no transaction is open
      */
-    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void;
+    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): int;
 
     /**
      * The lead's "Move to another step…": moves the ticket to a step of its team without a verb, and writes the same rows
      * and event as move, with no verb. In Needs input the ticket waits on the person or label given, else its reporter.
      *
      * @param string $stepId the uuid of the step to move to
+     *
+     * @return int how many of the actor's open pings on the ticket the move cleared, as move does
      *
      * @throws TicketNotFound         as move does
      * @throws TicketChangedMeanwhile as move does
@@ -109,5 +116,5 @@ interface TicketCommands
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
-    ): void;
+    ): int;
 }
