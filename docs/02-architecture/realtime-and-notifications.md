@@ -64,12 +64,14 @@ Implementation notes:
 | Domain event | Pushed to | Push |
 |---|---|---|
 | TicketMoved, TicketAssigned, TicketChecked, TicketVisibilityChanged | ticket topic; user topics of the old and new turn owners | refresh ticket frames; refresh the Home "needs you" frame for the users whose list changed |
-| QuestionAsked / QuestionAnswered | ticket topic; user topic of the asked person (and of the asker on answer) | refresh; bell item; toast "Mia answered your question" |
+| QuestionAsked / QuestionAnswered | ticket topic; user topic of the asked person (and of the asker on answer) | refresh; bell push; toast "Mia answered your question." on the answer |
 | CommentPosted, ReplyPosted, CommentResolved, MessageEdited, MessageRemoved | ticket topic | refresh the thread frame |
 | RoundShared, PinVerdictSet, ChecklistItemChanged | ticket topic; user topic of the next turn owner | refresh the rounds frame |
-| PingSent (delivered) / PingCleared | user topic of the recipient | bell count + items |
+| PingSent (delivered) / PingCleared | user topic of the recipient | bell push |
 | SuggestionReady, SummaryGenerated | user topic of the requester; ticket topic for summaries | refresh the report form or summary frame |
 | MediaReady | user topic of the uploader | replace the "processing" placeholder with the thumbnail |
+
+A bell push is a `RefreshBell` on `async_notify`, sent once the notification row (or the clear) commits: worker-notify publishes the new badge, a fresh lazy popover frame that the page loads again through the person's own session, and the toast when there is one. It never carries bell cards, whose forms need that session's CSRF token. A reply or an assignment that adds a bell row pushes the same way, with no toast; a ping held for quiet hours pushes nothing until it is released.
 
 Pushes are hints. If a push is lost, the next page load or frame refresh is still correct, because pages always read from the database.
 
