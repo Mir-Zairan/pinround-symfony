@@ -204,7 +204,7 @@ final class DbalSettingsQueriesTest extends KernelTestCase
     public function anUnknownStoredPingLimitIsRefusedTogether(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('org_settings holds an unknown ping limit.');
+        $this->expectExceptionMessageIsOrContains('org_settings holds an unknown ping limit.');
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): StoredSettings {
             $this->connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{ping_limit_hours}', '2')");

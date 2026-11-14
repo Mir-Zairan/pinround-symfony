@@ -239,7 +239,7 @@ final class NotifyRecipientsTest extends TestCase
 
     private function notificationQueries(): NotificationQueries
     {
-        return new class(new TicketId(self::TICKET), $this->mutedBy) implements NotificationQueries {
+        return new readonly class(new TicketId(self::TICKET), $this->mutedBy) implements NotificationQueries {
             /**
              * @param list<string> $mutedBy
              */
@@ -278,7 +278,7 @@ final class NotifyRecipientsTest extends TestCase
             new UserId(self::MIA),
         );
 
-        return new class($snapshot) implements TicketTurnQueries {
+        return new readonly class($snapshot) implements TicketTurnQueries {
             public function __construct(private ?TicketTurnSnapshot $snapshot)
             {
             }
@@ -295,7 +295,7 @@ final class NotifyRecipientsTest extends TestCase
      */
     private static function ticketVisibilities(): TicketVisibilities
     {
-        return new class(new TeamId(self::SHOP_TEAM), [self::LENA, self::OMAR]) implements TicketVisibilities {
+        return new readonly class(new TeamId(self::SHOP_TEAM), [self::LENA, self::OMAR]) implements TicketVisibilities {
             /**
              * @param list<string> $shopTeamMemberIds
              */
@@ -314,7 +314,7 @@ final class NotifyRecipientsTest extends TestCase
 
     private static function ticketKeyQueries(): TicketKeyQueries
     {
-        return new class(new TicketId(self::TICKET)) implements TicketKeyQueries {
+        return new readonly class(new TicketId(self::TICKET)) implements TicketKeyQueries {
             public function __construct(private TicketId $shopTicketId)
             {
             }
@@ -331,7 +331,7 @@ final class NotifyRecipientsTest extends TestCase
      */
     private static function memberNameQueries(): MemberNameQueries
     {
-        return new class(new OrganizationId(self::ACME_FOODS), [self::LENA => 'Lena', self::OMAR => 'Omar', self::MIA => 'Mia', self::RAJ => 'Raj']) implements MemberNameQueries {
+        return new readonly class(new OrganizationId(self::ACME_FOODS), [self::LENA => 'Lena', self::OMAR => 'Omar', self::MIA => 'Mia', self::RAJ => 'Raj']) implements MemberNameQueries {
             /**
              * @param array<string, string> $memberNames
              */

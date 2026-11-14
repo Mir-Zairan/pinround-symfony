@@ -24,7 +24,7 @@ final class Reply implements TenantOwned
     private ?\DateTimeImmutable $editedAt = null;
     private ?\DateTimeImmutable $removedAt = null;
 
-    private function __construct(ReplyId $id, OrganizationId $organizationId, MessageId $messageId, UserId $authorId, private string $body, private readonly bool $isAnswer, private readonly \DateTimeImmutable $createdAt)
+    private function __construct(ReplyId $id, OrganizationId $organizationId, MessageId $messageId, UserId $authorId, private readonly string $body, private readonly bool $isAnswer, private readonly \DateTimeImmutable $createdAt)
     {
         $this->id = $id->toString();
         $this->organizationId = $organizationId->toString();

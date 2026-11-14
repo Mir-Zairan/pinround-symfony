@@ -257,8 +257,8 @@ final class PingedStateTest extends TestCase
         $connection = self::createStub(Connection::class);
         $connection->method('isTransactionActive')->willReturnCallback(fn (): bool => $this->isTransactionOpen);
 
-        return new PingedState(new class($this->pingWindow, $this) implements PingWindow {
-            public function __construct(private readonly InMemoryPingWindow $window, private readonly PingedStateTest $test)
+        return new PingedState(new readonly class($this->pingWindow, $this) implements PingWindow {
+            public function __construct(private InMemoryPingWindow $window, private PingedStateTest $test)
             {
             }
 

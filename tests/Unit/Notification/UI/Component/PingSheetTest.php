@@ -179,8 +179,8 @@ final class PingSheetTest extends TestCase
         $connection = self::createStub(Connection::class);
         $connection->method('isTransactionActive')->willReturn(true);
 
-        return new PingedState(new class($this->pingWindow, $this) implements PingWindow {
-            public function __construct(private readonly InMemoryPingWindow $window, private readonly PingSheetTest $test)
+        return new PingedState(new readonly class($this->pingWindow, $this) implements PingWindow {
+            public function __construct(private InMemoryPingWindow $window, private PingSheetTest $test)
             {
             }
 

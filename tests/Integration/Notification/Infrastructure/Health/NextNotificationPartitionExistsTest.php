@@ -27,7 +27,7 @@ final class NextNotificationPartitionExistsTest extends KernelTestCase
         self::assertSame('next_notification_partition', $check->name());
 
         $this->expectException(ReadinessCheckFailed::class);
-        $this->expectExceptionMessage('ntf_notification has no partition for next month.');
+        $this->expectExceptionMessageIsOrContains('ntf_notification has no partition for next month.');
 
         $check->verify();
     }

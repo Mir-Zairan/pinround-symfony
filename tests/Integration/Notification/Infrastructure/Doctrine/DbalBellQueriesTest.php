@@ -137,7 +137,7 @@ final class DbalBellQueriesTest extends KernelTestCase
         ]);
 
         $this->expectException(\UnexpectedValueException::class);
-        $this->expectExceptionMessage('A notification in the bell has no actorName in its data.');
+        $this->expectExceptionMessageIsOrContains('A notification in the bell has no actorName in its data.');
 
         $this->bellOfOmar();
     }

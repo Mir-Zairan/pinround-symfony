@@ -179,7 +179,7 @@ final class DbalNotificationsTest extends KernelTestCase
         $question = new NewNotification(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), NotificationKind::Question, new UserId(self::LENA), new TicketId(self::TICKET), ['actorName' => 'Lena', 'ticketKey' => 'SHOP-1', 'messageId' => self::MESSAGE], new \DateTimeImmutable(self::FIRST_REPLY_AT));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Only a reply notification about a message folds into another.');
+        $this->expectExceptionMessageIsOrContains('Only a reply notification about a message folds into another.');
         $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): bool => $this->notifications()->foldIntoUnreadReply($question, new \DateTimeImmutable(self::FIRST_REPLY_AT)));
     }
 

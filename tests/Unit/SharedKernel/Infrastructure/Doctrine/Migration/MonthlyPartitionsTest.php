@@ -87,7 +87,7 @@ final class MonthlyPartitionsTest extends TestCase
     public function aPartitionNameLongerThanPostgresKeepsIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('is not a plain lowercase table name.');
+        $this->expectExceptionMessageIsOrContains('is not a plain lowercase table name.');
 
         MonthlyPartitions::statementsFor(str_repeat('a', 57), new \DateTimeImmutable('2027-03-15 10:00:00+00'));
     }
