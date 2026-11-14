@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Conversation\Api\ConversationPermission;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamPermission;
@@ -60,6 +61,7 @@ $adminMayNotEditTickets = 'may not move tickets or edit ticket fields';
 $teamOnlyTickets = 'visible to members of the ticket\'s team, to admins, and to the people working on that ticket';
 $triagerOfANoTeamTicket = 'and to the triager while it has no team';
 $managersOutsideTheTeam = 'Not to managers outside the team.';
+$commentAndReply = '| Comment, reply |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
 return [
@@ -270,4 +272,12 @@ return [
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+
+    ['source' => $commentAndReply, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $commentAndReply, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $adminWithoutTeamRole, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $triagerOfANoTeamTicket, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Noor', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $triagerOfANoTeamTicket, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Noor', 'subject' => 'Team-only ticket with no team', 'expected' => 'granted'],
+    ['source' => $managersOutsideTheTeam, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Raj', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
 ];
