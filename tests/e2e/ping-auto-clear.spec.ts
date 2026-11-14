@@ -1,6 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { bellPopover, openBellPopover } from './bell';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // Auto-clear (FR-PNG-05) is on in the demo seed. Each run makes its own SHOP ticket, with a title no earlier run used,
@@ -22,26 +23,13 @@ async function pingOmarAbout(browser: Browser, key: string, message: string): Pr
   await context.close();
 }
 
-function bell(page: Page) {
-  return page.getByRole('banner').getByRole('button', { name: 'Pings' });
-}
-
-function popover(page: Page) {
-  return page.getByRole('dialog', { name: /^Pings · \d+ open$/ });
-}
-
 async function openPopoverOn(page: Page, path: string): Promise<void> {
   await page.goto(path, { waitUntil: 'networkidle' });
-  const frameLoaded = page.waitForResponse((response) => new URL(response.url()).pathname === '/bell' && response.request().method() === 'GET');
-  await bell(page).click();
-  expect((await frameLoaded).status()).toBe(200);
-  await expect(popover(page)).toBeVisible();
-  // The frame's own text, so a check that a card is absent never runs before the frame has rendered.
-  await expect(popover(page).getByText('Grouped by person and ticket.')).toBeVisible();
+  await openBellPopover(page);
 }
 
 function lenasCardOn(page: Page, key: string) {
-  return popover(page).getByRole('article', { name: `Lena pinged you on ${key}` });
+  return bellPopover(page).getByRole('article', { name: `Lena pinged you on ${key}` });
 }
 
 test('Omar starting work on a ticket clears Lena’s ping from his bell and the toast says so', async ({ browser, page }) => {
@@ -57,7 +45,7 @@ test('Omar starting work on a ticket clears Lena’s ping from his bell and the 
   }).toPass({ intervals: [500, 1_000, 2_000], timeout: 20_000 });
   await expect(lenasCardOn(page, key).getByText(`“${message}”`)).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(popover(page)).toBeHidden();
+  await expect(bellPopover(page)).toBeHidden();
 
   const answer = page.waitForResponse((response) => response.url().endsWith(`/t/${key}/move/start_work`) && response.request().method() === 'POST');
   await page.locator('#ticket-next-step .next-step-box__verbs').getByRole('button', { name: 'Start work' }).click();
