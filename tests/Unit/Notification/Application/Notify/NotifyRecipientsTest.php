@@ -14,6 +14,8 @@ use App\Notification\Application\Notify\NewNotification;
 use App\Notification\Application\Notify\NotificationKind;
 use App\Notification\Application\Notify\Notifications;
 use App\Notification\Application\Notify\NotifyRecipients;
+use App\Notification\Application\Realtime\BellRefreshes;
+use App\Notification\Application\Realtime\RefreshBell;
 use App\Organization\Api\MemberNameQueries;
 use App\SharedKernel\Application\NoMessageBeingHandled;
 use App\SharedKernel\Application\OnceOnlyHandling;
@@ -50,6 +52,7 @@ final class NotifyRecipientsTest extends TestCase
 
     private OnceOnlyHandlingDouble $onceOnlyHandling;
     private NotificationsDouble $notifications;
+    private BellRefreshesDouble $bellRefreshes;
     /** @var list<string> user id strings with TICKET muted */
     private array $mutedBy = [];
     private bool $isTicketGone = false;
@@ -59,6 +62,7 @@ final class NotifyRecipientsTest extends TestCase
         $this->onceOnlyHandling = new OnceOnlyHandlingDouble();
         $this->onceOnlyHandling->messageId = 'message-1';
         $this->notifications = new NotificationsDouble();
+        $this->bellRefreshes = new BellRefreshesDouble();
     }
 
     /**
@@ -94,6 +98,42 @@ final class NotifyRecipientsTest extends TestCase
         self::assertEquals($at, $row->createdAt);
         self::assertEquals($isHeldUntilDelivery ? $at : null, $row->deliverAfter);
         self::assertSame([NotifyRecipients::HANDLER_NAME], $this->onceOnlyHandling->handlerNames);
+        $toast = NotificationKind::Answer === $kind ? 'Lena answered your question.' : null;
+        self::assertEquals([[new RefreshBell(self::ACME_FOODS, $recipientId, $toast), $row->deliverAfter]], $this->bellRefreshes->sent);
+    }
+
+    #[Test]
+    public function onlyAnAnswerRefreshesTheBellWithAToastNamingWhoAnswered(): void
+    {
+        $at = new \DateTimeImmutable(self::OCCURRED_AT);
+        $this->notify(new QuestionAnswered(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::OMAR, self::MIA, $at));
+        $this->onceOnlyHandling->messageId = 'message-2';
+        $this->notify(new QuestionAsked(self::ACME_FOODS, self::TICKET, self::OTHER_MESSAGE, self::OMAR, self::MIA, $at));
+
+        self::assertSame(['Mia answered your question.', null], array_map(static fn (array $sent): ?string => $sent[0]->toast, $this->bellRefreshes->sent));
+    }
+
+    #[Test]
+    public function aHeldPingPassesItsDeliveryTimeSoItsRefreshWaitsForTheRelease(): void
+    {
+        $deliveredAt = new \DateTimeImmutable('2027-03-16 09:00:00 UTC');
+
+        $this->notify(new PingSent(self::ACME_FOODS, self::TICKET, self::PING, self::LENA, self::OMAR, self::LENA, $deliveredAt));
+
+        self::assertEquals([[new RefreshBell(self::ACME_FOODS, self::OMAR, null), $deliveredAt]], $this->bellRefreshes->sent);
+    }
+
+    #[Test]
+    public function aReplyFoldedIntoTheLastUnreadOneStillRefreshesTheBell(): void
+    {
+        $first = new \DateTimeImmutable(self::OCCURRED_AT);
+        $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::REPLY, self::OMAR, self::LENA, $first));
+        $this->onceOnlyHandling->messageId = 'message-2';
+
+        $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::SECOND_REPLY, self::OMAR, self::MIA, $first->modify('+10 seconds')));
+
+        self::assertCount(1, $this->notifications->rows);
+        self::assertSame([self::OMAR, self::OMAR], array_map(static fn (array $sent): string => $sent[0]->userId, $this->bellRefreshes->sent));
     }
 
     #[Test]
@@ -102,6 +142,7 @@ final class NotifyRecipientsTest extends TestCase
         $this->notify(new QuestionAsked(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::LENA, self::LENA, new \DateTimeImmutable(self::OCCURRED_AT)));
 
         self::assertSame([], $this->notifications->rows);
+        self::assertSame([], $this->bellRefreshes->sent);
     }
 
     #[Test]
@@ -114,6 +155,7 @@ final class NotifyRecipientsTest extends TestCase
         $this->notify($this->questionTo(self::MIA));
 
         self::assertSame([self::MIA], $this->recipientsOfRows());
+        self::assertSame([self::MIA], array_map(static fn (array $sent): string => $sent[0]->userId, $this->bellRefreshes->sent));
     }
 
     #[Test]
@@ -124,6 +166,7 @@ final class NotifyRecipientsTest extends TestCase
         $this->notify($this->questionTo(self::MIA));
 
         self::assertSame([self::MIA], $this->recipientsOfRows());
+        self::assertSame([self::MIA], array_map(static fn (array $sent): string => $sent[0]->userId, $this->bellRefreshes->sent));
     }
 
     #[Test]
@@ -162,6 +205,7 @@ final class NotifyRecipientsTest extends TestCase
 
         self::assertSame([NotifyRecipients::HANDLER_NAME, NotifyRecipients::HANDLER_NAME], $this->onceOnlyHandling->handlerNames);
         self::assertSame([self::OMAR], $this->recipientsOfRows());
+        self::assertCount(1, $this->bellRefreshes->sent);
     }
 
     #[Test]
@@ -232,6 +276,7 @@ final class NotifyRecipientsTest extends TestCase
             self::ticketKeyQueries(),
             self::memberNameQueries(),
             $this->notifications,
+            $this->bellRefreshes,
         );
 
         $handler($event);
@@ -382,6 +427,20 @@ final class OnceOnlyHandlingDouble implements OnceOnlyHandling
         $effect();
 
         return true;
+    }
+}
+
+/**
+ * Keeps what NotifyRecipients asks to send; whether a held one goes is MessengerBellRefreshes' call, proved in its test.
+ */
+final class BellRefreshesDouble implements BellRefreshes
+{
+    /** @var list<array{RefreshBell, \DateTimeImmutable|null}> */
+    public array $sent = [];
+
+    public function sendOnceCommitted(RefreshBell $refresh, ?\DateTimeImmutable $deliverAfter): void
+    {
+        $this->sent[] = [$refresh, $deliverAfter];
     }
 }
 

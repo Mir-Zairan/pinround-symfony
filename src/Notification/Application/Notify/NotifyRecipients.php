@@ -9,6 +9,8 @@ use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\Event\ReplyPosted;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Api\NotificationQueries;
+use App\Notification\Application\Realtime\BellRefreshes;
+use App\Notification\Application\Realtime\RefreshBell;
 use App\Organization\Api\MemberNameQueries;
 use App\SharedKernel\Application\OnceOnlyHandling;
 use App\SharedKernel\Domain\OrganizationId;
@@ -25,7 +27,8 @@ use App\Ticketing\Api\TicketVisibilityFacts;
  * kinds), once per message however often it is delivered. It runs in worker-notify on event.bus (config/services.yaml),
  * in the bus's transaction under the event's organization. Nobody is notified of their own action, of a ticket they
  * muted or may no longer see, or by or as someone who is no longer a member; a ticket that is gone notifies nobody.
- * Replies to one message within REPLY_FOLD_SECONDS of the last unread one fold into it instead of adding a row.
+ * Replies to one message within REPLY_FOLD_SECONDS of the last unread one fold into it instead of adding a row. Each
+ * row added or folded refreshes the recipient's bell once the bus commits, unless it is held for quiet hours.
  */
 final readonly class NotifyRecipients
 {
@@ -43,6 +46,7 @@ final readonly class NotifyRecipients
         private TicketKeyQueries $ticketKeyQueries,
         private MemberNameQueries $memberNameQueries,
         private Notifications $notifications,
+        private BellRefreshes $bellRefreshes,
     ) {
     }
 
@@ -73,6 +77,9 @@ final readonly class NotifyRecipients
             if (NotificationKind::Reply !== $kind || !$this->notifications->foldIntoUnreadReply($notification, $since)) {
                 $this->notifications->add($notification);
             }
+            // realtime-and-notifications.md › What is pushed when; a person's name is no ticket text (ADR-0027).
+            $toast = NotificationKind::Answer === $kind ? \sprintf('%s answered your question.', $snapshot['actorName']) : null;
+            $this->bellRefreshes->sendOnceCommitted(new RefreshBell($organizationId->toString(), $recipient->toString(), $toast), $deliverAfter);
         });
     }
 
