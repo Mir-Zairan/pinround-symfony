@@ -96,5 +96,6 @@ The tester reviews one round: before/after screenshots, the pins from the last r
   - `Question` → asks the lead (pauses the ticket).
   
   The prototype only shows a toast. Decide in the plan.
+- **Product differs: ring pins.** The product draws pins as hollow rings (dark outer, white inner outline, number tab, note bubble on hover, focus or select), not the filled `#b4470a` marker above (product owner's decision, 2026-11-14; FR-RND-02 wins). The product also shows each screenshot's optional title and summary above the picture (FR-RND-16), which the prototype does not have.
 - The before screenshot is the previous round's after screenshot (or the Round 0 report).
 - Screenshots are simulated (`Shot` board, before/after variants). The product shows real uploads.
