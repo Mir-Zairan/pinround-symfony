@@ -11,7 +11,6 @@ use App\Conversation\Api\ReplyRefused;
 use App\Conversation\Application\ConversationEvents;
 use App\Conversation\Application\ThreadMessages;
 use App\Conversation\Domain\Replies;
-use App\Conversation\Domain\Reply;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -62,11 +61,10 @@ final readonly class PostReply
         }
 
         $message = $this->threadMessages->lockedOf($ticket->organizationId, $ticketId, $messageId);
-        if (null !== $message->removedAt()) {
-            throw new ReplyRefused('This message was removed, so you cannot reply to it.');
-        }
         try {
-            $reply = Reply::post($this->replies->nextIdentity(), $ticket->organizationId, $message->id(), $authorId, trim($body), false, $postedAt);
+            $reply = $message->reply($this->replies->nextIdentity(), $authorId, trim($body), $postedAt);
+        } catch (\DomainException $refusal) {
+            throw new ReplyRefused($refusal->getMessage(), 0, $refusal);
         } catch (\InvalidArgumentException $invalidBody) {
             throw new MessageBodyRefused($invalidBody->getMessage(), 0, $invalidBody);
         }

@@ -184,6 +184,22 @@ final class Message implements TenantOwned
     }
 
     /**
+     * A plain reply under this comment or question (FR-CNV-04), never its answer: only answer() closes a question. The
+     * message itself does not change; the caller saves the reply.
+     *
+     * @throws \DomainException          when the comment was removed or the question withdrawn
+     * @throws \InvalidArgumentException when the body is blank or longer than MAX_BODY_LENGTH characters
+     */
+    public function reply(ReplyId $replyId, UserId $authorId, string $body, \DateTimeImmutable $postedAt): Reply
+    {
+        if (null !== $this->removedAt) {
+            throw new \DomainException('This message was removed, so you cannot reply to it.');
+        }
+
+        return Reply::post($replyId, $this->organizationId(), $this->id(), $authorId, $body, false, $postedAt);
+    }
+
+    /**
      * @throws \InvalidArgumentException when the body is blank or longer than MAX_BODY_LENGTH characters
      */
     private static function refuseAnInvalidBody(string $body): void

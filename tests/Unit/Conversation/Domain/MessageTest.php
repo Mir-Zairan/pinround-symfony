@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Conversation\Domain;
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\MessageId;
 use App\Conversation\Domain\MessageKind;
+use App\Conversation\Domain\ReplyId;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -21,6 +22,7 @@ final class MessageTest extends TestCase
     private const string TICKET = '0197a3c0-0000-7000-8000-000000004103';
     private const string LENA = '0197a3c0-0000-7000-8000-000000004104';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000004105';
+    private const string REPLY = '0197a3c0-0000-7000-8000-000000004106';
 
     #[Test]
     public function aCommentAsksNobodyAndIsOpenToNothing(): void
@@ -407,6 +409,94 @@ final class MessageTest extends TestCase
         }
 
         self::assertEquals($before, [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()]);
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Message}>
+     */
+    public static function repliableMessages(): iterable
+    {
+        yield 'an open comment' => [static fn (): Message => self::commentOfLena()];
+        yield 'a resolved comment' => [static function (): Message {
+            $comment = self::commentOfLena();
+            $comment->resolve(new UserId(self::LENA), false, new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $comment;
+        }];
+        yield 'an open question' => [static fn (): Message => self::questionOfLenaToOmar()];
+        yield 'an answered question' => [static function (): Message {
+            $question = self::questionOfLenaToOmar();
+            $question->answer(new UserId(self::OMAR), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $question;
+        }];
+    }
+
+    /**
+     * @param \Closure(): Message $messageOf
+     */
+    #[Test]
+    #[DataProvider('repliableMessages')]
+    public function aReplyIsAPlainReplyUnderTheMessageAndLeavesTheMessageAsItWas(\Closure $messageOf): void
+    {
+        $message = $messageOf();
+        $before = [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()];
+        $postedAt = new \DateTimeImmutable('2027-03-15 11:00:00+00:00');
+
+        $reply = $message->reply(new ReplyId(self::REPLY), new UserId(self::OMAR), 'Yes, they count.', $postedAt);
+
+        self::assertSame(
+            [self::REPLY, self::ACME_FOODS, self::ID, self::OMAR, 'Yes, they count.', false, $postedAt],
+            [$reply->id()->toString(), $reply->organizationId()->toString(), $reply->messageId()->toString(), $reply->authorId()->toString(), $reply->body(), $reply->isAnswer(), $reply->createdAt()],
+        );
+        self::assertEquals($before, [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()]);
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Message}>
+     */
+    public static function removedMessages(): iterable
+    {
+        yield 'a removed comment' => [static function (): Message {
+            $comment = self::commentOfLena();
+            $comment->remove(new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $comment;
+        }];
+        yield 'a withdrawn question' => [static function (): Message {
+            $question = self::questionOfLenaToOmar();
+            $question->withdraw(new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
+
+            return $question;
+        }];
+    }
+
+    /**
+     * @param \Closure(): Message $messageOf
+     */
+    #[Test]
+    #[DataProvider('removedMessages')]
+    public function aReplyToARemovedMessageIsRefusedAndTheMessageStays(\Closure $messageOf): void
+    {
+        $message = $messageOf();
+        $before = [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()];
+
+        try {
+            $message->reply(new ReplyId(self::REPLY), new UserId(self::OMAR), 'Yes, they count.', new \DateTimeImmutable('2027-03-15 11:00:00+00:00'));
+            self::fail('The reply was not refused.');
+        } catch (\DomainException $refusal) {
+            self::assertSame('This message was removed, so you cannot reply to it.', $refusal->getMessage());
+        }
+
+        self::assertEquals($before, [$message->resolvedAt(), $message->resolvedBy(), $message->removedAt()]);
+    }
+
+    #[Test]
+    public function aReplyWithABlankBodyIsRefusedAsAnInvalidBody(): void
+    {
+        $this->expectExceptionObject(new \InvalidArgumentException('A reply needs a body.'));
+
+        self::commentOfLena()->reply(new ReplyId(self::REPLY), new UserId(self::OMAR), '   ', new \DateTimeImmutable('2027-03-15 11:00:00+00:00'));
     }
 
     private static function questionOfLenaToOmar(): Message
