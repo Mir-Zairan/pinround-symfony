@@ -12,6 +12,7 @@ use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\LockedTicketPauses;
+use App\Ticketing\Application\TicketTurnSnapshots;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -165,9 +166,17 @@ final class PausedTicketMoveTest extends KernelTestCase
         return null;
     }
 
+    private function ticketTurnSnapshots(): TicketTurnSnapshots
+    {
+        $ticketTurnSnapshots = self::getContainer()->get('test.ticketing_ticket_turn_snapshots');
+        self::assertInstanceOf(TicketTurnSnapshots::class, $ticketTurnSnapshots);
+
+        return $ticketTurnSnapshots;
+    }
+
     private function pauses(): LockedTicketPauses
     {
-        return new LockedTicketPauses(new DoctrineTickets($this->entityManager()), $this->tenantContext());
+        return new LockedTicketPauses(new DoctrineTickets($this->entityManager()), $this->ticketTurnSnapshots(), $this->tenantContext());
     }
 
     private function ticketCommands(): TicketCommands

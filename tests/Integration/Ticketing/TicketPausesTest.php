@@ -10,12 +10,14 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Ticketing\Api\AskedPersonNotOnTicket;
 use App\Ticketing\Api\TicketAlreadyPaused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketPauses;
 use App\Ticketing\Application\LockedTicketPauses;
+use App\Ticketing\Application\TicketTurnSnapshots;
 use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
 use Doctrine\DBAL\Connection;
@@ -27,7 +29,8 @@ use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 
 /**
  * TicketPauses on the real tables and turn projector, as pinround_app under row-level security. Acme Foods' SHOP-7
- * starts in To do, reported by Mia and assigned to Omar; Beta Bakery has a SHOP-7 of its own, which no pause may reach.
+ * starts in To do, reported by Mia and assigned to Omar; Lena leads its team and Raj is on the team but not on the
+ * ticket. Beta Bakery has a SHOP-7 of its own, which no pause may reach.
  */
 final class TicketPausesTest extends KernelTestCase
 {
@@ -42,6 +45,7 @@ final class TicketPausesTest extends KernelTestCase
     private const string LENA = '0197a3c0-0000-7000-8000-00000000a551';
     private const string OMAR = '0197a3c0-0000-7000-8000-00000000a552';
     private const string MIA = '0197a3c0-0000-7000-8000-00000000a553';
+    private const string RAJ = '0197a3c0-0000-7000-8000-00000000a554';
     private const string SARA = '0197a3c0-0000-7000-8000-00000000a555';
 
     private TicketId $ticketId;
@@ -55,6 +59,7 @@ final class TicketPausesTest extends KernelTestCase
             self::LENA => ['Lena', 'lead', 'developer'],
             self::OMAR => ['Omar', 'member', 'developer'],
             self::MIA => ['Mia', 'member', 'tester'],
+            self::RAJ => ['Raj', 'member', 'other'],
         ]);
         $this->shopTeamRows()->add(self::BETA_BAKERY, self::BETA_TEAM, self::BETA_PROJECT, self::SARA, [self::SARA => ['Sara', 'lead', 'developer']]);
         $shopTickets = new ShopTickets($this->ticketCommands(), $this->transactions(), $this->connection());
@@ -111,6 +116,42 @@ final class TicketPausesTest extends KernelTestCase
             ['asked_user_id' => true, 'asker_id' => true],
         )));
         self::assertSame($turnBefore, $this->turnOf($this->ticketId));
+    }
+
+    #[Test]
+    public function pausingOnSomeoneNotOnTheTicketIsRefusedBeforeAnyWrite(): void
+    {
+        $before = $this->pauseState($this->ticketId, self::ACME_FOODS);
+
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?\Throwable => $this->refusalOf(
+            fn () => $this->pauses()->pauseForQuestion($this->ticketId, new UserId(self::RAJ), new UserId(self::OMAR)),
+        ));
+
+        self::assertInstanceOf(AskedPersonNotOnTicket::class, $refusal);
+        self::assertSame('The person asked is not on this ticket.', $refusal->getMessage());
+        self::assertSame(['asked_user_id' => null, 'asker_id' => null], array_intersect_key($before, ['asked_user_id' => true, 'asker_id' => true]));
+        self::assertSame($before, $this->pauseState($this->ticketId, self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function theTicketsReviewerOrTesterMayBeAsked(): void
+    {
+        $askedReviewerAndTester = [];
+        foreach (['reviewer_id' => [self::RAJ, null], 'tester_id' => [null, self::RAJ]] as $column => [$reviewerId, $testerId]) {
+            // Raj is named only in this column, and no question pauses the ticket.
+            $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->migrator()->transactional(fn (Connection $migrator): int|string => $migrator->executeStatement(
+                'UPDATE tkt_ticket SET reviewer_id = ?, tester_id = ?, asked_user_id = NULL, asker_id = NULL WHERE organization_id = ? AND id = ?',
+                [$reviewerId, $testerId, self::ACME_FOODS, $this->ticketId->toString()],
+            )));
+            self::getContainer()->get('doctrine')->resetManager();
+
+            $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+                $this->pauses()->pauseForQuestion($this->ticketId, new UserId(self::RAJ), new UserId(self::OMAR));
+            });
+            $askedReviewerAndTester[$column] = $this->pauseState($this->ticketId, self::ACME_FOODS)['asked_user_id'];
+        }
+
+        self::assertSame(['reviewer_id' => self::RAJ, 'tester_id' => self::RAJ], $askedReviewerAndTester);
     }
 
     #[Test]
@@ -280,9 +321,17 @@ final class TicketPausesTest extends KernelTestCase
         return null;
     }
 
+    private function ticketTurnSnapshots(): TicketTurnSnapshots
+    {
+        $ticketTurnSnapshots = self::getContainer()->get('test.ticketing_ticket_turn_snapshots');
+        self::assertInstanceOf(TicketTurnSnapshots::class, $ticketTurnSnapshots);
+
+        return $ticketTurnSnapshots;
+    }
+
     private function pauses(): TicketPauses
     {
-        return new LockedTicketPauses(new DoctrineTickets($this->entityManager()), $this->tenantContext());
+        return new LockedTicketPauses(new DoctrineTickets($this->entityManager()), $this->ticketTurnSnapshots(), $this->tenantContext());
     }
 
     private function turnProjector(): TurnProjector
@@ -303,7 +352,7 @@ final class TicketPausesTest extends KernelTestCase
 
     private function removeRows(): void
     {
-        $this->shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA, self::SARA], self::ACME_FOODS, self::BETA_BAKERY);
+        $this->shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA, self::RAJ, self::SARA], self::ACME_FOODS, self::BETA_BAKERY);
         $this->connection()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");
     }
 

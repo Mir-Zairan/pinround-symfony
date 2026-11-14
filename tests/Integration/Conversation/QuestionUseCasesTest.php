@@ -21,13 +21,17 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\ShopTickets;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketNotFound;
+use App\Ticketing\Api\TicketPauses;
+use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibilityFacts;
 use App\Ticketing\Application\LockedTicketPauses;
+use App\Ticketing\Application\TicketTurnSnapshots;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -65,6 +69,9 @@ final class QuestionUseCasesTest extends KernelTestCase
     private TicketId $ticketId;
     private TicketId $betaTicketId;
 
+    /** @var list<EntityManagerInterface> */
+    private array $otherSessions = [];
+
     protected function setUp(): void
     {
         self::mockTime('2027-03-16 09:30:00+00:00');
@@ -83,6 +90,9 @@ final class QuestionUseCasesTest extends KernelTestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->otherSessions as $otherSession) {
+            $otherSession->getConnection()->close();
+        }
         self::getContainer()->get('doctrine')->resetManager();
         self::getContainer()->get(TenantContext::class)->reset();
         $this->removeRows();
@@ -260,6 +270,32 @@ final class QuestionUseCasesTest extends KernelTestCase
 
         self::assertSame(array_fill(0, 3, [QuestionRefused::class, 'You can ask only someone on this ticket.']), $refusals);
         self::assertSame($before, $this->stateOf($this->ticketId, self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function askingTheFormerAssigneeOfATicketGivenAwayBeforeThePauseLocksItIsRefusedAndNothingIsWritten(): void
+    {
+        $before = $this->stateOf($this->ticketId, self::ACME_FOODS);
+        self::assertSame(['turn_user_id' => self::OMAR, 'kind' => 'build'], $before['turn']);
+
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn () => $this->askQuestionWhileTheTicketIsGivenTo(self::RAJ)->ask(
+            $this->ticketId,
+            $this->acmeTicketFacts(),
+            new UserId(self::MIA),
+            new UserId(self::OMAR),
+            self::QUESTION_BODY,
+            new \DateTimeImmutable(self::ASKED_AT),
+        )));
+        self::getContainer()->get('doctrine')->resetManager();
+
+        self::assertSame([QuestionRefused::class, 'You can ask only someone on this ticket.'], [$refusal::class, $refusal->getMessage()]);
+        $givenAway = $before;
+        ++$givenAway['ticket']['version'];
+        self::assertSame($givenAway, $this->stateOf($this->ticketId, self::ACME_FOODS), 'Only the second session\'s reassignment was saved.');
+        self::assertSame([self::RAJ], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn(
+            'SELECT assignee_id FROM tkt_ticket WHERE id = ?',
+            [$this->ticketId->toString()],
+        )));
     }
 
     #[Test]
@@ -441,6 +477,49 @@ final class QuestionUseCasesTest extends KernelTestCase
     }
 
     /**
+     * AskQuestion as the container builds it, except that just before the pause locks the ticket a second session
+     * gives the ticket to $newAssigneeId and commits, as a reassignment saved meanwhile would.
+     */
+    private function askQuestionWhileTheTicketIsGivenTo(string $newAssigneeId): AskQuestion
+    {
+        $secondSession = SecondSession::besideTheApp($this->entityManager(), $this->tenantContext());
+        $this->otherSessions[] = $secondSession->entityManager;
+        $reassignmentThenPause = new readonly class($this->ticketPauses(), $secondSession->entityManager->getConnection(), $newAssigneeId) implements TicketPauses {
+            public function __construct(private TicketPauses $ticketPauses, private Connection $secondSession, private string $newAssigneeId)
+            {
+            }
+
+            public function pauseForQuestion(TicketId $ticketId, UserId $askedUserId, UserId $askerId): void
+            {
+                $this->secondSession->transactional(fn (Connection $connection): int|string => $connection->executeStatement(
+                    'UPDATE tkt_ticket SET assignee_id = ?, version = version + 1 WHERE id = ?',
+                    [$this->newAssigneeId, $ticketId->toString()],
+                ));
+                $this->ticketPauses->pauseForQuestion($ticketId, $askedUserId, $askerId);
+            }
+
+            public function resumeAfterAnswer(TicketId $ticketId): void
+            {
+                $this->ticketPauses->resumeAfterAnswer($ticketId);
+            }
+        };
+
+        return new AskQuestion(
+            $this->ticketVisibilities(),
+            $reassignmentThenPause,
+            $this->turnProjector(),
+            new DoctrineMessages($this->entityManager()),
+            new MessengerConversationEvents(self::getContainer()->get('event.bus'), $this->connection()),
+            $this->tenantContext(),
+        );
+    }
+
+    private function ticketPauses(): LockedTicketPauses
+    {
+        return new LockedTicketPauses(new DoctrineTickets($this->entityManager()), $this->ticketTurnSnapshots(), $this->tenantContext());
+    }
+
+    /**
      * Answer as the container builds it, except that its turn refresh writes the turn and then fails, as any failure
      * after the ticket resumed would.
      */
@@ -471,7 +550,7 @@ final class QuestionUseCasesTest extends KernelTestCase
             new ThreadMessages($messages),
             $messages,
             new DoctrineReplies($this->entityManager()),
-            new LockedTicketPauses(new DoctrineTickets($this->entityManager()), $this->tenantContext()),
+            $this->ticketPauses(),
             $turnRefreshThenFailure,
             new MessengerConversationEvents(self::getContainer()->get('event.bus'), $this->connection()),
         );
@@ -620,6 +699,22 @@ final class QuestionUseCasesTest extends KernelTestCase
         self::assertInstanceOf(TurnProjector::class, $turnProjector);
 
         return $turnProjector;
+    }
+
+    private function ticketVisibilities(): TicketVisibilities
+    {
+        $ticketVisibilities = self::getContainer()->get('test.ticketing_ticket_visibilities');
+        self::assertInstanceOf(TicketVisibilities::class, $ticketVisibilities);
+
+        return $ticketVisibilities;
+    }
+
+    private function ticketTurnSnapshots(): TicketTurnSnapshots
+    {
+        $ticketTurnSnapshots = self::getContainer()->get('test.ticketing_ticket_turn_snapshots');
+        self::assertInstanceOf(TicketTurnSnapshots::class, $ticketTurnSnapshots);
+
+        return $ticketTurnSnapshots;
     }
 
     private function ticketCommands(): TicketCommands

@@ -16,9 +16,12 @@ use App\SharedKernel\Domain\UserId;
 interface TicketPauses
 {
     /**
-     * Pauses the ticket until the asked person answers the asker's question.
+     * Pauses the ticket until the asked person answers the asker's question. Whether the asked person is on the
+     * ticket is decided on the locked row, so a reassignment saved meanwhile counts.
      *
      * @throws TicketNotFound            when the organization has no ticket with the id
+     * @throws AskedPersonNotOnTicket    when the asked person is not the ticket's assignee, reporter, reviewer or
+     *                                   tester nor its team's lead; nothing is saved
      * @throws TicketAlreadyPaused       when another question already pauses the ticket; nothing is saved
      * @throws TicketChangedMeanwhile    when another request saved the ticket after this request read it; the caller
      *                                   rolls back

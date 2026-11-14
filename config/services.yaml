@@ -227,7 +227,7 @@ when@test:
         test.ticketing_ticket_turn_queries:
             alias: App\Ticketing\Api\TicketTurnQueries
             public: true
-        # Only MoveTicket uses it; EntityTicketTurnSnapshotsTest gets the port as MoveTicket does.
+        # MoveTicket and LockedTicketPauses use it; their tests and EntityTicketTurnSnapshotsTest get the port as they do.
         test.ticketing_ticket_turn_snapshots:
             alias: App\Ticketing\Application\TicketTurnSnapshots
             public: true

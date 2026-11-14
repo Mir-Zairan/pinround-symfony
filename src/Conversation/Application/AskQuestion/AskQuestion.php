@@ -14,13 +14,12 @@ use App\Conversation\Domain\QuestionAlreadyOpen;
 use App\Insight\Api\TurnProjector;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
-use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\AskedPersonNotOnTicket;
 use App\Ticketing\Api\TicketAlreadyPaused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketPauses;
-use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibilityFacts;
 
@@ -35,7 +34,6 @@ final readonly class AskQuestion
 
     public function __construct(
         private TicketVisibilities $ticketVisibilities,
-        private TicketTurnQueries $ticketTurnQueries,
         private TicketPauses $ticketPauses,
         private TurnProjector $turnProjector,
         private Messages $messages,
@@ -46,9 +44,9 @@ final readonly class AskQuestion
 
     /**
      * Pauses the ticket, refreshes its turn, saves the question and writes QuestionAsked to the outbox, all in the open
-     * transaction, whose tenant must be the ticket's organization. The ticket's row is locked first, so two asks
-     * cannot both pass the one-question check. That the asker may ask at all (ConversationPermission ASK) is the
-     * caller's check.
+     * transaction, whose tenant must be the ticket's organization. The ticket's row is locked first and both checks
+     * read it, so two asks cannot both pass the one-question check and a reassignment saved meanwhile decides who is
+     * on the ticket. That the asker may ask at all (ConversationPermission ASK) is the caller's check.
      *
      * @param TicketVisibilityFacts $ticket the visibility facts of the ticket $ticketId, as the ticket page read them
      *
@@ -77,13 +75,16 @@ final readonly class AskQuestion
         } catch (\InvalidArgumentException $invalidBody) {
             throw new MessageBodyRefused($invalidBody->getMessage(), 0, $invalidBody);
         }
-        $facts = $this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.');
-        if ($askedUserId->equals($askerId) || !self::isListedOn($facts, $askedUserId)) {
+        if ($askedUserId->equals($askerId)) {
             throw new QuestionRefused(self::NOT_ON_THE_TICKET);
         }
 
         try {
             $this->ticketPauses->pauseForQuestion($ticketId, $askedUserId, $askerId);
+        } catch (TicketNotFound $notFound) {
+            throw new TicketNotFound('That ticket does not exist.', 0, $notFound);
+        } catch (AskedPersonNotOnTicket $notOnTheTicket) {
+            throw new QuestionRefused(self::NOT_ON_THE_TICKET, 0, $notOnTheTicket);
         } catch (TicketAlreadyPaused $alreadyPaused) {
             throw new QuestionRefused(self::ALREADY_WAITING, 0, $alreadyPaused);
         }
@@ -103,16 +104,5 @@ final readonly class AskQuestion
         }
 
         return $question->id()->toString();
-    }
-
-    private static function isListedOn(TicketTurnSnapshot $facts, UserId $userId): bool
-    {
-        foreach ([$facts->assigneeId, $facts->reporterId, $facts->reviewerId, $facts->testerId, $facts->leadId] as $listedId) {
-            if (null !== $listedId && $listedId->equals($userId)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }
