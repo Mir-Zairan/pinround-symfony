@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\SharedKernel\UI;
 
+use App\SharedKernel\Infrastructure\Http\BackgroundRequests;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Session\FlashBagAwareSessionInterface;
 use Twig\Attribute\AsTwigFunction;
@@ -16,8 +17,6 @@ use Twig\Attribute\AsTwigFunction;
  */
 final readonly class PageFlashes
 {
-    private const string LIVE_REFRESH_HEADER = 'X-Live-Refresh';
-
     public function __construct(private RequestStack $requestStack)
     {
     }
@@ -32,7 +31,7 @@ final readonly class PageFlashes
     public function take(string $type): array
     {
         $request = $this->requestStack->getMainRequest();
-        if (null === $request || !$request->hasSession() || $request->headers->has(self::LIVE_REFRESH_HEADER)) {
+        if (null === $request || !$request->hasSession() || $request->headers->has(BackgroundRequests::LIVE_REFRESH_HEADER)) {
             return [];
         }
         $session = $request->getSession();

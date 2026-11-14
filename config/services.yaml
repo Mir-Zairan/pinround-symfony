@@ -81,6 +81,14 @@ services:
         arguments: ['%env(STATE_VALKEY_DSN)%', { lazy: true }]
     Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler:
         arguments: ['@state_valkey.connection', { prefix: 'session:', ttl: '%identity.session_idle_seconds%' }]
+    # It takes no lock, so a background request (live refresh, realtime token) never writes the session: it could
+    # write back an older copy over the person's own POST (BackgroundReadOnlySessionHandler).
+    App\SharedKernel\Infrastructure\Http\BackgroundReadOnlySessionHandler:
+        decorates: Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler
+        arguments: { $sessionHandler: '@.inner' }
+    # Routes only a page's own scripts call. A lazy frame or a prefetch is not one: its page's CSRF tokens must be saved.
+    App\SharedKernel\Infrastructure\Http\BackgroundRequests:
+        arguments: { $backgroundRouteNames: [notification_realtime_token] }
 
     # Tracing (ADR-0029). An empty OTEL_EXPORTER_OTLP_ENDPOINT turns it off. The OTEL_* values are read here and
     # nowhere else: the SDK's own environment autoloading stays off (OTEL_PHP_AUTOLOAD_ENABLED is never set).
