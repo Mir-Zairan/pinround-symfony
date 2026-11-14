@@ -35,7 +35,7 @@ No spam, no stale pings, and nobody has to clear the bell by hand.
 
 ## Mercure topics
 
-The Mercure hub is built into FrankenPHP ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)). All topics are **private**: a subscriber needs a JWT that lists the topics it may read. That JWT is a short-lived (**10 minutes**) HttpOnly cookie, scoped to the hub path. Rendering a page sets no cookie: the `live-updates` Stimulus controller asks `POST /realtime/token` for it before it opens the stream, and again every 8 minutes; each call checks the session, the current memberships and the asked tickets again, so after logout or removal from the org, renewal fails and the subscription stops within 10 minutes.
+The Mercure hub is built into FrankenPHP ([ADR-0008](../03-adr/0008-frankenphp-runtime.md)). All topics are **private**: a subscriber needs a JWT that lists the topics it may read. That JWT is a short-lived (**10 minutes**) HttpOnly cookie, scoped to the hub path. Rendering a page sets no cookie: the `live-updates` Stimulus controller asks `POST /realtime/token` for it before every connect (the first one and each reopen after a dropped or refused stream, 5 s doubling to at most 60 s), and again every 8 minutes. All tabs of a browser share that one cookie and the hub reads it only as a stream connects, so a tab holds the Web Lock `pinround-live-updates-cookie` from its ask until its stream has connected (at most 5 s); no other tab's ask, for other topics, lands in between. Each call checks the session, the current memberships and the asked tickets again, so after logout or removal from the org, renewal fails and the subscription stops within 10 minutes.
 
 | Topic (URI template) | Who may subscribe | Payload |
 |---|---|---|
