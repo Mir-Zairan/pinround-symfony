@@ -76,8 +76,8 @@
 }
 
 .pin:focus-visible {
-  /* 5px, not base.css's 2px: the selected and AI rings reach 4px out and would hide the outline. */
   outline: 2px solid var(--primary);
+  /* 5px, not base.css's 2px: the selected and AI rings reach 4px out and would hide the outline. */
   outline-offset: 5px;
 }
 
