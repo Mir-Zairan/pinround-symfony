@@ -97,7 +97,6 @@ final class MonthlyPartitionsTest extends TestCase
     {
         $parent = str_repeat('a', 56);
         $partition = $parent.'_202703';
-        self::assertSame(63, \strlen($partition));
 
         self::assertSame(
             [
