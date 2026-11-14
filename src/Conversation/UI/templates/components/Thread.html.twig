@@ -1,9 +1,10 @@
 {#- The ticket's Questions and comments: the thread, oldest first, then the composer. A thread action's Turbo Stream replaces only the list (isListOnly); thread-composer clears the composer and puts focus back. -#}
 {% set csrf = csrf_token(this.csrfId) %}
 {% if not isListOnly %}
-<div{{ attributes.defaults({class: 'thread__content'}) }} {{ stimulus_controller('thread-composer') }} data-action="turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer">
+<div{{ attributes.defaults({class: 'thread__content'}) }} {{ stimulus_controller('thread-composer', {mayAsk: mayAsk}) }} data-action="turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer">
 {% endif %}
-<div id="{{ constant('App\\Conversation\\UI\\Component\\Thread::MESSAGES_ID') }}" class="thread__list" {{ stimulus_target('thread-composer', 'messages') }}>
+{#- The permanent composer is not rendered again by a Turbo Stream or a live reload, so the list carries whether a question is open, which turns the composer's Ask a question off. -#}
+<div id="{{ constant('App\\Conversation\\UI\\Component\\Thread::MESSAGES_ID') }}" class="thread__list" {{ stimulus_target('thread-composer', 'messages') }} data-has-open-question="{{ hasOpenQuestion ? 'true' : 'false' }}">
     {% if hasEarlierMessages %}
         <p class="thread__earlier">Showing the latest {{ constant('App\\Conversation\\Api\\ThreadView::MESSAGE_LIMIT') }} messages.</p>
     {% endif %}
@@ -14,15 +15,21 @@
             {% for message in messages %}
                 <li id="thread-message-{{ message.id }}" class="thread__message thread__message--{{ message.kind }}" data-message-id="{{ message.id }}">
                     <twig:Avatar name="{{ message.authorName }}" class="thread__avatar" aria-hidden="true"/>
-                    <div class="thread__message-main">
+                    <div class="thread__message-main{{ message.isOpenQuestion ? ' thread__message-main--open' }}">
                         <p class="thread__meta">
-                            <span class="thread__author">{{ message.authorName }}</span> · <time class="thread__time" datetime="{{ message.postedAt }}">{{ message.postedLine }}</time> · {{ message.kind }}
+                            <span class="thread__author">{{ message.authorName }}</span> · <time class="thread__time" datetime="{{ message.postedAt }}">{{ message.postedLine }}</time> ·
+                            {%- if message.askedName is not null %} question to {{ message.askedName }}{% else %} {{ message.kind }}{% endif %}
                             {%- if message.isEdited and not message.isRemoved %} · <span class="thread__edited">edited</span>{% endif %}
                         </p>
                         {% if message.isRemoved %}
                             <p class="thread__body thread__body--removed">Message removed</p>
                         {% else %}
                             <p class="thread__body">{{ message.body|linkify }}</p>
+                            {% if message.isOpenQuestion %}
+                                <p class="thread__tags"><span class="tag thread__tag--waiting">Waiting on {{ message.askedFirstName }}</span></p>
+                            {% elseif message.isAnswered %}
+                                <p class="thread__tags"><span class="tag thread__tag--answered">Answered</span></p>
+                            {% endif %}
                         {% endif %}
                         {% if message.answer %}
                             <div class="thread__reply thread__reply--answer" id="thread-reply-{{ message.answer.id }}">
@@ -40,7 +47,11 @@
                                     <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
                                     <label class="visually-hidden" for="thread-answer-{{ message.id }}">Your answer</label>
                                     <textarea id="thread-answer-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Your answer" required maxlength="{{ this.maxBodyLength }}" rows="3"></textarea>
-                                    <button type="submit" class="btn btn-filled btn-sm">Answer</button>
+                                    <p class="thread__note">{{ constant('App\\Conversation\\UI\\Component\\Thread::ANSWER_NOTE')|format(stepName) }}</p>
+                                    <div class="thread__answer-buttons">
+                                        <button type="button" class="btn btn-text btn-sm" data-action="thread-composer#closeAnswer">Cancel</button>
+                                        <button type="submit" class="btn btn-filled btn-sm">Answer</button>
+                                    </div>
                                 </form>
                             </details>
                         {% endif %}
@@ -75,15 +86,36 @@
     {#- Permanent, so a live refresh that reloads the frame keeps a comment being written; the id names the ticket, so the form of one ticket never stays on another's page. -#}
     <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer" id="thread-composer-{{ key }}" data-turbo-permanent>
         <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+        {#- Each chip carries what the composer becomes when it is chosen; thread-composer switches the form to it. -#}
         <div class="thread__kinds" role="group" aria-label="What to write">
-            <twig:Chip :pressed="true">Comment</twig:Chip>
-            <twig:Chip disabled>Ask a question</twig:Chip>
+            <twig:Chip :pressed="true" data-thread-composer-target="commentChip" data-action="thread-composer#writeComment"
+                data-form-action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}"
+                data-placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}"
+                data-note="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_NOTE') }}"
+                data-button="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_BUTTON') }}">Comment</twig:Chip>
+            <twig:Chip :disabled="not mayAsk or hasOpenQuestion" data-thread-composer-target="askChip" data-action="thread-composer#askQuestion"
+                data-form-action="{{ path(constant('App\\Conversation\\UI\\ThreadController::ASK_ROUTE'), {key: key}) }}"
+                data-placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::ASK_PLACEHOLDER') }}">Ask a question</twig:Chip>
         </div>
-        <label class="visually-hidden" for="thread-composer-body">Write a comment</label>
-        <textarea id="thread-composer-body" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Write a comment" required maxlength="{{ this.maxBodyLength }}" rows="3"
+        {% if mayAsk %}
+            <p class="thread__note" {{ stimulus_target('thread-composer', 'waitNote') }} {{ hasOpenQuestion ? '' : 'hidden' }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::WAIT_FOR_THE_OPEN_QUESTION') }}</p>
+            <div class="thread__people" role="group" aria-label="Whom to ask" {{ stimulus_target('thread-composer', 'people') }} hidden>
+                <span class="thread__to">to</span>
+                {% for person in askablePeople %}
+                    <twig:Chip :pressed="loop.first" data-thread-composer-target="person" data-action="thread-composer#choosePerson"
+                        data-user-id="{{ person.userId }}"
+                        data-note="{{ constant('App\\Conversation\\UI\\Component\\Thread::ASK_NOTE')|format(person.firstName) }}"
+                        data-button="{{ constant('App\\Conversation\\UI\\Component\\Thread::ASK_BUTTON')|format(person.firstName) }}">{{ person.firstName }}</twig:Chip>
+                {% endfor %}
+            </div>
+            {#- Sent only in question mode: the comment route has no use for it. -#}
+            <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::ASKED_USER_FIELD') }}" value="{{ (askablePeople|first).userId }}" disabled {{ stimulus_target('thread-composer', 'askedUser') }}>
+        {% endif %}
+        <label class="visually-hidden" for="thread-composer-body" {{ stimulus_target('thread-composer', 'label') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}</label>
+        <textarea id="thread-composer-body" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}" required maxlength="{{ this.maxBodyLength }}" rows="3"
             {{ stimulus_target('thread-composer', 'body') }} data-action="input->thread-composer#update"></textarea>
-        <p class="thread__note">A comment does not change the status and sends no notification.</p>
-        <button type="submit" class="btn btn-filled" {{ stimulus_target('thread-composer', 'submit') }}>Comment</button>
+        <p class="thread__note" {{ stimulus_target('thread-composer', 'note') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_NOTE') }}</p>
+        <button type="submit" class="btn btn-filled" {{ stimulus_target('thread-composer', 'submit') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_BUTTON') }}</button>
     </form>
 </div>
 {% endif %}

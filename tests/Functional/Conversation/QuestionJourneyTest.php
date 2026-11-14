@@ -117,13 +117,22 @@ final class QuestionJourneyTest extends WebTestCase
         self::assertSame([$lena, $omar], $this->pause());
         self::assertSame([$lena, 'answer'], $this->turn());
         self::assertSame(1, $this->outboxCount());
-        self::assertCount(0, $this->threadFrame()->filter('.thread__answer'), 'Only the person asked is offered Answer.');
+        $frame = $this->threadFrame();
+        self::assertCount(0, $frame->filter('.thread__answer'), 'Only the person asked is offered Answer.');
+        self::assertSame(['Omar · now · question to Lena', 'Waiting on Lena', true], $this->questionShownIn($frame, $questionId));
+        self::assertSame([true, true, 'true'], $this->askChipStateIn($frame), 'A second question waits for the first one\'s answer.');
 
         $this->logIn($this->client, $this->people['Lena']);
-        $answerForm = $this->threadFrame()->filter('#thread-message-'.$questionId.' form.thread__answer-form');
+        $frame = $this->threadFrame();
+        $answerForm = $frame->filter('#thread-message-'.$questionId.' form.thread__answer-form');
         self::assertCount(1, $answerForm);
         self::assertSame('/t/SHOP-1/messages/'.$questionId.'/answer', $answerForm->attr('action'));
         self::assertSame('_top', $answerForm->attr('data-turbo-frame'));
+        self::assertSame('Your answer closes the question. The ticket goes back to To do.', trim($answerForm->filter('.thread__note')->text()));
+        self::assertSame(
+            [['Cancel', 'button', 'thread-composer#closeAnswer'], ['Answer', 'submit', null]],
+            $answerForm->filter('button')->each(static fn (Crawler $button): array => [trim($button->text()), $button->attr('type'), $button->attr('data-action')]),
+        );
 
         $this->client->request('POST', $this->answerPath($questionId), $this->answerFields(self::ANSWER));
 
@@ -135,6 +144,8 @@ final class QuestionJourneyTest extends WebTestCase
         self::assertSame(2, $this->outboxCount());
         $frame = $this->threadFrame();
         self::assertCount(0, $frame->filter('.thread__answer'), 'An answered question offers no Answer.');
+        self::assertSame(['Omar · now · question to Lena', 'Answered', false], $this->questionShownIn($frame, $questionId));
+        self::assertSame([false, false, 'false'], $this->askChipStateIn($frame), 'Once answered, Lena may ask again.');
         $answer = $frame->filter('#thread-message-'.$questionId.' .thread__reply--answer');
         self::assertCount(1, $answer);
         self::assertSame('Lena · now · answer', trim($answer->filter('.thread__meta')->text()));
@@ -345,6 +356,94 @@ final class QuestionJourneyTest extends WebTestCase
         $this->assertNothingIsWritten();
     }
 
+    /**
+     * @return iterable<string, array{string, list<string>}> who views the thread, and the people offered in order
+     */
+    public static function peopleWhoMayAsk(): iterable
+    {
+        yield 'Omar, the assignee' => ['Omar', ['Lena', 'Sara']];
+        yield 'Lena, the reporter and the team\'s lead' => ['Lena', ['Omar', 'Sara']];
+    }
+
+    /**
+     * SHOP-1 has Omar as assignee, Lena as reporter and lead, Sara as reviewer and a tester Identity does not know. The
+     * composer offers everyone on it but the viewer, each once, in the ticket's order, and leaves out the tester, who
+     * would have no name. The first person is chosen; the person field is sent only once a question is chosen.
+     *
+     * @param list<string> $expectedPeople
+     */
+    #[Test]
+    #[DataProvider('peopleWhoMayAsk')]
+    public function theComposerOffersToAskEveryoneElseOnTheTicketWithTheFirstChosen(string $viewer, array $expectedPeople): void
+    {
+        $this->addTicket();
+        $this->addReviewerSaraAndATesterNobodyKnows();
+        $this->logIn($this->client, $this->people[$viewer]);
+
+        $frame = $this->threadFrame();
+
+        self::assertSame([false, false, 'false'], $this->askChipStateIn($frame));
+        self::assertSame('true', $frame->filter('.thread__content')->attr('data-thread-composer-may-ask-value'));
+        $askChip = $frame->filter('.thread__kinds [data-thread-composer-target="askChip"]');
+        self::assertSame([self::ASK_PATH, 'What do you need to know?'], [$askChip->attr('data-form-action'), $askChip->attr('data-placeholder')]);
+        $commentChip = $frame->filter('.thread__kinds [data-thread-composer-target="commentChip"]');
+        self::assertSame(
+            ['/t/SHOP-1/comments', 'Write a comment', 'A comment does not change the status and sends no notification.', 'Comment'],
+            [$commentChip->attr('data-form-action'), $commentChip->attr('data-placeholder'), $commentChip->attr('data-note'), $commentChip->attr('data-button')],
+        );
+        $people = $frame->filter('.thread__people');
+        self::assertNotNull($people->attr('hidden'), 'The people show once Ask a question is chosen.');
+        $first = $expectedPeople[0];
+        self::assertSame(
+            array_map(fn (string $name): array => [
+                $name, $name === $first ? 'true' : 'false', $this->people[$name]->id()->toString(),
+                \sprintf('A question pauses the ticket until %s answers. They get one notification.', $name), 'Ask '.$name,
+            ], $expectedPeople),
+            $people->filter('button.chip')->each(static fn (Crawler $chip): array => [
+                trim($chip->text()), $chip->attr('aria-pressed'), $chip->attr('data-user-id'), $chip->attr('data-note'), $chip->attr('data-button'),
+            ]),
+        );
+        $askedUser = $frame->filter('form.thread__composer input[name="'.ThreadController::ASKED_USER_FIELD.'"]');
+        self::assertSame([$this->people[$first]->id()->toString(), ''], [$askedUser->attr('value'), $askedUser->attr('disabled')]);
+    }
+
+    /**
+     * Lena is the reporter, the assignee and the team's lead: there is nobody else to ask, so Ask a question is off.
+     */
+    #[Test]
+    public function withNobodyElseOnTheTicketAskAQuestionIsOff(): void
+    {
+        $this->addTicket();
+        $this->assignToLena();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $frame = $this->threadFrame();
+
+        self::assertSame([true, false, 'false'], $this->askChipStateIn($frame));
+        self::assertSame('false', $frame->filter('.thread__content')->attr('data-thread-composer-may-ask-value'));
+        self::assertCount(0, $frame->filter('.thread__people, input[name="'.ThreadController::ASKED_USER_FIELD.'"]'));
+    }
+
+    /**
+     * Mia, a viewer, may not ask: Ask a question is off and no note tells her to wait for the open question, which she
+     * sees with its tag but may not answer.
+     */
+    #[Test]
+    public function aViewerSeesTheOpenQuestionButIsOfferedNeitherAskingNorAnswering(): void
+    {
+        $this->addTicket();
+        $questionId = $this->addOpenQuestion();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $frame = $this->threadFrame();
+
+        self::assertSame([true, false, 'true'], $this->askChipStateIn($frame));
+        self::assertSame('false', $frame->filter('.thread__content')->attr('data-thread-composer-may-ask-value'));
+        self::assertCount(0, $frame->filter('.thread__people'));
+        self::assertSame(['Omar · 1 min ago · question to Lena', 'Waiting on Lena', true], $this->questionShownIn($frame, $questionId));
+        self::assertCount(0, $frame->filter('.thread__answer'));
+    }
+
     private function assertNothingIsWritten(): void
     {
         self::assertSame([], $this->questionRows());
@@ -365,6 +464,45 @@ final class QuestionJourneyTest extends WebTestCase
         self::assertCount(1, $toast);
 
         return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /**
+     * @return array{string, string, bool} the question's meta line, its tag, and whether it is marked open
+     */
+    private function questionShownIn(Crawler $frame, string $questionId): array
+    {
+        $question = $frame->filter('#thread-message-'.$questionId);
+        self::assertCount(1, $question);
+        $tag = $question->filter('.thread__tags .tag');
+        self::assertCount(1, $tag);
+
+        return [
+            (string) preg_replace('/\s+/', ' ', trim($question->filter('.thread__message-main > .thread__meta')->text())),
+            trim($tag->text()),
+            1 === $question->filter('.thread__message-main--open')->count(),
+        ];
+    }
+
+    /**
+     * @return array{bool, bool, ?string} whether Ask a question is off, whether the note to wait for the open question
+     *                                    shows, and whether the message list tells the composer's script a question is
+     *                                    open
+     */
+    private function askChipStateIn(Crawler $frame): array
+    {
+        $kindChips = $frame->filter('.thread__kinds button.chip');
+        self::assertSame(['Comment', 'Ask a question'], $kindChips->each(static fn (Crawler $chip): string => trim($chip->text())));
+        $waitNote = $frame->filter('[data-thread-composer-target="waitNote"]');
+        $isWaitNoteShown = 1 === $waitNote->count() && null === $waitNote->attr('hidden');
+        if ($isWaitNoteShown) {
+            self::assertSame('Wait for the open question first.', trim($waitNote->text()));
+        }
+
+        return [
+            null !== $kindChips->eq(1)->attr('disabled'),
+            $isWaitNoteShown,
+            $frame->filter('#'.Thread::MESSAGES_ID)->attr('data-has-open-question'),
+        ];
     }
 
     private function threadFrame(): Crawler
@@ -459,6 +597,24 @@ final class QuestionJourneyTest extends WebTestCase
                  step_id, reporter_id, assignee_id, visibility, version, components, check_reasons, created_at, updated_at)
              VALUES (?, ?, ?, ?, 1, 'SHOP-1', 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, ?, 3, '{}', '{}',
                  TIMESTAMPTZ '2026-11-04 10:00:00+00', TIMESTAMPTZ '2026-11-05 10:00:00+00')",
+            $parameters,
+        ));
+    }
+
+    private function addReviewerSaraAndATesterNobodyKnows(): void
+    {
+        $parameters = [$this->people['Sara']->id()->toString(), Uuid::v7()->toRfc4122(), $this->acmeFoods->toString()];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET reviewer_id = ?, tester_id = ? WHERE organization_id = ? AND key = 'SHOP-1'",
+            $parameters,
+        ));
+    }
+
+    private function assignToLena(): void
+    {
+        $parameters = [$this->people['Lena']->id()->toString(), $this->acmeFoods->toString()];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET assignee_id = ? WHERE organization_id = ? AND key = 'SHOP-1'",
             $parameters,
         ));
     }

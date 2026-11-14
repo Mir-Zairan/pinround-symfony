@@ -89,29 +89,85 @@ turbo-frame#ticket-thread {
   margin: 0;
 }
 
-.thread__edit > summary {
+.thread__edit > summary,
+.thread__answer > summary {
   cursor: pointer;
   list-style: none;
 }
 
-.thread__edit > summary::-webkit-details-marker {
+.thread__edit > summary::-webkit-details-marker,
+.thread__answer > summary::-webkit-details-marker {
   display: none;
 }
 
 .thread__edit-form,
+.thread__answer-form,
 .thread__composer {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
 }
 
-.thread__edit-form {
+.thread__edit-form,
+.thread__answer-form {
   margin-top: var(--space-8);
 }
 
 .thread__edit-form > .btn,
 .thread__composer > .btn {
   align-self: flex-start;
+}
+
+.thread__answer-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* An open question carries the waiting colour until it is answered. */
+.thread__message-main--open {
+  padding-left: var(--space-12);
+  border-left: 3px solid var(--waiting);
+}
+
+.thread__tags {
+  margin: 0;
+}
+
+.thread__tag--waiting {
+  background: var(--waiting-container);
+  color: var(--on-waiting-container);
+}
+
+.thread__tag--answered {
+  background: var(--passed-container);
+  color: var(--on-passed-container);
+}
+
+/* Replies are one level only, indented under their message. */
+.thread__reply {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-left: var(--space-16);
+  padding-left: var(--space-12);
+  border-left: 2px solid var(--outline-var);
+}
+
+.thread__people {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.thread__people[hidden] {
+  display: none;
+}
+
+.thread__to {
+  color: var(--on-surface-var);
+  font-size: 14px;
 }
 
 /* The prototype's soft panel. */
@@ -127,7 +183,7 @@ turbo-frame#ticket-thread {
   gap: var(--space-8);
 }
 
-/* Ask a question stays off until questions come: no pointer that suggests a choice. */
+/* Ask a question is off for a viewer who may not ask and while a question is open: no pointer that suggests a choice. */
 .thread__kinds .chip:disabled {
   color: var(--on-surface-var);
   cursor: default;
