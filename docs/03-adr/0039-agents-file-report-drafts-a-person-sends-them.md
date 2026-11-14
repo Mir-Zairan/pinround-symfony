@@ -24,7 +24,7 @@ It adds to [ADR-0017](0017-private-draft-rounds.md), [ADR-0020](0020-ai-safety-a
 
 Mia, a tester at Acme Foods, gets a customer complaint about project SHOP. She asks her own Claude Code to reproduce
 it. Claude Code opens the app, takes three screenshots, and could write the report for her: a title, a short text,
-and for each picture a title and a summary ("Case B: an unloading change leaves the draft alone"). Mia wants to look
+and for each picture a title and a summary ("Case B: a new delivery date leaves the invoice total alone"). Mia wants to look
 at it before the team sees it. Raj, a manager, does not want agents to fill the team's board with tickets nobody
 checked.
 
