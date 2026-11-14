@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <!-- jsonb keeps the variants' keys in its own order (shorter first), not in the order they were saved. -->
+    <entity name="App\Media\Domain\MediaObject" table="med_object">
+        <indexes>
+            <index name="med_object_sha256_idx" columns="organization_id,sha256"/>
+            <index name="med_object_status_created_at_idx" columns="organization_id,status,created_at"/>
+        </indexes>
+
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
+
+        <field name="storageKey" type="text" column="storage_key"/>
+        <field name="mime" type="text" column="mime"/>
+        <field name="bytes" type="bigint" column="bytes"/>
+        <field name="uploadedBy" type="guid" column="uploaded_by"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+        <field name="status" type="text" column="status" enum-type="App\Media\Domain\MediaStatus"/>
+        <field name="rejectReason" type="text" column="reject_reason" nullable="true"/>
+        <field name="sha256" type="text" column="sha256" nullable="true"/>
+        <field name="width" type="integer" column="width" nullable="true"/>
+        <field name="height" type="integer" column="height" nullable="true"/>
+        <field name="variants" type="jsonb" column="variants" nullable="true"/>
+    </entity>
+</doctrine-mapping>
