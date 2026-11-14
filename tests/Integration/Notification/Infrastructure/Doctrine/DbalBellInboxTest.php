@@ -6,13 +6,20 @@ namespace App\Tests\Integration\Notification\Infrastructure\Doctrine;
 
 use App\Notification\Application\Bell\BellGroupKey;
 use App\Notification\Application\Bell\BellInbox;
+use App\Notification\Infrastructure\Cache\BellCountCache;
+use App\Notification\Infrastructure\Doctrine\DbalBellInbox;
+use App\Notification\Infrastructure\Doctrine\VisibleBellTickets;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Notification\NotificationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
+use App\Ticketing\Api\TicketQueries;
+use App\Ticketing\Api\TicketVisibilities;
+use App\Ticketing\Api\TicketVisibility;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -122,6 +129,26 @@ final class DbalBellInboxTest extends KernelTestCase
         $marked = $this->transactions()->committedAs(self::BETA_BAKERY, fn (): int => $this->bellInbox()->markGroupDone($this->lenasGroupOfOmar(), new \DateTimeImmutable(self::NOW)));
 
         self::assertSame(0, $marked);
+        self::assertSame(self::ROWS_BEFORE, $this->rows());
+    }
+
+    /**
+     * The SQL names Acme Foods from TenantContext while the transaction's tenant is Beta Bakery: what still keeps Done
+     * and Open off Omar's group is row-level security alone. The same calls under Acme Foods as both find the group.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneKeepsDoneAndOpenOffAnotherOrganizationsGroup(): void
+    {
+        $changeOfLenasGroup = fn (Connection $connection): array => [
+            $this->bellInboxOn($connection)->markGroupRead($this->lenasGroupOfOmar(), new \DateTimeImmutable(self::NOW)),
+            $this->bellInboxOn($connection)->markGroupDone($this->lenasGroupOfOmar(), new \DateTimeImmutable(self::NOW)),
+        ];
+
+        $underBetaBakery = $this->ownConnectionTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $changeOfLenasGroup);
+        $underAcmeFoods = $this->ownConnectionTransactions()->rolledBackUnderAnotherContext(self::ACME_FOODS, self::ACME_FOODS, $changeOfLenasGroup);
+
+        self::assertSame([null, 0], $underBetaBakery);
+        self::assertSame(['SHOP-1', 3], $underAcmeFoods);
         self::assertSame(self::ROWS_BEFORE, $this->rows());
     }
 
@@ -288,6 +315,29 @@ final class DbalBellInboxTest extends KernelTestCase
         \assert($bellInbox instanceof BellInbox);
 
         return $bellInbox;
+    }
+
+    /**
+     * A DbalBellInbox on the given connection. Done and Open never ask Ticketing, so its visibility doubles pass every
+     * ticket and the ntf policy alone decides.
+     */
+    private function bellInboxOn(Connection $connection): DbalBellInbox
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $ticketQueries = self::createStub(TicketQueries::class);
+        $ticketQueries->method('visibleTicketIdsOf')->willReturnCallback(static fn (TicketVisibility $viewer, array $ticketIds): array => array_values($ticketIds));
+
+        return new DbalBellInbox(
+            $connection,
+            $tenantContext,
+            self::getContainer()->get(BellCountCache::class),
+            new VisibleBellTickets($connection, $tenantContext, self::createStub(TicketVisibilities::class), $ticketQueries),
+        );
+    }
+
+    private function ownConnectionTransactions(): OwnConnectionTransactions
+    {
+        return new OwnConnectionTransactions($this->connection(), self::getContainer()->get(TenantContext::class));
     }
 
     private function connection(): Connection
