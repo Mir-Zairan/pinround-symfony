@@ -7,6 +7,7 @@ twig:
         '%kernel.project_dir%/src/Ticketing/UI/templates': Ticketing
         '%kernel.project_dir%/src/Notification/UI/templates': Notification
         '%kernel.project_dir%/src/Conversation/UI/templates': Conversation
+        '%kernel.project_dir%/src/Review/UI/templates': Review
 
 when@test:
     twig:
