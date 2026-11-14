@@ -598,9 +598,10 @@ final class TicketThreadTest extends WebTestCase
         $this->logIn($this->client, $this->people['Omar']);
         $fields = [ThreadController::CSRF_FIELD => $token, ThreadController::BODY_FIELD => 'Changed'];
 
-        foreach ([self::COMMENT_PATH, $this->messagePath($messageId, 'edit'), $this->messagePath($messageId, 'remove')] as $path) {
+        $editPath = $this->messagePath($messageId, 'edit');
+        foreach ([self::COMMENT_PATH, $editPath, $this->messagePath($messageId, 'remove')] as $path) {
             $this->client->request('POST', $path, $fields, [], self::TURBO_FORM_HEADERS);
-            self::assertSame(ThreadController::FORM_EXPIRED, $this->toastOf($this->streamsOfTheAnswer(422)), $path);
+            self::assertSame(ThreadController::FORM_EXPIRED, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: $editPath === $path)), $path);
         }
 
         self::assertSame($rowsBefore, $this->messageRows());
@@ -640,7 +641,22 @@ final class TicketThreadTest extends WebTestCase
 
         $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Too late'), [], self::TURBO_FORM_HEADERS);
 
-        self::assertSame(self::EDIT_WINDOW_PASSED, $this->toastOf($this->streamsOfTheAnswer(422)));
+        // Only the toast: a new message list would close the open Edit box and lose its text.
+        self::assertSame(self::EDIT_WINDOW_PASSED, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
+        self::assertSame($rowsBefore, $this->messageRows());
+    }
+
+    #[Test]
+    public function anEditRefusedFromAFormWithoutTurboRedirectsToTheThreadWithTheReason(): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:44:59+00');
+        $rowsBefore = $this->messageRows();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Too late'));
+
+        self::assertSame(self::EDIT_WINDOW_PASSED, $this->toastAfterTheRedirect());
         self::assertSame($rowsBefore, $this->messageRows());
     }
 
@@ -659,7 +675,7 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame([], $this->actionsOn($page));
 
         $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Lena was here'), [], self::TURBO_FORM_HEADERS);
-        self::assertSame('Only the person who wrote a message can edit it.', $this->toastOf($this->streamsOfTheAnswer(422)));
+        self::assertSame('Only the person who wrote a message can edit it.', $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
         $this->client->request('POST', $this->messagePath($messageId, 'remove'), $this->formFields(''), [], self::TURBO_FORM_HEADERS);
         self::assertSame('Only the person who wrote a message can remove it.', $this->toastOf($this->streamsOfTheAnswer(422)));
 
@@ -702,7 +718,7 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame('This message is already removed.', $this->toastOf($streams = $this->streamsOfTheAnswer(422)));
         self::assertStringNotContainsString(self::EARLIER_BODY, $streams[Thread::MESSAGES_ID]->html());
         $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Back again'), [], self::TURBO_FORM_HEADERS);
-        self::assertSame('This message was removed, so it cannot be edited.', $this->toastOf($this->streamsOfTheAnswer(422)));
+        self::assertSame('This message was removed, so it cannot be edited.', $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
 
         self::assertSame($rowsBefore, $this->messageRows());
     }
@@ -819,11 +835,12 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region.
+     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region,
+     * or, for a toast-only answer, only updates the toast region.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
-    private function streamsOfTheAnswer(int $expectedStatus): array
+    private function streamsOfTheAnswer(int $expectedStatus, bool $isToastOnly = false): array
     {
         self::assertResponseStatusCodeSame($expectedStatus);
         self::assertSame('text/vnd.turbo-stream.html; charset=UTF-8', $this->client->getResponse()->headers->get('Content-Type'));
@@ -834,7 +851,7 @@ final class TicketThreadTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
+            $isToastOnly ? [['update', self::TOAST_REGION_ID]] : [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];

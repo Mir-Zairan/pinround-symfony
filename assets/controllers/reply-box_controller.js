@@ -1,6 +1,6 @@
 import { Controller } from '@hotwired/stimulus';
 
-// An Answer or Reply box: a <details> around the form that writes under one message of the thread.
+// An Answer, Reply or Edit box: a <details> around the form that writes on one message of the thread.
 export default class extends Controller {
   static targets = ['body', 'opener'];
 
@@ -18,8 +18,8 @@ export default class extends Controller {
     this.openerTarget.focus();
   }
 
-  // turbo:submit-end: a refused reply answers with only a toast and leaves the box open, but Turbo disabled the
-  // submit button it was sent with, which dropped focus to the body, so focus goes back to the kept text.
+  // turbo:submit-end: a refused answer, reply or edit answers with only a toast and leaves the box open, but Turbo
+  // disabled the submit button it was sent with, which dropped focus to the body, so focus goes back to the kept text.
   settle(event) {
     if (!event.detail.success && this.element.open) {
       this.bodyTarget.focus();

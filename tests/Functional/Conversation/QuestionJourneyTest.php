@@ -199,7 +199,8 @@ final class QuestionJourneyTest extends WebTestCase
 
         $this->client->request('POST', $this->answerPath($questionId), $this->answerFields($body), [], self::TURBO_FORM_HEADERS);
 
-        self::assertSame($expectedToast, $this->toastOf($this->streamsOfTheAnswer(422)));
+        // Only the toast: a new message list would close the open Answer box and lose its text.
+        self::assertSame($expectedToast, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
         self::assertSame([[self::QUESTION, $omar, $lena, null]], $this->questionRows());
         self::assertSame([], $this->replyRows());
         self::assertSame([$lena, $omar], $this->pause());
@@ -331,6 +332,47 @@ final class QuestionJourneyTest extends WebTestCase
         $this->assertNothingIsWritten();
     }
 
+    #[Test]
+    public function anAnswerFromAnExpiredFormIsRefusedWithOnlyTheToastAndTheQuestionStaysOpen(): void
+    {
+        $this->addTicket();
+        $questionId = $this->addOpenQuestion();
+        $rowsBefore = [$this->questionRows(), $this->pause()];
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', $this->answerPath($questionId), [
+            ThreadController::CSRF_FIELD => 'not-a-token',
+            ThreadController::BODY_FIELD => self::ANSWER,
+        ], [], self::TURBO_FORM_HEADERS);
+
+        self::assertSame(ThreadController::FORM_EXPIRED, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
+        self::assertSame($rowsBefore, [$this->questionRows(), $this->pause()]);
+        self::assertSame([], $this->replyRows());
+        self::assertSame(0, $this->outboxCount());
+    }
+
+    #[Test]
+    public function anAnswerRefusedFromAFormWithoutTurboRedirectsToTheThreadWithTheReason(): void
+    {
+        $this->addTicket();
+        $questionId = $this->addOpenQuestion();
+        $rowsBefore = [$this->questionRows(), $this->pause()];
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->client->request('POST', $this->answerPath($questionId), $this->answerFields(self::ANSWER));
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame(self::THREAD_PAGE, $this->client->getResponse()->headers->get('Location'));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $toast = $page->filter('.toast-region [data-toast-message-value]');
+        self::assertCount(1, $toast);
+        self::assertSame(self::NOT_THE_PERSON_ASKED, $toast->attr('data-toast-message-value'));
+        self::assertSame($rowsBefore, [$this->questionRows(), $this->pause()]);
+        self::assertSame([], $this->replyRows());
+        self::assertSame(0, $this->outboxCount());
+    }
+
     /**
      * Another request saved the ticket after the answer was decided on: the answer, the closed question and its event
      * roll back with the refusal. The pause is seeded, as TicketPauses that refuses stands in for the real one.
@@ -346,7 +388,7 @@ final class QuestionJourneyTest extends WebTestCase
 
         $this->client->request('POST', $this->answerPath($questionId), $this->answerFields(self::ANSWER), [], self::TURBO_FORM_HEADERS);
 
-        self::assertSame(ThreadController::TICKET_CHANGED_MEANWHILE, $this->toastOf($this->streamsOfTheAnswer(422)));
+        self::assertSame(ThreadController::TICKET_CHANGED_MEANWHILE, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
         self::assertSame($rowsBefore, [$this->questionRows(), $this->pause()]);
         self::assertSame([], $this->replyRows());
         self::assertSame(0, $this->outboxCount());
@@ -527,11 +569,12 @@ final class QuestionJourneyTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region.
+     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region,
+     * or, for a toast-only answer, only updates the toast region.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
-    private function streamsOfTheAnswer(int $expectedStatus): array
+    private function streamsOfTheAnswer(int $expectedStatus, bool $isToastOnly = false): array
     {
         self::assertResponseStatusCodeSame($expectedStatus);
         self::assertSame('text/vnd.turbo-stream.html; charset=UTF-8', $this->client->getResponse()->headers->get('Content-Type'));
@@ -542,7 +585,7 @@ final class QuestionJourneyTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
+            $isToastOnly ? [['update', self::TOAST_REGION_ID]] : [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];

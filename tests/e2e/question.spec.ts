@@ -20,6 +20,8 @@ const ASK_PLACEHOLDER = 'What do you need to know?';
 const ASK_NOTE = 'A question pauses the ticket until Lena answers. They get one notification.';
 // TicketPageParts::PAUSED_PILL for Lena
 const PAUSED_PILL = 'Waiting · question to Lena';
+// ThreadController::FORM_EXPIRED
+const FORM_EXPIRED = 'This page was open too long. Reload it and try again.';
 
 // Each test makes its own SHOP ticket, given to Omar by Lena, so a rerun never meets an earlier run's open question and
 // the demo seed's tickets stay as they were. tests/Functional/Conversation/QuestionJourneyTest.php proves on the server
@@ -295,6 +297,42 @@ test('Cancel closes the Answer form, keeps the text and gives focus back to the 
     await answer.locator('summary').click();
     await expect(answer.getByLabel('Your answer')).toBeFocused();
     await expect(answer.getByLabel('Your answer')).toHaveValue(draft);
+  } finally {
+    await lena.context.close();
+    await omar.context.close();
+    await closeQuestionLeftOpen(browser, key, question);
+  }
+});
+
+test('a refused answer keeps its text in the open Answer box, shows the toast and puts focus back in the text', async ({ browser }) => {
+  const key = await makeTicketForOmar(browser, `Gift card balance rounds down ${randomUUID().slice(0, 8)}`);
+  const question = `Does it round on the receipt too? ${randomUUID().slice(0, 8)}`;
+  const draft = `Only on the checkout page ${randomUUID().slice(0, 8)}`;
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  const lena = await openAs(browser, LENA_STORAGE_STATE);
+  try {
+    await openThread(omar.page, key);
+    await askLena(omar.page, key, question);
+    await openThread(lena.page, key);
+    const answer = questionWithText(lena.page, question).locator('details.thread__answer');
+    await answer.locator('summary').click();
+    // An expired form is the refusal a browser can cause; QuestionJourneyTest covers the others.
+    await answer.locator('input[name="_csrf_token"]').evaluate((input) => {
+      (input as HTMLInputElement).value = 'expired';
+    });
+    await answer.getByLabel('Your answer').fill(draft);
+    const refused = lena.page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/answer') && response.request().method() === 'POST');
+
+    await answer.getByRole('button', { name: 'Answer', exact: true }).click();
+
+    expect((await refused).status()).toBe(422);
+    await expect(lena.page.locator(TOAST_REGION)).toHaveText(FORM_EXPIRED);
+    await expect(lena.page).toHaveURL(new RegExp(`/t/${key}$`));
+    await expect(answer).toHaveAttribute('open');
+    await expect(answer.getByLabel('Your answer')).toHaveValue(draft);
+    await expect(answer.getByLabel('Your answer')).toBeFocused();
+    await expect(questionWithText(lena.page, question).locator('.thread__tags')).toHaveText('Waiting on Lena');
+    await expect(statusPill(lena.page)).toHaveText(PAUSED_PILL);
   } finally {
     await lena.context.close();
     await omar.context.close();

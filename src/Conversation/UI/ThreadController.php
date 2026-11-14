@@ -45,7 +45,7 @@ use Symfony\UX\Turbo\TurboBundle;
  * The ticket's thread (FR-CNV-01, FR-CNV-02, FR-CNV-06, ticket-page.md, Questions and comments): shows it in
  * ThreadFrame's lazy frame, or as a page of its own, posts a comment, asks and answers a question, replies to a message,
  * resolves a comment, and edits or removes one's own message. Each action responds with a toast: a Turbo form in a Turbo Stream that also replaces the message
- * list, except a refused reply, whose open Reply box keeps its draft, any other form with a redirect to the thread's page. Asking and answering pause and resume the ticket, which
+ * list, except a refused answer, reply or edit, whose open box keeps its text, any other form with a redirect to the thread's page. Asking and answering pause and resume the ticket, which
  * changes its page's header that the thread's frame cannot replace, so once made they redirect to the ticket's page.
  * A comment, question, answer or reply that cleared the author's pings on the ticket says how many
  * ({@see PingsClearedToast}).
@@ -170,7 +170,7 @@ final class ThreadController extends AbstractController
             $this->editMessage->edit($organizationId, $ticket->id, $messageId, $userId, $body, $now);
 
             return self::MESSAGE_EDITED;
-        });
+        }, isRefusalToastOnly: true);
     }
 
     #[Route('/t/{key}/messages/{messageId}/remove', name: self::REMOVE_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
@@ -230,7 +230,7 @@ final class ThreadController extends AbstractController
             $answerReply = $this->answer->answer($organizationId, $ticket->id, $messageId, $userId, $body, $now);
 
             return PingsClearedToast::withClearedPings(\sprintf(self::QUESTION_ANSWERED, $ticket->stepName), $answerReply->clearedPingCount);
-        }, self::TICKET_ROUTE);
+        }, self::TICKET_ROUTE, isRefusalToastOnly: true);
     }
 
     #[Route('/t/{key}/messages/{messageId}/replies', name: self::REPLY_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]

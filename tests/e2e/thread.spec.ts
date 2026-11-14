@@ -177,6 +177,31 @@ test.describe('the thread of a new ticket', () => {
     await expect(message).toBeFocused();
   });
 
+  test('a refused edit keeps its text in the open Edit box, shows the toast and puts focus back in the text', async ({ page }) => {
+    const text = `Before the edit ${randomUUID().slice(0, 8)}`;
+    const editedText = `Kept after a refused edit ${randomUUID().slice(0, 8)}`;
+    await openThread(page, key);
+    await postComment(page, text);
+    const box = messageWithText(page, text).locator('details.thread__edit');
+    await box.locator('summary').click();
+    await expect(box.getByLabel('Edit your message')).toBeFocused();
+    // An expired form is the refusal a browser can cause; tests/Functional/Conversation covers the others.
+    await box.locator('input[name="_csrf_token"]').evaluate((input) => {
+      (input as HTMLInputElement).value = 'expired';
+    });
+    await box.getByLabel('Edit your message').fill(editedText);
+    const answer = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/edit') && response.request().method() === 'POST');
+
+    await box.getByRole('button', { name: 'Save' }).click();
+
+    expect((await answer).status()).toBe(422);
+    await expect(page.locator(TOAST_REGION)).toHaveText(FORM_EXPIRED);
+    await expect(box).toHaveAttribute('open');
+    await expect(box.getByLabel('Edit your message')).toHaveValue(editedText);
+    await expect(box.getByLabel('Edit your message')).toBeFocused();
+    await expect(messageWithText(page, text).locator('.thread__body')).toHaveText(text);
+  });
+
   test('a comment that holds a script shows as text and runs nothing', async ({ page }) => {
     const script = '<script>alert(1)</script>';
     const dialogs: string[] = [];
