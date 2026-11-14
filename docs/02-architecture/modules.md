@@ -371,7 +371,7 @@ All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `oc
 | PinVerdictSet | Review | Insight, Notification | ticketId, roundId, pinId, verdict | outbox |
 | ChecklistItemChanged | Review | Insight | ticketId, itemId, state | outbox |
 | MediaReady / MediaRejected | Media | Review, Ticketing | mediaId, reason? | outbox |
-| PingSent / PingCleared | Notification | Insight (bell counts), Audit | `Notification\Api\Event\NotificationEvent`: pingId, ticketId, fromUserId, toUserId; PingCleared also reason (`PingClearedReason`: `acted` or `done`; an archived ping publishes nothing). PingSent's `occurredAt` is the delivery time, after quiet hours for a held ping | outbox |
+| PingSent / PingCleared | Notification | Insight (bell counts), Audit | `Notification\Api\Event\PingEvent` (extends `NotificationEvent`, the outbox routing key): pingId, ticketId, fromUserId, toUserId; PingCleared also reason (`PingClearedReason`: `acted` or `done`; an archived ping publishes nothing). PingSent's `occurredAt` is the delivery time, after quiet hours for a held ping | outbox |
 | SummaryGenerated | Assist | Ticketing (stores the summary), Notification | ticketId, model, source | outbox |
 | ExplanationShared | Assist | Notification | ticketId, explanationId | outbox |
 | SuggestionReady | Assist | Web (Mercure push to the requester) | requestId, userId | outbox |
