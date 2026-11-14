@@ -60,6 +60,11 @@ doctrine:
                 dir: '%kernel.project_dir%/src/Workflow/Infrastructure/Doctrine/Mapping'
                 prefix: 'App\Workflow\Domain'
                 is_bundle: false
+            Media:
+                type: xml
+                dir: '%kernel.project_dir%/src/Media/Infrastructure/Doctrine/Mapping'
+                prefix: 'App\Media\Domain'
+                is_bundle: false
         # A result cache that never stores anything, in every environment: TenantFilter's SQL holds no organization
         # id, so a result cache key would not tell organizations apart and could serve one organization's rows to
         # another without asking the database. Left unset, DoctrineBundle would add an in-memory one. Replace it

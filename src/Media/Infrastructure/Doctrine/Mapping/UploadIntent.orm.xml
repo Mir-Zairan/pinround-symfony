@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="App\Media\Domain\UploadIntent" table="med_upload_intent">
+        <indexes>
+            <index name="med_upload_intent_expires_at_idx" columns="organization_id,expires_at"/>
+        </indexes>
+
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
+
+        <field name="userId" type="guid" column="user_id"/>
+        <field name="purpose" type="text" column="purpose" enum-type="App\Media\Domain\UploadPurpose"/>
+        <field name="maxBytes" type="bigint" column="max_bytes"/>
+        <field name="allowedMimeTypes" type="text_array" column="mime_allowed"/>
+        <field name="storageKey" type="text" column="storage_key"/>
+        <field name="expiresAt" type="datetimetz_immutable" column="expires_at"/>
+        <field name="usedAt" type="datetimetz_immutable" column="used_at" nullable="true"/>
+    </entity>
+</doctrine-mapping>
