@@ -43,6 +43,8 @@ final class QuestionJourneyTest extends WebTestCase
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string KEY = 'SHOP-1';
+    private const string OTHER_KEY = 'SHOP-2';
+    private const string OTHER_TICKETS_QUESTION_ID = '0197a3c0-0000-7000-8000-0000000000b2';
     private const string TICKET_PAGE = '/t/SHOP-1';
     private const string THREAD_PAGE = '/t/SHOP-1/thread';
     private const string ASK_PATH = '/t/SHOP-1/questions';
@@ -284,22 +286,33 @@ final class QuestionJourneyTest extends WebTestCase
     {
         yield 'malformed' => ['not-a-uuid'];
         yield 'unknown' => ['0197a3c0-0000-7000-8000-00000000dead'];
+        yield 'an open question to Lena on SHOP-2, a team-only ticket she may see' => [self::OTHER_TICKETS_QUESTION_ID];
     }
 
+    /**
+     * Lena is asked on SHOP-1 and on SHOP-2: an id under SHOP-1's path that names no message of SHOP-1 answers neither
+     * question and resumes neither ticket.
+     */
     #[Test]
     #[DataProvider('messageIdsOfNoMessage')]
     public function anAnswerToAMessageIdOfNoMessageIsNotFound(string $messageId): void
     {
         $this->addTicket();
         $this->addOpenQuestion();
-        $rowsBefore = [$this->questionRows(), $this->pause()];
+        $this->addTicket('team', self::OTHER_KEY);
+        $this->addOpenQuestion(self::OTHER_KEY, self::OTHER_TICKETS_QUESTION_ID);
+        $rowsBefore = [$this->questionRows(), $this->pause(), $this->pause(self::OTHER_KEY)];
+        self::assertSame([[self::QUESTION, null], [self::QUESTION, null]], array_map(static fn (array $question): array => [$question[0], $question[3]], $rowsBefore[0]));
+        $askedByOmarOfLena = [$this->people['Lena']->id()->toString(), $this->people['Omar']->id()->toString()];
+        self::assertSame([$askedByOmarOfLena, $askedByOmarOfLena], [$rowsBefore[1], $rowsBefore[2]]);
         $this->logIn($this->client, $this->people['Lena']);
 
         $this->client->request('POST', $this->answerPath($messageId), $this->answerFields(self::ANSWER));
 
         self::assertResponseStatusCodeSame(404);
-        self::assertSame($rowsBefore, [$this->questionRows(), $this->pause()]);
+        self::assertSame($rowsBefore, [$this->questionRows(), $this->pause(), $this->pause(self::OTHER_KEY)]);
         self::assertSame([], $this->replyRows());
+        self::assertSame(0, $this->outboxCount());
     }
 
     #[Test]
@@ -584,18 +597,19 @@ final class QuestionJourneyTest extends WebTestCase
     }
 
     /**
-     * SHOP-1, a bug of Shop's team reported by Lena and assigned to Omar, for everyone or for the team only.
+     * A bug of Shop's team, SHOP-1 unless $key says otherwise, reported by Lena and assigned to Omar, for everyone or
+     * for the team only.
      */
-    private function addTicket(string $visibility = 'all'): void
+    private function addTicket(string $visibility = 'all', string $key = self::KEY): void
     {
         $parameters = [
-            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), $this->stepId,
+            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), (int) substr($key, \strlen('SHOP-')), $key, $this->stepId,
             $this->people['Lena']->id()->toString(), $this->people['Omar']->id()->toString(), $visibility,
         ];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
                  step_id, reporter_id, assignee_id, visibility, version, components, check_reasons, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 1, 'SHOP-1', 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, ?, 3, '{}', '{}',
+             VALUES (?, ?, ?, ?, ?, ?, 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, ?, 3, '{}', '{}',
                  TIMESTAMPTZ '2026-11-04 10:00:00+00', TIMESTAMPTZ '2026-11-05 10:00:00+00')",
             $parameters,
         ));
@@ -620,25 +634,26 @@ final class QuestionJourneyTest extends WebTestCase
     }
 
     /**
-     * Omar's open question to Lena on SHOP-1, with the ticket paused on it as TicketPauses leaves it.
+     * Omar's open question to Lena on SHOP-1 unless $key says otherwise, with the ticket paused on it as TicketPauses
+     * leaves it.
      *
-     * @return string its id
+     * @return string its id, $messageId when given
      */
-    private function addOpenQuestion(): string
+    private function addOpenQuestion(string $key = self::KEY, ?string $messageId = null): string
     {
-        $messageId = Uuid::v7()->toRfc4122();
-        $parameters = [$messageId, $this->people['Omar']->id()->toString(), $this->people['Lena']->id()->toString(), self::QUESTION, $this->acmeFoods->toString()];
+        $messageId ??= Uuid::v7()->toRfc4122();
+        $parameters = [$messageId, $this->people['Omar']->id()->toString(), $this->people['Lena']->id()->toString(), self::QUESTION, $this->acmeFoods->toString(), $key];
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters): int {
             $migrator->executeStatement(
                 "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, created_at)
-                 SELECT organization_id, ?, id, ?, 'question', ?, ?, TIMESTAMPTZ '2026-11-06 11:59:00+00' FROM tkt_ticket WHERE organization_id = ? AND key = 'SHOP-1'",
+                 SELECT organization_id, ?, id, ?, 'question', ?, ?, TIMESTAMPTZ '2026-11-06 11:59:00+00' FROM tkt_ticket WHERE organization_id = ? AND key = ?",
                 $parameters,
             );
-            [, $askerId, $askedUserId, , $organizationId] = $parameters;
+            [, $askerId, $askedUserId, , $organizationId, $key] = $parameters;
 
             return (int) $migrator->executeStatement(
-                "UPDATE tkt_ticket SET asked_user_id = ?, asker_id = ? WHERE organization_id = ? AND key = 'SHOP-1'",
-                [$askedUserId, $askerId, $organizationId],
+                'UPDATE tkt_ticket SET asked_user_id = ?, asker_id = ? WHERE organization_id = ? AND key = ?',
+                [$askedUserId, $askerId, $organizationId, $key],
             );
         });
 
@@ -713,15 +728,15 @@ final class QuestionJourneyTest extends WebTestCase
     }
 
     /**
-     * @return array{string|null, string|null} SHOP-1's asked person and asker
+     * @return array{string|null, string|null} the ticket's asked person and asker
      */
-    private function pause(): array
+    private function pause(string $key = self::KEY): array
     {
         $organizationId = $this->acmeFoods->toString();
         $pause = [];
-        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$pause): int {
-            $row = $migrator->fetchNumeric("SELECT asked_user_id::text, asker_id::text FROM tkt_ticket WHERE organization_id = ? AND key = 'SHOP-1'", [$organizationId]);
-            self::assertIsArray($row, 'SHOP-1 has no ticket row.');
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $key, &$pause): int {
+            $row = $migrator->fetchNumeric('SELECT asked_user_id::text, asker_id::text FROM tkt_ticket WHERE organization_id = ? AND key = ?', [$organizationId, $key]);
+            self::assertIsArray($row, $key.' has no ticket row.');
             $pause = $row;
 
             return 0;

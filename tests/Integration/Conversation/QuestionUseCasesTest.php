@@ -506,6 +506,33 @@ final class QuestionUseCasesTest extends KernelTestCase
         self::assertSame($asked, $this->stateOf($this->ticketId, self::ACME_FOODS));
     }
 
+    /**
+     * Mia is asked on SHOP-7 and may answer there, but the question's id under another ticket of Acme Foods names no
+     * message of that ticket: neither ticket changes.
+     */
+    #[Test]
+    public function aQuestionAnsweredThroughAnotherTicketIsNotFoundAndBothTicketsStayAsTheyAre(): void
+    {
+        $otherTicketId = new ShopTickets($this->ticketCommands(), $this->transactions(), $this->connection())->createdFor(self::ACME_FOODS, self::SHOP_PROJECT, self::MIA, self::OMAR);
+        $questionId = $this->askedByOmarOfMia();
+        self::getContainer()->get('doctrine')->resetManager();
+        $asked = $this->stateOf($this->ticketId, self::ACME_FOODS);
+        $otherBefore = $this->stateOf($otherTicketId, self::ACME_FOODS);
+
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, fn (): \Throwable => $this->refusalOf(fn () => $this->answer()->answer(
+            new OrganizationId(self::ACME_FOODS),
+            $otherTicketId,
+            $questionId,
+            new UserId(self::MIA),
+            self::ANSWER_BODY,
+            new \DateTimeImmutable(self::ANSWERED_AT),
+        )));
+
+        self::assertSame([MessageNotFound::class, 'That message does not exist.'], [$refusal::class, $refusal->getMessage()]);
+        self::assertSame($asked, $this->stateOf($this->ticketId, self::ACME_FOODS));
+        self::assertSame($otherBefore, $this->stateOf($otherTicketId, self::ACME_FOODS));
+    }
+
     private function askedByOmarOfMia(): string
     {
         return $this->transactions()->committedAs(self::ACME_FOODS, fn (): string => $this->askQuestion()->ask(
