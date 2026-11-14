@@ -95,10 +95,14 @@ final class RefreshTicketPagesRoutingTest extends KernelTestCase
 
         $waiting = $sentRefreshes[2];
         $delayMilliseconds = $waiting->last(DelayStamp::class)?->getDelay() ?? self::fail('The Trailing try has no delay.');
-        $windowMillisecondsLeftNow = self::getContainer()->get('state_valkey.connection')->pttl('realtime-refresh:'.self::SHOP_12);
+        $stateValkey = self::getContainer()->get('state_valkey.connection');
+        $windowMillisecondsLeftNow = $stateValkey->pttl('realtime-refresh:'.self::SHOP_12);
         self::assertGreaterThan(0, $windowMillisecondsLeftNow, 'The window of the published refresh is still open.');
         self::assertGreaterThanOrEqual($windowMillisecondsLeftNow + RefreshTicketPagesHandler::WINDOW_END_MARGIN_MILLISECONDS, $delayMilliseconds, 'The Trailing try waits until the window ends.');
         self::assertLessThanOrEqual(RefreshTicketPagesHandler::WINDOW_MILLISECONDS + RefreshTicketPagesHandler::WINDOW_END_MARGIN_MILLISECONDS, $delayMilliseconds);
+        $trailingTryMillisecondsLeftNow = $stateValkey->pttl('realtime-refresh-trailing:'.self::SHOP_12);
+        self::assertGreaterThan(0, $trailingTryMillisecondsLeftNow, 'The waiting Trailing try holds its lock.');
+        self::assertLessThanOrEqual($delayMilliseconds, $trailingTryMillisecondsLeftNow, 'The lock of the Trailing try ends no later than the try is due.');
         self::assertSame([], [...$this->asyncNotify()->get()], 'The Trailing try is not due before its window ends.');
     }
 
