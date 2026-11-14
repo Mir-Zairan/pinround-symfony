@@ -1,6 +1,9 @@
 import { errors, expect, test, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { LENA_STORAGE_STATE, MIA_EMAIL, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 // ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED
@@ -15,6 +18,7 @@ const COALESCED_SHOWS_WITHIN_MS = 2000 + SHOWS_WITHIN_MS;
 const TOKEN_PATH = '/realtime/token';
 const HUB_PATH = '/.well-known/mercure';
 const STATE_CHANGE_KEY = 'e2e-ticket-state-change';
+const REPO_ROOT = path.join(__dirname, '..', '..');
 
 // Lena and Omar each have a browser of their own on one SHOP ticket that Lena makes for the test, so the hub, the
 // outbox relay and the worker that publishes (compose.yaml) all run between them. The signal carries no content: what
@@ -207,6 +211,53 @@ async function moveFromList(page: Page, stepName: string): Promise<void> {
   await moveList.getByText('Move to another step…').click();
   await moveList.getByRole('button', { name: stepName, exact: true }).click();
   expect((await answer).status()).toBe(200);
+}
+
+/**
+ * Runs one SQL statement as the database's superuser, which row-level security does not limit, and returns the rows
+ * it printed, one per line with '|' between columns. No app path removes a team member, so the test does it here.
+ * .env.local exists only on a dev machine; COMPOSE_FILE picks CI's compose files.
+ */
+function runAsDatabaseOwner(sql: string): string[] {
+  const envFileOptions = ['.env', '.env.dev', '.env.local'].filter((file) => existsSync(path.join(REPO_ROOT, file))).flatMap((file) => ['--env-file', file]);
+  const printed = execFileSync(
+    'docker',
+    ['compose', ...envFileOptions, 'exec', '-T', 'postgres', 'psql', '-U', 'pinround', '-d', 'pinround', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', sql],
+    { cwd: REPO_ROOT, encoding: 'utf8' },
+  );
+  return printed.split('\n').filter((line) => line !== '');
+}
+
+/** A seeded open SHOP ticket only the Shop team sees, on which Mia is none of the six people, so only her team shows it to her. */
+function teamOnlyTicketMiaSeesThroughShop(): { key: string; title: string } {
+  const rows = runAsDatabaseOwner(`
+    SELECT t.key, t.title FROM tkt_ticket t
+    JOIN org_team team ON team.organization_id = t.organization_id AND team.id = t.team_id
+    JOIN idn_user mia ON mia.email = '${MIA_EMAIL}'
+    WHERE team.name = 'Shop' AND t.key LIKE 'SHOP-%' AND t.visibility = 'team' AND t.closed_at IS NULL
+      AND mia.id <> t.reporter_id AND mia.id IS DISTINCT FROM t.assignee_id AND mia.id IS DISTINCT FROM t.pending_assignee_id
+      AND mia.id IS DISTINCT FROM t.reviewer_id AND mia.id IS DISTINCT FROM t.tester_id AND mia.id IS DISTINCT FROM t.waiting_on_user_id
+    ORDER BY t.number LIMIT 1`);
+  expect(rows, 'the seeded team-only SHOP tickets are missing: run make seed').toHaveLength(1);
+  const [key, ...titleParts] = rows[0].split('|');
+  return { key, title: titleParts.join('|') };
+}
+
+/** Takes Mia out of Shop and returns her row as SQL values, for putBackInShop. */
+function removeMiaFromShop(): string {
+  const rows = runAsDatabaseOwner(`
+    DELETE FROM org_team_member m USING idn_user mia, org_team team
+    WHERE mia.id = m.user_id AND team.organization_id = m.organization_id AND team.id = m.team_id
+      AND mia.email = '${MIA_EMAIL}' AND team.name = 'Shop'
+    RETURNING m.organization_id, m.team_id, m.user_id, m.team_role, m.job, m.created_at`);
+  expect(rows, 'Mia is not in Shop: an earlier run stopped before putting her back, or run make seed').toHaveLength(1);
+  return rows[0].split('|').map((value) => `'${value}'`).join(', ');
+}
+
+function putBackInShop(memberValues: string): void {
+  runAsDatabaseOwner(`
+    INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (${memberValues})
+    ON CONFLICT (organization_id, team_id, user_id) DO NOTHING`);
 }
 
 test.describe('two people on one ticket', () => {
@@ -419,6 +470,54 @@ test.describe('a refetch that fails', () => {
     await expect(omar.page.getByText(reply)).toHaveCount(0);
     await lena.context.close();
     await omar.context.close();
+  });
+
+  test("after Mia was taken out of the ticket's team, Lena's comment sends her page to the 404 page with none of the ticket shown", async ({ browser }) => {
+    test.skip(
+      !process.env.CI && !existsSync(MIA_STORAGE_STATE),
+      'auth.setup.ts skipped Mia: her two-step login is on in this database. TicketPageTest proves a non-viewer gets 404.',
+    );
+    const { key, title } = teamOnlyTicketMiaSeesThroughShop();
+    const mia = await openAs(browser, MIA_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(mia.page, key);
+    await expect(mia.page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+    await openThread(lena.page, key);
+    await markThisLoad(mia.page);
+    // The signal refetches the page and reloads the thread frame; each answer of 404 loads its own URL for real, and
+    // whichever loads last is the page Mia sees.
+    const refetchedPaths = [`/t/${key}`, `/t/${key}/thread`];
+    const refetches = refetchedPaths.map((refetchedPath) =>
+      mia.page.waitForResponse((response) => pathOf(response.request()) === refetchedPath && response.request().resourceType() === 'fetch'),
+    );
+    const documentStatuses: number[] = [];
+    mia.page.on('response', (response) => {
+      if (response.request().resourceType() === 'document') {
+        documentStatuses.push(response.status());
+      }
+    });
+    const comment = `Delivery date shows a day late ${randomUUID().slice(0, 8)}`;
+
+    // Mia's row goes for the shortest time the test allows: ticket-move.spec.ts, which may run at the same time, needs
+    // her as Shop's tester.
+    const miasShopRow = removeMiaFromShop();
+    try {
+      await postComment(lena.page, comment);
+
+      expect((await Promise.all(refetches)).map((response) => response.status())).toEqual([404, 404]);
+      await expect.poll(() => documentStatuses.length).toBeGreaterThan(0);
+      await mia.page.waitForLoadState('load');
+    } finally {
+      putBackInShop(miasShopRow);
+    }
+    expect(documentStatuses.every((status) => status === 404), `Mia's tab loaded pages answered ${documentStatuses.join(', ')}`).toBe(true);
+    await expect(mia.page).toHaveURL(new RegExp(`/t/${key}(/thread)?$`));
+    await expect(mia.page.locator('html')).not.toHaveAttribute('data-e2e-load', 'first');
+    await expect(mia.page.getByText(title)).toHaveCount(0);
+    await expect(mia.page.getByText(comment)).toHaveCount(0);
+    await expect(mia.page.locator('#ticket-state, turbo-frame#ticket-thread')).toHaveCount(0);
+    await lena.context.close();
+    await mia.context.close();
   });
 
   test('a page answer of 404 loads that page for real, with none of the change shown', async ({ browser }) => {
