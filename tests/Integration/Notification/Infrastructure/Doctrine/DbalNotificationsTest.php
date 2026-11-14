@@ -206,18 +206,50 @@ final class DbalNotificationsTest extends KernelTestCase
     #[Test]
     public function aReplyFoldsOnlyIntoAReplyHeldUntilTheSameTime(): void
     {
-        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::FIRST_REPLY_AT)));
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::FIRST_REPLY_AT));
+            $this->notifications()->add($this->reply(self::OMAR, self::OTHER_MESSAGE, self::LENA, '2027-03-16 08:30:00 UTC', '2027-03-16 08:30:00 UTC'));
+        });
         $since = new \DateTimeImmutable(self::FIRST_REPLY_AT);
 
-        $heldReply = $this->reply(self::OMAR, self::MESSAGE, self::MIA, self::HELD_UNTIL, self::HELD_UNTIL);
-        $isFoldedIntoTheShownReply = $this->transactions()->committedAs(self::ACME_FOODS, fn (): bool => $this->notifications()->foldIntoUnreadReply($heldReply, $since));
-        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($heldReply));
-        $laterHeldReply = $this->reply(self::OMAR, self::MESSAGE, self::LENA, self::HELD_UNTIL, self::HELD_UNTIL);
-        $isFoldedIntoTheHeldReply = $this->transactions()->committedAs(self::ACME_FOODS, fn (): bool => $this->notifications()->foldIntoUnreadReply($laterHeldReply, $since));
+        $isFolded = [
+            'held into shown' => $this->foldOrAdd($this->reply(self::OMAR, self::MESSAGE, self::MIA, self::HELD_UNTIL, self::HELD_UNTIL), $since),
+            'held into held until the same time' => $this->foldOrAdd($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::HELD_UNTIL, self::HELD_UNTIL), $since),
+            'shown into held until later' => $this->foldOrAdd($this->reply(self::OMAR, self::OTHER_MESSAGE, self::MIA, '2027-03-16 08:10:00 UTC'), $since),
+            'held into held until another time' => $this->foldOrAdd($this->reply(self::OMAR, self::OTHER_MESSAGE, self::MIA, '2027-03-17 08:30:00 UTC', '2027-03-17 08:30:00 UTC'), $since),
+        ];
 
-        self::assertSame([false, true], [$isFoldedIntoTheShownReply, $isFoldedIntoTheHeldReply]);
         self::assertSame(
-            [[self::LENA, '2027-03-15 10:00:00.000', null], [self::LENA, '2027-03-16 08:00:00.000', '2027-03-16 08:00:00.000']],
+            ['held into shown' => false, 'held into held until the same time' => true, 'shown into held until later' => false, 'held into held until another time' => false],
+            $isFolded,
+        );
+        self::assertSame(
+            [
+                [self::MESSAGE, self::LENA, '2027-03-15 10:00:00.000', null],
+                [self::MESSAGE, self::LENA, '2027-03-16 08:00:00.000', '2027-03-16 08:00:00.000'],
+                [self::OTHER_MESSAGE, self::MIA, '2027-03-16 08:10:00.000', null],
+                [self::OTHER_MESSAGE, self::LENA, '2027-03-16 08:30:00.000', '2027-03-16 08:30:00.000'],
+                [self::OTHER_MESSAGE, self::MIA, '2027-03-17 08:30:00.000', '2027-03-17 08:30:00.000'],
+            ],
+            array_map(static fn (array $row): array => [$row['data']['messageId'] ?? null, $row['actor_id'], $row['created_at'], $row['deliver_after']], $this->rowsOf(self::ACME_FOODS)),
+        );
+    }
+
+    #[Test]
+    public function aShownReplyFoldsIntoAReplyWhoseHoldEndedBeforeTheReleaseRan(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::HELD_UNTIL, self::HELD_UNTIL)));
+
+        $since = new \DateTimeImmutable(self::FIRST_REPLY_AT);
+
+        $isFolded = [
+            'as the hold ends' => $this->foldOrAdd($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::HELD_UNTIL), $since),
+            'after the hold ended' => $this->foldOrAdd($this->reply(self::OMAR, self::MESSAGE, self::MIA, '2027-03-16 08:02:00 UTC'), $since),
+        ];
+
+        self::assertSame(['as the hold ends' => true, 'after the hold ended' => true], $isFolded);
+        self::assertSame(
+            [[self::MIA, '2027-03-16 08:02:00.000', '2027-03-16 08:00:00.000']],
             array_map(static fn (array $row): array => [$row['actor_id'], $row['created_at'], $row['deliver_after']], $this->rowsOf(self::ACME_FOODS)),
         );
     }
@@ -288,6 +320,21 @@ final class DbalNotificationsTest extends KernelTestCase
         $this->transactions()->committedAs(self::BETA_BAKERY, fn () => $this->notifications()->add(
             new NewNotification(new OrganizationId(self::BETA_BAKERY), new UserId(self::OMAR), NotificationKind::Reply, new UserId(self::LENA), new TicketId(self::BETA_TICKET), ['actorName' => 'Lena', 'ticketKey' => 'BETA-1', 'messageId' => self::MESSAGE, 'replyId' => 'reply-by-'.self::LENA], new \DateTimeImmutable('2027-03-15 10:01:00 UTC')),
         ));
+    }
+
+    /**
+     * Folds $reply in one committed transaction or, when nothing takes it, adds it as NotifyRecipients does.
+     */
+    private function foldOrAdd(NewNotification $reply, \DateTimeImmutable $since): bool
+    {
+        return $this->transactions()->committedAs(self::ACME_FOODS, function () use ($reply, $since): bool {
+            $isFolded = $this->notifications()->foldIntoUnreadReply($reply, $since);
+            if (!$isFolded) {
+                $this->notifications()->add($reply);
+            }
+
+            return $isFolded;
+        });
     }
 
     private function reply(string $recipientId, string $messageId, string $actorId, string $at, ?string $deliverAfter = null): NewNotification

@@ -355,6 +355,22 @@ final class NotifyRecipientsTest extends TestCase
         );
     }
 
+    #[Test]
+    public function aShownReplyFoldsIntoTheHeldReplyOnceItsHoldHasEnded(): void
+    {
+        $this->isQuietHoursOn = true;
+        // 4 March 2026 in Berlin is UTC+1: 23:00 the night before is held until 09:00, 09:01 is shown at once.
+        $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::REPLY, self::OMAR, self::LENA, new \DateTimeImmutable('2026-03-03 22:00:00 UTC')));
+        $this->onceOnlyHandling->messageId = 'message-2';
+
+        $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::SECOND_REPLY, self::OMAR, self::MIA, new \DateTimeImmutable('2026-03-04 08:01:00 UTC')));
+
+        self::assertSame(
+            [[self::MIA, '2026-03-04T08:01:00+00:00', '2026-03-04T09:00:00+01:00']],
+            array_map(static fn (NewNotification $row): array => [$row->actorId->toString(), $row->createdAt->format(\DATE_ATOM), $row->deliverAfter?->format(\DATE_ATOM)], $this->notifications->rows),
+        );
+    }
+
     private function questionTo(string $recipientId): QuestionAsked
     {
         return new QuestionAsked(self::ACME_FOODS, self::TICKET, self::MESSAGE, $recipientId, self::LENA, new \DateTimeImmutable(self::OCCURRED_AT));
@@ -540,7 +556,8 @@ final class NotifyRecipientsTest extends TestCase
 
 /**
  * Like DbalNotifications: a reply folds into an unread, not done reply about the same message created at or after
- * $since and held until the same time; the rows have no read or done state here, so every row is unread.
+ * $since and held until the same time, or, for a reply that is not held, whose hold ended by the reply's created_at;
+ * the rows have no read or done state here, so every row is unread.
  */
 final class NotificationsDouble implements Notifications
 {
@@ -565,7 +582,8 @@ final class NotificationsDouble implements Notifications
                 && $row->recipientId->equals($reply->recipientId)
                 && ($row->data['messageId'] ?? null) === $messageId
                 && $row->createdAt >= $since
-                && $row->deliverAfter?->format('U.u') === $reply->deliverAfter?->format('U.u')
+                && ($row->deliverAfter?->format('U.u') === $reply->deliverAfter?->format('U.u')
+                    || (null === $reply->deliverAfter && null !== $row->deliverAfter && $row->deliverAfter <= $reply->createdAt))
             ) {
                 $this->rows[$index] = new NewNotification($row->organizationId, $row->recipientId, $row->kind, $reply->actorId, $row->ticketId, $reply->data, $reply->createdAt, $row->deliverAfter);
                 $isFolded = true;

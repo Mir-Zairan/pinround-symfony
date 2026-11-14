@@ -21,10 +21,11 @@ interface Notifications
 
     /**
      * Folds $reply into the recipient's reply notification about the same message (data.messageId) that is unread, not
-     * done, created at or after $since and held until the same time as $reply (both not held included): its actor, data
-     * and created_at become $reply's. A held reply never folds into a shown one, which would show it before its time. It first takes a
-     * transaction lock on (organization, recipient, message), held until the caller's transaction ends, so two
-     * replies handled at once cannot both find nothing and both add a row.
+     * done, created at or after $since and held until the same time as $reply (both not held included), or, for a $reply
+     * that is not held, one whose hold ended at or before $reply's created_at though not released yet: its actor, data
+     * and created_at become $reply's, its deliver_after stays. A held reply never folds into a shown one, which would
+     * show it before its time. It first takes a transaction lock on (organization, recipient, message), held until the
+     * caller's transaction ends, so two replies handled at once cannot both find nothing and both add a row.
      *
      * @return bool whether such a notification was found and changed; false changes nothing
      *

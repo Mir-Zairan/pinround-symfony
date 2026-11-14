@@ -23,9 +23,12 @@ final readonly class DbalNotifications implements Notifications
     private const string INSERT = 'INSERT INTO ntf_notification (organization_id, id, user_id, kind, actor_id, ticket_id, data,'
         .' deliver_after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
+    // The last parameter is the shown reply's created_at, or null for a held reply, which then folds only into a row
+    // held until the same time: a row whose hold ended before the release cleared its deliver_after is shown already.
     private const string FOLD = 'UPDATE ntf_notification SET actor_id = ?, data = ?, created_at = ?'
         ." WHERE organization_id = ? AND user_id = ? AND kind = ? AND data->>'messageId' = ?"
-        .' AND read_at IS NULL AND done_at IS NULL AND created_at >= ? AND deliver_after IS NOT DISTINCT FROM ?';
+        .' AND read_at IS NULL AND done_at IS NULL AND created_at >= ?'
+        .' AND (deliver_after IS NOT DISTINCT FROM ? OR deliver_after <= ?)';
 
     // No index covers user and ticket together: the bell index on (organization_id, user_id, actor_id, ticket_id,
     // created_at) WHERE done_at IS NULL narrows by its (organization_id, user_id) prefix to the person's open rows, or
@@ -87,6 +90,7 @@ final readonly class DbalNotifications implements Notifications
             $messageId,
             $since->format(self::TIMESTAMP_FORMAT),
             $reply->deliverAfter?->format(self::TIMESTAMP_FORMAT),
+            null === $reply->deliverAfter ? $reply->createdAt->format(self::TIMESTAMP_FORMAT) : null,
         ]);
         if ($isFolded) {
             $this->bellCountCache->invalidateAfterCommit($reply->recipientId);

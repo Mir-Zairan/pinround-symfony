@@ -32,9 +32,10 @@ use App\Ticketing\Api\TicketVisibilityFacts;
  * and neither does a ping cleared before its event is handled. A row made in the recipient's quiet hours is held until
  * they end (a ping keeps the time stored on it) and is created at that end, as a held ping's event already is: a
  * digest's window starts after the last digest's send time, so a row created at the event would miss every digest
- * when one went out during the hold. Replies to one message within REPLY_FOLD_SECONDS of the last unread
- * one fold into it instead of adding a row. Each row added or folded refreshes the recipient's bell once the bus
- * commits, or once it is delivered when it is held.
+ * when one went out during the hold. A shown reply within REPLY_FOLD_SECONDS of the last unread one about its
+ * message folds into it instead of adding a row, when that one is shown or its hold has ended; a held reply folds only
+ * into a reply held until the same time, for the whole hold (Notifications::foldIntoUnreadReply). Each row added or
+ * folded refreshes the recipient's bell once the bus commits, or once it is delivered when it is held.
  */
 final readonly class NotifyRecipients
 {

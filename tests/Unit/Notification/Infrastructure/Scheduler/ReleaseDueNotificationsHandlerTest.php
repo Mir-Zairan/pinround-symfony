@@ -11,6 +11,7 @@ use App\Notification\Infrastructure\Scheduler\ReleaseDueNotifications;
 use App\Notification\Infrastructure\Scheduler\ReleaseDueNotificationsHandler;
 use App\SharedKernel\Application\MessageForAnotherTenantRefused;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -105,6 +106,23 @@ final class ReleaseDueNotificationsHandlerTest extends TestCase
             self::fail('A release of Beta Bakery ran under Acme Foods.');
         } catch (MessageForAnotherTenantRefused $refusal) {
             self::assertSame('A message for another organization cannot be dispatched or handled while this organization is set.', $refusal->getMessage());
+        }
+
+        self::assertSame($deliveryTimesBefore, $this->notifications->deliveryTimes());
+        self::assertSame([], $this->bellRefreshes->sent);
+    }
+
+    #[Test]
+    public function aReleaseWithNoOrganizationSetIsRefusedAndReleasesNothing(): void
+    {
+        $deliveryTimesBefore = $this->notifications->deliveryTimes();
+        self::assertCount(5, array_filter($deliveryTimesBefore), 'The rows held before the release.');
+
+        try {
+            ($this->handler)(new ReleaseDueNotifications(self::ACME_FOODS));
+            self::fail('A release ran with no organization set.');
+        } catch (TenantNotSet $refusal) {
+            self::assertSame('No organization is set for this unit of work.', $refusal->getMessage());
         }
 
         self::assertSame($deliveryTimesBefore, $this->notifications->deliveryTimes());
