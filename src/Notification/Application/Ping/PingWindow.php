@@ -34,4 +34,18 @@ interface PingWindow
      * @throws PingsPaused when the store cannot be reached
      */
     public function release(OrganizationId $organizationId, UserId $fromUserId, UserId $toUserId, TicketId $ticketId, PingId $pingId): void;
+
+    /**
+     * When each held slot of this sender and ticket ends, among the recipients asked, in one read: the same slots
+     * take() refuses on, so the page and the POST agree. A recipient whose slot is free is left out; no recipients
+     * asks nothing.
+     *
+     * @param list<UserId> $toUserIds
+     *
+     * @return array<string, \DateTimeImmutable> the instant each held slot ends, by recipient user id string
+     *
+     * @throws PingsPaused     when the store cannot be reached
+     * @throws \LogicException when a slot holds a value take() never writes
+     */
+    public function heldUntilOf(OrganizationId $organizationId, UserId $fromUserId, array $toUserIds, TicketId $ticketId): array;
 }

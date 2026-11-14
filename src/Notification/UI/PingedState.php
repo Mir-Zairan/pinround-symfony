@@ -4,33 +4,27 @@ declare(strict_types=1);
 
 namespace App\Notification\UI;
 
-use App\Notification\Application\Ping\RecentPingQueries;
-use App\Notification\Application\Ping\RecentPings;
-use App\SharedKernel\Application\Transactions;
+use App\Notification\Api\PingsPaused;
+use App\Notification\Application\Ping\PingWindow;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use Doctrine\DBAL\Connection;
-use Psr\Clock\ClockInterface;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
- * Whom the current person pinged about a ticket lately, read once per request and ticket for every row of the ticket
- * page's People. Kept until the kernel resets it between requests (ADR-0008).
+ * Whom the current person may not ping again yet about a ticket, read from the ping window once per request, ticket and
+ * People rows for every row of the ticket page's People, so the page shows what a POST would refuse, with no SQL. Kept
+ * until the kernel resets it between requests (ADR-0008).
  *
  * The wait is shown relative ("again in 3 h"), as Notification's UI may not read the person's time zone from Identity.
  */
 final class PingedState implements ResetInterface
 {
-    /** @var array<string, RecentPings> by organization, sender and ticket */
-    private array $recentPingsByKey = [];
+    /** @var array<string, array<string, \DateTimeImmutable>> by organization, sender, ticket and sorted recipients */
+    private array $heldUntilByKey = [];
 
-    public function __construct(
-        private readonly RecentPingQueries $recentPingQueries,
-        private readonly Transactions $transactions,
-        private readonly Connection $connection,
-        private readonly ClockInterface $clock,
-    ) {
+    public function __construct(private readonly PingWindow $pingWindow)
+    {
     }
 
     /**
@@ -47,29 +41,39 @@ final class PingedState implements ResetInterface
     }
 
     /**
-     * Runs the read in a transaction of its own when none is open, as the stream answers of a move render the ticket's
-     * People after the move's transaction ended; inside an open one it reads there.
+     * When the ping window lets $fromUserId ping each of $toUserIds about the ticket again; a recipient with a free
+     * slot is left out. While the window cannot be reached nobody is shown pinged, and that answer is kept too, so a
+     * page of many rows waits for an unreachable store once; the POST still refuses with PingsPaused.
      *
-     * @throws \LogicException when the stored ping limit is not one of 1, 4, 8 or 24, or no transaction is open and
-     *                         the request has no tenant
+     * @param list<UserId> $toUserIds
+     *
+     * @return array<string, \DateTimeImmutable> by recipient user id string
+     *
+     * @throws \LogicException when a slot holds a value the window never writes
      */
-    public function recentPingsOf(OrganizationId $organizationId, UserId $fromUserId, TicketId $ticketId): RecentPings
+    public function heldUntilOf(OrganizationId $organizationId, UserId $fromUserId, TicketId $ticketId, array $toUserIds): array
     {
-        $key = $organizationId->toString().'|'.$fromUserId->toString().'|'.$ticketId->toString();
-        if (isset($this->recentPingsByKey[$key])) {
-            return $this->recentPingsByKey[$key];
+        $recipientIds = array_map(static fn (UserId $toUserId): string => $toUserId->toString(), $toUserIds);
+        sort($recipientIds);
+        $key = $organizationId->toString().'|'.$fromUserId->toString().'|'.$ticketId->toString().'|'.implode(',', $recipientIds);
+        if (isset($this->heldUntilByKey[$key])) {
+            return $this->heldUntilByKey[$key];
         }
-        $at = $this->clock->now();
-        $read = fn (): RecentPings => $this->recentPingQueries->recentPingsOf($organizationId, $fromUserId, $ticketId, $at);
 
-        return $this->recentPingsByKey[$key] = $this->connection->isTransactionActive() ? $read() : $this->transactions->run($read);
+        try {
+            $heldUntilById = $this->pingWindow->heldUntilOf($organizationId, $fromUserId, $toUserIds, $ticketId);
+        } catch (PingsPaused) {
+            $heldUntilById = [];
+        }
+
+        return $this->heldUntilByKey[$key] = $heldUntilById;
     }
 
     /**
-     * Forgets the pings read, after a ping is sent in this request too, so the next read sees it.
+     * Forgets the slots read, after a ping is sent in this request too, so the next read sees it.
      */
     public function reset(): void
     {
-        $this->recentPingsByKey = [];
+        $this->heldUntilByKey = [];
     }
 }

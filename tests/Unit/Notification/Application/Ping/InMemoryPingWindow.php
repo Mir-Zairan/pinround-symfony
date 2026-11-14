@@ -14,7 +14,8 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * Behaves like ValkeyPingWindow: a held slot refuses every take for its key with the same againAt until it ends, and
- * only the ping that holds a slot releases it.
+ * only the ping that holds a slot releases it. Valkey expires a slot when it ends; here take() treats an ended slot as
+ * free, and heldUntilOf() still reports it until a take replaces it, so tests that read slots ask before they end.
  */
 final class InMemoryPingWindow implements PingWindow
 {
@@ -22,6 +23,8 @@ final class InMemoryPingWindow implements PingWindow
     private array $slots = [];
 
     private bool $isReleasePaused = false;
+
+    private bool $isReadPaused = false;
 
     public function take(OrganizationId $organizationId, UserId $fromUserId, UserId $toUserId, TicketId $ticketId, PingId $pingId, int $hours, \DateTimeImmutable $at): void
     {
@@ -44,6 +47,31 @@ final class InMemoryPingWindow implements PingWindow
         if (($this->slots[$key]['pingId'] ?? null) === $pingId->toString()) {
             unset($this->slots[$key]);
         }
+    }
+
+    public function heldUntilOf(OrganizationId $organizationId, UserId $fromUserId, array $toUserIds, TicketId $ticketId): array
+    {
+        if ([] === $toUserIds) {
+            return [];
+        }
+        if ($this->isReadPaused) {
+            throw new PingsPaused();
+        }
+
+        $heldUntilById = [];
+        foreach ($toUserIds as $toUserId) {
+            $slot = $this->slots[self::keyOf($organizationId, $fromUserId, $toUserId, $ticketId)] ?? null;
+            if (null !== $slot) {
+                $heldUntilById[$toUserId->toString()] = $slot['againAt'];
+            }
+        }
+
+        return $heldUntilById;
+    }
+
+    public function pauseReads(): void
+    {
+        $this->isReadPaused = true;
     }
 
     public function pauseReleases(): void

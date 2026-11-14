@@ -204,6 +204,61 @@ final class ValkeyPingWindowTest extends KernelTestCase
         $this->window()->take(...$this->slot(self::LENA, self::OMAR, self::SHOP_12), pingId: new PingId(self::FIRST_PING), hours: 4, at: new \DateTimeImmutable(self::SENT_AT));
     }
 
+    #[Test]
+    public function theHeldSlotsOfTheAskedRecipientsAreReadWithWhenEachEnds(): void
+    {
+        $at = new \DateTimeImmutable(self::SENT_AT);
+        $this->window()->take(...$this->slot(self::LENA, self::OMAR, self::SHOP_12), pingId: new PingId(self::FIRST_PING), hours: 4, at: $at);
+        $this->window()->take(...$this->slot(self::LENA, self::MIA, self::SHOP_13), pingId: new PingId(self::SECOND_PING), hours: 8, at: $at);
+        $this->window()->take(...$this->slot(self::MIA, self::OMAR, self::SHOP_12), pingId: new PingId(self::SECOND_PING), hours: 24, at: $at);
+
+        $heldUntilById = $this->window()->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::MIA), new UserId(self::OMAR)], new TicketId(self::SHOP_12));
+
+        self::assertEquals([self::OMAR => new \DateTimeImmutable('2027-03-15 14:00:00 UTC')], $heldUntilById);
+    }
+
+    #[Test]
+    public function aReleasedSlotIsNoLongerRead(): void
+    {
+        $this->window()->take(...$this->slot(self::LENA, self::OMAR, self::SHOP_12), pingId: new PingId(self::FIRST_PING), hours: 4, at: new \DateTimeImmutable(self::SENT_AT));
+        $this->window()->release(...$this->slot(self::LENA, self::OMAR, self::SHOP_12), pingId: new PingId(self::FIRST_PING));
+
+        self::assertSame([], $this->window()->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::OMAR)], new TicketId(self::SHOP_12)));
+    }
+
+    #[Test]
+    public function askingForNoRecipientsDoesNotReachValkey(): void
+    {
+        self::assertSame([], new ValkeyPingWindow($this->unreachableValkey())->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [], new TicketId(self::SHOP_12)));
+    }
+
+    #[Test]
+    public function anUnreachableValkeyPausesTheRead(): void
+    {
+        $this->expectException(PingsPaused::class);
+
+        new ValkeyPingWindow($this->unreachableValkey())->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::OMAR)], new TicketId(self::SHOP_12));
+    }
+
+    #[Test]
+    public function aLostConnectionPausesTheReadToo(): void
+    {
+        $this->expectException(PingsPaused::class);
+
+        new ValkeyPingWindow(new \Redis())->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::OMAR)], new TicketId(self::SHOP_12));
+    }
+
+    #[Test]
+    public function anUnreadableHeldSlotFailsTheRead(): void
+    {
+        $this->stateValkey()->set($this->keyOf(self::LENA, self::OMAR, self::SHOP_12), 'soon', ['EX' => 60]);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageIsOrContains('The ping window holds an unreadable slot.');
+
+        $this->window()->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::OMAR)], new TicketId(self::SHOP_12));
+    }
+
     /**
      * @return array{organizationId: OrganizationId, fromUserId: UserId, toUserId: UserId, ticketId: TicketId}
      */

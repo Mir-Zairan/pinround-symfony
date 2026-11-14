@@ -7,6 +7,7 @@ namespace App\Notification\UI\Component;
 use App\Notification\UI\Controller\PingController;
 use App\Notification\UI\PingedState;
 use App\Organization\Api\CurrentActor;
+use App\Organization\Api\PingSettingsQueries;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use Psr\Clock\ClockInterface;
@@ -42,6 +43,13 @@ final class PingSheet
     /** The ticket's Now line, which the draft message quotes; null for a ticket no team owns, which has no turn. */
     public ?string $nowText = null;
 
+    /**
+     * The user ids of every People row, canonical uuids, so one read of the ping window serves all rows of the page.
+     *
+     * @var list<string>
+     */
+    public array $peopleUserIds = [];
+
     /** Whether the row is the viewer's own, who may not ping themselves. */
     public bool $isViewer = false;
 
@@ -56,6 +64,7 @@ final class PingSheet
 
     public function __construct(
         private readonly PingedState $pingedState,
+        private readonly PingSettingsQueries $pingSettingsQueries,
         private readonly CurrentActor $currentActor,
         private readonly Security $security,
         private readonly ClockInterface $clock,
@@ -63,8 +72,12 @@ final class PingSheet
     }
 
     /**
-     * Reads the viewer's recent pings of the ticket once per request and ticket, through PingedState, so a page of
-     * many rows asks once.
+     * Reads the viewer's held ping slots for all People rows once per request and ticket, through PingedState, so a
+     * page of many rows asks the ping window once; a row missing from peopleUserIds is asked along with them. The
+     * ping limit comes from the settings the ticket page and the move's stream answer already read in their
+     * transaction, so neither costs a query.
+     *
+     * @throws \LogicException when the stored ping limit is not one of 1, 4, 8 or 24, or a slot is unreadable
      */
     #[PostMount]
     public function readPingedState(): void
@@ -76,9 +89,16 @@ final class PingSheet
         if (null === $actor) {
             return;
         }
-        $recentPings = $this->pingedState->recentPingsOf($actor->organizationId(), $actor->userId(), new TicketId($this->ticketId));
-        $againAt = $recentPings->againAtOf(new UserId($this->toUserId));
-        $this->limitHours = $recentPings->limitHours;
+        $recipientIds = [];
+        foreach ($this->peopleUserIds as $personId) {
+            $recipientIds[] = new UserId($personId);
+        }
+        if (!\in_array($this->toUserId, $this->peopleUserIds, true)) {
+            $recipientIds[] = new UserId($this->toUserId);
+        }
+        $heldUntilById = $this->pingedState->heldUntilOf($actor->organizationId(), $actor->userId(), new TicketId($this->ticketId), $recipientIds);
+        $againAt = $heldUntilById[new UserId($this->toUserId)->toString()] ?? null;
+        $this->limitHours = $this->pingSettingsQueries->pingLimitHoursOf($actor->organizationId());
         $this->againIn = null === $againAt ? null : PingedState::againInOf($againAt, $this->clock->now());
         $this->isShown = true;
     }

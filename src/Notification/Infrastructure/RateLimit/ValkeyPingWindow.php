@@ -55,16 +55,52 @@ final readonly class ValkeyPingWindow implements PingWindow
             return;
         }
 
-        if (!\is_string($answer) || 1 !== preg_match(self::HELD_SLOT, $answer, $held)) {
-            throw new \LogicException('The ping window holds an unreadable slot.');
-        }
-
-        throw new PingTooSoon(new \DateTimeImmutable('@'.$held[1]));
+        throw new PingTooSoon(self::againAtOf($answer));
     }
 
     public function release(OrganizationId $organizationId, UserId $fromUserId, UserId $toUserId, TicketId $ticketId, PingId $pingId): void
     {
         $this->evaluate(self::RELEASE_SCRIPT, $this->keyOf($organizationId, $fromUserId, $toUserId, $ticketId), [':'.$pingId->toString()]);
+    }
+
+    public function heldUntilOf(OrganizationId $organizationId, UserId $fromUserId, array $toUserIds, TicketId $ticketId): array
+    {
+        if ([] === $toUserIds) {
+            return [];
+        }
+
+        $keys = array_map(fn (UserId $toUserId): string => $this->keyOf($organizationId, $fromUserId, $toUserId, $ticketId), $toUserIds);
+        try {
+            $values = $this->connection->mget($keys);
+        } catch (\RedisException|CacheConnectionFailed $failure) {
+            throw new PingsPaused($failure);
+        }
+        if (!\is_array($values) || \count($values) !== \count($keys)) {
+            throw new PingsPaused();
+        }
+
+        $heldUntilById = [];
+        foreach (array_values($values) as $index => $held) {
+            // MGET answers false for a key that does not exist: a free slot.
+            if (false === $held) {
+                continue;
+            }
+            $heldUntilById[$toUserIds[$index]->toString()] = self::againAtOf($held);
+        }
+
+        return $heldUntilById;
+    }
+
+    /**
+     * @throws \LogicException when the value is not "<again at>:<ping id>"
+     */
+    private static function againAtOf(mixed $held): \DateTimeImmutable
+    {
+        if (!\is_string($held) || 1 !== preg_match(self::HELD_SLOT, $held, $matches)) {
+            throw new \LogicException('The ping window holds an unreadable slot.');
+        }
+
+        return new \DateTimeImmutable('@'.$matches[1]);
     }
 
     /**

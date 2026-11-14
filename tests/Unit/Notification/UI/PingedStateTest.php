@@ -4,18 +4,16 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Notification\UI;
 
-use App\Notification\Application\Ping\RecentPingQueries;
-use App\Notification\Application\Ping\RecentPings;
+use App\Notification\Application\Ping\PingWindow;
+use App\Notification\Domain\PingId;
 use App\Notification\UI\PingedState;
-use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use Doctrine\DBAL\Connection;
+use App\Tests\Unit\Notification\Application\Ping\InMemoryPingWindow;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Clock\MockClock;
 
 final class PingedStateTest extends TestCase
 {
@@ -24,15 +22,20 @@ final class PingedStateTest extends TestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000c5102';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000c5111';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000c5112';
+    private const string MIA = '0197a3c0-0000-7000-8000-0000000c5113';
+    private const string RAJ = '0197a3c0-0000-7000-8000-0000000c5114';
     private const string TICKET = '0197a3c0-0000-7000-8000-0000000c5121';
     private const string OTHER_TICKET = '0197a3c0-0000-7000-8000-0000000c5122';
 
-    private bool $isTransactionOpen = false;
+    private InMemoryPingWindow $pingWindow;
 
-    /** @var list<array{string, string, string, string, bool}> organization, sender, ticket, at and whether a transaction was open, per read */
+    /** @var list<array{string, string, string, list<string>}> organization, sender, ticket and recipients, per read */
     private array $reads = [];
 
-    private int $transactionRuns = 0;
+    protected function setUp(): void
+    {
+        $this->pingWindow = new InMemoryPingWindow();
+    }
 
     /**
      * @return iterable<string, array{int, string}>
@@ -60,148 +63,144 @@ final class PingedStateTest extends TestCase
     }
 
     #[Test]
-    public function withNoTransactionOpenTheReadRunsInATransactionOfItsOwnAtTheClocksTime(): void
+    public function onlyTheRecipientsWhoseSlotTheSenderHoldsOnThisTicketAreShownPinged(): void
     {
-        $recentPings = $this->pingedState()->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::TICKET));
+        $this->takeSlot(self::ACME_FOODS, self::LENA, self::OMAR, self::TICKET, 4);
+        $this->takeSlot(self::ACME_FOODS, self::LENA, self::MIA, self::OTHER_TICKET, 4);
+        $this->takeSlot(self::ACME_FOODS, self::RAJ, self::MIA, self::TICKET, 4);
+        $this->takeSlot(self::BETA_BAKERY, self::LENA, self::MIA, self::TICKET, 4);
 
-        self::assertSame(1, $this->transactionRuns);
-        self::assertSame([[self::ACME_FOODS, self::LENA, self::TICKET, '2027-03-15 10:00:00', true]], $this->reads);
-        self::assertEquals(new \DateTimeImmutable('2027-03-15 13:00:00+00:00'), $recentPings->againAtOf(new UserId(self::OMAR)));
+        $heldUntilById = $this->pingedState()->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR, self::MIA]));
+
+        self::assertEquals([self::OMAR => new \DateTimeImmutable('2027-03-15 14:00:00+00:00')], $heldUntilById);
     }
 
     #[Test]
-    public function insideAnOpenTransactionTheReadRunsThereWithoutATransactionOfItsOwn(): void
+    public function theSameRecipientsInAnyOrderAreReadOncePerRequest(): void
     {
-        $this->isTransactionOpen = true;
-
-        $this->pingedState()->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::TICKET));
-
-        self::assertSame(0, $this->transactionRuns);
-        self::assertSame([[self::ACME_FOODS, self::LENA, self::TICKET, '2027-03-15 10:00:00', true]], $this->reads);
-    }
-
-    #[Test]
-    public function theSameOrganizationSenderAndTicketAreReadOncePerRequest(): void
-    {
+        $this->takeSlot(self::ACME_FOODS, self::LENA, self::OMAR, self::TICKET, 4);
         $pingedState = $this->pingedState();
 
-        $first = $pingedState->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::TICKET));
-        $second = $pingedState->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::TICKET));
+        $first = $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR, self::MIA]));
+        $second = $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::MIA, self::OMAR]));
 
+        self::assertNotSame([], $first);
         self::assertSame($first, $second);
-        self::assertCount(1, $this->reads);
+        self::assertSame([[self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR, self::MIA]]], $this->reads);
     }
 
     #[Test]
-    public function anotherOrganizationSenderOrTicketIsReadOnItsOwn(): void
+    public function anotherOrganizationSenderTicketOrRecipientListIsReadOnItsOwn(): void
     {
         $pingedState = $this->pingedState();
 
-        $pingedState->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::TICKET));
-        $pingedState->recentPingsOf(new OrganizationId(self::BETA_BAKERY), new UserId(self::LENA), new TicketId(self::TICKET));
-        $pingedState->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), new TicketId(self::TICKET));
-        $pingedState->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::OTHER_TICKET));
+        $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR]));
+        $pingedState->heldUntilOf(...$this->ask(self::BETA_BAKERY, self::LENA, self::TICKET, [self::OMAR]));
+        $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::RAJ, self::TICKET, [self::OMAR]));
+        $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::OTHER_TICKET, [self::OMAR]));
+        $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR, self::MIA]));
 
         self::assertSame([
-            [self::ACME_FOODS, self::LENA, self::TICKET],
-            [self::BETA_BAKERY, self::LENA, self::TICKET],
-            [self::ACME_FOODS, self::OMAR, self::TICKET],
-            [self::ACME_FOODS, self::LENA, self::OTHER_TICKET],
-        ], array_map(static fn (array $read): array => \array_slice($read, 0, 3), $this->reads));
+            [self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR]],
+            [self::BETA_BAKERY, self::LENA, self::TICKET, [self::OMAR]],
+            [self::ACME_FOODS, self::RAJ, self::TICKET, [self::OMAR]],
+            [self::ACME_FOODS, self::LENA, self::OTHER_TICKET, [self::OMAR]],
+            [self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR, self::MIA]],
+        ], $this->reads);
     }
 
     #[Test]
-    public function afterAResetThePingsAreReadAgainAtTheClocksNewTime(): void
+    public function afterAResetASlotTakenMeanwhileIsShown(): void
     {
-        $clock = new MockClock(self::NOW);
-        $pingedState = $this->pingedState($clock);
-        $pingedState->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::TICKET));
-        $clock->modify('+5 minutes');
+        $pingedState = $this->pingedState();
+        $before = $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR]));
+        $this->takeSlot(self::ACME_FOODS, self::LENA, self::OMAR, self::TICKET, 8);
 
         $pingedState->reset();
-        $pingedState->recentPingsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::TICKET));
+        $after = $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR]));
 
-        self::assertSame(['2027-03-15 10:00:00', '2027-03-15 10:05:00'], array_column($this->reads, 3));
-        self::assertSame(2, $this->transactionRuns);
+        self::assertSame([], $before);
+        self::assertEquals([self::OMAR => new \DateTimeImmutable('2027-03-15 18:00:00+00:00')], $after);
+        self::assertCount(2, $this->reads);
     }
 
-    private function pingedState(?MockClock $clock = null): PingedState
+    #[Test]
+    public function whileTheWindowIsPausedNobodyIsShownPingedAndTheWindowIsAskedOnce(): void
     {
-        $connection = self::createStub(Connection::class);
-        $connection->method('isTransactionActive')->willReturnCallback(fn (): bool => $this->isTransactionOpen);
+        $this->takeSlot(self::ACME_FOODS, self::LENA, self::OMAR, self::TICKET, 4);
+        $this->pingWindow->pauseReads();
+        $pingedState = $this->pingedState();
 
-        return new PingedState($this->recentPingQueries(), $this->transactions(), $connection, $clock ?? new MockClock(self::NOW));
+        $first = $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR]));
+        $second = $pingedState->heldUntilOf(...$this->ask(self::ACME_FOODS, self::LENA, self::TICKET, [self::OMAR]));
+
+        self::assertSame([], $first);
+        self::assertSame([], $second);
+        self::assertCount(1, $this->reads);
+        self::assertSame(1, $this->pingWindow->heldSlotCount());
     }
 
-    private function recentPingQueries(): RecentPingQueries
+    private function takeSlot(string $organization, string $from, string $to, string $ticket, int $hours): void
     {
-        return new class($this) implements RecentPingQueries {
-            public function __construct(private readonly PingedStateTest $test)
-            {
-            }
-
-            public function recentPingsOf(OrganizationId $organizationId, UserId $fromUserId, TicketId $ticketId, \DateTimeImmutable $at): RecentPings
-            {
-                return $this->test->answerRead($organizationId, $fromUserId, $ticketId, $at);
-            }
-        };
+        $this->pingWindow->take(new OrganizationId($organization), new UserId($from), new UserId($to), new TicketId($ticket), new PingId('0197a3c0-0000-7000-8000-0000000c5199'), $hours, new \DateTimeImmutable(self::NOW));
     }
 
     /**
-     * Refuses to run inside an open transaction and opens one around the write, as DoctrineTransactions does.
+     * @param list<string> $recipients
+     *
+     * @return array{OrganizationId, UserId, TicketId, list<UserId>}
      */
-    private function transactions(): Transactions
+    private function ask(string $organization, string $from, string $ticket, array $recipients): array
     {
-        return new class($this) implements Transactions {
-            public function __construct(private readonly PingedStateTest $test)
-            {
-            }
-
-            public function run(\Closure $write): mixed
-            {
-                return $this->test->runInATransactionOfItsOwn($write);
-            }
-        };
+        return [
+            new OrganizationId($organization),
+            new UserId($from),
+            new TicketId($ticket),
+            array_map(static fn (string $recipient): UserId => new UserId($recipient), $recipients),
+        ];
     }
 
     /**
-     * @internal for the Transactions double
-     *
-     * @template T
-     *
-     * @param \Closure(): T $write
-     *
-     * @return T
+     * Over the in-memory window, recording each read that reaches it.
      */
-    public function runInATransactionOfItsOwn(\Closure $write): mixed
+    private function pingedState(): PingedState
     {
-        if ($this->isTransactionOpen) {
-            throw new \LogicException('A transaction of its own must not run inside another transaction.');
-        }
-        ++$this->transactionRuns;
-        $this->isTransactionOpen = true;
-        try {
-            return $write();
-        } finally {
-            $this->isTransactionOpen = false;
-        }
+        return new PingedState(new class($this->pingWindow, $this) implements PingWindow {
+            public function __construct(private readonly InMemoryPingWindow $window, private readonly PingedStateTest $test)
+            {
+            }
+
+            public function take(OrganizationId $organizationId, UserId $fromUserId, UserId $toUserId, TicketId $ticketId, PingId $pingId, int $hours, \DateTimeImmutable $at): void
+            {
+                $this->window->take($organizationId, $fromUserId, $toUserId, $ticketId, $pingId, $hours, $at);
+            }
+
+            public function release(OrganizationId $organizationId, UserId $fromUserId, UserId $toUserId, TicketId $ticketId, PingId $pingId): void
+            {
+                $this->window->release($organizationId, $fromUserId, $toUserId, $ticketId, $pingId);
+            }
+
+            public function heldUntilOf(OrganizationId $organizationId, UserId $fromUserId, array $toUserIds, TicketId $ticketId): array
+            {
+                $this->test->recordRead($organizationId, $fromUserId, $toUserIds, $ticketId);
+
+                return $this->window->heldUntilOf($organizationId, $fromUserId, $toUserIds, $ticketId);
+            }
+        });
     }
 
     /**
-     * Records the read and answers that the sender may ping Omar again three hours after $at.
+     * @internal for the recording window
      *
-     * @internal for the RecentPingQueries double
+     * @param list<UserId> $toUserIds
      */
-    public function answerRead(OrganizationId $organizationId, UserId $fromUserId, TicketId $ticketId, \DateTimeImmutable $at): RecentPings
+    public function recordRead(OrganizationId $organizationId, UserId $fromUserId, array $toUserIds, TicketId $ticketId): void
     {
         $this->reads[] = [
             $organizationId->toString(),
             $fromUserId->toString(),
             $ticketId->toString(),
-            $at->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
-            $this->isTransactionOpen,
+            array_map(static fn (UserId $toUserId): string => $toUserId->toString(), $toUserIds),
         ];
-
-        return new RecentPings(4, [self::OMAR => $at->modify('+3 hours')]);
     }
 }

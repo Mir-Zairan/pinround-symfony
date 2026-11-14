@@ -3,6 +3,8 @@
     {% if people is not empty %}
         {# Notification's PingSheet, by name only, as Ticketing's UI may not use Notification (deptrac.yaml). #}
         {% set mayPing = is_granted('PING_SEND', ticket.visibilityFacts) %}
+        {# Every row's PingSheet asks for all of them, so the ping window is read once for the whole list. #}
+        {% set peopleUserIds = people|map(row => row.userId) %}
         <twig:People :people="people">
             <twig:block name="person_actions">
                 {% if outerScope.mayPing %}
@@ -14,6 +16,7 @@
                         toFirstName: person.firstName,
                         nowText: outerScope.turnLines is null ? null : outerScope.turnLines.now,
                         isViewer: person.isViewer,
+                        peopleUserIds: outerScope.peopleUserIds,
                     }) }}
                 {% endif %}
             </twig:block>
