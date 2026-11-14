@@ -81,6 +81,9 @@
                     {% endif %}
                 </section>
 
+                {#- Conversation's component, embedded by name: Ticketing's UI may not use Conversation's Api (deptrac). -#}
+                {{ component('Thread', {ticket: ticket}) }}
+
                 <section class="ticket__section" aria-labelledby="ticket-rounds-heading">
                     <h2 id="ticket-rounds-heading" class="ticket__section-title">Rounds</h2>
                     <twig:EmptyState message="No rounds yet. The developer starts round 1 from Claude Code: it shoots the screens and puts them here." />
