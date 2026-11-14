@@ -263,6 +263,13 @@ when@test:
         test.insight_home_queries:
             alias: App\Insight\Api\HomeQueries
             public: true
+        # No page shows the bell before its controllers (P04.T5); the bell tests get both as a page would.
+        test.notification_queries:
+            alias: App\Notification\Api\NotificationQueries
+            public: true
+        test.notification_bell_inbox:
+            alias: App\Notification\Application\Bell\BellInbox
+            public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
         tracing.in_memory_exporter:

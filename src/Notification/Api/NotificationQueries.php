@@ -20,4 +20,13 @@ interface NotificationQueries
      * @throws \App\SharedKernel\Application\TenantNotSet when no tenant is set, before any query
      */
     public function isMuted(UserId $userId, TicketId $ticketId): bool;
+
+    /**
+     * The person's bell now: their open count and at most 50 groups. One query.
+     *
+     * @throws \App\SharedKernel\Application\TenantNotSet when no tenant is set, before any query
+     * @throws \UnexpectedValueException                  when a notification's snapshot lacks the sender's name or the
+     *                                                    ticket's key
+     */
+    public function bell(UserId $userId): BellView;
 }

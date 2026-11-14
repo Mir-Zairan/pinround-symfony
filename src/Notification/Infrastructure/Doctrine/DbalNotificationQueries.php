@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Notification\Infrastructure\Doctrine;
 
+use App\Notification\Api\BellView;
 use App\Notification\Api\NotificationQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
@@ -16,8 +17,13 @@ use Doctrine\DBAL\Connection;
  */
 final readonly class DbalNotificationQueries implements NotificationQueries
 {
-    public function __construct(private Connection $connection, private TenantContext $tenantContext)
+    public function __construct(private Connection $connection, private TenantContext $tenantContext, private DbalBellQueries $bellQueries)
     {
+    }
+
+    public function bell(UserId $userId): BellView
+    {
+        return $this->bellQueries->bell($userId);
     }
 
     public function isMuted(UserId $userId, TicketId $ticketId): bool
