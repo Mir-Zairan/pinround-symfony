@@ -22,7 +22,9 @@ use App\Workflow\Api\WorkflowPermission;
  *            new email" for an email nobody has an account with). Nobody-logged-in cases are in InvitationVoterTest.
  *            Or a team-only ticket of Acme Foods: "Team-only Shop ticket", or "Team-only ticket with no team", both
  *            reported by someone who is no actor here; or "Team-only Support ticket reported by Mia" (a Viewer of
- *            Support) or "… reported by Omar" (no role in Support).
+ *            Support) or "… reported by Omar" (no role in Support). Or a for-everyone ticket of Shop, where Noor has no
+ *            role, so only the reporter exception lets her ask or ping: "For-everyone Shop ticket" (reported by someone
+ *            who is no actor here) or "For-everyone Shop ticket reported by Noor".
  * expected:  granted or denied.
  * twoStepProof: optional; decides for a person whose two-step login is on. true: they typed a code in this session 30
  *            minutes ago, within the 1 hour admin pages allow; an int: the code is that many seconds old; 'noCode': no
@@ -297,6 +299,8 @@ return [
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Omar', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'denied'],
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket', 'expected' => 'denied'],
+    ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket reported by Noor', 'expected' => 'granted'],
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
     ['source' => $adminPings, 'attribute' => ConversationPermission::ASK, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
@@ -308,4 +312,6 @@ return [
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Omar', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'denied'],
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket', 'expected' => 'denied'],
+    ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket reported by Noor', 'expected' => 'granted'],
 ];

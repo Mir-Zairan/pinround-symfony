@@ -84,14 +84,16 @@ final class VoterMatrixTest extends KernelTestCase
     private const array TEAMS = ['Shop' => self::SHOP, 'Mobile' => self::MOBILE, 'Support' => self::SUPPORT, 'Checkout' => self::CHECKOUT];
 
     /**
-     * Each team-only ticket of Acme Foods by its team, null for a ticket with no team yet, and the person of PEOPLE who
-     * reported it, null for REPORTER.
+     * Each ticket of Acme Foods by its visibility, its team, null for a ticket with no team yet, and the person of
+     * PEOPLE who reported it, null for REPORTER.
      */
     private const array TICKETS = [
-        'Team-only Shop ticket' => [self::SHOP, null],
-        'Team-only ticket with no team' => [null, null],
-        'Team-only Support ticket reported by Mia' => [self::SUPPORT, 'Mia'],
-        'Team-only Support ticket reported by Omar' => [self::SUPPORT, 'Omar'],
+        'Team-only Shop ticket' => [TicketVisibilityFacts::TEAM_ONLY, self::SHOP, null],
+        'Team-only ticket with no team' => [TicketVisibilityFacts::TEAM_ONLY, null, null],
+        'Team-only Support ticket reported by Mia' => [TicketVisibilityFacts::TEAM_ONLY, self::SUPPORT, 'Mia'],
+        'Team-only Support ticket reported by Omar' => [TicketVisibilityFacts::TEAM_ONLY, self::SUPPORT, 'Omar'],
+        'For-everyone Shop ticket' => [TicketVisibilityFacts::FOR_EVERYONE, self::SHOP, null],
+        'For-everyone Shop ticket reported by Noor' => [TicketVisibilityFacts::FOR_EVERYONE, self::SHOP, 'Noor'],
     ];
 
     /** Reported the tickets no person of PEOPLE reported, so no row's actor sees those as their reporter. */
@@ -250,11 +252,11 @@ final class VoterMatrixTest extends KernelTestCase
             return new OrganizationId(self::ORGANIZATIONS[$name]);
         }
         if (\array_key_exists($name, self::TICKETS)) {
-            [$teamId, $reporter] = self::TICKETS[$name];
+            [$visibility, $teamId, $reporter] = self::TICKETS[$name];
 
             return new TicketVisibilityFacts(
                 new OrganizationId(self::ACME_FOODS),
-                TicketVisibilityFacts::TEAM_ONLY,
+                $visibility,
                 null === $teamId ? null : new TeamId($teamId),
                 new UserId(null === $reporter ? self::REPORTER : self::PEOPLE[$reporter][0]),
             );
