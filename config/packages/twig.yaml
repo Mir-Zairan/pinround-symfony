@@ -5,6 +5,7 @@ twig:
         '%kernel.project_dir%/src/Identity/UI/templates': Identity
         '%kernel.project_dir%/src/Organization/UI/templates': Organization
         '%kernel.project_dir%/src/Ticketing/UI/templates': Ticketing
+        '%kernel.project_dir%/src/Notification/UI/templates': Notification
 
 when@test:
     twig:
