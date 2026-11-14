@@ -530,28 +530,45 @@ test.describe('a refetch that fails', () => {
       await expect(mia.page.getByRole('heading', { level: 1, name: title })).toBeVisible();
       await openThread(lena.page, key);
       await markThisLoad(mia.page);
-      // The signal refetches the page and reloads the thread frame; each answer of 404 loads its own URL for real, and
-      // whichever loads last is the page Mia sees.
-      const refetchedPaths = [`/t/${key}`, `/t/${key}/thread`];
-      const refetches = refetchedPaths.map((refetchedPath) =>
-        mia.page.waitForResponse((response) => pathOf(response.request()) === refetchedPath && response.request().resourceType() === 'fetch'),
-      );
+      // The signal refetches the page and reloads the thread frame, and each answer of 404 loads a page for real. The
+      // page's refetch is held until a page has loaded, so the frame's answer alone decides where the tab goes: to the
+      // ticket's URL, as the page's own answer would, never to the frame's.
+      const isPageRefetch = (request: Request) => pathOf(request) === `/t/${key}` && request.resourceType() === 'fetch';
+      const pageRefetchSent = mia.page.waitForRequest(isPageRefetch);
+      const threadRefetch = mia.page.waitForResponse((response) => pathOf(response.request()) === `/t/${key}/thread` && response.request().resourceType() === 'fetch');
+      let pageLoaded: () => void = () => undefined;
+      const isPageLoaded = new Promise<void>((resolve) => {
+        pageLoaded = resolve;
+      });
       const documentStatuses: number[] = [];
       mia.page.on('response', (response) => {
         if (response.request().resourceType() === 'document') {
           documentStatuses.push(response.status());
+          pageLoaded();
         }
       });
+      await mia.page.route(
+        (url) => url.pathname === `/t/${key}`,
+        async (route) => {
+          if (!isPageRefetch(route.request())) {
+            await route.continue();
+            return;
+          }
+          await isPageLoaded;
+          await route.abort().catch(() => undefined);
+        },
+      );
       const comment = `Delivery date shows a day late ${randomUUID().slice(0, 8)}`;
 
       removeMiaFromTeam(move);
       await postComment(lena.page, comment);
 
-      expect((await Promise.all(refetches)).map((response) => response.status())).toEqual([404, 404]);
+      await pageRefetchSent;
+      expect((await threadRefetch).status()).toBe(404);
       await expect.poll(() => documentStatuses.length).toBeGreaterThan(0);
       await mia.page.waitForLoadState('load');
       expect(documentStatuses.every((status) => status === 404), `Mia's tab loaded pages answered ${documentStatuses.join(', ')}`).toBe(true);
-      await expect(mia.page).toHaveURL(new RegExp(`/t/${key}(/thread)?$`));
+      await expect(mia.page).toHaveURL(new RegExp(`/t/${key}$`));
       await expect(mia.page.locator('html')).not.toHaveAttribute('data-e2e-load', 'first');
       await expect(mia.page.getByText(title)).toHaveCount(0);
       await expect(mia.page.getByText(comment)).toHaveCount(0);
@@ -881,6 +898,61 @@ test.describe('a stream that reconnects', () => {
     await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: SHOWS_WITHIN_MS });
     await lena.context.close();
     await omar.context.close();
+  });
+});
+
+type StreamOpens = Window & { streamOpens?: number };
+
+test.describe('a page with no live parts', () => {
+  test("a title Lena is typing stays when her stream reconnects; the page loads again once she clears it", async ({ browser }) => {
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    // The lowest draw, so the reopen waits half its step and the refetch has no jitter. Each stream's open is counted
+    // by a listener added before the controller's, so the controller has seen an open once the count shows it.
+    await lena.page.addInitScript(() => {
+      Math.random = () => 0;
+      const NativeEventSource = window.EventSource;
+      (window as StreamOpens).streamOpens = 0;
+      window.EventSource = class extends NativeEventSource {
+        constructor(url: string | URL, init?: EventSourceInit) {
+          super(url, init);
+          this.addEventListener('open', () => {
+            (window as StreamOpens).streamOpens! += 1;
+          });
+        }
+      };
+    });
+    let streamAsks = 0;
+    // The first stream ends as soon as it is answered, as a dropped connection does; the open of the next one is a
+    // reconnect, after which the page fetches itself again in case a signal was sent meanwhile.
+    await lena.page.route(`**${HUB_PATH}**`, async (route) => {
+      streamAsks += 1;
+      if (streamAsks === 1) {
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
+        return;
+      }
+      await route.continue();
+    });
+    const requests = recordRequests(lena.page);
+    const isNewTicketVisit = (request: Request) => pathOf(request) === '/tickets/new' && request.resourceType() === 'fetch';
+    await lena.page.goto('/tickets/new', { waitUntil: 'networkidle' });
+    const title = lena.page.getByLabel('Title');
+    const typed = `Receipt footer cuts off the address ${randomUUID().slice(0, 8)}`;
+    await title.fill(typed);
+    await lena.page.getByRole('heading', { level: 1 }).click();
+
+    // live-updates_controller.js FIRST_REOPEN_STEP_MS / 2, then the hub's answer.
+    await lena.page.waitForFunction(() => (window as StreamOpens).streamOpens === 2, undefined, { timeout: 5000 + SHOWS_WITHIN_MS });
+    await nextTaskOf(lena.page);
+    await nextTaskOf(lena.page);
+
+    expect(requests.filter(isNewTicketVisit)).toHaveLength(0);
+    await expect(title).toHaveValue(typed);
+
+    const visit = lena.page.waitForRequest(isNewTicketVisit, { timeout: SHOWS_WITHIN_MS });
+    await title.fill('');
+    await lena.page.getByRole('heading', { level: 1 }).click();
+    expect((await (await visit).response())?.status()).toBe(200);
+    await lena.context.close();
   });
 });
 

@@ -34,7 +34,7 @@ const FORM_FIELDS = 'input, textarea, select';
 // there after they click away; a refresh would close it and lose the text.
 const OPEN_EDITORS = 'dialog[open], details[open] :is(textarea, input[type="text"])';
 
-// Events after which a held part may be free again: focus moved, a disclosure opened or closed, a dialog closed. None
+// Events after which a held part or visit may be free again: focus moved, a disclosure opened or closed, a dialog closed. None
 // of toggle and close bubbles, so they are heard in the capture phase.
 const HOLD_ENDING_EVENTS = ['focusin', 'focusout', 'toggle', 'close'];
 
@@ -50,6 +50,31 @@ function isPartInUse(part) {
     return false;
   }
   return part.localName !== 'turbo-frame' || focused.closest('[data-turbo-permanent]') === null;
+}
+
+// A select-one with no option marked selected shows its first, so that is its default too.
+function isSelectChanged(select) {
+  const options = [...select.options];
+  if (select.multiple) {
+    return options.some((option) => option.selected !== option.defaultSelected);
+  }
+  const defaultIndex = options.findLastIndex((option) => option.defaultSelected);
+  return select.selectedIndex !== (defaultIndex === -1 && select.size <= 1 ? 0 : defaultIndex);
+}
+
+function isFieldChanged(field) {
+  if (field.localName === 'select') {
+    return isSelectChanged(field);
+  }
+  if (field.type === 'checkbox' || field.type === 'radio') {
+    return field.checked !== field.defaultChecked;
+  }
+  return field.value !== field.defaultValue;
+}
+
+// A whole-page visit would lose any field the person changed and close any open editor, wherever it sits on the page.
+function isPageInUse() {
+  return document.querySelector(OPEN_EDITORS) !== null || [...document.querySelectorAll(FORM_FIELDS)].some(isFieldChanged);
 }
 
 // Web Locks exist only in a secure context (HTTPS or localhost); without them a tab asks and connects unguarded.
@@ -136,6 +161,8 @@ export default class extends Controller {
   #hasConnected = false;
   // Ids of the parts a signal skipped because they were in use.
   #heldPartIds = new Set();
+  // A page with no parts that a signal would have visited again while it was in use.
+  #isVisitHeld = false;
   #onSignal = () => this.#refetchWhenVisible();
   #onStreamMessage = (event) => renderStreamMessage(event.data);
   #onVisibilityChange = () => this.#refetchMissedSignal();
@@ -158,6 +185,7 @@ export default class extends Controller {
   disconnect() {
     // The page around the element is new, so what was held belonged to the page before.
     this.#heldPartIds.clear();
+    this.#isVisitHeld = false;
     this.#stopTimer = setTimeout(() => this.#stop(), 0);
   }
 
@@ -267,16 +295,24 @@ export default class extends Controller {
     this.#isSignalMissed = false;
     const parts = [...document.querySelectorAll(REFRESHED_PARTS)];
     if (parts.length === 0) {
-      // Turbo sends the visit's fetch within visit(), so the listener marks that fetch and no later one.
-      document.addEventListener('turbo:before-fetch-request', markLiveRefresh);
-      try {
-        visit(window.location.href, { action: 'replace' });
-      } finally {
-        document.removeEventListener('turbo:before-fetch-request', markLiveRefresh);
-      }
+      this.#visitPageUnlessInUse();
       return;
     }
     this.#refreshParts(parts);
+  }
+
+  #visitPageUnlessInUse() {
+    this.#isVisitHeld = isPageInUse();
+    if (this.#isVisitHeld) {
+      return;
+    }
+    // Turbo sends the visit's fetch within visit(), so the listener marks that fetch and no later one.
+    document.addEventListener('turbo:before-fetch-request', markLiveRefresh);
+    try {
+      visit(window.location.href, { action: 'replace' });
+    } finally {
+      document.removeEventListener('turbo:before-fetch-request', markLiveRefresh);
+    }
   }
 
   // A held part's id stays in #heldPartIds until a refresh finds it free; a frame reloads, any other part is swapped.
@@ -298,13 +334,17 @@ export default class extends Controller {
 
   // After the event that may end a hold, focus has moved on and a closed dialog or disclosure reads as closed.
   #refreshReleasedPartsSoon() {
-    if (this.#heldPartIds.size > 0 && this.#releaseTimer === null) {
+    if ((this.#heldPartIds.size > 0 || this.#isVisitHeld) && this.#releaseTimer === null) {
       this.#releaseTimer = setTimeout(() => this.#refreshReleasedParts(), 0);
     }
   }
 
   #refreshReleasedParts() {
     this.#releaseTimer = null;
+    if (this.#isVisitHeld) {
+      this.#visitPageUnlessInUse();
+      return;
+    }
     const heldParts = [...this.#heldPartIds].map((id) => document.getElementById(id));
     this.#heldPartIds = new Set(heldParts.filter((part) => part !== null && isPartInUse(part)).map((part) => part.id));
     const releasedParts = heldParts.filter((part) => part !== null && !this.#heldPartIds.has(part.id));
@@ -351,19 +391,31 @@ export default class extends Controller {
   }
 
   // The focused control is noted as the frame renders, not as it is asked for, as focus may move while it loads.
-  // Turbo's reload settles once its answer is rendered or its fetch fails.
+  // Turbo's reload settles once its answer is rendered or its fetch fails. A frame answer of 404 loads this page for
+  // real, as #swapPageParts does, not the frame's own URL that app.js's turbo:frame-missing loads: whichever of the two
+  // lands last would decide the page the tab ends on.
   async #reloadFrame(frame) {
     let focusedControl = null;
     const noteFocusedControl = () => {
       focusedControl = focusedControlOf(frame);
     };
+    const loadPageOnNotFound = (event) => {
+      const { response } = event.detail;
+      if (response.status === 404 && !response.redirected) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.location.assign(window.location.href);
+      }
+    };
     frame.addEventListener('turbo:before-frame-render', noteFocusedControl);
     frame.addEventListener('turbo:before-fetch-request', markLiveRefresh);
+    frame.addEventListener('turbo:frame-missing', loadPageOnNotFound);
     try {
       await frame.reload();
     } finally {
       frame.removeEventListener('turbo:before-frame-render', noteFocusedControl);
       frame.removeEventListener('turbo:before-fetch-request', markLiveRefresh);
+      frame.removeEventListener('turbo:frame-missing', loadPageOnNotFound);
     }
     refocus(focusedControl, frame);
   }
