@@ -10,11 +10,15 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * A comment or a question in a ticket's thread. A question names the person asked and stays open until it is resolved;
- * a ticket has at most one open question that is not removed (cnv_message_ticket_id_open_question_key).
+ * A comment or a question in a ticket's thread. A question names the person asked and stays open until an answer
+ * closes it, which sets resolvedAt, so the open-question indexes drop it; a ticket has at most one open question that is
+ * not removed (cnv_message_ticket_id_open_question_key). Only a comment is folded by Resolve (FR-CNV-05).
  */
 final class Message implements TenantOwned
 {
+    // No requirement gives a limit, so this one is chosen; cnv_message_body_check holds the same.
+    public const int MAX_BODY_LENGTH = 10000;
+
     // Kept as strings and wrapped on the way out, like Invitation: the mapping stays free of value-object types.
     private readonly string $organizationId;
     private readonly string $id;
@@ -31,6 +35,9 @@ final class Message implements TenantOwned
         if ('' === trim($body)) {
             throw new \InvalidArgumentException('A message needs a body.');
         }
+        if (mb_strlen($body) > self::MAX_BODY_LENGTH) {
+            throw new \InvalidArgumentException(\sprintf('A message can have at most %d characters.', self::MAX_BODY_LENGTH));
+        }
 
         $this->id = $id->toString();
         $this->organizationId = $organizationId->toString();
@@ -40,7 +47,7 @@ final class Message implements TenantOwned
     }
 
     /**
-     * @throws \InvalidArgumentException when the body is blank
+     * @throws \InvalidArgumentException when the body is blank or longer than MAX_BODY_LENGTH characters
      */
     public static function comment(MessageId $id, OrganizationId $organizationId, TicketId $ticketId, UserId $authorId, string $body, \DateTimeImmutable $createdAt): self
     {
@@ -50,7 +57,7 @@ final class Message implements TenantOwned
     /**
      * An open question to one person.
      *
-     * @throws \InvalidArgumentException when the body is blank
+     * @throws \InvalidArgumentException when the body is blank or longer than MAX_BODY_LENGTH characters
      */
     public static function question(MessageId $id, OrganizationId $organizationId, TicketId $ticketId, UserId $authorId, UserId $toUserId, string $body, \DateTimeImmutable $createdAt): self
     {

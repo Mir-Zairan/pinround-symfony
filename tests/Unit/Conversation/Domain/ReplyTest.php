@@ -45,4 +45,26 @@ final class ReplyTest extends TestCase
 
         Reply::post(new ReplyId(self::ID), new OrganizationId(self::ACME_FOODS), new MessageId(self::MESSAGE), new UserId(self::OMAR), '   ', false, new \DateTimeImmutable('2027-03-15 10:05:00+00:00'));
     }
+
+    /**
+     * Counted in characters as cnv_reply_body_check's char_length counts them, not in bytes: each é is two bytes.
+     */
+    #[Test]
+    public function aBodyOfTenThousandCharactersIsKept(): void
+    {
+        $body = str_repeat('é', 10000);
+
+        $reply = Reply::post(new ReplyId(self::ID), new OrganizationId(self::ACME_FOODS), new MessageId(self::MESSAGE), new UserId(self::OMAR), $body, false, new \DateTimeImmutable('2027-03-15 10:05:00+00:00'));
+
+        self::assertSame($body, $reply->body());
+    }
+
+    #[Test]
+    public function aBodyOfOneCharacterMoreIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A reply can have at most 10000 characters.');
+
+        Reply::post(new ReplyId(self::ID), new OrganizationId(self::ACME_FOODS), new MessageId(self::MESSAGE), new UserId(self::OMAR), str_repeat('é', 10001), true, new \DateTimeImmutable('2027-03-15 10:05:00+00:00'));
+    }
 }

@@ -60,4 +60,35 @@ final class MessageTest extends TestCase
 
         Message::comment(new MessageId(self::ID), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), " \n\t", new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
     }
+
+    /**
+     * Counted in characters as cnv_message_body_check's char_length counts them, not in bytes: each é is two bytes.
+     */
+    #[Test]
+    public function aBodyOfTenThousandCharactersIsKept(): void
+    {
+        $body = str_repeat('é', 10000);
+
+        $question = Message::question(new MessageId(self::ID), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), new UserId(self::OMAR), $body, new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
+
+        self::assertSame($body, $question->body());
+    }
+
+    #[Test]
+    public function aCommentOfOneCharacterMoreIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A message can have at most 10000 characters.');
+
+        Message::comment(new MessageId(self::ID), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), str_repeat('é', 10001), new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
+    }
+
+    #[Test]
+    public function aQuestionOfOneCharacterMoreIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A message can have at most 10000 characters.');
+
+        Message::question(new MessageId(self::ID), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), new UserId(self::OMAR), str_repeat('a', 10001), new \DateTimeImmutable('2027-03-15 10:00:00+00:00'));
+    }
 }

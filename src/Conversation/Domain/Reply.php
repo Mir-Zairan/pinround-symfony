@@ -13,6 +13,9 @@ use App\SharedKernel\Domain\UserId;
  */
 final class Reply implements TenantOwned
 {
+    // The same chosen limit as Message's; cnv_reply_body_check holds it too.
+    public const int MAX_BODY_LENGTH = Message::MAX_BODY_LENGTH;
+
     // Kept as strings and wrapped on the way out, like Invitation: the mapping stays free of value-object types.
     private readonly string $organizationId;
     private readonly string $id;
@@ -30,12 +33,15 @@ final class Reply implements TenantOwned
     }
 
     /**
-     * @throws \InvalidArgumentException when the body is blank
+     * @throws \InvalidArgumentException when the body is blank or longer than MAX_BODY_LENGTH characters
      */
     public static function post(ReplyId $id, OrganizationId $organizationId, MessageId $messageId, UserId $authorId, string $body, bool $isAnswer, \DateTimeImmutable $createdAt): self
     {
         if ('' === trim($body)) {
             throw new \InvalidArgumentException('A reply needs a body.');
+        }
+        if (mb_strlen($body) > self::MAX_BODY_LENGTH) {
+            throw new \InvalidArgumentException(\sprintf('A reply can have at most %d characters.', self::MAX_BODY_LENGTH));
         }
 
         return new self($id, $organizationId, $messageId, $authorId, $body, $isAnswer, $createdAt);

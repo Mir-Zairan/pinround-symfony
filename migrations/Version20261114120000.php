@@ -33,12 +33,14 @@ final class Version20261114120000 extends AbstractMigration
             ." CONSTRAINT cnv_message_kind_check CHECK (kind IN ('comment', 'question')),"
             // A question asks exactly one person; a comment asks nobody.
             ." CONSTRAINT cnv_message_to_user_id_check CHECK ((kind = 'question') = (to_user_id IS NOT NULL)),"
-            // Only a question is resolved, and always by someone.
-            ." CONSTRAINT cnv_message_resolved_check CHECK ((resolved_at IS NULL) = (resolved_by IS NULL) AND (kind = 'question' OR resolved_at IS NULL)),"
+            // Always resolved by someone: an answer closes a question, Resolve folds a comment; Message decides which may.
+            .' CONSTRAINT cnv_message_resolved_check CHECK ((resolved_at IS NULL) = (resolved_by IS NULL)),'
+            // Message::MAX_BODY_LENGTH, counted in characters as mb_strlen counts them.
+            .' CONSTRAINT cnv_message_body_check CHECK (char_length(body) BETWEEN 1 AND 10000),'
             .' CONSTRAINT cnv_message_ticket_fkey FOREIGN KEY (organization_id, ticket_id) REFERENCES tkt_ticket (organization_id, id) ON DELETE CASCADE)',
         );
         $this->addSql('CREATE INDEX cnv_message_ticket_id_created_at_id_idx ON cnv_message (organization_id, ticket_id, created_at, id)');
-        // One open question per ticket: the asked person holds the turn until it is resolved.
+        // One open question per ticket: the asked person holds the turn until an answer resolves it.
         $this->addSql(
             'CREATE UNIQUE INDEX cnv_message_ticket_id_open_question_key ON cnv_message (organization_id, ticket_id)'
             ." WHERE kind = 'question' AND resolved_at IS NULL AND removed_at IS NULL",
@@ -60,6 +62,8 @@ final class Version20261114120000 extends AbstractMigration
             .' edited_at TIMESTAMP(0) WITH TIME ZONE DEFAULT NULL, removed_at TIMESTAMP(0) WITH TIME ZONE DEFAULT NULL,'
             .' created_at TIMESTAMP(0) WITH TIME ZONE NOT NULL,'
             .' PRIMARY KEY (organization_id, id),'
+            // Reply::MAX_BODY_LENGTH, counted in characters as mb_strlen counts them.
+            .' CONSTRAINT cnv_reply_body_check CHECK (char_length(body) BETWEEN 1 AND 10000),'
             .' CONSTRAINT cnv_reply_message_fkey FOREIGN KEY (organization_id, message_id) REFERENCES cnv_message (organization_id, id) ON DELETE CASCADE)',
         );
         $this->addSql('CREATE INDEX cnv_reply_message_id_created_at_id_idx ON cnv_reply (organization_id, message_id, created_at, id)');
