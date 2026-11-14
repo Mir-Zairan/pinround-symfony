@@ -15,8 +15,13 @@ export default class extends Controller {
   static targets = ['body', 'submit', 'messages', 'label', 'note', 'commentChip', 'askChip', 'askChoices', 'people', 'person', 'askedUser', 'waitNote'];
   static values = { mayAsk: Boolean };
 
-  connect() {
+  // When Turbo renders a page or frame again it puts the permanent composer back only after the new list has connected,
+  // when following the list finds no composer to change, so the composer follows the list again once it is back.
+  bodyTargetConnected() {
     this.update();
+    if (this.hasMessagesTarget) {
+      this.followMessages(this.messagesTarget);
+    }
   }
 
   update() {
@@ -80,8 +85,7 @@ export default class extends Controller {
   }
 
   messagesTargetConnected(messages) {
-    this.renewAskChoices(messages.dataset.askChoices);
-    this.followOpenQuestion(messages.dataset.hasOpenQuestion === 'true');
+    this.followMessages(messages);
     const messageId = this.changedMessageId;
     this.changedMessageId = null;
     if (!messageId) {
@@ -92,6 +96,11 @@ export default class extends Controller {
       message.tabIndex = -1;
       message.focus();
     }
+  }
+
+  followMessages(messages) {
+    this.renewAskChoices(messages.dataset.askChoices);
+    this.followOpenQuestion(messages.dataset.hasOpenQuestion === 'true');
   }
 
   // The markup is the server's Twig render, escaped like the rest of the page. A question being written stays with the
