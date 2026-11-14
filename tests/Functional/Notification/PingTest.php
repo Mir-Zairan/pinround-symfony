@@ -8,7 +8,10 @@ use App\Identity\Domain\User;
 use App\Notification\Infrastructure\RateLimit\ValkeyPingWindow;
 use App\Notification\UI\Component\PingSheet;
 use App\Notification\UI\Controller\PingController;
+use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Infrastructure\Doctrine\DoctrineTransactions;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
@@ -61,6 +64,8 @@ final class PingTest extends WebTestCase
 
     private string $backlogStep;
 
+    private string $shopTicket;
+
     protected function setUp(): void
     {
         $this->client = self::createClient([], ['HTTPS' => 'on']);
@@ -71,6 +76,7 @@ final class PingTest extends WebTestCase
 
     protected function tearDown(): void
     {
+        $this->forgetSlots();
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
                 foreach (['ntf_ping', 'tkt_ticket', 'wf_step'] as $table) {
@@ -93,8 +99,9 @@ final class PingTest extends WebTestCase
 
         $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
 
-        $streams = $this->streamsOfTheAnswer(200, 'Lena');
+        $streams = $this->streamsOfTheAnswer(200, 'Lena', true);
         self::assertSame('Pinged · again in 4 h', trim($streams['ping-'.$this->idOf('Lena')]->filter('#ping-'.$this->idOf('Lena'))->text()));
+        self::assertSame(1, $this->stateValkey()->exists($this->slotKeyOf('Omar', 'Lena')));
         self::assertSame('Pinged Lena. One notification sent.', $this->toastOf($streams));
         self::assertSame([['from_id' => $this->idOf('Omar'), 'to_id' => $this->idOf('Lena'), 'body' => self::MESSAGE, 'created_at' => '2026-11-06 12:00:00+00']], $this->storedPings());
         self::assertSame(1, $this->publishedPingEvents());
@@ -111,7 +118,7 @@ final class PingTest extends WebTestCase
 
         $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(['message' => 'Any news?']), [], self::TURBO_FORM_HEADERS);
 
-        $streams = $this->streamsOfTheAnswer(422, 'Lena');
+        $streams = $this->streamsOfTheAnswer(422, 'Lena', true);
         self::assertSame('Pinged · again in 3 h', trim($streams['ping-'.$this->idOf('Lena')]->text()));
         self::assertSame('You pinged Lena about this ticket recently. You can ping them again in 3 h.', $this->toastOf($streams));
         self::assertCount(1, $this->storedPings());
@@ -146,7 +153,7 @@ final class PingTest extends WebTestCase
 
         $this->client->request('POST', $this->pathTo($recipient), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
 
-        $streams = $this->streamsOfTheAnswer(200, $recipient);
+        $streams = $this->streamsOfTheAnswer(200, $recipient, true);
         self::assertSame(\sprintf('Pinged %s. One notification sent.', $recipient), $this->toastOf($streams));
         self::assertSame([[$this->idOf($sender), $this->idOf($recipient)]], array_map(static fn (array $ping): array => [$ping['from_id'], $ping['to_id']], $this->storedPings()));
     }
@@ -216,8 +223,9 @@ final class PingTest extends WebTestCase
 
         $this->client->request('POST', $this->pathTo($recipient), $this->pingFields($fields), [], self::TURBO_FORM_HEADERS);
 
-        $streams = $this->streamsOfTheAnswer(422, null);
+        $streams = $this->streamsOfTheAnswer(422, $recipient, false);
         self::assertSame($expectedToast, $this->toastOf($streams));
+        self::assertSame($expectedToast, trim($streams['ping-'.$this->idOf($recipient).'-refusal']->text()));
         self::assertSame([], $this->storedPings());
         self::assertSame(0, $this->publishedPingEvents());
     }
@@ -233,10 +241,70 @@ final class PingTest extends WebTestCase
 
         $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
 
-        $streams = $this->streamsOfTheAnswer(422, null);
+        $streams = $this->streamsOfTheAnswer(422, 'Lena', false);
         self::assertSame('Pings are paused for a moment. Try again soon.', $this->toastOf($streams));
         self::assertSame([], $this->storedPings());
         self::assertSame(0, $this->publishedPingEvents());
+    }
+
+    #[Test]
+    public function aPingWhoseTransactionFailsAfterTheWriteGivesItsSlotBackAndStoresNothing(): void
+    {
+        $this->seedShop();
+        $this->failCommitsAfterTheWrite();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
+
+        self::assertResponseStatusCodeSame(500);
+        self::assertSame(0, $this->stateValkey()->exists($this->slotKeyOf('Omar', 'Lena')));
+        self::assertSame([], $this->storedPings());
+        self::assertSame(0, $this->publishedPingEvents());
+    }
+
+    #[Test]
+    public function aFailedCommitWhoseSlotCannotBeGivenBackStillAnswersWithTheCommitsFailure(): void
+    {
+        $this->seedShop();
+        $this->failCommitsAfterTheWrite();
+        self::getContainer()->set(ValkeyPingWindow::class, new ValkeyPingWindow(self::valkeyThatFailsReleases()));
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->catchExceptions(false);
+
+        try {
+            $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
+            self::fail('The failed commit was answered as a success.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame([\RuntimeException::class, 'The commit failed.'], [$failure::class, $failure->getMessage()]);
+        }
+
+        // The slot then ends by itself after the ping limit.
+        self::assertSame(1, $this->stateValkey()->exists($this->slotKeyOf('Omar', 'Lena')));
+        self::assertSame([], $this->storedPings());
+        self::assertSame(0, $this->publishedPingEvents());
+    }
+
+    #[Test]
+    public function aPingTooSoonFromAFormWithoutTurboRedirectsToTheTicketWithTheWait(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
+        self::assertResponseStatusCodeSame(200);
+        $this->clock->modify('+90 minutes');
+
+        $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(['message' => 'Any news?']));
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame(self::TICKET_PAGE, $this->client->getResponse()->headers->get('Location'));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['You pinged Lena about this ticket recently. You can ping them again in 3 h.'],
+            $page->filter('.toast-region [data-toast-message-value]')->each(static fn (Crawler $toast): string => (string) $toast->attr('data-toast-message-value')),
+        );
+        self::assertSame([self::MESSAGE], array_column($this->storedPings(), 'body'));
+        self::assertSame(1, $this->publishedPingEvents());
     }
 
     /**
@@ -327,7 +395,7 @@ final class PingTest extends WebTestCase
 
         $this->client->submit($page->filter('#ping-'.$this->idOf('Lena').' form.ping-sheet__form')->form(), [], ['HTTP_ACCEPT' => self::TURBO_FORM_HEADERS['HTTP_ACCEPT']]);
 
-        $this->streamsOfTheAnswer(200, 'Lena');
+        $this->streamsOfTheAnswer(200, 'Lena', true);
         self::assertSame([self::DRAFT], array_column($this->storedPings(), 'body'));
     }
 
@@ -401,9 +469,10 @@ final class PingTest extends WebTestCase
         $this->people = $this->createAcmeFoodsPeople($miaTeamRole);
         $this->shopProject = $this->addProject($this->shop, 'SHOP', 'Shop');
         $this->backlogStep = Uuid::v7()->toRfc4122();
+        $this->shopTicket = Uuid::v7()->toRfc4122();
         $parameters = [
             $this->acmeFoods->toString(), $this->backlogStep,
-            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), $this->backlogStep,
+            $this->acmeFoods->toString(), $this->shopTicket, $this->shopProject, $this->shop->toString(), $this->backlogStep,
             $this->idOf($ticket['reporter'] ?? 'Lena'), $this->idOf('Omar'), $ticket['visibility'] ?? 'all',
         ];
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters): int {
@@ -421,6 +490,78 @@ final class PingTest extends WebTestCase
 
             return 0;
         });
+    }
+
+    /**
+     * Every transaction of its own runs its write and then fails and rolls back, as when the COMMIT fails.
+     */
+    private function failCommitsAfterTheWrite(): void
+    {
+        $container = self::getContainer();
+        $realTransactions = new DoctrineTransactions($container->get('doctrine.orm.entity_manager'), $container->get(TenantContext::class), $container->get('doctrine'));
+        $container->set(DoctrineTransactions::class, new readonly class($realTransactions) implements Transactions {
+            public function __construct(private Transactions $transactions)
+            {
+            }
+
+            public function run(\Closure $write): mixed
+            {
+                return $this->transactions->run(static function () use ($write): never {
+                    $write();
+
+                    throw new \RuntimeException('The commit failed.');
+                });
+            }
+        });
+    }
+
+    /**
+     * A connection to the tests' state Valkey on which the ping window's release script fails as phpredis does when
+     * Valkey goes away, while taking a slot still works.
+     */
+    private static function valkeyThatFailsReleases(): \Redis
+    {
+        $dsn = $_SERVER['TEST_STATE_VALKEY_DSN'] ?? null;
+        self::assertIsString($dsn, 'TEST_STATE_VALKEY_DSN is not set (.env.test).');
+        $connection = new class extends \Redis {
+            /**
+             * @param array<mixed> $args
+             */
+            public function eval(string $script, array $args = [], int $num_keys = 0): mixed
+            {
+                if (str_contains($script, "'DEL'")) {
+                    throw new \RedisException('Connection lost');
+                }
+
+                return parent::eval($script, $args, $num_keys);
+            }
+        };
+        $connection->connect((string) parse_url($dsn, \PHP_URL_HOST), (int) parse_url($dsn, \PHP_URL_PORT));
+
+        return $connection;
+    }
+
+    /**
+     * The state Valkey never evicts, so the slots of each test's own organizations go with them.
+     */
+    private function forgetSlots(): void
+    {
+        foreach ($this->createdOrganizationIds as $organizationId) {
+            $heldSlots = $this->stateValkey()->keys('ping:'.$organizationId.':*');
+            if (\is_array($heldSlots) && [] !== $heldSlots) {
+                $this->stateValkey()->del($heldSlots);
+            }
+        }
+    }
+
+    private function stateValkey(): \Redis
+    {
+        return self::getContainer()->get('state_valkey.connection');
+    }
+
+    private function slotKeyOf(string $sender, string $recipient): string
+    {
+        return 'ping:'.$this->acmeFoods->toString().':'.$this->idOf($sender).':'.$this->idOf($recipient).':'.$this->shopTicket;
     }
 
     private function addBenOfBetaBakery(): void
@@ -456,12 +597,12 @@ final class PingTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces $recipient's Ping button, when given, and then
-     * updates the toast region.
+     * Asserts the answer is a Turbo Stream of the status that replaces $recipient's Ping button with the pinged state
+     * when $isPinged, else fills the open sheet's refusal alert, and then updates the toast region.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
-    private function streamsOfTheAnswer(int $expectedStatus, ?string $recipient): array
+    private function streamsOfTheAnswer(int $expectedStatus, string $recipient, bool $isPinged): array
     {
         self::assertResponseStatusCodeSame($expectedStatus);
         self::assertSame('text/vnd.turbo-stream.html; charset=UTF-8', $this->client->getResponse()->headers->get('Content-Type'));
@@ -471,11 +612,8 @@ final class PingTest extends WebTestCase
             $matches,
             \PREG_SET_ORDER,
         );
-        $expectedTargets = [['update', self::TOAST_REGION_ID]];
-        if (null !== $recipient) {
-            array_unshift($expectedTargets, ['replace', 'ping-'.$this->idOf($recipient)]);
-        }
-        self::assertSame($expectedTargets, array_map(static fn (array $match): array => [$match[1], $match[2]], $matches));
+        $buttonTarget = $isPinged ? ['replace', 'ping-'.$this->idOf($recipient)] : ['update', 'ping-'.$this->idOf($recipient).'-refusal'];
+        self::assertSame([$buttonTarget, ['update', self::TOAST_REGION_ID]], array_map(static fn (array $match): array => [$match[1], $match[2]], $matches));
         $streams = [];
         foreach ($matches as [, , $target, $content]) {
             $streams[$target] = new Crawler('<!DOCTYPE html><html><body>'.$content.'</body></html>');

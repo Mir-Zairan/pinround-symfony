@@ -8,9 +8,11 @@ use App\Notification\Api\Event\PingSent;
 use App\Notification\Api\PingCommands;
 use App\Notification\Api\PingMessageRefused;
 use App\Notification\Api\PingRecipientCannotView;
+use App\Notification\Api\PingSlot;
 use App\Notification\Api\PingsPaused;
 use App\Notification\Api\PingToYourself;
 use App\Notification\Domain\Ping;
+use App\Notification\Domain\PingId;
 use App\Notification\Domain\Pings;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\PingSettingsQueries;
@@ -37,7 +39,7 @@ final readonly class SendPing implements PingCommands
     ) {
     }
 
-    public function ping(OrganizationId $organizationId, string $ticketKey, UserId $fromUserId, UserId $toUserId, string $body, \DateTimeImmutable $at): void
+    public function ping(OrganizationId $organizationId, string $ticketKey, UserId $fromUserId, UserId $toUserId, string $body, \DateTimeImmutable $at): PingSlot
     {
         if ($fromUserId->equals($toUserId)) {
             throw new PingToYourself();
@@ -57,7 +59,8 @@ final readonly class SendPing implements PingCommands
         }
 
         $pingId = $this->pings->nextIdentity();
-        $this->pingWindow->take($organizationId, $fromUserId, $toUserId, $ticket->id, $pingId, $this->pingSettingsQueries->pingLimitHoursOf($organizationId), $at);
+        $limitHours = $this->pingSettingsQueries->pingLimitHoursOf($organizationId);
+        $this->pingWindow->take($organizationId, $fromUserId, $toUserId, $ticket->id, $pingId, $limitHours, $at);
 
         try {
             $this->pings->add(Ping::send($pingId, $organizationId, $ticket->id, $fromUserId, $toUserId, $body, null, $at));
@@ -72,5 +75,12 @@ final readonly class SendPing implements PingCommands
 
             throw $failure;
         }
+
+        return new PingSlot($organizationId, $fromUserId, $toUserId, $ticket->id, $pingId->toString(), $at->add(new \DateInterval(\sprintf('PT%dH', $limitHours))));
+    }
+
+    public function releaseSlot(PingSlot $slot): void
+    {
+        $this->pingWindow->release($slot->organizationId, $slot->fromUserId, $slot->toUserId, $slot->ticketId, new PingId($slot->pingId));
     }
 }

@@ -8,6 +8,7 @@ use App\Notification\Api\PingCommands;
 use App\Notification\Api\PingMessageRefused;
 use App\Notification\Api\PingPermission;
 use App\Notification\Api\PingRecipientCannotView;
+use App\Notification\Api\PingSlot;
 use App\Notification\Api\PingsPaused;
 use App\Notification\Api\PingTooSoon;
 use App\Notification\Api\PingToYourself;
@@ -16,7 +17,6 @@ use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\MemberNameQueries;
 use App\Organization\Api\OrganizationPermission;
-use App\Organization\Api\PingSettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\UserId;
@@ -36,7 +36,8 @@ use Symfony\UX\Turbo\TurboBundle;
 /**
  * POST /t/{key}/ping/{userId}, the ticket page's ping sheet (FR-NTF, dialogs-and-popovers.md, Ping sheet). Without the
  * request transaction, as TicketMoveController: Transactions gives the ping a transaction of its own, so the toast says
- * "Pinged" only once the ping is committed, and a refusal leaves nothing. In that order: a ticket the person may not see
+ * "Pinged" only once the ping is committed, and a refusal leaves nothing; when that transaction fails after the ping
+ * took its ping limit slot, the slot is given back before the failure goes on. In that order: a ticket the person may not see
  * is not found, as on its page, and so is one they may see but not ping from (a Viewer); a person who is not a member
  * of the organization is not found; then an expired form, a message that is no text, and the use case's refusals each
  * answer 422 with a toast saying why.
@@ -81,7 +82,6 @@ final class PingController extends AbstractController
         private readonly TicketVisibilities $ticketVisibilities,
         private readonly TicketQueries $ticketQueries,
         private readonly MemberNameQueries $memberNameQueries,
-        private readonly PingSettingsQueries $pingSettingsQueries,
         private readonly PingCommands $pingCommands,
         private readonly PingedState $pingedState,
         private readonly ClockInterface $clock,
@@ -106,9 +106,10 @@ final class PingController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
         $message = $request->request->getString(self::MESSAGE_FIELD);
         $now = $this->clock->now();
+        $slot = null;
 
         try {
-            [$toast, $againAt] = $this->transactions->run(function () use ($key, $toUserId, $csrfToken, $message, $now): array {
+            [$toast, $againAt] = $this->transactions->run(function () use ($key, $toUserId, $csrfToken, $message, $now, &$slot): array {
                 [$actor, $ticket] = $this->pingableTicketOf($key);
                 $firstName = $this->recipientFirstNameOf($actor, $toUserId);
                 if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
@@ -118,20 +119,27 @@ final class PingController extends AbstractController
                     throw new PingRefusedWithToast(new PingMessageRefused(self::MESSAGE_MAX_LENGTH)->getMessage());
                 }
                 try {
-                    $this->pingCommands->ping($actor->organizationId(), $ticket->key, $actor->userId(), $toUserId, $message, $now);
+                    $slot = $this->pingCommands->ping($actor->organizationId(), $ticket->key, $actor->userId(), $toUserId, $message, $now);
                 } catch (PingTooSoon $tooSoon) {
                     throw new PingRefusedWithToast(\sprintf('You pinged %s about this ticket recently. You can ping them %s.', $firstName, PingedState::againInOf($tooSoon->againAt, $now)), $tooSoon->againAt);
                 } catch (PingToYourself|PingMessageRefused|PingRecipientCannotView|PingsPaused $refused) {
                     throw new PingRefusedWithToast($refused->getMessage());
                 }
-                $limitHours = $this->pingSettingsQueries->pingLimitHoursOf($actor->organizationId());
 
-                return [\sprintf('Pinged %s. One notification sent.', $firstName), $now->add(new \DateInterval(\sprintf('PT%dH', $limitHours)))];
+                return [\sprintf('Pinged %s. One notification sent.', $firstName), $slot->againAt];
             });
-        } catch (TicketNotFound) {
-            throw $this->createNotFoundException(self::TICKET_NOT_FOUND);
-        } catch (PingRefusedWithToast $refused) {
-            return $this->answerWithToast($request, $key, $toUserId, $refused->toast(), $refused->againAt(), $now, Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $failure) {
+            if (null !== $slot) {
+                $this->releaseUncommitted($slot);
+            }
+            if ($failure instanceof TicketNotFound) {
+                throw $this->createNotFoundException(self::TICKET_NOT_FOUND);
+            }
+            if ($failure instanceof PingRefusedWithToast) {
+                return $this->answerWithToast($request, $key, $toUserId, $failure->toast(), $failure->againAt(), $now, Response::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            throw $failure;
         }
         $this->pingedState->reset();
 
@@ -154,6 +162,19 @@ final class PingController extends AbstractController
         }
 
         return [$actor, $ticket];
+    }
+
+    /**
+     * The transaction rolled back, so the ping the slot was taken for is not stored; without this the sender could not
+     * ping this person about this ticket again until the slot ends.
+     */
+    private function releaseUncommitted(PingSlot $slot): void
+    {
+        try {
+            $this->pingCommands->releaseSlot($slot);
+        } catch (PingsPaused) {
+            // The slot then ends by itself at its againAt, and the failure of the transaction matters more than this.
+        }
     }
 
     private function recipientFirstNameOf(ActorContext $actor, UserId $toUserId): string

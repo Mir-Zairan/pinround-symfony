@@ -7,6 +7,8 @@ namespace App\Tests\Unit\Notification\Application\Ping;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Api\PingMessageRefused;
 use App\Notification\Api\PingRecipientCannotView;
+use App\Notification\Api\PingSlot;
+use App\Notification\Api\PingsPaused;
 use App\Notification\Api\PingTooSoon;
 use App\Notification\Api\PingToYourself;
 use App\Notification\Application\Ping\SendPing;
@@ -42,6 +44,7 @@ final class SendPingTest extends TestCase
     private const string MIA = '0197a3c0-0000-7000-8000-000000005113';
     private const string RAJ = '0197a3c0-0000-7000-8000-000000005114';
     private const int PING_LIMIT_HOURS = 8;
+    private const string EARLIER_PING = '0197a3c0-0000-7000-8000-000000005131';
 
     private InMemoryPingWindow $pingWindow;
     private InMemoryPings $pings;
@@ -201,14 +204,70 @@ final class SendPingTest extends TestCase
         self::assertSame([1, []], [$this->pingWindow->heldSlotCount(), $this->pings->stored()]);
     }
 
-    private function ping(string $fromUserId, string $toUserId, string $body, ?\DateTimeImmutable $at = null): void
+    #[Test]
+    public function aPingReturnsTheSlotItTookEndingAfterTheOrganizationsLimit(): void
     {
-        $this->sendPing->ping(new OrganizationId(self::ACME_FOODS), self::TICKET_KEY, new UserId($fromUserId), new UserId($toUserId), $body, $at ?? self::at('10:00'));
+        $slot = $this->ping(self::LENA, self::OMAR, 'Any news?', self::at('10:00'));
+
+        self::assertEquals(
+            new PingSlot(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new UserId(self::OMAR), new TicketId(self::TICKET), $this->pings->stored()[0]->id()->toString(), self::at('18:00')),
+            $slot,
+        );
+    }
+
+    #[Test]
+    public function releasingTheSlotOfAnUncommittedPingLetsTheSenderPingAgainAtOnce(): void
+    {
+        $slot = $this->ping(self::LENA, self::OMAR, 'Any news?', self::at('10:00'));
+
+        $this->sendPing->releaseSlot($slot);
+
+        self::assertSame(0, $this->pingWindow->heldSlotCount());
+        $this->ping(self::LENA, self::OMAR, 'Any news?', self::at('10:05'));
+        self::assertCount(2, $this->pings->stored());
+    }
+
+    #[Test]
+    public function releasingTheSlotOfAnotherPingLeavesTheHeldSlot(): void
+    {
+        $slot = $this->ping(self::LENA, self::OMAR, 'Any news?', self::at('10:00'));
+        $earlierPingsSlot = new PingSlot($slot->organizationId, $slot->fromUserId, $slot->toUserId, $slot->ticketId, self::EARLIER_PING, $slot->againAt);
+
+        $this->sendPing->releaseSlot($earlierPingsSlot);
+
+        self::assertSame(1, $this->pingWindow->heldSlotCount());
+        try {
+            $this->ping(self::LENA, self::OMAR, 'Any news now?', self::at('10:05'));
+            self::fail('A ping went out while the first one holds the slot.');
+        } catch (PingTooSoon $refusal) {
+            self::assertEquals(self::at('18:00'), $refusal->againAt);
+        }
+    }
+
+    #[Test]
+    public function releasingASlotWhenTheStoreCannotBeReachedSaysPingsArePausedAndKeepsTheSlot(): void
+    {
+        $slot = $this->ping(self::LENA, self::OMAR, 'Any news?', self::at('10:00'));
+        $this->pingWindow->pauseReleases();
+
+        try {
+            $this->sendPing->releaseSlot($slot);
+            self::fail('The release reached a store that is down.');
+        } catch (PingsPaused $paused) {
+            self::assertSame('Pings are paused for a moment. Try again soon.', $paused->getMessage());
+        }
+
+        self::assertSame(1, $this->pingWindow->heldSlotCount());
+    }
+
+    private function ping(string $fromUserId, string $toUserId, string $body, ?\DateTimeImmutable $at = null): PingSlot
+    {
+        return $this->sendPing->ping(new OrganizationId(self::ACME_FOODS), self::TICKET_KEY, new UserId($fromUserId), new UserId($toUserId), $body, $at ?? self::at('10:00'));
     }
 
     /**
      * @param class-string<\DomainException> $refusalClass
-     * @param \Closure(): void               $attempt
+     * @param \Closure(): mixed              $attempt
      */
     private function assertRefused(string $refusalClass, ?string $message, \Closure $attempt): void
     {
@@ -226,7 +285,7 @@ final class SendPingTest extends TestCase
     }
 
     /**
-     * @param \Closure(): void $attempt
+     * @param \Closure(): mixed $attempt
      */
     private function assertSameFailureRethrown(\Throwable $failure, \Closure $attempt): void
     {
