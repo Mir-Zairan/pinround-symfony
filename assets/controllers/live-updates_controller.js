@@ -27,7 +27,8 @@ const OPEN_EDITORS = 'dialog[open], details[open] :is(textarea, input[type="text
 const HOLD_ENDING_EVENTS = ['focusin', 'focusout', 'toggle', 'close'];
 
 // A part with an open editor, or with a field being typed in, is held rather than lose the text: a swapped part loses
-// both, a reloaded frame keeps only what sits in a data-turbo-permanent element. A focused button or link holds nothing.
+// both, a reloaded frame keeps only what sits in a data-turbo-permanent element. A focused button or link holds nothing:
+// its copy in the fresh part takes the focus back.
 function isPartInUse(part) {
   const focused = document.activeElement;
   if (part.querySelector(OPEN_EDITORS) !== null) {
@@ -37,6 +38,42 @@ function isPartInUse(part) {
     return false;
   }
   return part.localName !== 'turbo-frame' || focused.closest('[data-turbo-permanent]') === null;
+}
+
+function labelOf(control) {
+  return control.getAttribute('aria-label') ?? control.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function controlsLike(anchor, localName, label) {
+  return [...anchor.getElementsByTagName(localName)].filter((control) => labelOf(control) === label);
+}
+
+// How to find the focused control of a part again once the part is replaced (WCAG 2.4.3): by the nearest id around it
+// and its place among the controls there with the same tag and label, as most controls have no id of their own. Null
+// when the part has no focus.
+function focusedControlOf(part) {
+  const focused = document.activeElement;
+  if (focused === null || focused === part || !part.contains(focused)) {
+    return null;
+  }
+  const anchor = focused.parentElement.closest('[id]');
+  const label = labelOf(focused);
+  const index = controlsLike(anchor, focused.localName, label).indexOf(focused);
+  return { anchorId: anchor.id, localName: focused.localName, label, index };
+}
+
+// Replacing a part drops the focus it held to the body; this gives it to the same control in the fresh part, unless
+// focus has meanwhile moved on to something that is still on the page.
+function refocus(focusedControl, part) {
+  const focused = document.activeElement;
+  if (focusedControl === null || (focused !== null && focused !== document.body)) {
+    return;
+  }
+  const anchor = document.getElementById(focusedControl.anchorId);
+  const control = anchor === null ? null : (controlsLike(anchor, focusedControl.localName, focusedControl.label)[focusedControl.index] ?? null);
+  if (control !== null && part.contains(control)) {
+    control.focus({ preventScroll: true });
+  }
 }
 
 // Follows the live updates of a page (realtime-and-notifications.md): asks POST /realtime/token for the subscriber
@@ -193,7 +230,7 @@ export default class extends Controller {
       this.#heldPartIds.delete(part.id);
       return true;
     });
-    freeParts.filter((part) => part.localName === 'turbo-frame' && part.src).forEach((frame) => frame.reload());
+    freeParts.filter((part) => part.localName === 'turbo-frame' && part.src).forEach((frame) => this.#reloadFrame(frame));
     const pageParts = freeParts.filter((part) => part.localName !== 'turbo-frame' && part.id !== '');
     if (pageParts.length > 0) {
       this.#swapPageParts(pageParts);
@@ -244,7 +281,26 @@ export default class extends Controller {
         this.#heldPartIds.add(part.id);
         return;
       }
-      part.replaceWith(document.importNode(freshPart, true));
+      const focusedControl = focusedControlOf(part);
+      const importedPart = document.importNode(freshPart, true);
+      part.replaceWith(importedPart);
+      refocus(focusedControl, importedPart);
     });
+  }
+
+  // The focused control is noted as the frame renders, not as it is asked for, as focus may move while it loads.
+  // Turbo's reload settles once its answer is rendered or its fetch fails.
+  async #reloadFrame(frame) {
+    let focusedControl = null;
+    const noteFocusedControl = () => {
+      focusedControl = focusedControlOf(frame);
+    };
+    frame.addEventListener('turbo:before-frame-render', noteFocusedControl);
+    try {
+      await frame.reload();
+    } finally {
+      frame.removeEventListener('turbo:before-frame-render', noteFocusedControl);
+    }
+    refocus(focusedControl, frame);
   }
 }
