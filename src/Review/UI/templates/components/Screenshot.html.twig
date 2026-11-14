@@ -1,0 +1,16 @@
+<figure{{ attributes.defaults({class: 'screenshot', id: this.view.domId}) }}>
+    {% if this.view.title is not null or this.view.summary is not null %}
+        <figcaption class="screenshot__text">
+            {% if this.view.title is not null %}
+                <h3 class="screenshot__title">{{ this.view.title }}</h3>
+            {% endif %}
+            {% if this.view.summary is not null %}
+                <p class="screenshot__summary">{{ this.view.summary }}</p>
+            {% endif %}
+        </figcaption>
+    {% endif %}
+    <div class="screenshot__frame">
+        <img class="screenshot__image" src="{{ this.view.imageUrl }}" alt="{{ this.view.altText }}" width="{{ this.view.width }}" height="{{ this.view.height }}" decoding="async">
+        <twig:PinLayer :view="this.view" :selectedNumber="this.selectedNumber" />
+    </div>
+</figure>

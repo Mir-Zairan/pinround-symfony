@@ -1,0 +1,14 @@
+{% if this.view.pins is not empty %}
+    <ol class="pin-list" aria-label="Pins" data-pin-placer-target="list">
+        {% for pin in this.view.pins %}
+            <li class="pin-list__item{% if pin.isAiSuggested %} pin-list__item--ai{% endif %}{% if pin.number == this.selectedNumber %} pin-list__item--selected{% endif %}" value="{{ pin.number }}" data-pin-number="{{ pin.number }}">
+                <span class="pin-list__number">{{ pin.number }}</span>
+                {% if this.isEditable %}
+                    <textarea class="pin-list__note" name="pins[{{ pin.number }}][note]" rows="2" maxlength="{{ this.noteMaxLength }}" aria-label="Note for pin {{ pin.number }}">{{ pin.note }}</textarea>
+                {% else %}
+                    <p class="pin-list__note">{{ pin.note }}</p>
+                {% endif %}
+            </li>
+        {% endfor %}
+    </ol>
+{% endif %}

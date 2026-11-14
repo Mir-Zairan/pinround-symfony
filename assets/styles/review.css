@@ -1,0 +1,197 @@
+/* The Review components: Screenshot, PinLayer and PinList (src/Review/UI/templates/components). */
+
+.screenshot {
+  margin: 0;
+}
+
+.screenshot__text {
+  margin-bottom: var(--space-12);
+}
+
+.screenshot__title {
+  margin: 0 0 var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+.screenshot__summary {
+  margin: 0;
+  color: var(--on-surface-var);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.screenshot__frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.screenshot__image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-input);
+}
+
+/* A picture does not change with the theme, so the ring's two outlines are fixed: dark outside, white inside. They
+   stay visible on any background (WCAG 1.4.11). */
+.pin-layer {
+  --pin-outer: #161d1b;
+  --pin-inner: #ffffff;
+  --pin-size: 28px;
+
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* left and top come from the style element PinLayer prints; the ring is centred on that point. */
+.pin {
+  position: absolute;
+  box-sizing: border-box;
+  width: var(--pin-size);
+  height: var(--pin-size);
+  padding: 0;
+  border: 2px solid var(--pin-inner);
+  border-radius: 50%;
+  background: none;
+  box-shadow: 0 0 0 2px var(--pin-outer), inset 0 0 0 2px var(--pin-outer);
+  color: inherit;
+  font: inherit;
+  line-height: 1.3;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.pin--ai {
+  border: 2px dashed var(--ai);
+  box-shadow: 0 0 0 2px var(--pin-inner), 0 0 0 4px var(--pin-outer);
+}
+
+.pin--selected {
+  border: 2px solid var(--primary);
+  box-shadow: 0 0 0 2px var(--pin-inner), 0 0 0 4px var(--pin-outer);
+}
+
+.pin:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 5px;
+}
+
+.pin__tab {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  min-width: 20px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-tag);
+  background: var(--inverse-surface);
+  color: var(--inverse-on-surface);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+.pin--ai .pin__tab {
+  background: var(--ai-container);
+  color: var(--on-ai-container);
+}
+
+.pin--selected .pin__tab {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.pin__bubble {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + var(--space-8));
+  display: none;
+  width: max-content;
+  max-width: 240px;
+  padding: var(--space-6) var(--space-10);
+  border-radius: var(--radius-input);
+  background: var(--inverse-surface);
+  color: var(--inverse-on-surface);
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: left;
+  overflow-wrap: anywhere;
+  transform: translateY(-50%);
+}
+
+.pin--bubble-left .pin__bubble {
+  right: calc(100% + var(--space-8));
+  left: auto;
+}
+
+.pin:hover,
+.pin:focus-visible,
+.pin--selected {
+  z-index: 2;
+}
+
+.pin:hover .pin__bubble,
+.pin:focus-visible .pin__bubble,
+.pin--selected .pin__bubble {
+  display: block;
+}
+
+.pin-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: var(--space-16) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pin-list__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+}
+
+.pin-list__number {
+  flex: none;
+  min-width: 24px;
+  padding: 0 var(--space-6);
+  border-radius: var(--radius-tag);
+  background: var(--inverse-surface);
+  color: var(--inverse-on-surface);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+}
+
+.pin-list__item--ai .pin-list__number {
+  background: var(--ai-container);
+  color: var(--on-ai-container);
+}
+
+.pin-list__item--selected .pin-list__number {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.pin-list__note {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+textarea.pin-list__note {
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font: inherit;
+  resize: vertical;
+}
