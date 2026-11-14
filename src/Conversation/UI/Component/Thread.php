@@ -8,6 +8,7 @@ use App\Conversation\Api\MessageView;
 use App\Conversation\Api\ThreadQueries;
 use App\Conversation\UI\ThreadController;
 use App\Conversation\UI\ThreadMessage;
+use App\Conversation\UI\ThreadReply;
 use App\Identity\Api\CurrentTimeZone;
 use App\Identity\Api\CurrentUser;
 use App\Identity\Api\UserQueries;
@@ -22,7 +23,8 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
  * what ConversationPermission COMMENT grants, so the composer is shown to every viewer; ThreadController checks the
  * voter on every request.
  *
- * Reads the thread in one query and the names of authors outside the ticket's people in one more, so it needs the
+ * Reads the thread in one query, its answers in one more when a question is answered, and the names of authors outside
+ * the ticket's people in one more, so it needs the
  * request's transaction under the tenant.
  */
 #[AsTwigComponent(name: 'Thread', template: '@Conversation/components/Thread.html.twig')]
@@ -73,6 +75,7 @@ final class Thread
             // EditMessage and RemoveMessage refuse a question, so its author is offered neither.
             $isOwnComment = MessageView::KIND_COMMENT === $message->kind
                 && null !== $viewerId && $viewerId->equals($message->authorId);
+            $answer = $message->answer;
 
             return new ThreadMessage(
                 $message->id,
@@ -85,6 +88,14 @@ final class Thread
                 $message->isRemoved,
                 $isOwnComment && !$message->isRemoved && $now <= $message->editableUntil,
                 $isOwnComment && !$message->isRemoved,
+                $message->isOpenQuestion && null !== $viewerId && null !== $message->toUserId && $viewerId->equals($message->toUserId),
+                null === $answer ? null : new ThreadReply(
+                    $answer->id,
+                    $names[$answer->authorId->toString()] ?? self::UNKNOWN_AUTHOR,
+                    $answer->body,
+                    RelativeTime::sinceOf($answer->createdAt, $now, $zone),
+                    $answer->createdAt->setTimezone($utc)->format(\DateTimeInterface::ATOM),
+                ),
             );
         }, $thread->messages);
     }
@@ -100,7 +111,8 @@ final class Thread
     }
 
     /**
-     * The ticket page's names first; one query for the authors outside the ticket's people, none when there are none.
+     * The ticket page's names first; one query for the authors of messages and answers outside the ticket's people,
+     * none when there are none.
      *
      * @param list<MessageView>     $messages
      * @param array<string, string> $displayNames by user id string
@@ -111,9 +123,10 @@ final class Thread
     {
         $missingIds = [];
         foreach ($messages as $message) {
-            $authorId = $message->authorId->toString();
-            if (!isset($displayNames[$authorId])) {
-                $missingIds[$authorId] = $message->authorId;
+            foreach ([$message->authorId, $message->answer?->authorId] as $authorId) {
+                if (null !== $authorId && !isset($displayNames[$authorId->toString()])) {
+                    $missingIds[$authorId->toString()] = $authorId;
+                }
             }
         }
         foreach ($this->userQueries->byIds(array_values($missingIds)) as $userId => $user) {

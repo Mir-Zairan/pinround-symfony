@@ -24,6 +24,26 @@
                         {% else %}
                             <p class="thread__body">{{ message.body|linkify }}</p>
                         {% endif %}
+                        {% if message.answer %}
+                            <div class="thread__reply thread__reply--answer" id="thread-reply-{{ message.answer.id }}">
+                                <p class="thread__meta">
+                                    <span class="thread__author">{{ message.answer.authorName }}</span> · <time class="thread__time" datetime="{{ message.answer.postedAt }}">{{ message.answer.postedLine }}</time> · answer
+                                </p>
+                                <p class="thread__body">{{ message.answer.body|linkify }}</p>
+                            </div>
+                        {% endif %}
+                        {% if message.isAnswerable %}
+                            {#- Answering resumes the ticket and changes its header, so the answer's redirect replaces the whole page. -#}
+                            <details class="thread__answer">
+                                <summary class="btn btn-text btn-sm">Answer</summary>
+                                <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::ANSWER_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__answer-form" data-turbo-frame="_top">
+                                    <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                    <label class="visually-hidden" for="thread-answer-{{ message.id }}">Your answer</label>
+                                    <textarea id="thread-answer-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Your answer" required maxlength="{{ this.maxBodyLength }}" rows="3"></textarea>
+                                    <button type="submit" class="btn btn-filled btn-sm">Answer</button>
+                                </form>
+                            </details>
+                        {% endif %}
                         {% if message.isEditable or message.isRemovable %}
                             <div class="thread__actions">
                                 {% if message.isEditable %}
