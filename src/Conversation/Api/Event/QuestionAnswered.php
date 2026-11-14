@@ -12,11 +12,13 @@ final readonly class QuestionAnswered implements ConversationEvent
 {
     /**
      * @param string $messageId the cnv_message id of the question that was answered
+     * @param string $askerId   the person who asked the question, who is notified of the answer
      */
     public function __construct(
         public string $organizationId,
         public string $ticketId,
         public string $messageId,
+        public string $askerId,
         public string $actorId,
         public \DateTimeImmutable $occurredAt,
     ) {

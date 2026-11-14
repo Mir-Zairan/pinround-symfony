@@ -363,8 +363,8 @@ All events extend `SharedKernel\DomainEvent`. Every event carries `eventId`, `oc
 | SummaryChanged | Ticketing | Audit | ticketId, source, authorId | outbox |
 | CommentPosted | Conversation | Notification, Integration | `Conversation\Api\Event\ConversationEvent` (as every Conversation event): ticketId, messageId | outbox |
 | QuestionAsked | Conversation | Insight, Notification | ticketId, messageId, toUserId | outbox (turn row synchronous) |
-| QuestionAnswered | Conversation | Insight, Notification | ticketId, messageId | outbox (turn row synchronous) |
-| ReplyPosted | Conversation | Notification | ticketId, messageId, replyId | outbox |
+| QuestionAnswered | Conversation | Insight, Notification | ticketId, messageId, askerId | outbox (turn row synchronous) |
+| ReplyPosted | Conversation | Notification | ticketId, messageId, replyId, messageAuthorId | outbox |
 | CommentResolved | Conversation | — (UI only) | ticketId, messageId | outbox |
 | RoundStarted | Review | Audit | ticketId, roundId, kind | outbox |
 | RoundShared | Review | Notification, Insight, Audit | ticketId, roundId, number | outbox |
