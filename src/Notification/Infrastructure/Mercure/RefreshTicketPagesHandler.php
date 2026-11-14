@@ -46,8 +46,9 @@ final readonly class RefreshTicketPagesHandler
     }
 
     /**
-     * @throws \Symfony\Component\Lock\Exception\LockAcquiringException when the state Valkey cannot be reached
-     * @throws \Symfony\Component\Mercure\Exception\RuntimeException    when the hub refuses the update, so it is retried
+     * @throws \Symfony\Component\Lock\Exception\LockAcquiringException  when the state Valkey cannot be reached
+     * @throws \Symfony\Component\Mercure\Exception\RuntimeException     when the hub refuses the update, so it is retried
+     * @throws \Symfony\Component\Messenger\Exception\ExceptionInterface when the delayed try cannot be queued, so it is retried
      */
     public function __invoke(RefreshTicketPages $refresh): void
     {
@@ -71,16 +72,29 @@ final readonly class RefreshTicketPagesHandler
             return;
         }
 
+        $trailingTry = $this->trailingTryOf($ticketId);
+        $tookTrailingTry = RefreshAttempt::Leading === $refresh->attempt && $trailingTry->acquire();
         $nextAttempt = match ($refresh->attempt) {
-            RefreshAttempt::Leading => $this->takesTrailingTryOf($ticketId) ? RefreshAttempt::Trailing : null,
+            RefreshAttempt::Leading => $tookTrailingTry ? RefreshAttempt::Trailing : null,
             RefreshAttempt::Trailing => RefreshAttempt::LastTrailing,
             RefreshAttempt::LastTrailing => null,
         };
-        if (null !== $nextAttempt) {
+        if (null === $nextAttempt) {
+            return;
+        }
+
+        try {
             $this->commandBus->dispatch(
                 new RefreshTicketPages($refresh->organizationId, $refresh->ticketId, $nextAttempt),
                 [new DelayStamp(self::WINDOW_MILLISECONDS)],
             );
+        } catch (\Throwable $dispatchFailure) {
+            // A trailing try still held with none queued would make Messenger's retry queue nothing, losing the burst's last change.
+            if ($tookTrailingTry) {
+                $trailingTry->release();
+            }
+
+            throw $dispatchFailure;
         }
     }
 
@@ -90,14 +104,14 @@ final readonly class RefreshTicketPagesHandler
     }
 
     /** Held while a Trailing try waits, so a burst queues one, not one per change. */
-    private function takesTrailingTryOf(TicketId $ticketId): bool
+    private function trailingTryOf(TicketId $ticketId): LockInterface
     {
-        return $this->windowLock('realtime-refresh-trailing:'.$ticketId->toString())->acquire();
+        return $this->windowLock('realtime-refresh-trailing:'.$ticketId->toString());
     }
 
     private function windowLock(string $resource): LockInterface
     {
-        // The lock is the window: released only when the publish fails (so Messenger's retry can take it again), otherwise it ends when its time to live runs out.
+        // The lock is the window: released only when the publish or the dispatch fails (so Messenger's retry can take it again), otherwise it ends when its time to live runs out.
         return $this->lockFactory->createLock($resource, self::WINDOW_SECONDS, autoRelease: false);
     }
 }

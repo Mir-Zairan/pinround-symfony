@@ -21,6 +21,8 @@ use Symfony\Component\Mercure\Jwt\StaticTokenProvider;
 use Symfony\Component\Mercure\MockHub;
 use Symfony\Component\Mercure\Update;
 use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Exception\TransportException;
+use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Stamp\DelayStamp;
 
 /**
@@ -51,12 +53,7 @@ final class RefreshTicketPagesHandlerTest extends TestCase
         $this->startMicroseconds = (int) $this->clock->now()->format('Uu');
         $this->lockFactory = new LockFactory(new ClockedLockStore($this->clock));
         $this->commandBus = new RecordingMessageBus();
-        $hub = new MockHub('http://app/.well-known/mercure', new StaticTokenProvider('publisher-token'), function (Update $update): string {
-            $this->published[] = ['atMilliseconds' => $this->elapsedMilliseconds(), 'update' => $update];
-
-            return 'urn:uuid:published';
-        });
-        $this->handler = new RefreshTicketPagesHandler($hub, $this->lockFactory, $this->commandBus);
+        $this->handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->commandBus);
     }
 
     #[Test]
@@ -259,6 +256,86 @@ final class RefreshTicketPagesHandlerTest extends TestCase
         self::assertSame([1000], $this->publishedAtMilliseconds());
         self::assertSame([], $this->commandBus->dispatched());
         self::assertFalse($this->lockFactory->createLock('realtime-refresh:'.self::TICKET_ID, 2.0, autoRelease: false)->acquire(), 'the published retry holds the window');
+    }
+
+    #[Test]
+    public function aTrailingTryTheBusCannotQueueFreesItsLockSoTheRetryQueuesIt(): void
+    {
+        $handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->busFailingFirstDispatch());
+        $refresh = new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Leading);
+        $handler($refresh);
+        $this->clock->sleep(0.1);
+
+        try {
+            $handler($refresh);
+            self::fail('the transport failure reaches Messenger, so the message is retried');
+        } catch (TransportException $dispatchFailure) {
+            self::assertSame('The queue is down.', $dispatchFailure->getMessage());
+        }
+        $probe = $this->lockFactory->createLock('realtime-refresh-trailing:'.self::TICKET_ID, 2.0, autoRelease: false);
+        self::assertTrue($probe->acquire(), 'no trailing try is queued, so none may be held');
+        $probe->release();
+
+        // Messenger's first retry comes after 1 s, inside the window the leading refresh opened.
+        $this->clock->sleep(1.0);
+        $handler($refresh);
+
+        self::assertSame([0], $this->publishedAtMilliseconds());
+        self::assertCount(1, $this->commandBus->dispatched());
+        self::assertEquals(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Trailing), $this->commandBus->dispatched()[0]->getMessage());
+    }
+
+    #[Test]
+    public function aLastTrailingTryTheBusCannotQueueLeavesTheWaitingTrailingTryItsLock(): void
+    {
+        $window = $this->lockFactory->createLock('realtime-refresh:'.self::TICKET_ID, 2.0, autoRelease: false);
+        self::assertTrue($window->acquire());
+        $waitingTrailingTry = $this->lockFactory->createLock('realtime-refresh-trailing:'.self::TICKET_ID, 2.0, autoRelease: false);
+        self::assertTrue($waitingTrailingTry->acquire());
+        $handler = new RefreshTicketPagesHandler($this->hub(), $this->lockFactory, $this->busFailingFirstDispatch());
+
+        try {
+            $handler(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Trailing));
+            self::fail('the transport failure reaches Messenger, so the message is retried');
+        } catch (TransportException $dispatchFailure) {
+            self::assertSame('The queue is down.', $dispatchFailure->getMessage());
+        }
+
+        self::assertTrue($waitingTrailingTry->isAcquired());
+        self::assertTrue($window->isAcquired());
+        self::assertSame([], $this->commandBus->dispatched());
+    }
+
+    private function hub(): MockHub
+    {
+        return new MockHub('http://app/.well-known/mercure', new StaticTokenProvider('publisher-token'), function (Update $update): string {
+            $this->published[] = ['atMilliseconds' => $this->elapsedMilliseconds(), 'update' => $update];
+
+            return 'urn:uuid:published';
+        });
+    }
+
+    /** Throws as the real bus does when the transport is down, then records like the recording bus. */
+    private function busFailingFirstDispatch(): MessageBusInterface
+    {
+        return new class($this->commandBus) implements MessageBusInterface {
+            private bool $hasFailed = false;
+
+            public function __construct(private readonly RecordingMessageBus $recorder)
+            {
+            }
+
+            public function dispatch(object $message, array $stamps = []): Envelope
+            {
+                if (!$this->hasFailed) {
+                    $this->hasFailed = true;
+
+                    throw new TransportException('The queue is down.');
+                }
+
+                return $this->recorder->dispatch($message, $stamps);
+            }
+        };
     }
 
     /** @return list<int> */
