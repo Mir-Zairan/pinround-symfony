@@ -9,9 +9,8 @@ use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
-use App\Ticketing\Api\TicketPermission;
-use App\Ticketing\Api\TicketTurnQueries;
-use App\Ticketing\Api\TicketVisibilityFacts;
+use App\Ticketing\Api\TicketQueries;
+use App\Ticketing\Api\TicketVisibilities;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,13 +18,16 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * POST /realtime/token (realtime-and-notifications.md, Mercure topics): renews the subscriber cookie of a signed-in
- * member, for their own topic and each asked ticket that TicketPermission::VIEW still lets them see. The session and
- * the membership are checked again on every renewal, so after logout or removal the cookie runs out within
+ * member, for their own topic and each asked ticket the ticket visibility predicate still lets them see (ADR-0013,
+ * TicketQueries::visibleTicketIdsOf, the SQL twin of TicketPermission::VIEW). The session and the membership are
+ * checked again on every renewal, so after logout or removal the cookie runs out within
  * RealtimeSubscriptions::LIFETIME_SECONDS. A malformed, unknown, other organization's or hidden ticket id is left out
  * the same way, so the answer never tells that a hidden ticket exists.
  *
- * No form token: the answer is a cookie for the caller's own browser, which a cross-site post cannot read, and it
- * grants no more than a same-site renewal would.
+ * No form token: the session cookie is SameSite=Lax (config/packages/framework.yaml), so a cross-site POST arrives
+ * signed out. The worst a same-site forged POST can do is renew the cookie without the page's ticket topics, which
+ * drops their live updates until the page's next renewal. If the session cookie's SameSite is ever loosened, this
+ * route needs a form token.
  */
 final class RealtimeTokenController extends AbstractController
 {
@@ -36,7 +38,7 @@ final class RealtimeTokenController extends AbstractController
 
     /**
      * Each ticket topic adds about 100 bytes to the cookie's token; ten keep it well under the 4 KB browsers accept,
-     * and one page follows one ticket.
+     * and one page follows one ticket. It stays under TicketQueries::MAX_CHECKED_TICKET_IDS, so one check covers all.
      */
     public const int MAX_TICKETS = 10;
 
@@ -45,7 +47,8 @@ final class RealtimeTokenController extends AbstractController
     public function __construct(
         private readonly TenantContext $tenantContext,
         private readonly CurrentActor $currentActor,
-        private readonly TicketTurnQueries $ticketTurnQueries,
+        private readonly TicketVisibilities $ticketVisibilities,
+        private readonly TicketQueries $ticketQueries,
         private readonly RealtimeSubscriptions $realtimeSubscriptions,
     ) {
     }
@@ -60,33 +63,13 @@ final class RealtimeTokenController extends AbstractController
             return new Response(self::TOO_MANY_TICKETS, Response::HTTP_BAD_REQUEST, ['Content-Type' => 'text/plain; charset=UTF-8']);
         }
 
-        $viewableTicketIds = [];
-        foreach ($askedTicketIds as $askedTicketId) {
-            $ticketId = self::ticketIdOrNull($askedTicketId);
-            if (null === $ticketId || isset($viewableTicketIds[$ticketId->toString()])) {
-                continue;
-            }
-            $ticket = $this->ticketTurnQueries->factsOf($ticketId);
-            if (null === $ticket) {
-                continue;
-            }
-            $visibilityFacts = new TicketVisibilityFacts(
-                $actor->organizationId(),
-                $ticket->visibility,
-                $ticket->teamId,
-                $ticket->reporterId,
-                $ticket->assigneeId,
-                $ticket->pendingAssigneeId,
-                $ticket->reviewerId,
-                $ticket->testerId,
-                $ticket->waitingOnUserId,
-            );
-            if ($this->isGranted(TicketPermission::VIEW, $visibilityFacts)) {
-                $viewableTicketIds[$ticketId->toString()] = $ticketId;
-            }
-        }
+        $wellFormedTicketIds = array_values(array_filter(array_map(self::ticketIdOrNull(...), $askedTicketIds)));
+        $viewableTicketIds = [] === $wellFormedTicketIds ? [] : $this->ticketQueries->visibleTicketIdsOf(
+            $this->ticketVisibilities->of($actor->organizationId(), $actor->userId()),
+            $wellFormedTicketIds,
+        );
 
-        $this->realtimeSubscriptions->grant($actor->organizationId(), $actor->userId(), ...array_values($viewableTicketIds));
+        $this->realtimeSubscriptions->grant($actor->organizationId(), $actor->userId(), ...$viewableTicketIds);
 
         return new Response(null, Response::HTTP_NO_CONTENT);
     }

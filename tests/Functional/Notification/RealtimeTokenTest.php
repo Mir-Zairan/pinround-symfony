@@ -190,6 +190,29 @@ final class RealtimeTokenTest extends WebTestCase
     }
 
     #[Test]
+    public function logoutExpiresTheCookieAndTheNextRenewalIsSentToLogIn(): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', self::URL, [RealtimeTokenController::TICKET_IDS => [$this->shopTicketId]]);
+        self::assertResponseStatusCodeSame(204);
+        self::assertNotNull($this->subscriberCookie());
+        $this->client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->submitForm('Log out');
+
+        self::assertResponseRedirects('/login', 302);
+        $cleared = $this->subscriberCookie() ?? self::fail('Logout left the subscriber cookie alone.');
+        self::assertSame([true, '/.well-known/mercure', true], [$cleared->isCleared(), $cleared->getPath(), $cleared->isSecure()]);
+        self::assertSame('', (string) $cleared->getValue());
+
+        $this->client->request('POST', self::URL, [RealtimeTokenController::TICKET_IDS => [$this->shopTicketId]]);
+
+        self::assertResponseRedirects('/login', 302);
+        self::assertNull($this->subscriberCookie());
+    }
+
+    #[Test]
     public function aMemberRemovedFromTheOrganizationGetsNoCookie(): void
     {
         $this->logIn($this->client, $this->people['Omar']);

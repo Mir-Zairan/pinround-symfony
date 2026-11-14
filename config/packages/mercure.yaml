@@ -2,6 +2,8 @@
 # Publisher and subscriber tokens are signed with different keys, as the Caddyfile checks them: both HS256, which
 # LcobucciFactory calls hmac.sha256. Publishing happens only in worker-notify (ADR-0023), through MERCURE_URL.
 mercure:
+    # The bundle's default, kept in sight: logout expires the subscriber cookie (RealtimeTokenTest pins it).
+    clear_cookie_on_logout: true
     hubs:
         default:
             url: '%env(default::MERCURE_URL)%'
