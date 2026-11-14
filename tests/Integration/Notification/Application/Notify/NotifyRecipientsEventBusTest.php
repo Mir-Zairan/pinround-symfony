@@ -64,7 +64,8 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         });
         self::runTheWorkerUntilIdle('outbox');
         $relayed = $this->asyncNotify()->getSent();
-        self::assertSame([QuestionAsked::class, QuestionAnswered::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
+        // In any order: the relay sends the events of one second in no set order (data-model.md, messenger_outbox).
+        self::assertEqualsCanonicalizing([QuestionAsked::class, QuestionAnswered::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
 
         foreach ($relayed as $envelope) {
             self::deliverFromAsyncNotify($envelope);
@@ -93,7 +94,8 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         });
         self::runTheWorkerUntilIdle('outbox');
         $relayed = $this->asyncNotify()->getSent();
-        self::assertSame([PingSent::class, ReplyPosted::class, TicketAssigned::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
+        // In any order: the relay sends the events of one second in no set order (data-model.md, messenger_outbox).
+        self::assertEqualsCanonicalizing([PingSent::class, ReplyPosted::class, TicketAssigned::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
 
         foreach ($relayed as $envelope) {
             self::deliverFromAsyncNotify($envelope);
