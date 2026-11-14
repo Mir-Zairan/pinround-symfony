@@ -443,6 +443,81 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * The thread and notification tables (Version20261114120000, Version20261114130000): messages, replies, pings and
+     * notifications are changed but never removed by the app, a mute is removed to unmute, a delivery is only added;
+     * support reads under the tenant policy. Grants on the ntf_notification parent only.
+     */
+    #[Test]
+    public function theConversationAndNotificationTablesGrantTheAppOnlyWhatEachNeeds(): void
+    {
+        $connection = $this->connection();
+        $readOnly = ['pinround_readonly SELECT'];
+        $expectedGrants = [
+            'cnv_message' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE'],
+            'cnv_reply' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE'],
+            'ntf_ping' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE'],
+            'ntf_notification' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE'],
+            'ntf_mute' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app DELETE'],
+            'ntf_delivery' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT'],
+        ];
+
+        foreach ($expectedGrants as $table => $grants) {
+            self::assertEqualsCanonicalizing($grants, $this->grantsToOthersThanTheOwner($connection, $table), $table);
+            self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
+            self::assertSame([], $connection->fetchFirstColumn(
+                'SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)',
+                ['public.'.$table],
+            ), $table);
+        }
+
+        /** @var list<string> $partitions */
+        $partitions = $connection->fetchFirstColumn("SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'public.ntf_notification'::regclass");
+        // 2026-11 through 2027-12 at least; a database migrated later has more.
+        self::assertGreaterThanOrEqual(14, \count($partitions));
+        self::assertContains('ntf_notification_202611', $partitions);
+        self::assertContains('ntf_notification_202712', $partitions);
+        foreach ($partitions as $partition) {
+            self::assertMatchesRegularExpression('/^ntf_notification_\d{6}$/', $partition);
+            self::assertSame([], $this->grantsToOthersThanTheOwner($connection, $partition), $partition);
+        }
+    }
+
+    /**
+     * Every index of the thread and notification tables starts with organization_id, with the partial predicates the
+     * thread, the bell, the digest, the release after quiet hours and the rate limit read by.
+     */
+    #[Test]
+    public function theConversationAndNotificationIndexesAllStartWithTheOrganization(): void
+    {
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX cnv_message_pkey ON public.cnv_message USING btree (organization_id, id)',
+                'CREATE INDEX cnv_message_ticket_id_created_at_id_idx ON public.cnv_message USING btree (organization_id, ticket_id, created_at, id)',
+                "CREATE UNIQUE INDEX cnv_message_ticket_id_open_question_key ON public.cnv_message USING btree (organization_id, ticket_id) WHERE ((kind = 'question'::text) AND (resolved_at IS NULL) AND (removed_at IS NULL))",
+                "CREATE INDEX cnv_message_to_user_id_open_question_idx ON public.cnv_message USING btree (organization_id, to_user_id) WHERE ((kind = 'question'::text) AND (resolved_at IS NULL))",
+                'CREATE UNIQUE INDEX cnv_reply_pkey ON public.cnv_reply USING btree (organization_id, id)',
+                'CREATE INDEX cnv_reply_message_id_created_at_id_idx ON public.cnv_reply USING btree (organization_id, message_id, created_at, id)',
+                'CREATE UNIQUE INDEX ntf_ping_pkey ON public.ntf_ping USING btree (organization_id, id)',
+                'CREATE INDEX ntf_ping_from_id_to_id_ticket_id_created_at_idx ON public.ntf_ping USING btree (organization_id, from_id, to_id, ticket_id, created_at)',
+                'CREATE INDEX ntf_ping_to_id_ticket_id_open_idx ON public.ntf_ping USING btree (organization_id, to_id, ticket_id) WHERE (cleared_at IS NULL)',
+                'CREATE INDEX ntf_ping_ticket_id_idx ON public.ntf_ping USING btree (organization_id, ticket_id)',
+                'CREATE UNIQUE INDEX ntf_notification_pkey ON ONLY public.ntf_notification USING btree (organization_id, id, created_at)',
+                'CREATE INDEX ntf_notification_user_id_actor_id_ticket_id_created_at_idx ON ONLY public.ntf_notification USING btree (organization_id, user_id, actor_id, ticket_id, created_at DESC) WHERE (done_at IS NULL)',
+                'CREATE INDEX ntf_notification_user_id_created_at_unread_idx ON ONLY public.ntf_notification USING btree (organization_id, user_id, created_at) WHERE (read_at IS NULL)',
+                'CREATE INDEX ntf_notification_deliver_after_idx ON ONLY public.ntf_notification USING btree (organization_id, deliver_after) WHERE (deliver_after IS NOT NULL)',
+                'CREATE INDEX ntf_notification_ticket_id_idx ON ONLY public.ntf_notification USING btree (organization_id, ticket_id) WHERE (ticket_id IS NOT NULL)',
+                'CREATE UNIQUE INDEX ntf_mute_pkey ON public.ntf_mute USING btree (organization_id, user_id, ticket_id)',
+                'CREATE INDEX ntf_mute_ticket_id_idx ON public.ntf_mute USING btree (organization_id, ticket_id)',
+                'CREATE UNIQUE INDEX ntf_delivery_pkey ON public.ntf_delivery USING btree (organization_id, user_id, window_key)',
+            ],
+            $this->connection()->fetchFirstColumn(
+                "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public'
+                 AND tablename IN ('cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notification', 'ntf_mute', 'ntf_delivery')",
+            ),
+        );
+    }
+
+    /**
      * Every index of an org_ table starts with organization_id but the documented exceptions: the global slug key, the
      * user_id index of resolve_user_orgs and the token_hash key of resolve_invitation, which run before the tenant is
      * known.
@@ -481,8 +556,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);
