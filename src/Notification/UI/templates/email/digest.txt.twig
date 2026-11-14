@@ -1,0 +1,14 @@
+Hello,
+
+{{ subject }}:
+{% for line in lines %}
+
+- {{ line.actorName }} {{ line.action }} on {{ line.ticketKey }}: {{ line.label }}
+  {{ line.link }}
+{% endfor %}
+{% if unlistedCount > 0 %}
+
+And {{ unlistedCount }} more in pinround.
+{% endif %}
+
+You get this email at most every 3 hours while things wait on you. Your profile: {{ profileLink }}
