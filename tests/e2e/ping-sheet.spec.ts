@@ -73,6 +73,11 @@ async function sendPing(page: Page, key: string, expectedStatus: number): Promis
   expect(response.headers()['content-type']).toContain('text/vnd.turbo-stream.html');
 }
 
+/** How far the page is wider than the window; above 0 means it scrolls sideways. */
+async function sidewaysOverflowPx(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+}
+
 test.describe('Omar pings Lena about a SHOP ticket', () => {
   test.describe.configure({ mode: 'serial' });
 
@@ -143,5 +148,28 @@ test.describe('Omar pings Lena about a SHOP ticket', () => {
     await expect(peopleRowOf(page, 'Lena').locator('.ping-sheet__pinged')).toHaveText(/^Pinged · again in \d+ h$/);
     await expect(peopleRowOf(page, 'Lena').locator('.ping-sheet__pinged')).not.toBeFocused();
     await expect(pingButton(page)).toHaveCount(0);
+  });
+});
+
+test.describe('at 360 px', () => {
+  test.use({ viewport: { width: 360, height: 800 } });
+
+  const title = `Delivery slot picker skips Sunday ${randomUUID().slice(0, 8)}`;
+  let key = '';
+
+  test.beforeAll(async ({ browser }) => {
+    key = await makeTicketForOmar(browser, title);
+  });
+
+  test('neither the open sheet nor the pinged state makes the page scroll sideways', async ({ page }) => {
+    await openTicket(page, key, title);
+    await openSheet(page);
+
+    expect(await sidewaysOverflowPx(page), 'with the sheet open').toBeLessThanOrEqual(0);
+
+    await sendPing(page, key, 200);
+
+    await expect(peopleRowOf(page, 'Lena').locator('.ping-sheet__pinged')).toHaveText(/^Pinged · again in \d+ h$/);
+    expect(await sidewaysOverflowPx(page), 'with Lena pinged').toBeLessThanOrEqual(0);
   });
 });
