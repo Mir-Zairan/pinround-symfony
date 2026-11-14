@@ -49,6 +49,8 @@ final class ResolverFunctionTest extends KernelTestCase
         'search_ticket_ids' => "search_ticket_ids('".self::UNKNOWN_ID."'::uuid, 'checkout', '".self::UNKNOWN_ID."'::uuid, '{}'::uuid[], true, true, NULL, NULL, NULL)",
         // No notification is held until before 1970.
         'organizations_with_due_notifications' => "organizations_with_due_notifications('1970-01-01 00:00:00+00'::timestamptz)",
+        // No notification was made an hour before 1970.
+        'digest_recipients' => "digest_recipients('1970-01-01 00:00:00+00'::timestamptz)",
     ];
 
     private const array OUTPUT_COLUMNS = [
@@ -60,6 +62,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_laptop_package' => ['organization_id', 'user_id'],
         'search_ticket_ids' => ['ticket_id'],
         'organizations_with_due_notifications' => ['organization_id'],
+        'digest_recipients' => ['organization_id', 'user_id'],
     ];
 
     /**
@@ -217,15 +220,15 @@ final class ResolverFunctionTest extends KernelTestCase
     }
 
     /**
-     * organizations_with_due_notifications reads ntf_notification through resolver_read on the parent only, and only
-     * the organization it returns and the time it matches on: never who a notification is for, its kind or its data.
+     * organizations_with_due_notifications and digest_recipients read ntf_notification through resolver_read on the
+     * parent only, and only the ids they return and the columns they match on: never a notification's actor or data.
      */
     #[Test]
-    public function theReleaseOfHeldNotificationsReadsOnlyTheOrganizationAndTheDeliveryTimeOfTheParent(): void
+    public function theNotificationResolversReadOnlyTheColumnsTheyMatchOnOrReturnOfTheParent(): void
     {
         $connection = $this->connection();
         self::assertEqualsCanonicalizing(
-            ['organization_id', 'deliver_after'],
+            ['organization_id', 'deliver_after', 'user_id', 'kind', 'ticket_id', 'read_at', 'done_at', 'created_at'],
             $connection->fetchFirstColumn(
                 "SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl
                  WHERE a.attrelid = 'public.ntf_notification'::regclass AND acl.grantee = 'pinround_resolver'::regrole AND acl.privilege_type = 'SELECT'",
