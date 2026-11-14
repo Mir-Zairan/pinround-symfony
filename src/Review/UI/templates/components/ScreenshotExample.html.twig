@@ -1,14 +1,8 @@
-{% if this.isEditable %}
-    <form class="screenshot-example pin-placer" method="post" action="#" data-controller="pin-placer" data-pin-placer-note-max-value="{{ constant('App\\Review\\UI\\PinView::NOTE_MAX_LENGTH') }}">
-        <twig:Screenshot :view="this.view" :selectedNumber="this.selectedNumber" />
-        <button type="button" class="btn btn-outline pin-placer__add" data-pin-add data-action="pin-placer#addAtCentre">Add pin</button>
-        <p class="pin-placer__status" role="status" data-pin-placer-target="status"></p>
-        <twig:PinList :view="this.view" :selectedNumber="this.selectedNumber" :isEditable="true" />
-        <div hidden data-pin-placer-target="fields"></div>
-    </form>
-{% else %}
-    <div class="screenshot-example">
+<div class="screenshot-example">
+    {% if this.isEditable %}
+        <twig:EditableScreenshot :view="this.view" action="#" />
+    {% else %}
         <twig:Screenshot :view="this.view" :selectedNumber="this.selectedNumber" />
         <twig:PinList :view="this.view" :selectedNumber="this.selectedNumber" />
-    </div>
-{% endif %}
+    {% endif %}
+</div>

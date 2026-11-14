@@ -1,4 +1,4 @@
-/* The Review components: Screenshot, PinLayer and PinList (src/Review/UI/templates/components). */
+/* The Review components: Screenshot, EditableScreenshot, PinLayer and PinList (src/Review/UI/templates/components). */
 
 .screenshot {
   margin: 0;
@@ -76,7 +76,8 @@
 }
 
 .pin:focus-visible {
-  outline: 3px solid var(--primary);
+  /* 5px, not base.css's 2px: the selected and AI rings reach 4px out and would hide the outline. */
+  outline: 2px solid var(--primary);
   outline-offset: 5px;
 }
 
@@ -111,7 +112,7 @@
   left: calc(100% + var(--space-8));
   display: none;
   width: max-content;
-  max-width: 240px;
+  max-width: min(240px, 40vw);
   padding: var(--space-6) var(--space-10);
   border-radius: var(--radius-input);
   background: var(--inverse-surface);
@@ -194,6 +195,21 @@ textarea.pin-list__note {
   color: var(--on-surface);
   font: inherit;
   resize: vertical;
+}
+
+/* Narrow screens: the bubble opens below the ring, on the side of the picture the ring is not near, so it never leaves
+   the viewport. */
+@media (max-width: 480px) {
+  .pin__bubble {
+    top: calc(100% + var(--space-8));
+    left: 0;
+    transform: none;
+  }
+
+  .pin--bubble-left .pin__bubble {
+    right: 0;
+    left: auto;
+  }
 }
 
 /* The editable screenshot (pin-placer controller). */
