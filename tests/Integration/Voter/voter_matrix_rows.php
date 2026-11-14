@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Conversation\Api\ConversationPermission;
+use App\Notification\Api\MutePermission;
 use App\Notification\Api\PingPermission;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
@@ -42,6 +43,9 @@ use App\Workflow\Api\WorkflowPermission;
  * Acme Foods' settings row holds only its triager, Noor, and Beta Bakery has none, so both have the default step policy,
  * extend: the STEP_CHANGE_TEAM and RULES_CHANGE_TEAM rows hold under extend only. WorkflowVoterTest has the locked and
  * team cases.
+ *
+ * The roles doc has no mute row: whoever may see a ticket may mute it for themselves (MuteVoter), so the
+ * NOTIFICATION_MUTE rows cite the visibility text.
  */
 
 $isAUser = 'Every person in an organization is a **user** of it.';
@@ -69,6 +73,7 @@ $commentAndReply = '| Comment, reply |';
 $pingAPerson = '| Ping a person | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
 $askAQuestion = '| Ask a question (pauses ticket) | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
 $adminPings = 'An admin with no team role may see every ticket in the org (including team-only ones), comment, ask questions and ping';
+$seeForEveryoneTickets = '| See tickets (visibility "all") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
 return [
@@ -314,4 +319,15 @@ return [
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket', 'expected' => 'denied'],
     ['source' => $askAQuestion, 'attribute' => ConversationPermission::ASK, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket reported by Noor', 'expected' => 'granted'],
+
+    ['source' => $teamOnlyTickets, 'attribute' => MutePermission::MUTE, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
+    ['source' => $teamOnlyTickets, 'attribute' => MutePermission::MUTE, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $viewerRights, 'attribute' => MutePermission::MUTE, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
+    ['source' => $adminWithoutTeamRole, 'attribute' => MutePermission::MUTE, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $teamOnlyTickets, 'attribute' => MutePermission::MUTE, 'actor' => 'Noor', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $managersOutsideTheTeam, 'attribute' => MutePermission::MUTE, 'actor' => 'Raj', 'subject' => 'Team-only ticket with no team', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => MutePermission::MUTE, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $seeForEveryoneTickets, 'attribute' => MutePermission::MUTE, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket', 'expected' => 'granted'],
+    ['source' => $seeForEveryoneTickets, 'attribute' => MutePermission::MUTE, 'actor' => 'Raj', 'subject' => 'For-everyone Shop ticket', 'expected' => 'granted'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => MutePermission::MUTE, 'actor' => 'Ben', 'subject' => 'For-everyone Shop ticket', 'expected' => 'denied'],
 ];
