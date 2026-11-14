@@ -46,7 +46,7 @@ final class TicketThreadTest extends WebTestCase
     /** What Turbo sends with a form it posts. */
     private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
     private const string TOAST_REGION_ID = 'toast-region';
-    private const string SCRIPT_BODY = "<script>alert('x')</script>\nSecond line";
+    private const string SCRIPT_BODY = "<script>alert('x')</script>\nSee https://acme.test/build for the build";
     private const string EARLIER_BODY = 'The cart total is right again';
     private const string EDIT_WINDOW_PASSED = 'You can edit a message for 15 minutes after you post it.';
 
@@ -110,14 +110,18 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame('Write a comment', $thread->filter('form.thread__composer textarea')->attr('placeholder'));
         self::assertStringContainsString('A comment does not change the status and sends no notification.', $thread->text());
         self::assertNotNull($thread->filter('.thread__kinds button')->last()->attr('disabled'));
+        self::assertSame('thread-composer', $thread->filter('form.thread__composer')->attr('data-controller'));
+        self::assertNotNull($thread->filter('form.thread__composer textarea[data-thread-composer-target="body"]')->attr('required'));
+        self::assertSame('Comment', trim($thread->filter('form.thread__composer button[data-thread-composer-target="submit"]')->text()));
+        self::assertCount(1, $page->filter('link[rel="stylesheet"][href*="/styles/thread"]'));
     }
 
     /**
      * Mia is only a viewer of Shop's team, and anyone who may see the ticket may comment. The text comes back escaped,
-     * its line break as a <br>, and the comment writes one CommentPosted to the outbox.
+     * its line break as a <br> and its address as a link, and the comment writes one CommentPosted to the outbox.
      */
     #[Test]
-    public function aViewerPostsACommentAndThePageShowsItsTextEscaped(): void
+    public function aViewerPostsACommentAndThePageShowsItsTextEscapedWithItsAddressLinked(): void
     {
         $this->addTicket();
         $this->logIn($this->client, $this->people['Mia']);
@@ -127,9 +131,10 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame(ThreadController::COMMENT_ADDED, $this->toastAfterTheRedirect());
         $html = (string) $this->client->getResponse()->getContent();
         self::assertStringNotContainsString("<script>alert('x')</script>", $html);
-        self::assertStringContainsString('&lt;script&gt;alert(&#039;x&#039;)&lt;/script&gt;<br />', $html);
+        self::assertStringContainsString('&lt;script&gt;alert(&apos;x&apos;)&lt;/script&gt;<br>', $html);
         $message = $this->client->getCrawler()->filter('#'.Thread::ID.' .thread__message');
         self::assertCount(1, $message);
+        self::assertSame(['https://acme.test/build'], $message->filter('.thread__body a')->each(static fn (Crawler $link): ?string => $link->attr('href')));
         self::assertStringStartsWith('Mia · 6 Nov, 13:00 · comment', trim($message->filter('.thread__meta')->text()));
         self::assertSame([[self::SCRIPT_BODY, $this->people['Mia']->id()->toString(), null, null]], $this->messageRows());
         self::assertSame(1, $this->outboxCount());
@@ -534,7 +539,9 @@ final class TicketThreadTest extends WebTestCase
         $organizationId = $this->acmeFoods->toString();
         $count = 0;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$count): int {
-            $count = (int) $migrator->fetchOne("SELECT count(*) FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
+            $outboxRows = $migrator->fetchOne("SELECT count(*) FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
+            self::assertIsNumeric($outboxRows);
+            $count = (int) $outboxRows;
 
             return 0;
         });

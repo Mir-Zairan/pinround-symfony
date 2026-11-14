@@ -18,7 +18,7 @@
                     {% if message.isRemoved %}
                         <p class="thread__body thread__body--removed">Message removed</p>
                     {% else %}
-                        <p class="thread__body">{{ message.body|nl2br }}</p>
+                        <p class="thread__body">{{ message.body|linkify }}</p>
                     {% endif %}
                     {% if message.isEditable or message.isRemovable %}
                         <div class="thread__actions">
@@ -46,15 +46,16 @@
         </ol>
     {% endif %}
 
-    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer">
+    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer" {{ stimulus_controller('thread-composer') }}>
         <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
         <div class="thread__kinds" role="group" aria-label="What to write">
             <button type="button" class="chip" aria-pressed="true">Comment</button>
             <button type="button" class="chip" aria-pressed="false" disabled>Ask a question</button>
         </div>
         <label class="visually-hidden" for="thread-composer-body">Write a comment</label>
-        <textarea id="thread-composer-body" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Write a comment" required maxlength="{{ this.maxBodyLength }}" rows="3"></textarea>
+        <textarea id="thread-composer-body" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Write a comment" required maxlength="{{ this.maxBodyLength }}" rows="3"
+            {{ stimulus_target('thread-composer', 'body') }} data-action="input->thread-composer#update"></textarea>
         <p class="thread__note">A comment does not change the status and sends no notification.</p>
-        <button type="submit" class="btn btn-filled">Comment</button>
+        <button type="submit" class="btn btn-filled" {{ stimulus_target('thread-composer', 'submit') }}>Comment</button>
     </form>
 </section>

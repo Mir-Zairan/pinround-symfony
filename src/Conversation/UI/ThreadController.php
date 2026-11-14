@@ -148,7 +148,7 @@ final class ThreadController extends AbstractController
             throw $this->createAccessDeniedException();
         }
         try {
-            $toast = $this->transactions->run($action);
+            $toast = $this->transactions->run($action(...));
         } catch (TicketNotFound|MessageNotFound) {
             throw $this->createNotFoundException(self::NOT_FOUND);
         } catch (ThreadFormExpired) {

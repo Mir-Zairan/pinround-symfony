@@ -1,0 +1,139 @@
+/* The ticket page's Questions and comments: Conversation's Thread component inside a .ticket__section. */
+
+.thread__earlier {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.thread__messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread__message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.thread__meta {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.thread__author {
+  color: var(--on-surface);
+  font-weight: 600;
+}
+
+.thread__body {
+  max-width: 66ch;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.thread__message--question .thread__body {
+  font-weight: 600;
+}
+
+.thread__body a {
+  color: var(--primary);
+}
+
+.thread__body--removed {
+  color: var(--on-surface-var);
+  font-style: italic;
+}
+
+.thread__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+.thread__remove-form {
+  margin: 0;
+}
+
+.thread__edit > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.thread__edit > summary::-webkit-details-marker {
+  display: none;
+}
+
+.thread__edit-form,
+.thread__composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.thread__edit-form {
+  margin-top: var(--space-8);
+}
+
+.thread__edit-form > .btn,
+.thread__composer > .btn {
+  align-self: flex-start;
+}
+
+/* The prototype's soft panel. */
+.thread__composer {
+  padding: var(--space-16);
+  border-radius: var(--radius-card);
+  background: var(--s-low);
+}
+
+.thread__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* Ask a question stays off until questions come: no hover change and no pointer that suggests a choice. */
+.thread__kinds .chip:disabled {
+  color: var(--on-surface-var);
+  cursor: default;
+}
+
+.thread__kinds .chip:disabled:hover {
+  background: transparent;
+}
+
+.thread__kinds .chip[aria-pressed="true"]:hover {
+  background: var(--secondary-container);
+}
+
+.thread__composer textarea,
+.thread__edit-form textarea {
+  width: 100%;
+  min-height: 88px;
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.thread__note {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
