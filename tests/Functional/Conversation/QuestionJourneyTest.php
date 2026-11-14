@@ -328,6 +328,23 @@ final class QuestionJourneyTest extends WebTestCase
         self::assertSame(0, $this->outboxCount());
     }
 
+    /**
+     * Another request saved the ticket after the question was decided on: the asker reads a plain refusal, never a
+     * server error, and no question, pause or event is left behind.
+     */
+    #[Test]
+    public function aTicketChangedMeanwhileRefusesTheQuestionAndNothingIsWritten(): void
+    {
+        $this->addTicket();
+        self::getContainer()->set(TicketPauses::class, new ChangedMeanwhileTicketPauses());
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::ASK_PATH, $this->askFields(self::QUESTION, $this->people['Lena']->id()->toString()), [], self::TURBO_FORM_HEADERS);
+
+        self::assertSame(ThreadController::TICKET_CHANGED_MEANWHILE, $this->toastOf($this->streamsOfTheAnswer(422)));
+        $this->assertNothingIsWritten();
+    }
+
     private function assertNothingIsWritten(): void
     {
         self::assertSame([], $this->questionRows());
