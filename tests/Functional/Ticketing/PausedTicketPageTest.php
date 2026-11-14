@@ -37,6 +37,8 @@ final class PausedTicketPageTest extends WebTestCase
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string SHELL = '/_test/menu/shell';
     private const string PAUSE_NOTE = 'Paused until Lena answers the question below.';
+    /** A user id with no user row, as for an asked person who has since been removed. */
+    private const string GONE_USER_ID = '0190a000-0000-7000-8000-0000000000ee';
 
     private KernelBrowser $client;
 
@@ -88,7 +90,7 @@ final class PausedTicketPageTest extends WebTestCase
         $pill = $page->filter('#'.TicketPageParts::STATE_ID.' .pill');
         self::assertSame('Waiting · question to Lena', $pill->text());
         self::assertSame('pill pill-waiting', $pill->attr('class'));
-        self::assertSame('Now: Lena answers Omar\'s question', $page->filter('.ticket__now')->text());
+        self::assertSame('Now: Lena answers Omar’s question', $page->filter('.ticket__now')->text());
         // The step stays In progress while paused: the answer sends the ticket back to it.
         self::assertSame('Next: it goes back to In progress', $page->filter('.ticket__next')->text());
         self::assertSame($this->stepsByCore['progress'], $this->stepIdOf($key));
@@ -156,7 +158,7 @@ final class PausedTicketPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Waiting · question to Omar', $page->filter('#'.TicketPageParts::STATE_ID.' .pill')->text());
-        self::assertSame('Now: Omar answers Sara\'s question', $page->filter('.ticket__now')->text());
+        self::assertSame('Now: Omar answers Sara’s question', $page->filter('.ticket__now')->text());
         $box = $this->nextStepBoxOf($page);
         self::assertSame('Wait for Omar’s answer. You get one notification.', $box->filter('.next-step-box__sentence')->text());
         self::assertCount(0, $box->filter('.next-step-box__verbs'));
@@ -178,26 +180,70 @@ final class PausedTicketPageTest extends WebTestCase
     }
 
     /**
-     * The asked person and the asker are the ticket's people here, so the pause adds no query; the lead's Needs input
-     * dialog and its membership read go away with the move list.
+     * The asked person's user row is gone, so the page has no name for them and the pill says so instead of failing.
      */
     #[Test]
-    public function aPausedPageReadsNoMoreQueriesThanTheSamePageUnpaused(): void
+    public function thePillSaysAnUnknownPersonWhenTheAskedPersonHasNoName(): void
     {
         $key = $this->addInProgressTicket();
-        $this->addTurnRow($key, 'Omar', 'build');
-        $this->logIn($this->client, $this->people['Lena']);
+        $this->pauseWith($key, self::GONE_USER_ID, $this->people['Omar']->id()->toString());
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $pill = $page->filter('#'.TicketPageParts::STATE_ID.' .pill');
+        self::assertSame('Waiting · question to an unknown person', $pill->text());
+        self::assertSame('pill pill-waiting', $pill->attr('class'));
+        self::assertSame('Wait for an unknown person’s answer. You get one notification.', $this->nextStepBoxOf($page)->filter('.next-step-box__sentence')->text());
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string, string, int, int}>
+     */
+    public static function pausesAndTheirQueryCounts(): iterable
+    {
+        yield 'Omar asks Lena, both among the ticket\'s people: no names query either way' => ['Omar', 'Lena', 'Omar', 'Now: Lena answers Omar’s question', 6, 6];
+        yield 'Sara, not among the ticket\'s people, asks Lena: the pause adds the one names query' => ['Omar', 'Lena', 'Sara', 'Now: Lena answers Sara’s question', 6, 7];
+        yield 'Sara asks Raj, whose turn already needs the names query: Sara comes in the same one' => ['Raj', 'Raj', 'Sara', 'Now: Raj answers Sara’s question', 7, 7];
+    }
+
+    /**
+     * Mia has no move list paused or not, so both counts read the same parts. Beyond the shell, with the steps, the
+     * rules and the team's people cached: the settings, the ticket with its people's names, What happened's moves, the
+     * saved turn with the waiting turns and the ticket's place in the plain open list; and one batch for the names of
+     * the turn person and the asker when the ticket does not hold them. The ticket page's budget is 10.
+     */
+    #[Test]
+    #[DataProvider('pausesAndTheirQueryCounts')]
+    public function aPausedPageReadsTheQueriesOfTheSamePageUnpausedAndAtMostTheOneNamesQuery(
+        string $turnPerson,
+        string $asked,
+        string $asker,
+        string $expectedNowLine,
+        int $expectedUnpausedQueryCount,
+        int $expectedPausedQueryCount,
+    ): void {
+        $key = $this->addInProgressTicket();
+        $this->addTurnRow($key, $this->people[$turnPerson]->id()->toString(), 'Omar' === $turnPerson ? 'build' : 'decide');
+        $this->logIn($this->client, $this->people['Mia']);
         $this->queryCountOf(self::SHELL);
         $shellQueryCount = $this->queryCountOf(self::SHELL);
         $this->queryCountOf('/t/'.$key);
         $unpausedQueryCount = $this->queryCountOf('/t/'.$key) - $shellQueryCount;
-        self::assertSame('In progress', $this->client->getCrawler()->filter('#'.TicketPageParts::STATE_ID.' .pill')->text());
+        $unpausedPage = $this->client->getCrawler();
+        self::assertSame('In progress', $unpausedPage->filter('#'.TicketPageParts::STATE_ID.' .pill')->text());
+        self::assertCount(0, $unpausedPage->filter('details.next-step-box__move-to, dialog:not([id^="ping-"])'));
 
-        $this->pause($key, asked: 'Lena', asker: 'Omar');
+        $this->pause($key, asked: $asked, asker: $asker);
         $pausedQueryCount = $this->queryCountOf('/t/'.$key) - $shellQueryCount;
 
-        self::assertSame('Waiting · question to Lena', $this->client->getCrawler()->filter('#'.TicketPageParts::STATE_ID.' .pill')->text());
-        self::assertLessThanOrEqual($unpausedQueryCount, $pausedQueryCount);
+        $pausedPage = $this->client->getCrawler();
+        self::assertSame('Waiting · question to '.$asked, $pausedPage->filter('#'.TicketPageParts::STATE_ID.' .pill')->text());
+        self::assertSame($expectedNowLine, $pausedPage->filter('.ticket__now')->text());
+        self::assertCount(0, $pausedPage->filter('details.next-step-box__move-to, dialog:not([id^="ping-"])'));
+        self::assertSame($expectedUnpausedQueryCount, $unpausedQueryCount);
+        self::assertSame($expectedPausedQueryCount, $pausedQueryCount);
     }
 
     private function nextStepBoxOf(Crawler $page): Crawler
@@ -213,24 +259,29 @@ final class PausedTicketPageTest extends WebTestCase
      */
     private function pause(string $ticketKey, string $asked, string $asker): void
     {
-        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+        $this->pauseWith($ticketKey, $this->people[$asked]->id()->toString(), $this->people[$asker]->id()->toString());
+    }
+
+    private function pauseWith(string $ticketKey, string $askedUserId, string $askerId): void
+    {
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             'UPDATE tkt_ticket SET asked_user_id = ?, asker_id = ? WHERE key = ?',
-            [$this->people[$asked]->id()->toString(), $this->people[$asker]->id()->toString(), $ticketKey],
+            [$askedUserId, $askerId, $ticketKey],
         ));
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             'DELETE FROM ins_ticket_turn WHERE ticket_id = (SELECT id FROM tkt_ticket WHERE key = ?)',
             [$ticketKey],
         ));
-        $this->addTurnRow($ticketKey, $asked, 'answer');
+        $this->addTurnRow($ticketKey, $askedUserId, 'answer');
     }
 
-    private function addTurnRow(string $ticketKey, string $turnPerson, string $kind): void
+    private function addTurnRow(string $ticketKey, string $turnUserId, string $kind): void
     {
-        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id)
              SELECT organization_id, id, team_id, project_id, 'doing', ?, NULL, ?, 100, TIMESTAMPTZ '2026-11-05 10:00:00+00', visibility, reporter_id, assignee_id
              FROM tkt_ticket WHERE key = ?",
-            [$this->people[$turnPerson]->id()->toString(), $kind, $ticketKey],
+            [$turnUserId, $kind, $ticketKey],
         ));
     }
 

@@ -30,7 +30,8 @@ final readonly class SentenceWords
     }
 
     /**
-     * "your" for the viewer, "Mia's" for a named person, else $fallback (for example "the").
+     * "your" for the viewer, "Mia’s" (with the typographic apostrophe the page's copy uses) for a named person, else
+     * $fallback (for example "the").
      */
     public function possessive(?UserId $userId, string $fallback): string
     {
@@ -44,7 +45,7 @@ final readonly class SentenceWords
 
         $name = $this->context->firstNameOf($userId);
 
-        return null === $name ? $fallback : $name."'s";
+        return null === $name ? $fallback : $name.'’s';
     }
 
     /**
