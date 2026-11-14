@@ -110,6 +110,64 @@ final class DbalThreadQueriesTest extends KernelTestCase
         self::assertStringContainsString('Still here.', serialize($recording->returnedRows));
     }
 
+    /**
+     * An answered question carries its answer; a removed answer, a reply that is no answer and another organization's
+     * answer to a message of the same id are left out. The answers take one query more, the messages one.
+     */
+    #[Test]
+    public function anAnsweredQuestionCarriesItsAnswerReadInOneMoreQuery(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'question', 'Which build?', '2027-03-15 10:00:00+00', resolvedAt: '2027-03-15 10:04:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::SECOND_MESSAGE, 'question', 'Which browser?', '2027-03-15 10:05:00+00', resolvedAt: '2027-03-15 10:06:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::REMOVED_MESSAGE, 'question', 'Which phone?', '2027-03-15 10:07:00+00', removedAt: '2027-03-15 10:08:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::TIED_LOWER_ID, 'comment', 'Also on tablets.', '2027-03-15 10:09:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::TIED_HIGHER_ID, 'question', 'Which screen?', '2027-03-15 10:10:00+00');
+        $this->addMessage(self::BETA_BAKERY, self::THREAD_TICKET, self::FIRST_MESSAGE, 'question', 'Beta asks.', '2027-03-15 10:00:00+00', resolvedAt: '2027-03-15 10:01:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d431', 'A side note.', false, '2027-03-15 10:02:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d432', 'Build 42.', true, '2027-03-15 10:04:00+00');
+        $this->addReply(self::ACME_FOODS, self::SECOND_MESSAGE, '0197a3c0-0000-7000-8000-00000000d433', 'Removed answer.', true, '2027-03-15 10:06:00+00', removedAt: '2027-03-15 10:07:00+00');
+        $this->addReply(self::BETA_BAKERY, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d434', 'Beta answers.', true, '2027-03-15 10:01:00+00');
+        $recording = $this->recordingConnection();
+
+        $thread = $this->threadOf(self::THREAD_TICKET, $recording);
+
+        self::assertSame(2, $recording->fetchAllCount);
+        self::assertSame(
+            [
+                [self::FIRST_MESSAGE, self::LENA, false, true, 'Build 42.'],
+                [self::SECOND_MESSAGE, self::LENA, false, true, null],
+                [self::REMOVED_MESSAGE, self::LENA, false, false, null],
+                [self::TIED_LOWER_ID, null, false, false, null],
+                [self::TIED_HIGHER_ID, self::LENA, true, false, null],
+            ],
+            array_map(static fn (MessageView $message): array => [
+                $message->id, $message->toUserId?->toString(), $message->isOpenQuestion, $message->isAnswered, $message->answer?->body,
+            ], $thread->messages),
+        );
+        $answer = $thread->messages[0]->answer;
+        self::assertNotNull($answer);
+        self::assertSame('0197a3c0-0000-7000-8000-00000000d432', $answer->id);
+        self::assertSame(self::LENA, $answer->authorId->toString());
+        self::assertSame('2027-03-15T10:04:00+00:00', $answer->createdAt->format(\DATE_ATOM));
+        self::assertStringNotContainsString('Beta answers.', serialize($recording->returnedRows));
+        self::assertStringNotContainsString('Removed answer.', serialize($recording->returnedRows));
+    }
+
+    #[Test]
+    public function aThreadWithNoAnsweredQuestionReadsNoReplies(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'question', 'Which build?', '2027-03-15 10:00:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d431', 'A side note.', false, '2027-03-15 10:02:00+00');
+        $recording = $this->recordingConnection();
+
+        $thread = $this->threadOf(self::THREAD_TICKET, $recording);
+
+        self::assertSame(1, $recording->fetchAllCount);
+        self::assertCount(1, $thread->messages);
+        self::assertTrue($thread->messages[0]->isOpenQuestion);
+        self::assertNull($thread->messages[0]->answer);
+    }
+
     #[Test]
     public function aThreadOfMoreThanTwoHundredMessagesShowsTheNewestTwoHundredAndSaysThereAreEarlierOnes(): void
     {
@@ -199,12 +257,27 @@ final class DbalThreadQueriesTest extends KernelTestCase
         ));
     }
 
-    private function addMessage(string $organizationId, string $ticketId, string $messageId, string $kind, string $body, string $createdAt, ?string $editedAt = null, ?string $removedAt = null): void
+    /**
+     * By Omar; a question asks Lena, and $resolvedAt is when Lena answered it.
+     */
+    private function addMessage(string $organizationId, string $ticketId, string $messageId, string $kind, string $body, string $createdAt, ?string $editedAt = null, ?string $removedAt = null, ?string $resolvedAt = null): void
     {
         $this->asTenant($organizationId, fn (): int|string => $this->migrator()->executeStatement(
-            'INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, edited_at, removed_at, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$organizationId, $messageId, $ticketId, self::OMAR, $kind, 'question' === $kind ? self::LENA : null, $body, $editedAt, $removedAt, $createdAt],
+            'INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, edited_at, removed_at, resolved_at, resolved_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$organizationId, $messageId, $ticketId, self::OMAR, $kind, 'question' === $kind ? self::LENA : null, $body, $editedAt, $removedAt, $resolvedAt, null === $resolvedAt ? null : self::LENA, $createdAt],
+        ));
+    }
+
+    /**
+     * By Lena.
+     */
+    private function addReply(string $organizationId, string $messageId, string $replyId, string $body, bool $isAnswer, string $createdAt, ?string $removedAt = null): void
+    {
+        $this->asTenant($organizationId, fn (): int|string => $this->migrator()->executeStatement(
+            'INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, removed_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$organizationId, $replyId, $messageId, self::LENA, $body, $isAnswer ? 'true' : 'false', $removedAt, $createdAt],
         ));
     }
 
