@@ -1,0 +1,10 @@
+<section{{ attributes.defaults({class: 'ticket__section activity', 'aria-labelledby': 'ticket-activity-heading'}) }}>
+    <h2 id="ticket-activity-heading" class="ticket__section-title">What happened</h2>
+    <ol class="activity__lines">
+        {% for line in lines %}
+            <li class="activity__line">
+                <span class="activity__time">{{ line.time }}</span> · <span class="activity__sentence">{{ line.sentence }}</span>
+            </li>
+        {% endfor %}
+    </ol>
+</section>

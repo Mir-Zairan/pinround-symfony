@@ -21,6 +21,11 @@ final class DesignComponentsTest extends KernelTestCase
 
     private const array OPTIONS = ['list' => 'List', 'turn' => 'Whose turn?', '3' => 'Three'];
 
+    private const array LINKS = [
+        ['label' => 'List', 'href' => '/tickets', 'isCurrent' => false],
+        ['label' => 'Whose turn?', 'href' => '/tickets?view=turn', 'isCurrent' => true],
+    ];
+
     /**
      * @return iterable<string, array{string, string}>
      */
@@ -89,6 +94,8 @@ final class DesignComponentsTest extends KernelTestCase
         self::assertSame(1, substr_count($html, 'aria-pressed="true"'));
         self::assertStringContainsString('<button type="button" class="seg" value="turn" aria-pressed="true">Whose turn?</button>', $html);
         self::assertStringContainsString('<button type="button" class="seg" value="list" aria-pressed="false">List</button>', $html);
+        self::assertStringNotContainsString('<a ', $html);
+        self::assertStringNotContainsString('aria-current', $html);
     }
 
     #[Test]
@@ -110,6 +117,86 @@ final class DesignComponentsTest extends KernelTestCase
     public function aSegmentedControlWithoutALabelFailsAtMount(): void
     {
         $this->assertFailsAtMount(SegmentedControl::class, ['options' => self::OPTIONS, 'selected' => 'list'], 'needs a non-empty label');
+    }
+
+    #[Test]
+    public function aSegmentedControlInLinkModeRendersAnchorsWithOneCurrentPage(): void
+    {
+        $html = (string) $this->renderTwigComponent(SegmentedControl::class, ['label' => 'View', 'links' => self::LINKS]);
+
+        self::assertStringContainsString('<div class="seg-group" role="group" aria-label="View">', $html);
+        self::assertSame(2, substr_count($html, '<a class="seg"'));
+        self::assertSame(1, substr_count($html, 'aria-current="page"'));
+        self::assertStringContainsString('<a class="seg" href="/tickets">List</a>', $html);
+        self::assertStringContainsString('<a class="seg" href="/tickets?view=turn" aria-current="page">Whose turn?</a>', $html);
+        self::assertStringNotContainsString('<button', $html);
+        self::assertStringNotContainsString('aria-pressed', $html);
+    }
+
+    #[Test]
+    public function aSegmentedControlInLinkModeMarksTheFirstLinkCurrent(): void
+    {
+        $links = [['label' => 'List', 'href' => '/tickets', 'isCurrent' => true], ['label' => 'Whose turn?', 'href' => '/tickets?view=turn', 'isCurrent' => false]];
+
+        $html = (string) $this->renderTwigComponent(SegmentedControl::class, ['label' => 'View', 'links' => $links]);
+
+        self::assertStringContainsString('<a class="seg" href="/tickets" aria-current="page">List</a>', $html);
+        self::assertStringContainsString('<a class="seg" href="/tickets?view=turn">Whose turn?</a>', $html);
+    }
+
+    #[Test]
+    public function aSegmentedControlInLinkModeEscapesHrefsAndLabels(): void
+    {
+        $links = [
+            ['label' => '<b>List</b>', 'href' => '/tickets?a=1&b="x"', 'isCurrent' => true],
+            ['label' => 'Turn', 'href' => '/turn', 'isCurrent' => false],
+        ];
+
+        $html = (string) $this->renderTwigComponent(SegmentedControl::class, ['label' => 'View', 'links' => $links]);
+
+        self::assertStringContainsString('href="/tickets?a=1&amp;b=&quot;x&quot;"', $html);
+        self::assertStringContainsString('>&lt;b&gt;List&lt;/b&gt;</a>', $html);
+        self::assertStringNotContainsString('<b>List', $html);
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function invalidLinkModes(): iterable
+    {
+        yield 'no current link' => [['label' => 'View', 'links' => [['label' => 'List', 'href' => '/a', 'isCurrent' => false], ['label' => 'Turn', 'href' => '/b', 'isCurrent' => false]]], 'exactly one current link'];
+        yield 'two current links' => [['label' => 'View', 'links' => [['label' => 'List', 'href' => '/a', 'isCurrent' => true], ['label' => 'Turn', 'href' => '/b', 'isCurrent' => true]]], 'exactly one current link'];
+        yield 'blank link label' => [['label' => 'View', 'links' => [['label' => ' ', 'href' => '/a', 'isCurrent' => true]]], 'needs a label, an href and isCurrent'];
+        yield 'blank href' => [['label' => 'View', 'links' => [['label' => 'List', 'href' => '', 'isCurrent' => true]]], 'needs a label, an href and isCurrent'];
+        yield 'missing isCurrent' => [['label' => 'View', 'links' => [['label' => 'List', 'href' => '/a']]], 'needs a label, an href and isCurrent'];
+        yield 'links and options together' => [['label' => 'View', 'links' => self::LINKS, 'options' => self::OPTIONS, 'selected' => 'list'], 'either options or links'];
+        yield 'links with a selected option' => [['label' => 'View', 'links' => self::LINKS, 'selected' => 'list'], 'either options or links'];
+        yield 'links without a group label' => [['links' => self::LINKS], 'needs a non-empty label'];
+    }
+
+    /**
+     * @param array<string, mixed> $props
+     */
+    #[Test]
+    #[DataProvider('invalidLinkModes')]
+    public function aSegmentedControlWithInvalidLinksFailsAtMount(array $props, string $reason): void
+    {
+        $this->assertFailsAtMount(SegmentedControl::class, $props, $reason);
+    }
+
+    #[Test]
+    public function theStylesheetStylesSegmentLinksLikeSegmentButtons(): void
+    {
+        $css = file_get_contents(__DIR__.'/../../../assets/styles/components.css');
+        self::assertIsString($css);
+
+        self::assertSame(1, preg_match('/^a\.seg \{(.*?)^\}/ms', $css, $linkRule), 'a.seg rule not found');
+        self::assertMatchesRegularExpression('/^\s*display:\s*inline-flex;$/m', $linkRule[1]);
+        self::assertMatchesRegularExpression('/^\s*align-items:\s*center;$/m', $linkRule[1]);
+        self::assertMatchesRegularExpression('/^\s*text-decoration:\s*none;$/m', $linkRule[1]);
+        self::assertSame(1, preg_match('/^\.seg\[aria-pressed="true"\],\n\.seg\[aria-current="page"\] \{(.*?)^\}/ms', $css, $currentRule), 'the current link must share the pressed rule');
+        self::assertMatchesRegularExpression('/^\s*background:\s*var\(--secondary-container\);$/m', $currentRule[1]);
+        self::assertMatchesRegularExpression('/^\s*color:\s*var\(--on-secondary-container\);$/m', $currentRule[1]);
     }
 
     #[Test]

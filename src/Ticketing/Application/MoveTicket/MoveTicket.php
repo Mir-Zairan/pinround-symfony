@@ -12,6 +12,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\Event\TicketMoved;
 use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
@@ -42,11 +43,16 @@ use App\Workflow\Api\TurnPeopleChoice;
  */
 final readonly class MoveTicket
 {
+    /** Workflow's Verb::GiveItTo, which also names the assignee, so only {@see self::giveTo} takes it. */
+    public const string GIVE_IT_TO = 'give_it_to';
+    /** The refusal of a person to give the ticket to who is not its team's lead or a member (a viewer, or nobody of it). */
+    public const string ASSIGNEE_NOT_IN_TEAM_NOTE = 'Give it to someone in the ticket’s team.';
+    /** The refusal of giving the ticket to the person who already has it, with {assignee} for them. */
+    public const string ALREADY_GIVEN_NOTE = '{assignee} already has this ticket.';
+
     private const string NEEDS_INPUT = 'input';
     private const string REVIEW = 'review';
     private const string TEST = 'test';
-    // Workflow's Verb::GiveItTo, which also chooses the assignee; it comes with P03.T8.
-    private const string GIVE_IT_TO = 'give_it_to';
 
     public function __construct(
         private Tickets $tickets,
@@ -67,8 +73,9 @@ final readonly class MoveTicket
     /**
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
-     * @throws MoveRefused            when the ticket has no team, the policy refuses the verb, the verb is give_it_to, or
-     *                                it leads to Needs input and the reporter is no member of the organization
+     * @throws MoveRefused            when the ticket has no team, the policy refuses the verb, the verb is give_it_to
+     *                                (which {@see self::giveTo} takes), or it leads to Needs input and the reporter is no
+     *                                member of the organization
      */
     public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
     {
@@ -78,6 +85,59 @@ final readonly class MoveTicket
             throw new MoveRefused(null);
         }
         $team = $this->teamOf($teamId);
+        $allowed = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, $verb);
+        $waitingOn = self::NEEDS_INPUT === $allowed->target->coreCode() ? $this->waitingOnReporter($ticket) : null;
+
+        $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts);
+    }
+
+    /**
+     * "Give it to…": the give_it_to verb with the person it names. From Backlog the ticket also goes to To do in the same
+     * save (FR-WF-16); in To do it stays there.
+     *
+     * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
+     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
+     * @throws MoveRefused            when the ticket has no team, the policy refuses give_it_to, the person is not the
+     *                                team's lead or a member (ASSIGNEE_NOT_IN_TEAM_NOTE), or already has the ticket
+     *                                (ALREADY_GIVEN_NOTE)
+     */
+    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
+    {
+        $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
+        $teamId = $ticket->team() ?? throw new MoveRefused(null);
+        $team = $this->teamOf($teamId);
+        $allowed = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, self::GIVE_IT_TO);
+        $target = $allowed->target;
+        if (!$team->hasPossibleAssignee($assignee)) {
+            throw new MoveRefused(self::ASSIGNEE_NOT_IN_TEAM_NOTE);
+        }
+        $fromStepId = $ticket->stepId();
+        $previousAssignee = $ticket->assignee();
+        if (null !== $previousAssignee && $previousAssignee->equals($assignee)) {
+            throw new MoveRefused(self::ALREADY_GIVEN_NOTE, ['assignee' => $assignee]);
+        }
+        if ($target->id() !== $fromStepId) {
+            $ticket->move($target->id(), $target->groupCode(), false, null, $at);
+        }
+        $ticket->giveTo($assignee, $at);
+
+        $this->saveAndRecord($ticket, $team, $allowed->before, $actor, $fromStepId, $target->id(), self::GIVE_IT_TO, $assignee, $at, $allowed->waitingTurns);
+        $this->ticketEvents->publish(new TicketAssigned(
+            $ticket->organizationId()->toString(),
+            $allowed->before->ticketId->toString(),
+            $ticket->key()->toString(),
+            $previousAssignee?->toString(),
+            $assignee->toString(),
+            $actor->toString(),
+            $at,
+        ));
+    }
+
+    /**
+     * @throws MoveRefused when the policy refuses the verb, or its target is not a step of the team
+     */
+    private function allowedVerbMoveOf(Ticket $ticket, TeamId $teamId, MoveTeam $team, UserId $actor, string $verb): AllowedVerbMove
+    {
         $before = $this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people);
         $waitingTurns = $this->waitingTurnsOf($before);
         $teamFacts = self::teamFactsOf($before, $waitingTurns);
@@ -89,10 +149,13 @@ final readonly class MoveTicket
             $verb,
         );
         self::refuseUnlessAllowed($decision);
-        $target = $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.'));
-        $waitingOn = self::NEEDS_INPUT === $target->coreCode() ? $this->waitingOnReporter($ticket) : null;
 
-        $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, $verb, $at, $waitingTurns, $teamFacts);
+        return new AllowedVerbMove(
+            $before,
+            $waitingTurns,
+            $teamFacts,
+            $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.')),
+        );
     }
 
     /**
@@ -262,19 +325,53 @@ final readonly class MoveTicket
             self::REVIEW === $target->coreCode() ? $this->turnPeopleChoice->reviewerToStore($before->assigneeId, $teamFacts) : null,
             self::TEST === $target->coreCode() ? $this->turnPeopleChoice->testerToStore($teamFacts) : null,
         );
+
+        $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
+    }
+
+    /**
+     * Saves the changed ticket under its version lock, refreshes its turn row, and writes its "moved" history row and,
+     * when it left its step, TicketMoved.
+     *
+     * @param UserId|null                       $givenTo      the person a give_it_to names, recorded in the history row
+     * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
+     *
+     * @throws TicketChangedMeanwhile when another request saved the ticket first
+     */
+    private function saveAndRecord(
+        Ticket $ticket,
+        MoveTeam $team,
+        TicketTurnSnapshot $before,
+        UserId $actor,
+        string $fromStepId,
+        string $toStepId,
+        ?string $verb,
+        ?UserId $givenTo,
+        \DateTimeImmutable $at,
+        array $waitingTurns,
+    ): void {
         try {
             $this->tickets->save($ticket);
         } catch (TicketVersionConflict $conflict) {
             throw new TicketChangedMeanwhile('The ticket was changed after it was read.', 0, $conflict);
         }
         $overrideNote = $this->turnProjector->refreshFrom($this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people), $waitingTurns);
-        $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $target->id(), $verb, $overrideNote, $at);
+        if (null === $givenTo) {
+            $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $verb, $overrideNote, $at);
+        } else {
+            $this->ticketHistory->recordGiven($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $givenTo, $at);
+        }
+        // Only a give inside To do stays in its step (a move to the same step is refused); its TicketAssigned is its one
+        // event.
+        if ($fromStepId === $toStepId) {
+            return;
+        }
         $this->ticketEvents->publish(new TicketMoved(
             $ticket->organizationId()->toString(),
             $before->ticketId->toString(),
             $ticket->key()->toString(),
             $fromStepId,
-            $target->id(),
+            $toStepId,
             $verb,
             $actor->toString(),
             $at,

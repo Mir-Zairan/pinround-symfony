@@ -12,6 +12,6 @@
     {% elseif shown.rows is empty %}
         <p class="person-picker__note" role="status">{{ constant('NO_MATCHES', this) }}</p>
     {% else %}
-        <twig:PersonPickerRows :rows="shown.rows" :matchCount="shown.matchCount" :pickedEvent="pickedEvent"/>
+        <twig:PersonPickerRows :rows="shown.rows" :matchCount="shown.matchCount" :mode="mode" :pickedEvent="pickedEvent" :pickForm="pickForm" :pickField="pickField"/>
     {% endif %}
 </div>

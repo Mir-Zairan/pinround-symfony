@@ -16,6 +16,7 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\ReadsSentSql;
+use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\Event\TicketMoved;
 use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
@@ -94,6 +95,14 @@ final class MoveTicketTest extends KernelTestCase
         'INSERT INTO ins_project_count_ticket ',
         'INSERT INTO ins_ticket_turn ',
         'INSERT INTO tkt_ticket_event ',
+        'SAVEPOINT DOCTRINE_2',
+        'SAVEPOINT DOCTRINE_3',
+        'INSERT INTO messenger_outbox ',
+        'SELECT pg_notify(?, ?)',
+        'RELEASE SAVEPOINT DOCTRINE_3',
+        'RELEASE SAVEPOINT DOCTRINE_2',
+    ];
+    private const array PUBLISHED_AGAIN = [
         'SAVEPOINT DOCTRINE_2',
         'SAVEPOINT DOCTRINE_3',
         'INSERT INTO messenger_outbox ',
@@ -368,7 +377,7 @@ final class MoveTicketTest extends KernelTestCase
         yield 'a person of another organization' => ['start_work', self::SARA, [], self::NO_TEAM_ROLE_NOTE, []];
         yield 'a verb that does not apply in the step' => ['pass_it', self::LENA, [], null, []];
         yield 'an unknown verb' => ['jump', self::LENA, [], null, []];
-        yield 'give_it_to, which comes with P03.T8' => ['give_it_to', self::LENA, [], null, []];
+        yield 'give_it_to, which only giveTo takes' => ['give_it_to', self::LENA, [], null, []];
     }
 
     /**
@@ -405,6 +414,102 @@ final class MoveTicketTest extends KernelTestCase
         self::assertInstanceOf(MoveRefused::class, $moveToRefusal);
         self::assertNull($moveToRefusal->ruleNoteTemplate);
         self::assertSame([], $moveToRefusal->ruleNotePeople);
+        $giveRefusal = $this->refusalOf(fn () => $this->giveTo(self::LENA, self::MIA, $stateBefore['version']));
+        self::assertInstanceOf(MoveRefused::class, $giveRefusal);
+        self::assertNull($giveRefusal->ruleNoteTemplate);
+        self::assertSame($stateBefore, $this->storedState());
+    }
+
+    #[Test]
+    public function aGiveOutOfBacklogMovesTheTicketToToDoAndPublishesTicketMovedThenTicketAssigned(): void
+    {
+        $this->setColumns(['step_id' => ShopTeamRows::BACKLOG_STEP, 'assignee_id' => null]);
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $this->giveTo(self::LENA, self::MIA, $versionBefore);
+
+        self::assertSame([ShopTeamRows::TO_DO_STEP, $versionBefore + 1], $this->stepAndVersion());
+        self::assertSame([self::MIA, null, null], $this->storedPeople());
+        self::assertSame([[ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, 'give_it_to', self::MIA]], $this->givenRows());
+        $events = $this->outboxEvents();
+        self::assertCount(2, $events);
+        self::assertInstanceOf(TicketMoved::class, $events[0]);
+        self::assertSame(
+            [ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, 'give_it_to', self::LENA],
+            [$events[0]->fromStepId, $events[0]->toStepId, $events[0]->verb, $events[0]->actorId],
+        );
+        self::assertInstanceOf(TicketAssigned::class, $events[1]);
+        self::assertSame(
+            [self::ACME_FOODS, $this->ticketId()->toString(), self::KEY, null, self::MIA, self::LENA, '2027-03-16T09:30:00+00:00'],
+            [$events[1]->organizationId, $events[1]->ticketId, $events[1]->key, $events[1]->previousAssigneeId, $events[1]->assigneeId, $events[1]->actorId, $events[1]->assignedAt->format(\DATE_ATOM)],
+        );
+        $this->assertTurnRowIsAFreshRefreshOfTheTurnOf(self::MIA);
+        $this->assertBetaTicketsUntouched();
+    }
+
+    /**
+     * @return iterable<string, array{string, array{string|null, string|null}}>
+     */
+    public static function reGives(): iterable
+    {
+        // The new assignee, and the reviewer and tester stored after the give; before it Lena reviews and Mia tests.
+        yield 'to Mia, the stored tester, who is cleared with the reviewer' => [self::MIA, [null, null]];
+        yield 'to Lena, the stored reviewer, who is cleared while Mia keeps the test' => [self::LENA, [null, self::MIA]];
+    }
+
+    /**
+     * @param array{string|null, string|null} $expectedReviewerAndTester
+     */
+    #[Test]
+    #[DataProvider('reGives')]
+    public function theLeadGivesAnAssignedToDoTicketToSomeoneElseAndOnlyTicketAssignedIsPublished(string $assignee, array $expectedReviewerAndTester): void
+    {
+        $this->setColumns(['reviewer_id' => self::LENA, 'tester_id' => self::MIA]);
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $this->giveTo(self::LENA, $assignee, $versionBefore);
+
+        self::assertSame([ShopTeamRows::TO_DO_STEP, $versionBefore + 1], $this->stepAndVersion());
+        self::assertSame([$assignee, ...$expectedReviewerAndTester], $this->storedPeople());
+        self::assertSame([[ShopTeamRows::TO_DO_STEP, ShopTeamRows::TO_DO_STEP, 'give_it_to', $assignee]], $this->givenRows());
+        $events = $this->outboxEvents();
+        self::assertCount(1, $events);
+        self::assertInstanceOf(TicketAssigned::class, $events[0]);
+        self::assertSame([self::OMAR, $assignee, self::LENA], [$events[0]->previousAssigneeId, $events[0]->assigneeId, $events[0]->actorId]);
+        $this->assertTurnRowIsAFreshRefreshOfTheTurnOf($assignee);
+    }
+
+    /**
+     * @return iterable<string, array{string, string, array<string, string>, string|null, array<string, string>}>
+     */
+    public static function refusedGives(): iterable
+    {
+        // Who gives, to whom, the ticket's columns before, and the note template and people it is refused with.
+        yield 'Omar, a member, giving his own ticket away' => [self::OMAR, self::MIA, [], null, []];
+        yield 'Raj, a viewer, who has no team role' => [self::RAJ, self::MIA, [], self::NO_TEAM_ROLE_NOTE, []];
+        yield 'Sara, a person of another organization' => [self::SARA, self::MIA, [], self::NO_TEAM_ROLE_NOTE, []];
+        yield 'to Raj, a viewer of the team' => [self::LENA, self::RAJ, [], MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE, []];
+        yield 'to Sara, nobody of the team' => [self::LENA, self::SARA, [], MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE, []];
+        yield 'to Omar, who already has it' => [self::LENA, self::OMAR, ['reviewer_id' => self::LENA], MoveTicket::ALREADY_GIVEN_NOTE, ['assignee' => self::OMAR]];
+        yield 'in In progress, which give_it_to does not leave' => [self::LENA, self::MIA, ['step_id' => self::IN_PROGRESS_STEP], null, []];
+    }
+
+    /**
+     * @param array<string, string> $columnsBefore
+     * @param array<string, string> $expectedPeople
+     */
+    #[Test]
+    #[DataProvider('refusedGives')]
+    public function aRefusedGiveSaysWhyAndChangesNothing(string $actor, string $assignee, array $columnsBefore, ?string $expectedTemplate, array $expectedPeople): void
+    {
+        $this->setColumns($columnsBefore);
+        $stateBefore = $this->storedState();
+
+        $refusal = $this->refusalOf(fn () => $this->giveTo($actor, $assignee, $stateBefore['version']));
+
+        self::assertInstanceOf(MoveRefused::class, $refusal);
+        self::assertSame($expectedTemplate, $refusal->ruleNoteTemplate);
+        self::assertSame($expectedPeople, array_map(static fn (UserId $userId): string => $userId->toString(), $refusal->ruleNotePeople));
         self::assertSame($stateBefore, $this->storedState());
     }
 
@@ -619,9 +724,11 @@ final class MoveTicketTest extends KernelTestCase
 
         $verbRefusal = $this->refusalOf(fn () => $this->move(self::OMAR, 'start_work', $stateBefore['version'] - 1));
         $moveToRefusal = $this->refusalOf(fn () => $this->moveTo(self::LENA, self::IN_PROGRESS_STEP, $stateBefore['version'] + 1));
+        $giveRefusal = $this->refusalOf(fn () => $this->giveTo(self::LENA, self::MIA, $stateBefore['version'] - 1));
 
         self::assertInstanceOf(TicketChangedMeanwhile::class, $verbRefusal);
         self::assertInstanceOf(TicketChangedMeanwhile::class, $moveToRefusal);
+        self::assertInstanceOf(TicketChangedMeanwhile::class, $giveRefusal);
         self::assertSame($stateBefore, $this->storedState());
     }
 
@@ -818,6 +925,42 @@ final class MoveTicketTest extends KernelTestCase
     }
 
     /**
+     * Put on hold and Go on bring the ticket back to Backlog with the caches warm.
+     */
+    #[Test]
+    public function aWarmGiveOutOfBacklogRunsTenQueriesBesideItsSavepoints(): void
+    {
+        $this->setColumns(['step_id' => ShopTeamRows::BACKLOG_STEP, 'assignee_id' => null]);
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $statements = $this->statementsOfAWarmMove(
+            function () use ($versionBefore): void {
+                $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, 'put_on_hold', $versionBefore, new \DateTimeImmutable(self::MOVED_AT));
+                $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, 'go_on', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT));
+            },
+            fn () => $this->ticketCommands()->giveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, new UserId(self::MIA), $versionBefore + 2, new \DateTimeImmutable(self::MOVED_AT)),
+        );
+
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::PUBLISHED_AGAIN], $statements);
+        // Ten, not eight: TicketAssigned is a second outbox row with its own notify.
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T8: a move plus the TicketAssigned outbox row');
+    }
+
+    #[Test]
+    public function aWarmGiveInsideToDoRunsEightQueriesBesideItsSavepoints(): void
+    {
+        $versionBefore = $this->stepAndVersion()[1];
+
+        $statements = $this->statementsOfAWarmMove(
+            fn () => $this->ticketCommands()->giveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, new UserId(self::MIA), $versionBefore, new \DateTimeImmutable(self::MOVED_AT)),
+            fn () => $this->ticketCommands()->giveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, new UserId(self::OMAR), $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT)),
+        );
+
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, 'UPDATE tkt_ticket SET assignee_id = ?,', ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T8: a give inside To do publishes only TicketAssigned');
+    }
+
+    /**
      * @param list<string> $expectedPrefixes
      * @param list<string> $statements
      */
@@ -929,6 +1072,30 @@ final class MoveTicketTest extends KernelTestCase
         ));
     }
 
+    private function giveTo(string $actor, string $assignee, int $expectedVersion): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->ticketCommands()->giveTo(
+            new OrganizationId(self::ACME_FOODS),
+            new UserId($actor),
+            self::KEY,
+            new UserId($assignee),
+            $expectedVersion,
+            new \DateTimeImmutable(self::MOVED_AT),
+        ));
+    }
+
+    /**
+     * The turn row the give wrote is the one a fresh refresh writes, and it is the new assignee's.
+     */
+    private function assertTurnRowIsAFreshRefreshOfTheTurnOf(string $assignee): void
+    {
+        $turnRowsAfterTheGive = $this->turnRows();
+        self::assertSame([$assignee], array_column($turnRowsAfterTheGive, 'turn_user_id'));
+        $ticketId = $this->ticketId();
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
+        self::assertSame($this->turnRows(), $turnRowsAfterTheGive);
+    }
+
     private function moveTo(string $actor, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId = null, ?string $waitingOnLabel = null): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->ticketCommands()->moveTo(
@@ -1021,13 +1188,36 @@ final class MoveTicketTest extends KernelTestCase
     }
 
     /**
-     * @return array{step_id: string, version: int, history: list<array<string, mixed>>, outbox: int, turn: list<array<string, mixed>>, project_counts: array{placement: list<list<mixed>>, counts: list<list<mixed>>}}
+     * @return array{step_id: string, version: int, people: array{string|null, string|null, string|null}, history: list<array<string, mixed>>, outbox: int, turn: list<array<string, mixed>>, project_counts: array{placement: list<list<mixed>>, counts: list<list<mixed>>}}
      */
     private function storedState(): array
     {
         [$stepId, $version] = $this->stepAndVersion();
 
-        return ['step_id' => $stepId, 'version' => $version, 'history' => $this->movedRows(), 'outbox' => $this->outboxRows(), 'turn' => $this->turnRows(), 'project_counts' => $this->projectCountRows()];
+        return ['step_id' => $stepId, 'version' => $version, 'people' => $this->storedPeople(), 'history' => $this->movedRows(), 'outbox' => $this->outboxRows(), 'turn' => $this->turnRows(), 'project_counts' => $this->projectCountRows()];
+    }
+
+    /**
+     * @return array{string|null, string|null, string|null} the assignee_id, reviewer_id and tester_id of Acme Foods' SHOP-7
+     */
+    private function storedPeople(): array
+    {
+        $assigneeId = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): mixed => $this->connection()->fetchOne('SELECT assignee_id FROM tkt_ticket WHERE key = ?', [self::KEY]));
+        self::assertTrue(null === $assigneeId || \is_string($assigneeId));
+
+        return [$assigneeId, ...$this->storedReviewerAndTester()];
+    }
+
+    /**
+     * @return list<list<string>> the from and to step, verb and assignee of each give's history row
+     */
+    private function givenRows(): array
+    {
+        $rows = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchAllNumeric(
+            "SELECT from_step, to_step, payload->>'verb', payload->>'assignee_id' FROM tkt_ticket_event WHERE type = 'moved' AND payload->>'assignee_id' IS NOT NULL ORDER BY at, id",
+        ));
+
+        return array_map(static fn (array $row): array => array_map(static fn (mixed $column): string => \is_string($column) ? $column : throw new \UnexpectedValueException('A give row has an empty column.'), $row), $rows);
     }
 
     /**
@@ -1121,16 +1311,24 @@ final class MoveTicketTest extends KernelTestCase
      */
     private function movedEvents(): array
     {
-        $serializer = new PhpSerializer();
         $events = [];
-        foreach ($this->outboxBodies() as $body) {
-            $message = $serializer->decode(['body' => $body])->getMessage();
-            if ($message instanceof TicketMoved) {
-                $events[] = $message;
+        foreach ($this->outboxEvents() as $event) {
+            if ($event instanceof TicketMoved) {
+                $events[] = $event;
             }
         }
 
         return $events;
+    }
+
+    /**
+     * @return list<object> every message in the outbox, decoded as the outbox transport does, oldest first
+     */
+    private function outboxEvents(): array
+    {
+        $serializer = new PhpSerializer();
+
+        return array_map(static fn (string $body): object => $serializer->decode(['body' => $body])->getMessage(), $this->outboxBodies());
     }
 
     /**

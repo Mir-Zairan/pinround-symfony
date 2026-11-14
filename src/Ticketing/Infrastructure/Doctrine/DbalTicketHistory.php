@@ -7,6 +7,7 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\TicketHistory;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Uid\Uuid;
@@ -40,6 +41,19 @@ final readonly class DbalTicketHistory implements TicketHistory
         \DateTimeImmutable $at,
     ): void {
         $payload = array_filter(['verb' => $verb, 'override_note' => $overrideNote], static fn (?string $value): bool => null !== $value);
+        $this->insertEvent($organizationId, $ticketId, $actor, self::MOVED, $fromStepId, $toStepId, $payload, $at);
+    }
+
+    public function recordGiven(
+        OrganizationId $organizationId,
+        TicketId $ticketId,
+        UserId $actor,
+        string $fromStepId,
+        string $toStepId,
+        UserId $assignee,
+        \DateTimeImmutable $at,
+    ): void {
+        $payload = ['verb' => MoveTicket::GIVE_IT_TO, self::GIVEN_TO_PAYLOAD_KEY => $assignee->toString()];
         $this->insertEvent($organizationId, $ticketId, $actor, self::MOVED, $fromStepId, $toStepId, $payload, $at);
     }
 

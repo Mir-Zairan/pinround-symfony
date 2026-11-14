@@ -186,9 +186,35 @@
                 </section>
             </section>
 
-            <section class="team__column team__column--aside" aria-labelledby="team-people">
-                <h2 class="team__section-title" id="team-people">People <span class="team__hint">waiting on them</span></h2>
-                <twig:EmptyState message="How many open tickets wait on each person comes later."/>
+            {% set hasMorePeople = workload.people|length > peopleShownAtFirst %}
+            <section class="team__column team__column--aside" aria-labelledby="team-people" {{ stimulus_controller('team-people', {shownAtFirst: peopleShownAtFirst, isShowingAll: false}) }}>
+                <h2 class="team__section-title" id="team-people">People <span class="team__count">{{ workload.people|length }}</span> <span class="team__hint">waiting on them</span></h2>
+                {% if hasMorePeople %}
+                    <input class="login__input team__people-search" type="search" placeholder="Find a person" aria-label="Find a person" autocomplete="off" {{ stimulus_target('team-people', 'search') }} data-action="input->team-people#filter">
+                {% endif %}
+                <ul class="team__people" id="team-people-list">
+                    {% for person in workload.people %}
+                        <li class="team__person" data-search="{{ person.searchText }}" {{ stimulus_target('team-people', 'person') }}{{ loop.index > peopleShownAtFirst ? ' hidden' }}>
+                            <twig:Avatar name="{{ person.name }}" aria-hidden="true"/>
+                            <div class="team__person-main">
+                                <div class="team__person-head">
+                                    <span class="team__person-name">{{ person.name }}{{ person.isViewer ? ' (you)' }}</span>
+                                    <span class="team__person-figures">
+                                        <span class="team__person-load">{{ person.waitingTickets }}</span>
+                                        {%- if person.level.label is not null %} <span class="team__person-level">{{ person.level.label }}</span>{% endif -%}
+                                    </span>
+                                </div>
+                                <progress class="team__meter team__meter--{{ person.level.value }}" max="{{ workload.meterMax }}" value="{{ person.waitingTickets }}" aria-hidden="true"></progress>
+                                <span class="team__person-job">{{ person.jobLine }}</span>
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ul>
+                {% if hasMorePeople %}
+                    <p class="team__people-none" hidden {{ stimulus_target('team-people', 'noMatch') }}>No one in this team matches.</p>
+                    <twig:Button type="button" variant="text" size="sm" class="team__people-toggle" aria-controls="team-people-list" aria-expanded="false" data-show-all-label="Show all {{ workload.people|length }}" data-show-fewer-label="Show fewer" data-team-people-target="toggle" data-action="team-people#toggle">Show all {{ workload.people|length }}</twig:Button>
+                {% endif %}
+                <p class="team__hint team__people-note">Counts are open tickets where it is this person’s turn. Busy from {{ constant('App\\Web\\UI\\Team\\WorkloadLevel::BUSY_FROM') }} tickets, too much from {{ constant('App\\Web\\UI\\Team\\WorkloadLevel::TOO_MUCH_FROM') }}.</p>
             </section>
         </div>
     </div>

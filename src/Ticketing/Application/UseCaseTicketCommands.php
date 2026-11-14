@@ -38,6 +38,11 @@ final readonly class UseCaseTicketCommands implements TicketCommands
         $this->moveTicket->move($organizationId, $actor, $key, $verb, $expectedVersion, $at);
     }
 
+    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
+    {
+        $this->moveTicket->giveTo($organizationId, $actor, $key, $assignee, $expectedVersion, $at);
+    }
+
     public function moveTo(
         OrganizationId $organizationId,
         UserId $actor,

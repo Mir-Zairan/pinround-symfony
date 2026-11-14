@@ -10,9 +10,10 @@ use Symfony\UX\TwigComponent\Attribute\PostMount;
 use Symfony\UX\TwigComponent\Attribute\PreMount;
 
 /**
- * The person picker (prototype "Person picker"): a chip that opens a Dialog with the mode's title and sub line, the
- * PersonPickerSearch live component and Cancel. A plain component, so it re-renders with its parent's live component
- * at no cost of its own; the search sits inside it with props that never change after the page renders.
+ * The person picker (prototype "Person picker"): a chip (Filter) or a button (Assign) that opens a Dialog with the
+ * mode's title and sub line, the PersonPickerSearch live component and Cancel. A plain component, so it re-renders with
+ * its parent's live component at no cost of its own; the search sits inside it with props that never change after the
+ * page renders.
  */
 #[AsTwigComponent]
 final class PersonPicker
@@ -36,8 +37,20 @@ final class PersonPicker
 
     public bool $isTriggerPressed = false;
 
-    /** The live event a row emits up to the parent component, with the picked person's id. */
+    /** Filter mode: the live event a row emits up to the parent component, with the picked person's id. */
     public string $pickedEvent = '';
+
+    /** Assign mode: the key of the ticket given, as "SHOP-12", for the title. */
+    public string $ticketKey = '';
+
+    /** Assign mode: the id of the form, outside the dialog, that a row submits. */
+    public string $pickForm = '';
+
+    /** Assign mode: the field of $pickForm a row sends the picked person's id as. */
+    public string $pickField = '';
+
+    /** Assign mode: whether the trigger is the box's filled main button rather than an outline one. */
+    public bool $isTriggerPrimary = false;
 
     /**
      * Templates pass a plain string; from() throws a ValueError for an unknown one, so a typo fails at mount. A missing
@@ -70,8 +83,14 @@ final class PersonPicker
         if ('' !== $this->pressedPerson && !ListFilter::isCanonicalUuid($this->pressedPerson)) {
             throw new \InvalidArgumentException('A PersonPicker\'s pressed person must be a canonical uuid or empty.');
         }
-        if ('' === trim($this->triggerLabel) || '' === $this->pickedEvent) {
-            throw new \InvalidArgumentException('A PersonPicker needs a trigger label and the event its rows emit.');
+        if ('' === trim($this->triggerLabel)) {
+            throw new \InvalidArgumentException('A PersonPicker needs a trigger label.');
+        }
+        if (PersonPickerMode::Filter === $this->mode && '' === $this->pickedEvent) {
+            throw new \InvalidArgumentException('A filter PersonPicker needs the event its rows emit.');
+        }
+        if (PersonPickerMode::Assign === $this->mode && ('' === trim($this->ticketKey) || '' === $this->pickForm || '' === $this->pickField)) {
+            throw new \InvalidArgumentException('An assign PersonPicker needs the ticket key, the form its rows submit and the field they fill.');
         }
     }
 }

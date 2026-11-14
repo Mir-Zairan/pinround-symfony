@@ -207,6 +207,21 @@
   gap: var(--space-8);
 }
 
+.tickets__step-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.tickets__step-header .tickets__step-heading {
+  flex: 1 1 auto;
+}
+
+.tickets__go-through {
+  margin: 0;
+}
+
 .tickets__step-heading {
   display: flex;
   flex-wrap: wrap;
@@ -402,4 +417,161 @@
 
 .tickets__rows turbo-frame {
   display: block;
+}
+
+/* The whose-turn view (WhoseTurnController): one card per person or label, "You" first. */
+.turn__intro {
+  color: var(--on-surface-var);
+}
+
+.turn__cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  list-style: none;
+}
+
+.turn__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  border: 1px solid var(--outline-var);
+  border-radius: var(--radius-card);
+  background: var(--s-lowest);
+}
+
+.turn__card--you {
+  background: var(--s-low);
+}
+
+.turn__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.turn__avatar--you {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.turn__avatar--team {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.turn__avatar--outside {
+  background: var(--s-highest);
+  color: var(--on-surface);
+}
+
+.turn__who {
+  flex: 1;
+  min-width: 0;
+}
+
+.turn__name {
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.turn__sentence {
+  color: var(--on-surface-var);
+  overflow-wrap: anywhere;
+}
+
+/* A <progress>, as the CSP allows no style attribute for a width; max is the 60 days that fill it. */
+.turn__meter {
+  appearance: none;
+  flex: none;
+  width: clamp(80px, 12vw, 140px);
+  height: 8px;
+  border: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--s-highest);
+  color: var(--primary);
+}
+
+.turn__meter::-webkit-progress-bar {
+  background: var(--s-highest);
+}
+
+.turn__meter::-webkit-progress-value {
+  border-radius: 4px;
+  background: currentColor;
+}
+
+.turn__meter::-moz-progress-bar {
+  border-radius: 4px;
+  background: currentColor;
+}
+
+.turn__meter--busy {
+  color: var(--waiting);
+}
+
+.turn__meter--too-much {
+  color: var(--error);
+}
+
+.turn__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  list-style: none;
+}
+
+.turn__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.turn__row-link {
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.turn__row-link:hover .turn__title {
+  text-decoration: underline;
+}
+
+.turn__key {
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.turn__wait {
+  flex: none;
+  color: var(--on-surface-var);
+}
+
+.turn__wait--too-long {
+  font-weight: 700;
+  color: var(--error);
+}
+
+.turn__more {
+  align-self: flex-start;
+  font-weight: 600;
+}
+
+.turn__pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-12) var(--space-24);
+  align-self: flex-start;
+  padding: var(--space-12) 0;
+}
+
+.turn__first-page,
+.turn__next-page {
+  color: var(--primary);
+  font-weight: 700;
 }

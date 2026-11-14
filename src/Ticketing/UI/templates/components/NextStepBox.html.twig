@@ -10,11 +10,25 @@
     {% if moveTransitions is not empty %}
         <div class="next-step-box__verbs">
             {% for transition in moveTransitions %}
-                <form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: transition.verb}) }}" data-turbo="true" data-failed-toast="{{ moveFailedToast }}">
-                    <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                    <input type="hidden" name="{{ versionField }}" value="{{ version }}">
-                    <twig:Button type="submit" variant="{{ transition.isPrimary ? 'filled' : 'outline' }}">{{ transition.label }}</twig:Button>
-                </form>
+                {% if this.isGive(transition) %}
+                    {% set giveFormId = 'give-it-to-form' %}
+                    {# The picker's rows submit this form from inside their dialog, naming the person in the assignee field. #}
+                    <form id="{{ giveFormId }}" hidden method="post" action="{{ path(constant(moveController ~ '::ASSIGN_ROUTE'), {key: ticketKey}) }}" data-turbo="true" data-failed-toast="{{ moveFailedToast }}">
+                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                        <input type="hidden" name="{{ versionField }}" value="{{ version }}">
+                    </form>
+                    {# With Drive off, Turbo posts a form only when its submitter, too, sits in a data-turbo="true" element. #}
+                    <div class="next-step-box__give" data-turbo="true">
+                        <twig:PersonPicker mode="assign" id="give-it-to-picker" team="{{ teamId }}" ticketKey="{{ ticketKey }}" triggerLabel="{{ transition.label }}"
+                            pickForm="{{ giveFormId }}" pickField="{{ constant(moveController ~ '::ASSIGNEE_FIELD') }}" :isTriggerPrimary="transition.isPrimary" />
+                    </div>
+                {% else %}
+                    <form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: transition.verb}) }}" data-turbo="true" data-failed-toast="{{ moveFailedToast }}">
+                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                        <input type="hidden" name="{{ versionField }}" value="{{ version }}">
+                        <twig:Button type="submit" variant="{{ transition.isPrimary ? 'filled' : 'outline' }}">{{ transition.label }}</twig:Button>
+                    </form>
+                {% endif %}
             {% endfor %}
         </div>
     {% endif %}

@@ -56,6 +56,9 @@
                 <twig:SegmentedControl label="Team member {{ teamMember }}" :options="teamOptions" selected="{{ teamMember }}" />
             {% endfor %}
         </div>
+        <div class="gallery-row">
+            <twig:SegmentedControl label="View as links" :links="[{label: 'List', href: '#gallery-segmented-control', isCurrent: true}, {label: 'Whose turn?', href: '#gallery-tag', isCurrent: false}]" />
+        </div>
     </section>
 
     <section class="gallery-section" aria-labelledby="gallery-tag">
@@ -176,7 +179,7 @@
         <div class="gallery-row">
             <twig:Chip>Person ▾</twig:Chip>
             <div class="person-picker__host">
-                <twig:Dialog id="gallery-person-picker-demo" title="{{ pickerMode.title }}">
+                <twig:Dialog id="gallery-person-picker-demo" title="{{ pickerMode.title('') }}">
                     <twig:block name="trigger">
                         <twig:Chip pressed aria-haspopup="dialog" data-action="dialog#open">Omar</twig:Chip>
                     </twig:block>
@@ -184,10 +187,36 @@
                         <p class="person-picker__sub">{{ pickerMode.sub }}</p>
                         <div class="person-picker">
                             <input class="person-picker__field" type="search" autocomplete="off" placeholder="{{ searchLabel }}" aria-label="{{ searchLabel }}">
-                            <twig:PersonPickerRows :matchCount="3":rows="[
-                                {personId: '00000000-0000-4000-8000-000000000001', name: 'Omar', openCount: 3, isPressed: true},
-                                {personId: '00000000-0000-4000-8000-000000000002', name: 'Mia', openCount: 1, isPressed: false},
-                                {personId: '00000000-0000-4000-8000-000000000003', name: 'Lena', openCount: 0, isPressed: false},
+                            <twig:PersonPickerRows :mode="pickerMode" :matchCount="3" :rows="[
+                                {personId: '00000000-0000-4000-8000-000000000001', name: 'Omar', count: 3, isPressed: true},
+                                {personId: '00000000-0000-4000-8000-000000000002', name: 'Mia', count: 1, isPressed: false},
+                                {personId: '00000000-0000-4000-8000-000000000003', name: 'Lena', count: 0, isPressed: false},
+                            ]"/>
+                        </div>
+                    </twig:block>
+                    <twig:block name="actions">
+                        <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+                    </twig:block>
+                </twig:Dialog>
+            </div>
+        </div>
+        {# The Assign mode's dialog, fewest waiting first. Its rows submit a form outside the dialog, as on the ticket page; a method="dialog" form outside any dialog does nothing, so a pick here only closes the dialog. #}
+        {% set assignMode = constant('App\\Web\\UI\\Component\\PersonPickerMode::Assign') %}
+        <div class="gallery-row">
+            <form id="gallery-person-picker-give-form" method="dialog"></form>
+            <div class="person-picker__host">
+                <twig:Dialog id="gallery-person-picker-assign-demo" title="{{ assignMode.title('SHOP-12') }}">
+                    <twig:block name="trigger">
+                        <twig:Button variant="outline" aria-haspopup="dialog" data-action="dialog#open">Give it to…</twig:Button>
+                    </twig:block>
+                    <twig:block name="content">
+                        <p class="person-picker__sub">{{ assignMode.sub }}</p>
+                        <div class="person-picker">
+                            <input class="person-picker__field" type="search" autocomplete="off" placeholder="{{ searchLabel }}" aria-label="{{ searchLabel }}">
+                            <twig:PersonPickerRows :mode="assignMode" :matchCount="3" pickForm="gallery-person-picker-give-form" pickField="assignee" :rows="[
+                                {personId: '00000000-0000-4000-8000-000000000002', name: 'Mia', count: 0, isPressed: false},
+                                {personId: '00000000-0000-4000-8000-000000000003', name: 'Lena', count: 1, isPressed: false},
+                                {personId: '00000000-0000-4000-8000-000000000001', name: 'Omar', count: 3, isPressed: false},
                             ]"/>
                         </div>
                     </twig:block>
@@ -204,5 +233,11 @@
         <div class="gallery-next-step">
             <twig:NextStepBoxExample />
         </div>
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-queue-bar">
+        <h2 id="gallery-queue-bar">Queue bar</h2>
+        <twig:QueueBar aria-label="Queue, first ticket" label="Code reviews" :place="1" :count="3" nextUrl="/t/SHOP-13" finishUrl="/tickets/queue/finish" stopUrl="/t/SHOP-12/queue/stop" csrfToken="gallery-example" />
+        <twig:QueueBar aria-label="Queue, last ticket" label="Code reviews" :place="3" :count="3" previousUrl="/t/SHOP-13" finishUrl="/tickets/queue/finish" stopUrl="/t/SHOP-14/queue/stop" csrfToken="gallery-example" />
     </section>
 {% endblock %}

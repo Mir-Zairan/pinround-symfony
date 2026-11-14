@@ -13,6 +13,7 @@ use App\Ticketing\Api\TicketVisibility;
 use Symfony\Component\HttpFoundation\Exception\BadRequestException;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
@@ -82,6 +83,19 @@ final readonly class TicketListContext
             '' === $assigneeId ? null : $assigneeId,
             $pickedTeamId,
         );
+    }
+
+    /**
+     * The list a page was opened from, for pages that still work without it (the ticket page, the queue's Stop): a
+     * filter the list would refuse only drops the context, as fromRequest's refusals would.
+     */
+    public static function fromRequestOrPlain(Request $request, ActorContext $viewer, ProjectQueries $projectQueries): self
+    {
+        try {
+            return self::fromRequest($request, $viewer, $projectQueries);
+        } catch (HttpExceptionInterface|BadRequestException) {
+            return new self();
+        }
     }
 
     /**

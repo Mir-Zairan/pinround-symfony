@@ -37,7 +37,9 @@ use App\Workflow\Domain\Verb;
  * filled"); in Backlog the lead sees Plan it filled and Give it to… outline. In a company or team step only Put on hold
  * and Move on to… apply, and no guard blocks Move on to…: review_before_test is about In progress → Testing and
  * no_self_review about Code review → Testing, neither a step Move on to… leaves. Every offered verb carries where it
- * goes (MoveSideEffects); a "Move on to…" label names the core step it goes to.
+ * goes (MoveSideEffects); a "Move on to…" label names the core step it goes to. Give it to… on a To do ticket that
+ * already has an assignee is the lead's "Give it to someone else…" (workflow-engine.md); the checker gives only an
+ * unassigned ticket.
  *
  * The reviewer and the tester are the ones ReviewerChoice::reviewerOf and TesterChoice::testerOf give, as in the turn
  * rules, so a ticket that reached Code review or Testing without one stored is still moved by the person whose turn
@@ -50,6 +52,7 @@ use App\Workflow\Domain\Verb;
 final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 {
     private const string NO_TEAM_ROLE_NOTE = 'Managers can read and comment. Only the team moves tickets.';
+    private const string GIVE_IT_TO_SOMEONE_ELSE_LABEL = 'Give it to someone else…';
 
     /** @var list<Guard> */
     private array $guards;
@@ -225,9 +228,11 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
     private function viewOf(Transition $transition, TicketState $ticket, bool $isPrimary): TransitionView
     {
         $coreTarget = $this->coreTargetOf($transition, $ticket);
-        $label = Verb::MoveOn === $transition->verb
-            ? 'Move on to '.($coreTarget?->stepName() ?? 'the previous step')
-            : $transition->label;
+        $label = match (true) {
+            Verb::MoveOn === $transition->verb => 'Move on to '.($coreTarget?->stepName() ?? 'the previous step'),
+            Verb::GiveItTo === $transition->verb && null !== $ticket->assigneeId => self::GIVE_IT_TO_SOMEONE_ELSE_LABEL,
+            default => $transition->label,
+        };
 
         return new TransitionView($transition->verb->value, $label, $isPrimary, self::moveTargetOf($coreTarget, $ticket));
     }
@@ -273,7 +278,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             Mover::LeadWhenUnassigned => $this->moveRights->leadsTheTeam($actor) && null === $ticket->assigneeId,
             Mover::Assignee => self::isSamePerson($ticket->assigneeId, $actor->userId),
             Mover::WaitedOn => self::isSamePerson(self::personWaitedOn($ticket), $actor->userId),
-            Mover::Checker => $ticket->isCheckNeeded && self::isSamePerson($ticket->checkerId, $actor->userId),
+            Mover::CheckerWhenUnassigned => $ticket->isCheckNeeded && null === $ticket->assigneeId && self::isSamePerson($ticket->checkerId, $actor->userId),
             Mover::Reviewer => self::isSamePerson($this->reviewerChoice->reviewerOf($ticket, $team)->userId, $actor->userId),
             Mover::Tester => $this->isTesterOf($ticket, $actor, $team),
             Mover::TesterInCheckingStep => null === $ticket->coreCode && Group::Check === self::groupOf($ticket) && $this->isTesterOf($ticket, $actor, $team),

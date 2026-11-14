@@ -59,11 +59,30 @@ interface TicketCommands
      *                                nothing of the move is saved and the ticket is not reloaded
      * @throws MoveRefused            when the ticket has no team, the policy refuses the verb to this person (with the
      *                                rule's note when one explains it), the target is not a step of the team, is the
-     *                                ticket's step now, the verb is give_it_to (P03.T8), or it leads to Needs input and
-     *                                the reporter is no member of the organization; nothing is saved
+     *                                ticket's step now, the verb is give_it_to (giveTo takes it), or it leads to Needs
+     *                                input and the reporter is no member of the organization; nothing is saved
      * @throws \LogicException        when no transaction is open
      */
     public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void;
+
+    /**
+     * "Give it to…", the give_it_to verb with its person: makes them the assignee, moving a Backlog ticket to To do in
+     * the same save (a ticket in To do stays there), and writes the "moved" history row with the payload
+     * {"verb": "give_it_to", "assignee_id": <the person>}, the turn row, TicketMoved (only for a ticket that left
+     * Backlog) and TicketAssigned. A new assignee clears the stored reviewer, and the stored tester when it is the new
+     * assignee. In To do only the lead gives an assigned ticket to someone else (Workflow's policy).
+     *
+     * @param UserId $assignee the person to give it to: the lead or a member of the ticket's team, not a viewer
+     *
+     * @throws TicketNotFound         as move does
+     * @throws TicketChangedMeanwhile as move does
+     * @throws MoveRefused            when the ticket has no team, the policy refuses give_it_to to this person (with the
+     *                                rule's note when one explains it), the assignee is not the team's lead or a member
+     *                                (with the note "Give it to someone in the ticket’s team."), or already has the ticket
+     *                                (with the note "{assignee} already has this ticket."); nothing is saved
+     * @throws \LogicException        when no transaction is open
+     */
+    public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void;
 
     /**
      * The lead's "Move to another step…": moves the ticket to a step of its team without a verb, and writes the same rows

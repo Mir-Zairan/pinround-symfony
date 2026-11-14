@@ -273,6 +273,11 @@ final class NewTicketTest extends WebTestCase
                 throw new \LogicException('The new ticket page moves no ticket.');
             }
 
+            public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
+            {
+                throw new \LogicException('The new ticket page gives no ticket.');
+            }
+
             public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): void
             {
                 throw new \LogicException('The new ticket page moves no ticket.');

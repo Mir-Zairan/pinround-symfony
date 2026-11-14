@@ -13,6 +13,7 @@ use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\UseCaseTicketCommands;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
@@ -30,7 +31,7 @@ use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
- * The ticket page's moves, POST /t/{key}/move/{verb} and /t/{key}/move-to/{stepId}, on Acme Foods' SHOP-1 through the
+ * The ticket page's moves, POST /t/{key}/move/{verb}, /t/{key}/move-to/{stepId} and /t/{key}/assign, on Acme Foods' SHOP-1 through the
  * real firewall, voters, session, policy and database. The clock is fixed on 6 Nov 2026, before today: a clock ahead of
  * the login would end the session as idle. Every refusal also proves the ticket, its history and the outbox unchanged.
  */
@@ -48,6 +49,7 @@ final class TicketMoveTest extends WebTestCase
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string KEY = 'SHOP-1';
     private const string TICKET_PAGE = '/t/SHOP-1';
+    private const string ASSIGN_PATH = '/t/SHOP-1/assign';
     /** The version SHOP-1 is seeded at, so a stale form can send a lower one. */
     private const int VERSION = 3;
     private const string NOBODY_ID = '0197a3c0-0000-7000-8000-00000000dead';
@@ -57,9 +59,9 @@ final class TicketMoveTest extends WebTestCase
     /** base.html.twig's toast region, which a streamed toast updates. */
     private const string TOAST_REGION_ID = 'toast-region';
     /** The stream answer's re-read of the ticket page, warm, by the first table each statement reads. */
-    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'ins_ticket_turn', '"COMMIT"'];
+    private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', '"COMMIT"'];
     /** A lead's re-read: their box offers the Needs input dialog, so it also reads which of the ticket's people are members. */
-    private const array LEAD_RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'ins_ticket_turn', 'org_membership', '"COMMIT"'];
+    private const array LEAD_RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', 'org_membership', '"COMMIT"'];
     /**
      * The tenant middleware's transaction-local setting, matched rather than written out: bin/check-tenant-setting
      * allows the literal call only in the files that set it.
@@ -305,6 +307,7 @@ final class TicketMoveTest extends WebTestCase
 
         $streams = $this->streamsOfTheAnswer(200);
         self::assertSame('Needs input', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertSame('now · Lena moved it from Code review to Needs input', $streams[TicketPageParts::ACTIVITY_ID]->filter('.activity__line')->first()->text());
         self::assertSame('Moved to Needs input.', $this->toastOf($streams));
         self::assertSame(
             [...$stateBefore, 'step_id' => $this->steps['input'], 'version' => self::VERSION + 1, 'waiting_on_user_id' => $this->people['Omar']->id()->toString(), 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
@@ -434,7 +437,7 @@ final class TicketMoveTest extends WebTestCase
     public static function pathsOfNoMove(): iterable
     {
         yield 'a verb no step has' => ['/t/SHOP-1/move/jump'];
-        yield 'give_it_to, which comes with P03.T8' => ['/t/SHOP-1/move/give_it_to'];
+        yield 'give_it_to, which only the assign route takes' => ['/t/SHOP-1/move/give_it_to'];
         yield 'a verb in upper case' => ['/t/SHOP-1/move/START_WORK'];
         yield 'a step id that is no uuid' => ['/t/SHOP-1/move-to/progress'];
         yield 'a step id in upper case' => ['/t/SHOP-1/move-to/{PROGRESS}'];
@@ -883,7 +886,7 @@ final class TicketMoveTest extends WebTestCase
 
         $streams = $this->streamsOfTheAnswer(200);
         self::assertSame(
-            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, self::TOAST_REGION_ID => 0],
+            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, TicketPageParts::PEOPLE_ID => 0, TicketPageParts::ACTIVITY_ID => 0, self::TOAST_REGION_ID => 0],
             array_map(static fn (Crawler $stream): int => $stream->filter('[autofocus]')->count(), $streams),
         );
         $heading = $streams[TicketPageParts::NEXT_STEP_ID]->filter('[autofocus]');
@@ -893,9 +896,9 @@ final class TicketMoveTest extends WebTestCase
 
     /**
      * The stream answer reads the ticket's page again after the move's transaction, in one of its own: the same refusal
-     * answered by stream and by redirect differs by that read alone, warm: 6 queries with the transaction's own
-     * statements, the ticket, the names and the saved turn among them, and for a lead a 7th, the Needs input dialog's
-     * one read of which of the ticket's people are members.
+     * answered by stream and by redirect differs by that read alone, warm: 7 queries with the transaction's own
+     * statements, the ticket, the names, What happened's moves and the saved turn among them, and for a lead an 8th,
+     * the Needs input dialog's one read of which of the ticket's people are members.
      */
     #[Test]
     public function theStreamAnswerReadsTheTicketAgainInTheBudgetedQueries(): void
@@ -912,7 +915,7 @@ final class TicketMoveTest extends WebTestCase
         $streamStatements = $this->statementsOfAMove($staleFields, self::TURBO_FORM_HEADERS);
 
         self::assertSame(MoveToasts::CHANGED_MEANWHILE, $this->toastOf($this->streamsOfTheAnswer(422)));
-        self::assertSame(7, \count($streamStatements) - \count($redirectStatements), 'the re-read takes 6 and the lead’s Needs input dialog 1');
+        self::assertSame(8, \count($streamStatements) - \count($redirectStatements), 'the re-read takes 7 and the lead’s Needs input dialog 1');
         self::assertSame(
             1,
             \count(array_keys($streamStatements, 'org_membership', true)) - \count(array_keys($redirectStatements, 'org_membership', true)),
@@ -922,7 +925,7 @@ final class TicketMoveTest extends WebTestCase
 
     /**
      * A move made reads the ticket again after its COMMIT, warm, in the same statements as a refused one: its own
-     * transaction with the ticket, the names and the saved turn.
+     * transaction with the ticket, the names, What happened's moves and the saved turn.
      */
     #[Test]
     public function aTurboVerbMoveReadsTheTicketAgainInTheBudgetedQueries(): void
@@ -958,6 +961,193 @@ final class TicketMoveTest extends WebTestCase
         $state = $this->stateOfTicket();
         self::assertSame([$this->steps['review'], self::VERSION + 2], [$state['step_id'], $state['version']]);
         self::assertSame(self::LEAD_RE_READ_STATEMENTS, $reRead, 'the lead’s box offers Needs input, so its dialog reads which of the ticket’s people are members, once');
+    }
+
+    /**
+     * From Backlog the give also moves the ticket to To do: one history row, and TicketMoved and TicketAssigned in the
+     * outbox.
+     */
+    #[Test]
+    public function theLeadGivesABacklogTicketAndTheStreamSaysWhoGotIt(): void
+    {
+        $this->addTicket(['step' => 'backlog', 'assignee' => null]);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', self::ASSIGN_PATH, $this->giveFields($this->people['Omar']->id()->toString()), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame('Given to Omar.', $this->toastOf($streams));
+        self::assertSame('To do', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        $versions = $this->versionsOfTheForms($streams[TicketPageParts::NEXT_STEP_ID]);
+        self::assertNotEmpty($versions);
+        self::assertSame([(string) (self::VERSION + 1)], array_values(array_unique($versions)));
+        self::assertNull($stateBefore['assignee_id']);
+        self::assertSame(
+            [
+                ...$stateBefore,
+                'step_id' => $this->steps['todo'],
+                'assignee_id' => $this->people['Omar']->id()->toString(),
+                'version' => self::VERSION + 1,
+                'events' => $stateBefore['events'] + 1,
+                'outbox' => $stateBefore['outbox'] + 2,
+            ],
+            $this->stateOfTicket(),
+        );
+        $this->assertTheNextPageShowsNoToast();
+    }
+
+    /**
+     * Any other form gets the toast after a redirect. A re-give stays in To do, so the outbox gets TicketAssigned alone;
+     * the id is sent in upper case, as the form may send it, and saved in lower case.
+     */
+    #[Test]
+    public function theLeadGivesAnAssignedToDoTicketToSomeoneElseAndTheToastSaysWho(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', self::ASSIGN_PATH, $this->giveFields(strtoupper($this->people['Lena']->id()->toString())));
+
+        self::assertSame('Given to Lena.', $this->toastAfterTheRedirect());
+        self::assertSame($this->people['Omar']->id()->toString(), $stateBefore['assignee_id']);
+        self::assertSame(
+            [...$stateBefore, 'assignee_id' => $this->people['Lena']->id()->toString(), 'version' => self::VERSION + 1, 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
+            $this->stateOfTicket(),
+        );
+        self::assertSame($this->steps['todo'], $stateBefore['step_id']);
+    }
+
+    /**
+     * @return iterable<string, array{string, bool}> who posts, and whether it is a Turbo form
+     */
+    public static function peopleWhoMayNotGiveTheTicket(): iterable
+    {
+        yield 'Omar, a member, who may move it, giving it to himself' => ['Omar', false];
+        yield 'Omar, a member, on a Turbo form' => ['Omar', true];
+        yield 'Mia, a viewer of the team' => ['Mia', false];
+        yield 'Sara, an admin with no team role' => ['Sara', false];
+        yield 'Raj, a manager with no team role' => ['Raj', false];
+    }
+
+    /**
+     * Each of them may open the ticket, so it is a 403 and not the 404 of a ticket they may not see. Omar may move the
+     * ticket, so his 403 is the lead-only assign check's: without it the policy would answer him with a toast.
+     */
+    #[Test]
+    #[DataProvider('peopleWhoMayNotGiveTheTicket')]
+    public function someoneWhoMayNotGiveTheTicketIsDeniedAndNothingChanges(string $person, bool $isTurboForm): void
+    {
+        $this->addTicket(['step' => 'backlog', 'assignee' => null]);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people[$person]);
+        $this->client->request('GET', self::TICKET_PAGE);
+        self::assertResponseStatusCodeSame(200);
+
+        $this->client->request('POST', self::ASSIGN_PATH, $this->giveFields($this->people['Omar']->id()->toString()), [], $isTurboForm ? self::TURBO_FORM_HEADERS : []);
+
+        self::assertResponseStatusCodeSame(403);
+        $this->assertNoStreamAndNoWordOfTheTicket();
+        self::assertSame($stateBefore, $this->stateOfTicket());
+        self::assertNull($stateBefore['assignee_id']);
+    }
+
+    #[Test]
+    public function someoneOfAnotherOrganizationGetsNotFoundToAGiveAndNothingChanges(): void
+    {
+        $this->addTicket(['step' => 'backlog', 'assignee' => null]);
+        $stateBefore = $this->stateOfTicket();
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->people['Ben'] = $this->createUserWithoutOrganization('Ben');
+        $this->addMembership($this->people['Ben'], $betaBakery);
+        $this->setOrgRoles($this->people['Ben'], $betaBakery, '{admin}');
+        $this->logIn($this->client, $this->people['Ben']);
+
+        $this->client->request('POST', self::ASSIGN_PATH, $this->giveFields($this->people['Omar']->id()->toString()));
+
+        self::assertResponseStatusCodeSame(404);
+        $this->assertNoStreamAndNoWordOfTheTicket();
+        self::assertSame($stateBefore, $this->stateOfTicket());
+    }
+
+    #[Test]
+    public function anAnonymousVisitorIsSentToLogInFromAGiveAndNothingChanges(): void
+    {
+        $this->addTicket(['step' => 'backlog', 'assignee' => null]);
+        $stateBefore = $this->stateOfTicket();
+
+        $this->client->request('POST', self::ASSIGN_PATH, [TicketMoveController::VERSION_FIELD => (string) self::VERSION, TicketMoveController::ASSIGNEE_FIELD => $this->people['Omar']->id()->toString()]);
+
+        self::assertResponseStatusCodeSame(302);
+        self::assertStringContainsString('/login', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertSame($stateBefore, $this->stateOfTicket());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, string}> the fields over a give to Omar, and the toast
+     */
+    public static function giveFormsOfNoUse(): iterable
+    {
+        yield 'a made-up token' => [[TicketMoveController::CSRF_FIELD => 'not-a-token'], MoveToasts::FORM_EXPIRED];
+        yield 'a version behind' => [[TicketMoveController::VERSION_FIELD => (string) (self::VERSION - 1)], MoveToasts::CHANGED_MEANWHILE];
+        yield 'a version that is no number' => [[TicketMoveController::VERSION_FIELD => 'three'], MoveToasts::CHANGED_MEANWHILE];
+        yield 'an assignee who is no uuid' => [[TicketMoveController::ASSIGNEE_FIELD => 'omar'], MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE];
+        yield 'no assignee' => [[TicketMoveController::ASSIGNEE_FIELD => ''], MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE];
+        yield 'an assignee with a trailing newline' => [[TicketMoveController::ASSIGNEE_FIELD => '{Omar}'."\n"], MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE];
+    }
+
+    /**
+     * Refused before the give is asked, each answered 422 with a stream of the unchanged ticket and the reason.
+     *
+     * @param array<string, string> $fields
+     */
+    #[Test]
+    #[DataProvider('giveFormsOfNoUse')]
+    public function aGiveFormOfNoUseIsRefusedWithAToastAndNothingChanges(array $fields, string $expectedToast): void
+    {
+        $this->addTicket(['step' => 'backlog', 'assignee' => null]);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+        $sentFields = array_map(fn (string $value): string => strtr($value, ['{Omar}' => $this->people['Omar']->id()->toString()]), $fields);
+
+        $this->client->request('POST', self::ASSIGN_PATH, $this->giveFields($this->people['Omar']->id()->toString(), $sentFields), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(422);
+        self::assertSame($expectedToast, $this->toastOf($streams));
+        self::assertSame('Backlog', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertSame($stateBefore, $this->stateOfTicket());
+    }
+
+    /**
+     * @return iterable<string, array{array{step: string, assignee?: string|null}, string, string}> the ticket's columns,
+     *                                                                                              who it is given to,
+     *                                                                                              and the toast
+     */
+    public static function givesTheUseCaseRefuses(): iterable
+    {
+        yield 'a viewer of the team' => [['step' => 'backlog', 'assignee' => null], 'Mia', MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE];
+        yield 'a manager with no team role' => [['step' => 'backlog', 'assignee' => null], 'Raj', MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE];
+        yield 'someone Identity does not know' => [['step' => 'backlog', 'assignee' => null], self::NOBODY_ID, MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE];
+        yield 'the person who already has it' => [['step' => 'todo'], 'Omar', 'Omar already has this ticket.'];
+        yield 'a ticket in progress' => [['step' => 'progress'], 'Lena', MoveToasts::MOVE_REFUSED];
+    }
+
+    /**
+     * @param array{step: string, assignee?: string|null} $columns
+     */
+    #[Test]
+    #[DataProvider('givesTheUseCaseRefuses')]
+    public function aGiveTheUseCaseRefusesSaysWhyInAToastAndNothingChanges(array $columns, string $assignee, string $expectedToast): void
+    {
+        $this->addTicket($columns);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', self::ASSIGN_PATH, $this->giveFields(isset($this->people[$assignee]) ? $this->people[$assignee]->id()->toString() : $assignee));
+
+        self::assertSame($expectedToast, $this->toastAfterTheRedirect());
+        self::assertSame($stateBefore, $this->stateOfTicket());
     }
 
     /**
@@ -1013,8 +1203,8 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state and its box and updates the
-     * toast region, in that order.
+     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state, its box, its People and
+     * What happened and updates the toast region, in that order.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
@@ -1029,7 +1219,7 @@ final class TicketMoveTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['update', self::TOAST_REGION_ID]],
+            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['replace', TicketPageParts::PEOPLE_ID], ['replace', TicketPageParts::ACTIVITY_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];
@@ -1038,6 +1228,8 @@ final class TicketMoveTest extends WebTestCase
         }
         self::assertCount(1, $streams[TicketPageParts::STATE_ID]->filter('#'.TicketPageParts::STATE_ID));
         self::assertCount(1, $streams[TicketPageParts::NEXT_STEP_ID]->filter('#'.TicketPageParts::NEXT_STEP_ID.' .next-step-box'));
+        self::assertCount(1, $streams[TicketPageParts::PEOPLE_ID]->filter('#'.TicketPageParts::PEOPLE_ID));
+        self::assertCount(1, $streams[TicketPageParts::ACTIVITY_ID]->filter('#'.TicketPageParts::ACTIVITY_ID));
 
         return $streams;
     }
@@ -1097,6 +1289,11 @@ final class TicketMoveTest extends WebTestCase
                 throw new \LogicException('Only moveTo is replaced.');
             }
 
+            public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
+            {
+                throw new \LogicException('Only moveTo is replaced.');
+            }
+
             public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): void
             {
                 throw $this->fault;
@@ -1128,6 +1325,16 @@ final class TicketMoveTest extends WebTestCase
             TicketMoveController::VERSION_FIELD => (string) self::VERSION,
             ...$overrides,
         ];
+    }
+
+    /**
+     * @param array<string, string> $overrides
+     *
+     * @return array<string, string> SHOP-1's form token and version, the assignee, then the overrides
+     */
+    private function giveFields(string $assigneeId, array $overrides = []): array
+    {
+        return $this->moveFields([TicketMoveController::ASSIGNEE_FIELD => $assigneeId, ...$overrides]);
     }
 
     /**
@@ -1165,7 +1372,7 @@ final class TicketMoveTest extends WebTestCase
     /**
      * SHOP-1's columns, and the count of Acme Foods' history and outbox rows.
      *
-     * @return array{step_id: mixed, version: mixed, waiting_on_user_id: mixed, waiting_on_label: mixed, events: int, outbox: int}
+     * @return array{step_id: mixed, assignee_id: mixed, version: mixed, waiting_on_user_id: mixed, waiting_on_label: mixed, events: int, outbox: int}
      */
     private function stateOfTicket(): array
     {
@@ -1173,7 +1380,7 @@ final class TicketMoveTest extends WebTestCase
         $row = [];
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$row): int {
             $row = $migrator->fetchAssociative(
-                "SELECT step_id, version, waiting_on_user_id, waiting_on_label,
+                "SELECT step_id, assignee_id, version, waiting_on_user_id, waiting_on_label,
                      (SELECT count(*) FROM tkt_ticket_event WHERE organization_id = ?) AS events,
                      (SELECT count(*) FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0) AS outbox
                  FROM tkt_ticket WHERE organization_id = ? AND key = ?",
@@ -1188,6 +1395,7 @@ final class TicketMoveTest extends WebTestCase
 
         return [
             'step_id' => $row['step_id'],
+            'assignee_id' => $row['assignee_id'],
             'version' => $row['version'],
             'waiting_on_user_id' => $row['waiting_on_user_id'],
             'waiting_on_label' => $row['waiting_on_label'],
@@ -1228,17 +1436,18 @@ final class TicketMoveTest extends WebTestCase
 
     /**
      * SHOP-1 unless numbered, a major bug of Shop's team for everyone at VERSION, reported by Lena and assigned to Omar
-     * unless others are named. The reviewer is a person's name, or an id no user has.
+     * unless others are named, or nobody for an assignee of null. The reviewer is a person's name, or an id no user has.
      *
-     * @param array{step: string, number?: int, assignee?: string, reviewer?: string, reporter?: string, waitingOn?: string, visibility?: string} $columns
+     * @param array{step: string, number?: int, assignee?: string|null, reviewer?: string, reporter?: string, waitingOn?: string, visibility?: string} $columns
      */
     private function addTicket(array $columns): void
     {
         $number = $columns['number'] ?? 1;
         $reviewer = $columns['reviewer'] ?? null;
+        $assignee = \array_key_exists('assignee', $columns) ? $columns['assignee'] : 'Omar';
         $parameters = [
             $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), $number, 'SHOP-'.$number,
-            $this->steps[$columns['step']], $this->people[$columns['reporter'] ?? 'Lena']->id()->toString(), $this->people[$columns['assignee'] ?? 'Omar']->id()->toString(),
+            $this->steps[$columns['step']], $this->people[$columns['reporter'] ?? 'Lena']->id()->toString(), null === $assignee ? null : $this->people[$assignee]->id()->toString(),
             null === $reviewer ? null : (isset($this->people[$reviewer]) ? $this->people[$reviewer]->id()->toString() : $reviewer),
             isset($columns['waitingOn']) ? $this->people[$columns['waitingOn']]->id()->toString() : null, $columns['visibility'] ?? 'all', self::VERSION,
         ];

@@ -38,6 +38,7 @@ final class NextStepBoxComponentTest extends KernelTestCase
     private const string HOLD_ID = '0197a3c0-0000-7000-8000-000000000005';
     private const string MIA_ID = '0197a3c0-0000-7000-8000-0000000000a1';
     private const string OMAR_ID = '0197a3c0-0000-7000-8000-0000000000a2';
+    private const string TEAM_ID = '0197a3c0-0000-7000-8000-0000000000b1';
 
     protected function setUp(): void
     {
@@ -79,9 +80,9 @@ final class NextStepBoxComponentTest extends KernelTestCase
             new TransitionView('plan_it', 'Plan it', true, MoveTarget::coreStep('todo')),
             new TransitionView('give_it_to', 'Give it to…', false, MoveTarget::coreStep('todo')),
             new TransitionView('put_on_hold', 'Put on hold', false, MoveTarget::coreStep('hold')),
-        ], null, []));
+        ], null, []), ['teamId' => self::TEAM_ID, 'canGive' => true]);
 
-        $forms = $box->filter('.next-step-box__verbs form');
+        $forms = $box->filter('.next-step-box__verbs form:not([hidden])');
         self::assertSame(
             [
                 ['/t/SHOP-7/move/plan_it', 'post', 'Plan it', 'submit', 'btn btn-filled'],
@@ -90,6 +91,72 @@ final class NextStepBoxComponentTest extends KernelTestCase
             $forms->each(static fn (Crawler $form): array => [$form->attr('action'), $form->attr('method'), $form->filter('button')->text(), $form->filter('button')->attr('type'), $form->filter('button')->attr('class')]),
         );
         $this->assertCarriesTokenAndVersionOnly($forms, []);
+        self::assertSame(
+            ['Plan it', 'Give it to…', 'Put on hold'],
+            $box->filter('.next-step-box__verbs > form > button, .next-step-box__verbs [data-person-picker-trigger]')->each(static fn (Crawler $button): string => $button->text()),
+            'Give it to… keeps its place in the policy\'s order.',
+        );
+    }
+
+    #[Test]
+    public function giveItToOpensTheAssignPickerWhoseRowsSubmitAHiddenFormToTheAssignRoute(): void
+    {
+        $box = $this->render(new NextStep('Give it to someone.', [
+            new TransitionView('plan_it', 'Plan it', false, MoveTarget::coreStep('todo')),
+            new TransitionView('give_it_to', 'Give it to…', true, MoveTarget::coreStep('todo')),
+        ], null, []), ['teamId' => self::TEAM_ID, 'canGive' => true]);
+
+        $giveForm = $box->filter('form#give-it-to-form');
+        self::assertCount(1, $giveForm);
+        self::assertSame(['/t/SHOP-7/assign', 'post', '', 'true'], [$giveForm->attr('action'), $giveForm->attr('method'), $giveForm->attr('hidden'), $giveForm->attr('data-turbo')]);
+        self::assertNotSame('', (string) $giveForm->attr('data-failed-toast'));
+        $this->assertCarriesTokenAndVersionOnly($giveForm, []);
+        self::assertCount(0, $box->filter('dialog#give-it-to-picker form#give-it-to-form'), 'The form sits outside the dialog.');
+
+        self::assertCount(1, $box->filter('.next-step-box__give[data-turbo="true"] dialog#give-it-to-picker'), 'Turbo posts the form only for a submitter inside a data-turbo="true" element.');
+        $trigger = $box->filter('[data-person-picker-trigger]');
+        self::assertSame(['Give it to…', 'btn btn-filled', 'dialog'], [$trigger->text(), $trigger->attr('class'), $trigger->attr('aria-haspopup')]);
+        self::assertSame('Give SHOP-7 to…', $box->filter('dialog#give-it-to-picker #give-it-to-picker-title')->text());
+        $search = $box->filter('dialog#give-it-to-picker [data-live-name-value="PersonPickerSearch"]');
+        self::assertCount(1, $search);
+        $searchProps = json_decode((string) $search->attr('data-live-props-value'), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertIsArray($searchProps);
+        self::assertSame(
+            ['assign', self::TEAM_ID, 'give-it-to-form', TicketMoveController::ASSIGNEE_FIELD],
+            [$searchProps['mode'] ?? null, $searchProps['team'] ?? null, $searchProps['pickForm'] ?? null, $searchProps['pickField'] ?? null],
+        );
+    }
+
+    #[Test]
+    public function giveItToSomeoneElseIsAnOutlineTriggerWithThePolicysLabel(): void
+    {
+        $box = $this->render(new NextStep('Start work.', [
+            new TransitionView('start_work', 'Start work', true, MoveTarget::coreStep('progress')),
+            new TransitionView('give_it_to', 'Give it to someone else…', false, MoveTarget::coreStep('todo')),
+        ], null, []), ['teamId' => self::TEAM_ID, 'canGive' => true]);
+
+        $trigger = $box->filter('[data-person-picker-trigger]');
+        self::assertSame(['Give it to someone else…', 'btn btn-outline'], [$trigger->text(), $trigger->attr('class')]);
+    }
+
+    #[Test]
+    public function noGiveFormOrPickerShowsWhenGiveItToIsNotOffered(): void
+    {
+        $box = $this->render(new NextStep('Start work.', [new TransitionView('start_work', 'Start work', true, MoveTarget::coreStep('progress'))], null, []));
+
+        self::assertCount(0, $box->filter('#give-it-to-form, [data-person-picker-trigger], dialog'));
+    }
+
+    #[Test]
+    public function aViewerNotGrantedAssignSeesNoGiveItToThoughThePolicyOffersIt(): void
+    {
+        $box = $this->render(new NextStep('Give it to someone.', [
+            new TransitionView('give_it_to', 'Give it to…', true, MoveTarget::coreStep('todo')),
+            new TransitionView('put_on_hold', 'Put on hold', false, MoveTarget::coreStep('hold')),
+        ], null, []), ['teamId' => self::TEAM_ID, 'canGive' => false]);
+
+        self::assertCount(0, $box->filter('#give-it-to-form, [data-person-picker-trigger], dialog'));
+        self::assertSame(['Put on hold'], $box->filter('.next-step-box__verbs button')->each(static fn (Crawler $button): string => $button->text()));
     }
 
     #[Test]

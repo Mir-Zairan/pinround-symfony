@@ -1,5 +1,11 @@
 <div{{ attributes.defaults({class: 'seg-group'}) }} role="group" aria-label="{{ this.label }}">
+{%- if this.links is not empty -%}
+{%- for link in this.links -%}
+<a class="seg" href="{{ link.href }}"{% if link.isCurrent %} aria-current="page"{% endif %}>{{ link.label }}</a>
+{%- endfor -%}
+{%- else -%}
 {%- for value, optionLabel in this.options -%}
 <button type="button" class="seg" value="{{ value }}" aria-pressed="{{ (value ~ '') == this.selected ? 'true' : 'false' }}">{{ optionLabel }}</button>
 {%- endfor -%}
+{%- endif -%}
 </div>

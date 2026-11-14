@@ -23,6 +23,7 @@ use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\WaitingOnRefused;
+use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\RoleTicketVisibilities;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\StepQueries;
@@ -35,8 +36,8 @@ use Symfony\Component\Uid\Uuid;
 use Symfony\UX\Turbo\TurboBundle;
 
 /**
- * The moves of the ticket page (FR-TKT-10, P03.T7, ticket-page.md, Your next step box): a verb button, and the lead's
- * "Move to another step…". Each answers with a toast from {@see MoveToasts}: a Turbo form in a Turbo Stream that also
+ * The moves of the ticket page (FR-TKT-10, P03.T7, ticket-page.md, Your next step box): a verb button, the lead's
+ * "Move to another step…", and the lead's "Give it to…" (P03.T8). Each answers with a toast from {@see MoveToasts}: a Turbo form in a Turbo Stream that also
  * re-renders the ticket's state and its Your next step box, any other form with a redirect to the ticket page.
  *
  * Without the request transaction, as NewTicketController: a move can be refused after its conditional UPDATE, and only
@@ -50,12 +51,17 @@ final class TicketMoveController extends AbstractController
 {
     public const string MOVE_ROUTE = 'ticket_move';
     public const string MOVE_TO_ROUTE = 'ticket_move_to';
+    public const string ASSIGN_ROUTE = 'ticket_assign';
 
-    /** The form fields the actions read. The waiting-on fields are move-to's, and empty for none. */
+    /**
+     * The form fields the actions read. The waiting-on fields are move-to's, and empty for none; the assignee is
+     * assign's, a user id.
+     */
     public const string CSRF_FIELD = '_csrf_token';
     public const string VERSION_FIELD = 'version';
     public const string WAITING_ON_USER_FIELD = 'waiting_on_user_id';
     public const string WAITING_ON_LABEL_FIELD = 'waiting_on_label';
+    public const string ASSIGNEE_FIELD = 'assignee';
 
     /** In characters after trimming, as TicketCommands::moveTo counts them. */
     public const int WAITING_ON_LABEL_MAX_LENGTH = 100;
@@ -171,6 +177,48 @@ final class TicketMoveController extends AbstractController
                 }
 
                 return MoveToasts::movedTo($this->listedStepNameOf($stepId));
+            });
+        } catch (TicketNotFound) {
+            throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
+        } catch (TicketChangedMeanwhile) {
+            return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (MoveRefusedWithToast $refused) {
+            return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
+    }
+
+    /**
+     * "Give it to…" and "Give it to someone else…": only the team's lead may give a ticket (TicketPermission::ASSIGN),
+     * so anyone else who may move it is denied. Whom it may go to, and from which step, is the use case's and the
+     * policy's, whose refusal is a toast.
+     */
+    #[Route('/t/{key}/assign', name: self::ASSIGN_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function assign(string $key, Request $request): Response
+    {
+        $this->requestTenant();
+        $csrfToken = $request->request->getString(self::CSRF_FIELD);
+        $expectedVersion = self::versionOf($request);
+        $assigneeId = $request->request->getString(self::ASSIGNEE_FIELD);
+        $now = $this->clock->now();
+
+        try {
+            $toast = $this->transactions->run(function () use ($key, $csrfToken, $expectedVersion, $assigneeId, $now): string {
+                [$actor, $ticket] = $this->movableTicketOf($key);
+                $this->denyAccessUnlessGranted(TicketPermission::ASSIGN, $ticket->visibilityFacts);
+                $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
+                if (!Uuid::isValid($assigneeId)) {
+                    throw new MoveRefusedWithToast(MoveTicket::ASSIGNEE_NOT_IN_TEAM_NOTE);
+                }
+                $assignee = new UserId(strtolower($assigneeId));
+                try {
+                    $this->ticketCommands->giveTo($actor->organizationId(), $actor->userId(), $key, $assignee, $expectedVersion, $now);
+                } catch (MoveRefused $refused) {
+                    throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
+                }
+
+                return MoveToasts::givenTo($this->firstNameOf($assignee, $ticket));
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);

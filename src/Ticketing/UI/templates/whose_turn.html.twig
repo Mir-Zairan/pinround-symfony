@@ -1,0 +1,62 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Whose turn? · {{ heading }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/tickets.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="tickets">
+        <header class="tickets__header">
+            <h1 class="tickets__title">{{ heading }}</h1>
+            <p class="tickets__total">{{ totalLine }}</p>
+            <twig:SegmentedControl label="View" :links="[{label: 'List', href: path('ticketing_tickets', viewQuery), isCurrent: false}, {label: 'Whose turn?', href: path('ticketing_whose_turn', viewQuery), isCurrent: true}]" />
+        </header>
+
+        {% if cards is empty %}
+            <twig:EmptyState message="{{ noTickets }}" />
+        {% else %}
+            <p class="turn__intro">{{ intro }}</p>
+            <ul class="turn__cards">
+                {% for card in cards %}
+                    <li id="{{ card.id }}" class="turn__card turn__card--{{ card.tone }}">
+                        <div class="turn__head">
+                            <twig:Avatar name="{{ card.avatarName }}" size="lg" class="turn__avatar turn__avatar--{{ card.tone }}" aria-hidden="true" />
+                            <div class="turn__who">
+                                <h2 class="turn__name">{{ card.name }}</h2>
+                                <p class="turn__sentence">{{ card.sentence }}</p>
+                            </div>
+                            <progress class="turn__meter turn__meter--{{ card.meterLevel }}" max="{{ meterMax }}" value="{{ card.meterValue }}" title="{{ card.meterTitle }}" aria-hidden="true"></progress>
+                        </div>
+                        <ul class="turn__rows">
+                            {% for row in card.rows %}
+                                <li class="turn__row">
+                                    <a class="turn__row-link" href="{{ path('ticket_show', {key: row.key}|merge(listQuery)) }}">
+                                        <strong class="turn__verb">{{ row.verb }}</strong> · <span class="turn__key">{{ row.key }}</span> <span class="turn__title">{{ row.title }}</span>
+                                    </a>
+                                    <span class="turn__wait{{ row.isWaitTooLong ? ' turn__wait--too-long' }}">{{ row.wait }}</span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                        {% if card.moreText %}
+                            <a class="turn__more" href="{{ card.moreUrl }}">{{ card.moreText }}</a>
+                        {% elseif card.fewerUrl %}
+                            <a class="turn__more" href="{{ card.fewerUrl }}">Show fewer</a>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        {% if backToTheStartUrl or nextPageUrl %}
+            <nav class="turn__pages" aria-label="Pages of cards">
+                {% if backToTheStartUrl %}
+                    <a class="turn__first-page" href="{{ backToTheStartUrl }}">{{ backToTheStartText }}</a>
+                {% endif %}
+                {% if nextPageUrl %}
+                    <a class="turn__next-page" href="{{ nextPageUrl }}">{{ nextPageText }}</a>
+                {% endif %}
+            </nav>
+        {% endif %}
+    </div>
+{% endblock %}

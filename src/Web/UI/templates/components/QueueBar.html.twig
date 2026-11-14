@@ -1,0 +1,18 @@
+<nav{{ attributes.defaults({class: 'queue-bar', 'aria-label': 'Queue'}) }} data-turbo-prefetch="false">
+    <p class="queue-bar__line"><span class="queue-bar__label">{{ this.label }}</span> · {{ this.place }} of {{ this.count }}</p>
+    <div class="queue-bar__actions">
+        <twig:Button variant="tonal" size="sm" href="{{ this.previousUrl ?? '' }}" :disabled="this.previousUrl is null" class="queue-bar__previous">Previous</twig:Button>
+        {% if this.nextUrl is not null %}
+            <twig:Button variant="tonal" size="sm" href="{{ this.nextUrl }}" class="queue-bar__next">Next ticket</twig:Button>
+        {% else %}
+            <form method="post" action="{{ this.finishUrl }}" class="queue-bar__form" data-turbo-frame="_top">
+                <input type="hidden" name="_csrf_token" value="{{ this.csrfToken }}">
+                <twig:Button type="submit" variant="tonal" size="sm" class="queue-bar__finish">Finish</twig:Button>
+            </form>
+        {% endif %}
+        <form method="post" action="{{ this.stopUrl }}" class="queue-bar__form" data-turbo-frame="_top">
+            <input type="hidden" name="_csrf_token" value="{{ this.csrfToken }}">
+            <twig:Button type="submit" variant="text" size="sm" class="queue-bar__stop">Stop</twig:Button>
+        </form>
+    </div>
+</nav>

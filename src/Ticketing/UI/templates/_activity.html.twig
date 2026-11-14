@@ -1,0 +1,4 @@
+{# What happened, from TicketPageParts: the page renders it, and a move's Turbo Stream answer replaces it. It always holds the created line. #}
+<div id="{{ constant('App\\Ticketing\\UI\\TicketPageParts::ACTIVITY_ID') }}" class="ticket__activity">
+    <twig:Activity :lines="activity" />
+</div>

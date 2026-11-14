@@ -403,6 +403,22 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * Ticketing's view for Insight's one allowed join (Version20261114100000): only read, and run with the reader's
+     * rights, so tkt_ticket's row-level security applies to it.
+     */
+    #[Test]
+    public function theTicketListViewIsOnlyReadAndRunsWithTheReadersRights(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(['pinround_app SELECT', 'pinround_readonly SELECT'], $this->grantsToOthersThanTheOwner($connection, 'tkt_ticket_list_v'));
+        self::assertSame(
+            ['v', 'pinround_migrator', '{security_invoker=true}'],
+            $connection->fetchNumeric("SELECT relkind::text, relowner::regrole::text, reloptions::text FROM pg_class WHERE oid = to_regclass('public.tkt_ticket_list_v')"),
+        );
+    }
+
+    /**
      * A ticket's history (Version20261111140000): append-only for the app, read by support under the tenant policy.
      * Grants on the parent only, so no role reads a partition directly and skips the parent's policy.
      */

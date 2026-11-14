@@ -1,18 +1,23 @@
-{# The person picker's rows, most open tickets first, and the hint when more people match than are shown. PersonPickerSearch passes the live event a row emits up with the person's id; without one (the gallery's sample) a row only closes the dialog. #}
-{% props rows, matchCount, pickedEvent = '' %}
+{# The person picker's rows in the mode's order with the mode's count beside each, and the hint when more people match than are shown. In Assign mode PersonPickerSearch passes the form a row submits and the field it fills with the person's id; in Filter mode the live event a row emits up with the person's id; without either (the gallery's sample) a row only closes the dialog. #}
+{% props rows, matchCount, mode, pickedEvent = '', pickForm = '', pickField = '' %}
 <ul class="person-picker__rows" data-action="keydown->person-picker#moveBetweenRows">
     {% for row in rows %}
         <li>
-            <button type="button" class="pick" data-person-pick="{{ row.personId }}" data-person-picker-target="row"
-                aria-pressed="{{ row.isPressed ? 'true' : 'false' }}"
-                {% if pickedEvent is not empty %}
-                    data-action="live#emitUp dialog#close" data-live-event-param="{{ pickedEvent }}" data-live-person-param="{{ row.personId }}"
-                {% else %}
-                    data-action="dialog#close"
-                {% endif %}>
+            {% if pickForm is not empty %}
+                <button type="submit" class="pick" data-person-pick="{{ row.personId }}" data-person-picker-target="row"
+                    form="{{ pickForm }}" name="{{ pickField }}" value="{{ row.personId }}" data-action="dialog#close">
+            {% else %}
+                <button type="button" class="pick" data-person-pick="{{ row.personId }}" data-person-picker-target="row"
+                    aria-pressed="{{ row.isPressed ? 'true' : 'false' }}"
+                    {% if pickedEvent is not empty %}
+                        data-action="live#emitUp dialog#close" data-live-event-param="{{ pickedEvent }}" data-live-person-param="{{ row.personId }}"
+                    {% else %}
+                        data-action="dialog#close"
+                    {% endif %}>
+            {% endif %}
                 <twig:Avatar name="{{ row.name }}" aria-hidden="true"/>
                 <span class="pick__name">{{ row.name }}</span>
-                <span class="pick__side">{{ row.openCount }} open</span>
+                <span class="pick__side">{{ mode.sideTextOf(row.count) }}</span>
             </button>
         </li>
     {% endfor %}

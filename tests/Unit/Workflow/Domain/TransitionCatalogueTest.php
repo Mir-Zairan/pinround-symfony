@@ -19,7 +19,7 @@ final class TransitionCatalogueTest extends TestCase
     {
         $expected = [
             ['plan_it', 'Plan it', ['backlog'], 'todo', ['lead'], true, 'any', false, true],
-            ['give_it_to', 'Give it to…', ['todo', 'backlog'], 'todo', ['lead', 'checker'], true, 'nobody', false, true],
+            ['give_it_to', 'Give it to…', ['todo', 'backlog'], 'todo', ['lead', 'checker_when_unassigned'], true, 'any', false, true],
             ['start_work', 'Start work', ['todo'], 'progress', ['assignee'], true, 'someone', false, true],
             ['send_to_code_review', 'Send to code review', ['progress'], 'review', ['assignee', 'lead_when_unassigned'], true, 'any', false, true],
             ['send_to_testing', 'Send to testing', ['progress'], 'test', ['assignee'], false, 'any', false, false],

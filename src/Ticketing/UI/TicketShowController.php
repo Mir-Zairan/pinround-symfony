@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\Identity\Api\CurrentTimeZone;
-use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
@@ -16,10 +15,8 @@ use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Application\RoleTicketVisibilities;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-use Symfony\Component\HttpFoundation\Exception\BadRequestException;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
@@ -32,13 +29,16 @@ use Symfony\Component\Routing\Attribute\Route;
  *
  * The list a row's link came from travels in the list's own query (TicketListContext): "N of M" with Previous and Next
  * walk that list (TicketQueries::positionOf). With no list, a filter the list would refuse, or a ticket that is not in
- * it, they walk the plain open-tickets list; a Done ticket in neither has no position line.
+ * it, they walk the plain open-tickets list; a Done ticket in neither has no position line. A ticket in the viewer's
+ * queue (TicketQueue, FR-TKT-15) shows the QueueBar instead, which walks the queue, and costs no position query.
  *
- * Five queries beyond the request's own when the steps, rules and team's people are cached (performance-and-scale.md: ten
- * at most for the page): the settings (step policy and triager, one query), the ticket with its project and parent, the
- * names of everyone the page shows in one batch, the saved turn with the waiting turns of {@see NowNextSentences} in
- * one, and the position in one; a miss of the team's people adds two. A list's project adds its lookup; a list the
- * ticket is not in adds the plain list's position.
+ * Six queries beyond the request's own when the steps, rules and team's people are cached, seven for a lead whose move
+ * list offers Needs input (performance-and-scale.md: ten at most for the page): the settings (step policy and triager,
+ * one query), the ticket with its project and parent, the names of everyone the page shows in one batch, the saved turn
+ * with the waiting turns of {@see NowNextSentences} in one, the latest moves of What happened in one
+ * ({@see TicketPageParts}), and the position in one; the lead's Needs input dialog adds its membership read, and a miss
+ * of the team's people adds two. A list's project adds its lookup; a list the ticket is not in adds the plain list's
+ * position.
  */
 final class TicketShowController extends AbstractController
 {
@@ -73,12 +73,17 @@ final class TicketShowController extends AbstractController
         if (null === $ticket || !$this->isGranted(TicketPermission::VIEW, $ticket->visibilityFacts)) {
             throw $this->createNotFoundException(self::NOT_FOUND);
         }
-        $listContext = $this->listContextOf($request, $actor);
-        $position = $this->ticketQueries->positionOf($ticket->key, $listContext->filterFor($visibility));
+        $listContext = TicketListContext::fromRequestOrPlain($request, $actor, $this->projectQueries);
+        $queue = TicketQueue::of($request->getSession());
+        $queueBar = null === $queue ? null : $this->queueBarOf($queue, $ticket->key, $listContext);
+        $position = null;
         $positionContext = $listContext;
-        if (null === $position && !$listContext->isPlainList()) {
-            $positionContext = new TicketListContext();
-            $position = $this->ticketQueries->positionOf($ticket->key, $positionContext->filterFor($visibility));
+        if (null === $queueBar) {
+            $position = $this->ticketQueries->positionOf($ticket->key, $listContext->filterFor($visibility));
+            if (null === $position && !$listContext->isPlainList()) {
+                $positionContext = new TicketListContext();
+                $position = $this->ticketQueries->positionOf($ticket->key, $positionContext->filterFor($visibility));
+            }
         }
 
         $now = $this->clock->now();
@@ -87,6 +92,7 @@ final class TicketShowController extends AbstractController
         return $this->render('@Ticketing/show.html.twig', [
             ...$this->ticketPageParts->of($ticket, $actor),
             'backQuery' => $listContext->query(),
+            'queueBar' => $queueBar,
             'position' => null === $position ? null : [
                 'line' => self::positionLineOf($position),
                 'previousUrl' => null === $position->previousKey ? null : $this->generateUrl(self::ROUTE, ['key' => $position->previousKey, ...$positionContext->query()]),
@@ -111,16 +117,32 @@ final class TicketShowController extends AbstractController
     }
 
     /**
-     * The list the viewer came from, from a list row's link; a filter the list would refuse here only drops the
-     * context, as the ticket itself is still there to show.
+     * The QueueBar's props for a ticket in the viewer's queue; Previous and Next keep the list query so Stop and Back
+     * return to the list the queue started from.
+     *
+     * Null when the queue does not hold the ticket.
+     *
+     * @return array{label: string, place: int, count: int, previousUrl: string|null, nextUrl: string|null, finishUrl: string, stopUrl: string, csrfId: string}|null
      */
-    private function listContextOf(Request $request, ActorContext $viewer): TicketListContext
+    private function queueBarOf(TicketQueue $queue, string $ticketKey, TicketListContext $listContext): ?array
     {
-        try {
-            return TicketListContext::fromRequest($request, $viewer, $this->projectQueries);
-        } catch (HttpExceptionInterface|BadRequestException) {
-            return new TicketListContext();
+        $place = $queue->placeOf($ticketKey);
+        if (null === $place) {
+            return null;
         }
+        $previousKey = $queue->previousKeyOf($ticketKey);
+        $nextKey = $queue->nextKeyOf($ticketKey);
+
+        return [
+            'label' => $queue->label,
+            'place' => $place,
+            'count' => $queue->count(),
+            'previousUrl' => null === $previousKey ? null : $this->generateUrl(self::ROUTE, ['key' => $previousKey, ...$listContext->query()]),
+            'nextUrl' => null === $nextKey ? null : $this->generateUrl(self::ROUTE, ['key' => $nextKey, ...$listContext->query()]),
+            'finishUrl' => $this->generateUrl(QueueController::FINISH_ROUTE),
+            'stopUrl' => $this->generateUrl(QueueController::STOP_ROUTE, ['key' => $ticketKey, ...$listContext->query()]),
+            'csrfId' => QueueController::CSRF_ID,
+        ];
     }
 
     /**

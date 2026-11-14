@@ -18,6 +18,9 @@
                 <h1 class="tickets__title">{{ heading }}</h1>
                 {# Outside the frame, so it stays in the page and screen readers hear each new count; ticket-list copies it from the loaded frame. #}
                 <p class="tickets__total" role="status" {{ stimulus_target('ticket-list', 'total') }}>{{ totalLine }}</p>
+                {# Only the project and the picked team, which change by a full page load, so these links never go stale. #}
+                {% set viewQuery = {project: filters.project, team: filters.pickedTeam}|filter(value => value != '') %}
+                <twig:SegmentedControl label="View" :links="[{label: 'List', href: path('ticketing_tickets', viewQuery), isCurrent: true}, {label: 'Whose turn?', href: path('ticketing_whose_turn', viewQuery), isCurrent: false}]" />
             </header>
 
             {# TicketFilters sends the list's new URL after each change; ticket-list loads it into this frame and the rail's. #}

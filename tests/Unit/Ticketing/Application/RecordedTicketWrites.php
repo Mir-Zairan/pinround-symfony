@@ -109,6 +109,26 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         );
     }
 
+    public function recordGiven(
+        OrganizationId $organizationId,
+        TicketId $ticketId,
+        UserId $actor,
+        string $fromStepId,
+        string $toStepId,
+        UserId $assignee,
+        \DateTimeImmutable $at,
+    ): void {
+        $this->writes[] = \sprintf(
+            'given %s by %s from %s to %s to %s at %s',
+            $ticketId->toString(),
+            $actor->toString(),
+            $fromStepId,
+            $toStepId,
+            $assignee->toString(),
+            $at->format('Y-m-d H:i'),
+        );
+    }
+
     public function refresh(TicketId $ticketId): ?string
     {
         $this->writes[] = 'turn '.$ticketId->toString();
