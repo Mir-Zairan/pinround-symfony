@@ -14,7 +14,8 @@ mercure:
                 topics: ['*']
                 claims: &claims
                     iss: '%env(MERCURE_JWT_ISSUER)%'
-                    aud: '%env(MERCURE_JWT_ISSUER)%'
+                    # The Caddyfile's resource_identifier: the hub refuses any other audience.
+                    aud: '%env(MERCURE_PUBLIC_URL)%'
                     sub: 'pinround'
                     client_id: 'pinround'
             subscriber:

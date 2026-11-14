@@ -92,7 +92,7 @@ Secrets stored in the database (MFA seeds, and later integration tokens, client 
 | `MERCURE_PUBLISHER_JWT_ALG` | `HS256` | app (Caddy hub) | no | Signing algorithm of the publisher key. |
 | `MERCURE_SUBSCRIBER_JWT_KEY` | empty on purpose in `.env`; dev placeholder in `.env.dev` and `compose.yaml`; none, required in prod | app (Caddy hub) | yes | Key that checks subscribe tokens. Prod refuses an empty or `change-me` value. |
 | `MERCURE_SUBSCRIBER_JWT_ALG` | `HS256` | app (Caddy hub) | no | Algorithm of the subscriber key. |
-| `MERCURE_PUBLIC_URL` | empty on purpose in `.env`; `https://localhost/.well-known/mercure` in `.env.dev` and `.env.test` | app | no | The hub URL browsers subscribe to. Its origin joins the CSP `connect-src`. Empty adds no source. |
+| `MERCURE_PUBLIC_URL` | empty on purpose in `.env`; `https://localhost/.well-known/mercure` in `.env.dev`, `.env.test` and `compose.yaml` (app); none, required in prod | app, workers (Caddy hub) | no | The hub URL browsers subscribe to. Its origin joins the CSP `connect-src`. It is also the `aud` of every hub token: the Caddyfile pins it as the hub's `resource_identifier` and `mercure.yaml` signs it, so the hub refuses a token with any other audience. Caddy does not start when it is unset. |
 | `MERCURE_TRUSTED_ISSUERS` | `https://localhost` | app (Caddyfile only) | no | Issuer name the hub accepts in tokens. Not in an env file; set it in prod to the public origin. |
 
 ## Object storage

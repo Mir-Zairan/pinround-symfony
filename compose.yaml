@@ -47,6 +47,8 @@ services:
       MERCURE_PUBLISHER_JWT_ALG: ${MERCURE_PUBLISHER_JWT_ALG:-HS256}
       MERCURE_SUBSCRIBER_JWT_KEY: ${MERCURE_SUBSCRIBER_JWT_KEY:-change-me-dev-only-subscriber-key-32}
       MERCURE_SUBSCRIBER_JWT_ALG: ${MERCURE_SUBSCRIBER_JWT_ALG:-HS256}
+      # Caddy reads only the process environment, not .env.dev: the hub's token audience (the Caddyfile).
+      MERCURE_PUBLIC_URL: ${MERCURE_PUBLIC_URL:-https://localhost/.well-known/mercure}
     volumes:
       - .:/app
       - caddy_data:/data
