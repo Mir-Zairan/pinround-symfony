@@ -282,6 +282,13 @@ when@test:
         test.notification_open_bell_group:
             alias: App\Notification\Application\Bell\OpenBellGroup
             public: true
+        # Nothing sends a digest before its job (P04.T8 slice B); the digest tests get its parts as the job would.
+        test.notification_digest_items:
+            alias: App\Notification\Application\Digest\DigestItems
+            public: true
+        test.notification_digest_mail:
+            alias: App\Notification\Infrastructure\Mail\DigestMail
+            public: true
         # No route posts, edits or removes a comment before the thread's controllers (P04.T1 slice B); the comment
         # tests get the use cases as a controller would.
         test.conversation_post_comment:
