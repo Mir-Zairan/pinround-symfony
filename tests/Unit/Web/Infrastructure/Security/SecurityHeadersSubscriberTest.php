@@ -71,7 +71,17 @@ final class SecurityHeadersSubscriberTest extends TestCase
 
         $directives = $this->cspDirectives($response);
         self::assertSame("img-src 'self' http://localhost:9000 data:", $directives['img-src']);
-        self::assertSame("connect-src 'self' https://localhost", $directives['connect-src']);
+        self::assertSame("connect-src 'self' http://localhost:9000 https://localhost", $directives['connect-src']);
+    }
+
+    #[Test]
+    public function theStorageOriginIsAllowedForPresignedUploadsInConnectSrc(): void
+    {
+        $withStorage = $this->cspDirectives($this->respond(new SecurityHeadersSubscriber(new CspNonce(), 'http://localhost:9000', '', 'dev')));
+        $withoutStorage = $this->cspDirectives($this->respond(new SecurityHeadersSubscriber(new CspNonce(), '', '', 'dev')));
+
+        self::assertSame("connect-src 'self' http://localhost:9000", $withStorage['connect-src']);
+        self::assertSame("connect-src 'self'", $withoutStorage['connect-src']);
     }
 
     /**

@@ -9,7 +9,7 @@ import {
   markSelected,
   placeMarker,
 } from '../review/pin_markup.js';
-import { arrowStep, cutNote, movePercent, percentOfPicture } from '../review/pin_position.js';
+import { arrowStep, cutNote, movePercent, noteLength, percentOfPicture } from '../review/pin_position.js';
 
 const DRAG_THRESHOLD_PX = 3;
 const ARROW_DIRECTIONS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
@@ -93,10 +93,10 @@ export default class extends Controller {
     if (!field) {
       return;
     }
-    if (field.value.length > this.noteMaxValue) {
+    if (noteLength(field.value) > this.noteMaxValue) {
       field.value = cutNote(field.value, this.noteMaxValue);
     }
-    const isFull = field.value.length >= this.noteMaxValue;
+    const isFull = noteLength(field.value) >= this.noteMaxValue;
     if (isFull || this.isLimitShown) {
       this.say(isFull ? `A note holds at most ${this.noteMaxValue.toLocaleString('en')} characters. Anything more is cut.` : '');
       this.isLimitShown = isFull;

@@ -33,7 +33,7 @@ sequenceDiagram
   participant W as Media worker
   B->>A: POST /media/intents {mime, bytes, sha256}
   A->>A: Voter: may upload here? quota OK? type/size OK?
-  A->>A: Save upload intent (pending, org, user, expected size)
+  A->>A: Save upload intent (org, user, max bytes, allowed types, expiry)
   A-->>B: {intentId, presigned PUT URL (5 min), headers}
   B->>S: PUT bytes (Content-Type and Content-Length fixed)
   S-->>B: 200
@@ -59,7 +59,8 @@ Before the presigned URL:
 
 In the worker:
 
-- **Size first:** a `HEAD` on the upload object; if its size is bigger than the intent allows (or differs from the declared size), the object is deleted and the intent is `rejected`. We do not rely on the storage to enforce `Content-Length` on a presigned PUT; a test uploads a bigger body and checks it is refused.
+- **Upload URL:** the presigned PUT pins the declared `Content-Type` and the exact `Content-Length`, so the storage refuses any other type or length.
+- **Size first:** the worker does a `HEAD` on the upload object and checks its size against the intent's `max_bytes`. If it is bigger, the object is deleted and the `MediaObject` is rejected (`MediaObject::reject`). The intent itself has no rejected state; it only records the limits and whether it was used.
 - Magic bytes must match a PNG, JPEG or WebP signature.
 - **Dimensions from the header, before decoding:** width × height ≤ 40 megapixels is read from the image header (libvips header-only load). Only then is the image decoded fully. This stops decompression bombs before they use memory.
 - libvips must then decode it fully.
@@ -70,7 +71,7 @@ In the worker:
 
 Runs on the `media` transport ([ADR-0009](../03-adr/0009-async-messaging-and-outbox.md)).
 
-1. `HEAD` the upload object and check its size against the intent (delete it if too big).
+1. `HEAD` the upload object and check its size against the intent's `max_bytes` (delete it and reject the `MediaObject` if too big).
 2. Download it to a temp file (limited size) and validate (see above; header dimensions before full decode).
 3. Re-encode with libvips to WebP:
    - `view`: max 1920 px wide, quality ≈ 85.

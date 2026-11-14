@@ -33,12 +33,13 @@ export function singleLineNote(note) {
   return note.replace(/[\p{Cc}\p{Zl}\p{Zp}\s]+/gu, ' ').trim();
 }
 
-/** The text cut to at most maxLength UTF-16 units, never in the middle of a surrogate pair. */
+/** The number of code points, which is what the server's mb_strlen counts (an emoji is 1, not 2). */
+export function noteLength(note) {
+  return [...note].length;
+}
+
+/** The text cut to at most maxLength code points. */
 export function cutNote(note, maxLength) {
-  if (note.length <= maxLength) {
-    return note;
-  }
-  const cut = note.slice(0, maxLength);
-  const lastUnit = cut.charCodeAt(cut.length - 1);
-  return lastUnit >= 0xd800 && lastUnit <= 0xdbff ? cut.slice(0, -1) : cut;
+  const codePoints = [...note];
+  return codePoints.length <= maxLength ? note : codePoints.slice(0, maxLength).join('');
 }

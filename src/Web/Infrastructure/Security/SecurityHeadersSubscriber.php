@@ -13,8 +13,9 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * Puts the headers of the CSP example in docs/02-architecture/security.md on every main-request response. It
  * replaces any value a controller set, so no response can loosen the policy by accident.
  *
- * The origins of OBJECT_STORAGE_PUBLIC_URL (the bucket's own URL) and MERCURE_PUBLIC_URL (the hub browsers
- * subscribe to) join img-src and connect-src. An empty value adds no source; a value that is not http(s) with a
+ * The origin of OBJECT_STORAGE_PUBLIC_URL (the bucket's own URL) joins img-src and connect-src (images are read
+ * from it and presigned uploads are PUT to it); the origin of MERCURE_PUBLIC_URL (the hub browsers subscribe to)
+ * joins connect-src. An empty value adds no source; a value that is not http(s) with a
  * plain host throws \InvalidArgumentException.
  */
 final readonly class SecurityHeadersSubscriber
@@ -65,7 +66,7 @@ final readonly class SecurityHeadersSubscriber
             "script-src 'self' ".$nonceSource,
             "style-src 'self' ".$nonceSource,
             self::directive('img-src', "'self'", $this->objectStorageOrigin, 'data:'),
-            self::directive('connect-src', "'self'", $this->mercureOrigin),
+            self::directive('connect-src', "'self'", $this->objectStorageOrigin, $this->mercureOrigin),
             "font-src 'self'",
             "frame-ancestors 'none'",
             "base-uri 'none'",
