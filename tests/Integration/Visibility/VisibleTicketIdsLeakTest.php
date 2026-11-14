@@ -4,14 +4,22 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Visibility;
 
+use App\Identity\Infrastructure\Doctrine\DbalUserQueries;
+use App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries;
+use App\Organization\Infrastructure\Doctrine\DbalTeamPeopleQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\ReadsSentSql;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibility;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries;
+use App\Ticketing\Infrastructure\Doctrine\TicketTeamLookup;
+use App\Workflow\Api\StepQueries;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -145,6 +153,40 @@ final class VisibleTicketIdsLeakTest extends VisibilityLeakCast
             self::tenantContext()->clear();
         }
         self::assertSame(0, self::queryCountOf($this->debugData()));
+    }
+
+    /**
+     * The SQL names Acme Foods while the transaction's tenant is Beta Bakery, so only row-level security hides the
+     * tickets Sara, an admin, may see; the same objects under Acme Foods give both back.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTickets(): void
+    {
+        $saraVisibility = self::asViewer('Sara', fn (): TicketVisibility => $this->visibilityOf('Sara'));
+        $asked = [new TicketId(self::teamOnlyTicketId()), new TicketId(self::NO_TEAM_TICKET)];
+        $checkAsked = fn (Connection $connection): array => self::idsOf($this->ticketQueriesOn($connection)->visibleTicketIdsOf($saraVisibility, $asked));
+        self::assertSame([self::teamOnlyTicketId(), self::NO_TEAM_TICKET], $this->ownTransactions()->rolledBackAs(self::ACME_FOODS, $checkAsked));
+
+        self::assertSame([], $this->ownTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $checkAsked));
+    }
+
+    private function ticketQueriesOn(Connection $connection): DbalTicketQueries
+    {
+        $stepQueries = self::createStub(StepQueries::class);
+
+        return new DbalTicketQueries(
+            $connection,
+            self::tenantContext(),
+            $stepQueries,
+            new DbalTurnUserQueries($connection, self::tenantContext()),
+            new DbalUserQueries($connection),
+            new TicketTeamLookup($stepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
+        );
+    }
+
+    private function ownTransactions(): OwnConnectionTransactions
+    {
+        return new OwnConnectionTransactions(self::connection(), self::tenantContext());
     }
 
     /**
