@@ -11,6 +11,7 @@ use App\Conversation\Api\ReplyRefused;
 use App\Conversation\Application\PostReply\PostReply;
 use App\Conversation\Application\RemoveMessage\RemoveMessage;
 use App\Conversation\Application\ThreadMessages;
+use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Infrastructure\Doctrine\DoctrineMessages;
 use App\Conversation\Infrastructure\Doctrine\DoctrineReplies;
 use App\SharedKernel\Application\TenantContext;
@@ -258,11 +259,10 @@ final class PostReplyTest extends KernelTestCase
         // The app's event bus writes to the outbox through the first session's connection, so the second publishes here.
         $secondSessionEvents = new RecordingConversationEvents();
         $replyInSecondSession = new PostReply(
-            self::visibilitiesForEveryoneOnly(),
+            new VisibleTickets(self::visibilitiesForEveryoneOnly(), $this->tenantContext()),
             new ThreadMessages(new DoctrineMessages($secondSession->entityManager)),
             new DoctrineReplies($secondSession->entityManager),
             $secondSessionEvents,
-            $this->tenantContext(),
         );
         $postOmarsReply = fn (): string => $replyInSecondSession->post(
             new TicketId(self::TICKET_FOR_EVERYONE),

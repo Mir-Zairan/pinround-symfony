@@ -10,6 +10,7 @@ use App\Conversation\Api\QuestionRefused;
 use App\Conversation\Application\Answer\Answer;
 use App\Conversation\Application\AskQuestion\AskQuestion;
 use App\Conversation\Application\ThreadMessages;
+use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Application\WithdrawQuestion\WithdrawQuestion;
 use App\Conversation\Infrastructure\Doctrine\DoctrineMessages;
 use App\Conversation\Infrastructure\Doctrine\DoctrineReplies;
@@ -551,12 +552,11 @@ final class QuestionUseCasesTest extends KernelTestCase
         };
 
         return new AskQuestion(
-            $this->ticketVisibilities(),
+            new VisibleTickets($this->ticketVisibilities(), $this->tenantContext()),
             $reassignmentThenPause,
             $this->turnProjector(),
             new DoctrineMessages($this->entityManager()),
             new MessengerConversationEvents(self::getContainer()->get('event.bus'), $this->connection()),
-            $this->tenantContext(),
         );
     }
 

@@ -8,11 +8,11 @@ use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Api\QuestionRefused;
 use App\Conversation\Application\ConversationEvents;
+use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\Messages;
 use App\Conversation\Domain\QuestionAlreadyOpen;
 use App\Insight\Api\TurnProjector;
-use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\AskedPersonNotOnTicket;
@@ -20,7 +20,6 @@ use App\Ticketing\Api\TicketAlreadyPaused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketPauses;
-use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibilityFacts;
 
 /**
@@ -34,12 +33,11 @@ final readonly class AskQuestion
     public const string ALREADY_WAITING = 'This ticket already waits for an answer.';
 
     public function __construct(
-        private TicketVisibilities $ticketVisibilities,
+        private VisibleTickets $visibleTickets,
         private TicketPauses $ticketPauses,
         private TurnProjector $turnProjector,
         private Messages $messages,
         private ConversationEvents $conversationEvents,
-        private TenantContext $tenantContext,
     ) {
     }
 
@@ -66,12 +64,7 @@ final readonly class AskQuestion
      */
     public function ask(TicketId $ticketId, TicketVisibilityFacts $ticket, UserId $askerId, UserId $askedUserId, string $body, \DateTimeImmutable $askedAt): string
     {
-        // The visibility predicate trusts the organization it is given: a ticket for everyone of any organization passes it.
-        if (true !== $this->tenantContext->get()?->equals($ticket->organizationId)
-            || !$this->ticketVisibilities->of($ticket->organizationId, $askerId)->isVisible($ticket)) {
-            throw new TicketNotFound('That ticket does not exist.');
-        }
-
+        $this->visibleTickets->refuseUnlessVisibleTo($ticket, $askerId);
         try {
             $question = Message::question($this->messages->nextIdentity(), $ticket->organizationId, $ticketId, $askerId, $askedUserId, trim($body), $askedAt);
         } catch (\InvalidArgumentException $invalidBody) {

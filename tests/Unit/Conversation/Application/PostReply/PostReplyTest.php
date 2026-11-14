@@ -10,6 +10,7 @@ use App\Conversation\Api\MessageNotFound;
 use App\Conversation\Api\ReplyRefused;
 use App\Conversation\Application\PostReply\PostReply;
 use App\Conversation\Application\ThreadMessages;
+use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\MessageId;
 use App\Conversation\Domain\Reply;
@@ -77,7 +78,7 @@ final class PostReplyTest extends TestCase
         $this->conversationEvents = new RecordingConversationEvents();
         $this->tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $this->tenantContext->set($acmeFoods);
-        $this->postReply = new PostReply(self::visibilitiesWithShopTeam([self::LENA, self::OMAR]), new ThreadMessages($this->messages), $this->replies, $this->conversationEvents, $this->tenantContext);
+        $this->postReply = new PostReply(new VisibleTickets(self::visibilitiesWithShopTeam([self::LENA, self::OMAR]), $this->tenantContext), new ThreadMessages($this->messages), $this->replies, $this->conversationEvents);
     }
 
     #[Test]

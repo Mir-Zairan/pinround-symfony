@@ -10,12 +10,11 @@ use App\Conversation\Api\MessageNotFound;
 use App\Conversation\Api\ReplyRefused;
 use App\Conversation\Application\ConversationEvents;
 use App\Conversation\Application\ThreadMessages;
+use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Domain\Replies;
-use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketNotFound;
-use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibilityFacts;
 
 /**
@@ -25,11 +24,10 @@ use App\Ticketing\Api\TicketVisibilityFacts;
 final readonly class PostReply
 {
     public function __construct(
-        private TicketVisibilities $ticketVisibilities,
+        private VisibleTickets $visibleTickets,
         private ThreadMessages $threadMessages,
         private Replies $replies,
         private ConversationEvents $conversationEvents,
-        private TenantContext $tenantContext,
     ) {
     }
 
@@ -54,12 +52,7 @@ final readonly class PostReply
      */
     public function post(TicketId $ticketId, TicketVisibilityFacts $ticket, string $messageId, UserId $authorId, string $body, \DateTimeImmutable $postedAt): string
     {
-        // The visibility predicate trusts the organization it is given: a ticket for everyone of any organization passes it.
-        if (true !== $this->tenantContext->get()?->equals($ticket->organizationId)
-            || !$this->ticketVisibilities->of($ticket->organizationId, $authorId)->isVisible($ticket)) {
-            throw new TicketNotFound('That ticket does not exist.');
-        }
-
+        $this->visibleTickets->refuseUnlessVisibleTo($ticket, $authorId);
         $message = $this->threadMessages->lockedOf($ticket->organizationId, $ticketId, $messageId);
         try {
             $reply = $message->reply($this->replies->nextIdentity(), $authorId, trim($body), $postedAt);

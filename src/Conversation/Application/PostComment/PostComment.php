@@ -7,13 +7,12 @@ namespace App\Conversation\Application\PostComment;
 use App\Conversation\Api\Event\CommentPosted;
 use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Application\ConversationEvents;
+use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\Messages;
-use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketNotFound;
-use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibilityFacts;
 
 /**
@@ -22,10 +21,9 @@ use App\Ticketing\Api\TicketVisibilityFacts;
 final readonly class PostComment
 {
     public function __construct(
-        private TicketVisibilities $ticketVisibilities,
+        private VisibleTickets $visibleTickets,
         private Messages $messages,
         private ConversationEvents $conversationEvents,
-        private TenantContext $tenantContext,
     ) {
     }
 
@@ -44,12 +42,7 @@ final readonly class PostComment
      */
     public function post(TicketId $ticketId, TicketVisibilityFacts $ticket, UserId $authorId, string $body, \DateTimeImmutable $postedAt): string
     {
-        // The visibility predicate trusts the organization it is given: a ticket for everyone of any organization passes it.
-        if (true !== $this->tenantContext->get()?->equals($ticket->organizationId)
-            || !$this->ticketVisibilities->of($ticket->organizationId, $authorId)->isVisible($ticket)) {
-            throw new TicketNotFound('That ticket does not exist.');
-        }
-
+        $this->visibleTickets->refuseUnlessVisibleTo($ticket, $authorId);
         try {
             $comment = Message::comment($this->messages->nextIdentity(), $ticket->organizationId, $ticketId, $authorId, trim($body), $postedAt);
         } catch (\InvalidArgumentException $invalidBody) {
