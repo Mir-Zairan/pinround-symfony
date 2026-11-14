@@ -147,6 +147,8 @@ framework:
             # Sent at once by QueueTicketPagesRefreshHandler, and again with a DelayStamp by RefreshTicketPagesHandler;
             # the hub is published to from worker-notify only (ADR-0023).
             App\Notification\Infrastructure\Mercure\RefreshTicketPages: async_notify
+            # Sent after the current bus by worker-notify's handlers; RefreshBellHandler publishes it there (ADR-0023).
+            App\Notification\Application\Realtime\RefreshBell: async_notify
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.
