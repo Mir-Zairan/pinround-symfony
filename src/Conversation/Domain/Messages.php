@@ -14,6 +14,12 @@ interface Messages
 {
     public function nextIdentity(): MessageId;
 
+    /**
+     * Saves the new message at once.
+     *
+     * @throws QuestionAlreadyOpen when the message is a question and its ticket has an open question already; the
+     *                             transaction can no longer commit, so the caller rolls back
+     */
     public function add(Message $message): void;
 
     /**

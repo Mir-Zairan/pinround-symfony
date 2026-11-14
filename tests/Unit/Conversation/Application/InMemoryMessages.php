@@ -6,12 +6,15 @@ namespace App\Tests\Unit\Conversation\Application;
 
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\MessageId;
+use App\Conversation\Domain\MessageKind;
 use App\Conversation\Domain\Messages;
+use App\Conversation\Domain\QuestionAlreadyOpen;
 use App\SharedKernel\Domain\OrganizationId;
 
 /**
- * Messages by organization and id, as the cnv_message key is; save refuses a message not read through lockedOf, as
- * DoctrineMessages refuses one it does not manage.
+ * Messages by organization and id, as the cnv_message key is; add refuses a second open question on a ticket, as
+ * cnv_message_ticket_id_open_question_key does; save refuses a message not read through lockedOf, as DoctrineMessages
+ * refuses one it does not manage.
  */
 final class InMemoryMessages implements Messages
 {
@@ -34,6 +37,15 @@ final class InMemoryMessages implements Messages
         $key = self::keyOf($message->organizationId(), $message->id());
         if (isset($this->stored[$key])) {
             throw new \LogicException('A message with that id is already stored.');
+        }
+        if (MessageKind::Question === $message->kind()) {
+            foreach ($this->stored as $stored) {
+                if (MessageKind::Question === $stored->kind() && $stored->ticketId()->equals($message->ticketId())
+                    && $stored->organizationId()->equals($message->organizationId())
+                    && null === $stored->resolvedAt() && null === $stored->removedAt()) {
+                    throw new QuestionAlreadyOpen('This ticket already waits for an answer.');
+                }
+            }
         }
 
         $this->stored[$key] = $message;
