@@ -111,11 +111,18 @@ final readonly class DoctrineTickets implements Tickets
         }
 
         $identifier = ['organizationId' => $organizationId->toString(), 'id' => $ticketId->toString()];
-        // find() refreshes a ticket the request has loaded already, which its readonly fields refuse with a
-        // LogicException; lock() only takes the row lock, and save refuses the ticket if it went stale.
+        // find() and refresh() rehydrate a ticket the request has loaded already, which its readonly fields refuse with
+        // a LogicException; so lock its row, and refuse it when another request saved it since, as its fields are old.
         $loaded = $this->entityManager->getUnitOfWork()->tryGetById($identifier, Ticket::class);
         if ($loaded instanceof Ticket) {
-            $this->entityManager->lock($loaded, LockMode::PESSIMISTIC_WRITE);
+            $lockedVersion = $this->entityManager->getConnection()->fetchOne(
+                'SELECT version FROM tkt_ticket WHERE organization_id = ? AND id = ? FOR UPDATE',
+                [$organizationId->toString(), $ticketId->toString()],
+                [Types::GUID, Types::GUID],
+            );
+            if (!is_numeric($lockedVersion) || (int) $lockedVersion !== $loaded->version()) {
+                throw new TicketVersionConflict('The ticket was saved by another request after it was read.');
+            }
 
             return $loaded;
         }

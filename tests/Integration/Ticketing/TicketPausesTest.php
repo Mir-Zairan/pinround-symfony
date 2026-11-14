@@ -19,6 +19,7 @@ use App\Ticketing\Api\TicketPauses;
 use App\Ticketing\Application\LockedTicketPauses;
 use App\Ticketing\Application\TicketTurnSnapshots;
 use App\Ticketing\Domain\Ticket;
+use App\Ticketing\Domain\TicketVersionConflict;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
@@ -198,6 +199,53 @@ final class TicketPausesTest extends KernelTestCase
             ['asked_user_id' => self::MIA, 'asker_id' => self::LENA, 'step_id' => $before['step_id'], 'version' => $before['version'] + 1, 'updated_at' => $before['updated_at']],
             $this->pauseState($this->ticketId, self::ACME_FOODS),
         );
+    }
+
+    #[Test]
+    public function askingSomeoneAssignedSinceTheRequestReadTheTicketIsRefusedAsChangedMeanwhile(): void
+    {
+        $before = $this->pauseState($this->ticketId, self::ACME_FOODS);
+        self::assertIsInt($before['version']);
+
+        $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, function () use ($before): void {
+            $loaded = $this->entityManager()->find(Ticket::class, ['organizationId' => self::ACME_FOODS, 'id' => $this->ticketId->toString()]);
+            self::assertNotNull($loaded);
+
+            // A second connection gives the ticket to Raj, who the loaded copy still shows as on no part of it.
+            self::assertSame(1, $this->migrator()->transactional(fn (Connection $concurrent): int|string => $concurrent->executeStatement(
+                'UPDATE tkt_ticket SET assignee_id = ?, version = version + 1 WHERE organization_id = ? AND id = ? AND version = ?',
+                [self::RAJ, self::ACME_FOODS, $this->ticketId->toString(), $before['version']],
+            )));
+
+            $this->pauses()->pauseForQuestion($this->ticketId, new UserId(self::RAJ), new UserId(self::OMAR));
+        }));
+
+        self::assertInstanceOf(TicketChangedMeanwhile::class, $refusal);
+        self::assertSame('The ticket was changed after it was read.', $refusal->getMessage());
+        self::assertSame(
+            ['asked_user_id' => null, 'asker_id' => null, 'step_id' => $before['step_id'], 'version' => $before['version'] + 1, 'updated_at' => $before['updated_at']],
+            $this->pauseState($this->ticketId, self::ACME_FOODS),
+        );
+    }
+
+    #[Test]
+    public function lockingATicketTheRequestReadBeforeAnotherSavedItIsRefused(): void
+    {
+        $before = $this->pauseState($this->ticketId, self::ACME_FOODS);
+
+        $refusal = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($before): ?\Throwable {
+            $loaded = $this->entityManager()->find(Ticket::class, ['organizationId' => self::ACME_FOODS, 'id' => $this->ticketId->toString()]);
+            self::assertNotNull($loaded);
+            self::assertSame(1, $this->migrator()->transactional(fn (Connection $concurrent): int|string => $concurrent->executeStatement(
+                'UPDATE tkt_ticket SET version = version + 1 WHERE organization_id = ? AND id = ? AND version = ?',
+                [self::ACME_FOODS, $this->ticketId->toString(), $before['version']],
+            )));
+
+            return $this->refusalOf(fn () => new DoctrineTickets($this->entityManager())->lockedOf(new OrganizationId(self::ACME_FOODS), $this->ticketId));
+        });
+
+        self::assertInstanceOf(TicketVersionConflict::class, $refusal);
+        self::assertSame('The ticket was saved by another request after it was read.', $refusal->getMessage());
     }
 
     #[Test]

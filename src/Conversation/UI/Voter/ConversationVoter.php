@@ -21,8 +21,8 @@ use Symfony\Component\Security\Core\Authorization\Voter\Vote;
  * user, so anyone who may see the ticket comments, an admin with no team role too (personas-and-roles.md, "Comment,
  * reply"). ASK (personas-and-roles.md, "Ask a question"): only someone TicketPermission VIEW lets see the ticket, and
  * of them an Admin, a Manager, a Lead or Member of the ticket's team, or its reporter; a Viewer of the team is denied,
- * also when they reported the ticket (Roles::mayAskOrPingOn, which PingVoter shares). Both are denied with nobody logged in, with no tenant (the request's user is no
- * member), and for a ticket of another organization.
+ * also when they reported the ticket (the role rule PingVoter repeats for SEND). Both are denied with nobody logged in,
+ * with no tenant (the request's user is no member), and for a ticket of another organization.
  *
  * Reads the viewer's roles under row-level security, so it needs the request's open transaction under the tenant.
  *
@@ -79,6 +79,21 @@ final class ConversationVoter extends DenyByDefaultVoter
             return false;
         }
 
-        return $actor->roles()->mayAskOrPingOn($ticket->teamId, $ticket->reporterId->equals($actor->userId()));
+        // The same role rule as PingVoter::grants for "Ping a person"; change the two together.
+        $roles = $actor->roles();
+        if ($roles->isAdmin() || $roles->isManager()) {
+            return true;
+        }
+        if (null !== $ticket->teamId) {
+            if ($roles->isLeadOf($ticket->teamId) || $roles->isMemberOf($ticket->teamId)) {
+                return true;
+            }
+            // The matrix's "only as reporter" is the Other user column's; its Viewer column has no exception.
+            if ($roles->isViewerOf($ticket->teamId)) {
+                return false;
+            }
+        }
+
+        return $ticket->reporterId->equals($actor->userId());
     }
 }

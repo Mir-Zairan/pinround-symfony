@@ -25,7 +25,8 @@ interface TicketPauses
      * @throws TicketAlreadyPaused       when another question already pauses the ticket; nothing is saved
      * @throws TicketChangedMeanwhile    when another request saved the ticket after this request read it; the caller
      *                                   rolls back
-     * @throws \InvalidArgumentException when the asked person is the asker
+     * @throws \InvalidArgumentException only when the asker, who is on the ticket, asks themselves; an asker not on the
+     *                                   ticket who asks themselves gets AskedPersonNotOnTicket
      * @throws \LogicException           when no transaction is open or no tenant is set, before any query
      */
     public function pauseForQuestion(TicketId $ticketId, UserId $askedUserId, UserId $askerId): void;

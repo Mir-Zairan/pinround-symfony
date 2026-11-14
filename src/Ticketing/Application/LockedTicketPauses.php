@@ -62,8 +62,13 @@ final readonly class LockedTicketPauses implements TicketPauses
 
     private function lockedTicket(TicketId $ticketId): Ticket
     {
-        return $this->tickets->lockedOf($this->tenantContext->require(), $ticketId)
-            ?? throw new TicketNotFound('The organization has no ticket with this id.');
+        try {
+            $ticket = $this->tickets->lockedOf($this->tenantContext->require(), $ticketId);
+        } catch (TicketVersionConflict $conflict) {
+            throw new TicketChangedMeanwhile('The ticket was changed after it was read.', previous: $conflict);
+        }
+
+        return $ticket ?? throw new TicketNotFound('The organization has no ticket with this id.');
     }
 
     private function save(Ticket $ticket): void
