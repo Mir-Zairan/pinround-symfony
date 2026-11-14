@@ -154,6 +154,11 @@ turbo-frame#ticket-thread {
   border-left: 2px solid var(--outline-var);
 }
 
+/* Only a holder thread-composer refills: its parts lay out as the composer's own. */
+.thread__ask-choices {
+  display: contents;
+}
+
 .thread__people {
   display: flex;
   flex-wrap: wrap;

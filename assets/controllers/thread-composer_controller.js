@@ -9,9 +9,10 @@ import { Controller } from '@hotwired/stimulus';
 // The composer writes a comment or asks a question: each kind chip and person chip carries the form's action, texts
 // and asked person for its choice. A question's answer redirects to the whole page, as asking pauses the ticket and
 // changes its header. The composer is permanent, so a live reload does not render it again: the message list says
-// whether a question is open, which turns Ask a question off.
+// whether a question is open, which turns Ask a question off, and carries whom the viewer may ask now, which replaces
+// the composer's people so they follow a reassignment.
 export default class extends Controller {
-  static targets = ['body', 'submit', 'messages', 'label', 'note', 'commentChip', 'askChip', 'people', 'person', 'askedUser', 'waitNote'];
+  static targets = ['body', 'submit', 'messages', 'label', 'note', 'commentChip', 'askChip', 'askChoices', 'people', 'person', 'askedUser', 'waitNote'];
   static values = { mayAsk: Boolean };
 
   connect() {
@@ -33,14 +34,17 @@ export default class extends Controller {
   }
 
   askQuestion() {
-    if (this.askChipTarget.disabled || !this.hasPeopleTarget) {
+    if (this.askChipTarget.disabled || !this.hasPersonTarget) {
       return;
     }
-    const chosen = this.personTargets.find((person) => person.getAttribute('aria-pressed') === 'true') ?? this.personTargets[0];
+    this.ask(this.personTargets.find((person) => person.getAttribute('aria-pressed') === 'true') ?? this.personTargets[0]);
+  }
+
+  ask(person) {
     this.peopleTarget.hidden = false;
     this.askedUserTarget.disabled = false;
     this.bodyTarget.form.dataset.turboFrame = '_top';
-    this.choose(chosen);
+    this.choose(person);
   }
 
   choosePerson(event) {
@@ -76,6 +80,7 @@ export default class extends Controller {
   }
 
   messagesTargetConnected(messages) {
+    this.renewAskChoices(messages.dataset.askChoices);
     this.followOpenQuestion(messages.dataset.hasOpenQuestion === 'true');
     const messageId = this.changedMessageId;
     this.changedMessageId = null;
@@ -89,11 +94,33 @@ export default class extends Controller {
     }
   }
 
+  // The markup is the server's Twig render, escaped like the rest of the page. A question being written stays with the
+  // person chosen while they are still there to ask, else with the first.
+  renewAskChoices(markup) {
+    if (markup === undefined || !this.hasAskChoicesTarget) {
+      return;
+    }
+    const askedUserId = this.isAsking() && this.hasAskedUserTarget ? this.askedUserTarget.value : null;
+    const freshChoices = document.createElement('template');
+    freshChoices.innerHTML = markup;
+    this.askChoicesTarget.replaceChildren(freshChoices.content);
+    if (askedUserId === null) {
+      return;
+    }
+    const person = this.personTargets.find((each) => each.dataset.userId === askedUserId) ?? this.personTargets[0];
+    if (person === undefined) {
+      this.writeComment();
+    } else {
+      this.ask(person);
+    }
+  }
+
+  // A Turbo Stream renders only the list, so mayAsk may be older than the people: nobody left to ask turns Ask off too.
   followOpenQuestion(hasOpenQuestion) {
     if (!this.hasAskChipTarget) {
       return;
     }
-    this.askChipTarget.disabled = !this.mayAskValue || hasOpenQuestion;
+    this.askChipTarget.disabled = !this.mayAskValue || !this.hasPersonTarget || hasOpenQuestion;
     if (this.hasWaitNoteTarget) {
       this.waitNoteTarget.hidden = !(this.mayAskValue && hasOpenQuestion);
     }
