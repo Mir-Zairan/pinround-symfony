@@ -6,6 +6,8 @@ namespace App\Tests\Integration\Ticketing\Infrastructure\Scheduler;
 
 use App\Notification\Infrastructure\Scheduler\AddNotificationPartitions;
 use App\Notification\Infrastructure\Scheduler\DropExpiredNotificationPartitions;
+use App\Notification\Infrastructure\Scheduler\QueueDigests;
+use App\Notification\Infrastructure\Scheduler\ReleaseHeldNotifications;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
@@ -137,7 +139,7 @@ final class AddTicketEventPartitionsTest extends KernelTestCase
     }
 
     #[Test]
-    public function theDefaultScheduleHoldsThePartitionJobsAndEachRunsOnceADay(): void
+    public function theDefaultScheduleHoldsExactlyTheseJobsAndRunsThePartitionJobsOnceADay(): void
     {
         $scheduleProvider = self::getContainer()->get('scheduler.provider.default');
         $firstRunAfter = new \DateTimeImmutable('2031-06-15 10:00:00 UTC');
@@ -157,6 +159,8 @@ final class AddTicketEventPartitionsTest extends KernelTestCase
             [
                 AddNotificationPartitions::class.'::__invoke' => ['2031-06-16 10:00:00', '2031-06-17 10:00:00'],
                 DropExpiredNotificationPartitions::class.'::__invoke' => ['2031-06-16 10:00:00', '2031-06-17 10:00:00'],
+                QueueDigests::class.'::__invoke' => ['2031-06-15 10:15:00', '2031-06-15 10:30:00'],
+                ReleaseHeldNotifications::class.'::__invoke' => ['2031-06-15 10:05:00', '2031-06-15 10:10:00'],
                 AddTicketEventPartitions::class.'::__invoke' => ['2031-06-16 10:00:00', '2031-06-17 10:00:00'],
             ],
             $nextTwoRunsByJob,
