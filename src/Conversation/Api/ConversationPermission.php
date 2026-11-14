@@ -15,4 +15,12 @@ final class ConversationPermission
      * author edits (within 15 minutes) or removes a message is the use case's rule, checked on the locked row.
      */
     public const string COMMENT = 'CONVERSATION_COMMENT';
+
+    /**
+     * Ask a question on a ticket, which pauses it; the subject is the ticket's TicketVisibilityFacts. Whoever may see
+     * the ticket and is an Admin (with no team role too), a Manager, a Lead or Member of its team, or its reporter; a
+     * Viewer of the team is denied, also as reporter. That the asked person is on the ticket and no question is open
+     * yet is the use case's rule, checked on the locked ticket.
+     */
+    public const string ASK = 'CONVERSATION_ASK';
 }
