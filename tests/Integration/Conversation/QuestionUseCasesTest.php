@@ -179,11 +179,37 @@ final class QuestionUseCasesTest extends KernelTestCase
     }
 
     #[Test]
+    public function aFailureAfterTheResumeRollsBackTheWithdrawalTheResumeAndTheTurn(): void
+    {
+        $questionId = $this->askedByOmarOfMia();
+        self::getContainer()->get('doctrine')->resetManager();
+        $asked = $this->stateOf($this->ticketId, self::ACME_FOODS);
+        self::assertSame(['asked_user_id' => self::MIA, 'asker_id' => self::OMAR], array_intersect_key(
+            $asked['ticket'],
+            ['asked_user_id' => true, 'asker_id' => true],
+        ));
+        self::assertSame(['turn_user_id' => self::MIA, 'kind' => 'answer'], $asked['turn']);
+
+        $failure = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->withdrawQuestionThatFailsAfterTheTurnRefresh()->withdraw(
+            new OrganizationId(self::ACME_FOODS),
+            $this->ticketId,
+            $questionId,
+            new UserId(self::OMAR),
+            new \DateTimeImmutable(self::ANSWERED_AT),
+        )));
+        self::getContainer()->get('doctrine')->resetManager();
+
+        self::assertSame([\RuntimeException::class, 'The work after the turn refresh failed.'], [$failure::class, $failure->getMessage()]);
+        self::assertSame($asked, $this->stateOf($this->ticketId, self::ACME_FOODS));
+    }
+
+    #[Test]
     public function withdrawingResumesTheTicketAndGivesTheTurnBackWithOneMessageRemovedInTheOutbox(): void
     {
         $turnBefore = $this->turnOf($this->ticketId, self::ACME_FOODS);
         self::assertSame(self::OMAR, $turnBefore['turn_user_id'] ?? null);
         $questionId = $this->askedByOmarOfMia();
+        $asked = $this->ticketStateOf($this->ticketId, self::ACME_FOODS);
 
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->withdrawQuestion()->withdraw(
             new OrganizationId(self::ACME_FOODS),
@@ -193,10 +219,10 @@ final class QuestionUseCasesTest extends KernelTestCase
             new \DateTimeImmutable(self::ANSWERED_AT),
         ));
 
-        self::assertSame(['asked_user_id' => null, 'asker_id' => null], array_intersect_key(
+        self::assertSame(
+            ['asked_user_id' => null, 'asker_id' => null, 'step_id' => $asked['step_id'], 'version' => $asked['version'] + 1],
             $this->ticketStateOf($this->ticketId, self::ACME_FOODS),
-            ['asked_user_id' => true, 'asker_id' => true],
-        ));
+        );
         self::assertSame($turnBefore, $this->turnOf($this->ticketId, self::ACME_FOODS));
         self::assertSame(
             [[$questionId, 'question', self::OMAR, self::MIA, self::QUESTION_BODY, '2027-03-16 11:45:00+00', null, null, '2027-03-16 14:10:00+00']],
@@ -546,7 +572,37 @@ final class QuestionUseCasesTest extends KernelTestCase
     private function answerThatFailsAfterTheTurnRefresh(): Answer
     {
         $messages = new DoctrineMessages($this->entityManager());
-        $turnRefreshThenFailure = new readonly class($this->turnProjector()) implements TurnProjector {
+
+        return new Answer(
+            new ThreadMessages($messages),
+            $messages,
+            new DoctrineReplies($this->entityManager()),
+            $this->ticketPauses(),
+            $this->turnProjectorThatFailsAfterTheRefresh(),
+            new MessengerConversationEvents(self::getContainer()->get('event.bus'), $this->connection()),
+        );
+    }
+
+    /**
+     * WithdrawQuestion as the container builds it, except that its turn refresh writes the turn and then fails, as any
+     * failure after the ticket resumed would.
+     */
+    private function withdrawQuestionThatFailsAfterTheTurnRefresh(): WithdrawQuestion
+    {
+        $messages = new DoctrineMessages($this->entityManager());
+
+        return new WithdrawQuestion(
+            new ThreadMessages($messages),
+            $messages,
+            $this->ticketPauses(),
+            $this->turnProjectorThatFailsAfterTheRefresh(),
+            new MessengerConversationEvents(self::getContainer()->get('event.bus'), $this->connection()),
+        );
+    }
+
+    private function turnProjectorThatFailsAfterTheRefresh(): TurnProjector
+    {
+        return new readonly class($this->turnProjector()) implements TurnProjector {
             public function __construct(private TurnProjector $turnProjector)
             {
             }
@@ -565,15 +621,6 @@ final class QuestionUseCasesTest extends KernelTestCase
                 throw new \RuntimeException('The work after the turn refresh failed.');
             }
         };
-
-        return new Answer(
-            new ThreadMessages($messages),
-            $messages,
-            new DoctrineReplies($this->entityManager()),
-            $this->ticketPauses(),
-            $turnRefreshThenFailure,
-            new MessengerConversationEvents(self::getContainer()->get('event.bus'), $this->connection()),
-        );
     }
 
     /**
