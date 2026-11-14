@@ -10,11 +10,12 @@ use App\Conversation\Domain\MessageKind;
 use App\Conversation\Domain\Messages;
 use App\Conversation\Domain\QuestionAlreadyOpen;
 use App\SharedKernel\Domain\OrganizationId;
+use Symfony\Component\Uid\Uuid;
 
 /**
  * Messages by organization and id, as the cnv_message key is; add refuses a second open question on a ticket, as
  * cnv_message_ticket_id_open_question_key does; save refuses a message not read through lockedOf, as DoctrineMessages
- * refuses one it does not manage.
+ * refuses one it does not manage. New ids are UUIDv7, as DoctrineMessages hands out.
  */
 final class InMemoryMessages implements Messages
 {
@@ -29,7 +30,7 @@ final class InMemoryMessages implements Messages
 
     public function nextIdentity(): MessageId
     {
-        throw new \LogicException('Not used by these tests.');
+        return new MessageId(Uuid::v7()->toRfc4122());
     }
 
     public function add(Message $message): void
