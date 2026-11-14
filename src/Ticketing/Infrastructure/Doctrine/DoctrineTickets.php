@@ -110,10 +110,16 @@ final readonly class DoctrineTickets implements Tickets
             throw new \LogicException('A ticket is locked only inside a transaction.');
         }
 
-        return $this->entityManager->find(
-            Ticket::class,
-            ['organizationId' => $organizationId->toString(), 'id' => $ticketId->toString()],
-            LockMode::PESSIMISTIC_WRITE,
-        );
+        $identifier = ['organizationId' => $organizationId->toString(), 'id' => $ticketId->toString()];
+        // find() refreshes a ticket the request has loaded already, which its readonly fields refuse with a
+        // LogicException; lock() only takes the row lock, and save refuses the ticket if it went stale.
+        $loaded = $this->entityManager->getUnitOfWork()->tryGetById($identifier, Ticket::class);
+        if ($loaded instanceof Ticket) {
+            $this->entityManager->lock($loaded, LockMode::PESSIMISTIC_WRITE);
+
+            return $loaded;
+        }
+
+        return $this->entityManager->find(Ticket::class, $identifier, LockMode::PESSIMISTIC_WRITE);
     }
 }

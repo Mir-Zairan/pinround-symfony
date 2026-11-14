@@ -11,10 +11,12 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\TicketAlreadyPaused;
+use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketPauses;
 use App\Ticketing\Application\LockedTicketPauses;
+use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Infrastructure\Doctrine\DoctrineTickets;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
@@ -69,11 +71,12 @@ final class TicketPausesTest extends KernelTestCase
     }
 
     #[Test]
-    public function aPausedTicketGivesTheTurnToTheAskedPersonAndKeepsItsStep(): void
+    public function aPausedTicketGivesTheTurnToTheAskedPersonAndKeepsItsStepAndListPlace(): void
     {
         $before = $this->pauseState($this->ticketId, self::ACME_FOODS);
         self::assertIsInt($before['version']);
         self::assertSame(['turn_user_id' => self::OMAR], array_intersect_key($this->turnOf($this->ticketId), ['turn_user_id' => true]));
+        self::mockTime('2027-03-16 11:45:00+00:00');
 
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $this->pauses()->pauseForQuestion($this->ticketId, new UserId(self::LENA), new UserId(self::OMAR));
@@ -81,7 +84,7 @@ final class TicketPausesTest extends KernelTestCase
         });
 
         self::assertSame(
-            ['asked_user_id' => self::LENA, 'asker_id' => self::OMAR, 'step_id' => $before['step_id'], 'version' => $before['version'] + 1],
+            ['asked_user_id' => self::LENA, 'asker_id' => self::OMAR, 'step_id' => $before['step_id'], 'version' => $before['version'] + 1, 'updated_at' => $before['updated_at']],
             $this->pauseState($this->ticketId, self::ACME_FOODS),
         );
         self::assertSame(['turn_user_id' => self::LENA, 'kind' => 'answer'], $this->turnOf($this->ticketId));
@@ -127,6 +130,33 @@ final class TicketPausesTest extends KernelTestCase
         self::assertSame('This ticket already waits for an answer.', $refusal->getMessage());
         self::assertSame(['asked_user_id' => self::LENA, 'asker_id' => self::OMAR], array_intersect_key($paused, ['asked_user_id' => true, 'asker_id' => true]));
         self::assertSame($paused, $this->pauseState($this->ticketId, self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function aPauseOfATicketReadBeforeAnotherRequestPausedItIsRefusedAndTheOtherPauseStays(): void
+    {
+        $before = $this->pauseState($this->ticketId, self::ACME_FOODS);
+        self::assertIsInt($before['version']);
+
+        $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, function () use ($before): void {
+            $loaded = $this->entityManager()->find(Ticket::class, ['organizationId' => self::ACME_FOODS, 'id' => $this->ticketId->toString()]);
+            self::assertNotNull($loaded);
+
+            // A second connection commits the other request's pause, with the version raise its save would write.
+            self::assertSame(1, $this->migrator()->transactional(fn (Connection $concurrent): int|string => $concurrent->executeStatement(
+                'UPDATE tkt_ticket SET asked_user_id = ?, asker_id = ?, version = version + 1 WHERE organization_id = ? AND id = ? AND version = ?',
+                [self::MIA, self::LENA, self::ACME_FOODS, $this->ticketId->toString(), $before['version']],
+            )));
+
+            $this->pauses()->pauseForQuestion($this->ticketId, new UserId(self::LENA), new UserId(self::OMAR));
+        }));
+
+        self::assertInstanceOf(TicketChangedMeanwhile::class, $refusal);
+        self::assertSame('The ticket was changed after it was read.', $refusal->getMessage());
+        self::assertSame(
+            ['asked_user_id' => self::MIA, 'asker_id' => self::LENA, 'step_id' => $before['step_id'], 'version' => $before['version'] + 1, 'updated_at' => $before['updated_at']],
+            $this->pauseState($this->ticketId, self::ACME_FOODS),
+        );
     }
 
     #[Test]
@@ -193,13 +223,32 @@ final class TicketPausesTest extends KernelTestCase
         self::assertSame('55P03', $refusal->getSQLState());
     }
 
+    #[Test]
+    public function aTicketTheRequestLoadedBeforeIsLockedAsTheSameObject(): void
+    {
+        [$isSameObject, $refusal] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $loaded = $this->entityManager()->find(Ticket::class, ['organizationId' => self::ACME_FOODS, 'id' => $this->ticketId->toString()]);
+            self::assertNotNull($loaded);
+            $locked = new DoctrineTickets($this->entityManager())->lockedOf(new OrganizationId(self::ACME_FOODS), $this->ticketId);
+
+            return [$loaded === $locked, $this->refusalOf(fn () => $this->migrator()->transactional(fn (Connection $concurrent): array => $concurrent->fetchFirstColumn(
+                'SELECT id FROM tkt_ticket WHERE organization_id = ? AND id = ? FOR UPDATE NOWAIT',
+                [self::ACME_FOODS, $this->ticketId->toString()],
+            )))];
+        });
+
+        self::assertTrue($isSameObject);
+        self::assertInstanceOf(DriverException::class, $refusal);
+        self::assertSame('55P03', $refusal->getSQLState());
+    }
+
     /**
-     * @return array<string, mixed> asked_user_id, asker_id, step_id and version of the ticket
+     * @return array<string, mixed> asked_user_id, asker_id, step_id, version and updated_at of the ticket
      */
     private function pauseState(TicketId $ticketId, string $organizationId): array
     {
         $row = $this->transactions()->rolledBackAs($organizationId, fn (): array|false => $this->connection()->fetchAssociative(
-            'SELECT asked_user_id, asker_id, step_id, version FROM tkt_ticket WHERE id = ?',
+            'SELECT asked_user_id, asker_id, step_id, version, updated_at FROM tkt_ticket WHERE id = ?',
             [$ticketId->toString()],
         ));
         self::assertIsArray($row);

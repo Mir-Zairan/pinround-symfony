@@ -371,7 +371,9 @@ final class Ticket implements TenantOwned
 
     /**
      * Pauses the ticket until the asked person answers the asker's question (FR-CNV-08); the step stays as it is. The
-     * caller has checked the asked person is on the ticket. A refused pause changes nothing.
+     * caller has checked the asked person is on the ticket. A refused pause changes nothing. It keeps updatedAt, so the
+     * ticket keeps its list place and open page cursors stay valid; saving still raises the version, so an old form is
+     * refused.
      *
      * @throws QuestionAlreadyOpen       when another question already pauses the ticket
      * @throws \InvalidArgumentException when the asker asks themselves
@@ -390,7 +392,8 @@ final class Ticket implements TenantOwned
     }
 
     /**
-     * Ends the question pause, so the turn goes back to the step's normal owner.
+     * Ends the question pause, so the turn goes back to the step's normal owner. Like the pause, it keeps updatedAt
+     * for the list place and page cursors, and saving still raises the version.
      *
      * @throws \LogicException when no question pauses the ticket
      */
