@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
+// The Mercure hub's path, as in live-updates.spec.ts.
+const HUB_PATH = '/.well-known/mercure';
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED, REPLY_ADDED and COMMENT_RESOLVED
 const COMMENT_ADDED = 'Comment added.';
@@ -453,6 +455,9 @@ test('at 360 px a long reply, the Reply box and a resolved fold scroll nothing s
   const comment = `Receipt${'linewrapping'.repeat(20)}${randomUUID().replaceAll('-', '')}`;
   const reply = `Seenonthe${'phoneapptoo'.repeat(20)}${randomUUID().replaceAll('-', '')}`;
   const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  // A layout check: with the outbox relay and notify worker running, the signal of Omar's own comment can reload the
+  // thread just as he opens the Reply box and close it again. live-updates.spec.ts covers the signals.
+  await omar.page.route((url) => url.pathname === HUB_PATH, (route) => route.abort());
   try {
     await omar.page.setViewportSize({ width: 360, height: 800 });
     await openThread(omar.page, key);

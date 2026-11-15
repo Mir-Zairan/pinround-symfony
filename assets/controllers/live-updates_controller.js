@@ -33,17 +33,20 @@ const FORM_FIELDS = 'input, textarea, select';
 // An open dialog, or an open disclosure with text to type in (a message's edit form), keeps what the person wrote
 // there after they click away; a refresh would close it and lose the text.
 const OPEN_EDITORS = 'dialog[open], details[open] :is(textarea, input[type="text"])';
+// A box whose Cancel folds it away and keeps the text (the thread's Answer and Reply boxes) is still in use while that
+// text is changed, open or not.
+const KEPT_TEXT = '[data-live-keeps-text] :is(textarea, input[type="text"])';
 
 // Events after which a held part or visit may be free again: focus moved, a disclosure opened or closed, a dialog closed. None
 // of toggle and close bubbles, so they are heard in the capture phase.
 const HOLD_ENDING_EVENTS = ['focusin', 'focusout', 'toggle', 'close'];
 
-// A part with an open editor, or with a field being typed in, is held rather than lose the text: a swapped part loses
-// both, a reloaded frame keeps only what sits in a data-turbo-permanent element. A focused button or link holds nothing:
-// its copy in the fresh part takes the focus back.
+// A part with an open editor, with a field being typed in, or with a folded box that promises to keep its text, is held
+// rather than lose the text: a swapped part loses both, a reloaded frame keeps only what sits in a data-turbo-permanent
+// element. A focused button or link holds nothing: its copy in the fresh part takes the focus back.
 function isPartInUse(part) {
   const focused = document.activeElement;
-  if (part.querySelector(OPEN_EDITORS) !== null) {
+  if (part.querySelector(OPEN_EDITORS) !== null || [...part.querySelectorAll(KEPT_TEXT)].some(isFieldChanged)) {
     return true;
   }
   if (focused === null || !part.contains(focused) || !focused.matches(FORM_FIELDS)) {
@@ -131,7 +134,7 @@ function focusedControlOf(part) {
   const anchor = focused.parentElement.closest('[id]');
   const label = labelOf(focused);
   const index = controlsLike(anchor, focused.localName, label).indexOf(focused);
-  return { anchorId: anchor.id, localName: focused.localName, label, index };
+  return { anchorId: anchor.id, localName: focused.localName, label, index, tabIndex: focused.getAttribute('tabindex') };
 }
 
 // Replacing a part drops the focus it held to the body; this gives it to the same control in the fresh part, unless
@@ -143,9 +146,15 @@ function refocus(focusedControl, part) {
   }
   const anchor = document.getElementById(focusedControl.anchorId);
   const control = anchor === null ? null : (controlsLike(anchor, focusedControl.localName, focusedControl.label)[focusedControl.index] ?? null);
-  if (control !== null && part.contains(control)) {
-    control.focus({ preventScroll: true });
+  if (control === null || !part.contains(control)) {
+    return;
   }
+  // A heading or message that got focus after an action (tabindex="-1", from a script or the redirected page's
+  // autofocus) has no tabindex in the fresh copy, and focus() on it would do nothing.
+  if (focusedControl.tabIndex !== null && !control.hasAttribute('tabindex')) {
+    control.setAttribute('tabindex', focusedControl.tabIndex);
+  }
+  control.focus({ preventScroll: true });
 }
 
 // Follows the live updates of a page (realtime-and-notifications.md): asks POST /realtime/token for the subscriber
