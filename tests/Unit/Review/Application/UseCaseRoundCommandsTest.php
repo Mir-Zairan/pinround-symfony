@@ -167,6 +167,8 @@ final class UseCaseRoundCommandsTest extends TestCase
     public function itRefusesMoreThanTheMaximumNumberOfPinsOnAScreenshotAndStoresNothing(): void
     {
         $this->assertRefused('A picture holds at most 100 pins.', [self::screenshotWithPins(Screenshot::MAX_PINS + 1)]);
+
+        self::assertSame(0, $this->rounds->issuedPinIds);
     }
 
     #[Test]

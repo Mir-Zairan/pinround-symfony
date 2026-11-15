@@ -37,6 +37,16 @@ final class ReviewIdsAndCapsTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{class-string<RoundId|ScreenshotId|PinId>}>
+     */
+    public static function idClassNames(): iterable
+    {
+        foreach (self::idClasses() as $name => [$idClass]) {
+            yield $name => [$idClass];
+        }
+    }
+
+    /**
      * @return iterable<string, array{string}>
      */
     public static function valuesThatAreNotUuidV7(): iterable
@@ -53,8 +63,8 @@ final class ReviewIdsAndCapsTest extends TestCase
      * @param class-string<RoundId|ScreenshotId|PinId> $idClass
      */
     #[Test]
-    #[DataProvider('idClasses')]
-    public function anIdIsKeptInLowercaseAndEqualsTheSameValueInAnyCase(string $idClass, string $message): void
+    #[DataProvider('idClassNames')]
+    public function anIdIsKeptInLowercaseAndEqualsTheSameValueInAnyCase(string $idClass): void
     {
         $id = new $idClass(self::VALID);
 

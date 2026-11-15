@@ -20,21 +20,26 @@ final class InMemoryRounds implements Rounds
     /** @var list<Round> */
     public array $stored = [];
 
+    /** Pin ids handed out, so a test can show a refusal came before any pin was built. */
+    public int $issuedPinIds = 0;
+
     private int $issuedIds = 0;
 
     public function nextIdentity(): RoundId
     {
-        return new RoundId($this->nextUuid(0x1000));
+        return new RoundId($this->nextUuid(0x8000));
     }
 
     public function nextScreenshotIdentity(): ScreenshotId
     {
-        return new ScreenshotId($this->nextUuid(0x2000));
+        return new ScreenshotId($this->nextUuid(0x8100));
     }
 
     public function nextPinIdentity(): PinId
     {
-        return new PinId($this->nextUuid(0x3000));
+        ++$this->issuedPinIds;
+
+        return new PinId($this->nextUuid(0x8200));
     }
 
     public function add(Round $round): void

@@ -28,6 +28,8 @@ final class PinTest extends TestCase
         yield 'y above 100' => [50.0, 100.01];
         yield 'x not a number' => [\NAN, 50.0];
         yield 'y infinite' => [50.0, \INF];
+        yield 'x above 100 but rounds to 100' => [100.004, 50.0];
+        yield 'y above 100 but rounds to 100' => [50.0, 100.004];
     }
 
     #[Test]
