@@ -228,7 +228,7 @@ final class DbalDigestItemsTest extends KernelTestCase
         $tenantContext->set(new OrganizationId(self::ACME_FOODS));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('A digest is read in a transaction under the organization as tenant; none is open.');
+        $this->expectExceptionMessageIsOrContains('A digest is read in a transaction under the organization as tenant; none is open.');
 
         $this->digestItems()->digestOf(new UserId(self::OMAR), new \DateTimeImmutable(self::SINCE), new \DateTimeImmutable(self::NOW));
     }

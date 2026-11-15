@@ -51,11 +51,10 @@ final class VisibleTicketsTest extends TestCase
      */
     #[Test]
     #[DataProvider('visibleTickets')]
+    #[\PHPUnit\Framework\Attributes\DoesNotPerformAssertions]
     public function aTicketOfTheTenantThePersonMaySeePasses(\Closure $ticketOf, string $personId): void
     {
         $this->visibleTickets->refuseUnlessVisibleTo($ticketOf(), new UserId($personId));
-
-        $this->addToAssertionCount(1);
     }
 
     #[Test]

@@ -45,16 +45,16 @@ final class DigestTest extends TestCase
     public function aDigestListsAtMostTwentyItems(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A digest lists at most 20 items and counts at least the listed ones.');
+        $this->expectExceptionMessageIsOrContains('A digest lists at most 20 items and counts at least the listed ones.');
 
-        new Digest(array_map(static fn (): DigestItem => self::item(), range(1, 21)), 21, new \DateTimeImmutable(self::COVERED_UNTIL));
+        new Digest(array_map(self::item(...), range(1, 21)), 21, new \DateTimeImmutable(self::COVERED_UNTIL));
     }
 
     #[Test]
     public function aDigestCountsAtLeastTheItemsItLists(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A digest lists at most 20 items and counts at least the listed ones.');
+        $this->expectExceptionMessageIsOrContains('A digest lists at most 20 items and counts at least the listed ones.');
 
         new Digest([self::item(), self::item()], 1, new \DateTimeImmutable(self::COVERED_UNTIL));
     }

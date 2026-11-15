@@ -53,8 +53,7 @@ final class PageFlashesTest extends TestCase
     {
         self::assertSame([], new PageFlashes(new RequestStack())->take('notice'));
 
-        $requestStack = new RequestStack();
-        $requestStack->push(Request::create('/me/profile'));
+        $requestStack = new RequestStack([Request::create('/me/profile')]);
         self::assertSame([], new PageFlashes($requestStack)->take('notice'));
     }
 
@@ -71,8 +70,7 @@ final class PageFlashesTest extends TestCase
     private function requestStackWith(Request $request, Session $session): RequestStack
     {
         $request->setSession($session);
-        $requestStack = new RequestStack();
-        $requestStack->push($request);
+        $requestStack = new RequestStack([$request]);
 
         return $requestStack;
     }

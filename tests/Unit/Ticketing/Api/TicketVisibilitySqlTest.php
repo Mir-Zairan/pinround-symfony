@@ -96,7 +96,7 @@ final class TicketVisibilitySqlTest extends TestCase
     public function anAliasThatIsNotAPlainIdentifierIsRefused(string $alias): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A table alias must be a plain lower-case SQL identifier.');
+        $this->expectExceptionMessageIsOrContains('A table alias must be a plain lower-case SQL identifier.');
 
         TicketVisibilitySql::of(TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], false, new UserId(self::SARA)), $alias);
     }
@@ -106,7 +106,7 @@ final class TicketVisibilitySqlTest extends TestCase
     public function theForEveryoneConditionRefusesAnAliasThatIsNotAPlainIdentifier(string $alias): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A table alias must be a plain lower-case SQL identifier.');
+        $this->expectExceptionMessageIsOrContains('A table alias must be a plain lower-case SQL identifier.');
 
         TicketVisibilitySql::forEveryoneIn(new OrganizationId(self::ACME_FOODS), $alias);
     }

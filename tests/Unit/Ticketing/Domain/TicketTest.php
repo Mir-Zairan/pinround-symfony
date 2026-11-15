@@ -373,7 +373,7 @@ final class TicketTest extends TestCase
         $ticket = self::reported('Checkout button is hidden', '', new UserId(self::OMAR));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('This ticket waits for no answer.');
+        $this->expectExceptionMessageIsOrContains('This ticket waits for no answer.');
 
         $ticket->resume();
     }

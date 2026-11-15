@@ -53,13 +53,7 @@ final readonly class LockedTicketPauses implements TicketPauses
      */
     private static function isOnTheTicket(array $peopleOnTheTicket, UserId $userId): bool
     {
-        foreach ($peopleOnTheTicket as $personId) {
-            if ($personId->equals($userId)) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($peopleOnTheTicket, static fn ($personId) => $personId->equals($userId));
     }
 
     private function lockedTicket(TicketId $ticketId): Ticket

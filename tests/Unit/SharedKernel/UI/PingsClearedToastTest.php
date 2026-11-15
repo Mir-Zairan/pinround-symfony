@@ -35,7 +35,7 @@ final class PingsClearedToastTest extends TestCase
     public function aNegativeCountIsABug(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A cleared ping count is 0 or more, -1 given.');
+        $this->expectExceptionMessageIsOrContains('A cleared ping count is 0 or more, -1 given.');
 
         PingsClearedToast::withClearedPings(self::TOAST, -1);
     }

@@ -258,7 +258,7 @@ final class MessageTest extends TestCase
      */
     public static function refusedAnswers(): iterable
     {
-        yield 'a comment' => [static fn (): Message => self::commentOfLena(), self::OMAR, 'Only a question can be answered.'];
+        yield 'a comment' => [self::commentOfLena(...), self::OMAR, 'Only a question can be answered.'];
         yield 'a withdrawn question' => [static function (): Message {
             $question = self::questionOfLenaToOmar();
             $question->withdraw(new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
@@ -271,7 +271,7 @@ final class MessageTest extends TestCase
 
             return $question;
         }, self::OMAR, 'This question is already answered.'];
-        yield 'someone not asked, the asker included' => [static fn (): Message => self::questionOfLenaToOmar(), self::LENA, 'Only the person asked can answer this question.'];
+        yield 'someone not asked, the asker included' => [self::questionOfLenaToOmar(...), self::LENA, 'Only the person asked can answer this question.'];
     }
 
     /**
@@ -311,7 +311,7 @@ final class MessageTest extends TestCase
      */
     public static function refusedWithdrawals(): iterable
     {
-        yield 'a comment' => [static fn (): Message => self::commentOfLena(), self::LENA, 'Only a question can be withdrawn.'];
+        yield 'a comment' => [self::commentOfLena(...), self::LENA, 'Only a question can be withdrawn.'];
         yield 'a withdrawn question' => [static function (): Message {
             $question = self::questionOfLenaToOmar();
             $question->withdraw(new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
@@ -324,7 +324,7 @@ final class MessageTest extends TestCase
 
             return $question;
         }, self::LENA, 'An answered question cannot be withdrawn.'];
-        yield 'the asked person' => [static fn (): Message => self::questionOfLenaToOmar(), self::OMAR, 'Only the person who asked a question can withdraw it.'];
+        yield 'the asked person' => [self::questionOfLenaToOmar(...), self::OMAR, 'Only the person who asked a question can withdraw it.'];
     }
 
     /**
@@ -374,8 +374,8 @@ final class MessageTest extends TestCase
      */
     public static function refusedResolutions(): iterable
     {
-        yield 'an open question, by its asker' => [static fn (): Message => self::questionOfLenaToOmar(), self::LENA, false, 'A question is closed by its answer, not by Resolve.'];
-        yield 'an open question, by the team\'s lead' => [static fn (): Message => self::questionOfLenaToOmar(), self::OMAR, true, 'A question is closed by its answer, not by Resolve.'];
+        yield 'an open question, by its asker' => [self::questionOfLenaToOmar(...), self::LENA, false, 'A question is closed by its answer, not by Resolve.'];
+        yield 'an open question, by the team\'s lead' => [self::questionOfLenaToOmar(...), self::OMAR, true, 'A question is closed by its answer, not by Resolve.'];
         yield 'a removed comment' => [static function (): Message {
             $comment = self::commentOfLena();
             $comment->remove(new UserId(self::LENA), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
@@ -388,7 +388,7 @@ final class MessageTest extends TestCase
 
             return $comment;
         }, self::OMAR, true, 'This comment is already resolved.'];
-        yield 'someone else who is not the team\'s lead' => [static fn (): Message => self::commentOfLena(), self::OMAR, false, 'Only the person who wrote a comment or the lead of the ticket\'s team can resolve it.'];
+        yield 'someone else who is not the team\'s lead' => [self::commentOfLena(...), self::OMAR, false, 'Only the person who wrote a comment or the lead of the ticket\'s team can resolve it.'];
     }
 
     /**
@@ -416,14 +416,14 @@ final class MessageTest extends TestCase
      */
     public static function repliableMessages(): iterable
     {
-        yield 'an open comment' => [static fn (): Message => self::commentOfLena()];
+        yield 'an open comment' => [self::commentOfLena(...)];
         yield 'a resolved comment' => [static function (): Message {
             $comment = self::commentOfLena();
             $comment->resolve(new UserId(self::LENA), false, new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
 
             return $comment;
         }];
-        yield 'an open question' => [static fn (): Message => self::questionOfLenaToOmar()];
+        yield 'an open question' => [self::questionOfLenaToOmar(...)];
         yield 'an answered question' => [static function (): Message {
             $question = self::questionOfLenaToOmar();
             $question->answer(new UserId(self::OMAR), new \DateTimeImmutable('2027-03-15 10:30:00+00:00'));
