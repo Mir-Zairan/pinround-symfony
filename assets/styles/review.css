@@ -317,3 +317,50 @@ textarea.pin-list__note {
   object-fit: contain;
   border-radius: var(--radius-input);
 }
+
+/* The ticket page's Rounds section (RoundsSection). */
+
+.round-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: 18px 20px;
+  border: 1px solid var(--outline-var);
+  border-radius: 16px;
+  background: var(--s-lowest);
+}
+
+.round-card--private {
+  border: 1.5px dashed var(--outline);
+}
+
+.round-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
+}
+
+.round-card__headline {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.round-card__status,
+.rounds__older {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.round-card__open {
+  margin-inline-start: auto;
+}
+
+.round-card__screenshot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}

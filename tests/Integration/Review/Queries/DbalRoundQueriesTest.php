@@ -8,9 +8,12 @@ use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
+use App\Review\Api\TicketRounds;
+use App\Review\Application\RoundsVisibleTo;
 use App\Review\Infrastructure\Doctrine\DbalRoundQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
@@ -18,6 +21,7 @@ use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Review\Doctrine\RoundRows;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
+use App\Ticketing\Api\TicketVisibility;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -52,6 +56,8 @@ final class DbalRoundQueriesTest extends KernelTestCase
     private const string QUIET_TICKET = '0197a3c0-0000-7000-8000-0000000f5333';
     private const string UNPINNED_TICKET = '0197a3c0-0000-7000-8000-0000000f5334';
     private const string BAKERY_TICKET = '0197a3c0-0000-7000-8000-0000000f5335';
+    private const string CAPPED_TICKET = '0197a3c0-0000-7000-8000-0000000f5336';
+    private const string EXACT_TICKET = '0197a3c0-0000-7000-8000-0000000f5337';
     private const string UNKNOWN_TICKET = '0197a3c0-0000-7000-8000-0000000f5339';
     private const string ROUND_TWO = '0197a3c0-0000-7000-8000-0000000f5341';
     private const string OMAR_DRAFT = '0197a3c0-0000-7000-8000-0000000f5342';
@@ -85,6 +91,11 @@ final class DbalRoundQueriesTest extends KernelTestCase
     private const string BAKERY_PIN_ON_ACME_TICKET = '0197a3c0-0000-7000-8000-0000000f5368';
     private const string FIRST_MEDIA = '0197a3c0-0000-7000-8000-0000000f5371';
     private const string SECOND_MEDIA = '0197a3c0-0000-7000-8000-0000000f5372';
+    private const string CAPPED_REPORT = '0197a3c0-0000-7000-8000-0000000f5420';
+    private const string CAPPED_OMAR_DRAFT = '0197a3c0-0000-7000-8000-0000000f5421';
+    private const string CAPPED_LENA_DRAFT = '0197a3c0-0000-7000-8000-0000000f5422';
+    private const string BAKERY_ROUND_ON_CAPPED_TICKET = '0197a3c0-0000-7000-8000-0000000f5423';
+    private const int CAPPED_ROUND_COUNT = 25;
     private const string REPORTED_AT = '2027-03-15 10:20:30+00';
     private const string ROUND_ONE_SHARED_AT = '2027-03-16 09:00:00+00';
     private const string ROUND_TWO_SHARED_AT = '2027-03-17 09:00:00+00';
@@ -121,6 +132,8 @@ final class DbalRoundQueriesTest extends KernelTestCase
         $ticketRows->addWithAudienceOf(self::ACME_FOODS, self::QUIET_TICKET, self::SHOP_PROJECT, 3, 'all', self::SHOP_TEAM, self::OMAR);
         $ticketRows->addWithAudienceOf(self::ACME_FOODS, self::UNPINNED_TICKET, self::SHOP_PROJECT, 4, 'all', self::SHOP_TEAM, self::MIA);
         $ticketRows->addOf(self::BETA_BAKERY, self::BAKERY_TICKET, self::BAKERY_PROJECT, self::BEN);
+        $ticketRows->addWithAudienceOf(self::ACME_FOODS, self::CAPPED_TICKET, self::SHOP_PROJECT, 5, 'all', self::SHOP_TEAM, self::MIA);
+        $ticketRows->addWithAudienceOf(self::ACME_FOODS, self::EXACT_TICKET, self::SHOP_PROJECT, 6, 'all', self::SHOP_TEAM, self::MIA);
 
         self::addRoundRows(self::ACME_FOODS, [
             [self::ROUND_TWO, self::TICKET, 2, 'review', self::LENA, self::ROUND_TWO_SHARED_AT, 'open'],
@@ -149,10 +162,27 @@ final class DbalRoundQueriesTest extends KernelTestCase
             [self::OMAR_DRAFT_PIN, self::OMAR_DRAFT_SCREENSHOT, 1, '40.00', '60.00', 'Mine only', null, 'human', null, self::OMAR],
             [self::TEAM_ONLY_PIN, self::TEAM_ONLY_SCREENSHOT, 1, '40.00', '60.00', 'Team only', null, 'human', null, self::LENA],
         ]);
+        // 25 numbered rounds on one ticket and 20 on another, numbers in a shuffled order (7 and 25 share no factor).
+        $cappedRounds = [
+            [self::CAPPED_REPORT, self::CAPPED_TICKET, 0, 'report', self::MIA, self::REPORTED_AT, 'open'],
+            [self::CAPPED_OMAR_DRAFT, self::CAPPED_TICKET, null, 'draft', self::OMAR, null, 'open'],
+            [self::CAPPED_LENA_DRAFT, self::CAPPED_TICKET, null, 'draft', self::LENA, null, 'open'],
+        ];
+        for ($step = 1; $step <= self::CAPPED_ROUND_COUNT; ++$step) {
+            $number = ($step * 7) % self::CAPPED_ROUND_COUNT + 1;
+            $cappedRounds[] = [self::cappedRoundId($number), self::CAPPED_TICKET, $number, 'review', self::LENA, self::ROUND_ONE_SHARED_AT, 'open'];
+        }
+        $exactRounds = [];
+        for ($step = 1; $step <= RoundQueries::MAX_NUMBERED_ROUNDS; ++$step) {
+            $number = ($step * 7) % RoundQueries::MAX_NUMBERED_ROUNDS + 1;
+            $exactRounds[] = [self::exactRoundId($number), self::EXACT_TICKET, $number, 'review', self::LENA, self::ROUND_ONE_SHARED_AT, 'open'];
+        }
+        self::addRoundRows(self::ACME_FOODS, [...$cappedRounds, ...$exactRounds], [], []);
         // rvw_round.ticket_id has no foreign key, so Beta Bakery may hold a shared round on Acme Foods' ticket id.
         self::addRoundRows(self::BETA_BAKERY, [
             [self::BAKERY_REPORT, self::BAKERY_TICKET, 0, 'report', self::BEN, self::REPORTED_AT, 'open'],
             [self::BAKERY_ROUND_ON_ACME_TICKET, self::TICKET, 4, 'review', self::BEN, self::ROUND_ONE_SHARED_AT, 'open'],
+            [self::BAKERY_ROUND_ON_CAPPED_TICKET, self::CAPPED_TICKET, 26, 'review', self::BEN, self::ROUND_ONE_SHARED_AT, 'open'],
         ], [
             [self::BAKERY_SCREENSHOT, self::BAKERY_REPORT, self::FIRST_MEDIA, 0, null, null, null, null],
             [self::BAKERY_SCREENSHOT_ON_ACME_TICKET, self::BAKERY_ROUND_ON_ACME_TICKET, self::FIRST_MEDIA, 0, null, null, null, null],
@@ -209,6 +239,42 @@ final class DbalRoundQueriesTest extends KernelTestCase
         ], $rounds);
         self::assertTrue($rounds[4]->isUnsharedDraft());
         self::assertFalse($rounds[3]->isUnsharedDraft());
+    }
+
+    /**
+     * 25 numbered rounds, Round 0, Omar's draft and Lena's draft, and a Beta Bakery round numbered 26 on the same ticket
+     * id: Omar gets Round 0, the newest 20 numbered rounds (6 to 25, the 5 oldest left out, the other organization's 26
+     * not counted) and his own draft, and the cap does not take Round 0 or the draft from the 20.
+     */
+    #[Test]
+    public function aTicketWithMoreRoundsThanTheCapLoadsRoundZeroTheNewestTwentyAndTheViewersDraftAndCountsTheRest(): void
+    {
+        $ticketRounds = $this->ticketRoundsFor(self::CAPPED_TICKET, 'Omar');
+
+        self::assertSame(
+            [self::CAPPED_REPORT, ...array_map(self::cappedRoundId(...), range(6, 25)), self::CAPPED_OMAR_DRAFT],
+            self::idsOf($ticketRounds->rounds),
+        );
+        self::assertSame(5, $ticketRounds->olderRoundsNotShown);
+        self::assertSame(RoundQueries::MAX_NUMBERED_ROUNDS + 2, \count($ticketRounds->rounds));
+    }
+
+    #[Test]
+    public function aTicketWithExactlyTheCapOfNumberedRoundsLeavesNoneOut(): void
+    {
+        $ticketRounds = $this->ticketRoundsFor(self::EXACT_TICKET, 'Omar');
+
+        self::assertSame(array_map(self::exactRoundId(...), range(1, 20)), self::idsOf($ticketRounds->rounds));
+        self::assertSame(0, $ticketRounds->olderRoundsNotShown);
+    }
+
+    /**
+     * The ticket with five rounds has no numbered round past the cap, so nothing is counted as left out.
+     */
+    #[Test]
+    public function aTicketUnderTheCapCountsNoRoundAsLeftOut(): void
+    {
+        self::assertSame(0, $this->ticketRoundsFor(self::TICKET, 'Omar')->olderRoundsNotShown);
     }
 
     /**
@@ -380,6 +446,55 @@ final class DbalRoundQueriesTest extends KernelTestCase
         self::assertSame(['tkt_ticket'], $tables);
     }
 
+    /**
+     * Another organization's predicate for an Acme Foods ticket is refused whole, with no query: the tenant is Acme
+     * Foods.
+     */
+    #[Test]
+    public function aVisibilityOfAnotherOrganizationIsRefusedBeforeAnyQuery(): void
+    {
+        $visibility = TicketVisibility::for(new OrganizationId(self::BETA_BAKERY), new UserId(self::BEN), [], true, null);
+        $debugData = $this->debugData();
+
+        $refusal = self::transactions()->rolledBackAs(self::ACME_FOODS, function () use ($visibility, $debugData): ?string {
+            $debugData->reset();
+            try {
+                $this->roundsVisibleTo()->forVisibleTo(new TicketId(self::TEAM_ONLY_TICKET), $visibility);
+            } catch (\InvalidArgumentException $refusal) {
+                self::assertSame(0, self::queryCountOf($debugData));
+
+                return $refusal->getMessage();
+            }
+
+            return null;
+        });
+
+        self::assertSame('The ticket visibility given is not one of the tenant\'s organization.', $refusal);
+    }
+
+    /**
+     * The viewer's own predicate, handed in, saves the roles and the triager reads: the same four queries as the
+     * visibility check, rounds, screenshots and pins, and the same rounds as when the query builds the predicate.
+     */
+    #[Test]
+    public function aVisibilityHandedInSavesTheRolesReadsAndGivesTheSameRounds(): void
+    {
+        $debugData = $this->debugData();
+        $visibility = TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [new TeamId(self::SHOP_TEAM)], false, null);
+        $built = $this->roundsFor(self::TICKET, 'Omar');
+
+        [$handedIn, $queryCount] = self::transactions()->rolledBackAs(self::ACME_FOODS, function () use ($visibility, $debugData): array {
+            $debugData->reset();
+            $rounds = $this->roundsVisibleTo()->forVisibleTo(new TicketId(self::TICKET), $visibility)->rounds;
+
+            return [$rounds, self::queryCountOf($debugData)];
+        });
+
+        self::assertNotSame([], $built);
+        self::assertEquals($built, $handedIn);
+        self::assertSame(4, $queryCount);
+    }
+
     #[Test]
     public function aReadOutsideATransactionIsRefusedBeforeAnyQuery(): void
     {
@@ -415,6 +530,23 @@ final class DbalRoundQueriesTest extends KernelTestCase
         }
     }
 
+    private static function cappedRoundId(int $number): string
+    {
+        return \sprintf('0197a3c0-0000-7000-8000-0000000f54%02x', $number);
+    }
+
+    private static function exactRoundId(int $number): string
+    {
+        return \sprintf('0197a3c0-0000-7000-8000-0000000f55%02x', $number);
+    }
+
+    private function ticketRoundsFor(string $ticketId, string $viewer): TicketRounds
+    {
+        [$userId, $organizationId] = self::VIEWERS[$viewer];
+
+        return self::transactions()->rolledBackAs($organizationId, fn (): TicketRounds => $this->roundQueries()->forTicket(new TicketId($ticketId), new UserId($userId)));
+    }
+
     /**
      * @return list<RoundView>
      */
@@ -422,7 +554,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
     {
         [$userId, $organizationId] = self::VIEWERS[$viewer];
 
-        return self::transactions()->rolledBackAs($organizationId, fn (): array => $this->roundQueries()->forTicket(new TicketId($ticketId), new UserId($userId)));
+        return self::transactions()->rolledBackAs($organizationId, fn (): array => $this->roundQueries()->forTicket(new TicketId($ticketId), new UserId($userId))->rounds);
     }
 
     /**
@@ -437,7 +569,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
 
         return self::transactions()->rolledBackAs($organizationId, function () use ($ticketId, $userId): array {
             $this->debugData()->reset();
-            $rounds = $this->roundQueries()->forTicket(new TicketId($ticketId), new UserId($userId));
+            $rounds = $this->roundQueries()->forTicket(new TicketId($ticketId), new UserId($userId))->rounds;
             $tables = [];
             foreach (self::sqlOf($this->debugData()) as $sql) {
                 if (1 === preg_match('/\b(FROM|JOIN) org_/', $sql)) {
@@ -497,6 +629,14 @@ final class DbalRoundQueriesTest extends KernelTestCase
     {
         new RoundRows(self::migrator(), self::tenantContext())->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         self::shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA, self::SARA, self::NOOR], self::ACME_FOODS, self::BETA_BAKERY);
+    }
+
+    private function roundsVisibleTo(): RoundsVisibleTo
+    {
+        $roundQueries = self::getContainer()->get('test.review_round_queries');
+        \assert($roundQueries instanceof RoundsVisibleTo);
+
+        return $roundQueries;
     }
 
     private function roundQueries(): RoundQueries
