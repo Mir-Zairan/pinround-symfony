@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Media\Application;
 
+use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadedMedia;
-use App\Media\Api\UploadedMediaState;
 use App\Media\Application\UploaderMediaStates;
 use App\Media\Domain\MediaId;
 use App\Media\Domain\MediaObject;
@@ -55,7 +55,7 @@ final class UploaderMediaStatesTest extends TestCase
         $states = $this->statesOf(self::MIA, [self::MIA_PENDING, self::MIA_READY, self::MIA_REJECTED]);
 
         self::assertEqualsCanonicalizing(
-            [self::MIA_PENDING => UploadedMediaState::Pending, self::MIA_READY => UploadedMediaState::Ready, self::MIA_REJECTED => UploadedMediaState::Rejected],
+            [self::MIA_PENDING => MediaImageStatus::Pending, self::MIA_READY => MediaImageStatus::Ready, self::MIA_REJECTED => MediaImageStatus::Rejected],
             $states,
         );
         self::assertCount(3, $states);
@@ -66,7 +66,7 @@ final class UploaderMediaStatesTest extends TestCase
     {
         $states = $this->statesOf(self::MIA, [self::OMAR_READY, self::MIA_AT_OTHER, self::UNKNOWN, 'not-an-id', '', self::MIA_READY]);
 
-        self::assertSame([self::MIA_READY => UploadedMediaState::Ready], $states);
+        self::assertSame([self::MIA_READY => MediaImageStatus::Ready], $states);
     }
 
     #[Test]
@@ -74,17 +74,17 @@ final class UploaderMediaStatesTest extends TestCase
     {
         $states = $this->statesOf(self::MIA, [strtoupper(self::MIA_READY), self::MIA_READY]);
 
-        self::assertSame([self::MIA_READY => UploadedMediaState::Ready], $states);
+        self::assertSame([self::MIA_READY => MediaImageStatus::Ready], $states);
         self::assertSame([[self::MIA_READY]], $this->mediaObjects->byIdsReads());
     }
 
     #[Test]
-    public function noIdsAreReadInOneQueryAtMostAndFiftyIdsAreAccepted(): void
+    public function anEmptyListAnswersNothingAndFiftyIdsAreAccepted(): void
     {
         self::assertSame([], $this->statesOf(self::MIA, []));
         $fiftyIds = array_fill(0, UploadedMedia::MAX_MEDIA_IDS, self::MIA_READY);
 
-        self::assertSame([self::MIA_READY => UploadedMediaState::Ready], $this->statesOf(self::MIA, $fiftyIds));
+        self::assertSame([self::MIA_READY => MediaImageStatus::Ready], $this->statesOf(self::MIA, $fiftyIds));
     }
 
     #[Test]
@@ -126,7 +126,7 @@ final class UploaderMediaStatesTest extends TestCase
     /**
      * @param list<string> $mediaIds
      *
-     * @return array<string, UploadedMediaState>
+     * @return array<string, MediaImageStatus>
      */
     private function statesOf(string $uploader, array $mediaIds): array
     {

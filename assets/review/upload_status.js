@@ -1,6 +1,5 @@
 /** The text of the Screenshot component's rejected picture; UploadStatusMessageTest keeps the two alike. */
 export const REJECTED_MESSAGE = 'We could not process this image. Try again.';
-export const STILL_PROCESSING_MESSAGE = 'Still processing your screenshot. Try again in a moment.';
 
 export const POLL_INTERVAL_MS = 1000;
 export const MAX_POLLS = 15;

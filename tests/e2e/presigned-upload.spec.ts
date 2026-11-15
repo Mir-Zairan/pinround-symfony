@@ -394,7 +394,7 @@ test('a rejected picture shows the plain message, empties the media id and never
   const pollCount = await routeStatus(page, () => ({ status: 200, json: { status: 'rejected' } }));
   await page.clock.install();
   const { field, status, mediaId, preview } = await openUploadField(page, { withStatusRoute: false });
-  const events = await recordEvents(field, ['ready', 'still-processing']);
+  const events = await recordEvents(field, ['ready', 'rejected', 'still-processing']);
 
   await uploadPng(page, status);
   await runClockUntil(page, () => pollCount() >= 1);
@@ -404,11 +404,11 @@ test('a rejected picture shows the plain message, empties the media id and never
   await expect(preview).toBeHidden();
   await page.clock.runFor(100);
   await expect(status).toHaveText('We could not process this image. Try again.');
-  expect(await events()).toEqual([]);
+  expect(await events()).toEqual([{ name: 'rejected', mediaId: MEDIA_ID }]);
   expect(pollCount()).toBe(1);
 });
 
-test('after 15 polls still pending it says so, keeps the media id and polls no more', async ({ page }) => {
+test('after 15 polls still pending it fires still-processing, shows no text, keeps the media id and polls no more', async ({ page }) => {
   await routeCompletedUpload(page, 'intent-10');
   const pollCount = await routeStatus(page, () => ({ status: 200, json: { status: 'pending' } }));
   await page.clock.install();
@@ -424,7 +424,8 @@ test('after 15 polls still pending it says so, keeps the media id and polls no m
   expect(await events()).toEqual([{ name: 'still-processing', mediaId: MEDIA_ID }]);
   await expect(mediaId).toHaveValue(MEDIA_ID);
   await expect(field).toHaveAttribute('data-media-state', 'pending');
-  await expect(status).toHaveText('Still processing your screenshot. Try again in a moment.');
+  await expect(status).toHaveText('checkout.png uploaded.');
+  await expect(field).not.toContainText('Still processing');
   expect(pollCount()).toBe(15);
 });
 
@@ -459,7 +460,7 @@ test('a new upload stops the polling of the earlier one', async ({ page }) => {
   await input.setInputFiles({ name: 'second.png', mimeType: 'image/png', buffer: PNG });
   await expect(mediaId).toHaveValue('second-media-id');
   await expect(field).toHaveAttribute('data-media-state', 'pending');
-  await runClockUntil(page, () => polledIds.includes('second-media-id'));
+  await runClockUntil(page, () => polledIds.filter((id) => 'second-media-id' === id).length >= 3);
 
   expect(polledIds.slice(pollsOfFirst).filter((id) => MEDIA_ID === id).length).toBeLessThanOrEqual(1);
 });
@@ -473,9 +474,12 @@ test('leaving the page stops the polling', async ({ page }) => {
   await runClockUntil(page, () => pollCount() >= 1);
 
   await field.evaluate((element) => element.remove());
-  const pollsWhenLeft = pollCount();
-  await page.clock.runFor(20_000);
   await page.waitForLoadState('networkidle');
+  const pollsWhenLeft = pollCount();
+  for (let step = 0; step < 5; step += 1) {
+    await page.clock.runFor(1000);
+    await page.waitForLoadState('networkidle');
+  }
 
-  expect(pollCount() - pollsWhenLeft).toBeLessThanOrEqual(1);
+  expect(pollCount()).toBe(pollsWhenLeft);
 });

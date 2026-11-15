@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Media\UI\Controller;
 
+use App\Media\Api\MediaPermission;
 use App\Media\Api\UploadedMedia;
+use App\Media\Api\UploadedMediaId;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
@@ -19,15 +21,15 @@ use Symfony\Component\Routing\Attribute\Route;
 /**
  * GET /media/{id}/status, which the presigned-upload controller polls once a second after a complete: answers
  * {"status": "pending" | "ready" | "rejected"} with `Cache-Control: no-store`, in the request transaction. Only the
- * member of the tenant who uploaded the picture may read it: a malformed id, an unknown one, another person's and
- * another organization's all answer 404 with the same message. A poll past media_upload_status_per_user
+ * member of the tenant who uploaded the picture may read it (MediaPermission::VIEW_UPLOAD_STATE, then the service
+ * filters by uploader again): a person with no tenant or no right to view it, a malformed id, an unknown one, another
+ * person's and another organization's all answer 404 with the same message. A poll past media_upload_status_per_user
  * (rate_limiter.yaml) answers 429 with a Retry-After in seconds. A GET with no side effect, so no form token.
  */
 final class UploadStatusController extends AbstractController
 {
     public const string STATUS_ROUTE = 'media_upload_status';
 
-    public const string NOT_ALLOWED = 'You may not add a file here.';
     public const string NOTHING_UPLOADED = 'Nothing you uploaded has that id.';
     public const string POLLING_TOO_FAST = 'You are checking your upload too often. Wait a minute and try again.';
 
@@ -53,7 +55,7 @@ final class UploadStatusController extends AbstractController
             ? $this->currentActor->actorFor($this->getUser())
             : null;
         if (null === $actor) {
-            return self::refusal(self::NOT_ALLOWED, Response::HTTP_FORBIDDEN);
+            return self::refusal(self::NOTHING_UPLOADED, Response::HTTP_NOT_FOUND);
         }
 
         $pollLimit = $this->statusPollsPerUser->create($actor->userId()->toString())->consume();
@@ -62,6 +64,10 @@ final class UploadStatusController extends AbstractController
             $refusal->headers->set('Retry-After', (string) $this->secondsToWaitFor($pollLimit));
 
             return $refusal;
+        }
+
+        if (!$this->isGranted(MediaPermission::VIEW_UPLOAD_STATE, new UploadedMediaId($id))) {
+            return self::refusal(self::NOTHING_UPLOADED, Response::HTTP_NOT_FOUND);
         }
 
         $state = $this->uploadedMedia->statesOf($actor->organizationId(), $actor->userId(), [$id])[strtolower($id)] ?? null;

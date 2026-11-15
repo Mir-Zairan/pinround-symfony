@@ -103,6 +103,7 @@ final class UploadStatusTest extends WebTestCase
         self::assertSame(['message' => UploadStatusController::NOTHING_UPLOADED], $this->answer());
         self::assertSame($this->client->getResponse()->getContent(), $miasUpload);
         self::assertStringNotContainsString('ready', (string) $miasUpload);
+        self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
     }
 
     #[Test]
@@ -130,6 +131,20 @@ final class UploadStatusTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(404);
         self::assertSame(['message' => UploadStatusController::NOTHING_UPLOADED], $this->answer());
+        self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
+    }
+
+    #[Test]
+    public function aPersonWithNoOrganizationIsSentToChooseOneAndLearnsNothingOfMiasUpload(): void
+    {
+        $this->seed();
+        $this->logIn($this->client, $this->createUserWithoutOrganization('Drifter'));
+
+        $this->client->request('GET', $this->pathOf('miaReady'));
+
+        self::assertResponseStatusCodeSame(302);
+        self::assertSame('/org/choose', parse_url((string) $this->client->getResponse()->headers->get('Location'), \PHP_URL_PATH));
+        self::assertStringNotContainsString('ready', strip_tags((string) $this->client->getResponse()->getContent()));
     }
 
     #[Test]

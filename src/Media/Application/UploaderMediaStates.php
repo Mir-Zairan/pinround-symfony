@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Media\Application;
 
+use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadedMedia;
-use App\Media\Api\UploadedMediaState;
 use App\Media\Domain\MediaId;
 use App\Media\Domain\MediaObjects;
 use App\Media\Domain\MediaStatus;
@@ -47,9 +47,9 @@ final readonly class UploaderMediaStates implements UploadedMedia
         foreach ($this->mediaObjects->byIds(array_values($askedIds)) as $mediaObject) {
             if ($mediaObject->uploadedBy()->equals($uploader)) {
                 $states[$mediaObject->id()->toString()] = match ($mediaObject->status()) {
-                    MediaStatus::Pending => UploadedMediaState::Pending,
-                    MediaStatus::Ready => UploadedMediaState::Ready,
-                    MediaStatus::Rejected => UploadedMediaState::Rejected,
+                    MediaStatus::Pending => MediaImageStatus::Pending,
+                    MediaStatus::Ready => MediaImageStatus::Ready,
+                    MediaStatus::Rejected => MediaImageStatus::Rejected,
                 };
             }
         }

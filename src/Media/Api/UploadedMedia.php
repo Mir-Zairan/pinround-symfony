@@ -23,7 +23,7 @@ interface UploadedMedia
      * @param list<string> $mediaIds at most MAX_MEDIA_IDS; a malformed or unknown id, one of another organization and
      *                               one that $uploader did not upload are left out of the answer, with no hint which
      *
-     * @return array<string, UploadedMediaState> by media id in lowercase
+     * @return array<string, MediaImageStatus> by media id in lowercase
      *
      * @throws \InvalidArgumentException when $mediaIds holds more than MAX_MEDIA_IDS entries, before any read
      * @throws \LogicException           when the request has no tenant or its tenant is another organization, before

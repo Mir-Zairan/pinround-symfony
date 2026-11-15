@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Media;
 
+use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadedMedia;
-use App\Media\Api\UploadedMediaState;
 use App\Media\Application\UploaderMediaStates;
 use App\Media\Domain\MediaId;
 use App\Media\Domain\MediaObject;
@@ -80,7 +80,7 @@ final class UploadedMediaTest extends KernelTestCase
         });
 
         self::assertEquals(
-            [self::MIA_PENDING => UploadedMediaState::Pending, self::MIA_READY => UploadedMediaState::Ready, self::MIA_REJECTED => UploadedMediaState::Rejected],
+            [self::MIA_PENDING => MediaImageStatus::Pending, self::MIA_READY => MediaImageStatus::Ready, self::MIA_REJECTED => MediaImageStatus::Rejected],
             $states,
         );
         self::assertSame(1, $queryCount);
@@ -91,7 +91,7 @@ final class UploadedMediaTest extends KernelTestCase
     {
         $states = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->statesOf(self::OMAR, [self::MIA_READY, self::OMAR_READY]));
 
-        self::assertSame([self::OMAR_READY => UploadedMediaState::Ready], $states);
+        self::assertSame([self::OMAR_READY => MediaImageStatus::Ready], $states);
     }
 
     #[Test]
@@ -130,7 +130,7 @@ final class UploadedMediaTest extends KernelTestCase
     /**
      * @param list<string> $mediaIds
      *
-     * @return array<string, UploadedMediaState>
+     * @return array<string, MediaImageStatus>
      */
     private function statesOf(string $uploader, array $mediaIds): array
     {
