@@ -11,12 +11,13 @@ namespace App\Review\UI;
 final readonly class RoundCard
 {
     /**
-     * @param string               $domId          a lowercase id, unique on the page
-     * @param string               $headline       for example "Round 0 · Report · by Mia · 2 pins"
-     * @param string|null          $status         for example "1 of 2 look right"; null when there is none to say
-     * @param bool                 $isPrivateDraft the viewer's own unshared draft, which carries the PRIVATE tag
-     * @param list<ScreenshotView> $screenshots    empty for a round that is only a row
-     * @param bool                 $hasOpenRound   whether the card carries the "Open round" button
+     * @param string               $domId               a lowercase id, unique on the page
+     * @param string               $headline            for example "Round 0 · Report · by Mia · 2 pins"
+     * @param string|null          $status              for example "1 of 2 look right"; null when there is none to say
+     * @param bool                 $isPrivateDraft      the viewer's own unshared draft, which carries the PRIVATE tag
+     * @param list<ScreenshotView> $screenshots         empty for a round that is only a row
+     * @param bool                 $hasOpenRound        whether the card carries the "Open round" button
+     * @param string|null          $moreScreenshotsNote for example "2 more screenshots are not shown."; null when all are shown
      */
     public function __construct(
         public string $domId,
@@ -25,6 +26,7 @@ final readonly class RoundCard
         public bool $isPrivateDraft,
         public array $screenshots,
         public bool $hasOpenRound,
+        public ?string $moreScreenshotsNote = null,
     ) {
     }
 }

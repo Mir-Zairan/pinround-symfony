@@ -17,6 +17,9 @@ final class Screenshot
     public ScreenshotView $view;
     public ?int $selectedNumber = null;
 
+    /** The picture's loading attribute: "lazy" for a card among many, null for the browser's default (eager). */
+    public ?string $loading = null;
+
     public function frameId(): string
     {
         return $this->view->domId.'-frame';

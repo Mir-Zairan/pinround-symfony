@@ -349,6 +349,7 @@ textarea.pin-list__note {
 }
 
 .round-card__status,
+.round-card__more,
 .rounds__older {
   margin: 0;
   color: var(--on-surface-var);

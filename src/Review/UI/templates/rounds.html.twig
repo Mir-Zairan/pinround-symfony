@@ -1,0 +1,22 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- The rounds as a page of their own, for RoundsSection's link without JavaScript. -#}
+
+{% block title %}Rounds · {{ ticketKey }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+{% endblock %}
+
+{% block main %}
+    <article class="ticket rounds-page">
+        <header class="ticket__header">
+            <twig:Button variant="text" href="{{ path(constant('App\\Review\\UI\\RoundsController::TICKET_ROUTE'), {key: ticketKey}) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> {{ ticketKey }}</twig:Button>
+            <h1 class="ticket__title">Rounds</h1>
+        </header>
+        <div class="ticket__section rounds">
+            {{ include('@Review/rounds_frame.html.twig') }}
+        </div>
+    </article>
+{% endblock %}

@@ -45,6 +45,15 @@ final class ScreenshotComponentsTest extends KernelTestCase
         self::assertCount(0, $crawler->filter('.screenshot__placeholder'));
         self::assertCount(0, $crawler->filter('[role="status"]'));
         self::assertCount(0, $crawler->filter('.screenshot__frame--placeholder'));
+        self::assertNull($crawler->filter('img.screenshot__image')->attr('loading'), 'Eager unless the caller asks for lazy.');
+    }
+
+    #[Test]
+    public function aScreenshotAskedToLoadLazilyGivesItsPictureTheLoadingAttribute(): void
+    {
+        $crawler = new Crawler($this->render(Screenshot::class, ['view' => self::view(), 'loading' => 'lazy']));
+
+        self::assertSame('lazy', $crawler->filter('img.screenshot__image')->attr('loading'));
     }
 
     #[Test]

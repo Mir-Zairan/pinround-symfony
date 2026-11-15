@@ -17,7 +17,7 @@ final readonly class RoundView
      * @param int|null                  $number      null exactly while the round is an unshared draft
      * @param string                    $kind        report, checklist, review or draft
      * @param string                    $state       open or closed
-     * @param list<RoundScreenshotView> $screenshots by position
+     * @param list<RoundScreenshotView> $screenshots by position; none for a checklist or review round, which is not loaded with them
      */
     public function __construct(
         public string $id,

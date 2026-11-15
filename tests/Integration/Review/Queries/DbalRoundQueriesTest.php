@@ -58,6 +58,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
     private const string BAKERY_TICKET = '0197a3c0-0000-7000-8000-0000000f5335';
     private const string CAPPED_TICKET = '0197a3c0-0000-7000-8000-0000000f5336';
     private const string EXACT_TICKET = '0197a3c0-0000-7000-8000-0000000f5337';
+    private const string ROW_ROUNDS_TICKET = '0197a3c0-0000-7000-8000-0000000f5338';
     private const string UNKNOWN_TICKET = '0197a3c0-0000-7000-8000-0000000f5339';
     private const string ROUND_TWO = '0197a3c0-0000-7000-8000-0000000f5341';
     private const string OMAR_DRAFT = '0197a3c0-0000-7000-8000-0000000f5342';
@@ -95,6 +96,11 @@ final class DbalRoundQueriesTest extends KernelTestCase
     private const string CAPPED_OMAR_DRAFT = '0197a3c0-0000-7000-8000-0000000f5421';
     private const string CAPPED_LENA_DRAFT = '0197a3c0-0000-7000-8000-0000000f5422';
     private const string BAKERY_ROUND_ON_CAPPED_TICKET = '0197a3c0-0000-7000-8000-0000000f5423';
+    private const string ROW_CHECKLIST = '0197a3c0-0000-7000-8000-0000000f5424';
+    private const string ROW_REVIEW = '0197a3c0-0000-7000-8000-0000000f5425';
+    private const string ROW_CHECKLIST_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5426';
+    private const string ROW_REVIEW_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5427';
+    private const string ROW_REVIEW_PIN = '0197a3c0-0000-7000-8000-0000000f5428';
     private const int CAPPED_ROUND_COUNT = 25;
     private const string REPORTED_AT = '2027-03-15 10:20:30+00';
     private const string ROUND_ONE_SHARED_AT = '2027-03-16 09:00:00+00';
@@ -177,7 +183,18 @@ final class DbalRoundQueriesTest extends KernelTestCase
             $number = ($step * 7) % RoundQueries::MAX_NUMBERED_ROUNDS + 1;
             $exactRounds[] = [self::exactRoundId($number), self::EXACT_TICKET, $number, 'review', self::LENA, self::ROUND_ONE_SHARED_AT, 'open'];
         }
-        self::addRoundRows(self::ACME_FOODS, [...$cappedRounds, ...$exactRounds], [], []);
+        $ticketRows->addWithAudienceOf(self::ACME_FOODS, self::ROW_ROUNDS_TICKET, self::SHOP_PROJECT, 7, 'all', self::SHOP_TEAM, self::MIA);
+        self::addRoundRows(self::ACME_FOODS, [
+            ...$cappedRounds,
+            ...$exactRounds,
+            [self::ROW_CHECKLIST, self::ROW_ROUNDS_TICKET, 1, 'checklist', self::OMAR, self::ROUND_ONE_SHARED_AT, 'open'],
+            [self::ROW_REVIEW, self::ROW_ROUNDS_TICKET, 2, 'review', self::LENA, self::ROUND_TWO_SHARED_AT, 'open'],
+        ], [
+            [self::ROW_CHECKLIST_SCREENSHOT, self::ROW_CHECKLIST, self::FIRST_MEDIA, 0, null, null, null, null],
+            [self::ROW_REVIEW_SCREENSHOT, self::ROW_REVIEW, self::FIRST_MEDIA, 0, null, null, null, null],
+        ], [
+            [self::ROW_REVIEW_PIN, self::ROW_REVIEW_SCREENSHOT, 1, '40.00', '60.00', 'Not loaded', null, 'human', null, self::LENA],
+        ]);
         // rvw_round.ticket_id has no foreign key, so Beta Bakery may hold a shared round on Acme Foods' ticket id.
         self::addRoundRows(self::BETA_BAKERY, [
             [self::BAKERY_REPORT, self::BAKERY_TICKET, 0, 'report', self::BEN, self::REPORTED_AT, 'open'],
@@ -224,12 +241,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
                 ]),
             ]),
             new RoundView(self::ROUND_ONE, 1, 'checklist', new UserId(self::OMAR), $sharedAt(self::ROUND_ONE_SHARED_AT), 'closed', []),
-            new RoundView(self::ROUND_TWO, 2, 'review', new UserId(self::LENA), $sharedAt(self::ROUND_TWO_SHARED_AT), 'open', [
-                new RoundScreenshotView(self::ROUND_TWO_BEFORE, self::FIRST_MEDIA, 0, 'before', null, null, null, [
-                    new RoundPinView(self::ROUND_TWO_BEFORE_PIN, 1, 40.0, 60.0, 'Was cut off', null, 'human', null, new UserId(self::LENA)),
-                ]),
-                new RoundScreenshotView(self::ROUND_TWO_AFTER, self::SECOND_MEDIA, 1, 'after', null, null, null, []),
-            ]),
+            new RoundView(self::ROUND_TWO, 2, 'review', new UserId(self::LENA), $sharedAt(self::ROUND_TWO_SHARED_AT), 'open', []),
             new RoundView(self::OMAR_SHARED_DRAFT, 3, 'draft', new UserId(self::OMAR), $sharedAt(self::DRAFT_SHARED_AT), 'open', []),
             new RoundView(self::OMAR_DRAFT, null, 'draft', new UserId(self::OMAR), null, 'open', [
                 new RoundScreenshotView(self::OMAR_DRAFT_SCREENSHOT, self::FIRST_MEDIA, 0, null, null, null, null, [
@@ -326,6 +338,20 @@ final class DbalRoundQueriesTest extends KernelTestCase
         [$rounds, $tables] = $this->roundsAndQueriedTablesFor(self::QUIET_TICKET, 'Omar');
 
         self::assertSame([[self::QUIET_ROUND_ONE, []], [self::QUIET_OMAR_DRAFT, []]], array_map(static fn (RoundView $round): array => [$round->id, $round->screenshots], $rounds));
+        self::assertSame(['tkt_ticket', 'rvw_round'], $tables);
+    }
+
+    /**
+     * A checklist and a review round that hold a screenshot and a pin each are rows on the page: they come with none,
+     * and no screenshot or pin query is sent for them.
+     */
+    #[Test]
+    public function aChecklistOrReviewRoundIsLoadedWithNoScreenshotOrPinAndCostsNoQueryForThem(): void
+    {
+        [$rounds, $tables] = $this->roundsAndQueriedTablesFor(self::ROW_ROUNDS_TICKET, 'Omar');
+
+        self::assertSame([self::ROW_CHECKLIST, self::ROW_REVIEW], self::idsOf($rounds));
+        self::assertSame([[], []], array_map(static fn (RoundView $round): array => $round->screenshots, $rounds));
         self::assertSame(['tkt_ticket', 'rvw_round'], $tables);
     }
 

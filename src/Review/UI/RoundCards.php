@@ -15,19 +15,21 @@ use App\Review\Application\RoundsVisibleTo;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibility;
 
 /**
- * Builds the cards of the ticket page's Rounds section for one viewer. Besides RoundQueries' own queries it reads the
- * owners' names in one batch and signs every picture in one call per SignedUrls::MAX_MEDIA_IDS pictures, whatever the
- * number of rounds. Only the report and drafts show their pictures; a checklist or review round is a row that opens its
- * own page.
+ * Builds the cards of the Rounds section for one viewer. Besides RoundQueries' own queries it reads the owners'
+ * names in one batch and signs the pictures shown in one query per SignedUrls::MAX_MEDIA_IDS pictures, whatever the
+ * number of rounds. Only the report and drafts show their pictures, at most MAX_PICTURES_PER_CARD each; a checklist or
+ * review round is a row that opens its own page.
  */
 final readonly class RoundCards
 {
     public const string UNKNOWN_OWNER = 'a former member';
     public const string VARIANT = 'view';
+
+    /** The pictures one card shows; a round may hold 50 screenshots, and the card says how many more it left out. */
+    public const int MAX_PICTURES_PER_CARD = 10;
 
     private const string REPORT = 'report';
     private const string CHECKLIST = 'checklist';
@@ -37,20 +39,18 @@ final readonly class RoundCards
 
     public function __construct(
         private RoundsVisibleTo $roundsVisibleTo,
-        private TicketVisibilities $ticketVisibilities,
         private MemberNameQueries $memberNameQueries,
         private SignedUrls $signedUrls,
     ) {
     }
 
     /**
-     * Runs inside the request transaction whose tenant is $organizationId.
-     *
-     * @param TicketVisibility|null $visibility the viewer's, when the page has built it; null builds it
+     * Runs inside the request transaction whose tenant is the viewer's organization.
      */
-    public function forTicket(OrganizationId $organizationId, TicketId $ticketId, UserId $viewer, \DateTimeImmutable $now, ?TicketVisibility $visibility = null): RoundsSectionView
+    public function forTicket(TicketId $ticketId, TicketVisibility $viewer, \DateTimeImmutable $now): RoundsSectionView
     {
-        $ticketRounds = $this->roundsVisibleTo->forVisibleTo($ticketId, $visibility ?? $this->ticketVisibilities->of($organizationId, $viewer));
+        $organizationId = $viewer->organizationId();
+        $ticketRounds = $this->roundsVisibleTo->forVisibleTo($ticketId, $viewer);
         $rounds = $ticketRounds->rounds;
         if ([] === $rounds) {
             return new RoundsSectionView([], 0);
@@ -81,26 +81,33 @@ final readonly class RoundCards
         $pinCount = 0;
         $looksRightCount = 0;
         foreach ($round->screenshots as $screenshot) {
-            $view = $this->screenshotViewOf($round, $screenshot, $images[$screenshot->mediaId] ?? null);
-            $screenshots[] = $view;
-            $pinCount += \count($view->pins);
+            $shownPins = self::shownPinsOf($screenshot);
+            $pinCount += \count($shownPins);
             if (self::LOOKS_RIGHT === $screenshot->verdict) {
                 ++$looksRightCount;
             }
+            if (\count($screenshots) < self::MAX_PICTURES_PER_CARD) {
+                $screenshots[] = $this->screenshotViewOf($round, $screenshot, $images[$screenshot->mediaId] ?? null, $shownPins);
+            }
         }
+        $notShown = \count($round->screenshots) - \count($screenshots);
+        $moreNote = 0 === $notShown ? null : (1 === $notShown ? '1 more screenshot is not shown.' : \sprintf('%d more screenshots are not shown.', $notShown));
 
         if (self::REPORT === $round->kind) {
-            return new RoundCard($domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false);
+            return new RoundCard($domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false, $moreNote);
         }
-        $status = \sprintf('%d of %d look right', $looksRightCount, \count($screenshots));
+        $status = \sprintf('%d of %d look right', $looksRightCount, \count($round->screenshots));
         if ($round->isUnsharedDraft()) {
-            return new RoundCard($domId, 'Draft round · only you can see this', $status, true, $screenshots, false);
+            return new RoundCard($domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote);
         }
 
-        return new RoundCard($domId, \sprintf('Round %d · self-check by %s', $round->number ?? 0, $ownerName), $status, false, $screenshots, false);
+        return new RoundCard($domId, \sprintf('Round %d · self-check by %s', $round->number ?? 0, $ownerName), $status, false, $screenshots, false, $moreNote);
     }
 
-    private function screenshotViewOf(RoundView $round, RoundScreenshotView $screenshot, ?MediaImage $image): ScreenshotView
+    /**
+     * @return list<PinView> the pins of a screenshot but the AI's that were dismissed
+     */
+    private static function shownPinsOf(RoundScreenshotView $screenshot): array
     {
         $pins = [];
         foreach ($screenshot->pins as $pin) {
@@ -108,6 +115,15 @@ final readonly class RoundCards
                 $pins[] = self::pinViewOf($pin);
             }
         }
+
+        return $pins;
+    }
+
+    /**
+     * @param list<PinView> $pins
+     */
+    private function screenshotViewOf(RoundView $round, RoundScreenshotView $screenshot, ?MediaImage $image, array $pins): ScreenshotView
+    {
         $domId = 'screenshot-'.$screenshot->id;
         $altText = $screenshot->title ?? \sprintf('Screenshot %d of %s', $screenshot->position + 1, $round->isUnsharedDraft() ? 'your draft round' : 'round '.($round->number ?? 0));
         // A picture Media does not know is shown as refused rather than left out, so a round never loses a screenshot silently.
@@ -156,7 +172,7 @@ final readonly class RoundCards
             if (!$this->showsPictures($round)) {
                 continue;
             }
-            foreach ($round->screenshots as $screenshot) {
+            foreach (\array_slice($round->screenshots, 0, self::MAX_PICTURES_PER_CARD) as $screenshot) {
                 $mediaIds[$screenshot->mediaId] = true;
             }
         }

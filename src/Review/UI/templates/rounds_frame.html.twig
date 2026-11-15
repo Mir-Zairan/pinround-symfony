@@ -1,0 +1,32 @@
+{#- RoundsController's answer to RoundsSection's lazy frame: the bare frame with the cards, and no layout. -#}
+<turbo-frame id="{{ constant('App\\Review\\UI\\Component\\RoundsSection::FRAME_ID') }}">
+    {% if section.cards is empty %}
+        <twig:EmptyState :message="constant('App\\Review\\UI\\Component\\RoundsSection::EMPTY')" />
+    {% else %}
+        {% for card in section.cards %}
+            <article class="round-card{% if card.isPrivateDraft %} round-card--private{% endif %}" id="{{ card.domId }}" aria-labelledby="{{ card.domId }}-heading">
+                <header class="round-card__header">
+                    <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>
+                    {% if card.isPrivateDraft %}<twig:Tag class="round-card__private">PRIVATE</twig:Tag>{% endif %}
+                    {% if card.status is not null %}<p class="round-card__status">{{ card.status }}</p>{% endif %}
+                    {% if card.hasOpenRound %}
+                        {#- No round page exists yet, so the button is shown as the prototype has it, and cannot be used. -#}
+                        <twig:Button variant="outline" size="sm" :disabled="true" class="round-card__open">Open round</twig:Button>
+                    {% endif %}
+                </header>
+                {% for screenshot in card.screenshots %}
+                    <div class="round-card__screenshot">
+                        <twig:Screenshot :view="screenshot" loading="lazy" />
+                        <twig:PinList :view="screenshot" />
+                    </div>
+                {% endfor %}
+                {% if card.moreScreenshotsNote is not null %}
+                    <p class="round-card__more">{{ card.moreScreenshotsNote }}</p>
+                {% endif %}
+            </article>
+        {% endfor %}
+        {% if section.olderRoundsNote is not null %}
+            <p class="rounds__older">{{ section.olderRoundsNote }}</p>
+        {% endif %}
+    {% endif %}
+</turbo-frame>

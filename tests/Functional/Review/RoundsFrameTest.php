@@ -6,11 +6,14 @@ namespace App\Tests\Functional\Review;
 
 use App\Identity\Domain\User;
 use App\Review\UI\Component\RoundsSection;
+use App\Review\UI\RoundCards;
+use App\Review\UI\RoundsController;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -20,11 +23,11 @@ use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
- * The Rounds section of Acme Foods' ticket SHOP-1 at /t/SHOP-1, through the real firewall, voters, Media signing and
- * database. The clock is fixed on 6 Nov 2026, before today: a clock ahead of the login would end the session as idle.
+ * The Rounds section's lazy frame of Acme Foods' ticket SHOP-1, GET /t/SHOP-1/rounds, through the real firewall,
+ * voters, Media signing and database. The clock is fixed on 6 Nov 2026, before today: a clock ahead of the login would end the session as idle.
  * Mia reported the ticket and Lena leads the Shop team, Omar is its member; Raj is a manager in no team.
  */
-final class RoundsSectionTest extends WebTestCase
+final class RoundsFrameTest extends WebTestCase
 {
     use CreatesAcmeFoodsTeams;
     use CreatesTeams;
@@ -35,7 +38,16 @@ final class RoundsSectionTest extends WebTestCase
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string SHARED_AT = '2026-11-05 09:00:00+00';
-    private const string ROUNDS = '[aria-labelledby="ticket-rounds-heading"]';
+    /**
+     * A warm frame for a ticket with no round, the request's transaction included: the session's user and password
+     * change, the organizations, the tenant, the viewer's roles and teams twice, the settings, the ticket, the names, the
+     * visibility check and the rounds.
+     */
+    private const int EMPTY_FRAME_QUERIES = 15;
+    private const string ROUNDS_PAGE = '/t/SHOP-1/rounds';
+    private const string ROUNDS = 'turbo-frame#ticket-rounds';
+    /** What Turbo sends when it loads the Rounds section's frame. */
+    private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => RoundsSection::FRAME_ID];
     private const string REPORT_TITLE = 'Checkout <b>total</b>';
     private const string REPORT_SUMMARY = 'The total shows €0 after a coupon.';
     private const string LENA_DRAFT_TITLE = 'Lena private self-check';
@@ -86,12 +98,11 @@ final class RoundsSectionTest extends WebTestCase
         $this->addTicket('SHOP-1');
         $this->logIn($this->client, $this->people['Omar']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(RoundsSection::EMPTY, $page->filter(self::ROUNDS.' .empty-state')->text());
         self::assertCount(0, $page->filter(self::ROUNDS.' .round-card'));
-        self::assertCount(1, $page->filter('link[rel="stylesheet"][href*="/styles/review"]'));
     }
 
     #[Test]
@@ -106,7 +117,7 @@ final class RoundsSectionTest extends WebTestCase
         $this->addPin($screenshotId, 3, '50.00', '50.00', 'An AI guess nobody wanted', 'Mia', 'ai', 'dismissed');
         $this->logIn($this->client, $this->people['Omar']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
         $card = $page->filter(self::ROUNDS.' .round-card');
@@ -138,7 +149,7 @@ final class RoundsSectionTest extends WebTestCase
         $this->addScreenshot($roundId, Uuid::v7()->toRfc4122(), 2, 'Unknown one', null);
         $this->logIn($this->client, $this->people['Omar']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
         $shots = $page->filter(self::ROUNDS.' figure.screenshot');
@@ -161,7 +172,7 @@ final class RoundsSectionTest extends WebTestCase
         $this->addScreenshot($review, $this->addMedia('ready'), 0, 'Hidden in a row too', null);
         $this->logIn($this->client, $this->people['Mia']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
@@ -186,7 +197,7 @@ final class RoundsSectionTest extends WebTestCase
         $this->addScreenshot($lenaDraft, $this->addMedia('ready'), 0, self::LENA_DRAFT_TITLE, null);
 
         $this->logIn($this->client, $this->people['Omar']);
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
         self::assertResponseStatusCodeSame(200);
         $cards = $page->filter(self::ROUNDS.' .round-card');
         self::assertSame(
@@ -200,7 +211,7 @@ final class RoundsSectionTest extends WebTestCase
 
         foreach (['Mia', 'Sara'] as $person) {
             $this->logIn($this->client, $this->people[$person]);
-            $page = $this->client->request('GET', '/t/SHOP-1');
+            $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
             self::assertResponseStatusCodeSame(200);
             self::assertSame(['Round 3 · self-check by Omar'], $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person);
             self::assertCount(0, $page->filter(self::ROUNDS.' .round-card--private'), $person);
@@ -217,12 +228,12 @@ final class RoundsSectionTest extends WebTestCase
         $this->addScreenshot($roundId, $this->addMedia('ready'), 0, self::TEAM_ONLY_TITLE, null);
 
         $this->logIn($this->client, $this->people['Lena']);
-        $this->client->request('GET', '/t/SHOP-1');
+        $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
         self::assertResponseStatusCodeSame(200);
         self::assertStringContainsString(self::TEAM_ONLY_TITLE, (string) $this->client->getResponse()->getContent());
 
         $this->logIn($this->client, $this->people['Raj']);
-        $this->client->request('GET', '/t/SHOP-1');
+        $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
         self::assertResponseStatusCodeSame(404);
         self::assertStringNotContainsString(self::TEAM_ONLY_TITLE, (string) $this->client->getResponse()->getContent());
         self::assertCount(0, $this->client->getCrawler()->filter('.round-card, .screenshot, img.screenshot__image'));
@@ -240,8 +251,8 @@ final class RoundsSectionTest extends WebTestCase
         $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
         $this->addPin($this->addScreenshot($report, $this->addMedia('ready'), 0, 'First', null), 1, '10.00', '10.00', 'A note', 'Mia');
         $this->logIn($this->client, $this->people['Omar']);
-        $this->queryCountOf('/t/SHOP-1');
-        $oneRoundQueryCount = $this->queryCountOf('/t/SHOP-1');
+        $this->queryCountOf(self::ROUNDS_PAGE);
+        $oneRoundQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
 
         foreach (['Lena', 'Omar', 'Raj', 'Sara', 'Mia'] as $number => $owner) {
             $round = $this->addRound($ticketId, $number + 1, 0 === $number % 2 ? 'draft' : 'review', $owner, self::SHARED_AT);
@@ -252,7 +263,7 @@ final class RoundsSectionTest extends WebTestCase
         }
         $own = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $this->addScreenshot($own, $this->addMedia('pending'), 0, null, null);
-        $manyRoundsQueryCount = $this->queryCountOf('/t/SHOP-1');
+        $manyRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
 
         self::assertCount(7, $this->client->getCrawler()->filter(self::ROUNDS.' .round-card'));
         self::assertCount(11, $this->client->getCrawler()->filter(self::ROUNDS.' figure.screenshot'));
@@ -269,7 +280,7 @@ final class RoundsSectionTest extends WebTestCase
         }
         $this->logIn($this->client, $this->people['Omar']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
         $headlines = $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text());
@@ -289,7 +300,7 @@ final class RoundsSectionTest extends WebTestCase
         }
         $this->logIn($this->client, $this->people['Omar']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertSame('1 older round is not shown.', $page->filter(self::ROUNDS.' .rounds__older')->text());
     }
@@ -303,17 +314,167 @@ final class RoundsSectionTest extends WebTestCase
         }
         $this->logIn($this->client, $this->people['Omar']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertCount(20, $page->filter(self::ROUNDS.' .round-card'));
         self::assertCount(0, $page->filter(self::ROUNDS.' .rounds__older'));
+    }
+
+    #[Test]
+    public function aViewerWhoMayNotSeeATeamOnlyTicketGetsNotFoundWithNoRoundText(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1', 'team');
+        $roundId = $this->addRound($ticketId, 0, 'report', 'Lena', self::SHARED_AT);
+        $this->addScreenshot($roundId, $this->addMedia('ready'), 0, self::TEAM_ONLY_TITLE, null);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        foreach ([[], self::TURBO_FRAME_HEADERS] as $headers) {
+            $this->client->request('GET', self::ROUNDS_PAGE, [], [], $headers);
+
+            self::assertResponseStatusCodeSame(404);
+            self::assertStringContainsString(RoundsController::NOT_FOUND, (string) $this->client->getResponse()->getContent());
+            self::assertStringNotContainsString(self::TEAM_ONLY_TITLE, (string) $this->client->getResponse()->getContent());
+            self::assertCount(0, $this->client->getCrawler()->filter('.round-card, .screenshot, img'));
+        }
+    }
+
+    #[Test]
+    public function someoneOfAnotherOrganizationGetsNotFoundForATicketOfAcmeFoods(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $roundId = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addScreenshot($roundId, $this->addMedia('ready'), 0, self::TEAM_ONLY_TITLE, null);
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $ben = $this->createUserWithoutOrganization('Ben');
+        $this->addMembership($ben, $betaBakery);
+        $this->setOrgRoles($ben, $betaBakery, '{admin}');
+        $this->logIn($this->client, $ben);
+
+        $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringNotContainsString(self::TEAM_ONLY_TITLE, (string) $this->client->getResponse()->getContent());
+    }
+
+    #[Test]
+    public function anAnonymousVisitorIsSentToLogIn(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+
+        $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(302);
+        self::assertStringEndsWith('/login', (string) $this->client->getResponse()->headers->get('Location'));
+    }
+
+    /**
+     * @return iterable<string, array{string}> a key, as in the URL, of no ticket
+     */
+    public static function keysOfNoTicket(): iterable
+    {
+        yield 'a number no ticket has' => ['SHOP-99'];
+        yield 'a malformed key' => ['not-a-key'];
+        yield 'the key in lower case' => ['shop-1'];
+        yield 'a trailing newline' => ['SHOP-1%0A'];
+        yield 'a number past the integer range' => ['SHOP-99999999999999999999'];
+    }
+
+    #[Test]
+    #[DataProvider('keysOfNoTicket')]
+    public function aKeyOfNoTicketIsNotFound(string $key): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('GET', '/t/'.$key.'/rounds', [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertCount(0, $this->client->getCrawler()->filter('.round-card'));
+    }
+
+    #[Test]
+    public function withoutTheFrameHeaderTheRoundsComeAsAPageOfTheirOwnWithABackLinkAndTheFrameAsTheOnlyFrame(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Rounds', $page->filter('h1')->text());
+        self::assertSame('/t/SHOP-1', $page->filter('a.ticket__back')->attr('href'));
+        self::assertSame(['Round 0 · Report · by Mia · 0 pins'], $page->filter('.round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()));
+        self::assertSame('Turbo-Frame', $this->client->getResponse()->headers->get('Vary'));
+    }
+
+    #[Test]
+    public function aCardShowsAtMostTenPicturesLazilyAndSaysHowManyMoreAreNotShown(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $shared = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
+        $own = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        foreach (range(0, RoundCards::MAX_PICTURES_PER_CARD + 1) as $position) {
+            $this->addScreenshot($report, $this->addMedia('ready'), $position, 'Report shot '.$position, null);
+        }
+        foreach (range(0, RoundCards::MAX_PICTURES_PER_CARD) as $position) {
+            $this->addScreenshot($shared, $this->addMedia('ready'), $position, 'Shared shot '.$position, null);
+        }
+        foreach (range(0, RoundCards::MAX_PICTURES_PER_CARD - 1) as $position) {
+            $this->addScreenshot($own, $this->addMedia('ready'), $position, 'Own shot '.$position, null);
+        }
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $cards = $page->filter(self::ROUNDS.' .round-card');
+        self::assertCount(3, $cards);
+        self::assertSame([10, 10, 10], $cards->each(static fn (Crawler $card): int => $card->filter('img.screenshot__image')->count()));
+        self::assertSame(
+            ['2 more screenshots are not shown.', '1 more screenshot is not shown.'],
+            $cards->filter('.round-card__more')->each(static fn (Crawler $note): string => $note->text()),
+            'A card that shows every picture has no note.',
+        );
+        self::assertSame(['lazy'], array_unique($cards->filter('img.screenshot__image')->each(static fn (Crawler $image): ?string => $image->attr('loading'))));
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('Report shot 9', $content);
+        self::assertStringNotContainsString('Report shot 10', $content);
+        self::assertStringNotContainsString('Report shot 11', $content);
+        self::assertStringNotContainsString('Shared shot 10', $content);
+        self::assertSame('Round 0 · Report · by Mia · 0 pins', $cards->eq(0)->filter('.round-card__headline')->text());
+        self::assertSame('0 of 11 look right', $cards->eq(1)->filter('.round-card__status')->text(), 'The status counts every screenshot, shown or not.');
+    }
+
+    /**
+     * A round with a picture and a pin adds five queries to a frame with no round: its screenshots, their pins, the
+     * owners' membership and names, and the signing. Whatever the number of rounds, the count stays that
+     * (theSectionReadsTheSameNumberOfQueriesWhateverTheNumberOfRounds).
+     */
+    #[Test]
+    public function aFrameWithARoundReadsFiveMoreQueriesThanOneWithNone(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->queryCountOf(self::ROUNDS_PAGE);
+        $noRoundQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addPin($this->addScreenshot($report, $this->addMedia('ready'), 0, 'First', null), 1, '10.00', '10.00', 'A note', 'Mia');
+        $oneRoundQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+
+        self::assertSame(self::EMPTY_FRAME_QUERIES, $noRoundQueryCount);
+        self::assertSame(self::EMPTY_FRAME_QUERIES + 5, $oneRoundQueryCount, 'The rounds, screenshots, pins, the owners\' names and the signing.');
     }
 
     private function queryCountOf(string $uri): int
     {
         $debugData = self::getContainer()->get('doctrine.debug_data_holder');
         $debugData->reset();
-        $this->client->request('GET', $uri);
+        $this->client->request('GET', $uri, [], [], self::TURBO_FRAME_HEADERS);
         self::assertResponseStatusCodeSame(200);
 
         $queryCount = 0;

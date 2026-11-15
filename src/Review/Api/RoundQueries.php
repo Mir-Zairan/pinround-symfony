@@ -24,6 +24,8 @@ interface RoundQueries
      * Rounds come by number (Round 0, Round 1, then the rest), then the viewer's own unshared draft, which has none.
      * Another person's unshared draft is left out for everyone, the lead and admins included.
      *
+     * Only Round 0 (the report) and drafts come with screenshots and pins; a checklist or review round has none loaded.
+     *
      * Round 0, the viewer's own unshared draft and the newest MAX_NUMBERED_ROUNDS numbered rounds from Round 1 up are
      * loaded; the count of the older ones is in the answer. The cap is in the rounds query, so a ticket with a
      * thousand rounds still costs the same four queries.

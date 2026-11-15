@@ -20,8 +20,8 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * One ticket's page at /t/{key} (FR-TKT-08, P03.T6, ticket-page.md): the header, The ask, the Rounds empty state, the
- * "Your next step" box of a ticket a team owns (its verbs and move list only for someone TicketPermission::MOVE lets
+ * One ticket's page at /t/{key} (FR-TKT-08, P03.T6, ticket-page.md): the header, The ask, the Rounds section's lazy frame,
+ * the "Your next step" box of a ticket a team owns (its verbs and move list only for someone TicketPermission::MOVE lets
  * move it) and Details. Every person of the organization may ask for it (OrganizationPermission::VIEW); TicketQueries::pageOf reads
  * only a ticket the viewer may see, and TicketPermission VIEW on its visibility facts is the second guard. An unknown
  * or malformed key, another organization's ticket (row-level security hides it) and one the viewer may not see all
@@ -32,16 +32,14 @@ use Symfony\Component\Routing\Attribute\Route;
  * it, they walk the plain open-tickets list; a Done ticket in neither has no position line. A ticket in the viewer's
  * queue (TicketQueue, FR-TKT-15) shows the QueueBar instead, which walks the queue, and costs no position query.
  *
- * Eight queries beyond the request's own when the steps, rules and team's people are cached, nine for a lead whose move
- * list offers Needs input (performance-and-scale.md: ten at most for the page, which the Rounds section now passes, see
- * the phase 5 hand-off notes): the Rounds section's own two with no round to show (the ticket's visibility check,
- * which reuses the visibility built here, and the rounds), and each level of rounds it shows adds one more (screenshots,
- * pins, the owners' names, one signing call); the settings (step policy and triager,
- * one query), the ticket with its project and parent, the names of everyone the page shows in one batch, the saved turn
- * with the waiting turns of {@see NowNextSentences} in one, the latest moves of What happened in one
+ * Six queries beyond the request's own when the steps, rules and team's people are cached, seven for a lead whose move
+ * list offers Needs input (performance-and-scale.md: ten at most for the page): the settings (step policy and
+ * triager, one query), the ticket with its project and parent, the names of everyone the page shows in one batch, the
+ * saved turn with the waiting turns of {@see NowNextSentences} in one, the latest moves of What happened in one
  * ({@see TicketPageParts}), and the position in one; the lead's Needs input dialog adds its membership read, and a miss
  * of the team's people adds two. A list's project adds its lookup; a list the ticket is not in adds the plain list's
- * position.
+ * position. The thread and the Rounds section load in lazy frames of their own requests (ThreadController,
+ * RoundsController), so the page reads none of them.
  */
 final class TicketShowController extends AbstractController
 {
@@ -94,7 +92,6 @@ final class TicketShowController extends AbstractController
 
         return $this->render('@Ticketing/show.html.twig', [
             ...$this->ticketPageParts->of($ticket, $actor),
-            'visibility' => $visibility,
             'backQuery' => $listContext->query(),
             'queueBar' => $queueBar,
             'position' => null === $position ? null : [

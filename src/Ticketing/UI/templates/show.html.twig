@@ -93,8 +93,8 @@
                 {#- Conversation's component, embedded by name: Ticketing's UI may not use Conversation's Api (deptrac). -#}
                 {{ component('ThreadFrame', {key: ticket.key}) }}
 
-                {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). -#}
-                {{ component('RoundsSection', {ticketId: ticket.id.toString, visibility: visibility}) }}
+                {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). It passes the key only: the lazy frame's own request decides who may see the rounds. -#}
+                {{ component('RoundsSection', {key: ticket.key}) }}
             </div>
 
             <aside class="ticket__aside">
