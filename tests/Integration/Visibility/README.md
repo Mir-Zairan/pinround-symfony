@@ -30,7 +30,7 @@ Its data provider `viewers()` yields `[viewer, seesTeamOnly, seesNoTeamTicket]`.
 | Notification delivery (`NotifyRecipients` writing `ntf_notification` as worker-notify handles an event): each viewer, asked a question about each cast ticket, gets a notification exactly when they may see that ticket | `NotificationDeliveryLeakTest` | P04.T5 |
 | Batch visibility check (`TicketQueries::visibleTicketIdsOf`, for modules that keep ticket ids): each viewer gets back exactly the cast tickets they may see, once each, never an unknown id or another organization's ticket; an empty list costs no query, more than 200 ids, a viewer of another organization than the tenant and no open transaction are refused before any query | `VisibleTicketIdsLeakTest` | P04.T5 |
 | Bell (`NotificationQueries::bell`, `BellInbox` count, Done and Open): each viewer, with an open question about each cast ticket, sees, counts and changes exactly those of tickets they may see, and Done and Open on a hidden one leave its row as it was; a person who leaves the ticket's team loses it from the bell, a cold count and Done | `BellLeakTest` | P04.T5 |
-| Rounds | planned | P05 |
+| Rounds section (`RoundQueries::forTicket`): each viewer gets a cast ticket's Round 0, with its screenshot and pin, exactly when they may see that ticket; a member outside the team, a manager with no team role and another organization's admin get none of the team-only ticket's | `RoundListLeakTest` | P05.T4 |
 | Duplicate suggestions | planned | P06 |
 | Home, Whose turn, My reports | planned | P07 |
 | AI inputs | planned | P08 |
