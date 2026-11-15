@@ -51,14 +51,16 @@ final readonly class DbalRounds implements Rounds
         // when the caller goes on.
         $this->connection->transactional(function () use ($round): void {
             $organizationId = $round->organizationId()->toString();
+            $roundId = $round->id()->toString();
             $createdAt = $round->createdAt()->format(self::TIMESTAMP);
-            // DO NOTHING on any unique index: the number one and the one-open-draft one are the slots a round takes.
+            // DO NOTHING on any unique index: the number one and the one-open-draft one are the slots a round takes. A
+            // conflict target names one index only, so the primary key is told apart from the slots after the fact.
             $inserted = $this->connection->executeStatement(
                 'INSERT INTO rvw_round (organization_id, id, ticket_id, number, kind, owner_id, shared_at, state, version, created_at)'
                 .' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
                 [
                     $organizationId,
-                    $round->id()->toString(),
+                    $roundId,
                     $round->ticketId()->toString(),
                     $round->number(),
                     $round->kind()->value,
@@ -70,6 +72,12 @@ final readonly class DbalRounds implements Rounds
                 ],
             );
             if (1 !== $inserted) {
+                // A round id comes from nextIdentity once, so meeting it again is a bug or a redelivered message, never
+                // a ticket's slot the person could be told about.
+                if (false !== $this->connection->fetchOne('SELECT 1 FROM rvw_round WHERE organization_id = ? AND id = ?', [$organizationId, $roundId])) {
+                    throw new \LogicException(\sprintf('Round %s is added already; a round is added once.', $roundId));
+                }
+
                 throw new RoundSlotTaken('The ticket has this round already.');
             }
 
@@ -79,7 +87,7 @@ final readonly class DbalRounds implements Rounds
                 $screenshotRows[] = [
                     $organizationId,
                     $screenshot->id()->toString(),
-                    $round->id()->toString(),
+                    $roundId,
                     $screenshot->mediaId(),
                     $screenshot->position(),
                     $screenshot->variantLabel()?->value,

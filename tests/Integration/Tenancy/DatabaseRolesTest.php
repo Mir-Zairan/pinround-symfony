@@ -554,8 +554,36 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * The round, picture and pin tables (Version20261115180000): the app reads, adds and changes them and removes none
+     * yet; support reads under the tenant policy.
+     */
+    #[Test]
+    public function theRoundTablesGrantTheAppNoDeleteAndSupportOnlyRead(): void
+    {
+        $connection = $this->connection();
+
+        foreach (['rvw_round', 'rvw_screenshot', 'rvw_pin'] as $table) {
+            self::assertEqualsCanonicalizing(
+                ['pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+                $this->grantsToOthersThanTheOwner($connection, $table),
+                $table,
+            );
+            self::assertSame(
+                ['pinround_migrator', true, true],
+                $connection->fetchNumeric('SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]),
+                $table,
+            );
+            self::assertSame([], $connection->fetchFirstColumn(
+                'SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)',
+                ['public.'.$table],
+            ), $table);
+        }
+    }
+
+    /**
      * Every index of the media tables starts with organization_id: expired slots are found by time, a picture already
-     * uploaded by its hash, and the pictures of one status by age.
+     * uploaded by its hash, and the pictures of one status by age; the storage quota and a person's open slots are
+     * read from the index alone.
      */
     #[Test]
     public function theMediaIndexesAllStartWithTheOrganization(): void
@@ -567,6 +595,8 @@ final class DatabaseRolesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX med_object_pkey ON public.med_object USING btree (organization_id, id)',
                 'CREATE INDEX med_object_sha256_idx ON public.med_object USING btree (organization_id, sha256)',
                 'CREATE INDEX med_object_status_created_at_idx ON public.med_object USING btree (organization_id, status, created_at)',
+                'CREATE INDEX med_object_status_bytes_idx ON public.med_object USING btree (organization_id, status, bytes)',
+                'CREATE INDEX med_upload_intent_open_idx ON public.med_upload_intent USING btree (organization_id, expires_at, user_id, max_bytes) WHERE (used_at IS NULL)',
             ],
             $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('med_upload_intent', 'med_object')"),
         );
@@ -611,8 +641,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_check_item', 'rvw_report_draft'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);
