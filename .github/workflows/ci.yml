@@ -46,7 +46,8 @@ jobs:
 
   integration:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    # Integration plus functional tests take 5 to 8 minutes on a hosted runner since phase 5; 15 leaves room.
+    timeout-minutes: 15
     # The postgres and valkey images are the compose.yaml tags, pinned here by digest. Real environment
     # variables beat .env.test, whose URLs point at the compose host name "postgres". The URLs name "pinround";
     # config/packages/doctrine.yaml appends "_test" in the test env, so the service
