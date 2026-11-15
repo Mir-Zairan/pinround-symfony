@@ -96,6 +96,19 @@ final class InMemoryMediaObjects implements MediaObjects
         return $matches[0] ?? null;
     }
 
+    public function storedBytes(): int
+    {
+        $this->requireTransaction('Reading the stored media objects needs an open transaction.');
+
+        $tenant = $this->tenantContext->require();
+        $takingSpace = array_filter(
+            $this->stored,
+            static fn (MediaObject $mediaObject): bool => $mediaObject->organizationId()->equals($tenant) && MediaStatus::Rejected !== $mediaObject->status(),
+        );
+
+        return array_sum(array_map(static fn (MediaObject $mediaObject): int => $mediaObject->bytes(), $takingSpace));
+    }
+
     /**
      * What the table holds, of every organization; for assertions only.
      *

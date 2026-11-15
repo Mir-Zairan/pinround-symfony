@@ -9,16 +9,21 @@ use App\Media\Domain\UploadIntentId;
 use App\Media\Domain\UploadIntents;
 use App\Media\Domain\UploadIntentUnusable;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
 use Symfony\Component\Uid\Uuid;
 
 /**
  * UploadIntents as DoctrineUploadIntents behaves on the real table: it needs an open transaction, sees and writes only
- * the tenant's rows, refuses a second row with the same key, and recordUse() checks what is stored, not the copy.
+ * the tenant's rows, refuses a second row with the same key, and recordUse() checks what is stored, not the copy. A
+ * quota lock only records the organization, as one PHP process has no second begin to make wait.
  */
 final class InMemoryUploadIntents implements UploadIntents
 {
     /** @var array<string, UploadIntent> by organization id and intent id, as the table's primary key */
     private array $stored = [];
+
+    /** @var list<string> */
+    private array $quotaLocksTaken = [];
 
     public function __construct(private readonly InMemoryTransactions $transactions, private readonly TenantContext $tenantContext)
     {
@@ -77,6 +82,36 @@ final class InMemoryUploadIntents implements UploadIntents
         if ($storedIntent !== $intent) {
             $intent->markUsed($at);
         }
+    }
+
+    public function lockQuotaOf(OrganizationId $organizationId): void
+    {
+        $this->requireTransaction('Locking the storage quota needs an open transaction.');
+
+        $this->quotaLocksTaken[] = $organizationId->toString();
+    }
+
+    public function openBytesAt(\DateTimeImmutable $at): int
+    {
+        $this->requireTransaction('Reading the open upload intents needs an open transaction.');
+
+        $tenant = $this->tenantContext->require();
+        $openIntents = array_filter(
+            $this->stored,
+            static fn (UploadIntent $intent): bool => $intent->organizationId()->equals($tenant) && null === $intent->usedAt() && $intent->expiresAt() > $at,
+        );
+
+        return array_sum(array_map(static fn (UploadIntent $intent): int => $intent->maxBytes(), $openIntents));
+    }
+
+    /**
+     * The organization of each lockQuotaOf(), in order; for assertions only.
+     *
+     * @return list<string>
+     */
+    public function quotaLocksTaken(): array
+    {
+        return $this->quotaLocksTaken;
     }
 
     /**

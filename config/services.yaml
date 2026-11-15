@@ -13,6 +13,9 @@ parameters:
     # seconds because it is also the Valkey key's TTL, which every request renews (RedisSessionHandler below).
     identity.session_idle_seconds: 28800
     identity.session_absolute_days: 30
+    # What each organization may store when MEDIA_ORG_QUOTA_BYTES is unset or empty: 50 GiB, the SaaS default of
+    # media-pipeline.md (Quotas). A self-hosted install sets 0 for no limit.
+    media.organization_quota_default_bytes: 53687091200
     # The routes a logged-in user may open before choosing an organization (EnterChosenOrganization); every other one
     # sends a user without a chosen organization to the picker. Deny by default: a new route is not in this list.
     organization.routes_without_organization:
@@ -127,6 +130,10 @@ services:
     App\Media\Application\MediaTargetAuthorizers:
         arguments:
             $authorizers: !tagged_iterator app.media_target_authorizer
+    # A value that is no whole number fails the request; a negative one is refused by DirectUploads.
+    App\Media\Application\DirectUploads:
+        arguments:
+            $organizationQuotaBytes: '%env(int:default:media.organization_quota_default_bytes:MEDIA_ORG_QUOTA_BYTES)%'
 
     # Several services read the step policy on one page; it is read once per request. AddStep and SetRule check it
     # again inside their own transaction, after the voter, so they read it fresh.

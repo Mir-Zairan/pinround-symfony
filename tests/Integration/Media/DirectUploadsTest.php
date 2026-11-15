@@ -43,6 +43,7 @@ final class DirectUploadsTest extends KernelTestCase
     private const string NOW = '2026-03-02 10:00:00+00:00';
     private const string TICKET = 'ticket';
     private const string SHOP_12 = 'SHOP-12';
+    private const int FIFTY_GIB = 53_687_091_200;
 
     private MockClock $clock;
     private RecordingMediaTargetAuthorizer $ticketAuthorizer;
@@ -69,6 +70,51 @@ final class DirectUploadsTest extends KernelTestCase
     public function theContainerGivesTheUploadsApiAsDirectUploads(): void
     {
         self::assertInstanceOf(DirectUploads::class, self::getContainer()->get('test.media_uploads'));
+    }
+
+    /**
+     * .env.test leaves MEDIA_ORG_QUOTA_BYTES unset, so the container gives the default of media-pipeline.md.
+     */
+    #[Test]
+    public function theContainerGivesEachOrganizationA50GibQuotaByDefault(): void
+    {
+        $uploads = self::getContainer()->get('test.media_uploads');
+
+        self::assertSame(self::FIFTY_GIB, new \ReflectionProperty(DirectUploads::class, 'organizationQuotaBytes')->getValue($uploads));
+    }
+
+    #[Test]
+    public function aBeginThatFillsTheQuotaExactlyIsStored(): void
+    {
+        $this->seedStorageUseOf3048Bytes();
+
+        $slot = $this->transactions()->committedAs(self::ACME_FOODS, fn (): UploadSlot => $this->uploads(organizationQuotaBytes: 3_048 + 500)->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), new UploadTarget(self::TICKET, self::SHOP_12), 'screenshot', 'image/png', 500, $this->clock->now()));
+
+        self::assertSame([[$slot->intentId]], $this->rowsOf('SELECT id FROM med_upload_intent WHERE max_bytes = 500'));
+    }
+
+    #[Test]
+    public function aBeginOneByteOverTheQuotaIsRefusedAsStorageFullAndStoresNothing(): void
+    {
+        $this->seedStorageUseOf3048Bytes();
+        $intentsBefore = $this->rowsOf('SELECT id, max_bytes, used_at FROM med_upload_intent ORDER BY id');
+        $objectsBefore = $this->rowsOf('SELECT id, bytes, status FROM med_object ORDER BY id');
+        self::assertCount(2, $intentsBefore, 'The seed is one used and one open intent.');
+        $this->ticketAuthorizer = new RecordingMediaTargetAuthorizer(self::TICKET);
+        $this->ticketAuthorizer->allow(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::SHOP_12);
+
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn (): UploadSlot => $this->uploads(organizationQuotaBytes: 3_048 + 500)->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), new UploadTarget(self::TICKET, self::SHOP_12), 'screenshot', 'image/png', 501, $this->clock->now()));
+            self::fail('An upload past the quota was begun.');
+        } catch (UploadRefused $refused) {
+            self::assertSame(DirectUploads::STORAGE_FULL, $refused->getMessage());
+        } finally {
+            self::getContainer()->get('doctrine')->resetManager();
+        }
+
+        self::assertSame($intentsBefore, $this->rowsOf('SELECT id, max_bytes, used_at FROM med_upload_intent ORDER BY id'));
+        self::assertSame($objectsBefore, $this->rowsOf('SELECT id, bytes, status FROM med_object ORDER BY id'));
+        self::assertSame([], $this->ticketAuthorizer->asked());
     }
 
     #[Test]
@@ -244,7 +290,7 @@ final class DirectUploadsTest extends KernelTestCase
         return $messages;
     }
 
-    private function uploads(?UploadProcessingQueue $uploadProcessingQueue = null): DirectUploads
+    private function uploads(?UploadProcessingQueue $uploadProcessingQueue = null, int $organizationQuotaBytes = self::FIFTY_GIB): DirectUploads
     {
         $entityManager = $this->entityManager();
         $tenantContext = self::getContainer()->get(TenantContext::class);
@@ -257,7 +303,18 @@ final class DirectUploadsTest extends KernelTestCase
             new MediaTargetAuthorizers([$this->ticketAuthorizer]),
             new DoctrineTransactions($entityManager, $tenantContext, self::getContainer()->get('doctrine')),
             $tenantContext,
+            $organizationQuotaBytes,
         );
+    }
+
+    /**
+     * Acme Foods' 2 048-byte upload completed into a pending object, and a second intent of 1 000 bytes left open.
+     */
+    private function seedStorageUseOf3048Bytes(): void
+    {
+        $slot = $this->begin();
+        $this->complete($slot->intentId);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): UploadSlot => $this->uploads()->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), new UploadTarget(self::TICKET, self::SHOP_12), 'screenshot', 'image/webp', 1_000, $this->clock->now()));
     }
 
     private function connection(): Connection

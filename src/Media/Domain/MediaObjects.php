@@ -49,4 +49,12 @@ interface MediaObjects
      * @throws \LogicException when no transaction is open
      */
     public function readyBySha256(string $sha256): ?MediaObject;
+
+    /**
+     * The bytes the tenant's pending and ready media objects take; 0 when there are none. A rejected object's file is
+     * deleted from the bucket (media-pipeline.md, Validation rules), so it takes none.
+     *
+     * @throws \LogicException when no transaction is open
+     */
+    public function storedBytes(): int;
 }
