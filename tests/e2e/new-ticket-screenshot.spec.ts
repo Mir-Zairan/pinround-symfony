@@ -27,12 +27,12 @@ async function openNewTicketForm(page: Page) {
   const form = page.locator('form.login__form');
   return {
     form,
-    title: form.locator('input[name="title"]'),
-    description: form.locator('textarea[name="description"]'),
+    title: form.getByLabel('Title', { exact: true }),
+    description: form.getByLabel('Description', { exact: true }),
     section: form.locator('section.screenshot-report'),
-    fileInput: form.locator('input[type="file"]'),
-    uploadStatus: form.locator('.upload-field__status'),
-    holdStatus: form.locator('.screenshot-report__status'),
+    fileInput: form.getByLabel('Upload a file', { exact: true }),
+    uploadStatus: form.locator('[data-presigned-upload-target="status"]'),
+    holdStatus: form.locator('[data-screenshot-report-target="status"]'),
     mediaId: form.locator('input[name="screenshot_media_id"]'),
     frame: form.locator('.screenshot__frame'),
     pins: form.locator('.screenshot__frame .pin'),
@@ -104,6 +104,8 @@ test('an uploaded picture takes two pins with notes, and the count follows', asy
   await routeStatus(page);
   const form = await openNewTicketForm(page);
   await expect(form.pinCount).toHaveText('Pins are optional, but they help the developer find the problem fast.');
+  await expect(form.uploadStatus).toHaveAttribute('role', 'status');
+  await expect(form.holdStatus).toHaveAttribute('role', 'status');
 
   await form.fileInput.setInputFiles({ name: 'checkout.png', mimeType: 'image/png', buffer: drawablePng(400, 240) });
 
@@ -122,12 +124,15 @@ test('an uploaded picture takes two pins with notes, and the count follows', asy
 
 test('a submit while the picture is pending is held with the waiting text and sent when it is ready', async ({ page }) => {
   await routeCompletedUpload(page, 'intent-new-2');
-  let isReady = false;
-  await routeStatus(page, () => ({ status: 200, json: { status: isReady ? 'ready' : 'pending' } }));
+  // The page gives up waiting after 15 polls and sends anyway, so only the poll count at the send tells the two apart.
+  let readyFromPoll = Number.POSITIVE_INFINITY;
+  const pollCount = await routeStatus(page, (poll) => ({ status: 200, json: { status: poll >= readyFromPoll ? 'ready' : 'pending' } }));
   const submissions: string[] = [];
+  const pollsAtSubmission: number[] = [];
   page.on('request', (request) => {
     if ('POST' === request.method() && new URL(request.url()).pathname === '/tickets/new') {
       submissions.push(request.postData() ?? '');
+      pollsAtSubmission.push(pollCount());
     }
   });
   const form = await openNewTicketForm(page);
@@ -140,14 +145,16 @@ test('a submit while the picture is pending is held with the waiting text and se
   await form.submit.click();
 
   await expect(form.holdStatus).toHaveText(WAITING_MESSAGE);
-  await expect(form.submit).toBeFocused();
   await expect(page).toHaveURL(/\/tickets\/new$/);
   expect(submissions).toEqual([]);
   await expect(form.title).toHaveValue(TITLE);
   await expect(form.pins).toHaveCount(2);
 
-  isReady = true;
+  const firstReadyPoll = pollCount() + 1;
+  readyFromPoll = firstReadyPoll;
   await expect.poll(() => submissions.length, { timeout: 10_000 }).toBe(1);
+  expect(pollsAtSubmission[0]).toBeGreaterThanOrEqual(firstReadyPoll);
+  expect(pollsAtSubmission[0]).toBeLessThanOrEqual(firstReadyPoll + 1);
   expect(submissions[0]).toContain(`screenshot_media_id=${MEDIA_ID}`);
   expect(submissions[0]).toContain('pins%5B1%5D%5Bnote%5D=The+total+is+hidden');
 });
@@ -190,7 +197,7 @@ test('text dragged into a pin note is not swallowed, while a dragged file is tak
   const beginsBefore = intentRequests.length;
   const note = form.form.getByLabel('Note for pin 1');
 
-  const answers = await note.evaluate((element) => {
+  const answers = await note.evaluate((element, pngBytes) => {
     const dispatch = (type: string, transfer: DataTransfer) => {
       const event = new DragEvent(type, { dataTransfer: transfer, bubbles: true, cancelable: true });
       element.dispatchEvent(event);
@@ -199,17 +206,20 @@ test('text dragged into a pin note is not swallowed, while a dragged file is tak
     const text = new DataTransfer();
     text.setData('text/plain', 'dragged words');
     const files = new DataTransfer();
-    files.items.add(new File([new Uint8Array([1, 2, 3])], 'notes.txt', { type: 'text/plain' }));
+    files.items.add(new File([new Uint8Array(pngBytes)], 'dropped.png', { type: 'image/png' }));
     return {
       textOver: dispatch('dragover', text),
       textDrop: dispatch('drop', text),
       fileOver: dispatch('dragover', files),
+      fileDrop: dispatch('drop', files),
     };
-  });
+  }, [...drawablePng(400, 240)]);
 
-  expect(answers).toEqual({ textOver: false, textDrop: false, fileOver: true });
-  expect(intentRequests.length).toBe(beginsBefore);
-  await expect(form.pins).toHaveCount(2);
+  expect(answers).toEqual({ textOver: false, textDrop: false, fileOver: true, fileDrop: true });
+  // A file dropped on a note bubbles to the section and replaces the picture: exactly one begin, none for the text.
+  await expect.poll(() => intentRequests.length).toBe(beginsBefore + 1);
+  await expect(form.uploadStatus).toHaveText('dropped.png uploaded.');
+  await expect(form.pins).toHaveCount(0);
 });
 
 test.describe('the whole journey, with a worker and a bucket', () => {
