@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Review\Application;
 
+use App\Media\Api\MediaImageStatus;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
@@ -23,6 +24,7 @@ use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Review\UI\Media\InMemoryTicketTurnQueries;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
 use App\Ticketing\Api\TicketNotFound;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -35,11 +37,18 @@ final class UseCaseRoundCommandsTest extends TestCase
     private const string BROKEN_TICKET = '0197a3c0-0000-7000-8000-000000001098';
     private const string LENA = '0197a3c0-0000-7000-8000-000000000b01';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000000b02';
+    private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000000f02';
     private const string MEDIA = '0197a3c0-0000-7000-8000-000000000d01';
     private const string OTHER_MEDIA = '0197a3c0-0000-7000-8000-000000000d02';
+    private const string PENDING_MEDIA = '0197a3c0-0000-7000-8000-000000000d03';
+    private const string REJECTED_MEDIA = '0197a3c0-0000-7000-8000-000000000d04';
+    private const string OMARS_MEDIA = '0197a3c0-0000-7000-8000-000000000d05';
+    private const string LENAS_MEDIA_AT_BETA_BAKERY = '0197a3c0-0000-7000-8000-000000000d06';
+    private const string UNKNOWN_MEDIA = '0197a3c0-0000-7000-8000-000000000d09';
 
     private InMemoryRounds $rounds;
     private InMemoryTicketTurnQueries $tickets;
+    private InMemoryUploadedMedia $uploadedMedia;
     private UseCaseRoundCommands $commands;
     private \DateTimeImmutable $reportedAt;
 
@@ -47,9 +56,17 @@ final class UseCaseRoundCommandsTest extends TestCase
     {
         $this->rounds = new InMemoryRounds();
         $this->tickets = new InMemoryTicketTurnQueries([self::snapshot()], new TicketId(self::BROKEN_TICKET));
+        $this->uploadedMedia = new InMemoryUploadedMedia([
+            [self::ACME_FOODS, self::MEDIA, self::LENA, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::OTHER_MEDIA, self::LENA, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::PENDING_MEDIA, self::LENA, MediaImageStatus::Pending],
+            [self::ACME_FOODS, self::REJECTED_MEDIA, self::LENA, MediaImageStatus::Rejected],
+            [self::ACME_FOODS, self::OMARS_MEDIA, self::OMAR, MediaImageStatus::Ready],
+            [self::BETA_BAKERY, self::LENAS_MEDIA_AT_BETA_BAKERY, self::LENA, MediaImageStatus::Ready],
+        ]);
         $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $tenantContext->set(new OrganizationId(self::ACME_FOODS));
-        $this->commands = new UseCaseRoundCommands($this->rounds, $this->tickets, $tenantContext);
+        $this->commands = new UseCaseRoundCommands($this->rounds, $this->tickets, $tenantContext, $this->uploadedMedia);
         $this->reportedAt = new \DateTimeImmutable('2026-03-04 09:30:00+00:00');
     }
 
@@ -95,6 +112,65 @@ final class UseCaseRoundCommandsTest extends TestCase
         self::assertSame(['Total is off', 'Logo is cut'], array_map(static fn (Pin $pin): string => $pin->note(), $pins));
         self::assertSame([self::LENA, self::LENA], array_map(static fn (Pin $pin): string => $pin->authorId()->toString(), $pins));
         self::assertSame([self::TICKET], $this->tickets->askedTicketIds);
+        self::assertSame([[self::MEDIA, strtoupper(self::OTHER_MEDIA)]], $this->uploadedMedia->askedMediaIds);
+    }
+
+    /**
+     * Omar's picture is ready in Lena's organization and Lena's own one is ready in Beta Bakery, so only the uploader
+     * and organization check refuses them.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function picturesTheReporterDidNotUpload(): iterable
+    {
+        yield 'another person\'s ready picture' => [self::OMARS_MEDIA];
+        yield 'the reporter\'s picture in another organization' => [self::LENAS_MEDIA_AT_BETA_BAKERY];
+        yield 'an unknown picture' => [self::UNKNOWN_MEDIA];
+        yield 'a malformed id' => ['not-a-media-id'];
+    }
+
+    #[Test]
+    #[DataProvider('picturesTheReporterDidNotUpload')]
+    public function itRefusesAPictureTheReporterDidNotUploadBeforeBuildingAnything(string $mediaId): void
+    {
+        $this->assertRefusedBeforeBuilding(RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU, [self::screenshotOf($mediaId)]);
+
+        self::assertSame([[$mediaId]], $this->uploadedMedia->askedMediaIds);
+    }
+
+    #[Test]
+    public function itRefusesAPictureThatIsStillProcessingBeforeBuildingAnything(): void
+    {
+        $this->assertRefusedBeforeBuilding(RoundRefused::MEDIA_STILL_PROCESSING, [self::screenshotOf(self::PENDING_MEDIA)]);
+    }
+
+    #[Test]
+    public function itRefusesARejectedPictureBeforeBuildingAnything(): void
+    {
+        $this->assertRefusedBeforeBuilding(RoundRefused::MEDIA_REJECTED, [self::screenshotOf(self::REJECTED_MEDIA)]);
+    }
+
+    /**
+     * A ready picture first does not let the others through, and the first refused one in the list names the reason.
+     */
+    #[Test]
+    public function oneRefusedPictureRefusesTheWholeReportWithTheReasonOfTheFirst(): void
+    {
+        $this->assertRefusedBeforeBuilding(RoundRefused::MEDIA_STILL_PROCESSING, [
+            self::screenshotOf(self::MEDIA),
+            self::screenshotOf(self::PENDING_MEDIA),
+            self::screenshotOf(self::OMARS_MEDIA),
+        ]);
+
+        self::assertSame([[self::MEDIA, self::PENDING_MEDIA, self::OMARS_MEDIA]], $this->uploadedMedia->askedMediaIds);
+    }
+
+    #[Test]
+    public function aReportFromSomeoneWhoDidNotReportTheTicketIsRefusedBeforeAskingForThePictures(): void
+    {
+        $this->assertRefused('Only the person who reported the ticket can add its report.', [self::screenshotOf(self::OMARS_MEDIA)], self::OMAR);
+
+        self::assertSame([], $this->uploadedMedia->askedMediaIds);
     }
 
     #[Test]
@@ -150,12 +226,6 @@ final class UseCaseRoundCommandsTest extends TestCase
     }
 
     #[Test]
-    public function itRefusesAMediaIdThatIsNotAnUploadedPictureAndStoresNothing(): void
-    {
-        $this->assertRefused('A screenshot needs the id of an uploaded picture.', [new ScreenshotWithPins('not-a-media-id')]);
-    }
-
-    #[Test]
     public function itAcceptsExactlyTheMaximumNumberOfPinsOnAScreenshot(): void
     {
         $this->commands->createReport(new TicketId(self::TICKET), [self::screenshotWithPins(Screenshot::MAX_PINS)], new UserId(self::LENA), $this->reportedAt);
@@ -205,7 +275,7 @@ final class UseCaseRoundCommandsTest extends TestCase
     #[Test]
     public function itFailsWhenNoOrganizationIsSetAndAsksNothing(): void
     {
-        $commands = new UseCaseRoundCommands($this->rounds, $this->tickets, new TenantContext(new RecordingTenantSwitchGuard()));
+        $commands = new UseCaseRoundCommands($this->rounds, $this->tickets, new TenantContext(new RecordingTenantSwitchGuard()), $this->uploadedMedia);
 
         try {
             $commands->createReport(new TicketId(self::TICKET), self::screenshots(1), new UserId(self::LENA), $this->reportedAt);
@@ -229,6 +299,25 @@ final class UseCaseRoundCommandsTest extends TestCase
         }
 
         self::assertSame([], $this->rounds->stored);
+    }
+
+    /**
+     * @param list<ScreenshotWithPins> $screenshots
+     */
+    private function assertRefusedBeforeBuilding(string $reason, array $screenshots): void
+    {
+        $this->assertRefused($reason, $screenshots);
+
+        self::assertSame(0, $this->rounds->issuedRoundIds);
+        self::assertSame(0, $this->rounds->issuedPinIds);
+    }
+
+    /**
+     * A screenshot with a pin, so a refusal that came after building would have issued a round and a pin id.
+     */
+    private static function screenshotOf(string $mediaId): ScreenshotWithPins
+    {
+        return new ScreenshotWithPins($mediaId, null, null, [new PlacedPin(10.0, 10.0, 'Total is off')]);
     }
 
     /**

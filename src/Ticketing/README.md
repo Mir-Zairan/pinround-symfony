@@ -6,6 +6,8 @@ The ticket page's Now and Next lines (`UI\NowNextSentences`) read the turn snaps
 
 `NextStep::peopleToWaitOn` lists, as `UI\PersonToWaitOn` (user id, first name, the roles joined by " · "), the ticket's named reporter, assignee, reviewer and tester once each who are still members of the organization (one `MembershipQueries::membersAmong` read), only when the lead's list offers a move to Needs input; the dialog ticks the first of them, or Someone else when none is left.
 
+`NewTicketReport` is a port in Ticketing's Api that Review implements (`Review\UI\NewTicket\ScreenshotReportOnNewTicket`), so the new ticket form can check and save its screenshot part as Round 0 without Ticketing depending on Review: `refusalOf` before the ticket is made, `attach` right after it in the same transaction, which throws `NewTicketReportRefused` with the reason to show, so the caller rolls the ticket back. The posted shape is on the interface; the form does not call it yet.
+
 `NextStepBox` puts that move's chip in a dialog ("Who does it wait on?": one radio per person, "Someone else" with a one-line label, "Move"), which the `waiting-on` controller submits through the chip's own form; without JavaScript the chip posts directly and the ticket waits on its reporter.
 
 See the [module catalogue](../../docs/02-architecture/modules.md#ticketing-tkt_).

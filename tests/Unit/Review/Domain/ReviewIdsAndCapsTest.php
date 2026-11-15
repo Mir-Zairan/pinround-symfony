@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Review\Domain;
 
+use App\Review\Api\RoundCommands;
 use App\Review\Domain\AiPinState;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
@@ -102,6 +103,7 @@ final class ReviewIdsAndCapsTest extends TestCase
         yield 'screenshot title' => [Screenshot::TITLE_MAX_LENGTH, ScreenshotView::TITLE_MAX_LENGTH];
         yield 'screenshot summary' => [Screenshot::SUMMARY_MAX_LENGTH, ScreenshotView::SUMMARY_MAX_LENGTH];
         yield 'pin note' => [Pin::NOTE_MAX_LENGTH, PinView::NOTE_MAX_LENGTH];
+        yield 'pins on a screenshot, as the round commands take them' => [Screenshot::MAX_PINS, RoundCommands::MAX_PINS_PER_SCREENSHOT];
     }
 
     #[Test]

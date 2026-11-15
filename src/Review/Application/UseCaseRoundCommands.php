@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Review\Application;
 
+use App\Media\Api\MediaImageStatus;
+use App\Media\Api\UploadedMedia;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
@@ -14,6 +16,7 @@ use App\Review\Domain\Rounds;
 use App\Review\Domain\RoundSlotTaken;
 use App\Review\Domain\Screenshot;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketNotFound;
@@ -28,6 +31,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         private Rounds $rounds,
         private TicketTurnQueries $ticketTurnQueries,
         private TenantContext $tenantContext,
+        private UploadedMedia $uploadedMedia,
     ) {
     }
 
@@ -42,6 +46,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         if (!$ticket->reporterId->equals($reporterId)) {
             throw new RoundRefused('Only the person who reported the ticket can add its report.');
         }
+        $this->requireOwnProcessedMedia($organizationId, $reporterId, $screenshots);
 
         try {
             $round = Round::report(
@@ -67,6 +72,34 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         }
 
         return $round->id()->toString();
+    }
+
+    /**
+     * One read for all pictures, before any id is taken; the first screenshot in the list with a refused picture names
+     * the reason.
+     *
+     * @param list<ScreenshotWithPins> $screenshots at most Round::MAX_SCREENSHOTS, which UploadedMedia::MAX_MEDIA_IDS covers
+     *
+     * @throws RoundRefused when a picture is not one the reporter uploaded, or is still processing or rejected
+     */
+    private function requireOwnProcessedMedia(OrganizationId $organizationId, UserId $reporterId, array $screenshots): void
+    {
+        $states = $this->uploadedMedia->statesOf(
+            $organizationId,
+            $reporterId,
+            array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $screenshots),
+        );
+        foreach ($screenshots as $screenshot) {
+            $refusal = match ($states[strtolower($screenshot->mediaId)] ?? null) {
+                null => RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU,
+                MediaImageStatus::Pending => RoundRefused::MEDIA_STILL_PROCESSING,
+                MediaImageStatus::Rejected => RoundRefused::MEDIA_REJECTED,
+                MediaImageStatus::Ready => null,
+            };
+            if (null !== $refusal) {
+                throw new RoundRefused($refusal);
+            }
+        }
     }
 
     /**
