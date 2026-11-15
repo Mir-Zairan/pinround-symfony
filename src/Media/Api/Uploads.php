@@ -10,7 +10,7 @@ use App\SharedKernel\Domain\UserId;
 /**
  * Direct uploads of screenshots (media-pipeline.md, Upload flow): begin() hands out a slot the browser PUTs one file
  * into, complete() turns that file into a pending media object and queues its processing. Whether the person may
- * upload for the target is the caller's voter check, made before either call; both calls also ask the
+ * upload for the target is the caller's MediaPermission::UPLOAD check, made before begin(); both calls also ask the
  * MediaTargetAuthorizer of the target's kind themselves, complete() for the target stored at begin().
  */
 interface Uploads
@@ -35,9 +35,9 @@ interface Uploads
     public function begin(OrganizationId $organizationId, UserId $userId, UploadTarget $target, string $purpose, string $mime, int $bytes, \DateTimeImmutable $at): UploadSlot;
 
     /**
-     * Checks the target the intent was begun for again, then marks the intent used, adds a pending media object for its
-     * file created at $at and writes its processing to the outbox, all in one transaction of its own: they commit
-     * together or not at all. The intent is used once only, even by two calls at once.
+     * Checks the target the intent was begun for again, then marks the intent used at $at, adds a pending media object
+     * for its file created at $at and writes its processing to the outbox, all in one transaction of its own: they
+     * commit together or not at all. The intent is used once only, even by two calls at once, and expires by $at.
      *
      * @return string the id of the new media object, a UUIDv7
      *
@@ -45,7 +45,8 @@ interface Uploads
      *                              $userId began; nothing changes then
      * @throws UploadTargetDenied   when the MediaTargetAuthorizer of the stored target's kind now refuses $userId, or no
      *                              authorizer decides that kind; nothing changes then
-     * @throws UploadRefused        when the intent is used already or has expired; nothing changes then
+     * @throws UploadRefused        when the intent is used already ("This upload has ended. Upload the file again.") or
+     *                              has expired by $at ("The page was open too long. Try again."); nothing changes then
      * @throws \LogicException      when the request has no tenant, its tenant is another organization or a transaction
      *                              is open; nothing changes then
      */

@@ -99,10 +99,10 @@ final class UploadIntent implements TenantOwned
     public function markUsed(\DateTimeImmutable $at): void
     {
         if (null !== $this->usedAt) {
-            throw new UploadIntentUnusable('The upload intent is used already.');
+            throw UploadIntentUnusable::usedAlready();
         }
         if ($at >= $this->expiresAt) {
-            throw new UploadIntentUnusable('The upload intent has expired.');
+            throw UploadIntentUnusable::expired();
         }
 
         $this->usedAt = $at;

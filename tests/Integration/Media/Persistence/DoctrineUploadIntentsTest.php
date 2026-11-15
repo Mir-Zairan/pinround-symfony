@@ -98,7 +98,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
         $usedAtInMemory = $this->transactions()->committedAs(self::ACME_FOODS, function (): ?\DateTimeImmutable {
             $intent = $this->uploadIntents()->byId(new UploadIntentId(self::ACME_INTENT));
             self::assertNotNull($intent);
-            $this->uploadIntents()->recordUse($intent);
+            $this->uploadIntents()->recordUse($intent, $this->clock->now());
 
             return $intent->usedAt();
         });
@@ -117,7 +117,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
             self::assertNotNull($intent);
             $debugData = $this->debugData();
             $debugData->reset();
-            $this->uploadIntents()->recordUse($intent);
+            $this->uploadIntents()->recordUse($intent, $this->clock->now());
             $this->entityManager()->flush();
 
             return self::sqlOf($debugData);
@@ -139,7 +139,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
         $untrackedCopy = $this->intentOf(self::ACME_FOODS, self::ACME_INTENT, self::MIA, '2026-03-02 10:15:00+00:00');
 
         $originalData = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($untrackedCopy): array {
-            $this->uploadIntents()->recordUse($untrackedCopy);
+            $this->uploadIntents()->recordUse($untrackedCopy, $this->clock->now());
 
             return $this->entityManager()->getUnitOfWork()->getOriginalEntityData($untrackedCopy);
         });
@@ -180,7 +180,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $intent = $this->uploadIntents()->byId(new UploadIntentId(self::ACME_INTENT));
             self::assertNotNull($intent);
-            $this->uploadIntents()->recordUse($intent);
+            $this->uploadIntents()->recordUse($intent, $this->clock->now());
         });
         $this->clock->modify('+1 minute');
 
@@ -188,10 +188,10 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
             $intent = $this->uploadIntents()->byId(new UploadIntentId(self::ACME_INTENT));
             self::assertNotNull($intent);
             try {
-                $this->uploadIntents()->recordUse($intent);
+                $this->uploadIntents()->recordUse($intent, $this->clock->now());
                 self::fail('A used upload intent was used again.');
             } catch (UploadIntentUnusable $refusal) {
-                self::assertSame('The upload intent is used already.', $refusal->getMessage());
+                self::assertSame(['The upload intent is used already.', false], [$refusal->getMessage(), $refusal->hasExpired]);
             }
 
             return $intent->usedAt();
@@ -219,10 +219,10 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
                 [self::ACME_INTENT],
             )));
             try {
-                $this->uploadIntents()->recordUse($intent);
+                $this->uploadIntents()->recordUse($intent, $this->clock->now());
                 self::fail('An upload intent another request used was used again.');
             } catch (UploadIntentUnusable $refusal) {
-                self::assertSame('The upload intent is used already.', $refusal->getMessage());
+                self::assertSame(['The upload intent is used already.', false], [$refusal->getMessage(), $refusal->hasExpired]);
             }
 
             return $intent->usedAt();
@@ -241,7 +241,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($otherOrganizationsIntent): void {
             try {
-                $this->uploadIntents()->recordUse($otherOrganizationsIntent);
+                $this->uploadIntents()->recordUse($otherOrganizationsIntent, $this->clock->now());
                 self::fail('An upload intent of another organization was used.');
             } catch (\LogicException $refusal) {
                 self::assertSame('The upload intent is not stored under the tenant.', $refusal->getMessage());
@@ -274,7 +274,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
         $this->transactions()->committedAs(self::ACME_FOODS, function () use ($useInOtherRequest): void {
             $intent = $this->uploadIntents()->byId(new UploadIntentId(self::ACME_INTENT));
             self::assertNotNull($intent);
-            $this->uploadIntents()->recordUse($intent);
+            $this->uploadIntents()->recordUse($intent, $this->clock->now());
             try {
                 $useInOtherRequest();
                 self::fail('A second use did not wait for the first one.');
@@ -312,10 +312,10 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
             $intent = $this->uploadIntents()->byId(new UploadIntentId(self::ACME_INTENT));
             self::assertNotNull($intent);
             try {
-                $this->uploadIntents()->recordUse($intent);
+                $this->uploadIntents()->recordUse($intent, $this->clock->now());
                 self::fail('An expired upload intent was used.');
             } catch (UploadIntentUnusable $refusal) {
-                self::assertSame('The upload intent has expired.', $refusal->getMessage());
+                self::assertSame(['The upload intent has expired.', true], [$refusal->getMessage(), $refusal->hasExpired]);
             }
 
             return $intent->usedAt();
@@ -333,7 +333,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $intent = $this->uploadIntents()->byId(new UploadIntentId(self::ACME_INTENT));
             self::assertNotNull($intent);
-            $this->uploadIntents()->recordUse($intent);
+            $this->uploadIntents()->recordUse($intent, $this->clock->now());
         });
 
         self::assertEquals(new \DateTimeImmutable(self::NOW), $this->storedUsedAt(self::ACME_INTENT));
@@ -374,7 +374,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
         self::assertNotNull($intent);
         self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
         try {
-            $this->uploadIntents()->recordUse($intent);
+            $this->uploadIntents()->recordUse($intent, $this->clock->now());
             self::fail('An upload intent was used outside a transaction.');
         } catch (\LogicException $refusal) {
             self::assertSame('Using an upload intent needs an open transaction.', $refusal->getMessage());
@@ -422,7 +422,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
 
     private function uploadIntents(): DoctrineUploadIntents
     {
-        return new DoctrineUploadIntents($this->entityManager(), $this->clock);
+        return new DoctrineUploadIntents($this->entityManager());
     }
 
     private function entityManager(): EntityManagerInterface

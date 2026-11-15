@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace App\Media\Api;
 
 /**
- * The voter attributes for direct uploads (ADR-0013); the subject of both is an UploadTarget.
+ * The voter attribute for direct uploads (ADR-0013). Completing an upload has none: Uploads::complete() takes only the
+ * intent's creator and asks the MediaTargetAuthorizer of the target stored at begin() again.
  */
 final class MediaPermission
 {
-    /** Begin an upload for a target; the MediaTargetAuthorizer of the target's kind decides. */
+    /** Begin an upload for a target; the subject is an UploadTarget, the MediaTargetAuthorizer of its kind decides. */
     public const string UPLOAD = 'MEDIA_UPLOAD';
-
-    /** Complete an upload begun for a target; the same decision again, as access may have ended meanwhile. */
-    public const string COMPLETE_UPLOAD = 'MEDIA_COMPLETE_UPLOAD';
 }

@@ -9,7 +9,6 @@ use App\Media\Domain\UploadIntentId;
 use App\Media\Domain\UploadIntents;
 use App\Media\Domain\UploadIntentUnusable;
 use App\SharedKernel\Application\TenantContext;
-use Psr\Clock\ClockInterface;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -21,7 +20,7 @@ final class InMemoryUploadIntents implements UploadIntents
     /** @var array<string, UploadIntent> by organization id and intent id, as the table's primary key */
     private array $stored = [];
 
-    public function __construct(private readonly InMemoryTransactions $transactions, private readonly TenantContext $tenantContext, private readonly ClockInterface $clock)
+    public function __construct(private readonly InMemoryTransactions $transactions, private readonly TenantContext $tenantContext)
     {
         $transactions->enlist(function (): \Closure {
             $snapshot = array_map(static fn (UploadIntent $intent): UploadIntent => clone $intent, $this->stored);
@@ -59,7 +58,7 @@ final class InMemoryUploadIntents implements UploadIntents
         return $this->stored[self::keyOf($this->tenantContext->require()->toString(), $id->toString())] ?? null;
     }
 
-    public function recordUse(UploadIntent $intent): void
+    public function recordUse(UploadIntent $intent, \DateTimeImmutable $at): void
     {
         $this->requireTransaction('Using an upload intent needs an open transaction.');
 
@@ -67,17 +66,16 @@ final class InMemoryUploadIntents implements UploadIntents
         if (null === $storedIntent || !$storedIntent->organizationId()->equals($intent->organizationId())) {
             throw new \LogicException('The upload intent is not stored under the tenant.');
         }
-        $now = $this->clock->now();
         if (null !== $storedIntent->usedAt()) {
-            throw new UploadIntentUnusable('The upload intent is used already.');
+            throw UploadIntentUnusable::usedAlready();
         }
-        if ($storedIntent->expiresAt() <= $now) {
-            throw new UploadIntentUnusable('The upload intent has expired.');
+        if ($storedIntent->expiresAt() <= $at) {
+            throw UploadIntentUnusable::expired();
         }
 
-        $storedIntent->markUsed($now);
+        $storedIntent->markUsed($at);
         if ($storedIntent !== $intent) {
-            $intent->markUsed($now);
+            $intent->markUsed($at);
         }
     }
 

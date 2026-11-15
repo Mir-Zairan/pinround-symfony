@@ -10,12 +10,11 @@ use App\Media\Domain\UploadIntents;
 use App\Media\Domain\UploadIntentUnusable;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
-use Psr\Clock\ClockInterface;
 use Symfony\Component\Uid\Uuid;
 
 final readonly class DoctrineUploadIntents implements UploadIntents
 {
-    public function __construct(private EntityManagerInterface $entityManager, private ClockInterface $clock)
+    public function __construct(private EntityManagerInterface $entityManager)
     {
     }
 
@@ -50,23 +49,22 @@ final readonly class DoctrineUploadIntents implements UploadIntents
      *
      * @throws \LogicException when the tenant has no stored intent with that id
      */
-    public function recordUse(UploadIntent $intent): void
+    public function recordUse(UploadIntent $intent, \DateTimeImmutable $at): void
     {
         $this->requireTransaction('Using an upload intent needs an open transaction.');
 
-        $now = $this->clock->now();
         $key = ['organizationId' => $intent->organizationId()->toString(), 'id' => $intent->id()->toString()];
         $connection = $this->entityManager->getConnection();
         $changedRows = $connection->executeStatement(
-            'UPDATE med_upload_intent SET used_at = :now WHERE organization_id = :organizationId AND id = :id AND used_at IS NULL AND expires_at > :now',
-            ['now' => $now, ...$key],
-            ['now' => Types::DATETIMETZ_IMMUTABLE],
+            'UPDATE med_upload_intent SET used_at = :at WHERE organization_id = :organizationId AND id = :id AND used_at IS NULL AND expires_at > :at',
+            ['at' => $at, ...$key],
+            ['at' => Types::DATETIMETZ_IMMUTABLE],
         );
         if (1 === $changedRows) {
-            $intent->markUsed($now);
+            $intent->markUsed($at);
             $unitOfWork = $this->entityManager->getUnitOfWork();
             if ($unitOfWork->isInIdentityMap($intent)) {
-                $unitOfWork->setOriginalEntityProperty(spl_object_id($intent), 'usedAt', $now);
+                $unitOfWork->setOriginalEntityProperty(spl_object_id($intent), 'usedAt', $at);
             }
 
             return;
@@ -77,7 +75,7 @@ final readonly class DoctrineUploadIntents implements UploadIntents
             throw new \LogicException('The upload intent is not stored under the tenant.');
         }
 
-        throw new UploadIntentUnusable(null === $storedUsedAt ? 'The upload intent has expired.' : 'The upload intent is used already.');
+        throw null === $storedUsedAt ? UploadIntentUnusable::expired() : UploadIntentUnusable::usedAlready();
     }
 
     /**

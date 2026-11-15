@@ -324,9 +324,13 @@ when@test:
         test.media_presigned_uploads:
             alias: App\Media\Infrastructure\Storage\PresignedUploads
             public: true
-        # No route begins or completes an upload before the upload controller; the tests get the Api as it will.
+        # DirectUploadsTest checks the Api resolves to DirectUploads, and MediaTargetAuthorizersWiringTest that every
+        # tagged MediaTargetAuthorizer reaches MediaTargetAuthorizers, which DirectUploads would otherwise inline.
         test.media_uploads:
             alias: App\Media\Api\Uploads
+            public: true
+        test.media_target_authorizers:
+            alias: App\Media\Application\MediaTargetAuthorizers
             public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.

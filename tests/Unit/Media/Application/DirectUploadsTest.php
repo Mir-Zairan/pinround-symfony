@@ -9,9 +9,9 @@ use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadSlot;
 use App\Media\Api\UploadTarget;
 use App\Media\Api\UploadTargetDenied;
+use App\Media\Application\DirectUploads;
 use App\Media\Application\MediaTargetAuthorizers;
 use App\Media\Application\ProcessUpload;
-use App\Media\Application\UseCaseUploads;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaStatus;
 use App\Media\Domain\UploadIntent;
@@ -28,11 +28,11 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
 
 /**
- * UseCaseUploads over in-memory ports that behave like the Doctrine and Messenger ones. The clock stands at
+ * DirectUploads over in-memory ports that behave like the Doctrine and Messenger ones. The clock stands at
  * 2026-03-02 10:00 UTC, so an intent begun then expires at 2026-03-03 10:00 UTC. Mia may attach to the ticket
  * SHOP-12 of Acme Foods, Omar to nothing.
  */
-final class UseCaseUploadsTest extends TestCase
+final class DirectUploadsTest extends TestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000e1501';
     private const string OTHER_ORGANIZATION = '0197a3c0-0000-7000-8000-0000000e1502';
@@ -50,7 +50,7 @@ final class UseCaseUploadsTest extends TestCase
     private InMemoryMediaObjects $mediaObjects;
     private InMemoryUploadProcessingQueue $uploadProcessingQueue;
     private RecordingMediaTargetAuthorizer $ticketAuthorizer;
-    private UseCaseUploads $uploads;
+    private DirectUploads $uploads;
 
     protected function setUp(): void
     {
@@ -59,13 +59,13 @@ final class UseCaseUploadsTest extends TestCase
         $this->tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
         $this->transactions = new InMemoryTransactions($this->tenantContext);
-        $this->uploadIntents = new InMemoryUploadIntents($this->transactions, $this->tenantContext, $this->clock);
+        $this->uploadIntents = new InMemoryUploadIntents($this->transactions, $this->tenantContext);
         $this->mediaObjects = new InMemoryMediaObjects($this->transactions, $this->tenantContext);
         $this->uploadProcessingQueue = new InMemoryUploadProcessingQueue($this->transactions);
         $this->ticketAuthorizer = new RecordingMediaTargetAuthorizer(self::TICKET);
         $this->ticketAuthorizer->allow(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::SHOP_12);
         $this->ticketAuthorizer->allow(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), self::SHOP_12);
-        $this->uploads = new UseCaseUploads(
+        $this->uploads = new DirectUploads(
             $this->uploadIntents,
             $this->mediaObjects,
             new PresignedUploads(new ObjectStorageSettings('http://minio:9000', 'https://files.example.test', 'pinround', 'eu-west-1', 'acme-key', 'acme-secret'), $this->signingClock),
@@ -343,10 +343,37 @@ final class UseCaseUploadsTest extends TestCase
             $this->complete(self::MIA, $slot->intentId);
             self::fail('An expired upload was completed.');
         } catch (UploadRefused $refused) {
-            self::assertSame('This upload has ended. Upload the file again.', $refused->getMessage());
+            self::assertSame('The page was open too long. Try again.', $refused->getMessage());
         }
 
         $this->assertNothingChangedSinceTheBegin();
+    }
+
+    #[Test]
+    public function completingChecksTheExpiryAtTheTimeTheCallerGivesNotTheClocks(): void
+    {
+        $slot = $this->begin('image/png', 2048);
+
+        try {
+            $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId, new \DateTimeImmutable('2026-03-03 10:00:00 UTC'));
+            self::fail('An upload was completed at its expiry because the clock still stood before it.');
+        } catch (UploadRefused $refused) {
+            self::assertSame('The page was open too long. Try again.', $refused->getMessage());
+        }
+
+        $this->assertNothingChangedSinceTheBegin();
+    }
+
+    #[Test]
+    public function completingRecordsTheUseAndTheMediaObjectAtTheTimeTheCallerGives(): void
+    {
+        $slot = $this->begin('image/png', 2048);
+        $this->clock->modify('+2 days');
+
+        $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId, new \DateTimeImmutable('2026-03-02 10:05:00 UTC'));
+
+        self::assertEquals([new \DateTimeImmutable('2026-03-02 10:05:00 UTC')], $this->storedUsedTimes());
+        self::assertEquals([new \DateTimeImmutable('2026-03-02 10:05:00 UTC')], array_map(static fn (MediaObject $mediaObject): \DateTimeImmutable => $mediaObject->createdAt(), $this->mediaObjects->storedRows()));
     }
 
     #[Test]

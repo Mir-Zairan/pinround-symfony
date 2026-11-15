@@ -29,8 +29,12 @@ use App\SharedKernel\Domain\UserId;
  * Uploads straight from the browser to the bucket through a signed PUT URL (ADR-0011), so no file passes through PHP;
  * the contract is on {@see Uploads}.
  */
-final readonly class UseCaseUploads implements Uploads
+final readonly class DirectUploads implements Uploads
 {
+    /** The intent lasts a day after the page began it, so the page has been open that long. */
+    public const string EXPIRED = 'The page was open too long. Try again.';
+    public const string USED_ALREADY = 'This upload has ended. Upload the file again.';
+
     public function __construct(
         private UploadIntents $uploadIntents,
         private MediaObjects $mediaObjects,
@@ -90,9 +94,9 @@ final readonly class UseCaseUploads implements Uploads
         }
 
         try {
-            $this->uploadIntents->recordUse($intent);
+            $this->uploadIntents->recordUse($intent, $at);
         } catch (UploadIntentUnusable $unusable) {
-            throw new UploadRefused('This upload has ended. Upload the file again.', 0, $unusable);
+            throw new UploadRefused($unusable->hasExpired ? self::EXPIRED : self::USED_ALREADY, 0, $unusable);
         }
 
         $mediaObject = MediaObject::upload($this->mediaObjects->nextIdentity(), $organizationId, $intent->storageKey(), $allowedMimeTypes[0], $intent->maxBytes(), $userId, $at);

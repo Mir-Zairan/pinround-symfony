@@ -8,10 +8,10 @@ use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadSlot;
 use App\Media\Api\UploadTarget;
 use App\Media\Api\UploadTargetDenied;
+use App\Media\Application\DirectUploads;
 use App\Media\Application\MediaTargetAuthorizers;
 use App\Media\Application\ProcessUpload;
 use App\Media\Application\UploadProcessingQueue;
-use App\Media\Application\UseCaseUploads;
 use App\Media\Infrastructure\Doctrine\DoctrineMediaObjects;
 use App\Media\Infrastructure\Doctrine\DoctrineUploadIntents;
 use App\Media\Infrastructure\Messenger\MessengerUploadProcessingQueue;
@@ -32,11 +32,11 @@ use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
 
 /**
- * UseCaseUploads on the real med_upload_intent and med_object tables as pinround_app, under row-level security, and on
+ * DirectUploads on the real med_upload_intent and med_object tables as pinround_app, under row-level security, and on
  * the real command.bus, which writes ProcessUpload to the outbox. The clock stands at 2026-03-02 10:00 UTC. Mia may
  * attach to the ticket SHOP-12 of Acme Foods.
  */
-final class UseCaseUploadsTest extends KernelTestCase
+final class DirectUploadsTest extends KernelTestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000e1601';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000e1603';
@@ -66,9 +66,9 @@ final class UseCaseUploadsTest extends KernelTestCase
     }
 
     #[Test]
-    public function theContainerGivesTheUploadsApiAsUseCaseUploads(): void
+    public function theContainerGivesTheUploadsApiAsDirectUploads(): void
     {
-        self::assertInstanceOf(UseCaseUploads::class, self::getContainer()->get('test.media_uploads'));
+        self::assertInstanceOf(DirectUploads::class, self::getContainer()->get('test.media_uploads'));
     }
 
     #[Test]
@@ -178,17 +178,22 @@ final class UseCaseUploadsTest extends KernelTestCase
     }
 
     #[Test]
-    public function queueingOutsideATransactionIsRefusedAndWritesNoOutboxRow(): void
+    public function aCompleteOfAnExpiredIntentSaysThePageWasOpenTooLongAndChangesNothing(): void
     {
-        $queue = new MessengerUploadProcessingQueue(self::getContainer()->get('command.bus'), $this->connection());
+        $slot = $this->begin();
+        $this->clock->modify('+1 day');
 
         try {
-            $queue->queue(new ProcessUpload(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000e1609'));
-            self::fail('An upload was queued with no transaction open.');
-        } catch (\LogicException $refused) {
-            self::assertSame('An upload is queued for processing in the transaction of its media object; none is open.', $refused->getMessage());
+            $this->complete($slot->intentId);
+            self::fail('An expired upload was completed.');
+        } catch (UploadRefused $refused) {
+            self::assertSame('The page was open too long. Try again.', $refused->getMessage());
+        } finally {
+            self::getContainer()->get('doctrine')->resetManager();
         }
 
+        self::assertSame([[null]], $this->rowsOf('SELECT used_at FROM med_upload_intent'));
+        self::assertSame([], $this->rowsOf('SELECT id FROM med_object'));
         self::assertSame([], $this->outboxMessages());
     }
 
@@ -239,13 +244,13 @@ final class UseCaseUploadsTest extends KernelTestCase
         return $messages;
     }
 
-    private function uploads(?UploadProcessingQueue $uploadProcessingQueue = null): UseCaseUploads
+    private function uploads(?UploadProcessingQueue $uploadProcessingQueue = null): DirectUploads
     {
         $entityManager = $this->entityManager();
         $tenantContext = self::getContainer()->get(TenantContext::class);
 
-        return new UseCaseUploads(
-            new DoctrineUploadIntents($entityManager, $this->clock),
+        return new DirectUploads(
+            new DoctrineUploadIntents($entityManager),
             new DoctrineMediaObjects($entityManager),
             new PresignedUploads(new ObjectStorageSettings('http://minio:9000', 'https://files.example.test', 'pinround', 'eu-west-1', 'acme-key', 'acme-secret'), $this->clock),
             $uploadProcessingQueue ?? new MessengerUploadProcessingQueue(self::getContainer()->get('command.bus'), $this->connection()),

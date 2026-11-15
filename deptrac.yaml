@@ -325,9 +325,9 @@ deptrac:
     Media_Api: [SharedKernel]
     Media_Event: [SharedKernel]
     Media_Domain: [SharedKernel]
-    Media_Application: [Media_Domain, Media_Api, SharedKernel, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    Media_Infrastructure: [Media_Domain, Media_Application, Media_Api, SharedKernel, Vendor, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    Media_UI: [Media_Application, Media_Api, SharedKernel, Vendor]
+    Media_Application: [Media_Domain, Media_Api, SharedKernel, Organization_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Media_Infrastructure: [Media_Domain, Media_Application, Media_Api, SharedKernel, Vendor, Organization_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Media_UI: [Media_Application, Media_Api, SharedKernel, Vendor, Organization_Api]
 
     Notification_Api: [SharedKernel]
     Notification_Event: [SharedKernel]

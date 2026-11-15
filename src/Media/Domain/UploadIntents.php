@@ -24,13 +24,13 @@ interface UploadIntents
     public function byId(UploadIntentId $id): ?UploadIntent;
 
     /**
-     * Marks the intent used by writing it conditionally, so that two uses at once cannot both succeed, and updates
-     * $intent in memory to match.
+     * Marks the intent used at $at by writing it conditionally, so that two uses at once cannot both succeed, and
+     * updates $intent in memory to match. $at is also the time the expiry is checked against.
      *
-     * @throws UploadIntentUnusable when the intent is used already or has expired; nothing is written then
+     * @throws UploadIntentUnusable when the intent is used already or has expired by $at; nothing is written then
      * @throws \LogicException      when no transaction is open, or when the tenant has no stored intent with that id
      *                              (it belongs to another organization or was never added), which a caller answers
      *                              as not found; nothing is written then
      */
-    public function recordUse(UploadIntent $intent): void;
+    public function recordUse(UploadIntent $intent, \DateTimeImmutable $at): void;
 }
