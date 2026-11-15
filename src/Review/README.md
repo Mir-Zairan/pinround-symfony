@@ -13,7 +13,7 @@ Review rounds with screenshots, pins and verdicts, including private draft round
 - Domain: `Round` (report and draft, sharing a draft), `Screenshot`, `Pin`, their ids and enums, and `RoundSlotTaken`. `Rounds` is the repository port; `DbalRounds` implements it.
 - Api: `RoundCommands` (`createReport`), `RoundQueries`, and `RoundRefused` for a report that is refused (422): content the domain refuses, someone who is not the reporter, or a ticket that already has a report.
 - Application: `UseCaseRoundCommands`, and `RoundUploadTargets`, the read port `UI\Media\RoundMediaTarget` uses to read a round as an upload target; `Infrastructure\Doctrine\DbalRoundUploadTargets` implements it. Media never calls it.
-- UI: the screenshot and pin components, and `RoundMediaTarget`, its `MediaTargetAuthorizer` for kind `round`: Media asks it who may add an upload to a round.
+- UI: the Rounds section of the ticket page (`Component\RoundsSection`, built by `RoundCards`; `RoundQueries::forTicket` returns `TicketRounds` with the newest 20 numbered rounds, Round 0 and the viewer's own draft), the screenshot and pin components, and `RoundMediaTarget`, its `MediaTargetAuthorizer` for kind `round`: Media asks it who may add an upload to a round.
 
 Not built yet: checklist and review rounds, verdicts, AI pins and the check items.
 

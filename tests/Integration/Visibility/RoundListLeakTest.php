@@ -101,7 +101,7 @@ final class RoundListLeakTest extends VisibilityLeakCast
     private static function roundsAs(string $viewer, string $ticketId): array
     {
         return self::asViewer($viewer, static function () use ($viewer, $ticketId): array {
-            $rounds = self::roundQueries()->forTicket(new TicketId($ticketId), new UserId(self::VIEWERS[$viewer][0]));
+            $rounds = self::roundQueries()->forTicket(new TicketId($ticketId), new UserId(self::VIEWERS[$viewer][0]))->rounds;
 
             return array_map(static fn (RoundView $round): array => [$round->id, array_map(
                 static fn (RoundScreenshotView $screenshot): array => [$screenshot->id, array_map(static fn (RoundPinView $pin): string => $pin->id, $screenshot->pins)],

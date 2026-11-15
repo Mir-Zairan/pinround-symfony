@@ -8,11 +8,15 @@ use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
+use App\Review\Api\TicketRounds;
+use App\Review\Application\RoundsVisibleTo;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibilities;
+use App\Ticketing\Api\TicketVisibility;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -21,7 +25,7 @@ use Doctrine\DBAL\Connection;
  * round_id, position), (organization_id, screenshot_id, number)) and says whether it has rows below it, so a round with
  * no screenshot or a screenshot with no pin costs no query.
  */
-final readonly class DbalRoundQueries implements RoundQueries
+final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
 {
     public function __construct(
         private Connection $connection,
@@ -31,36 +35,69 @@ final readonly class DbalRoundQueries implements RoundQueries
     ) {
     }
 
-    public function forTicket(TicketId $ticketId, UserId $viewer): array
+    public function forTicket(TicketId $ticketId, UserId $viewer): TicketRounds
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+
+        return $this->roundsOf($organizationId, $ticketId, $this->ticketVisibilities->of($organizationId, $viewer));
+    }
+
+    public function forVisibleTo(TicketId $ticketId, TicketVisibility $viewer): TicketRounds
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        if (!$viewer->organizationId()->equals($organizationId)) {
+            throw new \InvalidArgumentException('The ticket visibility given is not one of the tenant\'s organization.');
+        }
+
+        return $this->roundsOf($organizationId, $ticketId, $viewer);
+    }
+
+    private function requireTransactionAndTenant(): OrganizationId
     {
         if (!$this->connection->isTransactionActive()) {
             throw new \LogicException('Rounds are read in a transaction under the organization as tenant; none is open.');
         }
-        $organizationId = $this->tenantContext->require();
-        $visibility = $this->ticketVisibilities->of($organizationId, $viewer);
+
+        return $this->tenantContext->require();
+    }
+
+    private function roundsOf(OrganizationId $organizationId, TicketId $ticketId, TicketVisibility $visibility): TicketRounds
+    {
+        $viewer = $visibility->viewerId();
         if ([] === $this->ticketQueries->visibleTicketIdsOf($visibility, [$ticketId])) {
-            return [];
+            return new TicketRounds([]);
         }
 
-        // A round with no number is an unshared draft; only its owner gets it, after every shared round.
+        // A round with no number is an unshared draft; only its owner gets it, after every shared round. Round 0 and the
+        // draft are never capped: the numbered rounds (1 and up) are ranked newest first among themselves and only the
+        // newest MAX_NUMBERED_ROUNDS go on, with the size of the numbered group to tell how many were left out.
         $roundRows = $this->connection->fetchAllAssociative(
-            'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state,'
-            .' EXISTS (SELECT 1 FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id) AS has_screenshots'
+            'SELECT listed.* FROM ('
+            .'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state,'
+            .' EXISTS (SELECT 1 FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id) AS has_screenshots,'
+            .' ROW_NUMBER() OVER (PARTITION BY (round.number >= 1) ORDER BY round.number DESC) AS newest_rank,'
+            .' COUNT(*) OVER (PARTITION BY (round.number >= 1)) AS group_size'
             .' FROM rvw_round AS round'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
             .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid))'
-            .' ORDER BY round.number NULLS LAST, round.id',
-            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'viewer' => $viewer->toString()],
+            .') AS listed'
+            .' WHERE listed.number IS NULL OR listed.number = 0 OR listed.newest_rank <= :cap'
+            .' ORDER BY listed.number NULLS LAST, listed.id',
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'viewer' => $viewer->toString(), 'cap' => self::MAX_NUMBERED_ROUNDS],
         );
+        $olderRoundsNotShown = 0;
         $roundIdsWithScreenshots = [];
         foreach ($roundRows as $roundRow) {
             if (self::boolean($roundRow['has_screenshots'], 'has_screenshots')) {
                 $roundIdsWithScreenshots[] = self::text($roundRow['id'], 'id');
             }
+            if ((self::integerOrNull($roundRow['number'], 'number') ?? 0) >= 1) {
+                $olderRoundsNotShown = max(0, self::integer($roundRow['group_size'], 'group_size') - self::MAX_NUMBERED_ROUNDS);
+            }
         }
         $screenshotsByRound = $this->screenshotsOf($organizationId->toString(), $roundIdsWithScreenshots);
 
-        return array_map(static function (array $roundRow) use ($screenshotsByRound): RoundView {
+        $rounds = array_map(static function (array $roundRow) use ($screenshotsByRound): RoundView {
             $roundId = self::text($roundRow['id'], 'id');
             $sharedAt = self::textOrNull($roundRow['shared_at'], 'shared_at');
 
@@ -74,6 +111,8 @@ final readonly class DbalRoundQueries implements RoundQueries
                 $screenshotsByRound[$roundId] ?? [],
             );
         }, $roundRows);
+
+        return new TicketRounds($rounds, $olderRoundsNotShown);
     }
 
     /**
