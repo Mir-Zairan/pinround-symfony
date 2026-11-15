@@ -20,6 +20,9 @@ parameters:
         App\Notification\Api\Event\NotificationEvent: async_notify
         # Short jobs for worker-notify too, today clearing a renamed person's cached teams (ForgetRenamedPersonHandler).
         App\Identity\Api\Event\IdentityEvent: async_notify
+        # Checking and re-encoding an uploaded picture, for worker-media. Until its handler exists, a consumed message
+        # fails and waits in failed for a retry.
+        App\Media\Application\ProcessUpload: async_media
 
 framework:
     messenger:
@@ -147,9 +150,9 @@ framework:
             # Sent at once by QueueTicketPagesRefreshHandler, and again with a DelayStamp by RefreshTicketPagesHandler;
             # the hub is published to from worker-notify only (ADR-0023).
             App\Notification\Infrastructure\Mercure\RefreshTicketPages: async_notify
-            # Sent by DirectUploads::complete() once its transaction has committed, not through the outbox, for
-            # worker-media. Until its handler exists, a consumed message fails and waits in failed for a retry.
-            App\Media\Application\ProcessUpload: async_media
+            # Dispatched on command.bus by MessengerUploadProcessingQueue inside the transaction that adds the media
+            # object, so the worker never looks for an uncommitted row; the relay moves it on to async_media.
+            App\Media\Application\ProcessUpload: outbox
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.
@@ -172,6 +175,7 @@ when@test:
             App\Conversation\Api\Event\ConversationEvent: async_notify
             App\Notification\Api\Event\NotificationEvent: async_notify
             App\Identity\Api\Event\IdentityEvent: async_notify
+            App\Media\Application\ProcessUpload: async_media
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey
             App\Tests\Fixtures\Messaging\OutageProbeRecorded: valkey_with_outage

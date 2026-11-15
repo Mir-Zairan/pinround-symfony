@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Media\Infrastructure\Storage;
+namespace App\Media\Application;
 
 /**
  * A URL the client PUTs one object to, with the headers it must send unchanged: both are part of the signature, so

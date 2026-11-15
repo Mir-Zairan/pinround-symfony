@@ -13,9 +13,9 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * The CHECKs of Version20261115120000 refuse every row the domain could not write, named in the error; its grants,
- * row-level security and indexes are pinned in DatabaseRolesTest with the other tenant tables. Every row is written as
- * pinround_app under its organization and rolled back.
+ * The CHECKs of Version20261115120000 and Version20261115140000 refuse every row the domain could not write, named in
+ * the error; the tables' grants, row-level security and indexes are pinned in DatabaseRolesTest with the other tenant
+ * tables. Every row is written as pinround_app under its organization and rolled back.
  */
 final class MediaTableTest extends KernelTestCase
 {
@@ -35,6 +35,8 @@ final class MediaTableTest extends KernelTestCase
         yield 'a used upload intent' => ['med_upload_intent', ['used_at' => '2027-03-15 10:07:30+00']];
         yield 'an upload intent used a second before it expires' => ['med_upload_intent', ['used_at' => '2027-03-15 10:14:59+00']];
         yield 'an upload intent for two media types' => ['med_upload_intent', ['mime_allowed' => '{"image/png","image/webp"}']];
+        yield 'a target kind of 40 characters' => ['med_upload_intent', ['target_kind' => str_repeat('é', 40)]];
+        yield 'a target id of 100 characters' => ['med_upload_intent', ['target_id' => str_repeat('é', 100)]];
         yield 'a pending picture' => ['med_object', []];
         yield 'a ready picture' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => self::VARIANTS]];
         yield 'a ready picture with one variant' => ['med_object', ['status' => 'ready', 'sha256' => self::SHA256, 'width' => 1440, 'height' => 900, 'variants' => '{"full": "acme/media/full.webp"}']];
@@ -55,6 +57,10 @@ final class MediaTableTest extends KernelTestCase
         yield 'an empty allowed media type' => ['med_upload_intent', ['mime_allowed' => '{"image/png",""}'], 'med_upload_intent_mime_allowed_check'];
         yield 'a NULL allowed media type' => ['med_upload_intent', ['mime_allowed' => '{"image/png",NULL}'], 'med_upload_intent_mime_allowed_check'];
         yield 'allowed media types nested in two dimensions' => ['med_upload_intent', ['mime_allowed' => '{{"image/png"},{"image/webp"}}'], 'med_upload_intent_mime_allowed_check'];
+        yield 'an empty target kind' => ['med_upload_intent', ['target_kind' => ''], 'med_upload_intent_target_kind_check'];
+        yield 'a target kind of 41 characters' => ['med_upload_intent', ['target_kind' => str_repeat('é', 41)], 'med_upload_intent_target_kind_check'];
+        yield 'an empty target id' => ['med_upload_intent', ['target_id' => ''], 'med_upload_intent_target_id_check'];
+        yield 'a target id of 101 characters' => ['med_upload_intent', ['target_id' => str_repeat('é', 101)], 'med_upload_intent_target_id_check'];
         yield 'an empty upload storage key' => ['med_upload_intent', ['storage_key' => ''], 'med_upload_intent_storage_key_check'];
         yield 'an upload intent used at its expiry' => ['med_upload_intent', ['used_at' => '2027-03-15 10:15:00+00'], 'med_upload_intent_used_at_check'];
         yield 'an upload intent used after its expiry' => ['med_upload_intent', ['used_at' => '2027-03-15 10:20:00+00'], 'med_upload_intent_used_at_check'];
@@ -119,7 +125,7 @@ final class MediaTableTest extends KernelTestCase
     private function insert(string $table, array $changedColumns): int|string
     {
         $validRow = match ($table) {
-            'med_upload_intent' => ['organization_id' => self::ACME_FOODS, 'id' => self::ROW, 'user_id' => self::MIA, 'purpose' => 'screenshot', 'max_bytes' => 10_485_760, 'mime_allowed' => '{"image/png"}', 'storage_key' => 'acme/uploads/'.self::ROW, 'expires_at' => '2027-03-15 10:15:00+00', 'used_at' => null],
+            'med_upload_intent' => ['organization_id' => self::ACME_FOODS, 'id' => self::ROW, 'user_id' => self::MIA, 'purpose' => 'screenshot', 'target_kind' => 'ticket', 'target_id' => 'SHOP-12', 'max_bytes' => 10_485_760, 'mime_allowed' => '{"image/png"}', 'storage_key' => 'acme/uploads/'.self::ROW, 'expires_at' => '2027-03-15 10:15:00+00', 'used_at' => null],
             'med_object' => ['organization_id' => self::ACME_FOODS, 'id' => self::ROW, 'storage_key' => 'acme/uploads/'.self::ROW, 'mime' => 'image/png', 'bytes' => 524_288, 'uploaded_by' => self::MIA, 'created_at' => '2027-03-15 10:08:00+00', 'status' => 'pending', 'reject_reason' => null, 'sha256' => null, 'width' => null, 'height' => null, 'variants' => null],
             default => throw new \LogicException(\sprintf('No test row for %s.', $table)),
         };

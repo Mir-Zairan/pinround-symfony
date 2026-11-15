@@ -18,7 +18,8 @@ interface MediaTargetAuthorizer
     public function targetKind(): string;
 
     /**
-     * Whether $userId may attach an upload to the target; false for an unknown or malformed $targetId.
+     * Whether $userId may attach an upload to the target; false for an unknown or malformed $targetId. Uploads calls
+     * it inside an open transaction whose tenant is $organizationId, so it must not begin or end one itself.
      */
     public function mayAttach(OrganizationId $organizationId, UserId $userId, string $targetId): bool;
 }

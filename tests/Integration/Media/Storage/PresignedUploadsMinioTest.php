@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Media\Storage;
 
+use App\Media\Application\PresignedPut;
 use App\Media\Domain\UploadIntentId;
+use App\Media\Domain\UploadKey;
 use App\Media\Infrastructure\Storage\ObjectStorageFilesystemFactory;
 use App\Media\Infrastructure\Storage\ObjectStorageSettings;
-use App\Media\Infrastructure\Storage\PresignedPut;
 use App\Media\Infrastructure\Storage\PresignedUploads;
-use App\Media\Infrastructure\Storage\UploadKey;
 use App\SharedKernel\Domain\OrganizationId;
 use League\Flysystem\FilesystemOperator;
 use PHPUnit\Framework\Attributes\Group;

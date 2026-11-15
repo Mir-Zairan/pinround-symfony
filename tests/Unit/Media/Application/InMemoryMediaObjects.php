@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Media\Infrastructure;
+namespace App\Tests\Unit\Media\Application;
 
 use App\Media\Domain\MediaId;
 use App\Media\Domain\MediaObject;

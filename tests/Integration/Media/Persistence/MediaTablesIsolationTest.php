@@ -151,7 +151,7 @@ final class MediaTablesIsolationTest extends KernelTestCase
 
     private static function intent(string $organizationId, string $id, string $userId): UploadIntent
     {
-        return UploadIntent::open(new UploadIntentId($id), new OrganizationId($organizationId), new UserId($userId), UploadPurpose::Screenshot, 10_485_760, ['image/png'], self::storageKey($organizationId, $id), new \DateTimeImmutable('2027-03-15 10:15:00+00:00'));
+        return UploadIntent::open(new UploadIntentId($id), new OrganizationId($organizationId), new UserId($userId), UploadPurpose::Screenshot, 'ticket', 'SHOP-12', 10_485_760, ['image/png'], self::storageKey($organizationId, $id), new \DateTimeImmutable('2027-03-15 10:15:00+00:00'));
     }
 
     private static function media(string $organizationId, string $id, string $userId): MediaObject

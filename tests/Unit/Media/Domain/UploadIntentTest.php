@@ -10,6 +10,7 @@ use App\Media\Domain\UploadIntentUnusable;
 use App\Media\Domain\UploadPurpose;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
@@ -36,11 +37,49 @@ final class UploadIntentTest extends TestCase
         self::assertSame(self::INTENT, $intent->id()->toString());
         self::assertSame(self::ORGANIZATION, $intent->organizationId()->toString());
         self::assertSame(self::USER, $intent->userId()->toString());
+        self::assertSame(['ticket', 'SHOP-12'], [$intent->targetKind(), $intent->targetId()]);
         self::assertSame(1000, $intent->maxBytes());
         self::assertSame(['image/png', 'image/jpeg'], $intent->allowedMimeTypes());
         self::assertSame('uploads/org/intent', $intent->storageKey());
         self::assertSame($expiresAt, $intent->expiresAt());
         self::assertNull($intent->usedAt());
+    }
+
+    #[Test]
+    public function aTargetAtTheLengthBoundsIsTakenCountedInCharacters(): void
+    {
+        $longestKind = str_repeat('é', UploadIntent::MAX_TARGET_KIND_LENGTH);
+        $longestId = str_repeat('é', UploadIntent::MAX_TARGET_ID_LENGTH);
+
+        $longest = $this->open(targetKind: $longestKind, targetId: $longestId);
+        $shortest = $this->open(targetKind: 't', targetId: '1');
+
+        self::assertSame([$longestKind, $longestId], [$longest->targetKind(), $longest->targetId()]);
+        self::assertSame(['t', '1'], [$shortest->targetKind(), $shortest->targetId()]);
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function targetsOutOfBounds(): iterable
+    {
+        $kindRefusal = 'An upload intent needs a target kind of 1 to 40 characters.';
+        $idRefusal = 'An upload intent needs a target id of 1 to 100 characters.';
+
+        yield 'an empty kind' => ['', 'SHOP-12', $kindRefusal];
+        yield 'a kind a character too long' => [str_repeat('é', 41), 'SHOP-12', $kindRefusal];
+        yield 'an empty id' => ['ticket', '', $idRefusal];
+        yield 'an id a character too long' => ['ticket', str_repeat('é', 101), $idRefusal];
+    }
+
+    #[Test]
+    #[DataProvider('targetsOutOfBounds')]
+    public function aTargetOutOfBoundsIsRefused(string $targetKind, string $targetId, string $refusal): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($refusal);
+
+        $this->open(targetKind: $targetKind, targetId: $targetId);
     }
 
     #[Test]
@@ -183,13 +222,15 @@ final class UploadIntentTest extends TestCase
     /**
      * @param list<string> $allowedMimeTypes
      */
-    private function open(int $maxBytes = 1000, array $allowedMimeTypes = ['image/png', 'image/jpeg'], string $storageKey = 'uploads/org/intent', ?\DateTimeImmutable $expiresAt = null): UploadIntent
+    private function open(int $maxBytes = 1000, array $allowedMimeTypes = ['image/png', 'image/jpeg'], string $storageKey = 'uploads/org/intent', ?\DateTimeImmutable $expiresAt = null, string $targetKind = 'ticket', string $targetId = 'SHOP-12'): UploadIntent
     {
         return UploadIntent::open(
             new UploadIntentId(self::INTENT),
             new OrganizationId(self::ORGANIZATION),
             new UserId(self::USER),
             UploadPurpose::Screenshot,
+            $targetKind,
+            $targetId,
             $maxBytes,
             $allowedMimeTypes,
             $storageKey,

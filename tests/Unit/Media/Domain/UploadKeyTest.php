@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Media\Infrastructure\Storage;
+namespace App\Tests\Unit\Media\Domain;
 
 use App\Media\Domain\UploadIntentId;
-use App\Media\Infrastructure\Storage\UploadKey;
+use App\Media\Domain\UploadKey;
 use App\SharedKernel\Domain\OrganizationId;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;

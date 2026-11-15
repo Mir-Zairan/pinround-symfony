@@ -2,17 +2,20 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Media\Infrastructure;
+namespace App\Tests\Unit\Media\Application;
 
 use App\Media\Api\UploadIntentNotFound;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadSlot;
+use App\Media\Api\UploadTarget;
+use App\Media\Api\UploadTargetDenied;
+use App\Media\Application\MediaTargetAuthorizers;
 use App\Media\Application\ProcessUpload;
+use App\Media\Application\UseCaseUploads;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaStatus;
 use App\Media\Domain\UploadIntent;
 use App\Media\Domain\UploadPurpose;
-use App\Media\Infrastructure\DirectUploads;
 use App\Media\Infrastructure\Storage\ObjectStorageSettings;
 use App\Media\Infrastructure\Storage\PresignedUploads;
 use App\SharedKernel\Application\TenantContext;
@@ -25,16 +28,19 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
 
 /**
- * DirectUploads over in-memory ports that behave like the Doctrine ones. The clock stands at 2026-03-02 10:00 UTC, so
- * an intent begun then expires at 2026-03-03 10:00 UTC.
+ * UseCaseUploads over in-memory ports that behave like the Doctrine and Messenger ones. The clock stands at
+ * 2026-03-02 10:00 UTC, so an intent begun then expires at 2026-03-03 10:00 UTC. Mia may attach to the ticket
+ * SHOP-12 of Acme Foods, Omar to nothing.
  */
-final class DirectUploadsTest extends TestCase
+final class UseCaseUploadsTest extends TestCase
 {
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000e1501';
     private const string OTHER_ORGANIZATION = '0197a3c0-0000-7000-8000-0000000e1502';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000e1503';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000e1504';
     private const string NOW = '2026-03-02 10:00:00 UTC';
+    private const string TICKET = 'ticket';
+    private const string SHOP_12 = 'SHOP-12';
 
     private MockClock $clock;
     private CountingClock $signingClock;
@@ -42,8 +48,9 @@ final class DirectUploadsTest extends TestCase
     private InMemoryTransactions $transactions;
     private InMemoryUploadIntents $uploadIntents;
     private InMemoryMediaObjects $mediaObjects;
-    private CommitAwareMessageBus $commandBus;
-    private DirectUploads $uploads;
+    private InMemoryUploadProcessingQueue $uploadProcessingQueue;
+    private RecordingMediaTargetAuthorizer $ticketAuthorizer;
+    private UseCaseUploads $uploads;
 
     protected function setUp(): void
     {
@@ -54,20 +61,23 @@ final class DirectUploadsTest extends TestCase
         $this->transactions = new InMemoryTransactions($this->tenantContext);
         $this->uploadIntents = new InMemoryUploadIntents($this->transactions, $this->tenantContext, $this->clock);
         $this->mediaObjects = new InMemoryMediaObjects($this->transactions, $this->tenantContext);
-        $this->commandBus = new CommitAwareMessageBus($this->transactions);
-        $this->uploads = new DirectUploads(
+        $this->uploadProcessingQueue = new InMemoryUploadProcessingQueue($this->transactions);
+        $this->ticketAuthorizer = new RecordingMediaTargetAuthorizer(self::TICKET);
+        $this->ticketAuthorizer->allow(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::SHOP_12);
+        $this->ticketAuthorizer->allow(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), self::SHOP_12);
+        $this->uploads = new UseCaseUploads(
             $this->uploadIntents,
             $this->mediaObjects,
             new PresignedUploads(new ObjectStorageSettings('http://minio:9000', 'https://files.example.test', 'pinround', 'eu-west-1', 'acme-key', 'acme-secret'), $this->signingClock),
-            $this->clock,
+            $this->uploadProcessingQueue,
+            new MediaTargetAuthorizers([$this->ticketAuthorizer]),
             $this->transactions,
             $this->tenantContext,
-            $this->commandBus,
         );
     }
 
     #[Test]
-    public function aGoodBeginStoresAnIntentForTheDeclaredFileAndSignsAUrlThatPinsItsTypeAndLength(): void
+    public function aGoodBeginStoresAnIntentForTheDeclaredFileAndTargetAndSignsAUrlThatPinsItsTypeAndLength(): void
     {
         $slot = $this->begin('image/png', 2048);
 
@@ -77,11 +87,13 @@ final class DirectUploadsTest extends TestCase
         self::assertSame($slot->intentId, $intent->id()->toString());
         self::assertSame(self::ACME_FOODS, $intent->organizationId()->toString());
         self::assertSame(self::MIA, $intent->userId()->toString());
+        self::assertSame([self::TICKET, self::SHOP_12], [$intent->targetKind(), $intent->targetId()]);
         self::assertSame(2048, $intent->maxBytes());
         self::assertSame(['image/png'], $intent->allowedMimeTypes());
         self::assertSame('uploads/'.self::ACME_FOODS.'/'.$slot->intentId, $intent->storageKey());
         self::assertEquals(new \DateTimeImmutable('2026-03-03 10:00:00 UTC'), $intent->expiresAt());
         self::assertNull($intent->usedAt());
+        self::assertSame([['organizationId' => self::ACME_FOODS, 'userId' => self::MIA, 'targetId' => self::SHOP_12]], $this->ticketAuthorizer->asked());
 
         self::assertSame('/pinround/uploads/'.self::ACME_FOODS.'/'.$slot->intentId, parse_url($slot->url, \PHP_URL_PATH));
         parse_str((string) parse_url($slot->url, \PHP_URL_QUERY), $query);
@@ -89,6 +101,14 @@ final class DirectUploadsTest extends TestCase
         self::assertEqualsCanonicalizing(['content-length', 'content-type', 'host'], explode(';', $query['X-Amz-SignedHeaders']));
         self::assertSame(['Content-Type' => 'image/png', 'Content-Length' => '2048'], $slot->headers);
         self::assertEquals(new \DateTimeImmutable('2026-03-02 10:05:00 UTC'), $slot->expiresAt);
+    }
+
+    #[Test]
+    public function theIntentExpiresADayAfterTheTimeTheCallerGivesNotTheClocks(): void
+    {
+        $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::shop12(), 'screenshot', 'image/png', 2048, new \DateTimeImmutable('2026-03-02 09:30:00 UTC')));
+
+        self::assertEquals([new \DateTimeImmutable('2026-03-03 09:30:00 UTC')], array_map(static fn (UploadIntent $intent): \DateTimeImmutable => $intent->expiresAt(), $this->uploadIntents->storedRows()));
     }
 
     /**
@@ -138,10 +158,51 @@ final class DirectUploadsTest extends TestCase
     public function aRefusedBeginStoresNoIntentAndSignsNoUrl(string $purpose, string $mime, int $bytes, string $refusal): void
     {
         try {
-            $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $purpose, $mime, $bytes));
+            $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::shop12(), $purpose, $mime, $bytes, $this->clock->now()));
             self::fail('A refused upload was begun.');
         } catch (UploadRefused $refused) {
             self::assertSame($refusal, $refused->getMessage());
+        }
+
+        $this->assertNothingBegun();
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function targetsThePersonMayNotAttachTo(): iterable
+    {
+        yield 'a ticket the authorizer refuses' => [self::MIA, self::TICKET, 'SHOP-13'];
+        yield 'a person the authorizer refuses' => [self::OMAR, self::TICKET, self::SHOP_12];
+        yield 'a kind no authorizer decides' => [self::MIA, 'round', self::SHOP_12];
+        yield 'the kind in capitals' => [self::MIA, 'Ticket', self::SHOP_12];
+    }
+
+    #[Test]
+    #[DataProvider('targetsThePersonMayNotAttachTo')]
+    public function aBeginForATargetThePersonMayNotAttachToStoresNothingAndSignsNoUrl(string $userId, string $targetKind, string $targetId): void
+    {
+        try {
+            $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId($userId), new UploadTarget($targetKind, $targetId), 'screenshot', 'image/png', 2048, $this->clock->now()));
+            self::fail('An upload was begun for a target the person may not attach to.');
+        } catch (UploadTargetDenied $denied) {
+            self::assertSame('This person may not add uploads to the target of this upload.', $denied->getMessage());
+        }
+
+        $this->assertNothingBegun();
+    }
+
+    #[Test]
+    public function aBeginForATargetIdLongerThanTheTableTakesStoresNothingAndSignsNoUrl(): void
+    {
+        $longTargetId = str_repeat('é', UploadIntent::MAX_TARGET_ID_LENGTH + 1);
+        $this->ticketAuthorizer->allow(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $longTargetId);
+
+        try {
+            $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), new UploadTarget(self::TICKET, $longTargetId), 'screenshot', 'image/png', 2048, $this->clock->now()));
+            self::fail('An upload was begun for a target id the table cannot hold.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertSame('An upload intent needs a target id of 1 to 100 characters.', $refusal->getMessage());
         }
 
         self::assertSame([], $this->uploadIntents->storedRows());
@@ -152,7 +213,7 @@ final class DirectUploadsTest extends TestCase
     public function aBeginOutsideATransactionStoresNothingAndSignsNoUrl(): void
     {
         try {
-            $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), 'screenshot', 'image/png', 2048);
+            $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::shop12(), 'screenshot', 'image/png', 2048, $this->clock->now());
             self::fail('An upload was begun outside a transaction.');
         } catch (\LogicException $refusal) {
             self::assertSame('Adding an upload intent needs an open transaction.', $refusal->getMessage());
@@ -166,23 +227,22 @@ final class DirectUploadsTest extends TestCase
     public function aBeginForAnotherOrganizationThanTheTenantStoresNothingAndSignsNoUrl(): void
     {
         try {
-            $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), 'screenshot', 'image/png', 2048));
+            $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), self::shop12(), 'screenshot', 'image/png', 2048, $this->clock->now()));
             self::fail('An upload was begun for another organization than the tenant.');
         } catch (\LogicException $refusal) {
             self::assertSame('An upload runs under the tenant of its own organization.', $refusal->getMessage());
         }
 
-        self::assertSame([], $this->uploadIntents->storedRows());
-        self::assertSame(0, $this->signingClock->readCount);
+        $this->assertNothingBegun();
     }
 
     #[Test]
-    public function completingByTheCreatorAddsOnePendingMediaObjectAndQueuesItsProcessingAfterTheCommit(): void
+    public function completingByTheCreatorAddsOnePendingMediaObjectAndQueuesItsProcessingInTheSameTransaction(): void
     {
         $slot = $this->begin('image/png', 2048);
         $this->clock->modify('+2 minutes');
 
-        $mediaId = $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId);
+        $mediaId = $this->complete(self::MIA, $slot->intentId);
 
         $mediaObjects = $this->mediaObjects->storedRows();
         self::assertCount(1, $mediaObjects);
@@ -196,28 +256,70 @@ final class DirectUploadsTest extends TestCase
         self::assertSame(self::MIA, $mediaObject->uploadedBy()->toString());
         self::assertEquals(new \DateTimeImmutable('2026-03-02 10:02:00 UTC'), $mediaObject->createdAt());
         self::assertEquals([new \DateTimeImmutable('2026-03-02 10:02:00 UTC')], $this->storedUsedTimes());
-        self::assertEquals(
-            [['message' => new ProcessUpload(self::ACME_FOODS, $mediaId), 'wasTransactionOpen' => false]],
-            $this->commandBus->dispatched(),
-        );
+        self::assertEquals([new ProcessUpload(self::ACME_FOODS, $mediaId)], $this->uploadProcessingQueue->queued());
+    }
+
+    #[Test]
+    public function completingAsksTheAuthorizerAboutTheTargetStoredAtTheBegin(): void
+    {
+        $slot = $this->begin('image/png', 2048);
+
+        $this->complete(self::MIA, $slot->intentId);
+
+        $askedAboutShop12 = ['organizationId' => self::ACME_FOODS, 'userId' => self::MIA, 'targetId' => self::SHOP_12];
+        self::assertSame([$askedAboutShop12, $askedAboutShop12], $this->ticketAuthorizer->asked());
+    }
+
+    #[Test]
+    public function completingAfterThePersonLostAccessToTheStoredTargetIsDeniedAndChangesNothing(): void
+    {
+        $slot = $this->begin('image/png', 2048);
+        $this->ticketAuthorizer->deny(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::SHOP_12);
+
+        try {
+            $this->complete(self::MIA, $slot->intentId);
+            self::fail('An upload was completed for a target the person may no longer attach to.');
+        } catch (UploadTargetDenied $denied) {
+            self::assertSame('This person may not add uploads to the target of this upload.', $denied->getMessage());
+        }
+
+        $this->assertNothingChangedSinceTheBegin();
+        $askedAboutShop12 = ['organizationId' => self::ACME_FOODS, 'userId' => self::MIA, 'targetId' => self::SHOP_12];
+        self::assertSame([$askedAboutShop12, $askedAboutShop12], $this->ticketAuthorizer->asked());
+    }
+
+    #[Test]
+    public function completingAnIntentWhoseTargetKindNoAuthorizerDecidesIsDeniedAndChangesNothing(): void
+    {
+        $intentId = $this->uploadIntents->nextIdentity();
+        $this->transactions->run(fn () => $this->uploadIntents->add(UploadIntent::open($intentId, new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, 'round', self::SHOP_12, 2048, ['image/png'], 'uploads/'.self::ACME_FOODS.'/'.$intentId->toString(), new \DateTimeImmutable('2026-03-03 10:00:00 UTC'))));
+
+        try {
+            $this->complete(self::MIA, $intentId->toString());
+            self::fail('An upload was completed for a target kind no authorizer decides.');
+        } catch (UploadTargetDenied $denied) {
+            self::assertSame('This person may not add uploads to the target of this upload.', $denied->getMessage());
+        }
+
+        $this->assertNothingChangedSinceTheBegin();
     }
 
     #[Test]
     public function aSecondCompleteIsRefusedAndAddsNoSecondMediaObjectNorMessage(): void
     {
         $slot = $this->begin('image/png', 2048);
-        $firstMediaId = $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId);
+        $firstMediaId = $this->complete(self::MIA, $slot->intentId);
         $this->clock->modify('+1 minute');
 
         try {
-            $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId);
+            $this->complete(self::MIA, $slot->intentId);
             self::fail('An upload was completed twice.');
         } catch (UploadRefused $refused) {
             self::assertSame('This upload has ended. Upload the file again.', $refused->getMessage());
         }
 
         self::assertSame([$firstMediaId], $this->storedMediaIds());
-        self::assertCount(1, $this->commandBus->dispatched());
+        self::assertEquals([new ProcessUpload(self::ACME_FOODS, $firstMediaId)], $this->uploadProcessingQueue->queued());
         self::assertEquals([new \DateTimeImmutable(self::NOW)], $this->storedUsedTimes());
     }
 
@@ -238,7 +340,7 @@ final class DirectUploadsTest extends TestCase
         $this->clock->modify($timeLater);
 
         try {
-            $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId);
+            $this->complete(self::MIA, $slot->intentId);
             self::fail('An expired upload was completed.');
         } catch (UploadRefused $refused) {
             self::assertSame('This upload has ended. Upload the file again.', $refused->getMessage());
@@ -253,7 +355,7 @@ final class DirectUploadsTest extends TestCase
         $slot = $this->begin('image/png', 2048);
         $this->clock->modify('+1 day -1 second');
 
-        $mediaId = $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId);
+        $mediaId = $this->complete(self::MIA, $slot->intentId);
 
         self::assertSame([$mediaId], $this->storedMediaIds());
     }
@@ -263,7 +365,7 @@ final class DirectUploadsTest extends TestCase
     {
         $slot = $this->begin('image/png', 2048);
 
-        $this->expectNotFound(fn (): string => $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), $slot->intentId));
+        $this->expectNotFound(fn (): string => $this->complete(self::OMAR, $slot->intentId));
 
         $this->assertNothingChangedSinceTheBegin();
     }
@@ -272,10 +374,10 @@ final class DirectUploadsTest extends TestCase
     public function completingAnotherOrganizationsUploadIsNotFoundAndChangesNothing(): void
     {
         $this->tenantContext->set(new OrganizationId(self::OTHER_ORGANIZATION));
-        $slot = $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), 'screenshot', 'image/png', 2048));
+        $slot = $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), self::shop12(), 'screenshot', 'image/png', 2048, $this->clock->now()));
         $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
 
-        $this->expectNotFound(fn (): string => $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId));
+        $this->expectNotFound(fn (): string => $this->complete(self::MIA, $slot->intentId));
 
         $this->assertNothingChangedSinceTheBegin();
     }
@@ -298,7 +400,7 @@ final class DirectUploadsTest extends TestCase
     {
         $this->begin('image/png', 2048);
 
-        $this->expectNotFound(fn (): string => $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $intentId));
+        $this->expectNotFound(fn (): string => $this->complete(self::MIA, $intentId));
 
         $this->assertNothingChangedSinceTheBegin();
     }
@@ -310,7 +412,7 @@ final class DirectUploadsTest extends TestCase
         $this->mediaObjects->nextAddFailure = new \RuntimeException('The database went away.');
 
         try {
-            $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId);
+            $this->complete(self::MIA, $slot->intentId);
             self::fail('A complete whose transaction failed went through.');
         } catch (\RuntimeException $failure) {
             self::assertSame('The database went away.', $failure->getMessage());
@@ -320,13 +422,44 @@ final class DirectUploadsTest extends TestCase
     }
 
     #[Test]
+    public function aFailedCommitTakesTheQueuedProcessingBackWithTheUseAndTheMediaObject(): void
+    {
+        $slot = $this->begin('image/png', 2048);
+        $this->transactions->nextCommitFailure = new \RuntimeException('The commit failed.');
+
+        try {
+            $this->complete(self::MIA, $slot->intentId);
+            self::fail('A complete whose commit failed went through.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame('The commit failed.', $failure->getMessage());
+        }
+
+        $this->assertNothingChangedSinceTheBegin();
+    }
+
+    #[Test]
+    public function completingInsideAnOpenTransactionIsRefusedAndChangesNothing(): void
+    {
+        $slot = $this->begin('image/png', 2048);
+
+        try {
+            $this->transactions->run(fn (): string => $this->complete(self::MIA, $slot->intentId));
+            self::fail('An upload was completed inside another transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('A transaction of its own must not run inside another transaction.', $refusal->getMessage());
+        }
+
+        $this->assertNothingChangedSinceTheBegin();
+    }
+
+    #[Test]
     public function anIntentAllowingMoreThanOneTypeIsNotCompletedAsTheTypeWouldBeAGuess(): void
     {
         $intentId = $this->uploadIntents->nextIdentity();
-        $this->transactions->run(fn () => $this->uploadIntents->add(UploadIntent::open($intentId, new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, 2048, ['image/png', 'image/webp'], 'uploads/'.self::ACME_FOODS.'/'.$intentId->toString(), new \DateTimeImmutable('2026-03-03 10:00:00 UTC'))));
+        $this->transactions->run(fn () => $this->uploadIntents->add(UploadIntent::open($intentId, new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, self::TICKET, self::SHOP_12, 2048, ['image/png', 'image/webp'], 'uploads/'.self::ACME_FOODS.'/'.$intentId->toString(), new \DateTimeImmutable('2026-03-03 10:00:00 UTC'))));
 
         try {
-            $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $intentId->toString());
+            $this->complete(self::MIA, $intentId->toString());
             self::fail('An intent of two types was completed.');
         } catch (\LogicException $refusal) {
             self::assertSame('A direct upload intent allows exactly one media type.', $refusal->getMessage());
@@ -341,7 +474,7 @@ final class DirectUploadsTest extends TestCase
         $slot = $this->begin('image/png', 2048);
 
         try {
-            $this->uploads->complete(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), $slot->intentId);
+            $this->uploads->complete(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), $slot->intentId, $this->clock->now());
             self::fail('An upload was completed for another organization than the tenant.');
         } catch (\LogicException $refusal) {
             self::assertSame('An upload runs under the tenant of its own organization.', $refusal->getMessage());
@@ -357,7 +490,7 @@ final class DirectUploadsTest extends TestCase
         $this->tenantContext->clear();
 
         try {
-            $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId);
+            $this->complete(self::MIA, $slot->intentId);
             self::fail('An upload was completed with no tenant.');
         } catch (\LogicException $refusal) {
             self::assertSame('An upload runs under the tenant of its own organization.', $refusal->getMessage());
@@ -367,9 +500,19 @@ final class DirectUploadsTest extends TestCase
         $this->assertNothingChangedSinceTheBegin();
     }
 
+    private static function shop12(): UploadTarget
+    {
+        return new UploadTarget(self::TICKET, self::SHOP_12);
+    }
+
     private function begin(string $mime, int $bytes): UploadSlot
     {
-        return $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), 'screenshot', $mime, $bytes));
+        return $this->transactions->run(fn (): UploadSlot => $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::shop12(), 'screenshot', $mime, $bytes, $this->clock->now()));
+    }
+
+    private function complete(string $userId, string $intentId): string
+    {
+        return $this->uploads->complete(new OrganizationId(self::ACME_FOODS), new UserId($userId), $intentId, $this->clock->now());
     }
 
     /**
@@ -384,12 +527,18 @@ final class DirectUploadsTest extends TestCase
         }
     }
 
+    private function assertNothingBegun(): void
+    {
+        self::assertSame([], $this->uploadIntents->storedRows());
+        self::assertSame(0, $this->signingClock->readCount);
+    }
+
     private function assertNothingChangedSinceTheBegin(): void
     {
         self::assertNotSame([], $this->uploadIntents->storedRows(), 'No intent was begun, so its staying unused proves nothing.');
         self::assertSame([null], array_values(array_unique(array_map(static fn (UploadIntent $intent): ?string => $intent->usedAt()?->format(\DATE_ATOM), $this->uploadIntents->storedRows()))));
         self::assertSame([], $this->mediaObjects->storedRows());
-        self::assertSame([], $this->commandBus->dispatched());
+        self::assertSame([], $this->uploadProcessingQueue->queued());
     }
 
     /**

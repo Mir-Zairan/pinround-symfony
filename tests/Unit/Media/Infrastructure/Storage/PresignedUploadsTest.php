@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Media\Infrastructure\Storage;
 
 use App\Media\Domain\UploadIntentId;
+use App\Media\Domain\UploadKey;
 use App\Media\Infrastructure\Storage\ObjectStorageSettings;
 use App\Media\Infrastructure\Storage\PresignedUploads;
-use App\Media\Infrastructure\Storage\UploadKey;
 use App\SharedKernel\Domain\OrganizationId;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;

@@ -153,7 +153,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
     public function addingASecondIntentWithAStoredIdIsRefusedAndKeepsTheFirstRow(): void
     {
         $this->addIntent(self::ACME_FOODS, self::ACME_INTENT, self::MIA, '2026-03-02 10:15:00+00:00');
-        $secondWithTheSameId = UploadIntent::open(new UploadIntentId(self::ACME_INTENT), new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, 1024, ['image/webp'], 'acme/second', new \DateTimeImmutable('2026-03-02 10:30:00+00:00'));
+        $secondWithTheSameId = UploadIntent::open(new UploadIntentId(self::ACME_INTENT), new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, 'ticket', 'SHOP-12', 1024, ['image/webp'], 'acme/second', new \DateTimeImmutable('2026-03-02 10:30:00+00:00'));
 
         try {
             $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->uploadIntents()->add($secondWithTheSameId));
@@ -393,7 +393,7 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
 
     private function intentOf(string $organizationId, string $id, string $userId, string $expiresAt): UploadIntent
     {
-        return UploadIntent::open(new UploadIntentId($id), new OrganizationId($organizationId), new UserId($userId), UploadPurpose::Screenshot, 10_485_760, ['image/png', 'image/webp'], (self::ACME_FOODS === $organizationId ? 'acme/' : 'other/').$id, new \DateTimeImmutable($expiresAt));
+        return UploadIntent::open(new UploadIntentId($id), new OrganizationId($organizationId), new UserId($userId), UploadPurpose::Screenshot, 'ticket', 'SHOP-12', 10_485_760, ['image/png', 'image/webp'], (self::ACME_FOODS === $organizationId ? 'acme/' : 'other/').$id, new \DateTimeImmutable($expiresAt));
     }
 
     private function storedUsedAt(string $id): ?\DateTimeImmutable

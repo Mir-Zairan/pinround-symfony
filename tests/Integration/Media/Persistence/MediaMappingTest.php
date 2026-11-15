@@ -53,8 +53,8 @@ final class MediaMappingTest extends KernelTestCase
 
         self::assertNotNull($intent);
         self::assertSame(
-            [self::INTENT, self::ACME_FOODS, self::MIA, UploadPurpose::Screenshot, self::LARGE_MAX_BYTES, ['image/webp', 'image/png'], 'acme/uploads/'.self::INTENT, null],
-            [$intent->id()->toString(), $intent->organizationId()->toString(), $intent->userId()->toString(), $intent->purpose(), $intent->maxBytes(), $intent->allowedMimeTypes(), $intent->storageKey(), $intent->usedAt()],
+            [self::INTENT, self::ACME_FOODS, self::MIA, UploadPurpose::Screenshot, 'ticket', 'SHOP-12', self::LARGE_MAX_BYTES, ['image/webp', 'image/png'], 'acme/uploads/'.self::INTENT, null],
+            [$intent->id()->toString(), $intent->organizationId()->toString(), $intent->userId()->toString(), $intent->purpose(), $intent->targetKind(), $intent->targetId(), $intent->maxBytes(), $intent->allowedMimeTypes(), $intent->storageKey(), $intent->usedAt()],
         );
         self::assertEquals(new \DateTimeImmutable('2027-03-15 10:15:00+00:00'), $intent->expiresAt());
     }
@@ -129,7 +129,7 @@ final class MediaMappingTest extends KernelTestCase
 
     private function openIntent(): UploadIntent
     {
-        return UploadIntent::open(new UploadIntentId(self::INTENT), new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, self::LARGE_MAX_BYTES, ['image/webp', 'image/png'], 'acme/uploads/'.self::INTENT, new \DateTimeImmutable('2027-03-15 10:15:00+00:00'));
+        return UploadIntent::open(new UploadIntentId(self::INTENT), new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, 'ticket', 'SHOP-12', self::LARGE_MAX_BYTES, ['image/webp', 'image/png'], 'acme/uploads/'.self::INTENT, new \DateTimeImmutable('2027-03-15 10:15:00+00:00'));
     }
 
     private function pendingMedia(): MediaObject

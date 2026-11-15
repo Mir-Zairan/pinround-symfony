@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Media\Application;
 
 /**
- * Check and re-encode the file of a pending media object (media-pipeline.md, Processing worker). Sent to async_media
- * once the transaction that added the media object has committed, so the worker always finds its row.
+ * Check and re-encode the file of a pending media object (media-pipeline.md, Processing worker). Written to the outbox
+ * in the transaction that adds the media object, and relayed to async_media only once it has committed, so the worker
+ * always finds its row.
  */
 final readonly class ProcessUpload
 {

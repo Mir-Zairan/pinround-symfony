@@ -49,6 +49,8 @@ services:
     _instanceof:
         App\Organization\Api\OrganizationSetupStep:
             tags: [app.organization_setup_step]
+        App\Media\Api\MediaTargetAuthorizer:
+            tags: [app.media_target_authorizer]
 
     # makes classes in src/ available to be used as services
     # this creates a service per class whose id is the fully-qualified class name
@@ -121,6 +123,10 @@ services:
     App\Organization\Application\CreateOrganization:
         arguments:
             $setupSteps: !tagged_iterator app.organization_setup_step
+    # The same way, with the tag the _instanceof rule above gives every MediaTargetAuthorizer.
+    App\Media\Application\MediaTargetAuthorizers:
+        arguments:
+            $authorizers: !tagged_iterator app.media_target_authorizer
 
     # Several services read the step policy on one page; it is read once per request. AddStep and SetRule check it
     # again inside their own transaction, after the voter, so they read it fresh.

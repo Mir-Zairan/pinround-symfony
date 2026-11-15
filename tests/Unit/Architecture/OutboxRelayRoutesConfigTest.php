@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Architecture;
 
 use App\Conversation\Api\Event\ConversationEvent;
 use App\Identity\Api\Event\IdentityEvent;
+use App\Media\Application\ProcessUpload;
 use App\Notification\Api\Event\NotificationEvent;
 use App\Organization\Api\Event\OrganizationEvent;
 use App\Ticketing\Api\Event\TicketEvent;
@@ -30,10 +31,10 @@ final class OutboxRelayRoutesConfigTest extends TestCase
     ];
 
     #[Test]
-    public function theRelaySendsExactlyTheDomainEventsOfEachModuleOnToAsyncNotify(): void
+    public function theRelaySendsTheDomainEventsOnToAsyncNotifyAndProcessUploadOnToAsyncMedia(): void
     {
         self::assertEqualsCanonicalizing(
-            array_fill_keys(self::DOMAIN_EVENTS, 'async_notify'),
+            array_fill_keys(self::DOMAIN_EVENTS, 'async_notify') + [ProcessUpload::class => 'async_media'],
             self::relayTargets(self::messengerConfig()),
         );
     }
@@ -41,15 +42,17 @@ final class OutboxRelayRoutesConfigTest extends TestCase
     #[Test]
     public function theDomainEventsOfEachModuleAreRoutedToTheOutbox(): void
     {
-        $framework = self::messengerConfig()['framework'] ?? null;
-        self::assertIsArray($framework);
-        self::assertIsArray($framework['messenger'] ?? null);
-        $routing = $framework['messenger']['routing'] ?? null;
-        self::assertIsArray($routing);
+        $routing = self::routing();
 
         foreach (self::DOMAIN_EVENTS as $event) {
             self::assertSame('outbox', $routing[$event] ?? null, $event);
         }
+    }
+
+    #[Test]
+    public function processUploadIsRoutedToTheOutboxNotStraightToAsyncMedia(): void
+    {
+        self::assertSame('outbox', self::routing()[ProcessUpload::class] ?? null);
     }
 
     #[Test]
@@ -79,6 +82,20 @@ final class OutboxRelayRoutesConfigTest extends TestCase
         self::assertIsArray($targets);
 
         return $targets;
+    }
+
+    /**
+     * @return array<mixed>
+     */
+    private static function routing(): array
+    {
+        $framework = self::messengerConfig()['framework'] ?? null;
+        self::assertIsArray($framework);
+        self::assertIsArray($framework['messenger'] ?? null);
+        $routing = $framework['messenger']['routing'] ?? null;
+        self::assertIsArray($routing);
+
+        return $routing;
     }
 
     /**
