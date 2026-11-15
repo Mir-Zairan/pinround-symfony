@@ -318,6 +318,97 @@ textarea.pin-list__note {
   border-radius: var(--radius-input);
 }
 
+/* The Screenshot section of a report form (ScreenshotReportField, screenshot-report controller). */
+.screenshot-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.screenshot-report__heading {
+  margin: 0;
+}
+
+.screenshot-report__error {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-input);
+  background: var(--error-container);
+  color: var(--on-error-container);
+  overflow-wrap: anywhere;
+}
+
+.screenshot-report__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.screenshot-report__pick {
+  cursor: pointer;
+}
+
+/* The file input is hidden but keeps the keyboard focus, so its button-like label shows the focus ring. */
+.screenshot-report__file:focus-visible + .screenshot-report__pick {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.screenshot-report__empty {
+  margin: 0;
+  padding: var(--space-16);
+  border: 2px dashed var(--outline);
+  border-radius: var(--radius-input);
+  color: var(--on-surface-var);
+}
+
+.screenshot-report__hint,
+.screenshot-report__count {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
+.screenshot-report__hint {
+  margin-bottom: var(--space-8);
+}
+
+.screenshot-report__count {
+  margin-top: var(--space-8);
+}
+
+.screenshot-report__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screenshot-report__label {
+  font-weight: 600;
+}
+
+.screenshot-report__input {
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font: inherit;
+}
+
+textarea.screenshot-report__input {
+  resize: vertical;
+}
+
+.screenshot-report__status:empty {
+  display: none;
+}
+
+.screenshot-report__status {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
 /* The ticket page's Rounds section (RoundsSection). */
 
 .round-card {

@@ -4,15 +4,17 @@ import { beginUpload, completeUpload, putFile, UploadFailed } from '../review/up
 import { readUploadStatus, REJECTED_MESSAGE, sleep, statusUrlFor, waitForProcessing } from '../review/upload_status.js';
 
 // Uploads one screenshot straight to storage (ADR-0011): the file is picked, dropped or pasted, checked for type and
-// size, then POST /media/intents, a PUT to the presigned URL with the progress shown, and POST .../complete. The
+// size, then presigned-upload:started fires (no detail) and POST /media/intents, a PUT to the presigned URL with the progress shown, and POST .../complete. The
 // returned media id goes into the hidden `mediaId` field and into presigned-upload:uploaded ({ mediaId }), for the form
 // that later posts it. Then GET the status URL once a second, at most 15 times: the field's data-media-state is
 // "pending" meanwhile, then "ready" with presigned-upload:ready ({ mediaId }), or on "rejected" the hidden field is
 // emptied, the message shows and presigned-upload:rejected ({ mediaId }) fires (the state is then "rejected"). After
 // 15 s still pending, presigned-upload:still-processing ({ mediaId }) fires and nothing is shown: the media id stays
 // and the form that listens says so when the server refuses a submit. A status poll that fails or is refused (offline,
-// 404, 429) shows nothing and counts as pending. Refusals of the upload itself show the server's own message in the
-// `status` live region. The markup and the values come from the UploadField component.
+// 404, 429) shows nothing and counts as pending. Refusals and failures of the upload itself show the server's own
+// message in the `status` live region and fire presigned-upload:failed (no detail). The clear() action drops the picture:
+// it stops the upload or the polling, empties the field and the preview, and fires nothing. The markup and the values
+// come from the UploadField component, or from ScreenshotReportField.
 export default class extends Controller {
   static targets = ['input', 'status', 'progress', 'preview', 'mediaId'];
   static values = {
@@ -75,6 +77,7 @@ export default class extends Controller {
     this.showPreview(file);
     this.showProgress(0);
     this.say(`Uploading ${file.name}…`);
+    this.dispatch('started');
     try {
       const slot = await beginUpload(this.urlValue, this.csrfTokenValue, {
         purpose: this.purposeValue,
@@ -96,6 +99,7 @@ export default class extends Controller {
       }
       this.clearPreview();
       this.say(failure instanceof UploadFailed ? failure.message : 'The upload failed. Try again.');
+      this.dispatch('failed');
     } finally {
       // An aborted upload was replaced by a newer one, or the page is gone: the newer one owns these.
       if (!signal.aborted) {
@@ -103,6 +107,17 @@ export default class extends Controller {
         this.progressTarget.hidden = true;
       }
     }
+  }
+
+  clear() {
+    this.abortController?.abort();
+    this.abortController = null;
+    this.isUploading = false;
+    this.mediaIdTarget.value = '';
+    delete this.element.dataset.mediaState;
+    this.progressTarget.hidden = true;
+    this.clearPreview();
+    this.say('');
   }
 
   async awaitProcessing(mediaId, signal) {

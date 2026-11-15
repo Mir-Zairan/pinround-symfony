@@ -6,6 +6,7 @@
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
 {% endblock %}
 
 {% block main %}
@@ -47,6 +48,11 @@
                         <p class="profile__error" id="ticket-description-error">{{ errors.description }}</p>
                     {% endif %}
                 </div>
+                {# The upload's target is the selected project's team; every team listed lets the reporter make tickets. #}
+                {% set screenshotProject = projects|filter(project => project.id == input.projectId)|first|default(projects|first) %}
+                {% if screenshotProject %}
+                    <twig:ScreenshotReportField :uploadTargetKind="constant('App\\Ticketing\\UI\\Media\\NewTicketMediaTarget::KIND')" :uploadTargetId="screenshotProject.teamId.toString" :postedReport="report|default({})" :error="errors.screenshot|default(null)" />
+                {% endif %}
                 <fieldset class="profile__themes"{% if errors.type is defined %} aria-describedby="ticket-type-error"{% endif %}>
                     <legend class="profile__legend">Type</legend>
                     {% for value, typeLabel in typeLabels %}

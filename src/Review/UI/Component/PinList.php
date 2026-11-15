@@ -16,4 +16,7 @@ final class PinList
     public ScreenshotView $view;
     public ?int $selectedNumber = null;
     public bool $isEditable = false;
+
+    /** The hint an empty note field shows; only for an editable list. */
+    public ?string $notePlaceholder = null;
 }
