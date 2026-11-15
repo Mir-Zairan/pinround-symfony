@@ -6,6 +6,7 @@ How screenshots get from a person's screen into pinround safely, and how they ar
 
 - [Why screenshots need their own pipeline](#why-screenshots-need-their-own-pipeline) — the scene.
 - [Upload flow](#upload-flow) — presigned PUT, sequence diagram.
+- [Upload status](#upload-status) — `GET /media/{id}/status`: who may read it, how the form polls.
 - [Validation rules](#validation-rules) — checks before the presigned URL (with what the URL pins) and checks in the worker.
 - [Processing worker](#processing-worker) — verify, re-encode, thumbnails; how the `vips` tool runs.
 - [Storage key layout](#storage-key-layout) — where each file lives.
@@ -51,6 +52,12 @@ sequenceDiagram
 ```
 
 The browser shows a local preview at once (from the file it already has), so the person can start placing pins while processing runs. Pins are saved against the media id and do not depend on processing.
+
+## Upload status
+
+`GET /media/{id}/status` answers `{"status": "pending" | "ready" | "rejected"}` with `Cache-Control: no-store`, for a form that waits for its screenshot (P05.T5). Only a member of the organization who uploaded that picture (`med_object.uploaded_by`) may read it: a malformed id, an unknown one, another person's and another organization's all answer 404 "Nothing you uploaded has that id.", so the answer does not tell them apart. A logged-out visitor is sent to `/login`. No form token: it is a GET with no side effect. A person may poll 120 times a minute (`media_upload_status_per_user`, per user id); past that the answer is 429 with `Retry-After`. Behind it is `Media\Api\UploadedMedia::statesOf(OrganizationId, UserId, list<string>)`: one query, at most 50 ids.
+
+The `presigned-upload` controller polls it once a second after `complete`, at most 15 times (15 s). `ready` sets `data-media-state="ready"` on the field and fires `presigned-upload:ready`; `rejected` shows "We could not process this image. Try again." and empties the hidden media id; after 15 polls still pending it fires `presigned-upload:still-processing` and keeps the id: the server decides on submit. A poll that fails (offline, 429) counts as no news and the next one asks again.
 
 ## Validation rules
 

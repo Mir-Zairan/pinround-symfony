@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const NODE_SPECS = ['pin-position.spec.ts', 'upload-checks.spec.ts'];
+const NODE_SPECS = ['pin-position.spec.ts', 'upload-checks.spec.ts', 'upload-status.spec.ts'];
 
 export default defineConfig({
   testDir: '.',

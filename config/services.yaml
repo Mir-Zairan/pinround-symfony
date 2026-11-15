@@ -369,6 +369,10 @@ when@test:
         test.media_signed_urls:
             alias: App\Media\Api\SignedUrls
             public: true
+        # UploadedMediaTest gets the Api as the status route does.
+        test.media_uploaded_media:
+            alias: App\Media\Api\UploadedMedia
+            public: true
         # The container drops a private service no test asks for; the integration tests get the Api as a page does.
         test.review_round_queries:
             alias: App\Review\Api\RoundQueries

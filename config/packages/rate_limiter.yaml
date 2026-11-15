@@ -12,6 +12,7 @@
 # right or wrong, at login and wherever else a code is asked, so the 6 digits cannot be guessed.
 # Upload begins (POST /media/intents) get media_upload_begin_per_user through UploadIntentController: every begin of a
 # member with a valid form token counts, accepted or not, so one member cannot script begins against the storage.
+# Status polls (GET /media/{id}/status) get media_upload_status_per_user through UploadStatusController.
 parameters:
     # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter,
     # SymfonyPasswordResetRequestLimiter, SymfonyCurrentPasswordLimiter, SymfonyTwoStepCodeLimiter).
@@ -23,6 +24,8 @@ parameters:
     identity.two_step_code_per_user_minutes: 15
     # The window in minutes, also the longest wait a refused begin is told (UploadIntentController).
     media.upload_begin_per_user_minutes: 1
+    # The same for a refused status poll (UploadStatusController).
+    media.upload_status_per_user_minutes: 1
 
 framework:
     rate_limiter:
@@ -74,5 +77,13 @@ framework:
             policy: fixed_window
             limit: 60
             interval: '%media.upload_begin_per_user_minutes% minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # GET /media/{id}/status, keyed by the user id: the form polls once a second for at most 15 s, so a few
+        # uploads at once stay far below 120 a minute while a script is stopped.
+        media_upload_status_per_user:
+            policy: fixed_window
+            limit: 120
+            interval: '%media.upload_status_per_user_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
