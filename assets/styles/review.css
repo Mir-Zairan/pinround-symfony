@@ -243,3 +243,43 @@ textarea.pin-list__note {
 .pin-list__remove {
   flex: none;
 }
+
+/* The screenshot upload field (presigned-upload controller). */
+.upload-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  max-width: 32rem;
+  padding: var(--space-16);
+  border: 2px dashed var(--outline);
+  border-radius: var(--radius-input);
+}
+
+.upload-field__drop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  cursor: pointer;
+}
+
+.upload-field__hint,
+.upload-field__status {
+  margin: 0;
+  color: var(--on-surface-var);
+  overflow-wrap: anywhere;
+}
+
+.upload-field__status {
+  min-height: 1.4em;
+}
+
+.upload-field__progress {
+  width: 100%;
+}
+
+.upload-field__preview {
+  max-width: 100%;
+  max-height: 16rem;
+  object-fit: contain;
+  border-radius: var(--radius-input);
+}

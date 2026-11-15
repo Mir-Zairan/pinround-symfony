@@ -256,4 +256,9 @@
         <h2 id="gallery-placed-pins-heading">Screenshot with pins already placed</h2>
         <twig:ScreenshotExample :isEditable="true" :hasPins="true" />
     </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-upload-heading">
+        <h2 id="gallery-upload-heading">Screenshot upload</h2>
+        <twig:UploadField fieldId="gallery-upload" targetKind="ticket" targetId="00000000-0000-7000-8000-000000000000" />
+    </section>
 {% endblock %}

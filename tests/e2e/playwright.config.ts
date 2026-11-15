@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const NODE_SPECS = ['pin-position.spec.ts', 'upload-checks.spec.ts'];
+
 export default defineConfig({
   testDir: '.',
   // Baselines sit beside the spec, one file per screenshot and platform, because font rendering differs per OS.
@@ -13,11 +15,11 @@ export default defineConfig({
   projects: [
     { name: 'setup', testMatch: 'auth.setup.ts' },
     // Pure-function specs run in Node with no page, so they need neither the app nor a login.
-    { name: 'node', testMatch: 'pin-position.spec.ts' },
+    { name: 'node', testMatch: NODE_SPECS },
     {
       name: 'chromium',
       testMatch: '*.spec.ts',
-      testIgnore: 'pin-position.spec.ts',
+      testIgnore: NODE_SPECS,
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
     },
