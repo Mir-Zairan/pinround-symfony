@@ -20,8 +20,9 @@ parameters:
         App\Notification\Api\Event\NotificationEvent: async_notify
         # Short jobs for worker-notify too, today clearing a renamed person's cached teams (ForgetRenamedPersonHandler).
         App\Identity\Api\Event\IdentityEvent: async_notify
-        # Checking and re-encoding an uploaded picture, for worker-media. Until its handler exists, a consumed message
-        # fails and waits in failed for a retry.
+        # Short jobs for worker-notify too; no module handles MediaReady or MediaRejected yet.
+        App\Media\Api\Event\MediaEvent: async_notify
+        # Checking and re-encoding an uploaded picture, for worker-media (ProcessUploadHandler).
         App\Media\Application\ProcessUpload: async_media
 
 framework:
@@ -165,6 +166,8 @@ framework:
             App\Notification\Api\Event\NotificationEvent: outbox
             # Domain events of Identity, the same way.
             App\Identity\Api\Event\IdentityEvent: outbox
+            # Domain events of Media, dispatched on event.bus by the processing worker inside its transaction.
+            App\Media\Api\Event\MediaEvent: outbox
 
 when@test:
     parameters:
@@ -175,6 +178,7 @@ when@test:
             App\Conversation\Api\Event\ConversationEvent: async_notify
             App\Notification\Api\Event\NotificationEvent: async_notify
             App\Identity\Api\Event\IdentityEvent: async_notify
+            App\Media\Api\Event\MediaEvent: async_notify
             App\Media\Application\ProcessUpload: async_media
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey

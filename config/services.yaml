@@ -135,6 +135,10 @@ services:
     App\Media\Application\DirectUploads:
         arguments:
             $organizationQuotaBytes: '%env(int:default:media.organization_quota_default_bytes:MEDIA_ORG_QUOTA_BYTES)%'
+    # The processing worker reads, writes and deletes in Media's bucket (media.object_storage above).
+    App\Media\Infrastructure\Processing\FlysystemMediaFiles:
+        arguments:
+            $objectStorage: '@media.object_storage'
 
     # Several services read the step policy on one page; it is read once per request. AddStep and SetRule check it
     # again inside their own transaction, after the voter, so they read it fresh.
