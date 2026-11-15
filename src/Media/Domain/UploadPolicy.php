@@ -16,6 +16,12 @@ final class UploadPolicy
     /** 15 MB, the largest original ADR-0011 accepts. */
     public const int MAX_BYTES = 15 * 1024 * 1024;
 
+    /** 40 megapixels, the largest picture ADR-0011 lets the processing worker decode. */
+    public const int MAX_PIXELS = 40_000_000;
+
+    /** The longest side ADR-0011 lets the processing worker decode, in pixels. */
+    public const int MAX_SIDE_PIXELS = 16_384;
+
     /** A quota of 0 bytes is no quota, for a self-hosted install whose operator sets none. */
     public const int UNLIMITED_QUOTA = 0;
 
@@ -43,6 +49,20 @@ final class UploadPolicy
     public static function allowsSize(int $bytes): bool
     {
         return $bytes >= 1 && $bytes <= self::MAX_BYTES;
+    }
+
+    /**
+     * Whether a picture whose header gives $width × $height pixels may be decoded; read before decoding, so an image
+     * bomb is refused before it takes any memory.
+     */
+    public static function allowsDimensions(int $width, int $height): bool
+    {
+        // The sides first, so the product of two huge header values never overflows into a float.
+        if ($width < 1 || $height < 1 || $width > self::MAX_SIDE_PIXELS || $height > self::MAX_SIDE_PIXELS) {
+            return false;
+        }
+
+        return $width * $height <= self::MAX_PIXELS;
     }
 
     /**

@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Architecture;
 
 use App\Conversation\Api\Event\ConversationEvent;
 use App\Identity\Api\Event\IdentityEvent;
+use App\Media\Api\Event\MediaEvent;
 use App\Media\Application\ProcessUpload;
 use App\Notification\Api\Event\NotificationEvent;
 use App\Organization\Api\Event\OrganizationEvent;
@@ -28,6 +29,7 @@ final class OutboxRelayRoutesConfigTest extends TestCase
         ConversationEvent::class,
         NotificationEvent::class,
         IdentityEvent::class,
+        MediaEvent::class,
     ];
 
     #[Test]

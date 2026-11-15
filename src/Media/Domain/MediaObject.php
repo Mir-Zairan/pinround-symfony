@@ -62,7 +62,7 @@ final class MediaObject implements TenantOwned
     }
 
     /**
-     * @param string                $sha256   the hash of the re-encoded view, 64 lowercase hex digits
+     * @param string                $sha256   the hash of the uploaded original, 64 lowercase hex digits
      * @param int                   $width    of the re-encoded view in pixels, at least 1
      * @param int                   $height   of the re-encoded view in pixels, at least 1
      * @param array<string, string> $variants the storage key of each variant by its name, at least one, no part empty
@@ -158,7 +158,7 @@ final class MediaObject implements TenantOwned
     }
 
     /**
-     * The hash of the re-encoded view, the key of deduplication in an organization; null unless ready.
+     * The hash of the uploaded original, the key of deduplication in an organization; null unless ready.
      */
     public function sha256(): ?string
     {
