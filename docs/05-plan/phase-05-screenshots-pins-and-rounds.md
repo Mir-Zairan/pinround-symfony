@@ -129,9 +129,9 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 4. P06.T1 later moves this section into the Report a problem page; keep it as a reusable Twig partial.
 **Files:** `templates/ticket/new.html.twig`, `templates/review/_screenshot_with_pins.html.twig`, `src/Ticketing/Application/CreateTicket/*`.
 **Acceptance criteria:**
-- [ ] Creating a ticket with one screenshot and two pins shows "Round 0 · Report · by Mia · 2 pins" on the ticket page.
-- [ ] Creating without a screenshot still works and creates no round.
-- [ ] A rejected upload (wrong type) shows a plain message and the ticket form keeps its text.
+- [x] Creating a ticket with one screenshot and two pins shows "Round 0 · Report · by Mia · 2 pins" on the ticket page. (`tests/Functional/Ticketing/NewTicketScreenshotTest.php`, `aTicketWithAScreenshotAndTwoPinsGetsRoundZero…`; the real-stack journey in `tests/e2e/new-ticket-screenshot.spec.ts` is written but not run yet, see the hand-off notes.)
+- [x] Creating without a screenshot still works and creates no round. (`NewTicketTest`; `tests/e2e/new-ticket-screenshot.spec.ts`, no picture, run in Chromium.)
+- [x] A rejected upload (wrong type) shows a plain message and the ticket form keeps its text. (`tests/e2e/new-ticket-screenshot.spec.ts`, a .gif and a .txt file, run in Chromium; the server refusal re-render is in `NewTicketScreenshotTest`.)
 **Tests:** functional create with and without screenshot; Playwright journey with a fixture PNG; isolation.
 **Prototype check:** screenshot area and pin list in [Report a problem: fields and copy](../04-prototype/screens/report-a-problem.md#fields-and-copy) (labels "Upload a file", "Click on the screenshot to drop a pin.", "What is wrong here?").
 **Size:** M
@@ -259,3 +259,4 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
   - (c) `ProcessUploadHandlerTest` is in the `object-storage` group like the other MinIO tests, so CI skips it until CI has a MinIO service.
 
 - **2026-11-15 — signed page images (P05.T2 step 4, ADR-0041).** `SignedUrls::forVariants` signs a page of pictures in a minute window with a private `Cache-Control`. Not built: refreshing URLs on a page held open past 4 minutes, and the `/media/{id}/{variant}` redirect route for links outside a page. `PresignedDownloadsMinioTest` signs at the real clock (MinIO checks its own), so it stays out of CI with the other `object-storage` tests.
+- **2026-11-16 — P05.T5 real-stack journey not yet run.** `tests/e2e/new-ticket-screenshot.spec.ts` holds one test (Mia, fixture PNG, create, ticket page shows "Round 0 · Report · by Mia · 2 pins") that runs only with `E2E_MEDIA_PIPELINE=1` and is skipped otherwise. It needs the image rebuilt with vips, MinIO and a worker on `async_media`, so it has not run in any environment yet. The prototype check found the section copy matching [Report a problem: fields and copy](../04-prototype/screens/report-a-problem.md#fields-and-copy); the section also has title and summary fields that the prototype lacks (FR-RND-16).

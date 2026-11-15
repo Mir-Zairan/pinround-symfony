@@ -1,5 +1,6 @@
-import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LENA_STORAGE_STATE } from './auth';
+import { beginAnswer, MEDIA_ID, PNG, routeCompletedUpload, routeStatus, routeStorage } from './media-mocks';
 
 test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 900 } });
 
@@ -8,56 +9,9 @@ test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 90
 // origin, which the dev stack does for the app's own origin only.
 const FIELD = '#gallery-upload';
 // The dev stack's OBJECT_STORAGE_PUBLIC_URL (.env.dev), the only storage origin the page's CSP lets it connect to.
-const STORAGE_URL = 'http://localhost:9000/pinround-dev/uploads/slot';
-const APP_ORIGIN = new URL(process.env.E2E_BASE_URL ?? 'https://localhost').origin;
-// What the bucket's CORS rule answers for the app's origin; a PUT with a Content-Type is preflighted.
-const STORAGE_CORS = {
-  'Access-Control-Allow-Origin': APP_ORIGIN,
-  'Access-Control-Allow-Methods': 'PUT, GET, HEAD',
-  'Access-Control-Allow-Headers': 'content-type',
-  Vary: 'Origin',
-};
-
-// Answers the browser's preflight like the bucket, and each PUT with what onPut returns.
-async function routeStorage(page: Page, onPut: (route: Route) => Promise<{ status: number; body?: string }> | { status: number; body?: string } = () => ({ status: 200 })) {
-  await page.route(STORAGE_URL, async (route) => {
-    if ('OPTIONS' === route.request().method()) {
-      await route.fulfill({ status: 200, headers: STORAGE_CORS, body: '' });
-      return;
-    }
-    const { status, body = '' } = await onPut(route);
-    await route.fulfill({ status, headers: STORAGE_CORS, body }).catch(() => {});
-  });
-}
-const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 const MULTIBYTE_NAME = 'Café ☕ 画面.png';
-const MEDIA_ID = '0192f3a0-7b2c-7d3e-8a4f-5b6c7d8e9f02';
 const USED_ALREADY_MESSAGE = 'This upload has ended. Upload the file again.';
 const NOT_A_BEGIN_REQUEST_MESSAGE = 'This upload request needs a purpose, a file type, a size and a target. Reload the page and try again.';
-
-// What PresignedUploads::forPut answers: the signed Content-Type and Content-Length headers.
-function beginAnswer(intentId: string) {
-  return {
-    status: 201,
-    json: {
-      intentId,
-      url: STORAGE_URL,
-      method: 'PUT',
-      headers: { 'Content-Type': 'image/png', 'Content-Length': String(PNG.length) },
-      expiresAt: '2026-11-06T12:05:00+00:00',
-    },
-  };
-}
-
-// The status the page polls after a complete call; most tests do not care, so by default the picture is ready.
-async function routeStatus(page: Page, answer: (poll: number) => { status: number; json: unknown } = () => ({ status: 200, json: { status: 'ready' } })) {
-  let polls = 0;
-  await page.route('**/media/*/status', (route) => {
-    polls += 1;
-    return route.fulfill(answer(polls));
-  });
-  return () => polls;
-}
 
 async function openUploadField(page: Page, { withStatusRoute = true }: { withStatusRoute?: boolean } = {}) {
   if (withStatusRoute) {
@@ -354,12 +308,6 @@ async function recordEvents(field: Locator, names: string[]) {
 async function uploadPng(page: Page, status: Locator) {
   await page.locator(`${FIELD} input[type="file"]`).setInputFiles({ name: 'checkout.png', mimeType: 'image/png', buffer: PNG });
   await expect(status).toHaveText('checkout.png uploaded.');
-}
-
-async function routeCompletedUpload(page: Page, intentId: string) {
-  await page.route('**/media/intents', (route) => route.fulfill(beginAnswer(intentId)));
-  await routeStorage(page);
-  await page.route(`**/media/intents/${intentId}/complete`, (route) => route.fulfill({ status: 202, json: { mediaId: MEDIA_ID, status: 'pending' } }));
 }
 
 test('the field polls the status URL and, once ready after two polls, marks itself ready and says so in an event', async ({ page }) => {
