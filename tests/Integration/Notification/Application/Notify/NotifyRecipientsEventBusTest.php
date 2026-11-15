@@ -31,8 +31,10 @@ use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
  * of these events, which publishes to the hub. That handler also keeps a missing tag from throwing, so only the
  * missing row shows it. Each row also sends one RefreshBell to async_notify, held by its stamp until the delivery's
  * event.bus transaction commits, and none for a retried delivery or a ping held past the frozen clock; a cleared ping
- * writes no row and refreshes the bell through PushBellOnPingCleared. NotifyRecipients reads each ping's ntf_ping row
- * for its delivery time, so the ping case stores them first. Everything commits, so tearDown removes the rows.
+ * writes no row and refreshes the bell through PushBellOnPingCleared, and an answer marks the question row done
+ * through MarkMessageNotificationsDone, which refreshes its recipient's bell once. NotifyRecipients reads each ping's
+ * ntf_ping row for its delivery time and writes a question row only while its cnv_message row is open, so those cases
+ * store them first. Everything commits, so tearDown removes the rows.
  */
 final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
 {
@@ -69,6 +71,7 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         $lena = self::VIEWERS['Lena'][0];
         $mia = self::VIEWERS['Mia'][0];
         self::transactions()->committedAs(self::ACME_FOODS, static function () use ($lena, $mia): void {
+            self::addOpenQuestion(self::teamOnlyTicketId(), self::QUESTION, 'Mia', 'Lena', self::ASKED_AT);
             $eventBus = self::getContainer()->get('event.bus');
             $eventBus->dispatch(new QuestionAsked(self::ACME_FOODS, self::teamOnlyTicketId(), self::QUESTION, $mia, $lena, new \DateTimeImmutable(self::ASKED_AT)));
             $eventBus->dispatch(new QuestionAnswered(self::ACME_FOODS, self::teamOnlyTicketId(), self::QUESTION, $lena, $mia, new \DateTimeImmutable(self::ANSWERED_AT)));
@@ -77,6 +80,8 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         $relayed = $this->asyncNotify()->getSent();
         // In any order: the relay sends the events of one second in no set order (data-model.md, messenger_outbox).
         self::assertEqualsCanonicalizing([QuestionAsked::class, QuestionAnswered::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
+        // Asked first, as the question was: the answer marks done the question row that delivery writes.
+        usort($relayed, static fn (Envelope $one, Envelope $other): int => ($one->getMessage() instanceof QuestionAnswered) <=> ($other->getMessage() instanceof QuestionAnswered));
 
         foreach ($relayed as $envelope) {
             self::deliverFromAsyncNotify($envelope);
@@ -87,13 +92,15 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
             ['question', $mia, $lena, null, self::QUESTION, null],
             ['answer', $lena, $mia, null, self::QUESTION, null],
         ], $this->acmeNotifications());
-        $messageIds = array_values(array_map(self::messageIdOf(...), $relayed));
+        $messageIds = array_map(self::messageIdOf(...), $relayed);
         self::assertCount(2, array_unique($messageIds));
         self::assertSame(2, $this->processedRowCount($messageIds));
         self::assertEqualsCanonicalizing([
             [self::ACME_FOODS, $mia, null],
             [self::ACME_FOODS, $lena, 'Mia answered your question.'],
+            [self::ACME_FOODS, $mia, null],
         ], $this->sentBellRefreshes());
+        self::assertSame([['question', true], ['answer', false]], $this->acmeNotificationsDone());
     }
 
     #[Test]
@@ -193,6 +200,17 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
     }
 
     /**
+     * @return list<list<mixed>> kind and whether it is done of every Acme Foods notification, oldest first
+     */
+    private function acmeNotificationsDone(): array
+    {
+        return self::transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array => self::connection()->fetchAllNumeric(
+            'SELECT kind, done_at IS NOT NULL FROM ntf_notification WHERE organization_id = ? ORDER BY created_at, id',
+            [self::ACME_FOODS],
+        ));
+    }
+
+    /**
      * @param list<string> $messageIds
      */
     private function processedRowCount(array $messageIds): int
@@ -248,6 +266,10 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         self::asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             'DELETE FROM ntf_ping WHERE organization_id = ? AND id IN (?, ?)',
             [self::ACME_FOODS, self::PING, self::HELD_PING],
+        ));
+        self::asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'DELETE FROM cnv_message WHERE organization_id = ? AND id = ?',
+            [self::ACME_FOODS, self::QUESTION],
         ));
         self::migrator()->executeStatement('DELETE FROM processed_message WHERE handler = ?', [NotifyRecipients::HANDLER_NAME]);
         self::migrator()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");

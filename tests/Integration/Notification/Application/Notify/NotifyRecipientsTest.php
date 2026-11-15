@@ -9,6 +9,7 @@ use App\Conversation\Api\Event\ReplyPosted;
 use App\Notification\Application\Notify\NotifyRecipients;
 use App\SharedKernel\Infrastructure\Messenger\MessageBeingHandled;
 use App\Tests\Integration\Visibility\VisibilityLeakCast;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Uid\Uuid;
 
@@ -28,6 +29,7 @@ final class NotifyRecipientsTest extends VisibilityLeakCast
     public function aRedeliveredQuestionStillWritesOneNotificationWithTheSnapshotTheBellReads(): void
     {
         $rows = self::transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            self::addOpenQuestion(self::teamOnlyTicketId(), self::MESSAGE, 'Lena', 'Raj', self::ASKED_AT);
             $question = $this->questionTo('Lena');
             $messageId = Uuid::v7()->toRfc4122();
             self::handle($question, $messageId);
@@ -45,18 +47,52 @@ final class NotifyRecipientsTest extends VisibilityLeakCast
     #[Test]
     public function aRecipientWhoMutedTheTicketGetsNoNotificationAndAnotherStillDoes(): void
     {
-        $counts = self::transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+        $countsAfterAQuestionTo = fn (string $viewer): array => self::transactions()->rolledBackAs(self::ACME_FOODS, function () use ($viewer): array {
             self::connection()->executeStatement(
                 "INSERT INTO ntf_mute (organization_id, user_id, ticket_id, created_at) VALUES (?, ?, ?, '2027-03-14 09:00:00+00')",
                 [self::ACME_FOODS, self::VIEWERS['Lena'][0], self::teamOnlyTicketId()],
             );
-            self::handle($this->questionTo('Lena'), Uuid::v7()->toRfc4122());
-            self::handle($this->questionTo('Mia'), Uuid::v7()->toRfc4122());
+            self::addOpenQuestion(self::teamOnlyTicketId(), self::MESSAGE, $viewer, 'Raj', self::ASKED_AT);
+            self::handle($this->questionTo($viewer), Uuid::v7()->toRfc4122());
 
             return ['Lena' => \count($this->notificationsOf('Lena')), 'Mia' => \count($this->notificationsOf('Mia'))];
         });
 
-        self::assertSame(['Lena' => 0, 'Mia' => 1], $counts);
+        self::assertSame(['Lena' => 0, 'Mia' => 0], $countsAfterAQuestionTo('Lena'));
+        self::assertSame(['Lena' => 0, 'Mia' => 1], $countsAfterAQuestionTo('Mia'));
+    }
+
+    #[Test]
+    #[DataProvider('closedQuestions')]
+    public function aQuestionClosedBeforeItsEventIsHandledWritesNoNotification(string $closingColumns): void
+    {
+        [$rows, $processedCount] = self::transactions()->rolledBackAs(self::ACME_FOODS, function () use ($closingColumns): array {
+            self::addOpenQuestion(self::teamOnlyTicketId(), self::MESSAGE, 'Lena', 'Raj', self::ASKED_AT);
+            self::assertSame(1, self::connection()->executeStatement(
+                'UPDATE cnv_message SET '.$closingColumns.' WHERE organization_id = ? AND id = ?',
+                [self::ACME_FOODS, self::MESSAGE],
+            ));
+            $messageId = Uuid::v7()->toRfc4122();
+            self::handle($this->questionTo('Lena'), $messageId);
+            $processedCount = self::connection()->fetchOne(
+                'SELECT count(*) FROM processed_message WHERE handler = ? AND message_id = ?',
+                [NotifyRecipients::HANDLER_NAME, $messageId],
+            );
+
+            return [$this->notificationsOf('Lena'), $processedCount];
+        });
+
+        self::assertSame([], $rows);
+        self::assertSame(1, $processedCount);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function closedQuestions(): iterable
+    {
+        yield 'withdrawn' => ["removed_at = '2027-03-15 10:05:00+00'"];
+        yield 'answered' => ["resolved_at = '2027-03-15 10:05:00+00', resolved_by = '".self::VIEWERS['Lena'][0]."'"];
     }
 
     #[Test]

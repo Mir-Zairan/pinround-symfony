@@ -82,14 +82,7 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
     {
         [$rowDeliverAfter, $bellAt0759, $bellAt0800] = self::transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
             $this->setUpLena(isQuietHoursOn: true);
-            $this->handle(new QuestionAsked(
-                self::ACME_FOODS,
-                self::teamOnlyTicketId(),
-                Uuid::v7()->toRfc4122(),
-                self::VIEWERS['Lena'][0],
-                self::VIEWERS['Raj'][0],
-                new \DateTimeImmutable('2027-03-03 22:00:00 UTC'),
-            ));
+            $this->handle($this->questionToLenaAsRaj('2027-03-03 22:00:00 UTC'));
 
             $this->clock->modify('2027-03-04 07:59:00 UTC');
             $bellAt0759 = $this->lenasBell();
@@ -104,7 +97,7 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
     }
 
     /**
-     * A digest goes out at 23:30 UTC while the 22:00 question is held, listing only the 16:00 one; the next starts
+     * A digest goes out at 23:30 UTC while the 22:00 question is held, listing only the 16:00 ping; the next starts
      * after that send time, so it finds the held question only because the row is created at 08:00, its delivery.
      */
     #[Test]
@@ -112,7 +105,10 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
     {
         [$rowCreatedAt, $digestDuringTheHold, $nextDigest] = self::transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
             $this->setUpLena(isQuietHoursOn: true);
-            $this->handle($this->questionToLenaAsRaj('2027-03-03 16:00:00 UTC'));
+            $this->clock->modify('2027-03-03 16:00:00 UTC');
+            $pingId = $this->pingLenaAsMia();
+            $this->handlePingSent($pingId, $this->storedDeliverAfterOf($pingId));
+            $this->clock->modify(self::SENT_AT);
             $this->handle($this->questionToLenaAsRaj('2027-03-03 22:00:00 UTC'));
             $digestItems = self::getContainer()->get('test.notification_digest_items');
             \assert($digestItems instanceof DigestItems);
@@ -127,7 +123,7 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
         });
 
         self::assertSame(['2027-03-03 16:00:00+00', self::QUIET_HOURS_END], $rowCreatedAt);
-        self::assertSame([['Raj', 'question', '2027-03-03 16:00:00+00']], self::itemsOf($digestDuringTheHold));
+        self::assertSame([['Mia', 'ping', '2027-03-03 16:00:00+00']], self::itemsOf($digestDuringTheHold));
         self::assertSame([['Raj', 'question', self::QUIET_HOURS_END]], self::itemsOf($nextDigest));
     }
 
@@ -215,7 +211,7 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
     }
 
     /**
-     * The PingSent SendPing publishes, delivered at the time stored on the ping.
+     * The PingSent SendPing publishes, delivered at the time stored on the ping, or now when none is.
      */
     private function handlePingSent(string $pingId, ?string $storedDeliverAfter): void
     {
@@ -226,7 +222,7 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
             self::VIEWERS['Mia'][0],
             self::VIEWERS['Lena'][0],
             self::VIEWERS['Mia'][0],
-            new \DateTimeImmutable($storedDeliverAfter ?? self::SENT_AT),
+            null === $storedDeliverAfter ? $this->clock->now() : new \DateTimeImmutable($storedDeliverAfter),
         ));
     }
 
@@ -258,12 +254,18 @@ final class QuietHoursDeliveryTest extends VisibilityLeakCast
         }, $rows);
     }
 
+    /**
+     * The QuestionAsked of a question it stores open, as Conversation stores it before publishing the event.
+     */
     private function questionToLenaAsRaj(string $askedAt): QuestionAsked
     {
+        $questionId = Uuid::v7()->toRfc4122();
+        self::addOpenQuestion(self::teamOnlyTicketId(), $questionId, 'Lena', 'Raj', $askedAt);
+
         return new QuestionAsked(
             self::ACME_FOODS,
             self::teamOnlyTicketId(),
-            Uuid::v7()->toRfc4122(),
+            $questionId,
             self::VIEWERS['Lena'][0],
             self::VIEWERS['Raj'][0],
             new \DateTimeImmutable($askedAt),
