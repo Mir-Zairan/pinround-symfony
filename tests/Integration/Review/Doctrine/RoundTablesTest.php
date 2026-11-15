@@ -14,7 +14,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 /**
  * What rvw_round, rvw_screenshot and rvw_pin keep on their own (Version20261115180000), whatever writes them: the
  * CHECKs and keys refuse a row the domain could not make, written as the app past the domain, and the rows next to it
- * are still accepted; the grants, row-level security, indexes and foreign keys are as the migration made them.
+ * are still accepted; the indexes and foreign keys are as the migration made them. Grants, ownership and the schema
+ * filter are pinned with every other module's in DatabaseRolesTest, row-level security in CatalogTest.
  */
 final class RoundTablesTest extends KernelTestCase
 {
@@ -31,20 +32,26 @@ final class RoundTablesTest extends KernelTestCase
     private const string CHECK_VIOLATION = '23514';
     private const string UNIQUE_VIOLATION = '23505';
     private const string FOREIGN_KEY_VIOLATION = '23503';
-    private const array TABLES = ['rvw_round', 'rvw_screenshot', 'rvw_pin'];
 
+    /**
+     * Every CHECK, foreign key and unique index but the primary keys (DbalRoundsTest clashes those) has a case below
+     * that breaks it, and every case breaks one the tables have.
+     */
     #[Test]
-    public function theCasesCoverEveryCheckOfTheRoundTables(): void
+    public function theCasesCoverEveryCheckForeignKeyAndUniqueIndexOfTheRoundTables(): void
     {
+        $constraintsTheCasesBreak = array_values(array_unique(array_map(
+            static fn (array $case): string => $case[1],
+            iterator_to_array(self::rowsTheDatabaseRefuses(), false),
+        )));
+
         self::assertEqualsCanonicalizing(
-            [
-                'rvw_round_kind_check', 'rvw_round_state_check', 'rvw_round_shared_check', 'rvw_round_number_check', 'rvw_round_version_check',
-                'rvw_screenshot_position_check', 'rvw_screenshot_variant_label_check', 'rvw_screenshot_verdict_check', 'rvw_screenshot_title_check', 'rvw_screenshot_summary_check',
-                'rvw_pin_number_check', 'rvw_pin_position_check', 'rvw_pin_note_check', 'rvw_pin_verdict_check', 'rvw_pin_source_check', 'rvw_pin_ai_state_check', 'rvw_pin_ai_check',
-            ],
             $this->connection()->fetchFirstColumn(
-                "SELECT conname FROM pg_constraint WHERE contype = 'c' AND conrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass)",
+                "SELECT conname FROM pg_constraint WHERE contype IN ('c', 'f') AND conrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass)"
+                .' UNION ALL SELECT indexrelid::regclass::text FROM pg_index WHERE indisunique AND NOT indisprimary'
+                ." AND indrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass)",
             ),
+            $constraintsTheCasesBreak,
         );
     }
 
@@ -136,31 +143,6 @@ final class RoundTablesTest extends KernelTestCase
         self::assertSame(array_fill(0, \count($rows), 1), $this->inserts()->insertAll($rows));
     }
 
-    /**
-     * The app reads, adds and changes rounds, pictures and pins and removes none yet; support reads under the tenant
-     * policy; both under ENABLE and FORCE ROW LEVEL SECURITY, the tables owned by the migrator.
-     */
-    #[Test]
-    public function theRoundTablesGrantTheAppNoDeleteAndSupportOnlyReadUnderRowLevelSecurity(): void
-    {
-        foreach (self::TABLES as $table) {
-            self::assertEqualsCanonicalizing(
-                ['pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
-                $this->connection()->fetchFirstColumn(
-                    "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type FROM pg_class c, aclexplode(c.relacl) acl WHERE c.oid = to_regclass(?) AND acl.grantee <> c.relowner",
-                    ['public.'.$table],
-                ),
-                $table,
-            );
-            self::assertSame(
-                ['pinround_migrator', true, true],
-                $this->connection()->fetchNumeric('SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]),
-                $table,
-            );
-            self::assertSame(['tenant_isolation'], $this->connection()->fetchFirstColumn('SELECT polname FROM pg_policy WHERE polrelid = to_regclass(?)', ['public.'.$table]), $table);
-        }
-    }
-
     #[Test]
     public function everyIndexOfTheRoundTablesStartsWithTheOrganization(): void
     {
@@ -190,24 +172,6 @@ final class RoundTablesTest extends KernelTestCase
                 ." FROM pg_constraint c WHERE c.contype = 'f' AND c.conrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass)",
             ),
         );
-    }
-
-    /** No entity maps the tables (DbalRounds writes them), so doctrine:migrations:diff must not see them. */
-    #[Test]
-    public function theSchemaFilterHidesTheRoundTablesOnBothConnections(): void
-    {
-        foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
-            $connection = self::getContainer()->get($connectionId);
-            self::assertInstanceOf(Connection::class, $connection);
-            $isKept = $connection->getConfiguration()->getSchemaAssetsFilter();
-
-            foreach ([...self::TABLES, 'public.rvw_round', 'public.rvw_screenshot', 'public.rvw_pin'] as $hidden) {
-                self::assertFalse((bool) $isKept($hidden), $connectionId.' '.$hidden);
-            }
-            foreach (['rvw_rounds', 'rvw_round_note', 'rvw_pins', 'rvw_screenshots', 'rvw_check_item', 'rvw_report_draft'] as $kept) {
-                self::assertTrue((bool) $isKept($kept), $connectionId.' '.$kept);
-            }
-        }
     }
 
     /**

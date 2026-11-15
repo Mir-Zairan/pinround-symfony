@@ -47,6 +47,7 @@ final class DbalRoundsTest extends KernelTestCase
     private const string LENA_DRAFT = '0197a3c0-0000-7000-8000-0000000f5127';
     private const string OMAR_OTHER_TICKET_DRAFT = '0197a3c0-0000-7000-8000-0000000f5128';
     private const string OMAR_SHARED_DRAFT = '0197a3c0-0000-7000-8000-0000000f5129';
+    private const string OMAR_THIRD_TICKET_DRAFT = '0197a3c0-0000-7000-8000-0000000f512a';
     private const string FIRST_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5131';
     private const string SECOND_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5132';
     private const string OTHER_TICKET_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5133';
@@ -179,6 +180,36 @@ final class DbalRoundsTest extends KernelTestCase
         self::assertSame([self::FIRST_PIN, self::SECOND_PIN, self::THIRD_PIN, self::OTHER_TICKET_PIN], $this->idsAs(self::ACME_FOODS, 'rvw_pin'));
     }
 
+    /**
+     * A round id met again, the identical round or the id on a free slot, is a programming error and not a ticket's
+     * slot: the primary key clash is told apart from the slot ones, writes nothing and leaves the transaction usable.
+     */
+    #[Test]
+    public function aRoundAddedAgainIsRefusedAsAProgrammingErrorNotAsRoundSlotTaken(): void
+    {
+        $this->addCommitted(self::report());
+
+        $refusals = $this->transactions()->committedAs(self::ACME_FOODS, function (): array {
+            $refusals = [];
+            foreach ([self::report(), self::reportOf(self::REPORT, self::THIRD_TICKET, [self::screenshot(self::REFUSED_SCREENSHOT, 0, [self::pin(self::REFUSED_PIN, 1)])])] as $roundAddedAgain) {
+                try {
+                    $this->rounds()->add($roundAddedAgain);
+                } catch (\LogicException $refusal) {
+                    $refusals[] = [$refusal::class, $refusal->getMessage()];
+                }
+            }
+            $this->rounds()->add(self::otherTicketReport());
+
+            return $refusals;
+        });
+
+        $expectedRefusal = [\LogicException::class, 'Round '.self::REPORT.' is added already; a round is added once.'];
+        self::assertSame([$expectedRefusal, $expectedRefusal], $refusals);
+        self::assertSame([[self::REPORT, self::TICKET], [self::OTHER_TICKET_REPORT, self::OTHER_TICKET]], $this->numericRowsAs(self::ACME_FOODS, 'SELECT id, ticket_id FROM rvw_round ORDER BY id'));
+        self::assertSame([self::FIRST_SCREENSHOT, self::SECOND_SCREENSHOT, self::OTHER_TICKET_SCREENSHOT], $this->idsAs(self::ACME_FOODS, 'rvw_screenshot'));
+        self::assertSame([self::FIRST_PIN, self::SECOND_PIN, self::THIRD_PIN, self::OTHER_TICKET_PIN], $this->idsAs(self::ACME_FOODS, 'rvw_pin'));
+    }
+
     #[Test]
     public function aSecondOpenDraftOfAnOwnerOnATicketIsRefusedAsRoundSlotTaken(): void
     {
@@ -186,12 +217,15 @@ final class DbalRoundsTest extends KernelTestCase
         $this->addCommitted(self::draft(self::LENA_DRAFT, self::TICKET, self::LENA));
         $this->addCommitted(self::draft(self::OMAR_OTHER_TICKET_DRAFT, self::OTHER_TICKET, self::OMAR));
 
-        $refusal = $this->refusalOfAdding(self::draft(self::REFUSED_ROUND, self::TICKET, self::OMAR));
+        $refusal = $this->refusalOfAddingBefore(self::draft(self::REFUSED_ROUND, self::TICKET, self::OMAR), self::draft(self::OMAR_THIRD_TICKET_DRAFT, self::THIRD_TICKET, self::OMAR));
 
         self::assertInstanceOf(RoundSlotTaken::class, $refusal);
         self::assertSame('The ticket has this round already.', $refusal->getMessage());
         self::assertSame(
-            [[self::OMAR_DRAFT, self::TICKET, self::OMAR], [self::LENA_DRAFT, self::TICKET, self::LENA], [self::OMAR_OTHER_TICKET_DRAFT, self::OTHER_TICKET, self::OMAR]],
+            [
+                [self::OMAR_DRAFT, self::TICKET, self::OMAR], [self::LENA_DRAFT, self::TICKET, self::LENA],
+                [self::OMAR_OTHER_TICKET_DRAFT, self::OTHER_TICKET, self::OMAR], [self::OMAR_THIRD_TICKET_DRAFT, self::THIRD_TICKET, self::OMAR],
+            ],
             $this->numericRowsAs(self::ACME_FOODS, 'SELECT id, ticket_id, owner_id FROM rvw_round ORDER BY id'),
         );
     }
@@ -210,11 +244,12 @@ final class DbalRoundsTest extends KernelTestCase
         $secondRoundOne = self::draft(self::REFUSED_ROUND, self::TICKET, self::LENA);
         $secondRoundOne->share(new UserId(self::LENA), 1, new \DateTimeImmutable('2027-03-16 09:05:00+00:00'));
 
-        $refusal = $this->refusalOfAdding($secondRoundOne);
+        $refusal = $this->refusalOfAddingBefore($secondRoundOne, self::draft(self::LENA_DRAFT, self::TICKET, self::LENA));
 
         self::assertInstanceOf(RoundSlotTaken::class, $refusal);
+        self::assertSame('The ticket has this round already.', $refusal->getMessage());
         self::assertSame(
-            [[self::OMAR_DRAFT, null], [self::OMAR_SHARED_DRAFT, 1]],
+            [[self::OMAR_DRAFT, null], [self::LENA_DRAFT, null], [self::OMAR_SHARED_DRAFT, 1]],
             $this->numericRowsAs(self::ACME_FOODS, 'SELECT id, number FROM rvw_round ORDER BY id'),
         );
     }
@@ -328,12 +363,18 @@ final class DbalRoundsTest extends KernelTestCase
         });
     }
 
-    private function refusalOfAdding(Round $round): ?RoundSlotTaken
+    /**
+     * Commits, so the rows read afterwards prove the refused round left nothing and the transaction went on to add the
+     * next one.
+     */
+    private function refusalOfAddingBefore(Round $refusedRound, Round $nextRound): ?RoundSlotTaken
     {
-        return $this->transactions()->rolledBackAs($round->organizationId()->toString(), function () use ($round): ?RoundSlotTaken {
+        return $this->transactions()->committedAs($refusedRound->organizationId()->toString(), function () use ($refusedRound, $nextRound): ?RoundSlotTaken {
             try {
-                $this->rounds()->add($round);
+                $this->rounds()->add($refusedRound);
             } catch (RoundSlotTaken $refusal) {
+                $this->rounds()->add($nextRound);
+
                 return $refusal;
             }
 
