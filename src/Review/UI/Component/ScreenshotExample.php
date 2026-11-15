@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Review\UI\Component;
 
+use App\Media\Api\MediaImageStatus;
 use App\Review\UI\PinView;
-use App\Review\UI\ScreenshotStatus;
 use App\Review\UI\ScreenshotView;
 use Symfony\Component\DependencyInjection\Attribute\WhenNot;
 use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
@@ -32,15 +32,15 @@ final class ScreenshotExample
     public bool $hasPins = false;
 
     /** "pending" shows the picture still being processed, at its known size; "rejected" one refused, of unknown size. */
-    public string $status = ScreenshotStatus::Ready->value;
+    public string $status = MediaImageStatus::Ready->value;
 
     public function view(): ScreenshotView
     {
-        $status = ScreenshotStatus::from($this->status);
-        if (ScreenshotStatus::Pending === $status) {
+        $status = MediaImageStatus::from($this->status);
+        if (MediaImageStatus::Pending === $status) {
             return new ScreenshotView('gallery-pending-screenshot', null, 800, 450, 'The Acme Foods checkout page of project SHOP', 'Checkout page', status: $status);
         }
-        if (ScreenshotStatus::Rejected === $status) {
+        if (MediaImageStatus::Rejected === $status) {
             return new ScreenshotView('gallery-rejected-screenshot', null, null, null, 'The Acme Foods checkout page of project SHOP', 'Checkout page', status: $status);
         }
         if ($this->isEditable) {

@@ -267,7 +267,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `MediaPermission::UPLOAD` (voter attribute on an `UploadTarget`, decided by `UI\Voter\UploadVoter` through the authorizers)
   - Refusals: `UploadRefused` (a plain message to show, 422), `UploadIntentNotFound` (404), `UploadTargetDenied` (403)
   - `MediaQueries::status(MediaId): MediaStatus` (P05.T2)
-  - `SignedUrls::forVariant(MediaId, Variant, UserId): SignedUrl` (P05.T2; the caller must check access first)
+  - `SignedUrls::forVariants(OrganizationId, list<string> $mediaIds, string $variant, \DateTimeImmutable $at): array<string, MediaImage>` (P05.T2; at most `MAX_MEDIA_IDS` = 200 ids, one query, no `UserId`: the caller has already decided that the viewer may see what the pictures belong to; `MediaImage` carries `MediaImageStatus` pending, ready with a signed URL, or rejected with its reason; [ADR-0041](../03-adr/0041-sign-page-images-at-render-time.md))
 - **Routes:** `POST /media/intents` and `POST /media/intents/{id}/complete` (`UI\Controller\UploadIntentController`, JSON).
 - **Events:** `MediaReady`, `MediaRejected`.
 - **Readiness:** `Infrastructure\Health\ObjectStorageIsReachable` (a `ReadinessCheck`): `OBJECT_STORAGE_ENDPOINT` accepts a TCP connection.

@@ -108,8 +108,8 @@ exports/{orgId}/{exportId}.zip                   # org exports, lifecycle rule: 
 
 ## Serving images
 
-- The page asks `MediaUrlSigner` for a signed GET URL **after** the voter confirms the viewer may see the round or ticket.
-- URLs expire after 5 minutes. Pages that stay open refresh URLs through a small endpoint when an image fails to load.
+- The page asks `SignedUrls::forVariants` for signed GET URLs **after** the caller's voter confirms the viewer may see the round or ticket; Media itself takes no user.
+- A URL works 5 minutes from its signing time, which is rounded down to the minute, so it works at least 4 minutes and renders in one minute give the same URL; it asks for `Cache-Control: private, max-age=240, immutable`. The caller signs a whole page of pictures with one `SignedUrls::forVariants` call ([ADR-0041](../03-adr/0041-sign-page-images-at-render-time.md)). Pages that stay open refresh URLs through a small endpoint when an image fails to load.
 - Response headers are set through the signed URL parameters where the storage supports them (`response-content-type`, `response-content-disposition`), plus bucket defaults: `X-Content-Type-Options: nosniff`.
 - The app never proxies image bytes through PHP.
 - Draft round images use the same rules: the voter only allows the owner until the round is shared ([ADR-0017](../03-adr/0017-private-draft-rounds.md)).

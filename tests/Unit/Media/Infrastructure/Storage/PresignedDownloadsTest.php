@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Media\Infrastructure\Storage;
 
+use App\Media\Application\MediaUrlSigner;
 use App\Media\Infrastructure\Storage\ObjectStorageSettings;
 use App\Media\Infrastructure\Storage\PresignedDownloads;
 use PHPUnit\Framework\Attributes\Test;
@@ -26,13 +27,50 @@ final class PresignedDownloadsTest extends TestCase
     }
 
     #[Test]
-    public function theSignatureChangesWithTheKeyAndTheTime(): void
+    public function theSignatureChangesWithTheKey(): void
     {
-        $signatureOf = fn (string $key, string $at): string => self::query($this->downloads()->forGet($key, new \DateTimeImmutable($at)))['X-Amz-Signature'] ?? '';
+        $signatureOf = fn (string $key): string => self::query($this->downloads()->forGet($key, new \DateTimeImmutable(self::SIGNED_AT)))['X-Amz-Signature'] ?? '';
 
-        self::assertSame($signatureOf(self::VIEW_KEY, self::SIGNED_AT), $signatureOf(self::VIEW_KEY, self::SIGNED_AT));
-        self::assertNotSame($signatureOf(self::VIEW_KEY, self::SIGNED_AT), $signatureOf(str_replace('view', 'thumb', self::VIEW_KEY), self::SIGNED_AT));
-        self::assertNotSame($signatureOf(self::VIEW_KEY, self::SIGNED_AT), $signatureOf(self::VIEW_KEY, '2026-04-07 09:30:01 UTC'));
+        self::assertNotSame('', $signatureOf(self::VIEW_KEY));
+        self::assertNotSame($signatureOf(self::VIEW_KEY), $signatureOf(str_replace('view', 'thumb', self::VIEW_KEY)));
+    }
+
+    #[Test]
+    public function twoCallsInsideOneMinuteGiveTheSameUrlAndTheNextMinuteGivesANewOne(): void
+    {
+        $urlAt = fn (string $at): string => $this->downloads()->forGet(self::VIEW_KEY, new \DateTimeImmutable($at));
+
+        self::assertSame($urlAt('2026-04-07 09:30:00 UTC'), $urlAt('2026-04-07 09:30:59 UTC'));
+        self::assertNotSame($urlAt('2026-04-07 09:30:59 UTC'), $urlAt('2026-04-07 09:31:00 UTC'));
+    }
+
+    #[Test]
+    public function theUrlIsSignedAtTheStartOfTheMinuteAndWorksFiveMinutesFromThere(): void
+    {
+        $query = self::query($this->downloads()->forGet(self::VIEW_KEY, new \DateTimeImmutable('2026-04-07 09:30:42 UTC')));
+
+        self::assertSame('20260407T093000Z', $query['X-Amz-Date'] ?? null);
+        self::assertSame('300', $query['X-Amz-Expires'] ?? null);
+    }
+
+    #[Test]
+    public function aUrlHandedOutAtTheLastSecondOfItsWindowStillWorksForTheStatedMinimum(): void
+    {
+        $handedOutAt = new \DateTimeImmutable('2026-04-07 09:30:59 UTC');
+        $query = self::query($this->downloads()->forGet(self::VIEW_KEY, $handedOutAt));
+
+        $signedAt = \DateTimeImmutable::createFromFormat('Ymd\THis\Z', $query['X-Amz-Date'] ?? '', new \DateTimeZone('UTC'));
+        self::assertInstanceOf(\DateTimeImmutable::class, $signedAt);
+        $validUntil = $signedAt->getTimestamp() + (int) ($query['X-Amz-Expires'] ?? 0);
+        self::assertGreaterThanOrEqual(MediaUrlSigner::MIN_VALID_FOR_SECONDS, $validUntil - $handedOutAt->getTimestamp());
+    }
+
+    #[Test]
+    public function theUrlCarriesAPrivateImmutableCacheControlNoLongerThanTheMinimumValidity(): void
+    {
+        $query = self::query($this->downloads()->forGet(self::VIEW_KEY, new \DateTimeImmutable(self::SIGNED_AT)));
+
+        self::assertSame('private, max-age=240, immutable', $query['response-cache-control'] ?? null);
     }
 
     #[Test]

@@ -17,6 +17,11 @@ final class Screenshot
     public ScreenshotView $view;
     public ?int $selectedNumber = null;
 
+    public function frameId(): string
+    {
+        return $this->view->domId.'-frame';
+    }
+
     public function placeholderId(): string
     {
         return $this->view->domId.'-placeholder';

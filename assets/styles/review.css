@@ -34,10 +34,17 @@
   border-radius: var(--radius-input);
 }
 
-/* A block frame, so a placeholder of unknown size takes the column's width; one of known size gets its max-width and
-   aspect-ratio from the style element the Screenshot component prints. */
+/* A block frame, so a placeholder of unknown size takes the column's width. A frame of known shape gets its max-width
+   and aspect-ratio from the style element the Screenshot component prints; the box fills it, so the pin layer over the
+   frame and the box are the same size. */
 .screenshot__frame--placeholder {
   display: block;
+}
+
+.screenshot__frame--shaped .screenshot__placeholder {
+  height: 100%;
+  aspect-ratio: auto;
+  box-sizing: border-box;
 }
 
 .screenshot__placeholder {

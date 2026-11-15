@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Review\UI;
 
+use App\Media\Api\MediaImageStatus;
 use App\Review\UI\PinView;
-use App\Review\UI\ScreenshotStatus;
 use App\Review\UI\ScreenshotView;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -75,7 +75,7 @@ final class ScreenshotViewTest extends TestCase
     {
         $view = self::view();
 
-        self::assertSame(ScreenshotStatus::Ready, $view->status);
+        self::assertSame(MediaImageStatus::Ready, $view->status);
         self::assertTrue($view->isReady());
         self::assertFalse($view->isPending());
     }
@@ -101,17 +101,17 @@ final class ScreenshotViewTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{ScreenshotStatus}>
+     * @return iterable<string, array{MediaImageStatus}>
      */
     public static function statusesWithoutAPicture(): iterable
     {
-        yield 'pending' => [ScreenshotStatus::Pending];
-        yield 'rejected' => [ScreenshotStatus::Rejected];
+        yield 'pending' => [MediaImageStatus::Pending];
+        yield 'rejected' => [MediaImageStatus::Rejected];
     }
 
     #[Test]
     #[DataProvider('statusesWithoutAPicture')]
-    public function aScreenshotThatIsNotReadyHasNoPictureToShow(ScreenshotStatus $status): void
+    public function aScreenshotThatIsNotReadyHasNoPictureToShow(MediaImageStatus $status): void
     {
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Only a ready screenshot has a picture to show.');
@@ -121,7 +121,7 @@ final class ScreenshotViewTest extends TestCase
 
     #[Test]
     #[DataProvider('statusesWithoutAPicture')]
-    public function aScreenshotThatIsNotReadyMayKnowItsSizeOrNot(ScreenshotStatus $status): void
+    public function aScreenshotThatIsNotReadyMayKnowItsSizeOrNot(MediaImageStatus $status): void
     {
         $sized = new ScreenshotView('shot-1', null, 800, 450, 'Checkout', status: $status);
         $unsized = new ScreenshotView('shot-2', null, null, null, 'Checkout', status: $status);
@@ -129,7 +129,7 @@ final class ScreenshotViewTest extends TestCase
         self::assertSame([800, 450, null], [$sized->width, $sized->height, $sized->imageUrl]);
         self::assertSame([null, null], [$unsized->width, $unsized->height]);
         self::assertFalse($sized->isReady());
-        self::assertSame(ScreenshotStatus::Pending === $status, $sized->isPending());
+        self::assertSame(MediaImageStatus::Pending === $status, $sized->isPending());
     }
 
     #[Test]
@@ -138,7 +138,7 @@ final class ScreenshotViewTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('A screenshot knows both its width and its height, or neither.');
 
-        new ScreenshotView('shot-1', null, 800, null, 'Checkout', status: ScreenshotStatus::Pending);
+        new ScreenshotView('shot-1', null, 800, null, 'Checkout', status: MediaImageStatus::Pending);
     }
 
     #[Test]
@@ -147,7 +147,7 @@ final class ScreenshotViewTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('A screenshot needs a width and a height of at least 1.');
 
-        new ScreenshotView('shot-1', null, 800, 0, 'Checkout', status: ScreenshotStatus::Pending);
+        new ScreenshotView('shot-1', null, 800, 0, 'Checkout', status: MediaImageStatus::Pending);
     }
 
     #[Test]

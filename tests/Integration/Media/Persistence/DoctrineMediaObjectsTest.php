@@ -208,6 +208,22 @@ final class DoctrineMediaObjectsTest extends KernelTestCase
         self::assertSame([], $none);
     }
 
+    #[Test]
+    public function byIdsLeavesTheObjectsItReadsOutOfChangeTracking(): void
+    {
+        $this->addMedia(self::ACME_FOODS, self::ACME_PENDING, '2026-03-02 10:00:00+00:00', null);
+        $this->addMedia(self::ACME_FOODS, self::ACME_READY_LATER, '2026-03-02 10:09:00+00:00', self::SAME_PICTURE);
+
+        $readOnly = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $this->entityManager()->clear();
+            $found = $this->mediaObjects()->byIds([new MediaId(self::ACME_PENDING), new MediaId(self::ACME_READY_LATER)]);
+
+            return array_map(fn (MediaObject $mediaObject): bool => $this->entityManager()->getUnitOfWork()->isReadOnly($mediaObject), $found);
+        });
+
+        self::assertSame([true, true], $readOnly);
+    }
+
     /**
      * The other organization's copy of the picture is the oldest of all and has the lowest id; Acme Foods' tied pair
      * is added in the reverse order of their ids, and its later one has a lower id than both.

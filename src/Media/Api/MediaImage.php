@@ -11,7 +11,7 @@ namespace App\Media\Api;
 final readonly class MediaImage
 {
     /**
-     * @param string      $url     a short-lived signed GET URL; only when ready
+     * @param string|null $url     a short-lived signed GET URL; only when ready
      * @param int|null    $width   of the variant the URL shows, in pixels; null when not known
      * @param int|null    $height  of the variant the URL shows, in pixels; null when not known
      * @param string|null $refusal why processing refused the upload, in the words the person sees; only when rejected

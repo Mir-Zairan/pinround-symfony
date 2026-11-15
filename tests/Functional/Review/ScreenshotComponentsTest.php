@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Review;
 
+use App\Media\Api\MediaImageStatus;
 use App\Review\UI\Component\EditableScreenshot;
 use App\Review\UI\Component\PinLayer;
 use App\Review\UI\Component\PinList;
 use App\Review\UI\Component\Screenshot;
 use App\Review\UI\PinView;
-use App\Review\UI\ScreenshotStatus;
 use App\Review\UI\ScreenshotView;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -56,7 +56,8 @@ final class ScreenshotComponentsTest extends KernelTestCase
         self::assertSame('Processing…', $placeholder->text());
         self::assertCount(0, $crawler->filter('img'));
         self::assertCount(0, $crawler->filter('.screenshot__placeholder--rejected'));
-        self::assertMatchesRegularExpression('/<style nonce="[A-Za-z0-9+\/=]+">#shot-2-placeholder\{max-width:800px;aspect-ratio:800 \/ 450\}<\/style>/', $html);
+        self::assertCount(1, $crawler->filter('#shot-2-frame.screenshot__frame--shaped > [data-pin-placer-target="layer"]'));
+        self::assertMatchesRegularExpression('/<style nonce="[A-Za-z0-9+\/=]+">#shot-2-frame\{max-width:800px;aspect-ratio:800 \/ 450\}<\/style>/', $html);
         self::assertStringNotContainsString('style="', $html);
         self::assertSame('Checkout page', $crawler->filter('.screenshot__title')->text());
     }
@@ -68,12 +69,26 @@ final class ScreenshotComponentsTest extends KernelTestCase
 
         self::assertSame('Processing…', new Crawler($html)->filter('[role="status"]')->text());
         self::assertStringNotContainsString('<style', $html);
+        self::assertCount(0, new Crawler($html)->filter('.screenshot__frame--shaped'));
+    }
+
+    #[Test]
+    public function aRejectedScreenshotOfKnownSizeShapesItsFrameAndSaysItCouldNotBeProcessed(): void
+    {
+        $view = new ScreenshotView('shot-4', null, 800, 450, 'Acme Foods checkout of project SHOP', status: MediaImageStatus::Rejected);
+        $html = $this->render(Screenshot::class, ['view' => $view]);
+        $crawler = new Crawler($html);
+
+        self::assertMatchesRegularExpression('/<style nonce="[A-Za-z0-9+\/=]+">#shot-4-frame\{max-width:800px;aspect-ratio:800 \/ 450\}<\/style>/', $html);
+        self::assertCount(1, $crawler->filter('#shot-4-frame.screenshot__frame--shaped #shot-4-placeholder.screenshot__placeholder--rejected'));
+        self::assertSame('We could not process this image. Try again.', $crawler->filter('#shot-4-placeholder')->text());
+        self::assertStringNotContainsString('style="', $html);
     }
 
     #[Test]
     public function aRejectedScreenshotSaysItCouldNotBeProcessedAndShowsNoPicture(): void
     {
-        $view = new ScreenshotView('shot-3', null, null, null, 'Acme Foods checkout of project SHOP', status: ScreenshotStatus::Rejected);
+        $view = new ScreenshotView('shot-3', null, null, null, 'Acme Foods checkout of project SHOP', status: MediaImageStatus::Rejected);
         $crawler = $this->renderScreenshot($view);
 
         $placeholder = $crawler->filter('#shot-3-placeholder.screenshot__placeholder.screenshot__placeholder--rejected');
@@ -87,7 +102,7 @@ final class ScreenshotComponentsTest extends KernelTestCase
     #[Test]
     public function aPendingScreenshotKeepsItsPinLayerAndItsPinsListed(): void
     {
-        $view = new ScreenshotView('shot-2', null, 800, 450, 'Acme Foods checkout of project SHOP', pins: self::pins(), status: ScreenshotStatus::Pending);
+        $view = new ScreenshotView('shot-2', null, 800, 450, 'Acme Foods checkout of project SHOP', pins: self::pins(), status: MediaImageStatus::Pending);
 
         $screenshot = $this->renderScreenshot($view);
         $list = new Crawler($this->render(PinList::class, ['view' => $view]));
@@ -319,7 +334,7 @@ final class ScreenshotComponentsTest extends KernelTestCase
 
     private static function pendingView(?int $width, ?int $height): ScreenshotView
     {
-        return new ScreenshotView('shot-2', null, $width, $height, 'Acme Foods checkout of project SHOP', 'Checkout page', status: ScreenshotStatus::Pending);
+        return new ScreenshotView('shot-2', null, $width, $height, 'Acme Foods checkout of project SHOP', 'Checkout page', status: MediaImageStatus::Pending);
     }
 
     /**

@@ -35,9 +35,11 @@ final readonly class PresignedDownloads implements MediaUrlSigner
             'Key' => $storageKey,
             'ResponseContentType' => 'image/webp',
             'ResponseContentDisposition' => 'inline',
+            'ResponseCacheControl' => \sprintf('private, max-age=%d, immutable', self::MIN_VALID_FOR_SECONDS),
         ]);
-        $expiresAt = $signedAt->add(new \DateInterval(\sprintf('PT%dS', self::VALID_FOR_SECONDS)));
+        $windowStart = new \DateTimeImmutable('@'.intdiv($signedAt->getTimestamp(), self::SIGNING_WINDOW_SECONDS) * self::SIGNING_WINDOW_SECONDS);
+        $expiresAt = $windowStart->add(new \DateInterval(\sprintf('PT%dS', self::VALID_FOR_SECONDS)));
 
-        return (string) $this->presigningClient->createPresignedRequest($command, $expiresAt, ['start_time' => $signedAt])->getUri();
+        return (string) $this->presigningClient->createPresignedRequest($command, $expiresAt, ['start_time' => $windowStart])->getUri();
     }
 }

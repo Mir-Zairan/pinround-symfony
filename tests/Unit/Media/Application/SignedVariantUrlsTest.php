@@ -78,11 +78,11 @@ final class SignedVariantUrlsTest extends TestCase
     }
 
     #[Test]
-    public function theTimeGivenAndNotAnyClockDecidesWhenTheUrlStarts(): void
+    public function theTimeGivenAndNotAnyClockDecidesTheMinuteTheUrlStartsIn(): void
     {
         $images = $this->transactions->run(fn (): array => $this->signedUrls->forVariants(new OrganizationId(self::ACME_FOODS), [self::READY], 'view', new \DateTimeImmutable('2026-04-07 11:45:10 UTC')));
 
-        self::assertSame('20260407T114510Z', self::query((string) $images[self::READY]->url)['X-Amz-Date'] ?? null);
+        self::assertSame('20260407T114500Z', self::query((string) $images[self::READY]->url)['X-Amz-Date'] ?? null);
     }
 
     #[Test]

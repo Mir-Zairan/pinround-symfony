@@ -9,6 +9,7 @@ use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaObjects;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Query;
 use Symfony\Component\Uid\Uuid;
 
 final readonly class DoctrineMediaObjects implements MediaObjects
@@ -63,6 +64,8 @@ final readonly class DoctrineMediaObjects implements MediaObjects
 
         return $this->entityManager->createQuery('SELECT m FROM '.MediaObject::class.' m WHERE m.id IN (:ids)')
             ->setParameter('ids', array_map(static fn (MediaId $id): string => $id->toString(), $ids))
+            // A page only reads what it shows: no snapshot kept, nothing to flush.
+            ->setHint(Query::HINT_READ_ONLY, true)
             ->getResult();
     }
 

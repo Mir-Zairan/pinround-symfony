@@ -42,7 +42,7 @@ final class ScreenshotGalleryTest extends WebTestCase
         self::assertCount(1, $pending);
         self::assertSame('Processing…', $pending->filter('[role="status"].screenshot__placeholder')->text());
         self::assertCount(0, $pending->filter('img'));
-        self::assertStringContainsString('#gallery-pending-screenshot-placeholder{max-width:800px;aspect-ratio:800 / 450}', (string) $client->getResponse()->getContent());
+        self::assertStringContainsString('#gallery-pending-screenshot-frame{max-width:800px;aspect-ratio:800 / 450}', (string) $client->getResponse()->getContent());
         $rejected = $crawler->filter('#gallery-rejected-screenshot-heading ~ .screenshot-example figure#gallery-rejected-screenshot');
         self::assertCount(1, $rejected);
         self::assertSame('We could not process this image. Try again.', $rejected->filter('.screenshot__placeholder--rejected')->text());
