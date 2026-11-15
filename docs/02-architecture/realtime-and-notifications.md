@@ -8,7 +8,7 @@ How open pages stay fresh (Mercure), and how pings and notifications are created
 - [Principles](#principles) — the rules that keep notifications useful and safe.
 - [Mercure topics](#mercure-topics) — topic names, what is pushed, and how access is checked.
 - [What is pushed when](#what-is-pushed-when) — the event → push table.
-- [Notification kinds](#notification-kinds) — which events notify whom.
+- [Notification kinds](#notification-kinds) — which events notify whom, and when a question notification closes.
 - [Ping lifecycle](#ping-lifecycle) — create, rate limit, deliver or hold, group, clear.
 - [The bell](#the-bell) — grouping and counts.
 - [Email digest](#email-digest) — when email is sent, and what it contains.
@@ -64,8 +64,9 @@ Implementation notes:
 | Domain event | Pushed to | Push |
 |---|---|---|
 | TicketMoved, TicketAssigned, TicketChecked, TicketVisibilityChanged | ticket topic; user topics of the old and new turn owners | refresh ticket frames; refresh the Home "needs you" frame for the users whose list changed |
-| QuestionAsked / QuestionAnswered | ticket topic; user topic of the asked person (and of the asker on answer) | refresh; bell push; toast "Mia answered your question." on the answer |
-| CommentPosted, ReplyPosted, CommentResolved, MessageEdited, MessageRemoved | ticket topic | refresh the thread frame |
+| QuestionAsked / QuestionAnswered | ticket topic; user topic of the asked person (and of the asker on answer) | refresh; bell push; toast "Mia answered your question." on the answer; on the answer the asked person's push follows marking their `question` row done |
+| CommentPosted, ReplyPosted, CommentResolved, MessageEdited | ticket topic | refresh the thread frame |
+| MessageRemoved | ticket topic; user topic of each person whose `question` or `reply` row about the message it marks done | refresh the thread frame; one bell push per such person, none when nothing was open |
 | RoundShared, PinVerdictSet, ChecklistItemChanged | ticket topic; user topic of the next turn owner | refresh the rounds frame |
 | PingSent (delivered) / PingCleared | user topic of the recipient | bell push |
 | SuggestionReady, SummaryGenerated | user topic of the requester; ticket topic for summaries | refresh the report form or summary frame |
@@ -94,6 +95,8 @@ Pushes are hints. If a push is lost, the next page load or frame refresh is stil
 | `closed_duplicate` | your report was closed as a duplicate | reporter | yes | yes |
 
 The actor never notifies themselves. Muted tickets are skipped. For restricted tickets (`visibility = team`), recipients are checked again at delivery time.
+
+A `question` notification closes with its question. When the question is answered (QuestionAnswered) or withdrawn (MessageRemoved), `MarkMessageNotificationsDone` marks done the `question` row about it, and on a withdrawal or a removed comment also the `reply` rows about the message, held rows included, so neither the bell nor the digest lists them once a hold ends. A QuestionAsked handled after its question closed writes no row: `NotifyRecipients` checks `QuestionQueries::isOpen` under the same per-message lock (`Notifications::lockAboutMessage`) that the marking takes, so one of the two always sees the other.
 
 ## Ping lifecycle
 
