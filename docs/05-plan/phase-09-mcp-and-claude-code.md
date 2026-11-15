@@ -174,10 +174,10 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-SEC-14, NFR-PERF
 ### P09.T9 — create_report: a report draft that a person sends
 - **Why:** a reporter's Claude Code can reproduce a customer issue and prepare the report, but a person checks it and sends it ([FR-MCP-12](../01-requirements/functional-requirements.md#mcp--mcp-server-and-agent-api), [ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)).
 - **Steps:**
-  1. `create_report {project, title, detail, screenshots[{upload_id, title?, summary?, pins?[]}]}`; scope `reports:write`. Uploads use the same path as P09.T5 (`create_upload` with the report draft as target, presigned PUT, then the `upload_id`), with the same file rules and caps (title ≤ 120, summary ≤ 600, pin note ≤ 1,000, ≤ 50 screenshots).
+  1. `create_report {project, title, detail, screenshots[{upload_id, title?, summary?, pins?[]}]}`; scope `reports:write`. Uploads use the same path as P09.T5 (`create_upload` with the report draft as target, presigned PUT, then the `upload_id`), with the same file rules and caps (title ≤ 120, summary ≤ 600, pin note ≤ 1,000, ≤ 10 screenshots per report draft, refused past the cap with a plain message; a round keeps its limit of 50).
   2. It calls `Review\Api\ReportDrafts::create` (Review owns `rvw_report_draft`, [ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)) to create a **report draft** owned by the token's user and returns the draft id and the page link. It never creates a ticket or a round on a ticket. The draft follows the [ADR-0017](../03-adr/0017-private-draft-rounds.md) privacy rules: owner only, others get "not found".
   3. The `reports:write` scope is added to the scope checkboxes on the token page (P09.T1) with the plain text "Let Claude Code prepare report drafts for you. You still check and send them." and is not ticked by default.
-  4. Sending is a person's click in the UI (P06.T1 "Report drafts"); the tool has no send action. Same rate limits; audit token id, tool, draft id, result, no content.
+  4. Sending is a person's click in the UI (P06.T1 "Report drafts", in Review's UI); the tool has no send action. Same rate limits; audit token id, tool, draft id, result, no content.
 - **Files:** `src/AgentApi/Application/Tool/CreateReport.php`, `src/Identity/UI/Controller/TokenController.php` (scope list), `templates/identity/tokens.html.twig`.
 - **Acceptance:**
   - [ ] A token without `reports:write` gets an MCP error and nothing is created (count rows before and after).
