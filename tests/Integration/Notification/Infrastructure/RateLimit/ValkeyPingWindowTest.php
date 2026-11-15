@@ -162,14 +162,14 @@ final class ValkeyPingWindowTest extends KernelTestCase
 
     /**
      * The lazy connection reports a failed connect as a cache InvalidArgumentException; a connection that is gone
-     * throws \RedisException, as a plain \Redis that never connected does.
+     * throws \RedisException (lostValkey).
      */
     #[Test]
     public function aLostConnectionPausesPingsToo(): void
     {
         $this->expectException(PingsPaused::class);
 
-        new ValkeyPingWindow(new \Redis())->take(...$this->slot(self::LENA, self::OMAR, self::SHOP_12), pingId: new PingId(self::FIRST_PING), hours: 4, at: new \DateTimeImmutable(self::SENT_AT));
+        new ValkeyPingWindow($this->lostValkey())->take(...$this->slot(self::LENA, self::OMAR, self::SHOP_12), pingId: new PingId(self::FIRST_PING), hours: 4, at: new \DateTimeImmutable(self::SENT_AT));
     }
 
     #[Test]
@@ -254,7 +254,7 @@ final class ValkeyPingWindowTest extends KernelTestCase
     {
         $this->expectException(PingsPaused::class);
 
-        new ValkeyPingWindow(new \Redis())->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::OMAR)], new TicketId(self::SHOP_12));
+        new ValkeyPingWindow($this->lostValkey())->heldUntilOf(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), [new UserId(self::OMAR)], new TicketId(self::SHOP_12));
     }
 
     #[Test]
@@ -310,6 +310,31 @@ final class ValkeyPingWindowTest extends KernelTestCase
         self::assertInstanceOf(\Redis::class, $unreachable);
 
         return $unreachable;
+    }
+
+    /**
+     * A connection that is gone, as phpredis reports it. Not a plain \Redis that never connected: phpredis connects that
+     * one to 127.0.0.1:6379 on first use, where CI runs a Valkey, so the call would succeed.
+     */
+    private function lostValkey(): \Redis
+    {
+        return new class extends \Redis {
+            /** @param array<mixed> $args */
+            public function eval(string $script, array $args = [], int $num_keys = 0): mixed
+            {
+                throw new \RedisException('Redis server 127.0.0.1:6380 went away');
+            }
+
+            /**
+             * @param array<mixed> $keys
+             *
+             * @return \Redis|list<string|false>|false
+             */
+            public function mget(array $keys): \Redis|array|false
+            {
+                throw new \RedisException('Redis server 127.0.0.1:6380 went away');
+            }
+        };
     }
 
     private function stateValkey(): \Redis
