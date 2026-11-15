@@ -32,6 +32,18 @@ interface MediaObjects
     public function byId(MediaId $id): ?MediaObject;
 
     /**
+     * The media objects of the tenant's organization with those ids, read in one query, in no particular order. An id
+     * with no media object is left out.
+     *
+     * @param list<MediaId> $ids
+     *
+     * @return list<MediaObject>
+     *
+     * @throws \LogicException when no transaction is open
+     */
+    public function byIds(array $ids): array;
+
+    /**
      * Like byId(), and the row stays locked until the open transaction ends, so the processing worker is the only one
      * to change it meanwhile. The object is read fresh: unsaved changes to one already loaded are lost, and save()
      * refuses that older copy.

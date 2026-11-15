@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Review\UI;
 
 use App\Review\UI\PinView;
+use App\Review\UI\ScreenshotStatus;
 use App\Review\UI\ScreenshotView;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -66,6 +68,86 @@ final class ScreenshotViewTest extends TestCase
         $this->expectExceptionMessage('A screenshot needs a width and a height of at least 1.');
 
         new ScreenshotView('shot-1', '/i.png', 0, 450, 'Checkout');
+    }
+
+    #[Test]
+    public function aScreenshotIsReadyUnlessToldOtherwise(): void
+    {
+        $view = self::view();
+
+        self::assertSame(ScreenshotStatus::Ready, $view->status);
+        self::assertTrue($view->isReady());
+        self::assertFalse($view->isPending());
+    }
+
+    /**
+     * @return iterable<string, array{?string, ?int, ?int}>
+     */
+    public static function readyScreenshotsWithoutTheirPicture(): iterable
+    {
+        yield 'no URL' => [null, 800, 450];
+        yield 'an empty URL' => ['', 800, 450];
+        yield 'no size' => ['/i.png', null, null];
+    }
+
+    #[Test]
+    #[DataProvider('readyScreenshotsWithoutTheirPicture')]
+    public function aReadyScreenshotNeedsItsPicturesUrlAndSize(?string $imageUrl, ?int $width, ?int $height): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A ready screenshot needs the URL, the width and the height of its picture.');
+
+        new ScreenshotView('shot-1', $imageUrl, $width, $height, 'Checkout');
+    }
+
+    /**
+     * @return iterable<string, array{ScreenshotStatus}>
+     */
+    public static function statusesWithoutAPicture(): iterable
+    {
+        yield 'pending' => [ScreenshotStatus::Pending];
+        yield 'rejected' => [ScreenshotStatus::Rejected];
+    }
+
+    #[Test]
+    #[DataProvider('statusesWithoutAPicture')]
+    public function aScreenshotThatIsNotReadyHasNoPictureToShow(ScreenshotStatus $status): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Only a ready screenshot has a picture to show.');
+
+        new ScreenshotView('shot-1', '/i.png', 800, 450, 'Checkout', status: $status);
+    }
+
+    #[Test]
+    #[DataProvider('statusesWithoutAPicture')]
+    public function aScreenshotThatIsNotReadyMayKnowItsSizeOrNot(ScreenshotStatus $status): void
+    {
+        $sized = new ScreenshotView('shot-1', null, 800, 450, 'Checkout', status: $status);
+        $unsized = new ScreenshotView('shot-2', null, null, null, 'Checkout', status: $status);
+
+        self::assertSame([800, 450, null], [$sized->width, $sized->height, $sized->imageUrl]);
+        self::assertSame([null, null], [$unsized->width, $unsized->height]);
+        self::assertFalse($sized->isReady());
+        self::assertSame(ScreenshotStatus::Pending === $status, $sized->isPending());
+    }
+
+    #[Test]
+    public function aWidthWithoutAHeightIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A screenshot knows both its width and its height, or neither.');
+
+        new ScreenshotView('shot-1', null, 800, null, 'Checkout', status: ScreenshotStatus::Pending);
+    }
+
+    #[Test]
+    public function aPendingScreenshotOfZeroHeightIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A screenshot needs a width and a height of at least 1.');
+
+        new ScreenshotView('shot-1', null, 800, 0, 'Checkout', status: ScreenshotStatus::Pending);
     }
 
     #[Test]

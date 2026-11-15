@@ -26,20 +26,16 @@ final readonly class PresignedUploads implements UploadUrlSigner
     public function __construct(ObjectStorageSettings $settings, private ClockInterface $clock)
     {
         $this->bucket = $settings->bucket;
-        $this->presigningClient = new S3Client([
-            'version' => '2006-03-01',
-            'region' => $settings->region,
-            'endpoint' => $settings->publicUrl,
-            'use_path_style_endpoint' => true,
-            'credentials' => ['key' => $settings->accessKeyId, 'secret' => $settings->secretAccessKey],
-            'signature_provider' => static function (string $version, string $service, string $region): ContentPinnedS3Signature {
+        $this->presigningClient = PresigningClientFactory::create(
+            $settings,
+            static function (string $version, string $service, string $region): ContentPinnedS3Signature {
                 if (!\in_array($version, ['v4', 's3v4'], true)) {
                     throw new \LogicException(\sprintf('Presigned uploads sign with SigV4 only, not "%s".', $version));
                 }
 
                 return new ContentPinnedS3Signature($service, $region);
             },
-        ]);
+        );
     }
 
     /**

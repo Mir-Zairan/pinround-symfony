@@ -344,6 +344,10 @@ when@test:
         test.media_target_authorizers:
             alias: App\Media\Application\MediaTargetAuthorizers
             public: true
+        # No page shows a picture before the Rounds section (P05 task 9); SignedUrlsTest gets the Api as a page would.
+        test.media_signed_urls:
+            alias: App\Media\Api\SignedUrls
+            public: true
         # No page reads rounds before the Rounds section (P05 task 9); DbalRoundQueriesTest gets the Api as a page would.
         test.review_round_queries:
             alias: App\Review\Api\RoundQueries

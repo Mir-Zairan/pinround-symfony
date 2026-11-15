@@ -52,6 +52,21 @@ final readonly class DoctrineMediaObjects implements MediaObjects
     }
 
     /**
+     * Served by the primary key (organization_id, id); the tenant filter supplies the organization.
+     */
+    public function byIds(array $ids): array
+    {
+        $this->requireTransaction('Reading media objects needs an open transaction.');
+        if ([] === $ids) {
+            return [];
+        }
+
+        return $this->entityManager->createQuery('SELECT m FROM '.MediaObject::class.' m WHERE m.id IN (:ids)')
+            ->setParameter('ids', array_map(static fn (MediaId $id): string => $id->toString(), $ids))
+            ->getResult();
+    }
+
+    /**
      * A loaded copy is detached rather than refreshed, as Doctrine refuses to refresh the readonly createdAt; the
      * locked row is then read into a new object, and save() refuses the detached one.
      */
