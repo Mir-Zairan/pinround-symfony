@@ -143,8 +143,9 @@ jobs:
           -f docker/postgres/roles.sql
       # The test-only readonly connection proves what pinround_readonly is refused.
       # The object-storage group (Media against MinIO) runs locally only: this job has no MinIO, only the stand-in
-      # listener above, so its uploads, CORS preflights and reads would fail here.
-      - run: composer test:integration -- --exclude-group object-storage
+      # listener above, so its uploads, CORS preflights and reads would fail here. The libvips group runs the vips
+      # tool of the app image (Dockerfile); this job runs on the runner, not in that image.
+      - run: composer test:integration -- --exclude-group object-storage --exclude-group libvips
         env:
           READONLY_DATABASE_URL: postgresql://pinround_readonly:change-me-ci-only-readonly-db@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
       - run: composer test:functional

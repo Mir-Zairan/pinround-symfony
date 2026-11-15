@@ -7,7 +7,7 @@ How screenshots get from a person's screen into pinround safely, and how they ar
 - [Why screenshots need their own pipeline](#why-screenshots-need-their-own-pipeline) — the scene.
 - [Upload flow](#upload-flow) — presigned PUT, sequence diagram.
 - [Validation rules](#validation-rules) — checks before the presigned URL (with what the URL pins) and checks in the worker.
-- [Processing worker](#processing-worker) — verify, re-encode, thumbnails.
+- [Processing worker](#processing-worker) — verify, re-encode, thumbnails; how the `vips` tool runs.
 - [Storage key layout](#storage-key-layout) — where each file lives.
 - [Serving images](#serving-images) — signed URLs after a voter check.
 - [Deduplication](#deduplication) — same image twice in one org.
@@ -92,7 +92,14 @@ Runs on the `media` transport ([ADR-0009](../03-adr/0009-async-messaging-and-out
 6. Delete the upload object.
 7. Publish `MediaReady` (outbox) so Review can update the round and Notification can push the change.
 
-The PHP binding for libvips (`jcupitt/vips` with the FFI extension, or the `vips` CLI) is chosen at implementation time. Measure memory and time per image.
+**How libvips runs:** `VipsImageEncoder` runs the `vips` command-line tool (Debian bookworm's `libvips-tools`, libvips 8.14, installed in the Dockerfile's base stage) through `symfony/process`, with an argument list and never a shell string. This needs no FFI extension, no PECL extension and no new Composer package, and a crash or a runaway decode stays in a child process. Per upload, in a new directory only the worker's user can open (0700), deleted when the encoder returns:
+
+- `vips pngload|jpegload|webpload <original> decoded.v --fail-on error`: the loader of the format the signature showed, and no other, decodes the whole file; a file cut short or broken fails. Bytes after the image data (a polyglot's tail) are never read.
+- `vips thumbnail decoded.v view.webp[strip,Q=85] 1920 --height 10000000 --size down --export-profile srgb`, and the same with `thumb.webp[strip,Q=75] 480`: scaled down to the width only, never up, aspect ratio kept, turned upright by its orientation tag and made sRGB.
+- libvips 8.14 writes an EXIF chunk into a WebP even with `strip`, so the encoder keeps only the picture chunks (`VP8X`, `VP8 `, `VP8L`, `ALPH`) and clears the ICC, EXIF and XMP flags of `VP8X`. Width and height come from the result's header.
+- Each run has a 30 s timeout. A refusal (exit code 1), a timeout or a missing result is `UndecodableImage`, so the object is rejected as unreadable. A tool that cannot start (exit code 126 or 127) or a result that is no WebP is a `RuntimeException`: the message is retried and the object stays pending.
+
+Tests: `tests/Unit/Media/Infrastructure/Processing/VipsImageEncoderTest.php` runs the encoder against a stand-in for the tool; `tests/Integration/Media/Processing/VipsImageEncoderTest.php` (group `libvips`) runs the real tool and is skipped where `vips` is not on the PATH. CI's integration job excludes that group. Time per image (the p95 ≤ 10 s target for a 15 MB image) is not measured yet.
 
 ## Storage key layout
 

@@ -12,6 +12,12 @@ WORKDIR /app
 # sodium and opcache are already in the base image.
 RUN install-php-extensions pdo_pgsql intl zip apcu redis
 
+# The vips command-line tool re-encodes uploads in worker-media (VipsImageEncoder, ADR-0011); in the base stage so
+# dev, prod and every worker role have it.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libvips-tools \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY docker/frankenphp/Caddyfile /etc/caddy/Caddyfile
 COPY docker/frankenphp/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 RUN chmod +x /usr/local/bin/docker-entrypoint

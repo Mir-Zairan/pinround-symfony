@@ -95,13 +95,24 @@ final class ImageFixtures
      */
     public static function webpExtended(int $width, int $height, bool $animationFlag = false, bool $animationChunks = false): string
     {
-        $flags = $animationFlag ? 0x02 : 0x00;
-        $canvas = pack('C', $flags)."\x00\x00\x00".substr(pack('V', $width - 1), 0, 3).substr(pack('V', $height - 1), 0, 3);
         $frames = $animationChunks
             ? self::riffChunk('ANIM', "\x00\x00\x00\x00\x00\x00").self::riffChunk('ANMF', str_repeat("\x00", 16))
             : self::losslessChunk($width, $height, "\x00\x00\x00\x00");
 
-        return self::riff(self::riffChunk('VP8X', $canvas).$frames);
+        return self::riff(self::canvasChunk($width, $height, $animationFlag ? 0x02 : 0x00).$frames);
+    }
+
+    /**
+     * webpExtended($width, $height) with an ICC profile, EXIF (an odd length, so padded) and XMP chunk around its
+     * bitstream, each announced by its flag in the VP8X header.
+     */
+    public static function webpWithMetadata(int $width, int $height): string
+    {
+        return self::riff(self::canvasChunk($width, $height, 0x20 | 0x08 | 0x04)
+            .self::riffChunk('ICCP', 'an icc profile')
+            .self::losslessChunk($width, $height, "\x00\x00\x00\x00")
+            .self::riffChunk('EXIF', "Exif\x00\x00GPS 52N")
+            .self::riffChunk('XMP ', '<x:xmpmeta/>'));
     }
 
     /**
@@ -120,6 +131,11 @@ final class ImageFixtures
     private static function pngChunk(string $type, string $data): string
     {
         return pack('N', \strlen($data)).$type.$data.pack('N', crc32($type.$data));
+    }
+
+    private static function canvasChunk(int $width, int $height, int $flags): string
+    {
+        return self::riffChunk('VP8X', pack('C', $flags)."\x00\x00\x00".substr(pack('V', $width - 1), 0, 3).substr(pack('V', $height - 1), 0, 3));
     }
 
     private static function losslessChunk(int $width, int $height, string $payload): string
