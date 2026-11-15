@@ -39,7 +39,8 @@ use Symfony\Component\Security\Core\User\InMemoryUser;
 /**
  * TicketMediaTarget with the real TicketVoter behind Symfony's AuthorizationChecker on the unanimous strategy the app
  * uses (security.yaml). Lena leads Shop, Omar is a member and Mia a viewer of Shop, Raj is a Manager of no team; all of
- * Acme Foods. Ben is an Admin of Beta Bakery. SHOP-1 is a Shop ticket for everyone, MOBILE-1 one of the Mobile team.
+ * Acme Foods. Noel is a plain member of Acme Foods in no team. Ben is an Admin of Beta Bakery. SHOP-1 is a Shop ticket
+ * for everyone, MOBILE-1 one of the Mobile team; SHOP-2 and MOBILE-2 are team-only tickets of Shop and Mobile.
  */
 final class TicketMediaTargetTest extends TestCase
 {
@@ -48,12 +49,15 @@ final class TicketMediaTargetTest extends TestCase
     private const string MIA = '0197a3c0-0000-7000-8000-0000000016a3';
     private const string RAJ = '0197a3c0-0000-7000-8000-0000000016a4';
     private const string BEN = '0197a3c0-0000-7000-8000-0000000016a5';
+    private const string NOEL = '0197a3c0-0000-7000-8000-0000000016a6';
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000160a';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000160b';
     private const string SHOP = '0197a3c0-0000-7000-8000-0000000016d1';
     private const string MOBILE = '0197a3c0-0000-7000-8000-0000000016d2';
     private const string SHOP_1 = '0197a3c0-0000-7000-8000-0000000016e1';
     private const string MOBILE_1 = '0197a3c0-0000-7000-8000-0000000016e2';
+    private const string SHOP_2 = '0197a3c0-0000-7000-8000-0000000016e5';
+    private const string MOBILE_2 = '0197a3c0-0000-7000-8000-0000000016e6';
     /** A ticket whose facts the queries cannot read, as when its step is not the organization's. */
     private const string BROKEN_TICKET = '0197a3c0-0000-7000-8000-0000000016e3';
     private const string NO_TICKET = '0197a3c0-0000-7000-8000-0000000016e4';
@@ -63,6 +67,12 @@ final class TicketMediaTargetTest extends TestCase
     {
         self::assertTrue(self::targetFor(self::tokenOf(self::OMAR))->mayAttach(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::SHOP_1));
         self::assertTrue(self::targetFor(self::tokenOf(self::LENA))->mayAttach(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::SHOP_1));
+    }
+
+    #[Test]
+    public function aMemberOfTheTeamOfATeamOnlyTicketMayAttachToIt(): void
+    {
+        self::assertTrue(self::targetFor(self::tokenOf(self::OMAR))->mayAttach(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::SHOP_2));
     }
 
     #[Test]
@@ -83,6 +93,9 @@ final class TicketMediaTargetTest extends TestCase
         yield 'Omar, on a ticket of a team he is not in' => [self::OMAR, self::OMAR, self::MOBILE_1];
         yield 'Omar asked about for Lena' => [self::OMAR, self::LENA, self::SHOP_1];
         yield 'Lena asked about for Omar' => [self::LENA, self::OMAR, self::SHOP_1];
+        yield 'Noel, a member of the organization in no team, on a team-only ticket' => [self::NOEL, self::NOEL, self::SHOP_2];
+        yield 'Omar, on a team-only ticket of a team he is not in' => [self::OMAR, self::OMAR, self::MOBILE_2];
+        yield 'Mia, a viewer of Shop, on its team-only ticket' => [self::MIA, self::MIA, self::SHOP_2];
         yield 'a ticket id that is no uuid' => [self::OMAR, self::OMAR, 'SHOP-1'];
         yield 'a ticket id with a trailing newline' => [self::OMAR, self::OMAR, self::SHOP_1."\n"];
         yield 'an empty ticket id' => [self::OMAR, self::OMAR, ''];
@@ -164,6 +177,7 @@ final class TicketMediaTargetTest extends TestCase
             self::OMAR => new ActorContext(new UserId(self::OMAR), $acmeFoods, new Roles(false, false, [], [$shop], [])),
             self::MIA => new ActorContext(new UserId(self::MIA), $acmeFoods, new Roles(false, false, [], [], [$shop])),
             self::RAJ => new ActorContext(new UserId(self::RAJ), $acmeFoods, new Roles(false, true, [], [], [])),
+            self::NOEL => new ActorContext(new UserId(self::NOEL), $acmeFoods, new Roles(false, false, [], [], [])),
             self::BEN => new ActorContext(new UserId(self::BEN), new OrganizationId(self::BETA_BAKERY), new Roles(true, false, [], [], [])),
         ]);
     }
@@ -174,7 +188,7 @@ final class TicketMediaTargetTest extends TestCase
      */
     private static function ticketTurnQueries(): TicketTurnQueries
     {
-        $snapshotOf = static fn (string $ticketId, string $teamId): TicketTurnSnapshot => new TicketTurnSnapshot(
+        $snapshotOf = static fn (string $ticketId, string $teamId, string $visibility = TicketVisibilityFacts::FOR_EVERYONE): TicketTurnSnapshot => new TicketTurnSnapshot(
             new TicketId($ticketId),
             '0197a3c0-0000-7000-8000-0000000016c1',
             '0197a3c0-0000-7000-8000-0000000016c2',
@@ -185,13 +199,13 @@ final class TicketMediaTargetTest extends TestCase
             'Lena',
             [],
             [],
-            TicketVisibilityFacts::FOR_EVERYONE,
+            $visibility,
             'major',
             null,
             new UserId(self::LENA),
         );
 
-        return new readonly class([$snapshotOf(self::SHOP_1, self::SHOP), $snapshotOf(self::MOBILE_1, self::MOBILE)], new TicketId(self::BROKEN_TICKET)) implements TicketTurnQueries {
+        return new readonly class([$snapshotOf(self::SHOP_1, self::SHOP), $snapshotOf(self::MOBILE_1, self::MOBILE), $snapshotOf(self::SHOP_2, self::SHOP, TicketVisibilityFacts::TEAM_ONLY), $snapshotOf(self::MOBILE_2, self::MOBILE, TicketVisibilityFacts::TEAM_ONLY)], new TicketId(self::BROKEN_TICKET)) implements TicketTurnQueries {
             /**
              * @param list<TicketTurnSnapshot> $snapshots
              */

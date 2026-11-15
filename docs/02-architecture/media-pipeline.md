@@ -32,7 +32,7 @@ sequenceDiagram
   participant S as Object storage (private bucket)
   participant W as Media worker
   B->>A: POST /media/intents {purpose, mime, bytes, target}
-  A->>A: Type and size OK? Voter: may this person add to the target?
+  A->>A: Type and size OK? Quota OK (else "storage full")? Voter: may this person add to the target?
   A->>A: Save upload intent (org, user, target kind and id, max bytes, allowed types, expiry)
   A-->>B: {intentId, presigned PUT URL (5 min), headers}
   B->>S: PUT bytes (Content-Type and Content-Length fixed)
