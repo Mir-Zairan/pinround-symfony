@@ -1,14 +1,20 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { LENA_STORAGE_STATE } from './auth';
-import { composerBody, openThread, threadFrame, TOAST_REGION } from './ticket';
+import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
-// ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED
+// ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED, REPLY_ADDED and COMMENT_RESOLVED
 const COMMENT_ADDED = 'Comment added.';
 const MESSAGE_EDITED = 'Message edited.';
 const MESSAGE_REMOVED = 'Message removed.';
+const REPLY_ADDED = 'Reply added.';
+const COMMENT_RESOLVED = 'Resolved. It folds away for everyone.';
+// Thread::REPLY_PLACEHOLDER, REPLY_NOTE for Omar's message and REPLY_NOTE_ON_YOUR_OWN
+const REPLY_PLACEHOLDER = 'Write a reply';
+const REPLY_NOTE_TO_OMAR = 'Replies stay under this message. Omar gets one notification.';
+const REPLY_NOTE_ON_YOUR_OWN = 'Replies stay under this message.';
 // ThreadController::FORM_EXPIRED
 const FORM_EXPIRED = 'This page was open too long. Reload it and try again.';
 // --space-12, the column gap of .ticket__section that the frame and Thread's wrappers carry on
@@ -48,8 +54,9 @@ function commentButton(page: Page) {
   return threadFrame(page).locator('form.thread__composer button[type="submit"]');
 }
 
+// The message's own body: a reply's body sits deeper, so a reply that quotes the text never matches.
 function messageWithText(page: Page, text: string) {
-  return threadFrame(page).locator('li[data-message-id]').filter({ has: page.locator('.thread__body', { hasText: text }) });
+  return threadFrame(page).locator('li[data-message-id]').filter({ has: page.locator('.thread__message-main > .thread__body', { hasText: text }) });
 }
 
 async function postComment(page: Page, text: string): Promise<void> {
@@ -170,6 +177,31 @@ test.describe('the thread of a new ticket', () => {
     await expect(message).toBeFocused();
   });
 
+  test('a refused edit keeps its text in the open Edit box, shows the toast and puts focus back in the text', async ({ page }) => {
+    const text = `Before the edit ${randomUUID().slice(0, 8)}`;
+    const editedText = `Kept after a refused edit ${randomUUID().slice(0, 8)}`;
+    await openThread(page, key);
+    await postComment(page, text);
+    const box = messageWithText(page, text).locator('details.thread__edit');
+    await box.locator('summary').click();
+    await expect(box.getByLabel('Edit your message')).toBeFocused();
+    // An expired form is the refusal a browser can cause; tests/Functional/Conversation covers the others.
+    await box.locator('input[name="_csrf_token"]').evaluate((input) => {
+      (input as HTMLInputElement).value = 'expired';
+    });
+    await box.getByLabel('Edit your message').fill(editedText);
+    const answer = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/edit') && response.request().method() === 'POST');
+
+    await box.getByRole('button', { name: 'Save' }).click();
+
+    expect((await answer).status()).toBe(422);
+    await expect(page.locator(TOAST_REGION)).toHaveText(FORM_EXPIRED);
+    await expect(box).toHaveAttribute('open');
+    await expect(box.getByLabel('Edit your message')).toHaveValue(editedText);
+    await expect(box.getByLabel('Edit your message')).toBeFocused();
+    await expect(messageWithText(page, text).locator('.thread__body')).toHaveText(text);
+  });
+
   test('a comment that holds a script shows as text and runs nothing', async ({ page }) => {
     const script = '<script>alert(1)</script>';
     const dialogs: string[] = [];
@@ -224,4 +256,220 @@ test.describe('the thread at 360 px', () => {
     await expect(pageMessage.getByLabel('Edit your message')).toBeVisible();
     await expectNoSidewaysScroll(page);
   });
+});
+
+function replyBox(page: Page, text: string) {
+  return messageWithText(page, text).locator('details.thread__reply-box');
+}
+
+/** On an opened thread: replies to the message that holds the text through its Reply box. */
+async function replyTo(page: Page, key: string, text: string, reply: string): Promise<void> {
+  const box = replyBox(page, text);
+  await box.locator(':scope > summary').click();
+  await box.getByLabel(REPLY_PLACEHOLDER).fill(reply);
+  const replied = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/replies') && response.request().method() === 'POST');
+
+  await box.getByRole('button', { name: 'Reply', exact: true }).click();
+
+  expect(new URL((await replied).url()).pathname).toMatch(new RegExp(`^/t/${key}/messages/[0-9a-f-]+/replies$`));
+  await expect(page.locator(TOAST_REGION)).toHaveText(REPLY_ADDED);
+}
+
+/** On an opened thread: resolves the comment that holds the text. */
+async function resolve(page: Page, text: string): Promise<void> {
+  await messageWithText(page, text).locator('.thread__resolve-form').getByRole('button', { name: 'Resolve' }).click();
+  await expect(page.locator(TOAST_REGION)).toHaveText(COMMENT_RESOLVED);
+}
+
+function foldOf(page: Page, text: string) {
+  return messageWithText(page, text).locator('details.thread__fold');
+}
+
+test('Lena replies to Omar’s comment, and the reply shows under it with no actions of its own', async ({ browser }) => {
+  const key = await makeTicketForOmar(browser, `Basket count lags one item ${randomUUID().slice(0, 8)}`);
+  const comment = `Seen after adding two items fast ${randomUUID().slice(0, 8)}`;
+  const reply = `Only on the phone app ${randomUUID().slice(0, 8)}`;
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  const lena = await openAs(browser, LENA_STORAGE_STATE);
+  try {
+    await openThread(omar.page, key);
+    await postComment(omar.page, comment);
+    await openThread(lena.page, key);
+    const box = replyBox(lena.page, comment);
+    await expect(box.locator(':scope > summary')).toHaveText('Reply');
+
+    await box.locator(':scope > summary').click();
+
+    await expect(box.getByLabel(REPLY_PLACEHOLDER)).toBeFocused();
+    await expect(box.locator('.thread__note')).toHaveText(REPLY_NOTE_TO_OMAR);
+    await box.getByLabel(REPLY_PLACEHOLDER).fill(reply);
+    await box.getByRole('button', { name: 'Reply', exact: true }).click();
+    await expect(lena.page.locator(TOAST_REGION)).toHaveText(REPLY_ADDED);
+
+    const message = messageWithText(lena.page, comment);
+    await expect(message.locator('.thread__reply .thread__body')).toHaveText([reply]);
+    await expect(message.locator('.thread__reply .thread__meta')).toContainText('Lena');
+    await expect(message.locator('.thread__reply').locator('button, summary, form')).toHaveCount(0);
+    await expect(message.locator('details.thread__reply-box > summary')).toHaveCount(1);
+    await expect(message).toBeFocused();
+
+    await openThread(omar.page, key);
+    await expect(messageWithText(omar.page, comment).locator('.thread__reply .thread__body')).toHaveText([reply]);
+  } finally {
+    await lena.context.close();
+    await omar.context.close();
+  }
+});
+
+test('Cancel closes the Reply box, keeps the text and gives focus back to the Reply button', async ({ browser }) => {
+  const key = await makeTicketForOmar(browser, `Promo banner covers the menu ${randomUUID().slice(0, 8)}`);
+  const comment = `Only below 400 px wide ${randomUUID().slice(0, 8)}`;
+  const draft = `Also on tablets ${randomUUID().slice(0, 8)}`;
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  try {
+    await openThread(omar.page, key);
+    await postComment(omar.page, comment);
+    const box = replyBox(omar.page, comment);
+    await box.locator(':scope > summary').click();
+    await expect(box.locator('.thread__note')).toHaveText(REPLY_NOTE_ON_YOUR_OWN);
+    await box.getByLabel(REPLY_PLACEHOLDER).fill(draft);
+
+    await box.getByRole('button', { name: 'Cancel' }).click();
+
+    await expect(box).not.toHaveAttribute('open');
+    await expect(box.getByLabel(REPLY_PLACEHOLDER)).toBeHidden();
+    await expect(box.locator(':scope > summary')).toBeFocused();
+    await box.locator(':scope > summary').press('Enter');
+    await expect(box.getByLabel(REPLY_PLACEHOLDER)).toBeFocused();
+    await expect(box.getByLabel(REPLY_PLACEHOLDER)).toHaveValue(draft);
+  } finally {
+    await omar.context.close();
+  }
+});
+
+test('a refused reply keeps its text in the open Reply box, shows the toast and puts focus back in the text', async ({ browser }) => {
+  const key = await makeTicketForOmar(browser, `Search shows sold-out items ${randomUUID().slice(0, 8)}`);
+  const comment = `Only for the shoe category ${randomUUID().slice(0, 8)}`;
+  const draft = `Also for bags ${randomUUID().slice(0, 8)}`;
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  try {
+    await openThread(omar.page, key);
+    await postComment(omar.page, comment);
+    const box = replyBox(omar.page, comment);
+    await box.locator(':scope > summary').click();
+    // An expired form is the refusal a browser can cause; tests/Functional/Conversation covers the others.
+    await box.locator('input[name="_csrf_token"]').evaluate((input) => {
+      (input as HTMLInputElement).value = 'expired';
+    });
+    await box.getByLabel(REPLY_PLACEHOLDER).fill(draft);
+    const answer = omar.page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/replies') && response.request().method() === 'POST');
+
+    await box.getByRole('button', { name: 'Reply', exact: true }).click();
+
+    expect((await answer).status()).toBe(422);
+    await expect(omar.page.locator(TOAST_REGION)).toHaveText(FORM_EXPIRED);
+    await expect(box).toHaveAttribute('open');
+    await expect(box.getByLabel(REPLY_PLACEHOLDER)).toHaveValue(draft);
+    await expect(box.getByLabel(REPLY_PLACEHOLDER)).toBeFocused();
+    await expect(messageWithText(omar.page, comment).locator('.thread__reply')).toHaveCount(0);
+  } finally {
+    await omar.context.close();
+  }
+});
+
+test('Omar resolves his comment, it folds into one line for Lena too, and show and Hide open and close it', async ({ browser }) => {
+  const key = await makeTicketForOmar(browser, `Address form forgets the flat number ${randomUUID().slice(0, 8)}`);
+  const comment = `Fixed by the new form ${randomUUID().slice(0, 8)}`;
+  const reply = `Checked on staging ${randomUUID().slice(0, 8)}`;
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  const lena = await openAs(browser, LENA_STORAGE_STATE);
+  try {
+    await openThread(omar.page, key);
+    await postComment(omar.page, comment);
+    await openThread(lena.page, key);
+    await replyTo(lena.page, key, comment, reply);
+    await openThread(omar.page, key);
+
+    await resolve(omar.page, comment);
+
+    const fold = foldOf(omar.page, comment);
+    await expect(fold).toHaveCount(1);
+    await expect(fold).not.toHaveAttribute('open');
+    await expect(fold.locator('.thread__fold-line')).toHaveText(`✓ Resolved: ${comment} · 1 reply · show`);
+    await expect(fold.locator('.thread__fold-hide')).toBeHidden();
+    await expect(fold.locator('.thread__fold-message')).toBeHidden();
+
+    await openThread(lena.page, key);
+    const lenasFold = foldOf(lena.page, comment);
+    await expect(lenasFold).not.toHaveAttribute('open');
+    await lenasFold.locator(':scope > summary').click();
+
+    await expect(lenasFold.locator('.thread__fold-message .thread__reply .thread__body')).toHaveText([reply]);
+    await expect(lenasFold.locator('.thread__fold-hide')).toBeVisible();
+    await expect(lenasFold.locator('.thread__fold-line')).toBeHidden();
+    await expect(lenasFold.locator('.thread__resolve-form')).toHaveCount(0);
+
+    await lenasFold.getByText('Hide', { exact: true }).click();
+
+    await expect(lenasFold).not.toHaveAttribute('open');
+    await expect(lenasFold.locator('.thread__fold-message')).toBeHidden();
+    await expect(lenasFold.locator('.thread__fold-line')).toBeVisible();
+  } finally {
+    await lena.context.close();
+    await omar.context.close();
+  }
+});
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`a thread with a reply, an open Reply box and an open fold has no serious or critical accessibility violations in ${scheme}`, async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Map pin drifts on zoom ${randomUUID().slice(0, 8)}`);
+    const resolvedComment = `Pin fixed in the last build ${randomUUID().slice(0, 8)}`;
+    const openComment = `Zoom still slow on old phones ${randomUUID().slice(0, 8)}`;
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    try {
+      await omar.page.emulateMedia({ colorScheme: scheme });
+      await openThread(omar.page, key);
+      await postComment(omar.page, resolvedComment);
+      await postComment(omar.page, openComment);
+      await replyTo(omar.page, key, openComment, `Measured two seconds ${randomUUID().slice(0, 8)}`);
+      await resolve(omar.page, resolvedComment);
+      await openThread(omar.page, key);
+      expect(await seriousViolations(omar.page)).toEqual([]);
+
+      await foldOf(omar.page, resolvedComment).locator(':scope > summary').click();
+      await replyBox(omar.page, openComment).locator(':scope > summary').click();
+      await expect(replyBox(omar.page, openComment).getByLabel(REPLY_PLACEHOLDER)).toBeVisible();
+
+      expect(await seriousViolations(omar.page)).toEqual([]);
+    } finally {
+      await omar.context.close();
+    }
+  });
+}
+
+test('at 360 px a long reply, the Reply box and a resolved fold scroll nothing sideways', async ({ browser }) => {
+  const key = await makeTicketForOmar(browser, `Receipt email wraps badly ${randomUUID().slice(0, 8)}`);
+  // Letters only: a space, a hyphen or a slash would be a place to break the line without any CSS.
+  const comment = `Receipt${'linewrapping'.repeat(20)}${randomUUID().replaceAll('-', '')}`;
+  const reply = `Seenonthe${'phoneapptoo'.repeat(20)}${randomUUID().replaceAll('-', '')}`;
+  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  try {
+    await omar.page.setViewportSize({ width: 360, height: 800 });
+    await openThread(omar.page, key);
+    await postComment(omar.page, comment);
+    await replyTo(omar.page, key, comment, reply);
+    await replyBox(omar.page, comment).locator(':scope > summary').click();
+    await expect(replyBox(omar.page, comment).getByLabel(REPLY_PLACEHOLDER)).toBeVisible();
+    await expectNoSidewaysScroll(omar.page);
+
+    await resolve(omar.page, comment);
+    await expect(foldOf(omar.page, comment).locator('.thread__fold-line')).toBeVisible();
+    await expectNoSidewaysScroll(omar.page);
+    await foldOf(omar.page, comment).locator(':scope > summary').click();
+    await expect(foldOf(omar.page, comment).locator('.thread__fold-message .thread__reply .thread__body')).toBeVisible();
+
+    await expectNoSidewaysScroll(omar.page);
+  } finally {
+    await omar.context.close();
+  }
 });

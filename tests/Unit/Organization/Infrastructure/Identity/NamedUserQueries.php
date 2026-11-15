@@ -43,4 +43,14 @@ final class NamedUserQueries implements UserQueries
 
         return $views;
     }
+
+    public function timeZonesOf(array $userIds): array
+    {
+        throw new \LogicException('Only byIds is expected.');
+    }
+
+    public function emailsOf(array $userIds): array
+    {
+        throw new \LogicException('Only byIds is expected.');
+    }
 }

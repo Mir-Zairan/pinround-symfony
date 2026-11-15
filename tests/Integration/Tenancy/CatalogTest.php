@@ -66,6 +66,8 @@ final class CatalogTest extends KernelTestCase
         self::assertSame([], $catalog->rolesBypassingRowLevelSecurityOtherThan('pinround_retention'));
         self::assertSame([], $catalog->securityDefinerFunctionsOutsideTheResolvers());
         self::assertSame([], $catalog->resolverRightsBeyondItsColumnReads());
+        self::assertSame([], $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader());
+        self::assertSame([], $catalog->resolverFunctionsInALanguageOtherThan(['sql', 'plpgsql']));
         self::assertSame([], $catalog->rolesGrantedTo('pinround_app'));
     }
 
@@ -321,6 +323,246 @@ final class CatalogTest extends KernelTestCase
     }
 
     /**
+     * Only a validated CHECK on the column alone to a fixed set of values counts; any type that is not a number, date,
+     * time, boolean, enum, uuid or bytea counts as text, arrays of text and domains over it included.
+     */
+    #[Test]
+    public function aResolverTextColumnWithoutAClosedSetAndNoResolverReadingItsTableIsReported(): void
+    {
+        self::assertSame(
+            [
+                'zz_catalog_text_columns.free_note (text): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_text_columns',
+                'zz_catalog_text_columns.labels (text[]): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_text_columns',
+                'zz_catalog_text_columns.loose_kind (text): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_text_columns',
+                'zz_catalog_text_columns.name_domain (zz_catalog_name): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_text_columns',
+                'zz_catalog_text_columns.payload (jsonb): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_text_columns',
+                'zz_catalog_text_columns.short_note (character varying(20)): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_text_columns',
+                'zz_catalog_text_columns.unchecked_kind (text): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_text_columns',
+                'zz_catalog_text_columns.words (tsvector): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_text_columns',
+            ],
+            $this->inRolledBackFixture(
+                [
+                    'CREATE DOMAIN zz_catalog_name AS text',
+                    'CREATE TABLE zz_catalog_text_columns (organization_id uuid NOT NULL, created_at timestamptz, rank int, is_open boolean,'
+                    .' token_hash bytea, member_ids uuid[], free_note text, short_note varchar(20), payload jsonb, words tsvector,'
+                    .' labels text[], name_domain zz_catalog_name, kind text, loose_kind text, unchecked_kind text,'
+                    ." CONSTRAINT zz_catalog_kind_check CHECK (kind IN ('ping', 'your_turn')),"
+                    ." CONSTRAINT zz_catalog_loose_kind_check CHECK (loose_kind <> ''))",
+                    "ALTER TABLE zz_catalog_text_columns ADD CONSTRAINT zz_catalog_unchecked_kind_check CHECK (unchecked_kind IN ('ping')) NOT VALID",
+                    ...TenantTable::enableRls('zz_catalog_text_columns'),
+                    ...TenantTable::allowResolverRead('zz_catalog_text_columns', [
+                        'organization_id', 'created_at', 'rank', 'is_open', 'token_hash', 'member_ids', 'free_note', 'short_note',
+                        'payload', 'words', 'labels', 'name_domain', 'kind', 'loose_kind', 'unchecked_kind',
+                    ]),
+                ],
+                static fn (TenancyCatalog $catalog): array => $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(),
+            ),
+        );
+    }
+
+    /**
+     * A text column with no closed set passes only while every resolver function that names its table keeps to the
+     * tenant of the transaction, as search_ticket_ids does for tkt_ticket.title.
+     */
+    #[Test]
+    public function aResolverTextColumnPassesOnlyWhileEveryResolverReadingItsTableIsTenantBound(): void
+    {
+        self::assertSame(
+            [
+                [],
+                ['zz_catalog_matched.title (text): no CHECK to a fixed set of values, and zz_catalog_unbound_reader read zz_catalog_matched without keeping to the tenant of the transaction'],
+            ],
+            [
+                $this->inRolledBackFixture(
+                    self::matchedTableWithATenantBoundReader(),
+                    static fn (TenancyCatalog $catalog): array => $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(),
+                ),
+                $this->inRolledBackFixture(
+                    [
+                        ...self::matchedTableWithATenantBoundReader(),
+                        'CREATE FUNCTION zz_catalog_unbound_reader(p_query text) RETURNS SETOF uuid LANGUAGE sql'
+                        .' AS $fixture$ SELECT organization_id FROM zz_catalog_matched WHERE title = p_query $fixture$',
+                        ...self::ownedByTheResolver('zz_catalog_unbound_reader(text)'),
+                    ],
+                    static fn (TenancyCatalog $catalog): array => $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(),
+                ),
+            ],
+        );
+    }
+
+    /**
+     * A SQL function written with BEGIN ATOMIC keeps its body in prosqlbody and leaves prosrc empty, so a search of
+     * prosrc alone never sees what it reads.
+     */
+    #[Test]
+    public function aBeginAtomicResolverThatReadsATextColumnWithoutTheTenantIsReported(): void
+    {
+        self::assertSame(
+            ['zz_catalog_matched.title (text): no CHECK to a fixed set of values, and zz_catalog_atomic_reader read zz_catalog_matched without keeping to the tenant of the transaction'],
+            $this->inRolledBackFixture(
+                [
+                    ...self::matchedTableWithATenantBoundReader(),
+                    'CREATE FUNCTION zz_catalog_atomic_reader(p_organization_id uuid, p_query text) RETURNS SETOF uuid LANGUAGE sql'
+                    .' BEGIN ATOMIC SELECT organization_id FROM zz_catalog_matched WHERE title = p_query; END',
+                    ...self::ownedByTheResolver('zz_catalog_atomic_reader(uuid, text)'),
+                ],
+                static fn (TenancyCatalog $catalog): array => $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(),
+            ),
+        );
+    }
+
+    /**
+     * The binding counts only outside comments, nested block comments included, and only in a function that takes
+     * p_organization_id as an input: a local variable or an output column of that name binds no row to the tenant. An
+     * unbound overload makes its name unbound.
+     */
+    #[Test]
+    public function aTenantBindingInACommentOrWithoutAnOrganizationInputDoesNotCount(): void
+    {
+        $binding = "p_organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid";
+
+        self::assertSame(
+            [
+                'zz_catalog_matched.title (text): no CHECK to a fixed set of values, and zz_catalog_block_comment_reader,'
+                .' zz_catalog_bound_reader, zz_catalog_line_comment_reader, zz_catalog_local_binding_reader, zz_catalog_output_binding_reader'
+                .' read zz_catalog_matched without keeping to the tenant of the transaction',
+            ],
+            $this->inRolledBackFixture(
+                [
+                    ...self::matchedTableWithATenantBoundReader(),
+                    'CREATE FUNCTION zz_catalog_line_comment_reader(p_organization_id uuid, p_query text) RETURNS SETOF uuid LANGUAGE sql'
+                    ." AS \$fixture\$ SELECT organization_id FROM zz_catalog_matched WHERE title = p_query -- AND {$binding}\n\$fixture\$",
+                    'CREATE FUNCTION zz_catalog_block_comment_reader(p_organization_id uuid, p_query text) RETURNS SETOF uuid LANGUAGE sql'
+                    ." AS \$fixture\$ SELECT organization_id FROM zz_catalog_matched WHERE title = p_query /* outer /* inner */ AND {$binding} */ \$fixture\$",
+                    'CREATE FUNCTION zz_catalog_local_binding_reader(p_query text) RETURNS SETOF uuid LANGUAGE plpgsql'
+                    ." AS \$fixture\$ DECLARE p_organization_id uuid := NULLIF(current_setting('app.org_id', true), '')::uuid;"
+                    ." BEGIN RETURN QUERY SELECT m.organization_id FROM zz_catalog_matched m WHERE {$binding} AND m.title = p_query; END \$fixture\$",
+                    'CREATE FUNCTION zz_catalog_output_binding_reader(p_query text) RETURNS TABLE (p_organization_id uuid) LANGUAGE plpgsql'
+                    ." AS \$fixture\$ BEGIN RETURN QUERY SELECT m.organization_id FROM zz_catalog_matched m WHERE {$binding} AND m.title = p_query; END \$fixture\$",
+                    'CREATE FUNCTION zz_catalog_bound_reader(p_query text) RETURNS SETOF uuid LANGUAGE sql'
+                    .' AS $fixture$ SELECT organization_id FROM zz_catalog_matched WHERE title = p_query $fixture$',
+                    ...self::ownedByTheResolver(
+                        'zz_catalog_bound_reader(text)',
+                        'zz_catalog_line_comment_reader(uuid, text)',
+                        'zz_catalog_block_comment_reader(uuid, text)',
+                        'zz_catalog_local_binding_reader(text)',
+                        'zz_catalog_output_binding_reader(text)',
+                    ),
+                ],
+                static fn (TenancyCatalog $catalog): array => $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(),
+            ),
+        );
+    }
+
+    /**
+     * A resolver function runs what it calls with pinround_resolver's rights, so a function the resolver may run reads
+     * as the resolver too; one it may not run reads nothing for it.
+     */
+    #[Test]
+    public function aFunctionTheResolverMayRunCountsAsAReaderOfTheTablesItNames(): void
+    {
+        $helper = static fn (string $name): string => \sprintf(
+            'CREATE FUNCTION %s(p_query text) RETURNS SETOF uuid LANGUAGE sql'
+            .' AS $fixture$ SELECT organization_id FROM zz_catalog_matched WHERE title = p_query $fixture$',
+            $name,
+        );
+
+        self::assertSame(
+            ['zz_catalog_matched.title (text): no CHECK to a fixed set of values, and zz_catalog_runnable_helper read zz_catalog_matched without keeping to the tenant of the transaction'],
+            $this->inRolledBackFixture(
+                [
+                    ...self::matchedTableWithATenantBoundReader(),
+                    $helper('zz_catalog_runnable_helper'),
+                    $helper('zz_catalog_unrunnable_helper'),
+                    'REVOKE EXECUTE ON FUNCTION zz_catalog_unrunnable_helper(text) FROM PUBLIC',
+                ],
+                static fn (TenancyCatalog $catalog): array => $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(),
+            ),
+        );
+    }
+
+    /**
+     * Whatever lets pinround_resolver read a column of a resolver_read table counts, a grant to PUBLIC on the column or
+     * the whole table included; PUBLIC on a table without resolver_read leaves the resolver to the tenant_isolation policy.
+     */
+    #[Test]
+    public function aTextColumnThatPublicMayReadOnAResolverReadTableIsReported(): void
+    {
+        self::assertSame(
+            [
+                'zz_catalog_public_column.title (text): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_public_column',
+                'zz_catalog_public_table.note (text): no CHECK to a fixed set of values, and no resolver function reads zz_catalog_public_table',
+            ],
+            $this->inRolledBackFixture(
+                [
+                    'CREATE TABLE zz_catalog_public_column (organization_id uuid NOT NULL, title text, note text)',
+                    ...TenantTable::enableRls('zz_catalog_public_column'),
+                    ...TenantTable::allowResolverRead('zz_catalog_public_column', ['organization_id']),
+                    'GRANT SELECT (title) ON zz_catalog_public_column TO PUBLIC',
+                    'CREATE TABLE zz_catalog_public_table (organization_id uuid NOT NULL, note text)',
+                    ...TenantTable::enableRls('zz_catalog_public_table'),
+                    ...TenantTable::allowResolverRead('zz_catalog_public_table', ['organization_id']),
+                    'GRANT SELECT ON zz_catalog_public_table TO PUBLIC',
+                    'CREATE TABLE zz_catalog_public_tenant_only (organization_id uuid NOT NULL, note text)',
+                    ...TenantTable::enableRls('zz_catalog_public_tenant_only'),
+                    'GRANT SELECT ON zz_catalog_public_tenant_only TO PUBLIC',
+                ],
+                static fn (TenancyCatalog $catalog): array => $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(),
+            ),
+        );
+    }
+
+    /**
+     * The migrator can create functions in no language but sql and plpgsql, so the rule is proved with plpgsql left out
+     * of the readable languages, on what the fixture adds to the functions that exist. The C functions an extension
+     * brings are left out: only a superuser or a trusted extension's script can create them.
+     */
+    #[Test]
+    public function aFunctionTheResolverOwnsOrMayRunInAnotherLanguageIsReported(): void
+    {
+        $plpgsqlFunction = static fn (string $name): string => \sprintf(
+            'CREATE FUNCTION %s() RETURNS int LANGUAGE plpgsql AS $fixture$ BEGIN RETURN 1; END $fixture$',
+            $name,
+        );
+        $languageRule = static fn (TenancyCatalog $catalog): array => $catalog->resolverFunctionsInALanguageOtherThan(['sql']);
+
+        $existing = $this->inRolledBackFixture([], $languageRule);
+        $withFixture = $this->inRolledBackFixture(
+            [
+                $plpgsqlFunction('zz_catalog_owned_plpgsql'),
+                'REVOKE EXECUTE ON FUNCTION zz_catalog_owned_plpgsql() FROM PUBLIC',
+                ...self::ownedByTheResolver('zz_catalog_owned_plpgsql()'),
+                $plpgsqlFunction('zz_catalog_runnable_plpgsql'),
+                $plpgsqlFunction('zz_catalog_unrunnable_plpgsql'),
+                'REVOKE EXECUTE ON FUNCTION zz_catalog_unrunnable_plpgsql() FROM PUBLIC',
+                'CREATE EXTENSION fuzzystrmatch',
+            ],
+            $languageRule,
+        );
+
+        self::assertSame(
+            ['zz_catalog_owned_plpgsql() is in language plpgsql', 'zz_catalog_runnable_plpgsql() is in language plpgsql'],
+            array_values(array_diff($withFixture, $existing)),
+        );
+    }
+
+    /**
+     * digest_recipients reads ntf_notification.kind in every organization (Version20261115150000) and keeps to no
+     * tenant, so only ntf_notification_kind_check (Version20261115163000) lets that grant pass.
+     */
+    #[Test]
+    public function theNotificationKindGrantFailsWithoutItsCheck(): void
+    {
+        self::assertSame(
+            ['ntf_notification.kind (text): no CHECK to a fixed set of values, and digest_recipients, organizations_with_due_notifications read ntf_notification without keeping to the tenant of the transaction'],
+            $this->inRolledBackFixture(
+                ['ALTER TABLE ntf_notification DROP CONSTRAINT ntf_notification_kind_check'],
+                static fn (TenancyCatalog $catalog): array => $catalog->resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(),
+            ),
+        );
+    }
+
+    /**
      * Runs $statements as the migrator in a transaction, reads the catalog on that connection (where the
      * uncommitted objects are visible), then rolls back so nothing remains.
      *
@@ -345,6 +587,34 @@ final class CatalogTest extends KernelTestCase
         } finally {
             $migrator->rollBack();
         }
+    }
+
+    /**
+     * @return list<string> zz_catalog_matched with title granted to pinround_resolver, read by a tenant-bound resolver function
+     */
+    private static function matchedTableWithATenantBoundReader(): array
+    {
+        return [
+            'CREATE TABLE zz_catalog_matched (organization_id uuid NOT NULL, title text)',
+            ...TenantTable::enableRls('zz_catalog_matched'),
+            ...TenantTable::allowResolverRead('zz_catalog_matched', ['organization_id', 'title']),
+            'CREATE FUNCTION zz_catalog_bound_reader(p_organization_id uuid, p_query text) RETURNS SETOF uuid LANGUAGE sql'
+            .' AS $fixture$ SELECT organization_id FROM zz_catalog_matched WHERE organization_id = p_organization_id'
+            ." AND p_organization_id = NULLIF(current_setting('app.org_id', true), '')::uuid AND title = p_query \$fixture\$",
+            ...self::ownedByTheResolver('zz_catalog_bound_reader(uuid, text)'),
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function ownedByTheResolver(string ...$signatures): array
+    {
+        return [
+            'GRANT CREATE ON SCHEMA public TO pinround_resolver',
+            ...array_map(static fn (string $signature): string => \sprintf('ALTER FUNCTION %s OWNER TO pinround_resolver', $signature), array_values($signatures)),
+            'REVOKE CREATE ON SCHEMA public FROM pinround_resolver',
+        ];
     }
 
     private function dropResolverProbeLeftovers(): void

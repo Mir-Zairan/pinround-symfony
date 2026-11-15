@@ -10,6 +10,7 @@ use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Application\TicketHistoryEntries;
 use App\Ticketing\Application\TicketHistoryEntry;
+use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\TurnInputs;
 use Psr\Clock\ClockInterface;
@@ -124,9 +125,9 @@ final readonly class TicketPageParts
         if (null === $askedUserId) {
             return $ticket->stepName;
         }
-        $askedName = trim($displayNames[$askedUserId->toString()] ?? '');
+        $askedName = NowNextContext::firstNameFrom($displayNames[$askedUserId->toString()] ?? '');
 
-        return \sprintf(self::PAUSED_PILL, '' === $askedName ? PersonNames::UNKNOWN_PERSON : explode(' ', $askedName, 2)[0]);
+        return \sprintf(self::PAUSED_PILL, $askedName ?? PersonNames::UNKNOWN_PERSON);
     }
 
     /**

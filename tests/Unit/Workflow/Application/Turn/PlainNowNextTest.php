@@ -31,7 +31,7 @@ final class PlainNowNextTest extends TestCase
         $mia = F::user(F::MIA);
         $ben = F::user(F::BEN);
 
-        yield 'open question' => [F::ticket('progress', 'doing', ['askedUserId' => $mia]), new Turn($mia, null, NeedsYouKind::Answer), F::context(asker: F::LENA), "Mia answers Lena's question"];
+        yield 'open question' => [F::ticket('progress', 'doing', ['askedUserId' => $mia]), new Turn($mia, null, NeedsYouKind::Answer), F::context(asker: F::LENA), 'Mia answers Lena’s question'];
         yield 'new ticket check' => [F::ticket('backlog', 'todo', ['isCheckNeeded' => true, 'checkerId' => $lena]), new Turn($lena, null, NeedsYouKind::Check), F::context(), 'Lena takes a quick look at the new ticket'];
         yield 'done' => [F::ticket('done', 'done'), Turn::nobody(), F::context(), 'Done. Nobody needs to act.'];
         yield 'backlog' => [F::ticket('backlog', 'todo'), new Turn($lena, null, NeedsYouKind::Build), F::context(), 'Lena plans it'];
@@ -45,7 +45,7 @@ final class PlainNowNextTest extends TestCase
         yield 'on hold' => [F::ticket('hold', 'wait'), new Turn($lena, null, NeedsYouKind::Decide), F::context(), 'Lena decides if it goes on'];
         yield 'custom step' => [F::ticket(null, 'check'), new Turn($mia, null, NeedsYouKind::Test), F::context(), 'Design check · Mia'];
         yield 'viewer builds' => [F::ticket('progress', 'doing', ['assigneeId' => $omar]), new Turn($omar, null, NeedsYouKind::Build), F::context(viewer: F::OMAR), 'You build it'];
-        yield 'viewer answers' => [F::ticket('progress', 'doing', ['askedUserId' => $mia]), new Turn($mia, null, NeedsYouKind::Answer), F::context(viewer: F::MIA, asker: F::LENA), "You answer Lena's question"];
+        yield 'viewer answers' => [F::ticket('progress', 'doing', ['askedUserId' => $mia]), new Turn($mia, null, NeedsYouKind::Answer), F::context(viewer: F::MIA, asker: F::LENA), 'You answer Lena’s question'];
         yield 'viewer asked the question' => [F::ticket('progress', 'doing', ['askedUserId' => $mia]), new Turn($mia, null, NeedsYouKind::Answer), F::context(viewer: F::LENA, asker: F::LENA), 'Mia answers your question'];
         yield 'viewer checks' => [F::ticket('backlog', 'todo', ['isCheckNeeded' => true, 'checkerId' => $lena]), new Turn($lena, null, NeedsYouKind::Check), F::context(viewer: F::LENA), 'You take a quick look at the new ticket'];
         yield 'viewer is waited for' => [F::ticket('input', 'wait', ['waitingOnUserId' => $ben]), new Turn($ben, null, NeedsYouKind::Input), F::context(viewer: F::BEN), 'Waiting for input from you'];

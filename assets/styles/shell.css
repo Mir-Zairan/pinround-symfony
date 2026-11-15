@@ -270,8 +270,17 @@
   gap: 28px;
 }
 
+/* LiveUpdates sits above main in the page's column, and takes no room while its paused line is hidden. */
+.live-updates {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
 @media (max-width: 360px) {
   .site-header__inner,
+  .live-updates,
   .page {
     padding-left: 16px;
     padding-right: 16px;

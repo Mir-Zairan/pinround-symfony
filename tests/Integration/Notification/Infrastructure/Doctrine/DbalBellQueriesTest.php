@@ -46,6 +46,10 @@ final class DbalBellQueriesTest extends KernelTestCase
     private const string DONE_PING = '0197a3c0-0000-7000-8000-0000000b3304';
     private const string HELD_PING = '0197a3c0-0000-7000-8000-0000000b3305';
     private const string TIED_PING = '0197a3c0-0000-7000-8000-0000000b3306';
+    private const string LENAS_DELIVERED_PING = '0197a3c0-0000-7000-8000-0000000b3307';
+    private const string LENAS_HELD_PING = '0197a3c0-0000-7000-8000-0000000b3308';
+
+    private MockClock $clock;
 
     protected function setUp(): void
     {
@@ -83,7 +87,8 @@ final class DbalBellQueriesTest extends KernelTestCase
         $this->notificationRows()->addOf(self::BETA_BAKERY, 'ntf_notification', [
             [...self::notification('0b3261', self::LENA, self::BAKERY_TICKET, 'ping', '2027-03-19 18:00:00+00', []), 'organization_id' => self::BETA_BAKERY],
         ]);
-        self::getContainer()->set('clock', new MockClock(self::NOW));
+        $this->clock = new MockClock(self::NOW);
+        self::getContainer()->set('clock', $this->clock);
     }
 
     protected function tearDown(): void
@@ -129,6 +134,33 @@ final class DbalBellQueriesTest extends KernelTestCase
         self::assertSame([self::LENA, self::MIA], [$bell->groups[0]->senderId->toString(), $bell->groups[1]->senderId->toString()]);
     }
 
+    /**
+     * VisibleBellTickets finds TICKET_C through the delivered row, so only the bell's own deliver_after filter keeps
+     * the held row out at 08:59.
+     */
+    #[Test]
+    public function aRowHeldOnATicketWithADeliveredRowJoinsTheGroupOnlyAtItsDeliveryTime(): void
+    {
+        $this->notificationRows()->addOf(self::ACME_FOODS, 'ntf_ping', [
+            [...self::ping(self::LENAS_DELIVERED_PING, 'Seen the new logs?', '2027-03-20 20:00:00+00'), 'ticket_id' => self::TICKET_C, 'from_id' => self::MIA, 'to_id' => self::LENA],
+            [...self::ping(self::LENAS_HELD_PING, 'Held for the morning.', '2027-03-20 22:00:00+00'), 'ticket_id' => self::TICKET_C, 'from_id' => self::MIA, 'to_id' => self::LENA],
+        ]);
+        $this->notificationRows()->addOf(self::ACME_FOODS, 'ntf_notification', [
+            [...self::notification('0b3282', self::MIA, self::TICKET_C, 'ping', '2027-03-21 09:00:00+00', ['pingId' => self::LENAS_HELD_PING], ['deliver_after' => '2027-03-21 09:00:00+00']), 'user_id' => self::LENA],
+            [...self::notification('0b3281', self::MIA, self::TICKET_C, 'ping', '2027-03-20 20:00:00+00', ['pingId' => self::LENAS_DELIVERED_PING]), 'user_id' => self::LENA],
+        ]);
+        $this->clock->modify('2027-03-21 08:59:00+00:00');
+
+        $bellAt0859 = $this->bellOf(self::LENA);
+        $this->clock->modify('2027-03-21 09:00:00+00:00');
+        $bellAt0900 = $this->bellOf(self::LENA);
+
+        self::assertSame(1, $bellAt0859->openCount);
+        self::assertSame([[self::MIA, 1, 'Seen the new logs?']], array_map(static fn (BellGroup $group): array => [$group->senderId->toString(), $group->size, $group->newestPingText], $bellAt0859->groups));
+        self::assertSame(2, $bellAt0900->openCount);
+        self::assertSame([[self::MIA, 2, 'Held for the morning.']], array_map(static fn (BellGroup $group): array => [$group->senderId->toString(), $group->size, $group->newestPingText], $bellAt0900->groups));
+    }
+
     #[Test]
     public function aNotificationWithoutTheSendersNameInItsSnapshotFailsTheBell(): void
     {
@@ -154,7 +186,12 @@ final class DbalBellQueriesTest extends KernelTestCase
 
     private function bellOfOmar(): BellView
     {
-        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): BellView => $this->notificationQueries()->bell(new UserId(self::OMAR)));
+        return $this->bellOf(self::OMAR);
+    }
+
+    private function bellOf(string $userId): BellView
+    {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): BellView => $this->notificationQueries()->bell(new UserId($userId)));
     }
 
     /**

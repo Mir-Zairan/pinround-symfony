@@ -157,6 +157,49 @@ final class Message implements TenantOwned
     }
 
     /**
+     * Folds a comment for everyone (FR-CNV-05): sets resolvedAt and resolvedBy. A question is closed only by answer().
+     *
+     * @param bool $isTeamLead whether $resolverId leads the ticket's team, who may resolve anyone's comment there
+     *
+     * @throws \DomainException when the message is a question, the comment is removed or already resolved, or the
+     *                          resolver is neither its author nor the team's lead; the message stays as it was
+     */
+    public function resolve(UserId $resolverId, bool $isTeamLead, \DateTimeImmutable $resolvedAt): void
+    {
+        if (MessageKind::Comment !== $this->kind) {
+            throw new \DomainException('A question is closed by its answer, not by Resolve.');
+        }
+        if (null !== $this->removedAt) {
+            throw new \DomainException('This comment was removed, so it cannot be resolved.');
+        }
+        if (null !== $this->resolvedAt) {
+            throw new \DomainException('This comment is already resolved.');
+        }
+        if (!$isTeamLead && !$resolverId->equals($this->authorId())) {
+            throw new \DomainException('Only the person who wrote a comment or the lead of the ticket\'s team can resolve it.');
+        }
+
+        $this->resolvedAt = $resolvedAt;
+        $this->resolvedBy = $resolverId->toString();
+    }
+
+    /**
+     * A plain reply under this comment or question (FR-CNV-04), never its answer: only answer() closes a question. The
+     * message itself does not change; the caller saves the reply.
+     *
+     * @throws \DomainException          when the comment was removed or the question withdrawn
+     * @throws \InvalidArgumentException when the body is blank or longer than MAX_BODY_LENGTH characters
+     */
+    public function reply(ReplyId $replyId, UserId $authorId, string $body, \DateTimeImmutable $postedAt): Reply
+    {
+        if (null !== $this->removedAt) {
+            throw new \DomainException('This message was removed, so you cannot reply to it.');
+        }
+
+        return Reply::post($replyId, $this->organizationId(), $this->id(), $authorId, $body, false, $postedAt);
+    }
+
+    /**
      * @throws \InvalidArgumentException when the body is blank or longer than MAX_BODY_LENGTH characters
      */
     private static function refuseAnInvalidBody(string $body): void

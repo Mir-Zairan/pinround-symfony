@@ -12,7 +12,6 @@ use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
 use App\Ticketing\Api\TicketPageView;
-use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibilities;
 use Psr\Clock\ClockInterface;
@@ -99,7 +98,7 @@ final class MuteController extends AbstractController
         $this->denyAccessUnlessGranted(OrganizationPermission::VIEW, $this->tenantContext->get());
         $actor = $this->currentActor->actorFor($this->getUser()) ?? throw $this->createAccessDeniedException();
         $ticket = $this->ticketQueries->pageOf($key, $this->ticketVisibilities->of($actor->organizationId(), $actor->userId()));
-        if (null === $ticket || !$this->isGranted(TicketPermission::VIEW, $ticket->visibilityFacts) || !$this->isGranted(MutePermission::MUTE, $ticket->visibilityFacts)) {
+        if (null === $ticket || !$this->isGranted(MutePermission::MUTE, $ticket->visibilityFacts)) {
             throw $this->createNotFoundException(self::TICKET_NOT_FOUND);
         }
 

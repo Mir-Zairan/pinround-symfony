@@ -13,7 +13,7 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * Like DoctrinePings with ntf_ping's primary key: a second ping with an id already stored is refused. The locking read
- * needs a tenant, as the real one needs a transaction under one, and finds only that organization's pings.
+ * needs a tenant, as the real one needs a transaction under one, and finds only that organization's open pings.
  */
 final class InMemoryPings implements Pings
 {
@@ -63,6 +63,14 @@ final class InMemoryPings implements Pings
         usort($openPings, static fn (Ping $left, Ping $right): int => [$left->createdAt(), $left->id()->toString()] <=> [$right->createdAt(), $right->id()->toString()]);
 
         return $openPings;
+    }
+
+    public function lockedOpenPing(PingId $id): ?Ping
+    {
+        $tenantId = $this->tenantId ?? throw new \LogicException('Locking a ping needs an open transaction.');
+        $ping = $this->stored[$id->toString()] ?? null;
+
+        return null !== $ping && $ping->organizationId()->equals($tenantId) && null === $ping->clearedAt() ? $ping : null;
     }
 
     public function actAsTenant(OrganizationId $tenantId): void

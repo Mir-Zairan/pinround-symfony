@@ -1,0 +1,6 @@
+{#- The bell push a worker publishes on one person's topic (RefreshBellHandler): the badge from openCount, a fresh lazy
+    popover frame in place of the cards (their forms need the person's session), and the toast when toast is not null. -#}
+{%- set bellController = 'App\\Notification\\UI\\Controller\\BellController' -%}
+<turbo-stream action="replace" target="bell-badge"><template>{{ include('@Notification/_bell_badge.html.twig', {openCount: openCount}) }}</template></turbo-stream>
+<turbo-stream action="replace" target="{{ constant(bellController ~ '::FRAME_ID') }}"><template>{{ include('@Notification/_bell_lazy_frame.html.twig', {frameId: constant(bellController ~ '::FRAME_ID'), frameSrc: path(constant(bellController ~ '::ROUTE'))}) }}</template></turbo-stream>
+{% if toast is not null %}{{ include('@Web/_toast_stream.html.twig', {message: toast}) }}{% endif %}

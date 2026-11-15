@@ -42,6 +42,8 @@ final class BellTest extends WebTestCase
 
     private const string STREAM_MEDIA_TYPE = 'text/vnd.turbo-stream.html';
     private const string NEWEST_PING_TEXT = 'Could you look at the checkout button?';
+    private const string GROUPED = 'Grouped by person and ticket.';
+    private const string GROUPED_WITH_AUTO_CLEAR = 'Grouped by person and ticket. A ping clears itself when you act on that ticket.';
 
     private MockClock $clock;
     private User $omar;
@@ -79,6 +81,37 @@ final class BellTest extends WebTestCase
     }
 
     #[Test]
+    public function thePopoverSaysAPingClearsItselfWhenAutoClearIsOn(): void
+    {
+        $client = $this->omarsClient();
+        $this->storeAutoClear(true);
+
+        $frame = $client->request('GET', '/bell');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(self::GROUPED_WITH_AUTO_CLEAR, $frame->filter('#bell-popover-body .bell-popover__muted')->text());
+    }
+
+    #[Test]
+    public function thePopoverAndItsDoneStreamLeaveOutTheAutoClearSentenceWhenAutoClearIsOff(): void
+    {
+        $client = $this->omarsClient();
+        $this->storeAutoClear(false);
+
+        $frame = $client->request('GET', '/bell');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(self::GROUPED, $frame->filter('#bell-popover-body .bell-popover__muted')->text());
+
+        $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)], server: ['HTTP_ACCEPT' => self::STREAM_MEDIA_TYPE.', text/html']);
+
+        self::assertResponseStatusCodeSame(200);
+        $stream = new Crawler((string) $client->getResponse()->getContent());
+        $popover = new Crawler($stream->filter('turbo-stream[target="bell-popover-body"] template')->html());
+        self::assertSame(self::GROUPED, $popover->filter('.bell-popover__muted')->text());
+    }
+
+    #[Test]
     public function aPersonWithNoOpenNotificationsIsToldSo(): void
     {
         $client = $this->omarsClient();
@@ -108,6 +141,7 @@ final class BellTest extends WebTestCase
         self::assertSame('1 open', $badge->filter('#bell-badge .visually-hidden')->text());
         $popover = new Crawler($stream->filter('turbo-stream[target="bell-popover-body"] template')->html());
         self::assertSame('Pings · 1 open', $popover->filter('#bell-popover-title')->text());
+        self::assertSame(self::GROUPED_WITH_AUTO_CLEAR, $popover->filter('.bell-popover__muted')->text());
         self::assertSame(['Mia asked you · 3 h ago'], $popover->filter('.ping-card__line')->each(static fn (Crawler $line): string => $line->text()));
         self::assertStringContainsString('data-toast-message-value="Marked done."', $stream->filter('turbo-stream[target="toast-region"]')->html());
         self::assertSame(self::marked($rowsBefore, 'done', 'Lena to Omar on SHOP-1 at 50 min', 'Lena to Omar on SHOP-1 at 20 min', 'Lena to Omar on SHOP-1 at 5 min'), $this->rows());
@@ -319,6 +353,15 @@ final class BellTest extends WebTestCase
 
             return \count($rows);
         });
+    }
+
+    private function storeAutoClear(bool $isAutoClearOn): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO org_settings (organization_id, data, created_at) VALUES (?, jsonb_build_object('auto_clear', ?::boolean), TIMESTAMPTZ '2026-11-01 08:00:00+00')
+             ON CONFLICT (organization_id) DO UPDATE SET data = org_settings.data || EXCLUDED.data",
+            [$this->acmeFoods->toString(), $isAutoClearOn ? 'true' : 'false'],
+        ));
     }
 
     /**

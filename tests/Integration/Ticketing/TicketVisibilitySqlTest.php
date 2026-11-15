@@ -104,6 +104,27 @@ final class TicketVisibilitySqlTest extends KernelTestCase
         yield 'Sara, an admin of Beta Bakery' => [TicketVisibility::for(new OrganizationId(self::BETA_BAKERY), new UserId(self::SARA), [], true, null), ['10']];
     }
 
+    /**
+     * Ticket 1 is Acme Foods' only ticket for everyone; ticket 10 is for everyone too, but Beta Bakery's. Run under both
+     * tenants, so the condition alone, not row-level security, leaves ticket 10 out.
+     */
+    #[Test]
+    public function theForEveryoneConditionFindsOnlyTheOrganizationsTicketsForEveryone(): void
+    {
+        $condition = TicketVisibilitySql::forEveryoneIn(new OrganizationId(self::ACME_FOODS), 't');
+        $ticketNumbersFound = fn (): array => $this->connection()->fetchFirstColumn(
+            'SELECT t.number::text FROM tkt_ticket t WHERE '.$condition->sql().' ORDER BY t.number',
+            $condition->parameters(),
+        );
+
+        $found = [
+            ...$this->transactions()->rolledBackAs(self::ACME_FOODS, $ticketNumbersFound),
+            ...$this->transactions()->rolledBackAs(self::BETA_BAKERY, $ticketNumbersFound),
+        ];
+
+        self::assertSame(['1'], $found);
+    }
+
     #[Test]
     public function twoConditionsInOneQueryKeepTheirOwnViewers(): void
     {

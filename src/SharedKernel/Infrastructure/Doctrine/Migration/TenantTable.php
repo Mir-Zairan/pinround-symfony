@@ -37,9 +37,11 @@ final class TenantTable
     /**
      * Lets the resolver functions (owned by pinround_resolver, see ResolverFunctions) read rows of every
      * organization in $table, but only $columns. Pass only the columns a resolver returns or matches on, never
-     * secrets. A text column may be granted only to match on, never to return, and only for a function that limits
-     * itself to the transaction's tenant (p_organization_id must equal app.org_id); search_ticket_ids, which matches
-     * tkt_ticket.title and search, is the one such case. For a partitioned table pass the parent only, never a child
+     * secrets. A text column may be granted only to match on, never to return, and only when a CHECK limits it to a fixed
+     * set of values (ntf_notification.kind), or for matching inside a function that limits itself to the transaction's
+     * tenant (p_organization_id must equal app.org_id; search_ticket_ids on tkt_ticket.title, key and search). The
+     * grant is per role, not per function, so the second case holds only while every resolver function that reads the
+     * table is tenant-bound; CatalogTest fails otherwise. For a partitioned table pass the parent only, never a child
      * partition.
      *
      * @param list<string> $columns

@@ -42,6 +42,8 @@ final class TicketThreadTest extends WebTestCase
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string KEY = 'SHOP-1';
+    private const string OTHER_KEY = 'SHOP-2';
+    private const string OTHER_TICKETS_COMMENT_ID = '0197a3c0-0000-7000-8000-0000000000c2';
     private const string TICKET_PAGE = '/t/SHOP-1';
     private const string THREAD_PAGE = '/t/SHOP-1/thread';
     private const string COMMENT_PATH = '/t/SHOP-1/comments';
@@ -149,13 +151,14 @@ final class TicketThreadTest extends WebTestCase
             [['Comment', 'true', false], ['Ask a question', 'false', true]],
             $thread->filter('.thread__kinds button.chip[type="button"]')->each(static fn (Crawler $chip): array => [trim($chip->text()), $chip->attr('aria-pressed'), null !== $chip->attr('disabled')]),
         );
-        self::assertSame('thread-composer', $thread->filter('.thread__content')->attr('data-controller'));
+        self::assertSame('thread-composer ask-choices', $thread->filter('.thread__content')->attr('data-controller'));
         self::assertSame(
             'turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer',
             $thread->filter('.thread__content')->attr('data-action'),
             'Focus goes back to the composer or the changed message after a thread form.',
         );
-        self::assertCount(1, $thread->filter('.thread__content #'.Thread::MESSAGES_ID.'[data-thread-composer-target="messages"]'));
+        self::assertCount(1, $thread->filter('.thread__content #'.Thread::MESSAGES_ID.'[data-thread-composer-target="messages"][data-ask-choices-target="messages"]'));
+        self::assertCount(1, $thread->filter('form.thread__composer .thread__ask-choices[data-ask-choices-target="choices"]'), 'ask-choices replaces the composer\'s people after a live reload.');
         self::assertNotNull($thread->filter('form.thread__composer textarea[data-thread-composer-target="body"]')->attr('required'));
         self::assertSame('Comment', trim($thread->filter('form.thread__composer button[data-thread-composer-target="submit"]')->text()));
     }
@@ -269,6 +272,110 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
+     * Raj, Sara and Mia are outside the ticket's people, asked and answering: the replies of every message, answers
+     * included, cost one query already read for the comments, and the names of everyone the questions bring one more,
+     * however many questions there are.
+     */
+    #[Test]
+    public function theFrameReadsAnswersInTheRepliesQueryAndNamesAnsweringAndAskedPeopleOutsideTheTicketsPeopleInOneMore(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
+        $this->addMessage('Lena', 'Thanks', '2026-11-06 09:05:00+00');
+        $this->logIn($this->client, $this->people['Mia']);
+        // logIn() leaves the user in the entity manager, and the first request fills the caches.
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $queryCountWithTheTicketsPeople = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+        $this->addAnsweredQuestion('Omar', 'Raj', '2026-11-06 10:00:00+00');
+        $this->addAnsweredQuestion('Lena', 'Sara', '2026-11-06 10:10:00+00');
+        $this->addAnsweredQuestion('Omar', 'Mia', '2026-11-06 10:20:00+00');
+
+        $queries = $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+
+        $frame = $this->client->getCrawler();
+        $metaLines = $frame->filter('.thread__message-main > .thread__meta')->each(static fn (Crawler $meta): string => (string) preg_replace('/\s+/', ' ', trim($meta->text())));
+        self::assertSame(
+            ['Omar · 2 h ago · question to Raj', 'Lena · 1 h ago · question to Sara', 'Omar · 1 h ago · question to Mia'],
+            array_values(array_filter($metaLines, static fn (string $metaLine): bool => str_contains($metaLine, 'question to'))),
+        );
+        self::assertSame(
+            ['Raj', 'Sara', 'Mia'],
+            $frame->filter('.thread__reply--answer .thread__author')->each(static fn (Crawler $author): string => trim($author->text())),
+        );
+        self::assertCount(1, array_filter($queries, static fn (string $query): bool => str_contains($query, 'cnv_reply')));
+        self::assertSame($queryCountWithTheTicketsPeople + 1, \count($queries));
+    }
+
+    /**
+     * @return iterable<string, array{string, int}> a viewer MessageVoter grants Resolve on some comments, and how many
+     *                                              of the eight comments it grants
+     */
+    public static function viewersWhoMayResolve(): iterable
+    {
+        yield 'Omar, the author of his four' => ['Omar', 4];
+        yield 'Lena, the lead, of all eight' => ['Lena', 8];
+    }
+
+    /**
+     * Whether Resolve is offered is asked once for the thread, not per message, and every message's replies come in the
+     * one replies query: more comments and replies by the same people cost no query.
+     */
+    #[Test]
+    #[DataProvider('viewersWhoMayResolve')]
+    public function moreCommentsAndRepliesByTheSamePeopleCostNoQuery(string $viewer, int $expectedResolveCount): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
+        $this->addMessage('Lena', 'Thanks', '2026-11-06 09:05:00+00');
+        $this->logIn($this->client, $this->people[$viewer]);
+        // logIn() leaves the user in the entity manager, and the first request fills the caches.
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $queryCountWithTwoComments = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+        foreach (['10:00', '10:05', '10:10'] as $time) {
+            $omarsCommentId = $this->addMessage('Omar', 'Still on it', '2026-11-06 '.$time.':00+00');
+            $this->addReply($omarsCommentId, 'Lena', 'Good');
+            $leadsCommentId = $this->addMessage('Lena', 'One more thing', '2026-11-06 '.$time.':30+00');
+            $this->addReply($leadsCommentId, 'Omar', 'Noted');
+        }
+
+        $queryCountWithMore = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+
+        self::assertSame(8, $this->client->getCrawler()->filter('.thread__message')->count());
+        self::assertSame(6, $this->client->getCrawler()->filter('.thread__reply')->count());
+        self::assertSame($expectedResolveCount, $this->client->getCrawler()->filter('.thread__resolve-form')->count());
+        self::assertSame($queryCountWithTwoComments, $queryCountWithMore);
+    }
+
+    /**
+     * Lena leads the ticket, so she may resolve every comment: authors she has not seen before cost no query, as
+     * MessageVoter is asked once for the whole thread, not once per author.
+     */
+    #[Test]
+    public function commentsByMoreAuthorsCostTheLeadNoQuery(): void
+    {
+        $this->addTicket();
+        $this->addMessage('Omar', 'Looking at it', '2026-11-06 09:00:00+00');
+        $this->addMessage('Lena', 'Thanks', '2026-11-06 09:05:00+00');
+        $this->addMessage('Raj', 'Any news?', '2026-11-06 09:10:00+00');
+        $this->logIn($this->client, $this->people['Lena']);
+        // logIn() leaves the user in the entity manager, and the first request fills the caches.
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS);
+        $queryCountWithThreeAuthors = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+        $this->addMessage('Sara', 'Checked the settings', '2026-11-06 10:00:00+00');
+        $this->addMessage('Mia', 'Tested on staging', '2026-11-06 10:05:00+00');
+
+        $queryCountWithFiveAuthors = \count($this->queriesOf(self::THREAD_PAGE, self::TURBO_FRAME_HEADERS));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(5, $this->client->getCrawler()->filter('.thread__message')->count());
+        self::assertSame(5, $this->client->getCrawler()->filter('.thread__resolve-form')->count());
+        self::assertSame($queryCountWithThreeAuthors, $queryCountWithFiveAuthors);
+    }
+
+    /**
      * The meta line says how long ago in the words the tickets list uses, the date in Mia's zone from a day on: Lena's
      * 23:30 UTC on 2 Nov is 3 Nov in Berlin. Each message has its author's avatar, hidden from screen readers, which
      * read the name next to it.
@@ -364,6 +471,33 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame('Fixed on staging', trim($streams[Thread::MESSAGES_ID]->filter('#'.Thread::MESSAGES_ID.' .thread__message .thread__body')->text()));
         self::assertCount(0, $streams[Thread::MESSAGES_ID]->filter('form.thread__composer'), 'The stream leaves the composer and its focus alone.');
         self::assertCount(1, $this->messageRows());
+    }
+
+    /**
+     * The message list carries whom the viewer may ask, for thread-composer to copy into the permanent composer after
+     * a live reload or a Turbo Stream: the ticket's people in their order (assignee, reporter, reviewer, tester, lead),
+     * each once, without the viewer. Lena reports and leads; Omar, the assignee, views; Raj is on no ticket role.
+     */
+    #[Test]
+    public function theMessageListCarriesTheTicketsPeopleOnceWithoutTheViewer(): void
+    {
+        $this->addTicket();
+        $this->setReviewerAndTester('Sara', 'Mia');
+        $this->logIn($this->client, $this->people['Omar']);
+        $expected = array_map(fn (string $name): array => [$name, $this->people[$name]->id()->toString()], ['Lena', 'Sara', 'Mia']);
+
+        $frame = $this->client->request('GET', self::THREAD_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $carried = (string) $frame->filter('#'.Thread::MESSAGES_ID)->attr('data-ask-choices');
+        self::assertSame($expected, self::askChoicesIn($carried));
+        self::assertSame($expected, self::askChoicesIn($frame->filter('form.thread__composer .thread__ask-choices')->html()), 'The composer starts with the same people.');
+        self::assertSame($expected[0][1], new Crawler('<!DOCTYPE html><html><body>'.$carried.'</body></html>')->filter('input[name="'.ThreadController::ASKED_USER_FIELD.'"]')->attr('value'));
+
+        $this->client->request('POST', self::COMMENT_PATH, $this->formFields('Fixed on staging'), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame($expected, self::askChoicesIn((string) $streams[Thread::MESSAGES_ID]->filter('#'.Thread::MESSAGES_ID)->attr('data-ask-choices')));
     }
 
     /**
@@ -464,9 +598,10 @@ final class TicketThreadTest extends WebTestCase
         $this->logIn($this->client, $this->people['Omar']);
         $fields = [ThreadController::CSRF_FIELD => $token, ThreadController::BODY_FIELD => 'Changed'];
 
-        foreach ([self::COMMENT_PATH, $this->messagePath($messageId, 'edit'), $this->messagePath($messageId, 'remove')] as $path) {
+        $editPath = $this->messagePath($messageId, 'edit');
+        foreach ([self::COMMENT_PATH, $editPath, $this->messagePath($messageId, 'remove')] as $path) {
             $this->client->request('POST', $path, $fields, [], self::TURBO_FORM_HEADERS);
-            self::assertSame(ThreadController::FORM_EXPIRED, $this->toastOf($this->streamsOfTheAnswer(422)), $path);
+            self::assertSame(ThreadController::FORM_EXPIRED, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: $editPath === $path)), $path);
         }
 
         self::assertSame($rowsBefore, $this->messageRows());
@@ -506,7 +641,22 @@ final class TicketThreadTest extends WebTestCase
 
         $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Too late'), [], self::TURBO_FORM_HEADERS);
 
-        self::assertSame(self::EDIT_WINDOW_PASSED, $this->toastOf($this->streamsOfTheAnswer(422)));
+        // Only the toast: a new message list would close the open Edit box and lose its text.
+        self::assertSame(self::EDIT_WINDOW_PASSED, $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
+        self::assertSame($rowsBefore, $this->messageRows());
+    }
+
+    #[Test]
+    public function anEditRefusedFromAFormWithoutTurboRedirectsToTheThreadWithTheReason(): void
+    {
+        $this->addTicket();
+        $messageId = $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:44:59+00');
+        $rowsBefore = $this->messageRows();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Too late'));
+
+        self::assertSame(self::EDIT_WINDOW_PASSED, $this->toastAfterTheRedirect());
         self::assertSame($rowsBefore, $this->messageRows());
     }
 
@@ -525,7 +675,7 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame([], $this->actionsOn($page));
 
         $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Lena was here'), [], self::TURBO_FORM_HEADERS);
-        self::assertSame('Only the person who wrote a message can edit it.', $this->toastOf($this->streamsOfTheAnswer(422)));
+        self::assertSame('Only the person who wrote a message can edit it.', $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
         $this->client->request('POST', $this->messagePath($messageId, 'remove'), $this->formFields(''), [], self::TURBO_FORM_HEADERS);
         self::assertSame('Only the person who wrote a message can remove it.', $this->toastOf($this->streamsOfTheAnswer(422)));
 
@@ -568,7 +718,7 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame('This message is already removed.', $this->toastOf($streams = $this->streamsOfTheAnswer(422)));
         self::assertStringNotContainsString(self::EARLIER_BODY, $streams[Thread::MESSAGES_ID]->html());
         $this->client->request('POST', $this->messagePath($messageId, 'edit'), $this->formFields('Back again'), [], self::TURBO_FORM_HEADERS);
-        self::assertSame('This message was removed, so it cannot be edited.', $this->toastOf($this->streamsOfTheAnswer(422)));
+        self::assertSame('This message was removed, so it cannot be edited.', $this->toastOf($this->streamsOfTheAnswer(422, isToastOnly: true)));
 
         self::assertSame($rowsBefore, $this->messageRows());
     }
@@ -580,15 +730,23 @@ final class TicketThreadTest extends WebTestCase
     {
         yield 'malformed' => ['not-a-uuid'];
         yield 'unknown' => ['0197a3c0-0000-7000-8000-00000000dead'];
+        yield 'Omar\'s own comment on SHOP-2' => [self::OTHER_TICKETS_COMMENT_ID];
     }
 
+    /**
+     * Omar may edit and remove his comments on SHOP-1 and SHOP-2: an id under SHOP-1's path that names no message of
+     * SHOP-1 changes neither.
+     */
     #[Test]
     #[DataProvider('messageIdsOfNoMessage')]
     public function aMessageIdOfNoMessageIsNotFound(string $messageId): void
     {
         $this->addTicket();
         $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00');
+        $this->addTicket(key: self::OTHER_KEY);
+        $this->addMessage('Omar', self::EARLIER_BODY, '2026-11-06 11:59:00+00', key: self::OTHER_KEY, messageId: self::OTHER_TICKETS_COMMENT_ID);
         $rowsBefore = $this->messageRows();
+        self::assertCount(2, $rowsBefore);
         $this->logIn($this->client, $this->people['Omar']);
 
         foreach (['edit', 'remove'] as $action) {
@@ -677,11 +835,12 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region.
+     * Asserts the answer is a Turbo Stream of the status that replaces the message list and updates the toast region,
+     * or, for a toast-only answer, only updates the toast region.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
-    private function streamsOfTheAnswer(int $expectedStatus): array
+    private function streamsOfTheAnswer(int $expectedStatus, bool $isToastOnly = false): array
     {
         self::assertResponseStatusCodeSame($expectedStatus);
         self::assertSame('text/vnd.turbo-stream.html; charset=UTF-8', $this->client->getResponse()->headers->get('Content-Type'));
@@ -692,7 +851,7 @@ final class TicketThreadTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
+            $isToastOnly ? [['update', self::TOAST_REGION_ID]] : [['replace', Thread::MESSAGES_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];
@@ -715,43 +874,105 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
-     * SHOP-1, a bug of Shop's team reported by Lena and assigned to Omar, for everyone or for the team only.
+     * A bug of Shop's team, SHOP-1 unless $key says otherwise, reported by Lena and assigned to Omar, for everyone or
+     * for the team only.
      */
-    private function addTicket(string $visibility = 'all'): void
+    private function addTicket(string $visibility = 'all', string $key = self::KEY): void
     {
         $parameters = [
-            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), $this->stepId,
+            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->shopProject, $this->shop->toString(), (int) substr($key, \strlen('SHOP-')), $key, $this->stepId,
             $this->people['Lena']->id()->toString(), $this->people['Omar']->id()->toString(), $visibility,
         ];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
                  step_id, reporter_id, assignee_id, visibility, version, components, check_reasons, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 1, 'SHOP-1', 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, ?, 3, '{}', '{}',
+             VALUES (?, ?, ?, ?, ?, ?, 'Cart total shows the wrong sum', '', 'bug', 'major', 2, ?, ?, ?, ?, 3, '{}', '{}',
                  TIMESTAMPTZ '2026-11-04 10:00:00+00', TIMESTAMPTZ '2026-11-05 10:00:00+00')",
             $parameters,
         ));
     }
 
+    private function setReviewerAndTester(string $reviewer, string $tester): void
+    {
+        $parameters = [$this->people[$reviewer]->id()->toString(), $this->people[$tester]->id()->toString(), $this->acmeFoods->toString(), self::KEY];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET reviewer_id = ?, tester_id = ? WHERE organization_id = ? AND key = ?',
+            $parameters,
+        ));
+    }
+
     /**
-     * A comment on SHOP-1 by the person, removed at $removedAt when given; or an open question to Lena.
+     * @return list<array{string, string}> the first name and user id of each person chip in the markup, in order
+     */
+    private static function askChoicesIn(string $markup): array
+    {
+        return new Crawler('<!DOCTYPE html><html><body>'.$markup.'</body></html>')
+            ->filter('[data-thread-composer-target="person"]')
+            ->each(static fn (Crawler $chip): array => [trim($chip->text()), (string) $chip->attr('data-user-id')]);
+    }
+
+    /**
+     * A comment by the person on SHOP-1 unless $key says otherwise, removed at $removedAt when given; or an open
+     * question to Lena.
      *
      * @param 'comment'|'question' $kind
      *
-     * @return string its id
+     * @return string its id, $messageId when given
      */
-    private function addMessage(string $author, string $body, string $createdAt, ?string $removedAt = null, string $kind = 'comment'): string
+    private function addMessage(string $author, string $body, string $createdAt, ?string $removedAt = null, string $kind = 'comment', string $key = self::KEY, ?string $messageId = null): string
     {
-        $messageId = Uuid::v7()->toRfc4122();
+        $messageId ??= Uuid::v7()->toRfc4122();
         $organizationId = $this->acmeFoods->toString();
         $authorId = $this->people[$author]->id()->toString();
         $toUserId = 'question' === $kind ? $this->people['Lena']->id()->toString() : null;
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, created_at, removed_at)
-             SELECT organization_id, ?, id, ?, ?, ?, ?, ?, ? FROM tkt_ticket WHERE organization_id = ? AND key = 'SHOP-1'",
-            [$messageId, $authorId, $kind, $toUserId, $body, $createdAt, $removedAt, $organizationId],
+            'INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, created_at, removed_at)
+             SELECT organization_id, ?, id, ?, ?, ?, ?, ?, ? FROM tkt_ticket WHERE organization_id = ? AND key = ?',
+            [$messageId, $authorId, $kind, $toUserId, $body, $createdAt, $removedAt, $organizationId, $key],
         ));
 
         return $messageId;
+    }
+
+    /**
+     * A question on SHOP-1 by $asker to $asked, who answered it ten minutes later.
+     */
+    private function addAnsweredQuestion(string $asker, string $asked, string $askedAt): void
+    {
+        $questionId = Uuid::v7()->toRfc4122();
+        $answeredAt = new \DateTimeImmutable($askedAt)->modify('+10 minutes')->format('Y-m-d H:i:sP');
+        $parameters = [
+            'organization' => $this->acmeFoods->toString(), 'question' => $questionId, 'answer' => Uuid::v7()->toRfc4122(),
+            'asker' => $this->people[$asker]->id()->toString(), 'asked' => $this->people[$asked]->id()->toString(),
+            'askedAt' => $askedAt, 'answeredAt' => $answeredAt,
+        ];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters): int {
+            $migrator->executeStatement(
+                "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, created_at, resolved_at, resolved_by)
+                 SELECT organization_id, :question, id, :asker, 'question', :asked, 'Which build?', :askedAt, :answeredAt, :asked
+                 FROM tkt_ticket WHERE organization_id = :organization AND key = 'SHOP-1'",
+                $parameters,
+            );
+
+            return (int) $migrator->executeStatement(
+                "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, created_at)
+                 VALUES (:organization, :answer, :question, :asked, 'Build 42.', true, :answeredAt)",
+                $parameters,
+            );
+        });
+    }
+
+    /**
+     * A plain reply by $author a minute before now.
+     */
+    private function addReply(string $messageId, string $author, string $body): void
+    {
+        $parameters = [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $messageId, $this->people[$author]->id()->toString(), $body];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, created_at)
+             VALUES (?, ?, ?, ?, ?, false, TIMESTAMPTZ '2026-11-06 11:59:00+00')",
+            $parameters,
+        ));
     }
 
     /**

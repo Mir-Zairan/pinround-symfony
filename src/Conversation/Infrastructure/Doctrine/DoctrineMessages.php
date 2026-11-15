@@ -7,13 +7,17 @@ namespace App\Conversation\Infrastructure\Doctrine;
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\MessageId;
 use App\Conversation\Domain\Messages;
+use App\Conversation\Domain\QuestionAlreadyOpen;
 use App\SharedKernel\Domain\OrganizationId;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
 
 final readonly class DoctrineMessages implements Messages
 {
+    private const string OPEN_QUESTION_KEY = 'cnv_message_ticket_id_open_question_key';
+
     public function __construct(private EntityManagerInterface $entityManager)
     {
     }
@@ -26,7 +30,16 @@ final readonly class DoctrineMessages implements Messages
     public function add(Message $message): void
     {
         $this->entityManager->persist($message);
-        $this->entityManager->flush();
+        try {
+            $this->entityManager->flush();
+        } catch (UniqueConstraintViolationException $exception) {
+            // PostgreSQL names the violated index only in the message; it is checked, never logged.
+            if (!str_contains($exception->getMessage(), self::OPEN_QUESTION_KEY)) {
+                throw $exception;
+            }
+
+            throw new QuestionAlreadyOpen('This ticket already waits for an answer.', 0, $exception);
+        }
     }
 
     public function lockedOf(OrganizationId $organizationId, MessageId $id): ?Message

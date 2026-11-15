@@ -461,11 +461,19 @@ final class DatabaseRolesTest extends KernelTestCase
             'ntf_delivery' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT'],
         ];
 
+        // The only column rights: what organizations_with_due_notifications (Version20261115140000) and digest_recipients
+        // (Version20261115150000) match on and return.
+        $expectedColumnGrants = ['ntf_notification' => array_map(
+            static fn (string $column): string => 'pinround_resolver SELECT '.$column,
+            ['organization_id', 'deliver_after', 'user_id', 'kind', 'ticket_id', 'read_at', 'done_at', 'created_at'],
+        )];
+
         foreach ($expectedGrants as $table => $grants) {
             self::assertEqualsCanonicalizing($grants, $this->grantsToOthersThanTheOwner($connection, $table), $table);
             self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
-            self::assertSame([], $connection->fetchFirstColumn(
-                'SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)',
+            self::assertEqualsCanonicalizing($expectedColumnGrants[$table] ?? [], $connection->fetchFirstColumn(
+                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
+                 FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)",
                 ['public.'.$table],
             ), $table);
         }
@@ -513,6 +521,8 @@ final class DatabaseRolesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX ntf_notification_pkey ON ONLY public.ntf_notification USING btree (organization_id, id, created_at)',
                 'CREATE INDEX ntf_notification_user_id_actor_id_ticket_id_created_at_idx ON ONLY public.ntf_notification USING btree (organization_id, user_id, actor_id, ticket_id, created_at DESC) WHERE (done_at IS NULL)',
                 'CREATE INDEX ntf_notification_user_id_created_at_unread_idx ON ONLY public.ntf_notification USING btree (organization_id, user_id, created_at) WHERE (read_at IS NULL)',
+                'CREATE INDEX ntf_notification_user_id_created_at_digest_idx ON ONLY public.ntf_notification USING btree (organization_id, user_id, created_at) INCLUDE (deliver_after)'
+                ." WHERE ((read_at IS NULL) AND (done_at IS NULL) AND (ticket_id IS NOT NULL) AND (kind = ANY (ARRAY['ping'::text, 'question'::text])))",
                 'CREATE INDEX ntf_notification_deliver_after_idx ON ONLY public.ntf_notification USING btree (organization_id, deliver_after) WHERE (deliver_after IS NOT NULL)',
                 'CREATE INDEX ntf_notification_ticket_id_idx ON ONLY public.ntf_notification USING btree (organization_id, ticket_id) WHERE (ticket_id IS NOT NULL)',
                 'CREATE UNIQUE INDEX ntf_mute_pkey ON public.ntf_mute USING btree (organization_id, user_id, ticket_id)',

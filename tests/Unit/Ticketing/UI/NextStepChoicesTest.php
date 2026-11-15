@@ -90,7 +90,7 @@ final class NextStepChoicesTest extends TestCase
         self::assertSame('Test it.', $miaTests->sentence);
         self::assertSame(['pass_it', 'needs_changes'], self::verbsOf($miaTests));
         self::assertNull($miaTests->ruleNote);
-        self::assertSame('Review Omar\'s code.', $this->nextStepOf($review, self::lead(GuardFixtures::LENA))->sentence);
+        self::assertSame('Review Omar’s code.', $this->nextStepOf($review, self::lead(GuardFixtures::LENA))->sentence);
     }
 
     #[Test]

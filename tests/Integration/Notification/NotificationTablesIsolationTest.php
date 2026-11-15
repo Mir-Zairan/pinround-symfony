@@ -125,7 +125,7 @@ final class NotificationTablesIsolationTest extends KernelTestCase
                 [$organizationId, $key, $ticketId, self::LENA, self::OMAR],
             ),
             'ntf_notification' => $this->connection()->executeStatement(
-                "INSERT INTO ntf_notification (organization_id, id, user_id, kind, actor_id, ticket_id, data, created_at) VALUES (?, ?, ?, 'pinged', ?, ?, '{}', '2027-03-15 10:00:00+00')",
+                "INSERT INTO ntf_notification (organization_id, id, user_id, kind, actor_id, ticket_id, data, created_at) VALUES (?, ?, ?, 'ping', ?, ?, '{}', '2027-03-15 10:00:00+00')",
                 [$organizationId, $key, self::OMAR, self::LENA, $ticketId],
             ),
             'ntf_mute' => $this->connection()->executeStatement(

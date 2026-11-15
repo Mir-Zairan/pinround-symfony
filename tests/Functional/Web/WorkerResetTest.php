@@ -95,6 +95,21 @@ final class WorkerResetTest extends WebTestCase
     }
 
     #[Test]
+    public function theNextRequestHasNoStoredCsrfTokenNotedAfterARequestStoredOne(): void
+    {
+        $this->logIn($this->client, $this->createUserWithPassword('Lena Berg'));
+        $this->client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+        $storage = $this->client->getContainer()->get('security.csrf.token_storage');
+        self::assertTrue($storage->hasStoredToken(), 'the page stored no token, so this test proves nothing');
+
+        $this->client->request('GET', '/_test/worker-reset');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($storage->hasStoredToken());
+    }
+
+    #[Test]
     public function theNextRequestHasNoTenantAfterARequestThatEndedNormally(): void
     {
         $this->client->request('POST', '/_test/worker-reset/'.self::ORG_A);

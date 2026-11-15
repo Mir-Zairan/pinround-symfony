@@ -116,11 +116,14 @@
             </div>
         </header>
         {% endblock %}
-        {#- One live updates stream per page: the viewer's own topic here, and a ticket page adds its ticket's topic. -#}
-        <main id="main" class="page">{% block live_updates %}{{ component('LiveUpdates') }}{% endblock %}{% block main %}{% endblock %}</main>
+        {#- One live updates stream per page: the viewer's own topic here, and a ticket page adds its ticket's topic. It is
+            the shell's, like the toast region, so it sits outside main: main's role="status" lines are the page's own. -#}
+        {% block live_updates %}{{ component('LiveUpdates') }}{% endblock %}
+        <main id="main" class="page">{% block main %}{% endblock %}</main>
         {#- One toast at a time (frontend.md): the last one flashed by the action that redirected here, or the one a
-            Turbo Stream answer (_toast_stream.html.twig) puts in by the region's id. -#}
-        {%- set toasts = app.flashes('toast') %}
+            Turbo Stream answer (_toast_stream.html.twig) puts in by the region's id. A live update's fetch leaves it
+            for the page that action redirected to (PageFlashes). -#}
+        {%- set toasts = page_flashes('toast') %}
         <div id="toast-region" class="toast-region" role="status" aria-live="polite">
             {%- if toasts is not empty %}{{ include('@Web/_toast.html.twig', {message: toasts|last}) }}{% endif -%}
         </div>

@@ -79,6 +79,7 @@ final class LoginConfigTest extends TestCase
                 'cookie_httponly' => true,
                 'cookie_samesite' => 'lax',
                 'cookie_path' => '/',
+                'metadata_update_threshold' => 120,
             ],
             self::at($framework, 'framework', 'session'),
         );

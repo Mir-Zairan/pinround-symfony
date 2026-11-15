@@ -4,26 +4,15 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\SharedKernel;
 
-use App\Identity\Api\UserQueries;
-use App\Identity\Domain\Users;
 use App\Identity\Infrastructure\Demo\SeedDemoCrowdPeople;
 use App\Organization\Api\DemoOrganizations;
-use App\Organization\Api\TeamQueries;
-use App\Organization\Application\AddMember;
-use App\Organization\Application\CreateTeam;
-use App\Organization\Application\OrganizationEvents;
-use App\Organization\Domain\Teams;
 use App\Organization\Infrastructure\Demo\SeedDemoCrowdTeam;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Infrastructure\Console\DemoSeedRefused;
 use App\SharedKernel\Infrastructure\Console\DemoSeedStep;
 use App\Tests\Integration\Organization\TenantTransactions;
-use App\Ticketing\Api\TicketCommands;
-use App\Ticketing\Application\CreateProject\CreateProject;
-use App\Ticketing\Domain\Projects;
 use App\Ticketing\Infrastructure\Demo\SeedDemoCrowdTickets;
 use Doctrine\DBAL\Connection;
-use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -186,46 +175,17 @@ final class DemoSeedCrowdStepsTest extends KernelTestCase
 
     private function crowdPeople(): SeedDemoCrowdPeople
     {
-        $container = self::getContainer();
-
-        return new SeedDemoCrowdPeople($container->get(Users::class), $container->get(EntityManagerInterface::class), $container->get('clock'), self::CROWD_SIZE);
+        return new DemoCrowdSteps(self::getContainer(), self::CROWD_SIZE)->people();
     }
 
     private function crowdTeam(): SeedDemoCrowdTeam
     {
-        $container = self::getContainer();
-
-        return new SeedDemoCrowdTeam(
-            $container->get(UserQueries::class),
-            $container->get(DemoOrganizations::class),
-            $container->get(CreateTeam::class),
-            $container->get(AddMember::class),
-            $container->get(Teams::class),
-            $container->get(OrganizationEvents::class),
-            $container->get(TenantContext::class),
-            $container->get(EntityManagerInterface::class),
-            $this->connection(),
-            $container->get('clock'),
-            self::CROWD_SIZE,
-        );
+        return new DemoCrowdSteps(self::getContainer(), self::CROWD_SIZE)->team();
     }
 
     private function crowdTickets(): SeedDemoCrowdTickets
     {
-        $container = self::getContainer();
-
-        return new SeedDemoCrowdTickets(
-            $container->get(DemoOrganizations::class),
-            $container->get(TeamQueries::class),
-            $container->get(UserQueries::class),
-            $container->get(Projects::class),
-            $container->get(CreateProject::class),
-            $container->get(TicketCommands::class),
-            $container->get(TenantContext::class),
-            $container->get(EntityManagerInterface::class),
-            $this->connection(),
-            $container->get('clock'),
-        );
+        return new DemoCrowdSteps(self::getContainer(), self::CROWD_SIZE)->tickets();
     }
 
     private function runDemoSeed(): void

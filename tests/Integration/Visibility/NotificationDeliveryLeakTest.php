@@ -15,7 +15,8 @@ use Symfony\Component\Uid\Uuid;
 /**
  * Notification delivery (NotifyRecipients writing ntf_notification), as worker-notify handles an event: each viewer is
  * asked a question about each cast ticket, and gets a notification exactly when they may see that ticket. Raj asks,
- * and Noor asks Raj. Each case runs in a rolled-back transaction under Acme Foods, the event's organization.
+ * and Noor asks Raj. Each case runs in a rolled-back transaction under Acme Foods, the event's organization, which
+ * first stores the question open on that ticket.
  */
 final class NotificationDeliveryLeakTest extends VisibilityLeakCast
 {
@@ -56,7 +57,8 @@ final class NotificationDeliveryLeakTest extends VisibilityLeakCast
         $actor = 'Raj' === $viewer ? 'Noor' : 'Raj';
         $question = new QuestionAsked(self::ACME_FOODS, $ticketId, self::MESSAGE, self::VIEWERS[$viewer][0], self::VIEWERS[$actor][0], new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
 
-        return self::transactions()->rolledBackAs(self::ACME_FOODS, static function () use ($question, $viewer, $ticketId): int {
+        return self::transactions()->rolledBackAs(self::ACME_FOODS, static function () use ($question, $viewer, $actor, $ticketId): int {
+            self::addOpenQuestion($ticketId, self::MESSAGE, $viewer, $actor, '2027-03-15 10:00:00+00');
             $messageBeingHandled = self::getContainer()->get(MessageBeingHandled::class);
             $messageBeingHandled->set(Uuid::v7()->toRfc4122());
             try {

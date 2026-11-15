@@ -28,7 +28,8 @@ mercure:
                 claims: *claims
 
 services:
-    # A failed or timed-out publish throws, and Messenger retries the RefreshTicketPages (RefreshTicketPagesHandler).
+    # A failed or timed-out publish throws, and Messenger retries the RefreshTicketPages (RefreshTicketPagesHandler)
+    # or the RefreshBell (RefreshBellHandler).
     # timeout is the longest wait for the next byte, max_duration the longest whole request.
     mercure.publisher_http_client:
         class: Symfony\Contracts\HttpClient\HttpClientInterface

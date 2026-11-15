@@ -11,6 +11,7 @@ use App\Notification\Api\PingSlot;
 use App\Notification\Api\PingsPaused;
 use App\Notification\Api\PingTooSoon;
 use App\Notification\Api\PingToYourself;
+use App\Notification\Application\Notify\DeliveryTimes;
 use App\Notification\Application\Ping\SendPing;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\PingSettingsQueries;
@@ -20,6 +21,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Unit\Notification\Application\Notify\InMemoryMemberTimeZones;
 use App\Ticketing\Api\Cursor;
 use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\TicketNotFound;
@@ -56,18 +58,7 @@ final class SendPingTest extends TestCase
         $this->pingWindow = new InMemoryPingWindow();
         $this->pings = new InMemoryPings();
         $this->pingEvents = new RecordingPingEvents();
-        // Lena and Omar are in the ticket's team; Mia is a member outside it; Raj left the organization, but a team
-        // row of his remains, so only the membership check keeps him out.
-        $teamsByUser = [self::LENA => [self::SHOP_TEAM], self::OMAR => [self::SHOP_TEAM], self::RAJ => [self::SHOP_TEAM]];
-        $this->sendPing = new SendPing(
-            self::ticketQueries(),
-            self::ticketVisibilities($teamsByUser),
-            self::membershipQueries([self::LENA, self::OMAR, self::MIA]),
-            self::pingSettingsQueries(self::PING_LIMIT_HOURS),
-            $this->pingWindow,
-            $this->pings,
-            $this->pingEvents,
-        );
+        $this->sendPing = $this->sendPingWith(false);
     }
 
     #[Test]
@@ -86,6 +77,38 @@ final class SendPingTest extends TestCase
             [new PingSent(self::ACME_FOODS, self::TICKET, $stored[0]->id()->toString(), self::LENA, self::OMAR, self::LENA, self::at('10:00'))],
             $this->pingEvents->published(),
         );
+    }
+
+    #[Test]
+    public function aPingDuringTheRecipientsQuietHoursIsStoredAndPublishedWithTheirEnd(): void
+    {
+        $this->sendPing = $this->sendPingWith(true);
+
+        // 22:00 in Berlin, where Omar lives: held until 09:00 Berlin, 08:00 UTC, the next day.
+        $slot = $this->ping(self::LENA, self::OMAR, 'Any news?', new \DateTimeImmutable('2026-03-03T21:00:00Z'));
+
+        $stored = $this->pings->stored();
+        self::assertCount(1, $stored);
+        self::assertSame('2026-03-04T08:00:00+00:00', $stored[0]->deliverAfter()?->setTimezone(new \DateTimeZone('UTC'))->format(\DATE_ATOM));
+        self::assertEquals(new \DateTimeImmutable('2026-03-03T21:00:00Z'), $stored[0]->createdAt());
+        self::assertEquals(
+            [new PingSent(self::ACME_FOODS, self::TICKET, $stored[0]->id()->toString(), self::LENA, self::OMAR, self::LENA, new \DateTimeImmutable('2026-03-04T08:00:00Z'))],
+            $this->pingEvents->published(),
+        );
+        // The sender's slot still runs from when they pinged, not from when the ping shows.
+        self::assertEquals(new \DateTimeImmutable('2026-03-04T05:00:00Z'), $slot->againAt);
+    }
+
+    #[Test]
+    public function aPingOutsideTheRecipientsQuietHoursIsNotHeld(): void
+    {
+        $this->sendPing = $this->sendPingWith(true);
+
+        // 09:00 in Berlin.
+        $this->ping(self::LENA, self::OMAR, 'Any news?', new \DateTimeImmutable('2026-03-03T08:00:00Z'));
+
+        self::assertNull($this->pings->stored()[0]->deliverAfter());
+        self::assertEquals(new \DateTimeImmutable('2026-03-03T08:00:00Z'), $this->pingEvents->published()[0]->occurredAt);
     }
 
     #[Test]
@@ -260,6 +283,25 @@ final class SendPingTest extends TestCase
         self::assertSame(1, $this->pingWindow->heldSlotCount());
     }
 
+    private function sendPingWith(bool $isQuietHoursOn): SendPing
+    {
+        // Lena and Omar are in the ticket's team; Mia is a member outside it; Raj left the organization, but a team
+        // row of his remains, so only the membership check keeps him out. Omar lives in Berlin.
+        $teamsByUser = [self::LENA => [self::SHOP_TEAM], self::OMAR => [self::SHOP_TEAM], self::RAJ => [self::SHOP_TEAM]];
+        $pingSettingsQueries = self::pingSettingsQueries(self::PING_LIMIT_HOURS, $isQuietHoursOn);
+
+        return new SendPing(
+            self::ticketQueries(),
+            self::ticketVisibilities($teamsByUser),
+            self::membershipQueries([self::LENA, self::OMAR, self::MIA]),
+            $pingSettingsQueries,
+            $this->pingWindow,
+            $this->pings,
+            $this->pingEvents,
+            new DeliveryTimes($pingSettingsQueries, new InMemoryMemberTimeZones(self::ACME_FOODS, [self::OMAR => 'Europe/Berlin'])),
+        );
+    }
+
     private function ping(string $fromUserId, string $toUserId, string $body, ?\DateTimeImmutable $at = null): PingSlot
     {
         return $this->sendPing->ping(new OrganizationId(self::ACME_FOODS), self::TICKET_KEY, new UserId($fromUserId), new UserId($toUserId), $body, $at ?? self::at('10:00'));
@@ -419,13 +461,13 @@ final class SendPingTest extends TestCase
     /**
      * @param 1|4|8|24 $pingLimitHours
      */
-    private static function pingSettingsQueries(int $pingLimitHours): PingSettingsQueries
+    private static function pingSettingsQueries(int $pingLimitHours, bool $isQuietHoursOn): PingSettingsQueries
     {
-        return new readonly class($pingLimitHours) implements PingSettingsQueries {
+        return new readonly class($pingLimitHours, $isQuietHoursOn) implements PingSettingsQueries {
             /**
              * @param 1|4|8|24 $pingLimitHours
              */
-            public function __construct(private int $pingLimitHours)
+            public function __construct(private int $pingLimitHours, private bool $isQuietHoursOn)
             {
             }
 
@@ -441,7 +483,7 @@ final class SendPingTest extends TestCase
 
             public function isQuietHoursOn(OrganizationId $organizationId): bool
             {
-                return false;
+                return $this->isQuietHoursOn;
             }
         };
     }

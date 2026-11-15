@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Conversation;
 
 use App\Conversation\Api\MessageView;
+use App\Conversation\Api\ReplyView;
 use App\Conversation\Api\ThreadView;
 use App\Conversation\Infrastructure\Doctrine\DbalThreadQueries;
 use App\SharedKernel\Application\TenantContext;
@@ -17,7 +18,8 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * DbalThreadQueries on the real cnv_message: order, the 200-message cap, removed text, and what it leaves out.
+ * DbalThreadQueries on the real cnv_message and cnv_reply: order, the 200-message and 50-reply caps, removed text, and
+ * what it leaves out.
  */
 final class DbalThreadQueriesTest extends KernelTestCase
 {
@@ -110,6 +112,181 @@ final class DbalThreadQueriesTest extends KernelTestCase
         self::assertStringContainsString('Still here.', serialize($recording->returnedRows));
     }
 
+    /**
+     * An answered question carries its answer; a removed answer, a reply that is no answer and another organization's
+     * answer to a message of the same id are left out. The answers take one query more, the messages one.
+     */
+    #[Test]
+    public function anAnsweredQuestionCarriesItsAnswerReadInOneMoreQuery(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'question', 'Which build?', '2027-03-15 10:00:00+00', resolvedAt: '2027-03-15 10:04:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::SECOND_MESSAGE, 'question', 'Which browser?', '2027-03-15 10:05:00+00', resolvedAt: '2027-03-15 10:06:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::REMOVED_MESSAGE, 'question', 'Which phone?', '2027-03-15 10:07:00+00', removedAt: '2027-03-15 10:08:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::TIED_LOWER_ID, 'comment', 'Also on tablets.', '2027-03-15 10:09:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::TIED_HIGHER_ID, 'question', 'Which screen?', '2027-03-15 10:10:00+00');
+        $this->addMessage(self::BETA_BAKERY, self::THREAD_TICKET, self::FIRST_MESSAGE, 'question', 'Beta asks.', '2027-03-15 10:00:00+00', resolvedAt: '2027-03-15 10:01:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d431', 'A side note.', false, '2027-03-15 10:02:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d432', 'Build 42.', true, '2027-03-15 10:04:00+00');
+        $this->addReply(self::ACME_FOODS, self::SECOND_MESSAGE, '0197a3c0-0000-7000-8000-00000000d433', 'Removed answer.', true, '2027-03-15 10:06:00+00', removedAt: '2027-03-15 10:07:00+00');
+        $this->addReply(self::BETA_BAKERY, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d434', 'Beta answers.', true, '2027-03-15 10:01:00+00');
+        $recording = $this->recordingConnection();
+
+        $thread = $this->threadOf(self::THREAD_TICKET, $recording);
+
+        self::assertCount(2, $recording->sentQueries);
+        self::assertSame(
+            [
+                [self::FIRST_MESSAGE, self::LENA, false, true, 'Build 42.'],
+                [self::SECOND_MESSAGE, self::LENA, false, true, null],
+                [self::REMOVED_MESSAGE, self::LENA, false, false, null],
+                [self::TIED_LOWER_ID, null, false, false, null],
+                [self::TIED_HIGHER_ID, self::LENA, true, false, null],
+            ],
+            array_map(static fn (MessageView $message): array => [
+                $message->id, $message->toUserId?->toString(), $message->isOpenQuestion, $message->isAnswered, self::answerAmong($message)?->body,
+            ], $thread->messages),
+        );
+        $answer = self::answerAmong($thread->messages[0]);
+        self::assertNotNull($answer);
+        self::assertSame('0197a3c0-0000-7000-8000-00000000d432', $answer->id);
+        self::assertSame(self::LENA, $answer->authorId->toString());
+        self::assertSame('2027-03-15T10:04:00+00:00', $answer->createdAt->format(\DATE_ATOM));
+        self::assertStringNotContainsString('Beta answers.', serialize($recording->returnedRows));
+        self::assertStringNotContainsString('Removed answer.', serialize($recording->returnedRows));
+    }
+
+    #[Test]
+    public function anEmptyThreadReadsNoReplies(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::OTHER_TICKET, self::OTHER_TICKET_MESSAGE, 'comment', 'Another ticket.', '2027-03-15 10:00:00+00');
+        $this->addReply(self::ACME_FOODS, self::OTHER_TICKET_MESSAGE, '0197a3c0-0000-7000-8000-00000000d431', 'Not this thread.', false, '2027-03-15 10:02:00+00');
+        $recording = $this->recordingConnection();
+
+        $thread = $this->threadOf(self::THREAD_TICKET, $recording);
+
+        self::assertCount(1, $recording->sentQueries);
+        self::assertSame([], $thread->messages);
+    }
+
+    /**
+     * Inserted out of order, the tied pair higher id first; a removed reply keeps its place with no text, and the
+     * replies of another ticket's message and of another organization's message of the same id are left out.
+     */
+    #[Test]
+    public function eachMessageCarriesItsRepliesOldestFirstReadInOneMoreQuery(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'comment', 'Broken on Safari.', '2027-03-15 10:00:00+00', resolvedAt: '2027-03-15 10:30:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::SECOND_MESSAGE, 'question', 'Which build?', '2027-03-15 10:01:00+00', resolvedAt: '2027-03-15 10:20:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::TIED_LOWER_ID, 'comment', 'No replies here.', '2027-03-15 10:02:00+00');
+        $this->addMessage(self::ACME_FOODS, self::OTHER_TICKET, self::OTHER_TICKET_MESSAGE, 'comment', 'Another ticket.', '2027-03-15 10:00:00+00');
+        $this->addMessage(self::BETA_BAKERY, self::THREAD_TICKET, self::FIRST_MESSAGE, 'comment', 'Beta comments.', '2027-03-15 10:00:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d434', 'Same here.', false, '2027-03-15 10:10:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d432', self::REMOVED_TEXT, false, '2027-03-15 10:05:00+00', removedAt: '2027-03-15 10:06:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d433', 'Fixed in 43.', false, '2027-03-15 10:10:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d431', 'On iOS only?', false, '2027-03-15 10:03:00+00');
+        $this->addReply(self::ACME_FOODS, self::SECOND_MESSAGE, '0197a3c0-0000-7000-8000-00000000d435', 'Build 42.', true, '2027-03-15 10:20:00+00');
+        $this->addReply(self::ACME_FOODS, self::OTHER_TICKET_MESSAGE, '0197a3c0-0000-7000-8000-00000000d436', 'Not this thread.', false, '2027-03-15 10:04:00+00');
+        $this->addReply(self::BETA_BAKERY, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d437', 'Beta replies.', false, '2027-03-15 10:04:00+00');
+        $recording = $this->recordingConnection();
+
+        $thread = $this->threadOf(self::THREAD_TICKET, $recording);
+
+        self::assertCount(2, $recording->sentQueries);
+        self::assertSame(
+            [
+                [self::FIRST_MESSAGE, 4, false, true, null],
+                [self::SECOND_MESSAGE, 1, false, false, 'Build 42.'],
+                [self::TIED_LOWER_ID, 0, false, false, null],
+            ],
+            array_map(static fn (MessageView $message): array => [
+                $message->id, $message->replyCount, $message->hasEarlierReplies, $message->isResolved, self::answerAmong($message)?->body,
+            ], $thread->messages),
+        );
+        self::assertSame([], $thread->messages[2]->replies);
+        self::assertSame(
+            [
+                ['0197a3c0-0000-7000-8000-00000000d431', 'On iOS only?', false, false, '2027-03-15T10:03:00+00:00'],
+                ['0197a3c0-0000-7000-8000-00000000d432', null, false, true, '2027-03-15T10:05:00+00:00'],
+                ['0197a3c0-0000-7000-8000-00000000d433', 'Fixed in 43.', false, false, '2027-03-15T10:10:00+00:00'],
+                ['0197a3c0-0000-7000-8000-00000000d434', 'Same here.', false, false, '2027-03-15T10:10:00+00:00'],
+            ],
+            array_map(static fn (ReplyView $reply): array => [
+                $reply->id, $reply->body, $reply->isAnswer, $reply->isRemoved, $reply->createdAt->format(\DATE_ATOM),
+            ], $thread->messages[0]->replies),
+        );
+        self::assertSame(self::LENA, $thread->messages[0]->replies[0]->authorId->toString());
+        self::assertSame([[true, false]], array_map(static fn (ReplyView $reply): array => [$reply->isAnswer, $reply->isRemoved], $thread->messages[1]->replies));
+        self::assertStringNotContainsString(self::REMOVED_TEXT, serialize($recording->returnedRows));
+        self::assertStringNotContainsString('Beta replies.', serialize($recording->returnedRows));
+        self::assertStringNotContainsString('Not this thread.', serialize($recording->returnedRows));
+    }
+
+    /**
+     * The first comment has one reply past the limit, the second exactly the limit; the question's answer is older than
+     * its newest REPLY_LIMIT replies, so it is listed on top of them and nothing earlier is left out.
+     */
+    #[Test]
+    public function aMessageShowsItsNewestFiftyRepliesAndAlwaysItsAnswer(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'comment', 'Broken on Safari.', '2027-03-15 10:00:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::SECOND_MESSAGE, 'comment', 'Also on tablets.', '2027-03-15 10:01:00+00');
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::TIED_LOWER_ID, 'question', 'Which build?', '2027-03-15 10:02:00+00', resolvedAt: '2027-03-15 10:03:00+00');
+        $this->addNumberedReplies(self::FIRST_MESSAGE, '8001', MessageView::REPLY_LIMIT + 1);
+        $this->addNumberedReplies(self::SECOND_MESSAGE, '8002', MessageView::REPLY_LIMIT);
+        $this->addReply(self::ACME_FOODS, self::TIED_LOWER_ID, '0197a3c0-0000-7000-8000-00000000d431', 'Build 42.', true, '2027-03-15 10:03:00+00');
+        $this->addNumberedReplies(self::TIED_LOWER_ID, '8003', MessageView::REPLY_LIMIT);
+
+        $thread = $this->threadOf(self::THREAD_TICKET);
+
+        [$overTheLimit, $atTheLimit, $answered] = $thread->messages;
+        self::assertSame([MessageView::REPLY_LIMIT + 1, true, MessageView::REPLY_LIMIT], [$overTheLimit->replyCount, $overTheLimit->hasEarlierReplies, \count($overTheLimit->replies)]);
+        self::assertSame('Reply 2', $overTheLimit->replies[0]->body);
+        self::assertSame('Reply 51', $overTheLimit->replies[MessageView::REPLY_LIMIT - 1]->body);
+        self::assertSame([MessageView::REPLY_LIMIT, false, MessageView::REPLY_LIMIT], [$atTheLimit->replyCount, $atTheLimit->hasEarlierReplies, \count($atTheLimit->replies)]);
+        self::assertSame('Reply 1', $atTheLimit->replies[0]->body);
+        self::assertSame([MessageView::REPLY_LIMIT + 1, false, MessageView::REPLY_LIMIT + 1], [$answered->replyCount, $answered->hasEarlierReplies, \count($answered->replies)]);
+        self::assertSame('Build 42.', $answered->replies[0]->body);
+        self::assertSame('Build 42.', self::answerAmong($answered)?->body);
+    }
+
+    /**
+     * cnv_reply.is_answer has no check tying it to a question, so a comment's reply marked as an answer is only one of
+     * its replies: it falls out of the newest REPLY_LIMIT like any other.
+     */
+    #[Test]
+    public function aCommentsReplyMarkedAsAnAnswerIsNotListedOnTopOfItsNewestFifty(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'comment', 'Broken on Safari.', '2027-03-15 10:00:00+00');
+        $this->addReply(self::ACME_FOODS, self::FIRST_MESSAGE, '0197a3c0-0000-7000-8000-00000000d431', 'Marked as an answer.', true, '2027-03-15 10:03:00+00');
+        $this->addNumberedReplies(self::FIRST_MESSAGE, '8001', MessageView::REPLY_LIMIT);
+
+        $thread = $this->threadOf(self::THREAD_TICKET);
+
+        [$comment] = $thread->messages;
+        self::assertSame([MessageView::REPLY_LIMIT + 1, true, MessageView::REPLY_LIMIT], [$comment->replyCount, $comment->hasEarlierReplies, \count($comment->replies)]);
+        self::assertSame('Reply 1', $comment->replies[0]->body);
+        self::assertNull(self::answerAmong($comment));
+    }
+
+    #[Test]
+    public function theRepliesQueryReadsTheMessageCreatedAtIdIndex(): void
+    {
+        $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'comment', 'Still here.', '2027-03-15 10:00:00+00');
+        $this->addMessage(self::ACME_FOODS, self::OTHER_TICKET, self::OTHER_TICKET_MESSAGE, 'comment', 'Another ticket.', '2027-03-15 10:00:00+00');
+        $this->addNumberedReplies(self::FIRST_MESSAGE, '8001', MessageView::REPLY_LIMIT);
+        $this->addNumberedReplies(self::OTHER_TICKET_MESSAGE, '8002', 10 * MessageView::REPLY_LIMIT);
+        // With no statistics the planner prices the primary key and this index alike on a near-empty table.
+        $this->migrator()->executeStatement('ANALYZE cnv_reply');
+        $recording = $this->recordingConnection();
+        $this->threadOf(self::THREAD_TICKET, $recording);
+        self::assertCount(2, $recording->sentQueries);
+
+        $plan = $this->planOf($recording->sentQueries[1]);
+
+        self::assertStringContainsString('cnv_reply_message_id_created_at_id_idx', $plan);
+        self::assertStringNotContainsString('Seq Scan on cnv_reply', $plan);
+    }
+
     #[Test]
     public function aThreadOfMoreThanTwoHundredMessagesShowsTheNewestTwoHundredAndSaysThereAreEarlierOnes(): void
     {
@@ -140,16 +317,14 @@ final class DbalThreadQueriesTest extends KernelTestCase
     public function theQueryReadsTheTicketCreatedAtIdIndexWithNoSort(): void
     {
         $this->addMessage(self::ACME_FOODS, self::THREAD_TICKET, self::FIRST_MESSAGE, 'comment', 'Still here.', '2027-03-15 10:00:00+00');
+        $this->addNumberedMessages(ThreadView::MESSAGE_LIMIT, self::OTHER_TICKET);
+        // Statistics left by an earlier test, or none, can price the primary key below this index on a small table.
+        $this->migrator()->executeStatement('ANALYZE cnv_message');
         $recording = $this->recordingConnection();
         $this->threadOf(self::THREAD_TICKET, $recording);
-        self::assertNotNull($recording->lastSql);
+        self::assertNotSame([], $recording->sentQueries);
 
-        $plan = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($recording): string {
-            // A handful of rows makes a sequential scan cheapest; this asks whether the index can serve the query at all.
-            $this->connection()->executeStatement('SET LOCAL enable_seqscan = off');
-
-            return implode("\n", array_filter($this->connection()->fetchFirstColumn('EXPLAIN '.$recording->lastSql, $recording->lastParams), \is_string(...)));
-        });
+        $plan = $this->planOf($recording->sentQueries[0]);
 
         self::assertStringContainsString('cnv_message_ticket_id_created_at_id_idx', $plan);
         self::assertStringNotContainsString('Sort', $plan);
@@ -165,6 +340,20 @@ final class DbalThreadQueriesTest extends KernelTestCase
         } finally {
             $this->tenantContext()->clear();
         }
+    }
+
+    /**
+     * The live reply marked as the answer among the message's listed replies.
+     */
+    private static function answerAmong(MessageView $message): ?ReplyView
+    {
+        foreach ($message->replies as $reply) {
+            if ($reply->isAnswer && !$reply->isRemoved) {
+                return $reply;
+            }
+        }
+
+        return null;
     }
 
     private function threadOf(string $ticketId, ?Connection $connection = null): ThreadView
@@ -186,25 +375,67 @@ final class DbalThreadQueriesTest extends KernelTestCase
     }
 
     /**
-     * Messages "Message 1" to "Message <count>", a minute apart, on the thread ticket.
+     * Messages "Message 1" to "Message <count>", a minute apart, on the ticket; ids differ per ticket.
      */
-    private function addNumberedMessages(int $count): void
+    private function addNumberedMessages(int $count, string $ticketId = self::THREAD_TICKET): void
     {
         $this->asTenant(self::ACME_FOODS, fn (): int|string => $this->migrator()->executeStatement(
             "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, body, created_at)
-             SELECT ?, CAST('0197a3c0-0000-7000-8000-' || lpad(n::text, 12, '0') AS uuid), ?, ?, 'comment', 'Message ' || n,
+             SELECT ?, CAST('0197a3c0-0000-7000-' || ? || '-' || lpad(n::text, 12, '0') AS uuid), ?, ?, 'comment', 'Message ' || n,
                  TIMESTAMPTZ '2027-03-15 10:00:00+00' + n * INTERVAL '1 minute'
              FROM generate_series(1, ?) AS n",
-            [self::ACME_FOODS, self::THREAD_TICKET, self::OMAR, $count],
+            [self::ACME_FOODS, self::THREAD_TICKET === $ticketId ? '8000' : '8100', $ticketId, self::OMAR, $count],
         ));
     }
 
-    private function addMessage(string $organizationId, string $ticketId, string $messageId, string $kind, string $body, string $createdAt, ?string $editedAt = null, ?string $removedAt = null): void
+    /**
+     * Plain replies "Reply 1" to "Reply <count>" by Lena, a minute apart from 11:00, with ids in the $idGroup group.
+     */
+    private function addNumberedReplies(string $messageId, string $idGroup, int $count): void
+    {
+        $this->asTenant(self::ACME_FOODS, fn (): int|string => $this->migrator()->executeStatement(
+            "INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, created_at)
+             SELECT ?, CAST('0197a3c0-0000-7000-' || ? || '-' || lpad(n::text, 12, '0') AS uuid), ?, ?, 'Reply ' || n, false,
+                 TIMESTAMPTZ '2027-03-15 11:00:00+00' + n * INTERVAL '1 minute'
+             FROM generate_series(1, ?) AS n",
+            [self::ACME_FOODS, $idGroup, $messageId, self::LENA, $count],
+        ));
+    }
+
+    /**
+     * @param array{sql: string, params: array<int<0, max>|string, mixed>} $sentQuery
+     */
+    private function planOf(array $sentQuery): string
+    {
+        return $this->transactions()->committedAs(self::ACME_FOODS, function () use ($sentQuery): string {
+            // A handful of rows makes a sequential scan cheapest; this asks whether the index can serve the query at all.
+            $this->connection()->executeStatement('SET LOCAL enable_seqscan = off');
+
+            return implode("\n", array_filter($this->connection()->fetchFirstColumn('EXPLAIN '.$sentQuery['sql'], $sentQuery['params']), \is_string(...)));
+        });
+    }
+
+    /**
+     * By Omar; a question asks Lena, and $resolvedAt is when Lena answered it or, on a comment, resolved it.
+     */
+    private function addMessage(string $organizationId, string $ticketId, string $messageId, string $kind, string $body, string $createdAt, ?string $editedAt = null, ?string $removedAt = null, ?string $resolvedAt = null): void
     {
         $this->asTenant($organizationId, fn (): int|string => $this->migrator()->executeStatement(
-            'INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, edited_at, removed_at, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$organizationId, $messageId, $ticketId, self::OMAR, $kind, 'question' === $kind ? self::LENA : null, $body, $editedAt, $removedAt, $createdAt],
+            'INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, edited_at, removed_at, resolved_at, resolved_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$organizationId, $messageId, $ticketId, self::OMAR, $kind, 'question' === $kind ? self::LENA : null, $body, $editedAt, $removedAt, $resolvedAt, null === $resolvedAt ? null : self::LENA, $createdAt],
+        ));
+    }
+
+    /**
+     * By Lena.
+     */
+    private function addReply(string $organizationId, string $messageId, string $replyId, string $body, bool $isAnswer, string $createdAt, ?string $removedAt = null): void
+    {
+        $this->asTenant($organizationId, fn (): int|string => $this->migrator()->executeStatement(
+            'INSERT INTO cnv_reply (organization_id, id, message_id, author_id, body, is_answer, removed_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$organizationId, $replyId, $messageId, self::LENA, $body, $isAnswer ? 'true' : 'false', $removedAt, $createdAt],
         ));
     }
 

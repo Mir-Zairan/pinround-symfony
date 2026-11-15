@@ -17,7 +17,7 @@ use Symfony\Component\Security\Core\Authorization\Voter\Vote;
  * Decides PingPermission SEND on one ticket (personas-and-roles.md, "Ping a person"): only someone TicketPermission VIEW
  * lets see the ticket, and of them an Admin, a Manager, a Lead or Member of the ticket's team, or its reporter. A
  * Viewer of the team is denied, also when they reported the ticket, and so is anyone else the ticket shows to only
- * because they work on it. Denied with
+ * because they work on it. ConversationVoter repeats this role rule for ASK. Denied with
  * nobody logged in, with no tenant, and for a ticket of another organization.
  *
  * Reads the actor's roles under row-level security, so it needs the request's open transaction under the tenant.
@@ -51,6 +51,8 @@ final class PingVoter extends DenyByDefaultVoter
         if (!$this->accessDecisionManager->decide($token, [TicketPermission::VIEW], $subject)) {
             return false;
         }
+
+        // The same role rule as ConversationVoter::mayAsk for "Ask a question"; change the two together.
         $roles = $actor->roles();
         if ($roles->isAdmin() || $roles->isManager()) {
             return true;

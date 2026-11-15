@@ -9,10 +9,13 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\Ticketing\Api\TicketEmailLabel;
 use App\Ticketing\Api\TicketEmailLabels;
+use App\Ticketing\Api\TicketVisibilitySql;
 use Doctrine\DBAL\Connection;
 
 final readonly class DbalTicketEmailLabels implements TicketEmailLabels
 {
+    private const string TICKET_ALIAS = 't';
+
     public function __construct(private Connection $connection, private TenantContext $tenantContext)
     {
     }
@@ -36,10 +39,15 @@ final readonly class DbalTicketEmailLabels implements TicketEmailLabels
 
         // The CASE keeps a restricted ticket's title in the database, so no caller can put it in an email by mistake.
         // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a TicketId holds no comma or brace.
+        $forEveryone = TicketVisibilitySql::forEveryoneIn($organizationId, self::TICKET_ALIAS);
         $rows = $this->connection->fetchAllAssociative(
-            "SELECT id, key, team_id, CASE WHEN visibility = 'all' THEN title END AS title FROM tkt_ticket"
-            .' WHERE organization_id = CAST(:organization AS uuid) AND id = ANY(CAST(:ids AS uuid[]))',
-            ['organization' => $organizationId->toString(), 'ids' => '{'.implode(',', array_keys($uniqueTicketIds)).'}'],
+            'SELECT t.id, t.key, t.team_id, CASE WHEN '.$forEveryone->sql().' THEN t.title END AS title FROM tkt_ticket t'
+            .' WHERE t.organization_id = CAST(:organization AS uuid) AND t.id = ANY(CAST(:ids AS uuid[]))',
+            [
+                ...$forEveryone->parameters(),
+                'organization' => $organizationId->toString(),
+                'ids' => '{'.implode(',', array_keys($uniqueTicketIds)).'}',
+            ],
         );
         $labelsById = [];
         foreach ($rows as $row) {

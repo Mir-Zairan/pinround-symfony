@@ -13,7 +13,7 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * The CHECKs of Version20261115120000 and Version20261115140000 refuse every row the domain could not write, named in
+ * The CHECKs of Version20261115120000 and Version20261115141000 refuse every row the domain could not write, named in
  * the error; the tables' grants, row-level security and indexes are pinned in DatabaseRolesTest with the other tenant
  * tables. Every row is written as pinround_app under its organization and rolled back.
  */

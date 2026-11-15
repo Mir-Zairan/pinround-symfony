@@ -36,4 +36,15 @@ interface Pings
      * @throws \LogicException when no transaction is open, before any read
      */
     public function lockedOpenPingsTo(UserId $toId, TicketId $ticketId): array;
+
+    /**
+     * The ping with $id when it is not cleared, of the tenant's organization, locked against clearing (a shared lock,
+     * so other readers do not wait) until the open transaction ends. A call that waited for a clearing transaction
+     * finds null once that one committed. The ping is read fresh: unsaved changes to it already loaded are lost.
+     *
+     * @return Ping|null null when the ping is cleared, unknown or another organization's
+     *
+     * @throws \LogicException when no transaction is open, before any read
+     */
+    public function lockedOpenPing(PingId $id): ?Ping;
 }

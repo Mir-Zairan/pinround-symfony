@@ -7,49 +7,46 @@ namespace App\Conversation\Application\PostComment;
 use App\Conversation\Api\Event\CommentPosted;
 use App\Conversation\Api\MessageBodyRefused;
 use App\Conversation\Application\ConversationEvents;
+use App\Conversation\Application\PostedMessage;
+use App\Conversation\Application\VisibleTickets;
 use App\Conversation\Domain\Message;
 use App\Conversation\Domain\Messages;
-use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketNotFound;
-use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibilityFacts;
 
 /**
- * Posts a comment in a ticket's thread (FR-CNV-01). A comment changes no status and notifies nobody.
+ * Posts a comment in a ticket's thread (FR-CNV-01). A comment changes no status and notifies nobody, and it clears the
+ * author's pings on the ticket (FR-PNG-05).
  */
 final readonly class PostComment
 {
     public function __construct(
-        private TicketVisibilities $ticketVisibilities,
+        private VisibleTickets $visibleTickets,
         private Messages $messages,
         private ConversationEvents $conversationEvents,
-        private TenantContext $tenantContext,
+        private PingClearing $pingClearing,
     ) {
     }
 
     /**
-     * Saves the comment and writes CommentPosted to the outbox, both in the open transaction, whose tenant must be the
-     * ticket's organization.
+     * Saves the comment, writes CommentPosted to the outbox and clears the author's open pings on the ticket, all in the
+     * open transaction, whose tenant must be the ticket's organization.
      *
      * @param TicketVisibilityFacts $ticket the visibility facts of the ticket $ticketId, as the ticket page read them
      *
-     * @return string the new message's id
+     * @return PostedMessage the new message's id and how many pings it cleared
      *
      * @throws TicketNotFound     when the ticket is of another organization than the tenant, or the author may not see
      *                            it; nothing is saved
      * @throws MessageBodyRefused when the trimmed body is empty or longer than 10,000 characters; nothing is saved
      * @throws \LogicException    when no transaction is open; nothing is saved
      */
-    public function post(TicketId $ticketId, TicketVisibilityFacts $ticket, UserId $authorId, string $body, \DateTimeImmutable $postedAt): string
+    public function post(TicketId $ticketId, TicketVisibilityFacts $ticket, UserId $authorId, string $body, \DateTimeImmutable $postedAt): PostedMessage
     {
-        // The visibility predicate trusts the organization it is given: a ticket for everyone of any organization passes it.
-        if (true !== $this->tenantContext->get()?->equals($ticket->organizationId)
-            || !$this->ticketVisibilities->of($ticket->organizationId, $authorId)->isVisible($ticket)) {
-            throw new TicketNotFound('That ticket does not exist.');
-        }
-
+        $this->visibleTickets->refuseUnlessVisibleTo($ticket, $authorId);
         try {
             $comment = Message::comment($this->messages->nextIdentity(), $ticket->organizationId, $ticketId, $authorId, trim($body), $postedAt);
         } catch (\InvalidArgumentException $invalidBody) {
@@ -65,6 +62,6 @@ final readonly class PostComment
         ));
         $this->messages->add($comment);
 
-        return $comment->id()->toString();
+        return new PostedMessage($comment->id()->toString(), $this->pingClearing->clearForActor($ticket->organizationId, $ticketId, $authorId, $postedAt));
     }
 }

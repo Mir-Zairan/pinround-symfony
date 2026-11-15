@@ -39,11 +39,18 @@ final readonly class NowNextContext
      */
     public function firstNameOf(UserId $userId): ?string
     {
-        $displayName = trim($this->firstNames[$userId->toString()] ?? '');
-        if ('' === $displayName) {
-            return null;
-        }
+        return self::firstNameFrom($this->firstNames[$userId->toString()] ?? '');
+    }
 
-        return explode(' ', $displayName, 2)[0];
+    /**
+     * The one rule for a first name, which the ticket page's pill and What happened share with these sentences.
+     *
+     * @return string|null the first word of the trimmed display name, or null for a blank one
+     */
+    public static function firstNameFrom(string $displayName): ?string
+    {
+        $trimmed = trim($displayName);
+
+        return '' === $trimmed ? null : explode(' ', $trimmed, 2)[0];
     }
 }

@@ -11,10 +11,12 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Notification\NotificationRows;
 use App\Tests\Integration\Organization\OrganizationRows;
+use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketVisibility;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -48,6 +50,8 @@ final class MarkBellGroupDoneTest extends KernelTestCase
 
     private const string DONE_AT = '2027-03-16 09:00:00+00:00';
 
+    private ?SecondSession $secondSession = null;
+
     protected function setUp(): void
     {
         $this->removeRows();
@@ -71,6 +75,8 @@ final class MarkBellGroupDoneTest extends KernelTestCase
 
     protected function tearDown(): void
     {
+        $this->secondSession?->entityManager->getConnection()->close();
+        $this->secondSession = null;
         self::getContainer()->get('doctrine')->resetManager();
         $this->removeRows();
         parent::tearDown();
@@ -119,14 +125,57 @@ final class MarkBellGroupDoneTest extends KernelTestCase
         self::assertSame($outboxBodiesAfterFirstDone, $this->outboxBodiesByPing());
     }
 
+    /**
+     * The other session is ClearPingsOnAction halfway: it locked Omar's open pings and marked their bell rows done, and
+     * has not committed. Done must wait on the pings, not on the bell rows: ClearPingsOnAction takes the pings first, so
+     * Done taking the bell rows first could hold one while the other holds the pings, and the two would deadlock. A
+     * failed statement ends the transaction's locks at once, so the order shows in the table Done gave up waiting on.
+     */
+    #[Test]
+    public function doneWaitsOnThePingsBeforeTheBellRowsAsClearingOnAnActionDoes(): void
+    {
+        $failure = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): DriverException {
+            $clearing = $this->secondSession()->entityManager->getConnection();
+            $clearing->beginTransaction();
+            try {
+                self::assertSame(
+                    [self::FIRST_PING_FROM_LENA, self::SECOND_PING_FROM_LENA, self::HELD_PING_FROM_LENA, self::PING_FROM_MIA],
+                    $clearing->fetchFirstColumn('SELECT id FROM ntf_ping WHERE to_id = ? AND ticket_id = ? AND cleared_at IS NULL ORDER BY id FOR UPDATE', [self::OMAR, self::TICKET]),
+                );
+                self::assertSame(3, $clearing->executeStatement(
+                    "UPDATE ntf_notification SET done_at = TIMESTAMPTZ '2027-03-16 08:59:00+00' WHERE user_id = ? AND ticket_id = ? AND kind = 'ping' AND done_at IS NULL",
+                    [self::OMAR, self::TICKET],
+                ));
+                $this->connection()->executeStatement("SET LOCAL lock_timeout = '300ms'");
+                try {
+                    $this->markDoneAsOmar();
+                } catch (DriverException $failure) {
+                    return $failure;
+                }
+                self::fail('Done went through while another session held the pings and their bell rows.');
+            } finally {
+                $clearing->rollBack();
+            }
+        });
+
+        self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $failure->getSQLState());
+        self::assertStringContainsString('in relation "ntf_ping"', $failure->getMessage(), 'Done waited on another table before the pings.');
+        $this->assertNothingChangedIn(self::ACME_FOODS);
+    }
+
     private function markLenasGroupDoneAsOmar(): int
     {
-        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): int => $this->markBellGroupDone()->markDone(
+        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): int => $this->markDoneAsOmar());
+    }
+
+    private function markDoneAsOmar(): int
+    {
+        return $this->markBellGroupDone()->markDone(
             TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), [], false, null),
             new UserId(self::LENA),
             new TicketId(self::TICKET),
             new \DateTimeImmutable(self::DONE_AT),
-        ));
+        );
     }
 
     private function assertNothingChangedIn(string $organizationId): void
@@ -255,6 +304,11 @@ final class MarkBellGroupDoneTest extends KernelTestCase
         \assert($markBellGroupDone instanceof MarkBellGroupDone);
 
         return $markBellGroupDone;
+    }
+
+    private function secondSession(): SecondSession
+    {
+        return $this->secondSession ??= SecondSession::besideTheApp($this->entityManager(), $this->tenantContext());
     }
 
     private function transactions(): TenantTransactions

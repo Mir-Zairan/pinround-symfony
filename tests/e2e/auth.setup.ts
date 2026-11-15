@@ -1,5 +1,17 @@
 import { expect, test as setup, type Page } from '@playwright/test';
-import { BEN_EMAIL, BEN_STORAGE_STATE, demoPassword, LENA_EMAIL, LENA_STORAGE_STATE, OMAR_EMAIL, OMAR_STORAGE_STATE, RAJ_EMAIL, RAJ_STORAGE_STATE } from './auth';
+import {
+  BEN_EMAIL,
+  BEN_STORAGE_STATE,
+  demoPassword,
+  LENA_EMAIL,
+  LENA_STORAGE_STATE,
+  MIA_EMAIL,
+  MIA_STORAGE_STATE,
+  OMAR_EMAIL,
+  OMAR_STORAGE_STATE,
+  RAJ_EMAIL,
+  RAJ_STORAGE_STATE,
+} from './auth';
 
 async function submitPassword(page: Page, email: string): Promise<void> {
   await page.goto('/login');
@@ -32,17 +44,36 @@ setup('log in as Ben', async ({ page }) => {
   await logIn(page, BEN_EMAIL, 'Ben', BEN_STORAGE_STATE);
 });
 
-// This project runs before any spec, so confirm-its-you.spec.ts has not turned Raj's two-step login on yet.
-setup('log in as Raj', async ({ page }) => {
-  await submitPassword(page, RAJ_EMAIL);
+/**
+ * Logs in a person whose two-step login a spec turns on, which this project runs before. When an earlier local run
+ * stopped with it on, it skips instead: typing a recovery code would spend one that spec needs to turn it off again.
+ * CI starts from the demo seed, where it is off, so there the code page fails this login.
+ */
+async function logInBeforeTwoStepLogin(page: Page, email: string, firstName: string, storageState: string, skipReason: string): Promise<void> {
+  await submitPassword(page, email);
   const codePage = page.getByRole('heading', { name: 'Type your code', level: 1 });
-  await expect(codePage.or(avatarOf(page, 'Raj'))).toBeVisible();
-  // Typing a recovery code would spend one that confirm-its-you.spec.ts needs to turn it off again. CI starts from the
-  // demo seed, where it is off, so there the code page fails this login.
-  setup.skip(
-    !process.env.CI && (await codePage.isVisible()),
+  await expect(codePage.or(avatarOf(page, firstName))).toBeVisible();
+  setup.skip(!process.env.CI && (await codePage.isVisible()), skipReason);
+  await expect(avatarOf(page, firstName)).toBeVisible();
+  await page.context().storageState({ path: storageState });
+}
+
+setup('log in as Raj', async ({ page }) => {
+  await logInBeforeTwoStepLogin(
+    page,
+    RAJ_EMAIL,
+    'Raj',
+    RAJ_STORAGE_STATE,
     'Raj has two-step login on in this database (an earlier run of confirm-its-you.spec.ts stopped before turning it off), so ticket-move.spec.ts skips his viewer check.',
   );
-  await expect(avatarOf(page, 'Raj')).toBeVisible();
-  await page.context().storageState({ path: RAJ_STORAGE_STATE });
+});
+
+setup('log in as Mia', async ({ page }) => {
+  await logInBeforeTwoStepLogin(
+    page,
+    MIA_EMAIL,
+    'Mia',
+    MIA_STORAGE_STATE,
+    'Mia has two-step login on in this database (an earlier run of login-code.spec.ts stopped before turning it off), so live-updates.spec.ts skips her removed-access check.',
+  );
 });

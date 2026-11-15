@@ -101,7 +101,7 @@ final class DbalTicketEmailLabelsTest extends KernelTestCase
         $ticketIds = array_map(static fn (int $number): TicketId => new TicketId(\sprintf('0197a3c0-0000-7000-8000-0000000089%02x', $number)), range(0, TicketEmailLabels::MAX_TICKET_IDS));
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('At most 100 ticket labels are read at once.');
+        $this->expectExceptionMessageIsOrContains('At most 100 ticket labels are read at once.');
 
         $this->queries()->labelsOf($ticketIds);
     }
@@ -128,7 +128,7 @@ final class DbalTicketEmailLabelsTest extends KernelTestCase
         self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Ticket email labels are read in a transaction under the organization as tenant; none is open.');
+        $this->expectExceptionMessageIsOrContains('Ticket email labels are read in a transaction under the organization as tenant; none is open.');
 
         $this->queries()->labelsOf([new TicketId(self::FOR_EVERYONE_TICKET)]);
     }

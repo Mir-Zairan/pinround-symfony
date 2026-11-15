@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { bellButton, bellPopover, expectOmarUnderBellCaps, openBellPopover } from './bell';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 const TOAST_REGION = '#toast-region';
@@ -19,21 +20,6 @@ async function seriousViolations(page: Page): Promise<string[]> {
 async function openHome(page: Page): Promise<void> {
   // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
   await page.goto('/', { waitUntil: 'networkidle' });
-}
-
-function bell(page: Page) {
-  return page.getByRole('banner').getByRole('button', { name: 'Pings' });
-}
-
-function popover(page: Page) {
-  return page.getByRole('dialog', { name: /^Pings · \d+ open$/ });
-}
-
-async function openPopover(page: Page): Promise<void> {
-  const frameLoaded = page.waitForResponse((response) => new URL(response.url()).pathname === '/bell' && response.request().method() === 'GET');
-  await bell(page).click();
-  expect((await frameLoaded).status()).toBe(200);
-  await expect(popover(page)).toBeVisible();
 }
 
 /** The badge's count of open notifications, 0 when the badge shows none. */
@@ -79,79 +65,110 @@ async function pingOmarOnNewTicket(browser: Browser, message: string): Promise<s
 
 test('the bell opens the Pings popover, loads its frame and focuses it', async ({ page }) => {
   await openHome(page);
-  await expect(bell(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(bellButton(page)).toHaveAttribute('aria-expanded', 'false');
 
-  await openPopover(page);
+  await openBellPopover(page);
 
-  await expect(bell(page)).toHaveAttribute('aria-expanded', 'true');
-  await expect(popover(page)).toBeFocused();
-  await expect(popover(page).getByText('Grouped by person and ticket.')).toBeVisible();
-  await expect(popover(page).getByRole('button', { name: 'Close' })).toBeVisible();
+  await expect(bellButton(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(bellPopover(page)).toBeFocused();
+  await expect(bellPopover(page).getByText('Grouped by person and ticket.')).toBeVisible();
+  await expect(bellPopover(page).getByRole('button', { name: 'Close' })).toBeVisible();
 });
 
 test('Escape closes the popover and puts focus back on the bell', async ({ page }) => {
   await openHome(page);
-  await openPopover(page);
+  await openBellPopover(page);
 
   await page.keyboard.press('Escape');
 
-  await expect(popover(page)).toBeHidden();
-  await expect(bell(page)).toHaveAttribute('aria-expanded', 'false');
-  await expect(bell(page)).toBeFocused();
+  await expect(bellPopover(page)).toBeHidden();
+  await expect(bellButton(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(bellButton(page)).toBeFocused();
 });
 
 test('Close closes the popover and puts focus back on the bell', async ({ page }) => {
   await openHome(page);
-  await openPopover(page);
+  await openBellPopover(page);
 
-  await popover(page).getByRole('button', { name: 'Close' }).click();
+  await bellPopover(page).getByRole('button', { name: 'Close' }).click();
 
-  await expect(popover(page)).toBeHidden();
-  await expect(bell(page)).toHaveAttribute('aria-expanded', 'false');
-  await expect(bell(page)).toBeFocused();
+  await expect(bellPopover(page)).toBeHidden();
+  await expect(bellButton(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(bellButton(page)).toBeFocused();
 });
 
-test.describe('a ping from Lena', () => {
-  const message = `Can you look at the basket total? ${randomUUID().slice(0, 8)}`;
-  let key = '';
-
-  test.beforeAll(async ({ browser }) => {
-    key = await pingOmarOnNewTicket(browser, message);
-  });
-
-  function lenasCard(page: Page) {
-    // A rerun's earlier ping on the same ticket would make the group "2 pings", so only the sender and key are fixed.
-    return popover(page).getByRole('article', { name: new RegExp(`^Lena .+ on ${key}$`) });
+/**
+ * The badge's count as the server renders it now, read from a fresh Home page in Omar's session, so it is taken a moment
+ * before the next click rather than when the open page loaded.
+ */
+async function serverBadgeCountOf(page: Page): Promise<number> {
+  const home = await page.request.get('/');
+  expect(home.status()).toBe(200);
+  const spokenCount = await page.evaluate(
+    (html) => new DOMParser().parseFromString(html, 'text/html').querySelector('#bell-badge .visually-hidden')?.textContent ?? null,
+    await home.text(),
+  );
+  if (null === spokenCount) {
+    return 0;
   }
+  const match = /^(\d+) open$/.exec(spokenCount.trim());
+  expect(match, 'the badge names its count as "N open"').not.toBeNull();
+  return Number(match![1]);
+}
 
-  test('Done takes the card out of the popover and drops the badge by one', async ({ page }) => {
+function lenasCardOn(page: Page, key: string) {
+  return bellPopover(page).getByRole('article', { name: `Lena pinged you on ${key}` });
+}
+
+// The badge counts every open notification of Omar, and the specs running beside this one notify him and clear his
+// pings at any moment, so no read taken seconds before Done can be compared with the count after it. Each try reads
+// the count just before the click and compares it with the count Done's own answer draws. A try whose drop is not one,
+// as when another spec's change landed in between, is spent, and the next one pings Omar on a new ticket; a Done that
+// drops the badge by anything but one fails every try.
+const DONE_TRIES = 3;
+
+test('Done takes the card out of the popover and drops the badge by one', async ({ browser, page }) => {
+  expectOmarUnderBellCaps();
+  test.setTimeout(DONE_TRIES * 30_000);
+  const drops: number[] = [];
+  let key = '';
+  for (let attempt = 1; attempt <= DONE_TRIES && drops.at(-1) !== 1; attempt++) {
+    const message = `Can you look at the basket total? ${randomUUID().slice(0, 8)}`;
+    key = await pingOmarOnNewTicket(browser, message);
     // The ping reaches the bell through the outbox and its worker, a moment after Lena sent it.
     await expect(async () => {
       await openHome(page);
-      await openPopover(page);
-      await expect(lenasCard(page)).toBeVisible({ timeout: 1_000 });
+      await openBellPopover(page);
+      await expect(lenasCardOn(page, key)).toBeVisible({ timeout: 1_000 });
     }).toPass({ intervals: [500, 1_000, 2_000], timeout: 20_000 });
-    await expect(lenasCard(page)).toHaveAccessibleName(`Lena pinged you on ${key}`);
-    await expect(lenasCard(page).getByText(`“${message}”`)).toBeVisible();
-    const countBefore = await badgeCountOf(page);
-    expect(countBefore).toBeGreaterThan(0);
+    await expect(lenasCardOn(page, key).getByText(`“${message}”`)).toBeVisible();
 
-    await lenasCard(page).getByRole('button', { name: 'Done' }).click();
+    const countBefore = await serverBadgeCountOf(page);
+    expect(countBefore, 'the badge counts the ping on screen').toBeGreaterThan(0);
+    const answer = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/done') && response.request().method() === 'POST');
+    await lenasCardOn(page, key).getByRole('button', { name: 'Done' }).click();
+    expect((await answer).status()).toBe(200);
 
+    // The toast comes last in Done's stream, so the badge and the popover are already redrawn from the same answer.
     await expect(page.locator(TOAST_REGION)).not.toBeEmpty();
-    await expect.poll(() => badgeCountOf(page)).toBe(countBefore - 1);
-    await openHome(page);
-    await openPopover(page);
-    await expect(popover(page)).toHaveAccessibleName(`Pings · ${countBefore - 1} open`);
-    await expect(lenasCard(page)).toHaveCount(0);
-  });
+    const countAfter = await badgeCountOf(page);
+    await expect(bellPopover(page)).toHaveAccessibleName(`Pings · ${countAfter} open`);
+    await expect(lenasCardOn(page, key)).toHaveCount(0);
+    drops.push(countBefore - countAfter);
+  }
+
+  expect(drops.at(-1), `the badge dropped by ${drops.join(', then ')} over ${drops.length} tries`).toBe(1);
+  // After a reload too: Done ended the group on the server, not only on the open page.
+  await openHome(page);
+  await openBellPopover(page);
+  await expect(lenasCardOn(page, key)).toHaveCount(0);
 });
 
 for (const scheme of ['light', 'dark'] as const) {
   test(`the open popover has no serious or critical accessibility violations in ${scheme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme });
     await openHome(page);
-    await openPopover(page);
+    await openBellPopover(page);
 
     expect(await seriousViolations(page)).toEqual([]);
   });
@@ -162,10 +179,10 @@ test.describe('narrow viewport', () => {
 
   test('the open popover stays inside the viewport at 360px', async ({ page }) => {
     await openHome(page);
-    await openPopover(page);
+    await openBellPopover(page);
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-    const box = (await popover(page).boundingBox())!;
+    const box = (await bellPopover(page).boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(360);
   });

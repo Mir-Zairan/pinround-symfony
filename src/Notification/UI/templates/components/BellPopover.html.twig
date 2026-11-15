@@ -3,7 +3,7 @@
         <h2 id="bell-popover-title" class="bell-popover__title">Pings · {{ this.bell.openCount }} open</h2>
         <button type="button" class="btn btn-text btn-sm" data-action="bell#closeToTrigger">Close</button>
     </div>
-    <p class="bell-popover__muted">Grouped by person and ticket. A ping clears itself when you act on that ticket.</p>
+    <p class="bell-popover__muted">Grouped by person and ticket.{% if this.isAutoClearOn %} A ping clears itself when you act on that ticket.{% endif %}</p>
     {% if this.bell.groups is empty %}
         <p class="bell-popover__empty">No open pings.</p>
     {% else %}

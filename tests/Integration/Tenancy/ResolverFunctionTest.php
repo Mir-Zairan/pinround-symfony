@@ -47,6 +47,10 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_jira_connection' => "resolve_jira_connection('".self::UNKNOWN_ID."'::uuid)",
         'resolve_laptop_package' => "resolve_laptop_package('".self::UNKNOWN_ID."'::uuid)",
         'search_ticket_ids' => "search_ticket_ids('".self::UNKNOWN_ID."'::uuid, 'checkout', '".self::UNKNOWN_ID."'::uuid, '{}'::uuid[], true, true, NULL, NULL, NULL)",
+        // No notification is held until before 1970.
+        'organizations_with_due_notifications' => "organizations_with_due_notifications('1970-01-01 00:00:00+00'::timestamptz)",
+        // No notification was made an hour before 1970.
+        'digest_recipients' => "digest_recipients('1970-01-01 00:00:00+00'::timestamptz)",
     ];
 
     private const array OUTPUT_COLUMNS = [
@@ -57,6 +61,8 @@ final class ResolverFunctionTest extends KernelTestCase
         'resolve_jira_connection' => ['organization_id'],
         'resolve_laptop_package' => ['organization_id', 'user_id'],
         'search_ticket_ids' => ['ticket_id'],
+        'organizations_with_due_notifications' => ['organization_id'],
+        'digest_recipients' => ['organization_id', 'user_id'],
     ];
 
     /**
@@ -214,26 +220,51 @@ final class ResolverFunctionTest extends KernelTestCase
     }
 
     /**
+     * organizations_with_due_notifications and digest_recipients read ntf_notification through resolver_read on the
+     * parent only, and only the ids they return and the columns they match on: never a notification's actor or data.
+     */
+    #[Test]
+    public function theNotificationResolversReadOnlyTheColumnsTheyMatchOnOrReturnOfTheParent(): void
+    {
+        $connection = $this->connection();
+        self::assertEqualsCanonicalizing(
+            ['organization_id', 'deliver_after', 'user_id', 'kind', 'ticket_id', 'read_at', 'done_at', 'created_at'],
+            $connection->fetchFirstColumn(
+                "SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl
+                 WHERE a.attrelid = 'public.ntf_notification'::regclass AND acl.grantee = 'pinround_resolver'::regrole AND acl.privilege_type = 'SELECT'",
+            ),
+        );
+        self::assertSame(
+            [['policyname' => 'resolver_read', 'roles' => '{pinround_resolver}', 'cmd' => 'SELECT', 'qual' => 'true']],
+            $connection->fetchAllAssociative(
+                "SELECT policyname, roles::text AS roles, cmd, qual FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'ntf_notification' AND policyname <> 'tenant_isolation'",
+            ),
+        );
+        self::assertSame([], $connection->fetchFirstColumn(
+            "SELECT c.relname || ' ' || a.attname FROM pg_inherits i
+             JOIN pg_class c ON c.oid = i.inhrelid
+             JOIN pg_attribute a ON a.attrelid = c.oid, aclexplode(a.attacl) acl
+             WHERE i.inhparent = 'public.ntf_notification'::regclass AND acl.grantee = 'pinround_resolver'::regrole",
+        ));
+        self::assertSame([], $connection->fetchFirstColumn(
+            "SELECT c.relname || ' ' || pol.polname FROM pg_inherits i
+             JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_policy pol ON pol.polrelid = c.oid
+             WHERE i.inhparent = 'public.ntf_notification'::regclass AND pol.polname = 'resolver_read'",
+        ));
+    }
+
+    /**
      * resolver_read lets pinround_resolver read every organization's tickets, so a function of it that reads tkt_ticket
      * keeps to the transaction's tenant itself: p_organization_id must equal app.org_id, or no row matches.
      */
     #[Test]
     public function everyResolverFunctionThatReadsTicketsKeepsToTheTenantOfTheTransaction(): void
     {
-        /** @var array<string, string> $bodiesByName */
-        $bodiesByName = $this->connection()->fetchAllKeyValue(
-            "SELECT p.proname, p.prosrc FROM pg_proc p
-             WHERE p.pronamespace = 'public'::regnamespace AND p.proowner = 'pinround_resolver'::regrole AND p.prosrc ~ '\\mtkt_ticket\\M'",
-        );
+        $ticketReaders = TenancyCatalog::read($this->connection(), $this->migrator())->resolverReadersByTable()['tkt_ticket'] ?? [];
 
-        self::assertContains('search_ticket_ids', array_keys($bodiesByName));
-        foreach ($bodiesByName as $name => $body) {
-            self::assertMatchesRegularExpression(
-                "/\\bp_organization_id\\s*=\\s*NULLIF\\(\\s*current_setting\\('app\\.org_id',\\s*true\\),\\s*''\\s*\\)::uuid/",
-                $body,
-                $name,
-            );
-        }
+        self::assertArrayHasKey('search_ticket_ids', $ticketReaders);
+        self::assertSame(array_fill_keys(array_keys($ticketReaders), true), $ticketReaders);
     }
 
     #[Test]

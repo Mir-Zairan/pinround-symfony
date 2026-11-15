@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Voter;
 
+use App\Conversation\UI\Voter\MessageOnTicket;
 use App\Identity\Application\SessionConfirmations;
 use App\Identity\Domain\Credential;
 use App\Identity\Domain\Email;
@@ -89,15 +90,20 @@ final class VoterMatrixTest extends KernelTestCase
 
     private const array TEAMS = ['Shop' => self::SHOP, 'Mobile' => self::MOBILE, 'Support' => self::SUPPORT, 'Checkout' => self::CHECKOUT];
 
+    /** The person of PEOPLE who leads each team, as setUpBeforeClass adds them; a comment's subject carries its lead. */
+    private const array TEAM_LEADS = [self::SHOP => 'Lena', self::MOBILE => 'Lena', self::SUPPORT => 'Noor', self::CHECKOUT => 'Ben'];
+
     /**
-     * Each team-only ticket of Acme Foods by its team, null for a ticket with no team yet, and the person of PEOPLE who
-     * reported it, null for REPORTER.
+     * Each ticket of Acme Foods by its visibility, its team, null for a ticket with no team yet, and the person of
+     * PEOPLE who reported it, null for REPORTER.
      */
     private const array TICKETS = [
-        'Team-only Shop ticket' => [self::SHOP, null],
-        'Team-only ticket with no team' => [null, null],
-        'Team-only Support ticket reported by Mia' => [self::SUPPORT, 'Mia'],
-        'Team-only Support ticket reported by Omar' => [self::SUPPORT, 'Omar'],
+        'Team-only Shop ticket' => [TicketVisibilityFacts::TEAM_ONLY, self::SHOP, null],
+        'Team-only ticket with no team' => [TicketVisibilityFacts::TEAM_ONLY, null, null],
+        'Team-only Support ticket reported by Mia' => [TicketVisibilityFacts::TEAM_ONLY, self::SUPPORT, 'Mia'],
+        'Team-only Support ticket reported by Omar' => [TicketVisibilityFacts::TEAM_ONLY, self::SUPPORT, 'Omar'],
+        'For-everyone Shop ticket' => [TicketVisibilityFacts::FOR_EVERYONE, self::SHOP, null],
+        'For-everyone Shop ticket reported by Noor' => [TicketVisibilityFacts::FOR_EVERYONE, self::SHOP, 'Noor'],
     ];
 
     /** Reported the tickets no person of PEOPLE reported, so no row's actor sees those as their reporter. */
@@ -275,7 +281,7 @@ final class VoterMatrixTest extends KernelTestCase
         ));
     }
 
-    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget
+    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget|MessageOnTicket
     {
         if (isset(self::UPLOAD_TARGETS[$name])) {
             return new UploadTarget(...self::UPLOAD_TARGETS[$name]);
@@ -283,12 +289,21 @@ final class VoterMatrixTest extends KernelTestCase
         if (isset(self::ORGANIZATIONS[$name])) {
             return new OrganizationId(self::ORGANIZATIONS[$name]);
         }
+        if (1 === preg_match('/\A(\w+)\'s comment on (.+)\z/', $name, $comment)) {
+            [, $author, $ticketName] = $comment;
+            self::assertArrayHasKey($author, self::PEOPLE, 'The comment\'s author is one of VoterMatrixTest::PEOPLE.');
+            $ticket = self::subjectNamed($ticketName);
+            self::assertInstanceOf(TicketVisibilityFacts::class, $ticket, 'A comment is on a ticket of VoterMatrixTest::TICKETS.');
+            $teamLead = null === $ticket->teamId ? null : self::TEAM_LEADS[$ticket->teamId->toString()];
+
+            return new MessageOnTicket($ticket, new UserId(self::PEOPLE[$author][0]), null === $teamLead ? null : new UserId(self::PEOPLE[$teamLead][0]));
+        }
         if (\array_key_exists($name, self::TICKETS)) {
-            [$teamId, $reporter] = self::TICKETS[$name];
+            [$visibility, $teamId, $reporter] = self::TICKETS[$name];
 
             return new TicketVisibilityFacts(
                 new OrganizationId(self::ACME_FOODS),
-                TicketVisibilityFacts::TEAM_ONLY,
+                $visibility,
                 null === $teamId ? null : new TeamId($teamId),
                 new UserId(null === $reporter ? self::REPORTER : self::PEOPLE[$reporter][0]),
             );
@@ -304,7 +319,7 @@ final class VoterMatrixTest extends KernelTestCase
                 null === $invitee ? null : new UserId(self::PEOPLE[$invitee][0]),
             );
         }
-        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team, an invitation or a ticket of VoterMatrixTest.');
+        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team, an invitation, a ticket or a comment of VoterMatrixTest.');
 
         return new TeamId(self::TEAMS[$name]);
     }

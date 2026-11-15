@@ -82,12 +82,20 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         );
     }
 
+    /**
+     * As DoctrineTickets, it refuses a ticket marked with changedMeanwhile, as the one it holds is the stale copy.
+     */
     public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket
     {
-        return array_find(
+        $ticket = array_find(
             $this->addedTickets,
             static fn (Ticket $ticket): bool => $ticket->organizationId()->equals($organizationId) && $ticket->id()->equals($ticketId),
         );
+        if (null !== $ticket && \in_array($ticket->id()->toString(), $this->ticketsChangedMeanwhile, true)) {
+            throw new TicketVersionConflict('The ticket was saved by another request after it was read.');
+        }
+
+        return $ticket;
     }
 
     public function recordCreated(OrganizationId $organizationId, TicketId $ticketId, UserId $reporter, string $stepId, \DateTimeImmutable $at): void

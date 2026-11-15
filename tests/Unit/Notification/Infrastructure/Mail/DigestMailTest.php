@@ -55,7 +55,7 @@ final class DigestMailTest extends TestCase
     public function aKindNoDigestListsHasNoWords(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('A digest has no words for the kind answer.');
+        $this->expectExceptionMessageIsOrContains('A digest has no words for the kind answer.');
 
         DigestMail::actionOf(NotificationKind::Answer);
     }
@@ -106,7 +106,7 @@ final class DigestMailTest extends TestCase
     public function aTitleThatIsNotUtf8IsRefused(): void
     {
         $this->expectException(\UnexpectedValueException::class);
-        $this->expectExceptionMessage('Stored text for a digest email is not valid UTF-8.');
+        $this->expectExceptionMessageIsOrContains('Stored text for a digest email is not valid UTF-8.');
 
         DigestMail::labelOf(self::itemOf("Checkout \xC3\x28 hidden", null));
     }

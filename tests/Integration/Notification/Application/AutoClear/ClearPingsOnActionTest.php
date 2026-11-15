@@ -12,6 +12,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\Tests\Integration\Notification\NotificationRows;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\SecondSession;
@@ -51,6 +52,11 @@ final class ClearPingsOnActionTest extends KernelTestCase
     private const string MIAS_BELL_ROW = '0197a3c0-0000-7000-8000-0000000c6c03';
     private const string TICKET_B_BELL_ROW = '0197a3c0-0000-7000-8000-0000000c6c04';
     private const string REPLY_BELL_ROW = '0197a3c0-0000-7000-8000-0000000c6c05';
+
+    private const string HELD_PING_TO_OMAR = '0197a3c0-0000-7000-8000-0000000c6b06';
+    private const string HELD_BELL_ROW = '0197a3c0-0000-7000-8000-0000000c6c06';
+    /** After ACTED_AT, so the held ping and its bell row are still waiting when Omar acts. */
+    private const string HELD_UNTIL = '2027-03-16 10:00:00+00';
 
     private const string ACTED_AT = '2027-03-16 09:00:00+00:00';
     private const string ACTED_AGAIN_AT = '2027-03-16 10:00:00+00:00';
@@ -154,6 +160,40 @@ final class ClearPingsOnActionTest extends KernelTestCase
 
         $this->assertNothingChangedIn(self::ACME_FOODS);
         self::assertSame($outboxRowsBefore, $this->outboxRowsByPing());
+    }
+
+    /**
+     * With the tenant filter off the pings query names no organization, so only row-level security keeps Beta Bakery's
+     * pings with the same ids out of the lock and the clear.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneKeepsAnotherOrganizationsPingsOpenWithTheTenantFilterOff(): void
+    {
+        $this->entityManager()->getFilters()->disable(TenantFilter::NAME);
+
+        $clearedCount = $this->clearAsOmar(self::ACTED_AT);
+
+        self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
+        self::assertSame(2, $clearedCount);
+        self::assertSame(['acted', '2027-03-16 09:00:00'], $this->pingStatesOf(self::ACME_FOODS)[self::FIRST_PING_TO_OMAR]);
+        self::assertSame(['acted', '2027-03-16 09:00:00'], $this->pingStatesOf(self::ACME_FOODS)[self::SECOND_PING_TO_OMAR]);
+        $this->assertNothingChangedIn(self::BETA_BAKERY);
+    }
+
+    #[Test]
+    public function actingClearsAPingStillHeldForQuietHoursWithItsBellRow(): void
+    {
+        $this->notificationRows()->addOf(self::ACME_FOODS, 'ntf_ping', [
+            [...self::ping(self::ACME_FOODS, self::HELD_PING_TO_OMAR, self::OMAR, self::TICKET_A, '2027-03-15 20:00:00+00'), 'deliver_after' => self::HELD_UNTIL],
+        ]);
+        $this->notificationRows()->addOf(self::ACME_FOODS, 'ntf_notification', [
+            self::bellRow(self::ACME_FOODS, self::HELD_BELL_ROW, self::OMAR, self::TICKET_A, 'ping', ['deliver_after' => self::HELD_UNTIL]),
+        ]);
+
+        self::assertSame(3, $this->clearAsOmar(self::ACTED_AT));
+
+        self::assertSame(['acted', '2027-03-16 09:00:00'], $this->pingStatesOf(self::ACME_FOODS)[self::HELD_PING_TO_OMAR]);
+        self::assertSame('2027-03-16 09:00:00', $this->bellRowsDoneAtOf(self::ACME_FOODS)[self::HELD_BELL_ROW]);
     }
 
     #[Test]

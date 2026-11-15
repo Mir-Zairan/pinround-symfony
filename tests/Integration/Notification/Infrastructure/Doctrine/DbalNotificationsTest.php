@@ -37,6 +37,7 @@ final class DbalNotificationsTest extends KernelTestCase
     private const string OMAR = '0197a3c0-0000-7000-8000-000000006b12';
     private const string MIA = '0197a3c0-0000-7000-8000-000000006b13';
     private const string FIRST_REPLY_AT = '2027-03-15 10:00:00 UTC';
+    private const string HELD_UNTIL = '2027-03-16 08:00:00 UTC';
 
     protected function setUp(): void
     {
@@ -88,6 +89,25 @@ final class DbalNotificationsTest extends KernelTestCase
         }
 
         self::assertSame([], $this->rowsOf(self::ACME_FOODS));
+    }
+
+    #[Test]
+    public function markingPingsDoneOutsideATransactionIsRefusedAndLeavesThemOpen(): void
+    {
+        $at = new \DateTimeImmutable(self::FIRST_REPLY_AT);
+        $ping = new NewNotification(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), NotificationKind::Ping, new UserId(self::LENA), new TicketId(self::TICKET), ['actorName' => 'Lena', 'ticketKey' => 'SHOP-1', 'pingId' => self::MESSAGE], $at);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($ping));
+        $rowsBefore = $this->rowsOf(self::ACME_FOODS);
+        self::assertSame([null], array_column($rowsBefore, 'done_at'));
+
+        try {
+            $this->notifications()->markPingsDone(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), new TicketId(self::TICKET), $at->modify('+1 minute'));
+            self::fail('Pings were marked done outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('A notification is written in the transaction of the event it is about; none is open.', $refusal->getMessage());
+        }
+
+        self::assertSame($rowsBefore, $this->rowsOf(self::ACME_FOODS));
     }
 
     #[Test]
@@ -183,6 +203,101 @@ final class DbalNotificationsTest extends KernelTestCase
         $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): bool => $this->notifications()->foldIntoUnreadReply($question, new \DateTimeImmutable(self::FIRST_REPLY_AT)));
     }
 
+    #[Test]
+    public function aReplyFoldsOnlyIntoAReplyHeldUntilTheSameTime(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::FIRST_REPLY_AT));
+            $this->notifications()->add($this->reply(self::OMAR, self::OTHER_MESSAGE, self::LENA, '2027-03-16 08:30:00 UTC', '2027-03-16 08:30:00 UTC'));
+        });
+        $since = new \DateTimeImmutable(self::FIRST_REPLY_AT);
+
+        $isFolded = [
+            'held into shown' => $this->foldOrAdd($this->reply(self::OMAR, self::MESSAGE, self::MIA, self::HELD_UNTIL, self::HELD_UNTIL), $since),
+            'held into held until the same time' => $this->foldOrAdd($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::HELD_UNTIL, self::HELD_UNTIL), $since),
+            'shown into held until later' => $this->foldOrAdd($this->reply(self::OMAR, self::OTHER_MESSAGE, self::MIA, '2027-03-16 08:10:00 UTC'), $since),
+            'held into held until another time' => $this->foldOrAdd($this->reply(self::OMAR, self::OTHER_MESSAGE, self::MIA, '2027-03-17 08:30:00 UTC', '2027-03-17 08:30:00 UTC'), $since),
+        ];
+
+        self::assertSame(
+            ['held into shown' => false, 'held into held until the same time' => true, 'shown into held until later' => false, 'held into held until another time' => false],
+            $isFolded,
+        );
+        self::assertSame(
+            [
+                [self::MESSAGE, self::LENA, '2027-03-15 10:00:00.000', null],
+                [self::MESSAGE, self::LENA, '2027-03-16 08:00:00.000', '2027-03-16 08:00:00.000'],
+                [self::OTHER_MESSAGE, self::MIA, '2027-03-16 08:10:00.000', null],
+                [self::OTHER_MESSAGE, self::LENA, '2027-03-16 08:30:00.000', '2027-03-16 08:30:00.000'],
+                [self::OTHER_MESSAGE, self::MIA, '2027-03-17 08:30:00.000', '2027-03-17 08:30:00.000'],
+            ],
+            array_map(static fn (array $row): array => [$row['data']['messageId'] ?? null, $row['actor_id'], $row['created_at'], $row['deliver_after']], $this->rowsOf(self::ACME_FOODS)),
+        );
+    }
+
+    #[Test]
+    public function aShownReplyFoldsIntoAReplyWhoseHoldEndedBeforeTheReleaseRan(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::HELD_UNTIL, self::HELD_UNTIL)));
+
+        $since = new \DateTimeImmutable(self::FIRST_REPLY_AT);
+
+        $isFolded = [
+            'as the hold ends' => $this->foldOrAdd($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::HELD_UNTIL), $since),
+            'after the hold ended' => $this->foldOrAdd($this->reply(self::OMAR, self::MESSAGE, self::MIA, '2027-03-16 08:02:00 UTC'), $since),
+        ];
+
+        self::assertSame(['as the hold ends' => true, 'after the hold ended' => true], $isFolded);
+        self::assertSame(
+            [[self::MIA, '2027-03-16 08:02:00.000', '2027-03-16 08:00:00.000']],
+            array_map(static fn (array $row): array => [$row['actor_id'], $row['created_at'], $row['deliver_after']], $this->rowsOf(self::ACME_FOODS)),
+        );
+    }
+
+    #[Test]
+    public function aReleaseClearsTheOrganizationsDueRowsAndReturnsEachRecipientOnceInUserIdOrder(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $notifications = $this->notifications();
+            $notifications->add($this->reply(self::MIA, self::MESSAGE, self::LENA, '2027-03-16 07:00:00 UTC', '2027-03-16 07:00:00 UTC'));
+            $notifications->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, '2027-03-16 07:30:00 UTC', '2027-03-16 07:30:00 UTC'));
+            $notifications->add($this->reply(self::OMAR, self::OTHER_MESSAGE, self::LENA, self::HELD_UNTIL, self::HELD_UNTIL));
+            $notifications->add($this->reply(self::OMAR, self::MESSAGE, self::MIA, '2027-03-17 08:00:00 UTC', '2027-03-17 08:00:00 UTC'));
+            $notifications->add($this->reply(self::LENA, self::MESSAGE, self::MIA, self::FIRST_REPLY_AT));
+        });
+        $this->transactions()->committedAs(self::BETA_BAKERY, fn () => $this->notifications()->add(
+            new NewNotification(new OrganizationId(self::BETA_BAKERY), new UserId(self::LENA), NotificationKind::Ping, new UserId(self::OMAR), new TicketId(self::BETA_TICKET), ['actorName' => 'Omar', 'ticketKey' => 'BETA-1'], new \DateTimeImmutable('2027-03-16 07:00:00 UTC'), new \DateTimeImmutable('2027-03-16 07:00:00 UTC')),
+        ));
+        $betaRowsBefore = $this->rowsOf(self::BETA_BAKERY);
+        self::assertSame(1, $this->cachedBellCountOf(self::OMAR, 1));
+        self::assertSame(1, $this->cachedBellCountOf(self::LENA, 1));
+
+        $released = $this->transactions()->committedAs(self::ACME_FOODS, fn (): array => $this->notifications()->releaseDue(new OrganizationId(self::ACME_FOODS), new \DateTimeImmutable(self::HELD_UNTIL)));
+
+        self::assertSame([self::OMAR, self::MIA], array_map(static fn (UserId $recipientId): string => $recipientId->toString(), $released));
+        self::assertSame([null, null, null, null, '2027-03-17 08:00:00.000'], array_column($this->rowsOf(self::ACME_FOODS), 'deliver_after'));
+        self::assertSame($betaRowsBefore, $this->rowsOf(self::BETA_BAKERY));
+        self::assertSame(2, $this->cachedBellCountOf(self::OMAR, 2));
+        self::assertSame(1, $this->cachedBellCountOf(self::LENA, 2));
+    }
+
+    #[Test]
+    public function releasingOutsideATransactionIsRefusedAndKeepsTheRowsHeld(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->notifications()->add($this->reply(self::OMAR, self::MESSAGE, self::LENA, self::FIRST_REPLY_AT, self::FIRST_REPLY_AT)));
+        $rowsBefore = $this->rowsOf(self::ACME_FOODS);
+        self::assertSame(['2027-03-15 10:00:00.000'], array_column($rowsBefore, 'deliver_after'));
+
+        try {
+            $this->notifications()->releaseDue(new OrganizationId(self::ACME_FOODS), new \DateTimeImmutable(self::HELD_UNTIL));
+            self::fail('Notifications were released outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('A notification is written in the transaction of the event it is about; none is open.', $refusal->getMessage());
+        }
+
+        self::assertSame($rowsBefore, $this->rowsOf(self::ACME_FOODS));
+    }
+
     /**
      * The fold target (Omar's unread reply about MESSAGE at 10:00) and six rows the fold must leave alone: another
      * person's, a read one, a done one, one about another message, a question about the same message, one older than
@@ -207,7 +322,22 @@ final class DbalNotificationsTest extends KernelTestCase
         ));
     }
 
-    private function reply(string $recipientId, string $messageId, string $actorId, string $at): NewNotification
+    /**
+     * Folds $reply in one committed transaction or, when nothing takes it, adds it as NotifyRecipients does.
+     */
+    private function foldOrAdd(NewNotification $reply, \DateTimeImmutable $since): bool
+    {
+        return $this->transactions()->committedAs(self::ACME_FOODS, function () use ($reply, $since): bool {
+            $isFolded = $this->notifications()->foldIntoUnreadReply($reply, $since);
+            if (!$isFolded) {
+                $this->notifications()->add($reply);
+            }
+
+            return $isFolded;
+        });
+    }
+
+    private function reply(string $recipientId, string $messageId, string $actorId, string $at, ?string $deliverAfter = null): NewNotification
     {
         $actorName = [self::LENA => 'Lena', self::MIA => 'Mia'][$actorId] ?? 'Omar';
 
@@ -219,6 +349,7 @@ final class DbalNotificationsTest extends KernelTestCase
             new TicketId(self::TICKET),
             ['actorName' => $actorName, 'ticketKey' => 'SHOP-1', 'messageId' => $messageId, 'replyId' => 'reply-by-'.$actorId],
             new \DateTimeImmutable($at),
+            null === $deliverAfter ? null : new \DateTimeImmutable($deliverAfter),
         );
     }
 

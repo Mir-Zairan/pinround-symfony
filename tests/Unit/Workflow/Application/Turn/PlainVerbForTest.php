@@ -26,10 +26,10 @@ final class PlainVerbForTest extends TestCase
         $mia = F::user(F::MIA);
 
         yield 'test' => [F::ticket('test', 'check'), new Turn($mia, null, NeedsYouKind::Test), F::context(), 'Test it'];
-        yield 'review' => [F::ticket('review', 'check', ['assigneeId' => $omar]), new Turn($lena, null, NeedsYouKind::Review), F::context(), "Review Omar's code"];
+        yield 'review' => [F::ticket('review', 'check', ['assigneeId' => $omar]), new Turn($lena, null, NeedsYouKind::Review), F::context(), 'Review Omar’s code'];
         yield 'review without an assignee' => [F::ticket('review', 'check'), new Turn($lena, null, NeedsYouKind::Review), F::context(), 'Review the code'];
         yield 'review your own code' => [F::ticket('review', 'check', ['assigneeId' => $lena]), new Turn($lena, null, NeedsYouKind::Review), F::context(viewer: F::LENA), 'Review your code'];
-        yield 'answer' => [F::ticket('progress', 'doing', ['askedUserId' => $omar]), new Turn($omar, null, NeedsYouKind::Answer), F::context(asker: F::MIA), "Answer Mia's question"];
+        yield 'answer' => [F::ticket('progress', 'doing', ['askedUserId' => $omar]), new Turn($omar, null, NeedsYouKind::Answer), F::context(asker: F::MIA), 'Answer Mia’s question'];
         yield 'answer without a known asker' => [F::ticket('progress', 'doing'), new Turn($omar, null, NeedsYouKind::Answer), F::context(), 'Answer the question'];
         yield 'check' => [F::ticket('backlog', 'todo'), new Turn($lena, null, NeedsYouKind::Check), F::context(), 'Check the new ticket'];
         yield 'plan' => [F::ticket('backlog', 'todo'), new Turn($lena, null, NeedsYouKind::Build), F::context(), 'Plan it'];

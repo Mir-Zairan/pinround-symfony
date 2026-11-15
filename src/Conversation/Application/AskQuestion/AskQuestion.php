@@ -1,0 +1,107 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Conversation\Application\AskQuestion;
+
+use App\Conversation\Api\Event\QuestionAsked;
+use App\Conversation\Api\MessageBodyRefused;
+use App\Conversation\Api\QuestionRefused;
+use App\Conversation\Application\ConversationEvents;
+use App\Conversation\Application\PostedMessage;
+use App\Conversation\Application\VisibleTickets;
+use App\Conversation\Domain\Message;
+use App\Conversation\Domain\Messages;
+use App\Conversation\Domain\QuestionAlreadyOpen;
+use App\Insight\Api\TurnProjector;
+use App\SharedKernel\Application\PingClearing;
+use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\AskedPersonNotOnTicket;
+use App\Ticketing\Api\TicketAlreadyPaused;
+use App\Ticketing\Api\TicketChangedMeanwhile;
+use App\Ticketing\Api\TicketNotFound;
+use App\Ticketing\Api\TicketPauses;
+use App\Ticketing\Api\TicketVisibilityFacts;
+
+/**
+ * Asks one person on the ticket a question (FR-CNV-02): the ticket pauses on its step and the turn goes to the person
+ * asked until they answer or the asker withdraws the question. A ticket waits on one question at a time (FR-CNV-08).
+ * Asking is acting on the ticket, so it clears the asker's pings on it (FR-PNG-05).
+ */
+final readonly class AskQuestion
+{
+    public const string NOT_ON_THE_TICKET = 'You can ask only someone on this ticket.';
+    public const string ASKING_YOURSELF = 'You cannot ask yourself.';
+    public const string ALREADY_WAITING = 'This ticket already waits for an answer.';
+
+    public function __construct(
+        private VisibleTickets $visibleTickets,
+        private TicketPauses $ticketPauses,
+        private TurnProjector $turnProjector,
+        private Messages $messages,
+        private ConversationEvents $conversationEvents,
+        private PingClearing $pingClearing,
+    ) {
+    }
+
+    /**
+     * Pauses the ticket, refreshes its turn, saves the question, writes QuestionAsked to the outbox and clears the
+     * asker's open pings on the ticket, all in the open transaction, whose tenant must be the ticket's organization. The ticket's row is locked first and both checks
+     * read it, so two asks cannot both pass the one-question check and a reassignment saved meanwhile decides who is
+     * on the ticket. That the asker may ask at all (ConversationPermission ASK) is the caller's check.
+     *
+     * @param TicketVisibilityFacts $ticket the visibility facts of the ticket $ticketId, as the ticket page read them
+     *
+     * @return PostedMessage the new question's id and how many pings it cleared
+     *
+     * @throws TicketNotFound         when the ticket is of another organization than the tenant, or the asker may not
+     *                                see it; nothing is saved
+     * @throws MessageBodyRefused     when the trimmed body is empty or longer than 10,000 characters; nothing is saved
+     * @throws QuestionRefused        when the person asked is the asker (ASKING_YOURSELF) or not on the ticket, its
+     *                                assignee, reporter, reviewer, tester or team lead (NOT_ON_THE_TICKET), or the
+     *                                ticket already waits for an answer (ALREADY_WAITING); nothing is saved, though
+     *                                after a refusal the database raised the caller must roll back
+     * @throws TicketChangedMeanwhile when another request saved the ticket after this request read it; the caller rolls
+     *                                back
+     * @throws \LogicException        when no transaction is open; nothing is saved
+     */
+    public function ask(TicketId $ticketId, TicketVisibilityFacts $ticket, UserId $askerId, UserId $askedUserId, string $body, \DateTimeImmutable $askedAt): PostedMessage
+    {
+        $this->visibleTickets->refuseUnlessVisibleTo($ticket, $askerId);
+        try {
+            $question = Message::question($this->messages->nextIdentity(), $ticket->organizationId, $ticketId, $askerId, $askedUserId, trim($body), $askedAt);
+        } catch (\InvalidArgumentException $invalidBody) {
+            throw new MessageBodyRefused($invalidBody->getMessage(), 0, $invalidBody);
+        }
+        if ($askedUserId->equals($askerId)) {
+            throw new QuestionRefused(self::ASKING_YOURSELF);
+        }
+
+        try {
+            $this->ticketPauses->pauseForQuestion($ticketId, $askedUserId, $askerId);
+        } catch (TicketNotFound $notFound) {
+            throw new TicketNotFound('That ticket does not exist.', 0, $notFound);
+        } catch (AskedPersonNotOnTicket $notOnTheTicket) {
+            throw new QuestionRefused(self::NOT_ON_THE_TICKET, 0, $notOnTheTicket);
+        } catch (TicketAlreadyPaused $alreadyPaused) {
+            throw new QuestionRefused(self::ALREADY_WAITING, 0, $alreadyPaused);
+        }
+        $this->turnProjector->refresh($ticketId);
+        $this->conversationEvents->publish(new QuestionAsked(
+            $ticket->organizationId->toString(),
+            $ticketId->toString(),
+            $question->id()->toString(),
+            $askedUserId->toString(),
+            $askerId->toString(),
+            $askedAt,
+        ));
+        try {
+            $this->messages->add($question);
+        } catch (QuestionAlreadyOpen $alreadyOpen) {
+            throw new QuestionRefused(self::ALREADY_WAITING, 0, $alreadyOpen);
+        }
+
+        return new PostedMessage($question->id()->toString(), $this->pingClearing->clearForActor($ticket->organizationId, $ticketId, $askerId, $askedAt));
+    }
+}

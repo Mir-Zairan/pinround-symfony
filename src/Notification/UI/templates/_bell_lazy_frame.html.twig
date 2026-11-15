@@ -1,0 +1,5 @@
+{#- The popover's frame before it loads frameSrc: lazy, so it loads once the popover shows it. The bell push swaps in a
+    fresh one, so an open popover loads its cards again through the person's own session. -#}
+<turbo-frame id="{{ frameId }}" src="{{ frameSrc }}" loading="lazy" {{ stimulus_target('bell', 'frame') }}>
+    <p class="bell-popover__loading">Loading pings…</p>
+</turbo-frame>

@@ -6,6 +6,7 @@ namespace App\Ticketing\UI;
 
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Application\TicketHistoryEntry;
+use App\Workflow\Api\NowNextContext;
 
 /**
  * Words the ticket page's What happened (FR-TKT-12): each move as a plain sentence with first names and step names,
@@ -90,9 +91,7 @@ final readonly class TicketHistorySentences
 
     private function knownFirstNameOf(UserId $userId): ?string
     {
-        $displayName = trim($this->displayNames[$userId->toString()] ?? '');
-
-        return '' === $displayName ? null : explode(' ', $displayName, 2)[0];
+        return NowNextContext::firstNameFrom($this->displayNames[$userId->toString()] ?? '');
     }
 
     private function stepNameOf(string $stepId): string

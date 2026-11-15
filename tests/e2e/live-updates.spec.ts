@@ -1,6 +1,9 @@
 import { errors, expect, test, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { existsSync } from 'node:fs';
+import { LENA_EMAIL, LENA_STORAGE_STATE, MIA_EMAIL, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { bellButton, bellPopover, expectOmarUnderBellCaps, openBellPopover } from './bell';
+import { runAsDatabaseOwner } from './database';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 // ThreadController::COMMENT_ADDED, MESSAGE_EDITED, MESSAGE_REMOVED
@@ -209,6 +212,53 @@ async function moveFromList(page: Page, stepName: string): Promise<void> {
   expect((await answer).status()).toBe(200);
 }
 
+/** The throwaway team a ticket went to and where the ticket stood before, as SQL literals, for putBackAndDropTeam. */
+type TeamMove = { organizationId: string; ticketKey: string; teamId: string; earlierTeamId: string; earlierVisibility: string };
+
+/**
+ * Makes a throwaway team whose lead and only member is Mia and gives Lena's ticket to it, seen by its team only, so
+ * taking Mia out of it changes no seeded team: ticket-move.spec.ts, which may run at the same time, needs her in Shop.
+ * Mia is none of the ticket's people, as Lena made it for Omar, so only that team shows it to her.
+ */
+function giveToTeamOfOnlyMia(ticketKey: string): TeamMove {
+  const suffix = randomUUID().slice(0, 8);
+  const rows = runAsDatabaseOwner(`
+    WITH ticket AS (
+      SELECT t.organization_id, t.id, t.team_id, t.visibility FROM tkt_ticket t
+      JOIN idn_user lena ON lena.id = t.reporter_id AND lena.email = '${LENA_EMAIL}'
+      WHERE t.key = '${ticketKey}'
+    ), team AS (
+      INSERT INTO org_team (organization_id, id, name, lead_user_id, created_at, slug)
+      SELECT ticket.organization_id, uuidv7(), 'Only Mia ${suffix}', mia.id, now(), 'only-mia-${suffix}'
+      FROM ticket JOIN idn_user mia ON mia.email = '${MIA_EMAIL}'
+      RETURNING organization_id, id, lead_user_id
+    ), member AS (
+      INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at)
+      SELECT organization_id, id, lead_user_id, 'lead', 'tester', now() FROM team
+    )
+    UPDATE tkt_ticket t SET team_id = team.id, visibility = 'team'
+    FROM team, ticket WHERE t.organization_id = ticket.organization_id AND t.id = ticket.id
+    RETURNING quote_literal(ticket.organization_id), quote_literal(team.id), quote_nullable(ticket.team_id), quote_literal(ticket.visibility)`);
+  expect(rows, `Lena's ticket ${ticketKey} or Mia is missing: run make seed`).toHaveLength(1);
+  const [organizationId, teamId, earlierTeamId, earlierVisibility] = rows[0].split('|');
+  return { organizationId, ticketKey, teamId, earlierTeamId, earlierVisibility };
+}
+
+function removeMiaFromTeam(move: TeamMove): void {
+  const rows = runAsDatabaseOwner(`
+    DELETE FROM org_team_member WHERE organization_id = ${move.organizationId} AND team_id = ${move.teamId} RETURNING user_id`);
+  expect(rows, 'the throwaway team lost its only member before the test removed her').toHaveLength(1);
+}
+
+/** Runs in finally, so it also cleans up after a test that stopped before removing Mia. */
+function putBackAndDropTeam(move: TeamMove): void {
+  runAsDatabaseOwner(`
+    UPDATE tkt_ticket SET team_id = ${move.earlierTeamId}, visibility = ${move.earlierVisibility}
+    WHERE organization_id = ${move.organizationId} AND key = '${move.ticketKey}';
+    DELETE FROM org_team_member WHERE organization_id = ${move.organizationId} AND team_id = ${move.teamId};
+    DELETE FROM org_team WHERE organization_id = ${move.organizationId} AND id = ${move.teamId}`);
+}
+
 test.describe('two people on one ticket', () => {
   test("Lena's comment, edit and removal each show on Omar's page without a reload", async ({ browser }) => {
     const key = await makeTicketForOmar(browser, `Basket badge counts removed items ${randomUUID().slice(0, 8)}`);
@@ -401,6 +451,30 @@ test.describe('two people on one ticket', () => {
   });
 });
 
+test.describe("the signal of Omar's own change", () => {
+  test("the page his comment form redirects to shows its toast, though his page fetched the signal's refresh first", async ({ browser }) => {
+    const { key, omar } = await openNewTicketAsOmar(browser, `The receipt prints twice ${randomUUID().slice(0, 8)}`);
+    const ownSignalFetch = pageFetchAfterNow(omar.page, key);
+    // The comment's redirect reaches the browser only once the refresh its signal sends has its answer, so that answer
+    // is read with the toast still in his session. A route sees no redirected request, so the redirect itself waits.
+    await omar.page.route(`**/t/${key}/comments`, async (route) => {
+      const redirect = await route.fetch({ maxRedirects: 0 });
+      await (await ownSignalFetch).finished();
+      await route.fulfill({ response: redirect });
+    });
+    const composer = threadFrame(omar.page).locator('form.thread__composer');
+    await composer.evaluate((form) => form.setAttribute('data-turbo', 'false'));
+    await composerBody(omar.page).fill(`Seen on the second till too ${randomUUID().slice(0, 8)}`);
+
+    await composer.locator('button[type="submit"]').click();
+
+    await omar.page.waitForURL(`**/t/${key}/thread`);
+    expect((await ownSignalFetch).status()).toBe(200);
+    await expect(omar.page.locator(TOAST_REGION)).toHaveText(COMMENT_ADDED);
+    await omar.context.close();
+  });
+});
+
 test.describe('a refetch that fails', () => {
   test("after Omar's session ended, Lena's comment sends his page to the login page with none of it shown", async ({ browser }) => {
     const { key, omar } = await openNewTicketAsOmar(browser, `Opening hours show the wrong day ${randomUUID().slice(0, 8)}`);
@@ -419,6 +493,73 @@ test.describe('a refetch that fails', () => {
     await expect(omar.page.getByText(reply)).toHaveCount(0);
     await lena.context.close();
     await omar.context.close();
+  });
+
+  test("after Mia was taken out of the ticket's team, Lena's comment sends her page to the 404 page with none of the ticket shown", async ({ browser }) => {
+    test.skip(
+      !process.env.CI && !existsSync(MIA_STORAGE_STATE),
+      'auth.setup.ts skipped Mia: her two-step login is on in this database. TicketPageTest proves a non-viewer gets 404.',
+    );
+    const title = `Delivery slot picker skips Sunday ${randomUUID().slice(0, 8)}`;
+    const key = await makeTicketForOmar(browser, title);
+    const move = giveToTeamOfOnlyMia(key);
+    try {
+      const mia = await openAs(browser, MIA_STORAGE_STATE);
+      const lena = await openAs(browser, LENA_STORAGE_STATE);
+      const creationSignalSettled = settleCreationSignal(mia.page, key);
+      await openFollowedThread(mia.page, key);
+      await creationSignalSettled;
+      await expect(mia.page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+      await openThread(lena.page, key);
+      await markThisLoad(mia.page);
+      // The signal refetches the page and reloads the thread frame, and each answer of 404 loads a page for real. The
+      // page's refetch is held until a page has loaded, so the frame's answer alone decides where the tab goes: to the
+      // ticket's URL, as the page's own answer would, never to the frame's.
+      const isPageRefetch = (request: Request) => pathOf(request) === `/t/${key}` && request.resourceType() === 'fetch';
+      const pageRefetchSent = mia.page.waitForRequest(isPageRefetch);
+      const threadRefetch = mia.page.waitForResponse((response) => pathOf(response.request()) === `/t/${key}/thread` && response.request().resourceType() === 'fetch');
+      let pageLoaded: () => void = () => undefined;
+      const isPageLoaded = new Promise<void>((resolve) => {
+        pageLoaded = resolve;
+      });
+      const documentStatuses: number[] = [];
+      mia.page.on('response', (response) => {
+        if (response.request().resourceType() === 'document') {
+          documentStatuses.push(response.status());
+          pageLoaded();
+        }
+      });
+      await mia.page.route(
+        (url) => url.pathname === `/t/${key}`,
+        async (route) => {
+          if (!isPageRefetch(route.request())) {
+            await route.continue();
+            return;
+          }
+          await isPageLoaded;
+          await route.abort().catch(() => undefined);
+        },
+      );
+      const comment = `Delivery date shows a day late ${randomUUID().slice(0, 8)}`;
+
+      removeMiaFromTeam(move);
+      await postComment(lena.page, comment);
+
+      await pageRefetchSent;
+      expect((await threadRefetch).status()).toBe(404);
+      await expect.poll(() => documentStatuses.length).toBeGreaterThan(0);
+      await mia.page.waitForLoadState('load');
+      expect(documentStatuses.every((status) => status === 404), `Mia's tab loaded pages answered ${documentStatuses.join(', ')}`).toBe(true);
+      await expect(mia.page).toHaveURL(new RegExp(`/t/${key}$`));
+      await expect(mia.page.locator('html')).not.toHaveAttribute('data-e2e-load', 'first');
+      await expect(mia.page.getByText(title)).toHaveCount(0);
+      await expect(mia.page.getByText(comment)).toHaveCount(0);
+      await expect(mia.page.locator('#ticket-state, turbo-frame#ticket-thread')).toHaveCount(0);
+      await lena.context.close();
+      await mia.context.close();
+    } finally {
+      putBackAndDropTeam(move);
+    }
   });
 
   test('a page answer of 404 loads that page for real, with none of the change shown', async ({ browser }) => {
@@ -492,6 +633,64 @@ test.describe('a refetch that fails', () => {
     await lena.context.close();
     await omar.context.close();
   });
+
+  test('a thread answer of 404 on a page opened at #main loads the ticket page for real, not only its anchor', async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Store finder skips the nearest shop ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(omar.page, key);
+    await openThread(lena.page, key);
+    await omar.page.getByRole('link', { name: 'Skip to main content' }).focus();
+    await omar.page.keyboard.press('Enter');
+    await expect(omar.page).toHaveURL(new RegExp(`/t/${key}#main$`));
+    await markThisLoad(omar.page);
+    // Only the thread frame's answer can move the tab: the page's own refetch fails, and its 404 path drops the hash anyway.
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}/thread`,
+      (route) => route.fulfill({ status: 404, contentType: 'text/html', body: '<!doctype html><title>Not found</title><h1>Page not found</h1>' }),
+    );
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}`,
+      (route) =>
+        route.request().resourceType() === 'document'
+          ? route.fulfill({ status: 404, contentType: 'text/html', body: '<!doctype html><title>Not found</title><h1>Page not found</h1>' })
+          : route.abort(),
+    );
+
+    await moveFromList(lena.page, 'Code review');
+
+    await expect(omar.page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible({ timeout: COALESCED_SHOWS_WITHIN_MS });
+    await expect(omar.page).toHaveURL(new RegExp(`/t/${key}$`));
+    await expect(omar.page.locator('html')).not.toHaveAttribute('data-e2e-load', 'first');
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test("a thread answer of 200 without the thread's frame loads that answer as app.js does, not the ticket page again", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Store finder shows closed shops ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openFollowedThread(omar.page, key);
+    await openThread(lena.page, key);
+    await markThisLoad(omar.page);
+    // As a login page or an error page answered with 200 would come back: no turbo-frame#ticket-thread in it.
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}/thread`,
+      (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Elsewhere</title><h1>Not the thread</h1>' }),
+    );
+    // The page's own refetch fails, so only the frame's answer can move the tab.
+    await omar.page.route(
+      (url) => url.pathname === `/t/${key}`,
+      (route) => (route.request().resourceType() === 'document' ? route.continue() : route.abort()),
+    );
+
+    await moveFromList(lena.page, 'Code review');
+
+    await expect(omar.page.getByRole('heading', { level: 1, name: 'Not the thread' })).toBeVisible({ timeout: COALESCED_SHOWS_WITHIN_MS });
+    await expect(omar.page).toHaveURL(new RegExp(`/t/${key}/thread$`));
+    await lena.context.close();
+    await omar.context.close();
+  });
 });
 
 test.describe('a lost stream', () => {
@@ -510,11 +709,377 @@ test.describe('a lost stream', () => {
 
     await expect(banner).toBeVisible();
     await expect(banner).toHaveText('Updates paused. Reload to see the latest.');
-    await expect(banner).toHaveRole('status');
+    // The region was there, empty, before the line showed in it, so the line is announced as it appears.
+    await expect(page.locator('.live-updates')).toHaveRole('status');
+    await expect(page.getByRole('status').filter({ hasText: 'Updates paused.' })).toHaveCount(1);
+    // Above the page it follows, aligned with main's content.
+    const [bannerBox, mainBox] = [await banner.boundingBox(), await page.locator('main#main').boundingBox()];
+    expect(bannerBox !== null && mainBox !== null && bannerBox.y + bannerBox.height <= mainBox.y).toBe(true);
+    expect(bannerBox?.x).toBe((mainBox?.x ?? 0) + 24);
     // --waiting-container and --on-waiting-container of the light theme (tokens.css)
     await expect(banner).toHaveCSS('background-color', 'rgb(255, 224, 136)');
     await expect(banner).toHaveCSS('color', 'rgb(36, 26, 0)');
     await expect(banner.getByRole('link', { name: 'Reload' })).toHaveAttribute('href', page.url());
+  });
+
+  test('a dropped stream is opened again after a random wait of half to all of its 5 s step', async ({ browser, page }) => {
+    const key = await makeTicketForOmar(browser, `Basket shows an old price ${randomUUID().slice(0, 8)}`);
+    // The lowest draw, so the wait is half the step: a fixed 5 s, or a draw from 0, would miss the bounds below.
+    await page.addInitScript(() => {
+      Math.random = () => 0;
+    });
+    const streamAskedAtMs: number[] = [];
+    await page.route(`**${HUB_PATH}**`, (route) => {
+      streamAskedAtMs.push(Date.now());
+      return route.abort();
+    });
+
+    await page.goto(`/t/${key}`);
+
+    await expect.poll(() => streamAskedAtMs.length, { timeout: 5000 + SHOWS_WITHIN_MS }).toBeGreaterThanOrEqual(2);
+    const waitedMs = streamAskedAtMs[1] - streamAskedAtMs[0];
+    // live-updates_controller.js FIRST_REOPEN_STEP_MS / 2, plus the cookie ask before the stream.
+    expect(waitedMs).toBeGreaterThanOrEqual(2500);
+    expect(waitedMs).toBeLessThan(4500);
+  });
+});
+
+// The tabs of one browser share one subscriber cookie, and each page asks for it with its own topics: Omar's home page
+// asks for one with no ticket in it. The hub reads the cookie only as a stream connects.
+test.describe('two tabs of one browser', () => {
+  test("Omar's ticket tab reconnects with its own cookie after his home tab asked for one without the ticket", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Gift card balance shows twice ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const homeTab = await omar.context.newPage();
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openThread(lena.page, key);
+    const ticketTabStreams: Response[] = [];
+    omar.page.on('response', (response) => {
+      if (pathOf(response.request()) === HUB_PATH) {
+        ticketTabStreams.push(response);
+      }
+    });
+    let streamHeld: () => void = () => undefined;
+    const isStreamHeld = new Promise<void>((resolve) => {
+      streamHeld = resolve;
+    });
+    let homeTabAsked: () => void = () => undefined;
+    const hasHomeTabAsked = new Promise<void>((resolve) => {
+      homeTabAsked = resolve;
+    });
+    // The first stream ends as soon as it is answered, as a dropped connection does, and only once the home tab's
+    // cookie is the one the browser holds; its retry would have the browser reconnect after 100 ms.
+    await omar.page.route(
+      `**${HUB_PATH}**`,
+      async (route) => {
+        streamHeld();
+        await hasHomeTabAsked;
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
+      },
+      { times: 1 },
+    );
+
+    const ticketTabOpened = openThread(omar.page, key);
+    await isStreamHeld;
+    const homeTabCookie = homeTab.waitForResponse((response) => pathOf(response.request()) === TOKEN_PATH);
+    await homeTab.goto('/');
+    expect((await homeTabCookie).status()).toBe(204);
+    homeTabAsked();
+    await ticketTabOpened;
+    // live-updates_controller.js FIRST_REOPEN_STEP_MS, then the hub's answer.
+    await expect.poll(() => ticketTabStreams.length, { timeout: 5000 + SHOWS_WITHIN_MS }).toBe(2);
+    expect(ticketTabStreams[1].status()).toBe(200);
+    const text = `Still following after the drop ${randomUUID().slice(0, 8)}`;
+
+    await postComment(lena.page, text);
+
+    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: COALESCED_SHOWS_WITHIN_MS });
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test("a tab Omar opens while his ticket tab connects asks for its cookie only once that tab's stream has connected", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Gift card expiry date is blank ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const homeTab = await omar.context.newPage();
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openThread(lena.page, key);
+    const order: string[] = [];
+    omar.page.on('response', (response) => {
+      if (pathOf(response.request()) === HUB_PATH) {
+        order.push('ticket tab stream answered');
+      }
+    });
+    homeTab.on('request', (request) => {
+      if (pathOf(request) === TOKEN_PATH) {
+        order.push('home tab asked');
+      }
+    });
+    let streamHeld: () => void = () => undefined;
+    const isStreamHeld = new Promise<void>((resolve) => {
+      streamHeld = resolve;
+    });
+    // Held until the home tab asks for its cookie, or for 3 s when it waits, as it should, for this stream to connect.
+    await omar.page.route(
+      `**${HUB_PATH}**`,
+      async (route) => {
+        streamHeld();
+        try {
+          await homeTab.waitForRequest((request) => pathOf(request) === TOKEN_PATH, { timeout: 3000 });
+        } catch (error) {
+          if (!(error instanceof errors.TimeoutError)) {
+            throw error;
+          }
+        }
+        await route.continue();
+      },
+      { times: 1 },
+    );
+
+    const ticketTabOpened = openThread(omar.page, key);
+    await isStreamHeld;
+    const homeTabCookie = homeTab.waitForResponse((response) => pathOf(response.request()) === TOKEN_PATH);
+    await homeTab.goto('/');
+    expect((await homeTabCookie).status()).toBe(204);
+    await ticketTabOpened;
+
+    expect(order).toEqual(['ticket tab stream answered', 'home tab asked']);
+    const text = `Still following beside the home tab ${randomUUID().slice(0, 8)}`;
+    await postComment(lena.page, text);
+    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: COALESCED_SHOWS_WITHIN_MS });
+    await lena.context.close();
+    await omar.context.close();
+  });
+
+  test("a cookie ask of Omar's ticket tab that never answers lets his home tab ask once it gives up", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Gift card form hangs on submit ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const homeTab = await omar.context.newPage();
+    let askHeld: () => void = () => undefined;
+    const isAskHeld = new Promise<void>((resolve) => {
+      askHeld = resolve;
+    });
+    let releaseAsk: () => void = () => undefined;
+    const isAskReleased = new Promise<void>((resolve) => {
+      releaseAsk = resolve;
+    });
+    // Unanswered until the test ends, as a token route that hangs would leave it; the tab gave up on it by then.
+    await omar.page.route(
+      `**${TOKEN_PATH}`,
+      async (route) => {
+        askHeld();
+        await isAskReleased;
+        await route.abort().catch(() => undefined);
+      },
+      { times: 1 },
+    );
+    try {
+      await omar.page.goto(`/t/${key}`);
+      await isAskHeld;
+      const homeTabCookie = homeTab.waitForResponse((response) => pathOf(response.request()) === TOKEN_PATH, {
+        // live-updates_controller.js MAX_CONNECT_WAIT_MS for the ask, then as long for the stream without a cookie.
+        timeout: 2 * 5000 + SHOWS_WITHIN_MS,
+      });
+
+      await homeTab.goto('/');
+
+      expect((await homeTabCookie).status()).toBe(204);
+    } finally {
+      releaseAsk();
+      await omar.context.close();
+    }
+  });
+});
+
+test.describe('a stream that reconnects', () => {
+  test("Lena's comment sent while Omar's stream was down shows once it reconnects", async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, `Basket total skips the voucher ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    const creationSignalSettled = settleCreationSignal(lena.page, key);
+    await openFollowedThread(lena.page, key);
+    await creationSignalSettled;
+    const omarsStreams: Response[] = [];
+    omar.page.on('response', (response) => {
+      if (pathOf(response.request()) === HUB_PATH) {
+        omarsStreams.push(response);
+      }
+    });
+    let lenasSignalSent: () => void = () => undefined;
+    const isLenasSignalSent = new Promise<void>((resolve) => {
+      lenasSignalSent = resolve;
+    });
+    let streamAsks = 0;
+    // The first stream ends as soon as it is answered, as a dropped connection does; the one that reopens it waits
+    // until the hub has sent the signal of Lena's comment, so Omar's page never hears it.
+    await omar.page.route(`**${HUB_PATH}**`, async (route) => {
+      streamAsks += 1;
+      if (streamAsks === 1) {
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
+        return;
+      }
+      await isLenasSignalSent;
+      await route.continue();
+    });
+    await openThread(omar.page, key);
+    await expect.poll(() => omarsStreams.length).toBe(1);
+    const text = `The voucher drops off at checkout ${randomUUID().slice(0, 8)}`;
+    // Lena's page follows the ticket too, so its fetch proves the hub sent the signal.
+    const lenasSignalFetch = pageFetchAfterNow(lena.page, key);
+
+    await postComment(lena.page, text);
+    expect((await lenasSignalFetch).status()).toBe(200);
+    await expect(messageWithText(omar.page, text)).toHaveCount(0);
+    lenasSignalSent();
+
+    // live-updates_controller.js FIRST_REOPEN_STEP_MS at most, then the hub's answer.
+    await expect.poll(() => omarsStreams.length, { timeout: 5000 + SHOWS_WITHIN_MS }).toBe(2);
+    expect(omarsStreams[1].status()).toBe(200);
+    await expect(messageWithText(omar.page, text)).toHaveCount(1, { timeout: SHOWS_WITHIN_MS });
+    await lena.context.close();
+    await omar.context.close();
+  });
+});
+
+type StreamOpens = Window & { streamOpens?: number };
+
+const isNewTicketVisit = (request: Request) => pathOf(request) === '/tickets/new' && request.resourceType() === 'fetch';
+
+/**
+ * As Lena: opens /tickets/new, which has no live part, so a reconnect makes the page visit itself again. Its first
+ * stream ends as soon as it is answered, as a dropped connection does; the open of the next one is a reconnect, after
+ * which the page fetches itself again in case a signal was sent meanwhile. Returns every request the page sends.
+ */
+async function openNewTicketWhoseStreamDrops(browser: Browser): Promise<{ lena: { context: BrowserContext; page: Page }; requests: Request[] }> {
+  const lena = await openAs(browser, LENA_STORAGE_STATE);
+  // The lowest draw, so the reopen waits half its step and the refetch has no jitter. Each stream's open is counted
+  // by a listener added before the controller's, so the controller has seen an open once the count shows it.
+  await lena.page.addInitScript(() => {
+    Math.random = () => 0;
+    const NativeEventSource = window.EventSource;
+    (window as StreamOpens).streamOpens = 0;
+    window.EventSource = class extends NativeEventSource {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        this.addEventListener('open', () => {
+          (window as StreamOpens).streamOpens! += 1;
+        });
+      }
+    };
+  });
+  let streamAsks = 0;
+  await lena.page.route(`**${HUB_PATH}**`, async (route) => {
+    streamAsks += 1;
+    if (streamAsks === 1) {
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 100\n\n' });
+      return;
+    }
+    await route.continue();
+  });
+  const requests = recordRequests(lena.page);
+  await lena.page.goto('/tickets/new', { waitUntil: 'networkidle' });
+  return { lena, requests };
+}
+
+/** Waits for the second stream's open and for the refetch the controller runs after it. */
+async function streamReconnected(page: Page): Promise<void> {
+  // live-updates_controller.js FIRST_REOPEN_STEP_MS / 2, then the hub's answer.
+  await page.waitForFunction(() => (window as StreamOpens).streamOpens === 2, undefined, { timeout: 5000 + SHOWS_WITHIN_MS });
+  await nextTaskOf(page);
+  await nextTaskOf(page);
+}
+
+test.describe('a page with no live parts', () => {
+  test("a title Lena is typing stays when her stream reconnects; the page loads again once she clears it", async ({ browser }) => {
+    const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
+    const title = lena.page.getByLabel('Title');
+    const typed = `Receipt footer cuts off the address ${randomUUID().slice(0, 8)}`;
+    await title.fill(typed);
+    await lena.page.getByRole('heading', { level: 1 }).click();
+
+    await streamReconnected(lena.page);
+
+    expect(requests.filter(isNewTicketVisit)).toHaveLength(0);
+    await expect(title).toHaveValue(typed);
+
+    const visit = lena.page.waitForRequest(isNewTicketVisit, { timeout: SHOWS_WITHIN_MS });
+    await title.fill('');
+    await lena.page.getByRole('heading', { level: 1 }).click();
+    expect((await (await visit).response())?.status()).toBe(200);
+    await lena.context.close();
+  });
+
+  test('a changed select or a ticked checkbox holds the visit until each is put back', async ({ browser }) => {
+    const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
+    // The form has no checkbox and no select with an option marked selected of its own, so the test adds one of each.
+    await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title') }).evaluate((form) => {
+      form.insertAdjacentHTML(
+        'beforeend',
+        '<label>Notify the team <input type="checkbox" name="e2e_notify"></label>' +
+          '<label>Size <select name="e2e_size"><option>Small</option><option selected>Medium</option></select></label>',
+      );
+    });
+    const giveItTo = lena.page.getByLabel('Give it to');
+    const size = lena.page.getByLabel('Size');
+    const notify = lena.page.getByLabel('Notify the team');
+    const pageHeading = lena.page.getByRole('heading', { level: 1 });
+    // "Give it to" marks no option selected, so its first option, No one yet, is its default.
+    await expect(giveItTo.locator('option[selected]')).toHaveCount(0);
+    await expect(giveItTo).toHaveValue('');
+
+    await giveItTo.selectOption({ label: 'Omar' });
+    await size.selectOption('Small');
+    await notify.check();
+    await pageHeading.click();
+
+    await streamReconnected(lena.page);
+
+    /** Moves focus away and back, which may end the hold, then proves the visit is still held. */
+    const expectVisitHeld = async (): Promise<void> => {
+      await pageHeading.click();
+      await lena.page.getByLabel('Title').focus();
+      await pageHeading.click();
+      await nextTaskOf(lena.page);
+      await nextTaskOf(lena.page);
+      expect(requests.filter(isNewTicketVisit)).toHaveLength(0);
+    };
+    await expectVisitHeld();
+    // Each field in turn is the only one still changed: first "Give it to", then Size, then the checkbox.
+    await notify.uncheck();
+    await size.selectOption('Medium');
+    await expectVisitHeld();
+    await size.selectOption('Small');
+    await giveItTo.selectOption({ label: 'No one yet' });
+    await expectVisitHeld();
+    await notify.check();
+    await size.selectOption('Medium');
+    await expectVisitHeld();
+
+    const visit = lena.page.waitForRequest(isNewTicketVisit, { timeout: SHOWS_WITHIN_MS });
+    await notify.uncheck();
+    await pageHeading.click();
+    expect((await (await visit).response())?.status()).toBe(200);
+    await lena.context.close();
+  });
+  test('an open details box with an untouched text field holds the visit until it is closed', async ({ browser }) => {
+    const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
+    // The form has no disclosure of its own, so the test adds one, open, whose field Lena never types in.
+    await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title') }).evaluate((form) => {
+      form.insertAdjacentHTML('beforeend', '<details open><summary>Add a note</summary><label>Note <input type="text" name="e2e_note"></label></details>');
+    });
+    const note = lena.page.getByLabel('Note');
+    await expect(note).toHaveValue('');
+    await lena.page.getByRole('heading', { level: 1 }).click();
+
+    await streamReconnected(lena.page);
+
+    expect(requests.filter(isNewTicketVisit)).toHaveLength(0);
+    await expect(note).toBeVisible();
+
+    const visit = lena.page.waitForRequest(isNewTicketVisit, { timeout: SHOWS_WITHIN_MS });
+    await lena.page.getByText('Add a note').click();
+    expect((await (await visit).response())?.status()).toBe(200);
+    await lena.context.close();
   });
 });
 
@@ -549,6 +1114,169 @@ test.describe('the stream across Turbo visits', () => {
     expect(hubStreams(requests)).toHaveLength(2);
     await expect(omar.page.locator('[data-controller="live-updates"]')).toHaveCount(1);
     await lena.context.close();
+    await omar.context.close();
+  });
+});
+
+/** The badge's count on the open page, 0 when it shows none. */
+async function badgeCountOf(page: Page): Promise<number> {
+  const spokenCount = page.locator('#bell-badge .visually-hidden');
+  if ((await spokenCount.count()) === 0) {
+    return 0;
+  }
+  return Number(/^(\d+) open$/.exec((await spokenCount.innerText()).trim())?.[1] ?? Number.NaN);
+}
+
+/** The badge's count as the server renders it now, from a fresh Home page in the page's session. */
+async function serverBadgeCountOf(page: Page): Promise<number> {
+  const home = await page.request.get('/');
+  expect(home.status()).toBe(200);
+  const spokenCount = await page.evaluate(
+    (html) => new DOMParser().parseFromString(html, 'text/html').querySelector('#bell-badge .visually-hidden')?.textContent ?? null,
+    await home.text(),
+  );
+  return spokenCount === null ? 0 : Number(/^(\d+) open$/.exec(spokenCount.trim())?.[1] ?? Number.NaN);
+}
+
+/** As Mia, pings Omar on the ticket and waits for the answer; returns her open session for the caller to close. */
+async function pingOmarAsMia(browser: Browser, key: string, message: string): Promise<{ context: BrowserContext; page: Page }> {
+  const mia = await openAs(browser, MIA_STORAGE_STATE);
+  await mia.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+  await mia.page.getByRole('button', { name: 'Ping Omar' }).click();
+  const sheet = mia.page.getByRole('dialog', { name: 'Ping Omar' });
+  await sheet.getByLabel('Message').fill(message);
+  const pingAnswer = mia.page.waitForResponse((response) => response.url().includes(`/t/${key}/ping/`) && response.request().method() === 'POST');
+  await sheet.getByRole('button', { name: 'Send ping' }).click();
+  expect((await pingAnswer).status()).toBe(200);
+  return mia;
+}
+
+/** Marks the document once the popover shows "Loading pings…" from now on, however briefly. */
+async function recordBellLoadingText(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const popover = document.getElementById('bell-popover')!;
+    new MutationObserver(() => {
+      if (popover.querySelector('.bell-popover__loading')) {
+        document.documentElement.setAttribute('data-e2e-bell-loading-shown', '');
+      }
+    }).observe(popover, { childList: true, subtree: true });
+  });
+}
+
+test.describe("the bell's push", () => {
+  test("a push while the popover is open keeps focus on the card that had it and never shows the loading text", async ({ browser }) => {
+    test.skip(
+      !process.env.CI && !existsSync(MIA_STORAGE_STATE),
+      'auth.setup.ts skipped Mia: her two-step login is on in this database. RefreshBellHandlerTest proves the push.',
+    );
+    expectOmarUnderBellCaps();
+    const key = await makeTicketForOmar(browser, `Coupon field clears itself ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const streamOpened = omar.page.waitForResponse((response) => pathOf(response.request()) === HUB_PATH);
+    await omar.page.goto('/', { waitUntil: 'networkidle' });
+    expect((await streamOpened).status()).toBe(200);
+    await openBellPopover(omar.page);
+    const cards = bellPopover(omar.page).getByRole('article');
+    await expect(cards.nth(1), 'Omar has at least two cards: run make seed').toBeVisible();
+    const secondCardName = await cards.nth(1).getAttribute('aria-label');
+    expect(secondCardName).not.toBeNull();
+    const secondCardsDone = bellPopover(omar.page).getByRole('article', { name: secondCardName!, exact: true }).getByRole('button', { name: 'Done' });
+    await secondCardsDone.focus();
+    await recordBellLoadingText(omar.page);
+    const miasCard = bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}` });
+
+    const mia = await pingOmarAsMia(browser, key, `Can you check the coupon field? ${randomUUID().slice(0, 8)}`);
+
+    await expect(miasCard).toBeVisible({ timeout: SHOWS_WITHIN_MS });
+    await expect(secondCardsDone).toBeFocused();
+    await expect(omar.page.locator('html')).not.toHaveAttribute('data-e2e-bell-loading-shown');
+    await mia.context.close();
+    await omar.context.close();
+  });
+
+  test("Mia's ping shows on Omar's badge within 3 s, and his open popover loads again with her card, without a reload", async ({ browser }) => {
+    test.skip(
+      !process.env.CI && !existsSync(MIA_STORAGE_STATE),
+      'auth.setup.ts skipped Mia: her two-step login is on in this database. RefreshBellHandlerTest proves the push.',
+    );
+    expectOmarUnderBellCaps();
+    // Lena giving Omar the ticket notifies him too; its push may come at any time before Mia's, so the badge is
+    // compared with the server's count once Mia's card shows rather than with a count read before her ping.
+    const key = await makeTicketForOmar(browser, `Gift card balance shows twice ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    const streamOpened = omar.page.waitForResponse((response) => pathOf(response.request()) === HUB_PATH);
+    await omar.page.goto('/', { waitUntil: 'networkidle' });
+    expect((await streamOpened).status()).toBe(200);
+    await openBellPopover(omar.page);
+    await markThisLoad(omar.page);
+    const miasCard = bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}` });
+    await expect(miasCard).toHaveCount(0);
+    const message = `Can you check the gift card total? ${randomUUID().slice(0, 8)}`;
+
+    const mia = await pingOmarAsMia(browser, key, message);
+
+    await expect(miasCard).toBeVisible({ timeout: SHOWS_WITHIN_MS });
+    await expect(miasCard.getByText(`“${message}”`)).toBeVisible();
+    await expect(bellButton(omar.page)).toHaveAttribute('aria-expanded', 'true');
+    const serverCount = await serverBadgeCountOf(omar.page);
+    expect(serverCount, "the server counts Mia's ping").toBeGreaterThan(0);
+    await expect.poll(() => badgeCountOf(omar.page)).toBe(serverCount);
+    await expectSameLoad(omar.page);
+    await mia.context.close();
+    await omar.context.close();
+  });
+
+  test("a push while the popover's first load is still on its way leaves that load to show Mia's card", async ({ browser }) => {
+    test.skip(
+      !process.env.CI && !existsSync(MIA_STORAGE_STATE),
+      'auth.setup.ts skipped Mia: her two-step login is on in this database. RefreshBellHandlerTest proves the push.',
+    );
+    expectOmarUnderBellCaps();
+    const key = await makeTicketForOmar(browser, `Store finder lists closed shops ${randomUUID().slice(0, 8)}`);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    // The popover's first GET /bell waits until the test lets it go, so the push lands while the frame still shows
+    // "Loading pings…"; every later load goes through.
+    let releaseFirstLoad = (): void => undefined;
+    const firstLoadReleased = new Promise<void>((resolve) => {
+      releaseFirstLoad = resolve;
+    });
+    let bellLoads = 0;
+    await omar.page.route(
+      (url) => url.pathname === '/bell',
+      async (route) => {
+        bellLoads += 1;
+        if (bellLoads > 1) {
+          await route.continue();
+          return;
+        }
+        await firstLoadReleased;
+        // The push swaps in a new frame, and the page may cancel the load the old one sent, which ends this route too.
+        await route.continue().catch((error: unknown) => {
+          if (!(error instanceof Error) || !/Request (was aborted|context disposed)|Target (page, context or browser )?(has been )?closed/i.test(error.message)) {
+            throw error;
+          }
+        });
+      },
+    );
+    const streamOpened = omar.page.waitForResponse((response) => pathOf(response.request()) === HUB_PATH);
+    await omar.page.goto('/', { waitUntil: 'networkidle' });
+    expect((await streamOpened).status()).toBe(200);
+    const firstLoadSent = omar.page.waitForRequest((request) => pathOf(request) === '/bell');
+    await expect(async () => {
+      await bellButton(omar.page).click();
+      await expect(bellButton(omar.page)).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+    }).toPass({ intervals: [250, 500, 1_000], timeout: 10_000 });
+    await firstLoadSent;
+    await expect(omar.page.locator('#bell-popover .bell-popover__loading')).toBeVisible();
+
+    const mia = await pingOmarAsMia(browser, key, `Can you check the store finder? ${randomUUID().slice(0, 8)}`);
+    // Counted from her ping's answer, not from before her page opened, so her own page load is not timed.
+    await expect.poll(() => bellLoads, { timeout: SHOWS_WITHIN_MS }).toBeGreaterThan(1);
+    releaseFirstLoad();
+
+    await expect(bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}` })).toBeVisible({ timeout: SHOWS_WITHIN_MS });
+    await expect(omar.page.locator('#bell-popover .bell-popover__loading')).toHaveCount(0);
+    await mia.context.close();
     await omar.context.close();
   });
 });

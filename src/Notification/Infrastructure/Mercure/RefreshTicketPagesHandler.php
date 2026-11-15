@@ -79,12 +79,15 @@ final readonly class RefreshTicketPagesHandler
             return;
         }
 
-        $trailingTry = $this->trailingTryOf($ticketId);
+        if (RefreshAttempt::LastTrailing === $refresh->attempt) {
+            return;
+        }
+        $delayMilliseconds = $this->millisecondsUntilWindowEndsOf($ticketId);
+        $trailingTry = $this->trailingTryOf($ticketId, $delayMilliseconds);
         $tookTrailingTry = RefreshAttempt::Leading === $refresh->attempt && $trailingTry->acquire();
         $nextAttempt = match ($refresh->attempt) {
             RefreshAttempt::Leading => $tookTrailingTry ? RefreshAttempt::Trailing : null,
             RefreshAttempt::Trailing => RefreshAttempt::LastTrailing,
-            RefreshAttempt::LastTrailing => null,
         };
         if (null === $nextAttempt) {
             return;
@@ -93,7 +96,7 @@ final readonly class RefreshTicketPagesHandler
         try {
             $this->commandBus->dispatch(
                 new RefreshTicketPages($refresh->organizationId, $refresh->ticketId, $nextAttempt),
-                [new DelayStamp($this->millisecondsUntilWindowEndsOf($ticketId))],
+                [new DelayStamp($delayMilliseconds)],
             );
         } catch (\Throwable $dispatchFailure) {
             // A trailing try still held with none queued would make Messenger's retry queue nothing, losing the burst's last change.
@@ -107,7 +110,7 @@ final readonly class RefreshTicketPagesHandler
 
     private function windowOf(TicketId $ticketId): LockInterface
     {
-        return $this->windowLock(self::windowResourceOf($ticketId));
+        return $this->windowLock(self::windowResourceOf($ticketId), self::WINDOW_SECONDS);
     }
 
     /** A store that cannot say waits a full window, which ends no sooner than the one held. */
@@ -126,15 +129,18 @@ final readonly class RefreshTicketPagesHandler
         return 'realtime-refresh:'.$ticketId->toString();
     }
 
-    /** Held while a Trailing try waits, so a burst queues one, not one per change. */
-    private function trailingTryOf(TicketId $ticketId): LockInterface
+    /**
+     * Held while a Trailing try waits, so a burst queues one, not one per change. It lives only until that try is due:
+     * held past then, it would swallow a change that comes after the try published, with no try left to send it.
+     */
+    private function trailingTryOf(TicketId $ticketId, int $delayMilliseconds): LockInterface
     {
-        return $this->windowLock('realtime-refresh-trailing:'.$ticketId->toString());
+        return $this->windowLock('realtime-refresh-trailing:'.$ticketId->toString(), $delayMilliseconds / 1000);
     }
 
-    private function windowLock(string $resource): LockInterface
+    private function windowLock(string $resource, float $lifetimeSeconds): LockInterface
     {
         // The lock is the window: released only when the publish or the dispatch fails (so Messenger's retry can take it again), otherwise it ends when its time to live runs out.
-        return $this->lockFactory->createLock($resource, self::WINDOW_SECONDS, autoRelease: false);
+        return $this->lockFactory->createLock($resource, $lifetimeSeconds, autoRelease: false);
     }
 }

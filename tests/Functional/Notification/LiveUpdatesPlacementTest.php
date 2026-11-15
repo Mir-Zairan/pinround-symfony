@@ -79,6 +79,7 @@ final class LiveUpdatesPlacementTest extends WebTestCase
         $subscribeUrl = $this->subscribeUrlOf($liveUpdates);
         self::assertStringContainsString('match='.rawurlencode(RealtimeTopics::ofUser($this->acmeFoods, $this->people['Omar']->id())), $subscribeUrl);
         self::assertSame(0, substr_count($subscribeUrl, rawurlencode('/t/')));
+        $this->assertSitsAboveMain($page);
     }
 
     #[Test]
@@ -97,6 +98,7 @@ final class LiveUpdatesPlacementTest extends WebTestCase
         self::assertStringContainsString('match='.rawurlencode(RealtimeTopics::ofUser($this->acmeFoods, $this->people['Omar']->id())), $subscribeUrl);
         self::assertStringContainsString('match='.rawurlencode(RealtimeTopics::ofTicket($this->acmeFoods, new TicketId($ticketId))), $subscribeUrl);
         self::assertSame(1, substr_count($subscribeUrl, rawurlencode('/t/')));
+        $this->assertSitsAboveMain($page);
     }
 
     #[Test]
@@ -107,6 +109,17 @@ final class LiveUpdatesPlacementTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $page->filter('main#main'));
         self::assertCount(0, $page->filter(self::LIVE_UPDATES));
+    }
+
+    /**
+     * The stream and its paused line are the shell's, like the toast region, so main's role="status" lines stay the
+     * page's own notices, which the page tests read by that selector.
+     */
+    private function assertSitsAboveMain(Crawler $page): void
+    {
+        self::assertCount(0, $page->filter('main '.self::LIVE_UPDATES));
+        self::assertCount(1, $page->filterXPath('//main[@id="main"]/preceding-sibling::*[@data-controller="live-updates"][@role="status"]'));
+        self::assertCount(0, $page->filter('main [role="status"]'), 'a page with no notice has no status line in main');
     }
 
     private function subscribeUrlOf(Crawler $liveUpdates): string

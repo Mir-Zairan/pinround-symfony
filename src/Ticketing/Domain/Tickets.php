@@ -49,12 +49,15 @@ interface Tickets
     /**
      * The ticket of the organization with the id, loaded for a change and locked (SELECT ... FOR UPDATE) until the
      * transaction ends, so two requests cannot both pass a check on it before their writes. A ticket of another
-     * organization is not found. When the request has loaded the ticket already, the row is locked but the object is
-     * not reloaded: its fields, and any unsaved change to them, stay as they were, and save still refuses a stale one.
+     * organization is not found. When the request has loaded the ticket already, the row is locked and the same object
+     * comes back, not reloaded: its fields, and any unsaved change to them, stay as they were, so it is refused when
+     * another request saved the ticket since.
      *
      * @return Ticket|null null when the organization has no ticket with the id
      *
-     * @throws \LogicException when no transaction is open, before any query
+     * @throws \LogicException       when no transaction is open, before any query
+     * @throws TicketVersionConflict when the request loaded the ticket before another request saved it; the row stays
+     *                               locked until the transaction ends
      */
     public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket;
 }

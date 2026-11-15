@@ -50,7 +50,7 @@ final class InvitationAcceptTest extends WebTestCase
         self::assertResponseRedirects('/login', 302);
         $client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(\sprintf(InvitationController::ACCOUNT_READY, 'Acme Foods'), $client->getCrawler()->filter('[role="status"]')->text());
+        self::assertSame(\sprintf(InvitationController::ACCOUNT_READY, 'Acme Foods'), $client->getCrawler()->filter('main [role="status"]')->text());
         $userId = $this->userIdWithEmail($email);
         self::assertNotNull($userId, 'no account was created');
         self::assertSame(1, $this->membershipCount($organizationId, $userId));

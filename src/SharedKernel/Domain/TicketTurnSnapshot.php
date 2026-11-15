@@ -68,4 +68,22 @@ final readonly class TicketTurnSnapshot
             throw new \InvalidArgumentException('A ticket visibility must be all or team.');
         }
     }
+
+    /**
+     * Whom a question on this ticket may ask: its assignee, reporter, reviewer, tester and team lead, in that order,
+     * each once. The team's other members, a pending assignee and whoever the ticket waits on are not among them.
+     *
+     * @return list<UserId>
+     */
+    public function peopleOnTheTicket(): array
+    {
+        $people = [];
+        foreach ([$this->assigneeId, $this->reporterId, $this->reviewerId, $this->testerId, $this->leadId] as $listedId) {
+            if (null !== $listedId) {
+                $people[$listedId->toString()] ??= $listedId;
+            }
+        }
+
+        return array_values($people);
+    }
 }

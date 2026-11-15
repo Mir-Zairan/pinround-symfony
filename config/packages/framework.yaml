@@ -15,6 +15,10 @@ framework:
         cookie_httponly: true
         cookie_samesite: lax
         cookie_path: /
+        # The last-used time is stamped at most every 2 minutes, so a request that changes nothing else leaves the
+        # session's bytes as they are and only renews its TTL; at 0 every request in a new second rewrote the whole
+        # session, racing any other request at once. EndExpiredSession's 8-hour idle check can be 2 minutes late.
+        metadata_update_threshold: 120
 
     # A missing route or a wrong method is the caller's doing (scanners, outside callers of /health/*), not an error:
     # logged at debug, below prod's info, so it never lands in the prod log (MonologConfigTest pins it).
