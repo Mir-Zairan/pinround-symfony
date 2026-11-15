@@ -31,14 +31,16 @@ sequenceDiagram
   participant A as pinround app
   participant S as Object storage (private bucket)
   participant W as Media worker
-  B->>A: POST /media/intents {mime, bytes, sha256}
-  A->>A: Voter: may upload here? quota OK? type/size OK?
-  A->>A: Save upload intent (org, user, max bytes, allowed types, expiry)
+  B->>A: POST /media/intents {purpose, mime, bytes, target}
+  A->>A: Type and size OK? Voter: may this person add to the target?
+  A->>A: Save upload intent (org, user, target kind and id, max bytes, allowed types, expiry)
   A-->>B: {intentId, presigned PUT URL (5 min), headers}
   B->>S: PUT bytes (Content-Type and Content-Length fixed)
   S-->>B: 200
   B->>A: POST /media/intents/{id}/complete
-  A->>W: Message ProcessUpload(intentId) via media queue
+  A->>A: Check the stored target again, mark the intent used
+  A->>A: Write ProcessUpload(organizationId, mediaId) to the outbox, same transaction
+  A->>W: Outbox relay sends it on the async_media queue
   W->>S: GET original
   W->>W: Check magic bytes, decode, re-encode WebP, thumbnails
   W->>S: PUT view + thumb, DELETE upload object

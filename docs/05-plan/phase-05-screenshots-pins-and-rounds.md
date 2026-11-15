@@ -58,7 +58,7 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 5. `presigned-upload` Stimulus controller: browser-side type/size check, progress, paste from clipboard, local preview.
 **Files:** `src/Media/**`, `assets/controllers/presigned-upload_controller.js`, `config/packages/flysystem.yaml`.
 **Acceptance criteria:**
-- [ ] A 16 MB file or a GIF is refused before any URL is issued, with a plain message.
+- [x] A 16 MB file or a GIF is refused before any URL is issued, with a plain message. (`tests/Functional/Media/UploadIntentsTest.php`, `aFileOfTheWrongTypeOrSizeIsRefusedBeforeAnyUrlWithThePlainMessage`.)
 - [ ] A presigned URL cannot be used after 5 minutes or for another content type.
 - [ ] Anonymous GET on the uploaded object fails.
 **Tests:** unit (validation), integration with MinIO in CI, functional intent/complete, voter + isolation.
@@ -235,4 +235,6 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 - **2026-11-14 — P05.T1 MinIO tests do not run in CI yet.** The integration job has no MinIO (only a stand-in TCP listener for `/health/ready`), so `composer test:integration` there excludes the `object-storage` group (`PresignedUploadsMinioTest`, `ObjectStorageWiringTest`, `MinioUploadCorsTest`). They run locally against the compose stack's MinIO. T1's "integration with MinIO in CI" is not met until CI gets a MinIO service.
 - **2026-11-14 — dev MinIO CORS is by origin only.** MinIO has no bucket CORS (it answers `PutBucketCors` with NotImplemented), so `minio-init` sets the server-wide `cors_allow_origin` to the app origin (`MINIO_CORS_ALLOW_ORIGIN`). That limits origins but not methods. A production bucket's CORS must allow PUT only, and only from the app origin ([ADR-0011](../03-adr/0011-screenshot-storage-and-processing.md), P05.T1 step 2).
 - **2026-11-15 — migration `Version20261115120000` (media tables) was changed after it ran, to add CHECKs.** A dev database that ran the old version must run it down and up: `bin/console doctrine:migrations:execute --down 'DoctrineMigrations\Version20261115120000'`, then the same command with `--up`. A fresh database needs nothing.
-- (add dated notes here)
+- **2026-11-15 — P05.T1 upload routes are built.** `POST /media/intents` refuses a bad type, size or purpose with 422 and a plain message, a target the person may not edit with 403, and an unknown intent on complete with 404. `POST /media/intents/{id}/complete` re-checks the stored target (a person who left the team is refused and the intent stays unused), refuses a second complete and an intent older than a day. A logged-out POST gets `302 /login`, not a JSON 401.
+  - New migration `Version20261115140000` (target kind and id on `med_upload_intent`): run `doctrine:migrations:migrate` for dev and with `APP_ENV=test`.
+  - `ProcessUpload(organizationId, mediaId)` is written to the outbox and relayed to `async_media`, but nothing handles it yet; P05.T2 builds the worker.
