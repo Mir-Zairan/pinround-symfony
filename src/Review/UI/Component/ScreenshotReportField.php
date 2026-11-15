@@ -9,7 +9,6 @@ use App\Media\Api\SignedUrls;
 use App\Media\Api\UploadedMedia;
 use App\Organization\Api\CurrentActor;
 use App\Review\Api\RoundCommands;
-use App\Review\UI\NewTicket\ScreenshotReportOnNewTicket;
 use App\Review\UI\PinView;
 use App\Review\UI\ScreenshotView;
 use Psr\Clock\ClockInterface;
@@ -202,7 +201,7 @@ final class ScreenshotReportField
 
     private static function percentOf(mixed $posted): ?float
     {
-        if (!\is_string($posted) || 1 !== preg_match(ScreenshotReportOnNewTicket::PIN_PERCENT, $posted)) {
+        if (!\is_string($posted) || 1 !== preg_match(PinView::POSTED_PERCENT_PATTERN, $posted)) {
             return null;
         }
         $percent = (float) $posted;

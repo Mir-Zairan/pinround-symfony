@@ -31,7 +31,8 @@ use Symfony\UX\TwigComponent\Test\InteractsWithTwigComponents;
 /**
  * The Screenshot section of the new ticket form, as a fresh form and as the form shows it again after a refused
  * submit. Lena of Acme Foods is logged in; Acme Foods holds a ready, a pending and a rejected picture of hers and a
- * ready one of Omar's, Beta Bakery a ready one of hers. The clock is fixed in March 2027.
+ * ready one of Omar's, Beta Bakery a ready one of hers. Three more of hers are ready by their upload state but gone,
+ * rejected or pending when signed. The clock is fixed in March 2027.
  */
 final class ScreenshotReportFieldTest extends KernelTestCase
 {
@@ -47,6 +48,10 @@ final class ScreenshotReportFieldTest extends KernelTestCase
     private const string LENAS_REJECTED_MEDIA = '0197a3c0-0000-7000-8000-0000000f6743';
     private const string OMARS_READY_MEDIA = '0197a3c0-0000-7000-8000-0000000f6744';
     private const string LENAS_MEDIA_AT_BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000f6745';
+    /** Ready by its upload state, but by the time it is signed gone, rejected or pending again: a race of the two reads. */
+    private const string LENAS_MEDIA_GONE_WHEN_SIGNED = '0197a3c0-0000-7000-8000-0000000f6746';
+    private const string LENAS_MEDIA_REJECTED_WHEN_SIGNED = '0197a3c0-0000-7000-8000-0000000f6747';
+    private const string LENAS_MEDIA_PENDING_WHEN_SIGNED = '0197a3c0-0000-7000-8000-0000000f6748';
     private const string UNKNOWN_MEDIA = '0197a3c0-0000-7000-8000-0000000f6749';
     private const string NOW = '2027-03-15 10:20:30 UTC';
     private const string SIGNED_AT = '2027-03-15T10:20:00+00:00';
@@ -72,6 +77,9 @@ final class ScreenshotReportFieldTest extends KernelTestCase
             [self::ACME_FOODS, self::LENAS_REJECTED_MEDIA, self::LENA, MediaImageStatus::Rejected],
             [self::ACME_FOODS, self::OMARS_READY_MEDIA, self::OMAR, MediaImageStatus::Ready],
             [self::BETA_BAKERY, self::LENAS_MEDIA_AT_BETA_BAKERY, self::LENA, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::LENAS_MEDIA_GONE_WHEN_SIGNED, self::LENA, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::LENAS_MEDIA_REJECTED_WHEN_SIGNED, self::LENA, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::LENAS_MEDIA_PENDING_WHEN_SIGNED, self::LENA, MediaImageStatus::Ready],
         ]);
         $container->set(UploaderMediaStates::class, $this->uploadedMedia);
         $this->signedUrls = new RecordingSignedUrls($this->tenantContext(), [
@@ -80,6 +88,8 @@ final class ScreenshotReportFieldTest extends KernelTestCase
             [self::ACME_FOODS, self::LENAS_REJECTED_MEDIA, MediaImageStatus::Rejected],
             [self::ACME_FOODS, self::OMARS_READY_MEDIA, MediaImageStatus::Ready],
             [self::BETA_BAKERY, self::LENAS_MEDIA_AT_BETA_BAKERY, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::LENAS_MEDIA_REJECTED_WHEN_SIGNED, MediaImageStatus::Rejected],
+            [self::ACME_FOODS, self::LENAS_MEDIA_PENDING_WHEN_SIGNED, MediaImageStatus::Pending],
         ]);
         $container->set(SignedVariantUrls::class, $this->signedUrls);
     }
@@ -238,6 +248,57 @@ final class ScreenshotReportFieldTest extends KernelTestCase
         self::assertNull($image->attr('src'));
         self::assertNotNull($image->attr('hidden'));
         self::assertNull($section->attr('data-media-state'), 'Nothing polls a re-rendered picture, so the submit is not held.');
+        self::assertCount(0, $section->filter('[data-screenshot-report-target="picture"][hidden]'));
+        self::assertSame(['1', '2'], $section->filter('.pin')->each(static fn (Crawler $marker): string => (string) $marker->attr('data-pin-number')));
+        self::assertSame(self::PINS_TWO, $section->filter('[data-screenshot-report-target="count"]')->text());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function readyPicturesNotSignedAsReady(): iterable
+    {
+        yield 'a picture gone by the time it is signed' => [self::LENAS_MEDIA_GONE_WHEN_SIGNED];
+        yield 'a picture rejected by the time it is signed' => [self::LENAS_MEDIA_REJECTED_WHEN_SIGNED];
+    }
+
+    #[Test]
+    #[DataProvider('readyPicturesNotSignedAsReady')]
+    public function aReadyPictureThatIsGoneOrRejectedWhenSignedIsDroppedWithItsPins(string $mediaId): void
+    {
+        $section = $this->renderField([
+            'media_id' => $mediaId,
+            'title' => 'Checkout total',
+            'summary' => '',
+            'pins' => [1 => ['x' => '12.50', 'y' => '40.00', 'note' => 'Here']],
+        ]);
+
+        self::assertSame([[$mediaId, 'view', self::SIGNED_AT]], $this->signedUrls->asked);
+        self::assertSame('', $section->filter('input[name="screenshot_media_id"]')->attr('value'));
+        self::assertCount(1, $section->filter('[data-screenshot-report-target="picture"][hidden]'));
+        self::assertCount(0, $section->filter('.screenshot__placeholder'));
+        self::assertCount(0, $section->filter('.pin'));
+        self::assertCount(0, $section->filter('textarea.pin-list__note'));
+        self::assertSame(ScreenshotReportField::PINS_NONE, $section->filter('[data-screenshot-report-target="count"]')->text());
+        self::assertSame('Checkout total', $section->filter('input[name="screenshot_title"]')->attr('value'));
+    }
+
+    #[Test]
+    public function aReadyPictureThatIsPendingWhenSignedShowsProcessingAndKeepsItsPins(): void
+    {
+        $section = $this->renderField([
+            'media_id' => self::LENAS_MEDIA_PENDING_WHEN_SIGNED,
+            'title' => '',
+            'summary' => '',
+            'pins' => [1 => ['x' => '12.50', 'y' => '40.00', 'note' => 'Here'], 2 => ['x' => '50', 'y' => '50', 'note' => '']],
+        ]);
+
+        self::assertSame([[self::LENAS_MEDIA_PENDING_WHEN_SIGNED, 'view', self::SIGNED_AT]], $this->signedUrls->asked);
+        self::assertSame(self::LENAS_MEDIA_PENDING_WHEN_SIGNED, $section->filter('input[name="screenshot_media_id"]')->attr('value'));
+        self::assertSame('Processing…', $section->filter('#screenshot-frame.screenshot__frame--placeholder [data-screenshot-report-target="placeholder"]')->text());
+        $image = $section->filter('#screenshot-frame img');
+        self::assertNull($image->attr('src'));
+        self::assertNotNull($image->attr('hidden'));
         self::assertCount(0, $section->filter('[data-screenshot-report-target="picture"][hidden]'));
         self::assertSame(['1', '2'], $section->filter('.pin')->each(static fn (Crawler $marker): string => (string) $marker->attr('data-pin-number')));
         self::assertSame(self::PINS_TWO, $section->filter('[data-screenshot-report-target="count"]')->text());

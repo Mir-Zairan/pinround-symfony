@@ -1,14 +1,13 @@
 import { Controller } from '@hotwired/stimulus';
 import { pinCountText } from '../review/pin_count.js';
-
-const WAITING_MESSAGE = 'Waiting for your screenshot to finish processing…';
+import { isSubmitHeldFor, WAITING_MESSAGE } from '../review/submit_hold.js';
 
 // The Screenshot section of a report form (ScreenshotReportField), on the same element as presigned-upload. It shows
 // the picture area when an upload starts and hides it again, with every pin removed through the pin-placer outlet, when
 // the upload fails, processing rejects it or Remove screenshot is clicked; a new upload also starts with no pins. It
-// keeps the line under the pins in step with pin-placer:change. While the picture is pending it holds the form's submit
-// and sends it once presigned-upload:ready fires; after presigned-upload:still-processing it lets the submit through,
-// so the server refuses it with its own text.
+// keeps the line under the pins in step with pin-placer:change. While the picture uploads or is pending it holds the
+// form's submit and sends it once presigned-upload:ready fires; after presigned-upload:still-processing it lets the
+// submit through, so the server refuses it with its own text.
 export default class extends Controller {
   static targets = ['picture', 'empty', 'remove', 'count', 'frame', 'image', 'placeholder', 'file', 'status'];
   static outlets = ['pin-placer'];
@@ -18,15 +17,15 @@ export default class extends Controller {
     this.isSubmitHeld = false;
     this.heldSubmitter = null;
     this.isWaitOver = false;
-    this.form?.addEventListener('submit', this.holdWhilePending);
+    this.form?.addEventListener('submit', this.holdUntilPictureReady);
   }
 
   disconnect() {
-    this.form?.removeEventListener('submit', this.holdWhilePending);
+    this.form?.removeEventListener('submit', this.holdUntilPictureReady);
   }
 
-  holdWhilePending = (event) => {
-    if ('pending' !== this.element.dataset.mediaState || this.isWaitOver) {
+  holdUntilPictureReady = (event) => {
+    if (!isSubmitHeldFor(this.element.dataset.mediaState, this.isWaitOver)) {
       return;
     }
     event.preventDefault();
@@ -43,11 +42,16 @@ export default class extends Controller {
     this.showPictureArea(true);
   }
 
+  // A failed or rejected upload hides the area and the Remove button: focus inside them would fall to the page.
   dropPicture() {
+    const isFocusInHiddenPart = [this.pictureTarget, this.removeTarget].some((part) => part.contains(document.activeElement));
     this.releaseSubmit();
     this.clearPins();
     this.forgetPagePicture();
     this.showPictureArea(false);
+    if (isFocusInHiddenPart) {
+      this.fileTarget.focus();
+    }
   }
 
   removePicture() {

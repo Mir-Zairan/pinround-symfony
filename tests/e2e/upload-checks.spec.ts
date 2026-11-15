@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 // @ts-expect-error The browser modules are plain JavaScript with no type declarations.
-import { MAX_BYTES, pickedFile, refusalFor, WRONG_SIZE_MESSAGE, WRONG_TYPE_MESSAGE } from '../../assets/review/upload_checks.js';
+import { carriesFiles, MAX_BYTES, pickedFile, refusalFor, WRONG_SIZE_MESSAGE, WRONG_TYPE_MESSAGE } from '../../assets/review/upload_checks.js';
 
 // Pure helpers, run in Node with no page and no app.
 
@@ -55,5 +55,26 @@ test.describe('pickedFile', () => {
     expect(pickedFile([])).toBeNull();
     expect(pickedFile(null)).toBeNull();
     expect(pickedFile(undefined)).toBeNull();
+  });
+});
+
+test.describe('carriesFiles', () => {
+  test('takes a drag that carries files, alone or with other types', () => {
+    expect(carriesFiles(['Files'])).toBe(true);
+    expect(carriesFiles(['text/uri-list', 'Files'])).toBe(true);
+  });
+
+  test('reads a DOMStringList-like list the way it reads an array', () => {
+    const domStringList = { 0: 'text/plain', 1: 'Files', length: 2 };
+    expect(carriesFiles(domStringList)).toBe(true);
+  });
+
+  test('leaves a drag of text or a link, an empty drag and no types to the browser', () => {
+    expect(carriesFiles(['text/plain'])).toBe(false);
+    expect(carriesFiles(['text/plain', 'text/html', 'text/uri-list'])).toBe(false);
+    expect(carriesFiles(['files'])).toBe(false);
+    expect(carriesFiles([])).toBe(false);
+    expect(carriesFiles(null)).toBe(false);
+    expect(carriesFiles(undefined)).toBe(false);
   });
 });

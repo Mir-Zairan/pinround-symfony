@@ -11,8 +11,8 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 
 /**
- * Like SignedVariantUrls: refuses an organization that is not the tenant's, leaves out another organization's and an
- * unknown id, answers by the id in lowercase, and signs a ready picture for the start of $at's minute. Records every
+ * Like SignedVariantUrls: refuses a variant other than view or thumb, more than MAX_MEDIA_IDS ids and an organization
+ * that is not the tenant's, leaves out another organization's and an unknown id, answers by the id in lowercase, and signs a ready picture for the start of $at's minute. Records every
  * list of ids, the variant and the signing time it is asked for.
  */
 final class RecordingSignedUrls implements SignedUrls
@@ -29,6 +29,12 @@ final class RecordingSignedUrls implements SignedUrls
 
     public function forVariants(OrganizationId $organizationId, array $mediaIds, string $variant, \DateTimeImmutable $at): array
     {
+        if (!\in_array($variant, ['view', 'thumb'], true)) {
+            throw new \InvalidArgumentException('A picture variant is "view" or "thumb".');
+        }
+        if (\count($mediaIds) > self::MAX_MEDIA_IDS) {
+            throw new \InvalidArgumentException(\sprintf('Signed URLs are made for at most %d pictures at once.', self::MAX_MEDIA_IDS));
+        }
         if (true !== $this->tenantContext->get()?->equals($organizationId)) {
             throw new \LogicException('Pictures are signed under the tenant of their own organization.');
         }

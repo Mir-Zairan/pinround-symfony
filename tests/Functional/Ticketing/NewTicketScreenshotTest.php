@@ -7,8 +7,10 @@ namespace App\Tests\Functional\Ticketing;
 use App\Identity\Domain\User;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
+use App\Review\Application\ReportPictures;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\NewTicket\ScreenshotReportOnNewTicket;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -206,6 +208,94 @@ final class NewTicketScreenshotTest extends WebTestCase
         $this->postTicket();
         self::assertResponseRedirects('/t/SHOP-1', 302);
         self::assertSame(['APP-1', 'SHOP-1'], $this->committedTicketKeys());
+    }
+
+    #[Test]
+    public function aRefusedReportWithTheReportersOwnReadyPictureComesBackWithThePictureItsPinsAndTheSummary(): void
+    {
+        $mediaId = $this->addMedia($this->people['Mia'], 'ready');
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->postTicket([
+            NewTicketController::SCREENSHOT_MEDIA_FIELD => $mediaId,
+            NewTicketController::SCREENSHOT_TITLE_FIELD => str_repeat('é', 121),
+            NewTicketController::SCREENSHOT_SUMMARY_FIELD => 'The total drops to zero.',
+            NewTicketController::PINS_FIELD => [
+                5 => ['x' => '80.00', 'y' => '50.00', 'note' => 'Pay button is hidden'],
+                2 => ['x' => '12.35', 'y' => '7.10', 'note' => 'The total is off'],
+            ],
+        ]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('A picture title holds at most 120 characters.', $page->filter('#screenshot-error')->text());
+        self::assertSame($mediaId, $page->filter('input[name="'.NewTicketController::SCREENSHOT_MEDIA_FIELD.'"]')->attr('value'));
+        $markers = $page->filter('#screenshot-frame .pin');
+        self::assertSame(['2', '5'], $markers->each(static fn (Crawler $marker): string => (string) $marker->attr('data-pin-number')));
+        self::assertSame(['12.35', '80.00'], $markers->each(static fn (Crawler $marker): string => (string) $marker->attr('data-x-percent')));
+        self::assertSame(['The total is off', 'Pay button is hidden'], $page->filter('textarea.pin-list__note')->each(static fn (Crawler $note): string => $note->text()));
+        self::assertSame('The total drops to zero.', $page->filter('textarea[name="'.NewTicketController::SCREENSHOT_SUMMARY_FIELD.'"]')->text());
+        self::assertSame(str_repeat('é', 121), $page->filter('input[name="'.NewTicketController::SCREENSHOT_TITLE_FIELD.'"]')->attr('value'));
+        self::assertSame(['APP-1'], $this->committedTicketKeys());
+    }
+
+    /**
+     * @return iterable<string, array{string}> whose picture is posted, as addPictureAsDescribed reads it
+     */
+    public static function picturesNotTheReportersOwn(): iterable
+    {
+        yield 'a picture another person uploaded' => ['Omar ready'];
+        yield 'a picture of another organization the reporter uploaded' => ['Mia ready in Beta Bakery'];
+    }
+
+    #[Test]
+    #[DataProvider('picturesNotTheReportersOwn')]
+    public function aRefusedPictureThatIsNotTheReportersOwnComesBackWithoutItsIdOrPinsButWithTheSummary(string $picture): void
+    {
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->postTicket([
+            NewTicketController::SCREENSHOT_MEDIA_FIELD => $this->addPictureAsDescribed($picture),
+            NewTicketController::SCREENSHOT_SUMMARY_FIELD => 'The total drops to zero.',
+            NewTicketController::PINS_FIELD => [1 => ['x' => '12.35', 'y' => '7.10', 'note' => 'The total is off']],
+        ]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU, $page->filter('#screenshot-error')->text());
+        self::assertSame('', $page->filter('input[name="'.NewTicketController::SCREENSHOT_MEDIA_FIELD.'"]')->attr('value'));
+        self::assertCount(0, $page->filter('.pin'));
+        self::assertCount(0, $page->filter('textarea.pin-list__note'));
+        self::assertSame('The total drops to zero.', $page->filter('textarea[name="'.NewTicketController::SCREENSHOT_SUMMARY_FIELD.'"]')->text());
+        self::assertSame(['APP-1'], $this->committedTicketKeys());
+    }
+
+    #[Test]
+    public function aReportRefusedOnlyOnceTheTicketIsMadeRollsTheTicketAndItsNumberBack(): void
+    {
+        $container = self::getContainer();
+        $report = new NewTicketReportRefusingOnlyOnAttach(new ScreenshotReportOnNewTicket(
+            $container->get(RoundCommands::class),
+            $container->get(ReportPictures::class),
+            $container->get(TenantContext::class),
+        ));
+        $container->set(ScreenshotReportOnNewTicket::class, $report);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->postTicket([
+            NewTicketController::SCREENSHOT_MEDIA_FIELD => $this->addMedia($this->people['Omar'], 'ready'),
+            NewTicketController::PINS_FIELD => [1 => ['x' => '12.35', 'y' => '7.10', 'note' => 'The total is off']],
+        ]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(1, $report->attachRefusalCount, 'The refusal came from attach, after the ticket was made.');
+        self::assertSame(RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU, $page->filter('#screenshot-error')->text());
+        self::assertSame(self::TICKET_TITLE, $page->filter('input[name="title"]')->attr('value'));
+        self::assertSame(['APP-1'], $this->committedTicketKeys());
+        self::assertSame(['APP-1'], array_column($this->committedRounds(), 'key'));
+
+        $this->postTicket();
+        self::assertResponseRedirects('/t/SHOP-1', 302);
+        self::assertSame(['APP-1', 'SHOP-1'], $this->committedTicketKeys());
+        self::assertSame(['APP-1'], array_column($this->committedRounds(), 'key'));
     }
 
     #[Test]

@@ -12,6 +12,9 @@ final readonly class PinView
 {
     public const int NOTE_MAX_LENGTH = 1000;
 
+    /** A posted pin x or y as pin_markup.js writes it ("12.50"): is_numeric would also let in a sign, an exponent and spaces. */
+    public const string POSTED_PERCENT_PATTERN = '/\A\d{1,3}(?:\.\d+)?\z/';
+
     /** Past this x the note's bubble opens to the left of the ring, so it stays inside the picture. */
     private const float BUBBLE_FLIP_PERCENT = 60.0;
 

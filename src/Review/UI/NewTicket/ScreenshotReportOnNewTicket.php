@@ -9,6 +9,7 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\ReportPictures;
+use App\Review\UI\PinView;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -26,9 +27,6 @@ final readonly class ScreenshotReportOnNewTicket implements NewTicketReport
     public const string PIN_SPOT_UNREADABLE = 'Place each pin on the picture again.';
     public const string CONTENT_WITHOUT_SCREENSHOT = 'Add a screenshot, or clear its title, summary and pins.';
     public const string TOO_MANY_PINS = 'A picture holds at most '.RoundCommands::MAX_PINS_PER_SCREENSHOT.' pins.';
-
-    /** A posted pin x or y as pin_markup.js writes it ("12.50"): is_numeric would also let in a sign, an exponent and spaces. */
-    public const string PIN_PERCENT = '/\A\d{1,3}(?:\.\d+)?\z/';
 
     public function __construct(
         private RoundCommands $roundCommands,
@@ -133,7 +131,7 @@ final readonly class ScreenshotReportOnNewTicket implements NewTicketReport
     {
         $xPercent = $postedPin['x'] ?? null;
         $yPercent = $postedPin['y'] ?? null;
-        if (!\is_string($xPercent) || !\is_string($yPercent) || 1 !== preg_match(self::PIN_PERCENT, $xPercent) || 1 !== preg_match(self::PIN_PERCENT, $yPercent)) {
+        if (!\is_string($xPercent) || !\is_string($yPercent) || 1 !== preg_match(PinView::POSTED_PERCENT_PATTERN, $xPercent) || 1 !== preg_match(PinView::POSTED_PERCENT_PATTERN, $yPercent)) {
             throw new NewTicketReportRefused(self::PIN_SPOT_UNREADABLE);
         }
 

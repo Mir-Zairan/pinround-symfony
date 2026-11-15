@@ -1,19 +1,21 @@
 import { Controller } from '@hotwired/stimulus';
-import { pickedFile, refusalFor } from '../review/upload_checks.js';
+import { carriesFiles, pickedFile, refusalFor } from '../review/upload_checks.js';
 import { beginUpload, completeUpload, putFile, UploadFailed } from '../review/upload_requests.js';
 import { readUploadStatus, REJECTED_MESSAGE, sleep, statusUrlFor, waitForProcessing } from '../review/upload_status.js';
 
 // Uploads one screenshot straight to storage (ADR-0011): the file is picked, dropped or pasted, checked for type and
-// size, then presigned-upload:started fires (no detail) and POST /media/intents, a PUT to the presigned URL with the progress shown, and POST .../complete. The
+// size, then the field's data-media-state becomes "uploading", presigned-upload:started fires (no detail) and POST
+// /media/intents, a PUT to the presigned URL with the progress shown, and POST .../complete. The
 // returned media id goes into the hidden `mediaId` field and into presigned-upload:uploaded ({ mediaId }), for the form
-// that later posts it. Then GET the status URL once a second, at most 15 times: the field's data-media-state is
+// that later posts it. Then GET the status URL once a second, at most 15 times: data-media-state is
 // "pending" meanwhile, then "ready" with presigned-upload:ready ({ mediaId }), or on "rejected" the hidden field is
 // emptied, the message shows and presigned-upload:rejected ({ mediaId }) fires (the state is then "rejected"). After
 // 15 s still pending, presigned-upload:still-processing ({ mediaId }) fires and nothing is shown: the media id stays
 // and the form that listens says so when the server refuses a submit. A status poll that fails or is refused (offline,
 // 404, 429) shows nothing and counts as pending. Refusals and failures of the upload itself show the server's own
-// message in the `status` live region and fire presigned-upload:failed (no detail). The clear() action drops the picture:
-// it stops the upload or the polling, empties the field and the preview, and fires nothing. The markup and the values
+// message in the `status` live region, remove data-media-state and fire presigned-upload:failed (no detail). The clear()
+// action drops the picture: it stops the upload or the polling, empties the field, data-media-state and the preview, and
+// fires nothing. The markup and the values
 // come from the UploadField component, or from ScreenshotReportField.
 export default class extends Controller {
   static targets = ['input', 'status', 'progress', 'preview', 'mediaId'];
@@ -52,12 +54,17 @@ export default class extends Controller {
   }
 
   dragOver(event) {
-    event.preventDefault();
+    if (carriesFiles(event.dataTransfer?.types)) {
+      event.preventDefault();
+    }
   }
 
   drop(event) {
+    if (!carriesFiles(event.dataTransfer?.types)) {
+      return;
+    }
     event.preventDefault();
-    this.upload(pickedFile(event.dataTransfer?.files));
+    this.upload(pickedFile(event.dataTransfer.files));
   }
 
   async upload(file) {
@@ -73,7 +80,7 @@ export default class extends Controller {
     this.abortController?.abort();
     const { signal } = (this.abortController = new AbortController());
     this.mediaIdTarget.value = '';
-    delete this.element.dataset.mediaState;
+    this.element.dataset.mediaState = 'uploading';
     this.showPreview(file);
     this.showProgress(0);
     this.say(`Uploading ${file.name}…`);
@@ -97,6 +104,7 @@ export default class extends Controller {
       if (signal.aborted) {
         return;
       }
+      delete this.element.dataset.mediaState;
       this.clearPreview();
       this.say(failure instanceof UploadFailed ? failure.message : 'The upload failed. Try again.');
       this.dispatch('failed');
