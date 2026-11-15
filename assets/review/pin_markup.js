@@ -17,8 +17,8 @@ export function buildMarker(number) {
   return marker;
 }
 
-/** The list item with the note field and Remove button of a pin added in the browser. */
-export function buildListItem(number) {
+/** The list item with the note field and Remove button of a pin added in the browser; PinList prints the same. */
+export function buildListItem(number, notePlaceholder = '') {
   const item = document.createElement('li');
   item.className = 'pin-list__item';
   item.value = number;
@@ -31,6 +31,9 @@ export function buildListItem(number) {
   field.name = `pins[${number}][note]`;
   field.rows = 2;
   field.setAttribute('aria-label', `Note for pin ${number}`);
+  if ('' !== notePlaceholder) {
+    field.placeholder = notePlaceholder;
+  }
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'btn btn-sm btn-text pin-list__remove';

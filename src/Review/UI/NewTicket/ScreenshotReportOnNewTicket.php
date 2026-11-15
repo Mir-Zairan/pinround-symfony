@@ -27,8 +27,8 @@ final readonly class ScreenshotReportOnNewTicket implements NewTicketReport
     public const string CONTENT_WITHOUT_SCREENSHOT = 'Add a screenshot, or clear its title, summary and pins.';
     public const string TOO_MANY_PINS = 'A picture holds at most '.RoundCommands::MAX_PINS_PER_SCREENSHOT.' pins.';
 
-    // As pin_markup.js writes it ("12.50"): is_numeric would also let in a sign, an exponent and spaces.
-    private const string PIN_PERCENT = '/\A\d{1,3}(?:\.\d+)?\z/';
+    /** A posted pin x or y as pin_markup.js writes it ("12.50"): is_numeric would also let in a sign, an exponent and spaces. */
+    public const string PIN_PERCENT = '/\A\d{1,3}(?:\.\d+)?\z/';
 
     public function __construct(
         private RoundCommands $roundCommands,
