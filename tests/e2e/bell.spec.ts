@@ -125,16 +125,19 @@ test.describe('a ping from Lena', () => {
   }
 
   test('Done takes the card out of the popover and drops the badge by one', async ({ page }) => {
-    // The ping reaches the bell through the outbox and its worker, a moment after Lena sent it.
+    // The ping reaches the bell through the outbox and its worker, a moment after Lena sent it. The badge is drawn with
+    // the page and the popover loads later, so the worker can land in between: a try counts only when the page's badge
+    // counts the ping too.
+    let countBefore = 0;
     await expect(async () => {
       await openHome(page);
       await openPopover(page);
       await expect(lenasCard(page)).toBeVisible({ timeout: 1_000 });
+      countBefore = await badgeCountOf(page);
+      expect(countBefore).toBeGreaterThan(0);
     }).toPass({ intervals: [500, 1_000, 2_000], timeout: 20_000 });
     await expect(lenasCard(page)).toHaveAccessibleName(`Lena pinged you on ${key}`);
     await expect(lenasCard(page).getByText(`“${message}”`)).toBeVisible();
-    const countBefore = await badgeCountOf(page);
-    expect(countBefore).toBeGreaterThan(0);
 
     await lenasCard(page).getByRole('button', { name: 'Done' }).click();
 
