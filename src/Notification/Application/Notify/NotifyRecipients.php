@@ -7,6 +7,7 @@ namespace App\Notification\Application\Notify;
 use App\Conversation\Api\Event\QuestionAnswered;
 use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\Event\ReplyPosted;
+use App\Conversation\Api\MessageQueries;
 use App\Conversation\Api\QuestionQueries;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Api\NotificationQueries;
@@ -30,11 +31,12 @@ use App\Ticketing\Api\TicketVisibilityFacts;
  * kinds), once per message however often it is delivered. It runs in worker-notify on event.bus (config/services.yaml),
  * in the bus's transaction under the event's organization. Nobody is notified of their own action, of a ticket they
  * muted or may no longer see, or by or as someone who is no longer a member; a ticket that is gone notifies nobody,
- * and neither does a ping cleared or a question answered or withdrawn before its event is handled. A row made in the
- * recipient's quiet hours is held until they end (a ping keeps the time stored on it) and is created at that end, as a
- * held ping's event already is: a digest's window starts after the last digest's send time, so a row created at the
- * event would miss every digest when one went out during the hold. A shown reply within REPLY_FOLD_SECONDS of the last unread one about its
- * message folds into it instead of adding a row, when that one is shown or its hold has ended; a held reply folds only
+ * and neither does a ping cleared, a question answered or withdrawn, or a reply's message removed before its event
+ * is handled. A row made in the recipient's quiet hours is held until they end (a ping keeps the time stored on it)
+ * and is created at that end, as a held ping's event already is: a digest's window starts after the last digest's
+ * send time, so a row created at the event would miss every digest when one went out during the hold. A shown reply
+ * within REPLY_FOLD_SECONDS of the last unread one about its message folds into it instead of adding a row, when that
+ * one is shown or its hold has ended; a held reply folds only
  * into a reply held until the same time, for the whole hold (Notifications::foldIntoUnreadReply). Each row added or
  * folded refreshes the recipient's bell once the bus commits, or once it is delivered when it is held.
  */
@@ -58,6 +60,7 @@ final readonly class NotifyRecipients
         private Pings $pings,
         private DeliveryTimes $deliveryTimes,
         private QuestionQueries $questionQueries,
+        private MessageQueries $messageQueries,
     ) {
     }
 
@@ -75,9 +78,9 @@ final readonly class NotifyRecipients
         $actor = new UserId($event->actorId);
         $ticketId = new TicketId($event->ticketId);
         $pingId = $event instanceof PingSent ? new PingId($event->pingId) : null;
-        $questionId = $event instanceof QuestionAsked ? $event->messageId : null;
+        $closableMessageId = $event instanceof QuestionAsked || $event instanceof ReplyPosted ? $event->messageId : null;
 
-        $this->onceOnlyHandling->runOnce(self::HANDLER_NAME, function () use ($organizationId, $recipient, $actor, $ticketId, $pingId, $questionId, $kind, $occurredAt, $sourceIds): void {
+        $this->onceOnlyHandling->runOnce(self::HANDLER_NAME, function () use ($organizationId, $recipient, $actor, $ticketId, $pingId, $closableMessageId, $kind, $occurredAt, $sourceIds): void {
             $ping = null;
             if (null !== $pingId) {
                 // The shared lock makes a clear of this ping that runs at the same time wait for this transaction, so
@@ -87,11 +90,15 @@ final readonly class NotifyRecipients
                     return;
                 }
             }
-            if (null !== $questionId) {
+            if (null !== $closableMessageId) {
                 // MarkMessageNotificationsDone takes the same lock, so it marks the row written here or runs first and
-                // the question already reads as closed.
-                $this->notifications->lockAboutMessage($organizationId, $questionId);
-                if (!$this->questionQueries->isOpen($questionId)) {
+                // the message already reads as closed. A reply is still news once its question is answered, so it
+                // waits only for its message to be present.
+                $this->notifications->lockAboutMessage($organizationId, $closableMessageId);
+                $isStillOpen = NotificationKind::Question === $kind
+                    ? $this->questionQueries->isOpen($closableMessageId)
+                    : $this->messageQueries->isPresent($closableMessageId);
+                if (!$isStillOpen) {
                     return;
                 }
             }

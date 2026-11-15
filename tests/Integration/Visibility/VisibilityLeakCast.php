@@ -179,6 +179,18 @@ abstract class VisibilityLeakCast extends KernelTestCase
         );
     }
 
+    /**
+     * Stores a comment as Conversation posts one, in the transaction under Acme Foods that is open: NotifyRecipients
+     * writes a reply row only while the message replied to is present.
+     */
+    protected static function addComment(string $ticketId, string $commentId, string $authorViewer, string $postedAt): void
+    {
+        self::connection()->executeStatement(
+            "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, body, created_at) VALUES (?, ?, ?, ?, 'comment', ?, ?)",
+            [self::ACME_FOODS, $commentId, $ticketId, self::VIEWERS[$authorViewer][0], 'The cart total looks off.', $postedAt],
+        );
+    }
+
     protected static function connection(): Connection
     {
         return self::entityManager()->getConnection();

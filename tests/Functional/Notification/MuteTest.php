@@ -57,6 +57,8 @@ final class MuteTest extends WebTestCase
 
     private string $lenasPing;
 
+    private string $omarsComment;
+
     protected function setUp(): void
     {
         $this->client = self::createClient([], ['HTTPS' => 'on']);
@@ -68,7 +70,7 @@ final class MuteTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                foreach (['ntf_mute', 'ntf_ping', 'tkt_ticket', 'wf_step'] as $table) {
+                foreach (['ntf_mute', 'ntf_ping', 'cnv_message', 'tkt_ticket', 'wf_step'] as $table) {
                     $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
                 }
 
@@ -204,7 +206,7 @@ final class MuteTest extends WebTestCase
 
     /**
      * Acme Foods' people and SHOP-1, a team-only bug of Shop's team in its backlog, reported by Lena and assigned to
-     * Omar, with one ping from Lena to Omar.
+     * Omar, with one ping from Lena to Omar and one comment by Omar.
      */
     private function seedShop(): void
     {
@@ -213,11 +215,13 @@ final class MuteTest extends WebTestCase
         $backlogStep = Uuid::v7()->toRfc4122();
         $this->shopTicket = Uuid::v7()->toRfc4122();
         $this->lenasPing = Uuid::v7()->toRfc4122();
+        $this->omarsComment = Uuid::v7()->toRfc4122();
         $organizationId = $this->acmeFoods->toString();
         $parameters = [
             $organizationId, $backlogStep,
             $organizationId, $this->shopTicket, $shopProject, $this->shop->toString(), $backlogStep, $this->idOf('Lena'), $this->idOf('Omar'),
             $organizationId, $this->lenasPing, $this->shopTicket, $this->idOf('Lena'), $this->idOf('Omar'),
+            $organizationId, $this->omarsComment, $this->shopTicket, $this->idOf('Omar'),
         ];
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters): int {
             $migrator->executeStatement(
@@ -233,7 +237,11 @@ final class MuteTest extends WebTestCase
             );
             $migrator->executeStatement(
                 "INSERT INTO ntf_ping (organization_id, id, ticket_id, from_id, to_id, body, created_at) VALUES (?, ?, ?, ?, ?, 'Could you look at SHOP-1?', TIMESTAMPTZ '2026-11-06 11:00:00+00')",
-                \array_slice($parameters, 9),
+                \array_slice($parameters, 9, 5),
+            );
+            $migrator->executeStatement(
+                "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, body, created_at) VALUES (?, ?, ?, ?, 'comment', 'The sum is off by one item.', TIMESTAMPTZ '2026-11-06 11:10:00+00')",
+                \array_slice($parameters, 14),
             );
 
             return 0;
@@ -266,7 +274,7 @@ final class MuteTest extends WebTestCase
         $omar = $this->idOf('Omar');
         $events = [
             new PingSent($organizationId, $this->shopTicket, $this->lenasPing, $this->idOf('Lena'), $omar, $this->idOf('Lena'), new \DateTimeImmutable('2026-11-06 11:00:00 UTC')),
-            new ReplyPosted($organizationId, $this->shopTicket, Uuid::v7()->toRfc4122(), Uuid::v7()->toRfc4122(), $omar, $this->idOf('Lena'), new \DateTimeImmutable('2026-11-06 11:30:00 UTC')),
+            new ReplyPosted($organizationId, $this->shopTicket, $this->omarsComment, Uuid::v7()->toRfc4122(), $omar, $this->idOf('Lena'), new \DateTimeImmutable('2026-11-06 11:30:00 UTC')),
         ];
 
         return new TenantTransactions($entityManager, $tenantContext)->rolledBackAs($organizationId, static function () use ($container, $entityManager, $events, $organizationId, $omar): int {

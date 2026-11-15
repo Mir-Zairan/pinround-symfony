@@ -33,8 +33,8 @@ use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
  * event.bus transaction commits, and none for a retried delivery or a ping held past the frozen clock; a cleared ping
  * writes no row and refreshes the bell through PushBellOnPingCleared, and an answer marks the question row done
  * through MarkMessageNotificationsDone, which refreshes its recipient's bell once. NotifyRecipients reads each ping's
- * ntf_ping row for its delivery time and writes a question row only while its cnv_message row is open, so those cases
- * store them first. Everything commits, so tearDown removes the rows.
+ * ntf_ping row for its delivery time, writes a question row only while its cnv_message row is open and a reply row
+ * only while the message replied to is not removed, so those cases store them first. Everything commits, so tearDown removes the rows.
  */
 final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
 {
@@ -112,6 +112,7 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
         self::addCommittedPing(self::PING, $mia, $lena, null, self::PINGED_AT);
         self::addCommittedPing(self::HELD_PING, $lena, $sara, self::HELD_PING_DELIVERED_AT, self::NOW);
         self::transactions()->committedAs(self::ACME_FOODS, static function () use ($lena, $mia, $sara): void {
+            self::addComment(self::teamOnlyTicketId(), self::COMMENT, 'Mia', self::PINGED_AT);
             $eventBus = self::getContainer()->get('event.bus');
             $eventBus->dispatch(new PingSent(self::ACME_FOODS, self::teamOnlyTicketId(), self::PING, $mia, $lena, $mia, new \DateTimeImmutable(self::PINGED_AT)));
             $eventBus->dispatch(new ReplyPosted(self::ACME_FOODS, self::teamOnlyTicketId(), self::COMMENT, self::REPLY, $mia, $lena, new \DateTimeImmutable(self::REPLIED_AT)));
@@ -268,8 +269,8 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
             [self::ACME_FOODS, self::PING, self::HELD_PING],
         ));
         self::asTenantMigrator(self::ACME_FOODS, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            'DELETE FROM cnv_message WHERE organization_id = ? AND id = ?',
-            [self::ACME_FOODS, self::QUESTION],
+            'DELETE FROM cnv_message WHERE organization_id = ? AND id IN (?, ?)',
+            [self::ACME_FOODS, self::QUESTION, self::COMMENT],
         ));
         self::migrator()->executeStatement('DELETE FROM processed_message WHERE handler = ?', [NotifyRecipients::HANDLER_NAME]);
         self::migrator()->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox'");

@@ -96,7 +96,7 @@ Pushes are hints. If a push is lost, the next page load or frame refresh is stil
 
 The actor never notifies themselves. Muted tickets are skipped. For restricted tickets (`visibility = team`), recipients are checked again at delivery time.
 
-A `question` notification closes with its question. When the question is answered (QuestionAnswered) or withdrawn (MessageRemoved), `MarkMessageNotificationsDone` marks done the `question` row about it, and on a withdrawal or a removed comment also the `reply` rows about the message, held rows included, so neither the bell nor the digest lists them once a hold ends. A QuestionAsked handled after its question closed writes no row: `NotifyRecipients` checks `QuestionQueries::isOpen` under the same per-message lock (`Notifications::lockAboutMessage`) that the marking takes, so one of the two always sees the other.
+A `question` notification closes with its question. When the question is answered (QuestionAnswered) or withdrawn (MessageRemoved), `MarkMessageNotificationsDone` marks done the `question` row about it, and on a withdrawal or a removed comment also the `reply` rows about the message, held rows included, so neither the bell nor the digest lists them once a hold ends. A QuestionAsked handled after its question closed writes no row: `NotifyRecipients` checks `QuestionQueries::isOpen` under the same per-message lock (`Notifications::lockAboutMessage`) that the marking takes, so one of the two always sees the other. Likewise a ReplyPosted handled after the message it replies to was removed writes no row: `NotifyRecipients` checks `MessageQueries::isPresent` under the same lock; a reply about an answered question still notifies.
 
 ## Ping lifecycle
 

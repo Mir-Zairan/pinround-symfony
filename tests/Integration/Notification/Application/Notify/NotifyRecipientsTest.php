@@ -105,11 +105,47 @@ final class NotifyRecipientsTest extends VisibilityLeakCast
         self::assertSame([self::VIEWERS['Raj'][0], self::VIEWERS['Sara'][0]], $actorsAt121);
     }
 
+    #[Test]
+    public function aReplyToACommentRemovedBeforeItsEventIsHandledWritesNoNotificationWhileOneToAPresentCommentStillDoes(): void
+    {
+        [$removedRows, $removedProcessedCount] = self::transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            self::addComment(self::teamOnlyTicketId(), self::MESSAGE, 'Lena', self::ASKED_AT);
+            self::assertSame(1, self::connection()->executeStatement(
+                "UPDATE cnv_message SET removed_at = '2027-03-15 10:05:00+00' WHERE organization_id = ? AND id = ?",
+                [self::ACME_FOODS, self::MESSAGE],
+            ));
+            $messageId = Uuid::v7()->toRfc4122();
+            self::handle($this->replyToLenasComment(), $messageId);
+            $processedCount = self::connection()->fetchOne(
+                'SELECT count(*) FROM processed_message WHERE handler = ? AND message_id = ?',
+                [NotifyRecipients::HANDLER_NAME, $messageId],
+            );
+
+            return [$this->notificationsOf('Lena'), $processedCount];
+        });
+        $presentRows = self::transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            self::addComment(self::teamOnlyTicketId(), self::MESSAGE, 'Lena', self::ASKED_AT);
+            self::handle($this->replyToLenasComment(), Uuid::v7()->toRfc4122());
+
+            return $this->notificationsOf('Lena');
+        });
+
+        self::assertSame([], $removedRows);
+        self::assertSame(1, $removedProcessedCount);
+        self::assertSame([['reply', self::MESSAGE, self::REPLY]], array_map(static fn (array $row): array => [$row['kind'], $row['data']['messageId'] ?? null, $row['data']['replyId'] ?? null], $presentRows));
+    }
+
+    private function replyToLenasComment(): ReplyPosted
+    {
+        return new ReplyPosted(self::ACME_FOODS, self::teamOnlyTicketId(), self::MESSAGE, self::REPLY, self::VIEWERS['Lena'][0], self::VIEWERS['Raj'][0], new \DateTimeImmutable('2027-03-15 10:10:00 UTC'));
+    }
+
     /**
      * @return list<mixed> the actor of each of Lena's reply notifications, oldest first
      */
     private function replyActorsAfterASecondReplyAt(string $offset): array
     {
+        self::addComment(self::teamOnlyTicketId(), self::MESSAGE, 'Lena', self::ASKED_AT);
         $first = new \DateTimeImmutable(self::ASKED_AT);
         self::handle(new ReplyPosted(self::ACME_FOODS, self::teamOnlyTicketId(), self::MESSAGE, self::REPLY, self::VIEWERS['Lena'][0], self::VIEWERS['Raj'][0], $first), Uuid::v7()->toRfc4122());
         self::handle(new ReplyPosted(self::ACME_FOODS, self::teamOnlyTicketId(), self::MESSAGE, self::SECOND_REPLY, self::VIEWERS['Lena'][0], self::VIEWERS['Sara'][0], $first->modify($offset)), Uuid::v7()->toRfc4122());
