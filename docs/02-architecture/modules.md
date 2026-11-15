@@ -263,7 +263,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `Uploads::begin(OrganizationId, UserId, UploadTarget $target, string $purpose, string $mime, int $bytes, \DateTimeImmutable $at): UploadSlot` (in the caller's transaction; a presigned PUT URL of 5 minutes, the intent lasts a day)
   - `Uploads::complete(OrganizationId, UserId, string $intentId, \DateTimeImmutable $at): string` (the media id; its own transaction, which also writes `ProcessUpload` to the outbox)
   - `UploadTarget` (kind and id of what the upload is for), `UploadSlot` (intent id, URL, headers to send, expiry)
-  - `MediaTargetAuthorizer`: implemented by the module that owns a target kind (`Ticketing\UI\Media\TicketMediaTarget` for `ticket`; Review adds rounds in P05.T4), tagged `app.media_target_authorizer`; a kind no authorizer decides is refused
+  - `MediaTargetAuthorizer`: implemented by the module that owns a target kind (`Ticketing\UI\Media\TicketMediaTarget` for `ticket`; Review adds rounds in P05.T4), tagged `app.media_target_authorizer`; a kind no authorizer decides is refused. `Uploads::begin` and `complete` must run in a request whose logged-in actor is `$userId` in `$organizationId`; any other caller (console command, message handler, MCP without a token) is refused with `UploadTargetDenied`
   - `MediaPermission::UPLOAD` (voter attribute on an `UploadTarget`, decided by `UI\Voter\UploadVoter` through the authorizers)
   - Refusals: `UploadRefused` (a plain message to show, 422), `UploadIntentNotFound` (404), `UploadTargetDenied` (403)
   - `MediaQueries::status(MediaId): MediaStatus` (P05.T2)

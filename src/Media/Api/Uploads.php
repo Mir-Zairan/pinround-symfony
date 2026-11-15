@@ -11,7 +11,9 @@ use App\SharedKernel\Domain\UserId;
  * Direct uploads of screenshots (media-pipeline.md, Upload flow): begin() hands out a slot the browser PUTs one file
  * into, complete() turns that file into a pending media object and queues its processing. Whether the person may
  * upload for the target is the caller's MediaPermission::UPLOAD check, made before begin(); both calls also ask the
- * MediaTargetAuthorizer of the target's kind themselves, complete() for the target stored at begin().
+ * MediaTargetAuthorizer of the target's kind themselves, complete() for the target stored at begin(). Both calls
+ * must run in a request whose logged-in actor is $userId in $organizationId; any other caller (console command,
+ * message handler, MCP without a token) is refused with UploadTargetDenied.
  */
 interface Uploads
 {

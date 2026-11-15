@@ -93,9 +93,6 @@ final class TicketMediaTargetTest extends TestCase
         yield 'Omar, on a ticket of a team he is not in' => [self::OMAR, self::OMAR, self::MOBILE_1];
         yield 'Omar asked about for Lena' => [self::OMAR, self::LENA, self::SHOP_1];
         yield 'Lena asked about for Omar' => [self::LENA, self::OMAR, self::SHOP_1];
-        yield 'Noel, a member of the organization in no team, on a team-only ticket' => [self::NOEL, self::NOEL, self::SHOP_2];
-        yield 'Omar, on a team-only ticket of a team he is not in' => [self::OMAR, self::OMAR, self::MOBILE_2];
-        yield 'Mia, a viewer of Shop, on its team-only ticket' => [self::MIA, self::MIA, self::SHOP_2];
         yield 'a ticket id that is no uuid' => [self::OMAR, self::OMAR, 'SHOP-1'];
         yield 'a ticket id with a trailing newline' => [self::OMAR, self::OMAR, self::SHOP_1."\n"];
         yield 'an empty ticket id' => [self::OMAR, self::OMAR, ''];

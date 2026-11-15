@@ -32,7 +32,8 @@ sequenceDiagram
   participant S as Object storage (private bucket)
   participant W as Media worker
   B->>A: POST /media/intents {purpose, mime, bytes, target}
-  A->>A: Type and size OK? Quota OK (else "storage full")? Voter: may this person add to the target?
+  A->>A: Voter: may this person add to the target?
+  A->>A: Type and size OK? Quota OK (else "storage full")? Person under 20 open uploads (else "too many uploads waiting")? Target allowed again?
   A->>A: Save upload intent (org, user, target kind and id, max bytes, allowed types, expiry)
   A-->>B: {intentId, presigned PUT URL (5 min), headers}
   B->>S: PUT bytes (Content-Type and Content-Length fixed)
@@ -54,10 +55,15 @@ The browser shows a local preview at once (from the file it already has), so the
 
 Before the presigned URL:
 
+In this order:
+
+- The person may add a screenshot to this round or report (voter).
 - MIME declared as `image/png`, `image/jpeg` or `image/webp`.
 - Size ≤ 15 MB.
-- The person may add a screenshot to this round or report (voter).
-- The org is under its quota.
+- The org is under its quota: stored images plus open upload intents, counted in one statement under a per-org lock.
+- The person has fewer than 20 open (unused, unexpired) intents.
+- The target's authorizer allows it again, inside the same transaction.
+- A per-person rate limit on starting uploads (429).
 - **Upload URL:** the presigned PUT pins the declared `Content-Type` and the exact `Content-Length`, so the storage refuses any other type or length.
 
 In the worker:
@@ -133,7 +139,9 @@ exports/{orgId}/{exportId}.zip                   # org exports, lifecycle rule: 
 | File rejected (type, size, not an image) | "This file is not a PNG, JPEG or WebP screenshot." | Upload object deleted, intent `rejected` with reason |
 | Processing failed (worker error) | Spinner turns into "We could not process this image. Try again." | Messenger retries 3 times with backoff, then failure transport + alert |
 | Signed URL expired on an open page | Image reloads automatically | Browser requests a new URL |
-| Quota full | "Your company's storage is full. Ask your admin." | Admins notified |
+| Quota full | "Your company's storage is full. Ask your admin." (422) | Nothing stored. Admin notice not built yet |
+| Too many uploads waiting (20 open) | "You have too many uploads waiting. Finish or wait for them, then try again." (422) | Nothing stored |
+| Starting uploads too fast | "Too many requests" (429) | Nothing stored |
 
 ## Other inputs
 
