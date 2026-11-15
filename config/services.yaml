@@ -118,6 +118,12 @@ services:
             - { name: messenger.message_handler, bus: event.bus, handles: App\Conversation\Api\Event\ReplyPosted }
             - { name: messenger.message_handler, bus: event.bus, handles: App\Ticketing\Api\Event\TicketAssigned }
 
+    # Tagged here for the same reason; it marks done the bell rows about an answered, withdrawn or removed message.
+    App\Notification\Application\Notify\MarkMessageNotificationsDone:
+        tags:
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Conversation\Api\Event\QuestionAnswered }
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Conversation\Api\Event\MessageRemoved }
+
     # Tagged here for the same reason; it refreshes the bell of the person whose ping was cleared.
     App\Notification\Application\Notify\PushBellOnPingCleared:
         tags:

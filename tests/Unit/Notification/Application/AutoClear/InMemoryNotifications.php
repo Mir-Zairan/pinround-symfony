@@ -12,11 +12,15 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * Like DbalNotifications for the rows, their done_at and their deliver_after, and for the recipients a release
- * returns (each once, in user id order); folding replies is not modelled and refused.
+ * Like DbalNotifications for the rows, their done_at and their deliver_after, and for the recipients a release or a
+ * mark done about a message returns (each once, in user id order); folding replies is not modelled and refused, and a
+ * lock about a message is only recorded, as one process holds no lock against itself.
  */
 final class InMemoryNotifications implements Notifications
 {
+    /** @var list<array{string, string}> organization and message id of each lock about a message, in the order taken */
+    public array $lockedMessages = [];
+
     /** @var list<array{notification: NewNotification, doneAt: ?\DateTimeImmutable, deliverAfter: ?\DateTimeImmutable}> in the order added */
     private array $rows = [];
 
@@ -47,6 +51,32 @@ final class InMemoryNotifications implements Notifications
         }
 
         return $marked;
+    }
+
+    public function lockAboutMessage(OrganizationId $organizationId, string $messageId): void
+    {
+        $this->lockedMessages[] = [$organizationId->toString(), $messageId];
+    }
+
+    public function markDoneAboutMessage(OrganizationId $organizationId, TicketId $ticketId, string $messageId, array $kinds, \DateTimeImmutable $at): array
+    {
+        $this->lockAboutMessage($organizationId, $messageId);
+        $recipientIds = [];
+        foreach ($this->rows as $index => $row) {
+            $notification = $row['notification'];
+            if (null === $row['doneAt']
+                && \in_array($notification->kind, $kinds, true)
+                && ($notification->data['messageId'] ?? null) === $messageId
+                && $notification->organizationId->equals($organizationId)
+                && $notification->ticketId->equals($ticketId)
+            ) {
+                $this->rows[$index]['doneAt'] = $at;
+                $recipientIds[$notification->recipientId->toString()] = $notification->recipientId;
+            }
+        }
+        ksort($recipientIds, \SORT_STRING);
+
+        return array_values($recipientIds);
     }
 
     public function releaseDue(OrganizationId $organizationId, \DateTimeImmutable $at): array

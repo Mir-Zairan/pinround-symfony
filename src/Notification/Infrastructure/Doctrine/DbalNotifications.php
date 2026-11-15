@@ -11,6 +11,7 @@ use App\Notification\Infrastructure\Cache\BellCountCache;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Uid\UuidV7;
 
@@ -40,6 +41,12 @@ final readonly class DbalNotifications implements Notifications
     private const string RELEASE_DUE = 'WITH released AS ('
         .'UPDATE ntf_notification SET deliver_after = NULL WHERE organization_id = ? AND deliver_after <= ? RETURNING user_id'
         .') SELECT DISTINCT user_id FROM released ORDER BY user_id';
+
+    // ntf_notification_ticket_id_idx narrows to the ticket's rows; the rest of the WHERE filters those.
+    private const string MARK_DONE_ABOUT_MESSAGE = 'WITH marked AS ('
+        .'UPDATE ntf_notification SET done_at = :at WHERE organization_id = :organization AND ticket_id = :ticket'
+        ." AND kind IN (:kinds) AND data->>'messageId' = :message AND done_at IS NULL RETURNING user_id"
+        .') SELECT DISTINCT user_id FROM marked ORDER BY user_id';
 
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:s.uP';
 
@@ -121,18 +128,59 @@ final readonly class DbalNotifications implements Notifications
     {
         $this->requireTransaction();
 
-        $recipientIds = array_map(static function (mixed $userId): UserId {
-            if (!\is_string($userId)) {
-                throw new \LogicException('The release returned a recipient that is not a uuid.');
-            }
-
-            return new UserId($userId);
-        }, $this->connection->fetchFirstColumn(self::RELEASE_DUE, [$organizationId->toString(), $at->format(self::TIMESTAMP_FORMAT)]));
+        $recipientIds = self::recipientsOf($this->connection->fetchFirstColumn(self::RELEASE_DUE, [$organizationId->toString(), $at->format(self::TIMESTAMP_FORMAT)]));
         foreach ($recipientIds as $recipientId) {
             $this->bellCountCache->invalidateAfterCommit($recipientId);
         }
 
         return $recipientIds;
+    }
+
+    public function lockAboutMessage(OrganizationId $organizationId, string $messageId): void
+    {
+        $this->requireTransaction();
+
+        $this->connection->executeStatement('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+            \sprintf('ntf_message:%s:%s', $organizationId->toString(), $messageId),
+        ]);
+    }
+
+    public function markDoneAboutMessage(OrganizationId $organizationId, TicketId $ticketId, string $messageId, array $kinds, \DateTimeImmutable $at): array
+    {
+        $this->lockAboutMessage($organizationId, $messageId);
+
+        $recipientIds = self::recipientsOf($this->connection->fetchFirstColumn(
+            self::MARK_DONE_ABOUT_MESSAGE,
+            [
+                'at' => $at->format(self::TIMESTAMP_FORMAT),
+                'organization' => $organizationId->toString(),
+                'ticket' => $ticketId->toString(),
+                'kinds' => array_map(static fn (NotificationKind $kind): string => $kind->value, $kinds),
+                'message' => $messageId,
+            ],
+            ['kinds' => ArrayParameterType::STRING],
+        ));
+        foreach ($recipientIds as $recipientId) {
+            $this->bellCountCache->invalidateAfterCommit($recipientId);
+        }
+
+        return $recipientIds;
+    }
+
+    /**
+     * @param list<mixed> $userIds
+     *
+     * @return list<UserId>
+     */
+    private static function recipientsOf(array $userIds): array
+    {
+        return array_map(static function (mixed $userId): UserId {
+            if (!\is_string($userId)) {
+                throw new \LogicException('An update of notifications returned a recipient that is not a uuid.');
+            }
+
+            return new UserId($userId);
+        }, $userIds);
     }
 
     private function requireTransaction(): void

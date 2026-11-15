@@ -332,9 +332,9 @@ deptrac:
     Notification_Api: [SharedKernel]
     Notification_Event: [SharedKernel]
     Notification_Domain: [SharedKernel]
-    Notification_Application: [Notification_Domain, Notification_Api, SharedKernel, Organization_Api, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    Notification_Infrastructure: [Notification_Domain, Notification_Application, Notification_Api, SharedKernel, Vendor, Organization_Api, Ticketing_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    Notification_UI: [Notification_Application, Notification_Api, SharedKernel, Vendor, Organization_Api, Ticketing_Api]
+    Notification_Application: [Notification_Domain, Notification_Api, SharedKernel, Organization_Api, Ticketing_Api, Conversation_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Notification_Infrastructure: [Notification_Domain, Notification_Application, Notification_Api, SharedKernel, Vendor, Organization_Api, Ticketing_Api, Conversation_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Notification_UI: [Notification_Application, Notification_Api, SharedKernel, Vendor, Organization_Api, Ticketing_Api, Conversation_Api]
 
     Insight_Api: [SharedKernel]
     Insight_Event: [SharedKernel]
