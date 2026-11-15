@@ -20,7 +20,8 @@ interface Rounds
      * Writes the round with its screenshots and pins, all or nothing.
      *
      * @throws RoundSlotTaken  when the ticket has a round with the same number, or the owner an open draft on it
-     * @throws \LogicException when no transaction is open
+     * @throws \LogicException when no transaction is open, or the round id was added before (a bug or a redelivered
+     *                         message, not a slot)
      */
     public function add(Round $round): void;
 }
