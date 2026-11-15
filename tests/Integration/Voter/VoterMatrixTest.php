@@ -103,7 +103,8 @@ final class VoterMatrixTest extends KernelTestCase
     /** Reported the tickets no person of PEOPLE reported, so no row's actor sees those as their reporter. */
     private const string REPORTER = '0197a3c0-0000-7000-8000-0000000009c9';
 
-    private const string TO_DO_STEP = '0197a3c0-0000-7000-8000-0000000009f1';
+    /** The step id TicketRows gives every ticket it adds. */
+    private const string TO_DO_STEP = '0197a3c0-0000-7000-8000-00000000f0d0';
     private const string PROJECT = '0197a3c0-0000-7000-8000-0000000009f2';
     private const string SHOP_TICKET = '0197a3c0-0000-7000-8000-0000000009f3';
     private const string SUPPORT_TICKET = '0197a3c0-0000-7000-8000-0000000009f4';
@@ -197,10 +198,19 @@ final class VoterMatrixTest extends KernelTestCase
         self::getContainer()->set('clock', $clock);
         $accessDecision = new AccessDecision();
         $isGranted = self::transactions()->rolledBackAs($organizationId, function () use ($actor, $attribute, $subject, $accessDecision, $twoStepProof, $clock): bool {
+            if (isset(self::UPLOAD_TARGETS[$subject])) {
+                self::persistUsersOfEveryone();
+            }
             $requestStack = false !== $twoStepProof ? self::requestWithCodeProofOf($actor, $clock, $twoStepProof) : null;
+            // MediaTargetAuthorizer decides for the current request actor, so voters that delegate to it read TokenStorage.
+            $tokenStorage = self::getContainer()->get('security.token_storage');
+            $previousToken = $tokenStorage->getToken();
+            $token = self::tokenOf($actor);
+            $tokenStorage->setToken($token);
             try {
-                return $this->accessDecisionManager()->decide(self::tokenOf($actor), [$attribute], self::subjectNamed($subject), $accessDecision);
+                return $this->accessDecisionManager()->decide($token, [$attribute], self::subjectNamed($subject), $accessDecision);
             } finally {
+                $tokenStorage->setToken($previousToken);
                 $requestStack?->pop();
             }
         });
@@ -309,6 +319,18 @@ final class VoterMatrixTest extends KernelTestCase
         $securityUser = SecurityUser::of($user, new Credential($user, $hash, new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
 
         return new UsernamePasswordToken($securityUser, 'main', $securityUser->getRoles());
+    }
+
+    /**
+     * A ticket's turn facts need the people of its team to be users; the upload rows read them.
+     */
+    private static function persistUsersOfEveryone(): void
+    {
+        $entityManager = self::entityManager();
+        foreach (array_keys(self::PEOPLE) as $person) {
+            $entityManager->persist(self::userOf($person));
+        }
+        $entityManager->flush();
     }
 
     private static function userOf(string $person): User
