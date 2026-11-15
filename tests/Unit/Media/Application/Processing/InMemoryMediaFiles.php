@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Media\Processing;
+namespace App\Tests\Unit\Media\Application\Processing;
 
 use App\Media\Application\Processing\MediaFiles;
 

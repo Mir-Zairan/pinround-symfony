@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Media\Processing;
+namespace App\Tests\Unit\Media\Application\Processing;
 
 use App\Media\Api\Event\MediaEvent;
 use App\Media\Application\Processing\MediaEvents;

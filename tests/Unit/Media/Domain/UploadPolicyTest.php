@@ -53,6 +53,30 @@ final class UploadPolicyTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{int, int, bool}>
+     */
+    public static function dimensions(): iterable
+    {
+        yield 'exactly 40,000,000 px' => [8_000, 5_000, true];
+        yield '40,000,005 px, the fewest above 40 megapixels with both sides allowed' => [3_015, 13_267, false];
+        yield 'a width of exactly 16,384 px' => [16_384, 2_441, true];
+        yield 'a height of exactly 16,384 px' => [2_441, 16_384, true];
+        yield 'a width of 16,385 px and a height of 1' => [16_385, 1, false];
+        yield 'a height of 16,385 px and a width of 1' => [1, 16_385, false];
+        yield 'one pixel' => [1, 1, true];
+        yield 'a width of 0' => [0, 10, false];
+        yield 'a height of 0' => [10, 0, false];
+        yield 'sides whose product would overflow' => [\PHP_INT_MAX, \PHP_INT_MAX, false];
+    }
+
+    #[Test]
+    #[DataProvider('dimensions')]
+    public function aPictureMayBeDecodedUpTo40MegapixelsWithNoSideAbove16384(int $width, int $height, bool $isAllowed): void
+    {
+        self::assertSame($isAllowed, UploadPolicy::allowsDimensions($width, $height));
+    }
+
+    /**
      * @return iterable<string, array{int, int}>
      */
     public static function negativeAmounts(): iterable

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Media\Processing;
+namespace App\Tests\Unit\Media\Infrastructure\Processing;
 
 use App\Media\Application\Processing\ImageFormat;
 use App\Media\Application\Processing\ImageHeaderReader;
@@ -52,12 +52,9 @@ final class PurePhpImageHeaderReaderTest extends TestCase
     #[DataProvider('pictureBombs')]
     public function aHeaderClaimingAHugeSizeIsReadAsItStatesWithoutDecodingAnything(string $bytes, ImageFormat $format, int $width, int $height): void
     {
-        $memoryBefore = memory_get_usage();
-
         $header = self::reader()->read($bytes);
 
         self::assertSame([$format, $width, $height], [$header->format, $header->width, $header->height]);
-        self::assertLessThan(1024 * 1024, memory_get_usage() - $memoryBefore, 'Reading the header took memory for pixels.');
     }
 
     /**

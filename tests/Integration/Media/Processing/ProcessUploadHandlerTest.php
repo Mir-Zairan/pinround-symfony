@@ -29,6 +29,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Messenger\Stamp\ErrorDetailsStamp;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
 
@@ -43,6 +44,7 @@ final class ProcessUploadHandlerTest extends KernelTestCase
     use RunsTheWorkerUntilIdle;
 
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000e1901';
+    private const string OTHER_ORGANIZATION = '0197a3c0-0000-7000-8000-0000000e1902';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000e1903';
     private const string FIRST_MEDIA = '0197a3c0-0000-7000-8000-0000000e1911';
     private const string SECOND_MEDIA = '0197a3c0-0000-7000-8000-0000000e1912';
@@ -189,6 +191,30 @@ final class ProcessUploadHandlerTest extends KernelTestCase
         self::assertSame(2, $this->ledgerRows(), 'The second message had its own id, so only the status guard stopped it.');
     }
 
+    #[Test]
+    public function aMessageOfAnotherOrganizationNamingAcmesMediaObjectLeavesTheRowTheUploadAndTheOutboxAlone(): void
+    {
+        $original = ImageFixtures::png(64, 64);
+        $this->storage()->write($this->uploadKey(self::FIRST_MEDIA), $original);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->mediaObjects()->add($this->pendingMediaObject(self::FIRST_MEDIA, 'image/png', \strlen($original))));
+        $this->transactions()->committedAs(self::OTHER_ORGANIZATION, fn () => $this->queue()->queue(new ProcessUpload(self::OTHER_ORGANIZATION, self::FIRST_MEDIA)));
+
+        $this->relayAndHandle();
+
+        self::assertSame(['pending', null, null, null, null, null], $this->row(self::FIRST_MEDIA));
+        self::assertSame($original, $this->storage()->read($this->uploadKey(self::FIRST_MEDIA)));
+        self::assertSame([], $this->bucketKeys());
+        self::assertSame([], $this->mediaEventsInTheOutbox());
+        self::assertSame(0, $this->encoder()->encodeCount);
+        self::assertSame(0, $this->ledgerRows());
+        // The in-memory transport hands out a retry only once the clock is past its due time, which the frozen clock
+        // never is: the run ends with the first retry waiting.
+        $sent = $this->asyncMedia()->getSent();
+        self::assertCount(2, $sent, 'The message and its first retry.');
+        self::assertEquals(new ProcessUpload(self::OTHER_ORGANIZATION, self::FIRST_MEDIA), $sent[1]->getMessage());
+        self::assertSame('The media object of the upload to clean is not found.', $sent[1]->last(ErrorDetailsStamp::class)?->getExceptionMessage());
+    }
+
     private function relayAndHandle(): void
     {
         self::runTheWorkerUntilIdle('outbox');
@@ -199,9 +225,14 @@ final class ProcessUploadHandlerTest extends KernelTestCase
     {
         $this->storage()->write($this->uploadKey($mediaId), $bytes);
         $this->transactions()->committedAs(self::ACME_FOODS, function () use ($mediaId, $mime, $bytes, $declaredBytes): void {
-            $this->mediaObjects()->add(MediaObject::upload(new MediaId($mediaId), new OrganizationId(self::ACME_FOODS), $this->uploadKey($mediaId), $mime, $declaredBytes ?? \strlen($bytes), new UserId(self::MIA), new \DateTimeImmutable('2026-03-02 09:58:00 UTC')));
+            $this->mediaObjects()->add($this->pendingMediaObject($mediaId, $mime, $declaredBytes ?? \strlen($bytes)));
             $this->queue()->queue(new ProcessUpload(self::ACME_FOODS, $mediaId));
         });
+    }
+
+    private function pendingMediaObject(string $mediaId, string $mime, int $declaredBytes): MediaObject
+    {
+        return MediaObject::upload(new MediaId($mediaId), new OrganizationId(self::ACME_FOODS), $this->uploadKey($mediaId), $mime, $declaredBytes, new UserId(self::MIA), new \DateTimeImmutable('2026-03-02 09:58:00 UTC'));
     }
 
     /**
