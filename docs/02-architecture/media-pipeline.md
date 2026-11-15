@@ -32,8 +32,9 @@ sequenceDiagram
   participant S as Object storage (private bucket)
   participant W as Media worker
   B->>A: POST /media/intents {purpose, mime, bytes, target}
+  A->>A: Member and form token OK? Under 60 begins a minute (else 429)? Every begin with a valid token counts, even one refused later
   A->>A: Voter: may this person add to the target?
-  A->>A: Type and size OK? Quota OK (else "storage full")? Person under 20 open uploads (else "too many uploads waiting")? Target allowed again?
+  A->>A: Type and size OK? Person under 20 open uploads (else "too many uploads waiting")? Quota OK (else "storage full")? Target allowed again?
   A->>A: Save upload intent (org, user, target kind and id, max bytes, allowed types, expiry)
   A-->>B: {intentId, presigned PUT URL (5 min), headers}
   B->>S: PUT bytes (Content-Type and Content-Length fixed)
@@ -57,13 +58,14 @@ Before the presigned URL:
 
 In this order:
 
+- The caller is a member of the organization and sends a valid form token.
+- A per-person rate limit on starting uploads: 60 a minute, then 429 with a Retry-After header. It is spent right after the member and token checks, before the body is read or anything else is asked, so every begin with a valid token counts, even one refused later.
 - The person may add a screenshot to this round or report (voter).
 - MIME declared as `image/png`, `image/jpeg` or `image/webp`.
 - Size ≤ 15 MB.
-- The org is under its quota: stored images plus open upload intents, counted in one statement under a per-org lock.
-- The person has fewer than 20 open (unused, unexpired) intents.
+- The person has fewer than 20 open (unused, unexpired) intents. This and the quota check run under one per-org lock.
+- The org is under its quota (skipped when the quota is unlimited): stored images plus open upload intents, counted in one statement.
 - The target's authorizer allows it again, inside the same transaction.
-- A per-person rate limit on starting uploads: 60 a minute, then 429 with a Retry-After header.
 - **Upload URL:** the presigned PUT pins the declared `Content-Type` and the exact `Content-Length`, so the storage refuses any other type or length.
 
 In the worker:

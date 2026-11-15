@@ -376,6 +376,25 @@ final class UploadIntentsTest extends WebTestCase
         self::assertSame([], $this->queuedMessages());
     }
 
+    /**
+     * Every begin with a valid token counts, even one Uploads refuses afterwards: the limit is spent before the body is read.
+     */
+    #[Test]
+    public function aBeginRefusedForItsFileTypeStillSpendsOneOfOmarsBeginsSoTheNextIsHeldBack(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->spendBeginsOf('Omar', 59);
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(['mime' => 'image/gif']), $this->uploadToken());
+        self::assertResponseStatusCodeSame(422);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(429);
+        self::assertSame(['message' => UploadIntentController::ADDING_TOO_FAST], $this->answer());
+        $this->assertNothingStored();
+    }
+
     #[Test]
     public function omarsSpentBeginsDoNotHoldBackLena(): void
     {

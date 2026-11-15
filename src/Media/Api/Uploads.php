@@ -12,8 +12,9 @@ use App\SharedKernel\Domain\UserId;
  * into, complete() turns that file into a pending media object and queues its processing. Whether the person may
  * upload for the target is the caller's MediaPermission::UPLOAD check, made before begin(); both calls also ask the
  * MediaTargetAuthorizer of the target's kind themselves, complete() for the target stored at begin(). Both calls
- * must run in a request whose logged-in actor is $userId in $organizationId; any other caller (console command,
- * message handler, MCP without a token) is refused with UploadTargetDenied.
+ * must run under the tenant $organizationId: a caller with no tenant, or another one, gets a LogicException. A
+ * logged-in actor who is not $userId, or an authorizer refusal, gives UploadTargetDenied (so a console command,
+ * message handler or MCP call without a token is refused).
  */
 interface Uploads
 {
@@ -31,15 +32,16 @@ interface Uploads
      * @throws UploadRefused             when the purpose is unknown, the type is not allowed or the size is out of
      *                                   bounds, in that order, before any write; then, under the right tenant, when
      *                                   $userId holds 20 unused, unexpired intents already ("You have too many uploads
-     *                                   waiting. Finish or wait for them, then try again."), and when $bytes do not
-     *                                   fit the organization's quota beside its pending and ready media objects and
-     *                                   its unused, unexpired intents ("Your company's storage is full. Ask your
-     *                                   admin.")
-     * @throws UploadTargetDenied        when the MediaTargetAuthorizer of $target's kind refuses $userId, or no
-     *                                   authorizer decides that kind
+     *                                   waiting. Finish or wait for them, then try again."), and then, unless the
+     *                                   quota is unlimited, when $bytes do not fit the organization's quota beside its
+     *                                   pending and ready media objects and its unused, unexpired intents ("Your
+     *                                   company's storage is full. Ask your admin.")
+     * @throws UploadTargetDenied        when the logged-in actor is not $userId, the MediaTargetAuthorizer of $target's
+     *                                   kind refuses $userId, or no authorizer decides that kind
      * @throws \InvalidArgumentException when $target's kind is longer than 40 characters or its id longer than 100, which
      *                                   the authorizer refuses first for any target it knows
-     * @throws \LogicException           when no transaction is open or its tenant is another organization
+     * @throws \LogicException           when no transaction is open, or the tenant context is missing or is not
+     *                                   $organizationId
      */
     public function begin(OrganizationId $organizationId, UserId $userId, UploadTarget $target, string $purpose, string $mime, int $bytes, \DateTimeImmutable $at): UploadSlot;
 
