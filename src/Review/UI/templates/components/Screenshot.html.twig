@@ -9,8 +9,20 @@
             {% endif %}
         </figcaption>
     {% endif %}
-    <div class="screenshot__frame">
-        <img class="screenshot__image" src="{{ this.view.imageUrl }}" alt="{{ this.view.altText }}" width="{{ this.view.width }}" height="{{ this.view.height }}" decoding="async">
+    <div class="screenshot__frame{% if not this.view.isReady %} screenshot__frame--placeholder{% endif %}">
+        {% if this.view.isReady %}
+            <img class="screenshot__image" src="{{ this.view.imageUrl }}" alt="{{ this.view.altText }}" width="{{ this.view.width }}" height="{{ this.view.height }}" decoding="async">
+        {% else %}
+            {% if this.view.width is not null %}
+                {#- The CSP allows no style attribute, so the picture's shape is a rule in a style element with the nonce. -#}
+                <style nonce="{{ csp_nonce() }}">#{{ this.placeholderId }}{max-width:{{ this.view.width }}px;aspect-ratio:{{ this.view.width }} / {{ this.view.height }}}</style>
+            {% endif %}
+            {% if this.view.isPending %}
+                <div class="screenshot__placeholder" id="{{ this.placeholderId }}" role="status">Processing…</div>
+            {% else %}
+                <div class="screenshot__placeholder screenshot__placeholder--rejected" id="{{ this.placeholderId }}">We could not process this image. Try again.</div>
+            {% endif %}
+        {% endif %}
         <twig:PinLayer :view="this.view" :selectedNumber="this.selectedNumber" />
     </div>
 </figure>

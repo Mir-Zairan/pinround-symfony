@@ -23,6 +23,9 @@ final class InMemoryMediaObjects implements MediaObjects
     /** @var array<string, MediaObject> by organization id and media id, as the table's primary key */
     private array $stored = [];
 
+    /** @var list<list<string>> */
+    private array $byIdsReads = [];
+
     public function __construct(private readonly InMemoryTransactions $transactions, private readonly TenantContext $tenantContext)
     {
         $transactions->enlist(function (): \Closure {
@@ -73,6 +76,34 @@ final class InMemoryMediaObjects implements MediaObjects
         $this->requireTransaction('Reading a media object needs an open transaction.');
 
         return $this->stored[self::keyOf($this->tenantContext->require()->toString(), $id->toString())] ?? null;
+    }
+
+    public function byIds(array $ids): array
+    {
+        $this->requireTransaction('Reading media objects needs an open transaction.');
+        $askedIds = array_map(static fn (MediaId $id): string => $id->toString(), $ids);
+        $this->byIdsReads[] = $askedIds;
+        $tenantId = $this->tenantContext->require()->toString();
+
+        // The table answers in its own order, not the order of the ids asked for.
+        $found = [];
+        foreach (array_reverse($this->stored) as $mediaObject) {
+            if ($mediaObject->organizationId()->toString() === $tenantId && \in_array($mediaObject->id()->toString(), $askedIds, true)) {
+                $found[] = $mediaObject;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The ids of each byIds() read, in the order the reads came; for assertions only.
+     *
+     * @return list<list<string>>
+     */
+    public function byIdsReads(): array
+    {
+        return $this->byIdsReads;
     }
 
     public function lockById(MediaId $id): ?MediaObject

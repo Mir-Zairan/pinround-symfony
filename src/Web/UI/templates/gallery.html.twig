@@ -257,6 +257,16 @@
         <twig:ScreenshotExample :isEditable="true" :hasPins="true" />
     </section>
 
+    <section class="gallery-section" aria-labelledby="gallery-pending-screenshot-heading">
+        <h2 id="gallery-pending-screenshot-heading">Screenshot being processed</h2>
+        <twig:ScreenshotExample status="pending" />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-rejected-screenshot-heading">
+        <h2 id="gallery-rejected-screenshot-heading">Screenshot that could not be processed</h2>
+        <twig:ScreenshotExample status="rejected" />
+    </section>
+
     <section class="gallery-section" aria-labelledby="gallery-upload-heading">
         <h2 id="gallery-upload-heading">Screenshot upload</h2>
         <twig:UploadField fieldId="gallery-upload" targetKind="ticket" targetId="00000000-0000-7000-8000-000000000000" />

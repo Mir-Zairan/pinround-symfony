@@ -9,6 +9,7 @@ use App\Review\UI\Component\PinLayer;
 use App\Review\UI\Component\PinList;
 use App\Review\UI\Component\Screenshot;
 use App\Review\UI\PinView;
+use App\Review\UI\ScreenshotStatus;
 use App\Review\UI\ScreenshotView;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -30,6 +31,69 @@ final class ScreenshotComponentsTest extends KernelTestCase
         self::assertSame(['screenshot__text', 'screenshot__frame'], $children);
         self::assertCount(1, $crawler->filter('.screenshot__frame img.screenshot__image[width="800"][height="450"][alt="Acme Foods checkout of project SHOP"]'));
         self::assertCount(1, $crawler->filter('.screenshot__frame .pin-layer'));
+    }
+
+    #[Test]
+    public function aReadyScreenshotShowsItsPictureAndNoPlaceholder(): void
+    {
+        $crawler = $this->renderScreenshot(self::view());
+
+        self::assertSame('/media/shop-checkout.png', $crawler->filter('.screenshot__frame img.screenshot__image')->attr('src'));
+        self::assertCount(0, $crawler->filter('.screenshot__placeholder'));
+        self::assertCount(0, $crawler->filter('[role="status"]'));
+        self::assertCount(0, $crawler->filter('.screenshot__frame--placeholder'));
+    }
+
+    #[Test]
+    public function aPendingScreenshotSaysItIsProcessingInABoxOfThePicturesShapeAndShowsNoPicture(): void
+    {
+        $html = $this->render(Screenshot::class, ['view' => self::pendingView(800, 450)]);
+        $crawler = new Crawler($html);
+
+        $placeholder = $crawler->filter('.screenshot__frame--placeholder #shot-2-placeholder.screenshot__placeholder');
+        self::assertCount(1, $placeholder);
+        self::assertSame('status', $placeholder->attr('role'));
+        self::assertSame('Processing…', $placeholder->text());
+        self::assertCount(0, $crawler->filter('img'));
+        self::assertCount(0, $crawler->filter('.screenshot__placeholder--rejected'));
+        self::assertMatchesRegularExpression('/<style nonce="[A-Za-z0-9+\/=]+">#shot-2-placeholder\{max-width:800px;aspect-ratio:800 \/ 450\}<\/style>/', $html);
+        self::assertStringNotContainsString('style="', $html);
+        self::assertSame('Checkout page', $crawler->filter('.screenshot__title')->text());
+    }
+
+    #[Test]
+    public function aPendingScreenshotOfUnknownSizePrintsNoShapeRule(): void
+    {
+        $html = $this->render(Screenshot::class, ['view' => self::pendingView(null, null)]);
+
+        self::assertSame('Processing…', new Crawler($html)->filter('[role="status"]')->text());
+        self::assertStringNotContainsString('<style', $html);
+    }
+
+    #[Test]
+    public function aRejectedScreenshotSaysItCouldNotBeProcessedAndShowsNoPicture(): void
+    {
+        $view = new ScreenshotView('shot-3', null, null, null, 'Acme Foods checkout of project SHOP', status: ScreenshotStatus::Rejected);
+        $crawler = $this->renderScreenshot($view);
+
+        $placeholder = $crawler->filter('#shot-3-placeholder.screenshot__placeholder.screenshot__placeholder--rejected');
+        self::assertCount(1, $placeholder);
+        self::assertSame('We could not process this image. Try again.', $placeholder->text());
+        self::assertCount(0, $crawler->filter('img'));
+        self::assertCount(0, $crawler->filter('[role="status"]'));
+        self::assertStringNotContainsString('Processing', $crawler->html());
+    }
+
+    #[Test]
+    public function aPendingScreenshotKeepsItsPinLayerAndItsPinsListed(): void
+    {
+        $view = new ScreenshotView('shot-2', null, 800, 450, 'Acme Foods checkout of project SHOP', pins: self::pins(), status: ScreenshotStatus::Pending);
+
+        $screenshot = $this->renderScreenshot($view);
+        $list = new Crawler($this->render(PinList::class, ['view' => $view]));
+
+        self::assertCount(1, $screenshot->filter('.screenshot__frame [data-pin-placer-target="layer"]'));
+        self::assertSame(['1', '2', '4'], $list->filter('.pin-list__number')->each(static fn (Crawler $number): string => $number->text()));
     }
 
     #[Test]
@@ -251,6 +315,11 @@ final class ScreenshotComponentsTest extends KernelTestCase
     private static function view(?string $title = null, ?string $summary = null, array $pins = []): ScreenshotView
     {
         return new ScreenshotView('shot-1', '/media/shop-checkout.png', 800, 450, 'Acme Foods checkout of project SHOP', $title, $summary, $pins);
+    }
+
+    private static function pendingView(?int $width, ?int $height): ScreenshotView
+    {
+        return new ScreenshotView('shot-2', null, $width, $height, 'Acme Foods checkout of project SHOP', 'Checkout page', status: ScreenshotStatus::Pending);
     }
 
     /**

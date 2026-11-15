@@ -32,6 +32,24 @@ final class ScreenshotGalleryTest extends WebTestCase
     }
 
     #[Test]
+    public function theGalleryShowsAScreenshotBeingProcessedAndOneThatCouldNotBe(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        $pending = $crawler->filter('#gallery-pending-screenshot-heading ~ .screenshot-example figure#gallery-pending-screenshot');
+        self::assertCount(1, $pending);
+        self::assertSame('Processing…', $pending->filter('[role="status"].screenshot__placeholder')->text());
+        self::assertCount(0, $pending->filter('img'));
+        self::assertStringContainsString('#gallery-pending-screenshot-placeholder{max-width:800px;aspect-ratio:800 / 450}', (string) $client->getResponse()->getContent());
+        $rejected = $crawler->filter('#gallery-rejected-screenshot-heading ~ .screenshot-example figure#gallery-rejected-screenshot');
+        self::assertCount(1, $rejected);
+        self::assertSame('We could not process this image. Try again.', $rejected->filter('.screenshot__placeholder--rejected')->text());
+        self::assertCount(0, $rejected->filter('img'));
+    }
+
+    #[Test]
     public function theEditableExampleIsAFormWithThePinPlacerAndAnEmptyList(): void
     {
         $client = self::createClient();

@@ -188,6 +188,26 @@ final class DoctrineMediaObjectsTest extends KernelTestCase
         self::assertSame(['acme/'.self::ACME_PENDING, null, null], $found);
     }
 
+    #[Test]
+    public function byIdsFindsTheTenantsObjectsOfThoseIdsOnlyAndAnEmptyListNone(): void
+    {
+        $this->addMedia(self::ACME_FOODS, self::ACME_PENDING, '2026-03-02 10:00:00+00:00', null);
+        $this->addMedia(self::ACME_FOODS, self::ACME_READY_LATER, '2026-03-02 10:09:00+00:00', self::SAME_PICTURE);
+        $this->addMedia(self::ACME_FOODS, self::ACME_READY_OTHER_PICTURE, '2026-03-02 07:00:00+00:00', self::OTHER_PICTURE);
+        $this->addMedia(self::OTHER_ORGANIZATION, self::OTHER_READY_OLDEST, '2026-03-02 08:00:00+00:00', self::SAME_PICTURE);
+
+        [$found, $none] = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => [
+            array_map(
+                static fn (MediaObject $mediaObject): string => $mediaObject->id()->toString(),
+                $this->mediaObjects()->byIds([new MediaId(self::ACME_READY_LATER), new MediaId(self::OTHER_READY_OLDEST), new MediaId(self::UNKNOWN), new MediaId(self::ACME_PENDING)]),
+            ),
+            $this->mediaObjects()->byIds([]),
+        ]);
+
+        self::assertEqualsCanonicalizing([self::ACME_READY_LATER, self::ACME_PENDING], $found);
+        self::assertSame([], $none);
+    }
+
     /**
      * The other organization's copy of the picture is the oldest of all and has the lowest id; Acme Foods' tied pair
      * is added in the reverse order of their ids, and its later one has a lower id than both.
@@ -319,6 +339,7 @@ final class DoctrineMediaObjectsTest extends KernelTestCase
     {
         yield 'byId' => [static fn (DoctrineMediaObjects $mediaObjects): mixed => $mediaObjects->byId(new MediaId(self::ACME_PENDING)), 'Reading a media object needs an open transaction.'];
         yield 'lockById' => [static fn (DoctrineMediaObjects $mediaObjects): mixed => $mediaObjects->lockById(new MediaId(self::ACME_PENDING)), 'Locking a media object needs an open transaction.'];
+        yield 'byIds' => [static fn (DoctrineMediaObjects $mediaObjects): mixed => $mediaObjects->byIds([new MediaId(self::ACME_PENDING)]), 'Reading media objects needs an open transaction.'];
         yield 'readyBySha256' => [static fn (DoctrineMediaObjects $mediaObjects): mixed => $mediaObjects->readyBySha256(self::SAME_PICTURE), 'Reading a media object needs an open transaction.'];
     }
 

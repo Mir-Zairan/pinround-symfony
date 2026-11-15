@@ -1,0 +1,39 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Media\Api;
+
+use App\SharedKernel\Domain\OrganizationId;
+
+/**
+ * Short-lived signed GET URLs of stored pictures (media-pipeline.md, Serving images): the browser reads the bytes from
+ * the private bucket, never through PHP. Media knows no tickets or rounds, so the caller has decided with its own voter,
+ * before it asks, that the viewer may see what the pictures belong to; this only signs.
+ */
+interface SignedUrls
+{
+    /** The most media ids one call takes, the 50 screenshots of a round several times over. */
+    public const int MAX_MEDIA_IDS = 200;
+
+    /**
+     * Reads every media object of $mediaIds in one query and signs, for each ready one, a GET URL of its $variant that
+     * works for 5 minutes from $at and makes the storage answer `Content-Type: image/webp` and
+     * `Content-Disposition: inline`. Signing is local: no request goes to the storage. It runs inside the request's
+     * transaction, whose tenant is $organizationId.
+     *
+     * @param list<string> $mediaIds at most MAX_MEDIA_IDS; a malformed, unknown or another organization's id is left
+     *                               out of the answer, and an id given twice is answered once
+     * @param string       $variant  "view" (at most 1920 px wide) or "thumb" (at most 480 px wide)
+     *
+     * @return array<string, MediaImage> by media id in lowercase, in the order of $mediaIds; width and height are
+     *                                   known only for a ready "view"
+     *
+     * @throws \InvalidArgumentException when $variant is unknown or $mediaIds holds more than MAX_MEDIA_IDS entries,
+     *                                   before any read
+     * @throws \LogicException           when the request has no tenant or its tenant is another organization, before
+     *                                   any read; when no transaction is open; or when a ready media object has no
+     *                                   $variant stored
+     */
+    public function forVariants(OrganizationId $organizationId, array $mediaIds, string $variant, \DateTimeImmutable $at): array;
+}

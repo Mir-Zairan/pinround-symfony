@@ -34,6 +34,33 @@
   border-radius: var(--radius-input);
 }
 
+/* A block frame, so a placeholder of unknown size takes the column's width; one of known size gets its max-width and
+   aspect-ratio from the style element the Screenshot component prints. */
+.screenshot__frame--placeholder {
+  display: block;
+}
+
+.screenshot__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  padding: var(--space-16);
+  border: 1px dashed var(--outline-var);
+  border-radius: var(--radius-input);
+  background: var(--s-c);
+  color: var(--on-surface-var);
+  line-height: 1.4;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.screenshot__placeholder--rejected {
+  border-color: var(--error);
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
 /* A picture does not change with the theme, so the ring's two outlines are fixed: dark outside, white inside. They
    stay visible on any background (WCAG 1.4.11). */
 .pin-layer {

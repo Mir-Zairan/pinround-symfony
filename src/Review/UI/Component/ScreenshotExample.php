@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Review\UI\Component;
 
 use App\Review\UI\PinView;
+use App\Review\UI\ScreenshotStatus;
 use App\Review\UI\ScreenshotView;
 use Symfony\Component\DependencyInjection\Attribute\WhenNot;
 use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
@@ -30,8 +31,18 @@ final class ScreenshotExample
     /** Pins 1, 2 and 4 come with the page (a deleted pin 3 leaves a gap), as they will from the database. */
     public bool $hasPins = false;
 
+    /** "pending" shows the picture still being processed, at its known size; "rejected" one refused, of unknown size. */
+    public string $status = ScreenshotStatus::Ready->value;
+
     public function view(): ScreenshotView
     {
+        $status = ScreenshotStatus::from($this->status);
+        if (ScreenshotStatus::Pending === $status) {
+            return new ScreenshotView('gallery-pending-screenshot', null, 800, 450, 'The Acme Foods checkout page of project SHOP', 'Checkout page', status: $status);
+        }
+        if (ScreenshotStatus::Rejected === $status) {
+            return new ScreenshotView('gallery-rejected-screenshot', null, null, null, 'The Acme Foods checkout page of project SHOP', 'Checkout page', status: $status);
+        }
         if ($this->isEditable) {
             return new ScreenshotView(
                 $this->hasPins ? 'gallery-placed-screenshot' : 'gallery-editable-screenshot',
