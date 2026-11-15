@@ -68,7 +68,7 @@ final class UploadVoterTest extends TestCase
     #[Test]
     public function itDeniesAKindNoAuthorizerDecides(): void
     {
-        self::assertSame(VoterInterface::ACCESS_DENIED, $this->voter()->vote(self::tokenOf(self::OMAR), new UploadTarget('round', self::SHOP_1), [MediaPermission::UPLOAD]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->voter()->vote(self::tokenOf(self::OMAR), new UploadTarget('sketch', self::SHOP_1), [MediaPermission::UPLOAD]));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->voter()->vote(self::tokenOf(self::OMAR), new UploadTarget('Ticket', self::SHOP_1), [MediaPermission::UPLOAD]));
         self::assertSame([], $this->ticketAuthorizer->asked());
     }

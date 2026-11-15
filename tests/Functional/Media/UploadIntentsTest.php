@@ -22,6 +22,7 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\Media\Persistence\MediaRows;
+use App\Tests\Integration\Review\Doctrine\RoundRows;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -38,7 +39,7 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The two JSON calls of a direct upload, POST /media/intents and POST /media/intents/{id}/complete, for Acme Foods'
- * SHOP-1 through the real firewall, voters, session, database and outbox. The clock is fixed on 6 Nov 2026, before
+ * SHOP-1 and its rounds through the real firewall, voters, session, database and outbox. The clock is fixed on 6 Nov 2026, before
  * today: a clock ahead of the login would end the session as idle. Every refusal also proves that no intent, media
  * object or outbox row was written, or that the intent stayed unused. The begin limiter counts on the state Valkey,
  * shared with other checkouts, keyed by user id; every test has new users, so their counts start empty.
@@ -86,6 +87,7 @@ final class UploadIntentsTest extends WebTestCase
         self::getContainer()->get(TenantContext::class)->reset();
         self::getContainer()->get('doctrine.orm.entity_manager')->clear();
         new MediaRows($this->migrator(), self::getContainer()->get(TenantContext::class))->removeAllOf(...$this->createdOrganizationIds);
+        new RoundRows($this->migrator(), self::getContainer()->get(TenantContext::class))->removeAllOf(...$this->createdOrganizationIds);
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
                 foreach (['tkt_ticket', 'wf_step'] as $table) {
@@ -192,6 +194,51 @@ final class UploadIntentsTest extends WebTestCase
     }
 
     #[Test]
+    public function omarBeginsAnUploadForHisOwnUnsharedDraftOfShop1(): void
+    {
+        $this->seedShop();
+        $omarsDraft = $this->addRoundOfShop1('Omar', 'draft', null);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(['target' => ['kind' => 'round', 'id' => $omarsDraft]]), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(201);
+        $intents = $this->storedIntents();
+        self::assertSame([[$this->idOf('Omar'), 'round', $omarsDraft]], array_map(static fn (array $intent): array => [$intent['user_id'], $intent['target_kind'], $intent['target_id']], $intents));
+        self::assertSame($intents[0]['id'], $this->answer()['intentId'] ?? null);
+    }
+
+    /**
+     * Lena leads Shop and may add to SHOP-1, so only the draft's owner rule refuses her.
+     */
+    #[Test]
+    public function lenaWhoLeadsShopMayNotBeginAnUploadForOmarsUnsharedDraftAndNothingIsStored(): void
+    {
+        $this->seedShop();
+        $omarsDraft = $this->addRoundOfShop1('Omar', 'draft', null);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(['target' => ['kind' => 'round', 'id' => $omarsDraft]]), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['message' => UploadIntentController::NOT_ALLOWED], $this->answer());
+        $this->assertNothingStored();
+    }
+
+    #[Test]
+    public function lenaWhoLeadsShopBeginsAnUploadForAnOpenSharedRoundOfOmar(): void
+    {
+        $this->seedShop();
+        $omarsSharedRound = $this->addRoundOfShop1('Omar', 'review', 1);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(['target' => ['kind' => 'round', 'id' => $omarsSharedRound]]), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(201);
+        self::assertSame([[$this->idOf('Lena'), 'round', $omarsSharedRound]], array_map(static fn (array $intent): array => [$intent['user_id'], $intent['target_kind'], $intent['target_id']], $this->storedIntents()));
+    }
+
+    #[Test]
     public function anAnonymousVisitorIsSentToLogInAndNothingIsStored(): void
     {
         $this->seedShop();
@@ -252,7 +299,9 @@ final class UploadIntentsTest extends WebTestCase
         yield 'no target' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760}', 400, UploadIntentController::NOT_A_BEGIN_REQUEST];
         yield 'a size as text' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":"245760","target":{"kind":"ticket","id":"{ticket}"}}', 400, UploadIntentController::NOT_A_BEGIN_REQUEST];
         yield 'a target id as a number' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760,"target":{"kind":"ticket","id":7}}', 400, UploadIntentController::NOT_A_BEGIN_REQUEST];
-        yield 'a kind no module decides' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760,"target":{"kind":"round","id":"{ticket}"}}', 403, UploadIntentController::NOT_ALLOWED];
+        yield 'a kind no module decides' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760,"target":{"kind":"sketch","id":"{ticket}"}}', 403, UploadIntentController::NOT_ALLOWED];
+        yield 'a round Acme Foods has not' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760,"target":{"kind":"round","id":"'.self::NOBODY_INTENT_ID.'"}}', 403, UploadIntentController::NOT_ALLOWED];
+        yield 'a ticket id sent as a round' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760,"target":{"kind":"round","id":"{ticket}"}}', 403, UploadIntentController::NOT_ALLOWED];
         yield 'a ticket id that is no uuid' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760,"target":{"kind":"ticket","id":"SHOP-1"}}', 403, UploadIntentController::NOT_ALLOWED];
         yield 'a ticket id with a trailing newline' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760,"target":{"kind":"ticket","id":"{ticket}\n"}}', 403, UploadIntentController::NOT_ALLOWED];
         yield 'a ticket Acme Foods has not' => ['{token}', '{"purpose":"screenshot","mime":"image/png","bytes":245760,"target":{"kind":"ticket","id":"'.self::NOBODY_INTENT_ID.'"}}', 403, UploadIntentController::NOT_ALLOWED];
@@ -670,6 +719,25 @@ final class UploadIntentsTest extends WebTestCase
 
             return 0;
         });
+    }
+
+    /**
+     * @param 'draft'|'review' $kind
+     * @param int|null         $number null leaves the round unshared
+     *
+     * @return string the id of an open round of SHOP-1 that $owner owns
+     */
+    private function addRoundOfShop1(string $owner, string $kind, ?int $number): string
+    {
+        $roundId = Uuid::v7()->toRfc4122();
+        $parameters = [$this->acmeFoods->toString(), $roundId, $this->shopTicket, $number, $kind, $this->idOf($owner), null === $number ? null : '2026-11-05 12:00:00+00'];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO rvw_round (organization_id, id, ticket_id, number, kind, owner_id, shared_at, state, version, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, CAST(? AS TIMESTAMPTZ), 'open', 1, TIMESTAMPTZ '2026-11-05 11:00:00+00')",
+            $parameters,
+        ));
+
+        return $roundId;
     }
 
     private function addPendingObjectOf(int $bytes): void

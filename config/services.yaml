@@ -344,6 +344,10 @@ when@test:
         test.media_target_authorizers:
             alias: App\Media\Application\MediaTargetAuthorizers
             public: true
+        # No page reads rounds before the Rounds section (P05 task 9); DbalRoundQueriesTest gets the Api as a page would.
+        test.review_round_queries:
+            alias: App\Review\Api\RoundQueries
+            public: true
         # The box has no libvips, so ProcessUploadHandlerTest runs the worker with an encoder that follows the same port.
         App\Tests\Fixtures\Media\FakeImageEncoder:
             public: true

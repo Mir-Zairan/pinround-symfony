@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Review\Queries;
 
 use App\Review\Api\RoundPinView;
+use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\Review\Infrastructure\Doctrine\DbalRoundQueries;
@@ -17,9 +18,8 @@ use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Review\Doctrine\RoundRows;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
-use App\Ticketing\Api\TicketQueries;
-use App\Ticketing\Api\TicketVisibilities;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -27,7 +27,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * DbalRoundQueries with the services the container wires it with, on rows committed once per class: Acme Foods' Shop team (Lena leads it,
- * Omar develops, Mia tests), Sara an admin in no team and Noor a member in no team; Beta Bakery has a ticket of its own.
+ * Omar develops, Mia tests), Sara an admin in no team and Noor a member in no team; Beta Bakery has a ticket of its own
+ * and a round on Acme Foods' ticket id. DbalRoundQueries comes from the container as the RoundQueries Api.
  * Rounds, screenshots and pins go in out of their number, position and id order, so only the query's order can put them
  * right. Every time is fixed in March 2027; nothing reads the clock.
  */
@@ -63,6 +64,8 @@ final class DbalRoundQueriesTest extends KernelTestCase
     private const string QUIET_OMAR_DRAFT = '0197a3c0-0000-7000-8000-0000000f5349';
     private const string UNPINNED_REPORT = '0197a3c0-0000-7000-8000-0000000f534a';
     private const string BAKERY_REPORT = '0197a3c0-0000-7000-8000-0000000f534b';
+    private const string BAKERY_ROUND_ON_ACME_TICKET = '0197a3c0-0000-7000-8000-0000000f534c';
+    private const string OMAR_SECOND_DRAFT = '0197a3c0-0000-7000-8000-0000000f5340';
     private const string REPORT_SECOND_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5351';
     private const string REPORT_FIRST_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5352';
     private const string ROUND_TWO_AFTER = '0197a3c0-0000-7000-8000-0000000f5353';
@@ -71,6 +74,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
     private const string TEAM_ONLY_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5356';
     private const string UNPINNED_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5357';
     private const string BAKERY_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5358';
+    private const string BAKERY_SCREENSHOT_ON_ACME_TICKET = '0197a3c0-0000-7000-8000-0000000f5359';
     private const string FIRST_PIN_THREE = '0197a3c0-0000-7000-8000-0000000f5361';
     private const string FIRST_PIN_ONE = '0197a3c0-0000-7000-8000-0000000f5362';
     private const string SECOND_PIN_ONE = '0197a3c0-0000-7000-8000-0000000f5363';
@@ -78,6 +82,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
     private const string OMAR_DRAFT_PIN = '0197a3c0-0000-7000-8000-0000000f5365';
     private const string TEAM_ONLY_PIN = '0197a3c0-0000-7000-8000-0000000f5366';
     private const string BAKERY_PIN = '0197a3c0-0000-7000-8000-0000000f5367';
+    private const string BAKERY_PIN_ON_ACME_TICKET = '0197a3c0-0000-7000-8000-0000000f5368';
     private const string FIRST_MEDIA = '0197a3c0-0000-7000-8000-0000000f5371';
     private const string SECOND_MEDIA = '0197a3c0-0000-7000-8000-0000000f5372';
     private const string REPORTED_AT = '2027-03-15 10:20:30+00';
@@ -144,12 +149,17 @@ final class DbalRoundQueriesTest extends KernelTestCase
             [self::OMAR_DRAFT_PIN, self::OMAR_DRAFT_SCREENSHOT, 1, '40.00', '60.00', 'Mine only', null, 'human', null, self::OMAR],
             [self::TEAM_ONLY_PIN, self::TEAM_ONLY_SCREENSHOT, 1, '40.00', '60.00', 'Team only', null, 'human', null, self::LENA],
         ]);
-        self::addRoundRows(
-            self::BETA_BAKERY,
-            [[self::BAKERY_REPORT, self::BAKERY_TICKET, 0, 'report', self::BEN, self::REPORTED_AT, 'open']],
-            [[self::BAKERY_SCREENSHOT, self::BAKERY_REPORT, self::FIRST_MEDIA, 0, null, null, null, null]],
-            [[self::BAKERY_PIN, self::BAKERY_SCREENSHOT, 1, '40.00', '60.00', 'Bakery', null, 'human', null, self::BEN]],
-        );
+        // rvw_round.ticket_id has no foreign key, so Beta Bakery may hold a shared round on Acme Foods' ticket id.
+        self::addRoundRows(self::BETA_BAKERY, [
+            [self::BAKERY_REPORT, self::BAKERY_TICKET, 0, 'report', self::BEN, self::REPORTED_AT, 'open'],
+            [self::BAKERY_ROUND_ON_ACME_TICKET, self::TICKET, 4, 'review', self::BEN, self::ROUND_ONE_SHARED_AT, 'open'],
+        ], [
+            [self::BAKERY_SCREENSHOT, self::BAKERY_REPORT, self::FIRST_MEDIA, 0, null, null, null, null],
+            [self::BAKERY_SCREENSHOT_ON_ACME_TICKET, self::BAKERY_ROUND_ON_ACME_TICKET, self::FIRST_MEDIA, 0, null, null, null, null],
+        ], [
+            [self::BAKERY_PIN, self::BAKERY_SCREENSHOT, 1, '40.00', '60.00', 'Bakery', null, 'human', null, self::BEN],
+            [self::BAKERY_PIN_ON_ACME_TICKET, self::BAKERY_SCREENSHOT_ON_ACME_TICKET, 1, '40.00', '60.00', 'Bakery on Acme', null, 'human', null, self::BEN],
+        ]);
         self::ensureKernelShutdown();
     }
 
@@ -289,6 +299,78 @@ final class DbalRoundQueriesTest extends KernelTestCase
         yield 'another organization\'s ticket, to an admin' => [self::BAKERY_TICKET, 'Sara', 'Ben', self::BAKERY_REPORT];
     }
 
+    /**
+     * Beta Bakery's shared round on Acme Foods' ticket id, with a screenshot and a pin, passes the visibility check,
+     * which reads Acme's ticket; only the organization of the round, screenshot and pin queries keeps it out.
+     */
+    #[Test]
+    public function anotherOrganizationsRoundOnTheSameTicketIdIsLeftOut(): void
+    {
+        $roundIds = self::idsOf($this->roundsFor(self::TICKET, 'Omar'));
+
+        self::assertNotContains(self::BAKERY_ROUND_ON_ACME_TICKET, $roundIds);
+        self::assertSame([self::REPORT, self::ROUND_ONE, self::ROUND_TWO, self::OMAR_SHARED_DRAFT, self::OMAR_DRAFT], $roundIds);
+    }
+
+    /**
+     * The round, screenshot and pin queries of DbalRoundQueries with their organization condition taken out, run as
+     * pinround_app: under Acme Foods as tenant, row-level security alone hides Beta Bakery's rows on Acme's ticket id,
+     * which Beta's own tenant gets.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsRoundScreenshotAndPinOnTheTicketId(): void
+    {
+        $rowIdsAs = static fn (string $organizationId): array => self::transactions()->rolledBackAs($organizationId, static fn (): array => [
+            self::connection()->fetchOne('SELECT current_user'),
+            self::connection()->fetchFirstColumn(
+                'SELECT round.id FROM rvw_round AS round WHERE round.ticket_id = CAST(:ticket AS uuid)'
+                .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid)) ORDER BY round.number NULLS LAST, round.id',
+                ['ticket' => self::TICKET, 'viewer' => self::OMAR],
+            ),
+            self::connection()->fetchFirstColumn(
+                'SELECT screenshot.id FROM rvw_screenshot AS screenshot WHERE screenshot.round_id = ANY(CAST(:rounds AS uuid[])) ORDER BY screenshot.position, screenshot.id',
+                ['rounds' => '{'.self::BAKERY_ROUND_ON_ACME_TICKET.'}'],
+            ),
+            self::connection()->fetchFirstColumn(
+                'SELECT pin.id FROM rvw_pin AS pin WHERE pin.screenshot_id = ANY(CAST(:screenshots AS uuid[])) ORDER BY pin.number, pin.id',
+                ['screenshots' => '{'.self::BAKERY_SCREENSHOT_ON_ACME_TICKET.'}'],
+            ),
+        ]);
+
+        self::assertSame(
+            ['pinround_app', [self::REPORT, self::ROUND_ONE, self::ROUND_TWO, self::OMAR_SHARED_DRAFT, self::OMAR_DRAFT], [], []],
+            $rowIdsAs(self::ACME_FOODS),
+        );
+        self::assertSame(
+            ['pinround_app', [self::BAKERY_ROUND_ON_ACME_TICKET], [self::BAKERY_SCREENSHOT_ON_ACME_TICKET], [self::BAKERY_PIN_ON_ACME_TICKET]],
+            $rowIdsAs(self::BETA_BAKERY),
+        );
+    }
+
+    /**
+     * The list puts the viewer's unshared draft last, after the numbered rounds, and orders no two of them: the open
+     * draft slot holds every unshared draft of an owner on a ticket, closed ones too, so a second one is refused.
+     */
+    #[Test]
+    public function aViewerHasAtMostOneUnsharedDraftOfATicketEvenWhenTheSecondIsClosed(): void
+    {
+        $refusal = self::transactions()->rolledBackAs(self::ACME_FOODS, static function (): ?UniqueConstraintViolationException {
+            try {
+                self::connection()->executeStatement(
+                    "INSERT INTO rvw_round (organization_id, id, ticket_id, number, kind, owner_id, shared_at, state, version, created_at) VALUES (?, ?, ?, NULL, 'draft', ?, NULL, 'closed', 1, '2027-03-15 10:00:00+00')",
+                    [self::ACME_FOODS, self::OMAR_SECOND_DRAFT, self::TICKET, self::OMAR],
+                );
+            } catch (UniqueConstraintViolationException $refusal) {
+                return $refusal;
+            }
+
+            return null;
+        });
+
+        self::assertNotNull($refusal, 'A second unshared draft of Omar on the ticket was written.');
+        self::assertStringContainsString('rvw_round_ticket_id_owner_id_open_draft_key', $refusal->getMessage());
+    }
+
     #[Test]
     public function anUnknownTicketHasNoRoundsAndCostsNoRoundQuery(): void
     {
@@ -417,18 +499,12 @@ final class DbalRoundQueriesTest extends KernelTestCase
         self::shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA, self::SARA, self::NOOR], self::ACME_FOODS, self::BETA_BAKERY);
     }
 
-    /**
-     * Built here with the services the container gives it: no page reads rounds yet, so the compiled test container
-     * drops the private service.
-     */
-    private function roundQueries(): DbalRoundQueries
+    private function roundQueries(): RoundQueries
     {
-        $ticketVisibilities = self::getContainer()->get('test.ticketing_ticket_visibilities');
-        \assert($ticketVisibilities instanceof TicketVisibilities);
-        $ticketQueries = self::getContainer()->get('test.ticketing_ticket_queries');
-        \assert($ticketQueries instanceof TicketQueries);
+        $roundQueries = self::getContainer()->get('test.review_round_queries');
+        \assert($roundQueries instanceof DbalRoundQueries);
 
-        return new DbalRoundQueries(self::connection(), self::tenantContext(), $ticketVisibilities, $ticketQueries);
+        return $roundQueries;
     }
 
     private static function shopTeamRows(): ShopTeamRows

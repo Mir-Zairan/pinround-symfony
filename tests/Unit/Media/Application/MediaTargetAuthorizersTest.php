@@ -20,13 +20,13 @@ final class MediaTargetAuthorizersTest extends TestCase
     {
         $tickets = new RecordingMediaTargetAuthorizer('ticket');
         $tickets->allow(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), 'SHOP-12');
-        $rounds = new RecordingMediaTargetAuthorizer('round');
-        $authorizers = new MediaTargetAuthorizers([$rounds, $tickets]);
+        $sketches = new RecordingMediaTargetAuthorizer('sketch');
+        $authorizers = new MediaTargetAuthorizers([$sketches, $tickets]);
 
         self::assertTrue($authorizers->mayAttach(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), 'ticket', 'SHOP-12'));
         self::assertFalse($authorizers->mayAttach(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), 'ticket', 'SHOP-13'));
         self::assertCount(2, $tickets->asked());
-        self::assertSame([], $rounds->asked());
+        self::assertSame([], $sketches->asked());
     }
 
     #[Test]

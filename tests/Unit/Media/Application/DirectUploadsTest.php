@@ -177,7 +177,7 @@ final class DirectUploadsTest extends TestCase
     {
         yield 'a ticket the authorizer refuses' => [self::MIA, self::TICKET, 'SHOP-13'];
         yield 'a person the authorizer refuses' => [self::OMAR, self::TICKET, self::SHOP_12];
-        yield 'a kind no authorizer decides' => [self::MIA, 'round', self::SHOP_12];
+        yield 'a kind no authorizer decides' => [self::MIA, 'sketch', self::SHOP_12];
         yield 'the kind in capitals' => [self::MIA, 'Ticket', self::SHOP_12];
     }
 
@@ -418,7 +418,7 @@ final class DirectUploadsTest extends TestCase
     public function completingAnIntentWhoseTargetKindNoAuthorizerDecidesIsDeniedAndChangesNothing(): void
     {
         $intentId = $this->uploadIntents->nextIdentity();
-        $this->transactions->run(fn () => $this->uploadIntents->add(UploadIntent::open($intentId, new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, 'round', self::SHOP_12, 2048, ['image/png'], 'uploads/'.self::ACME_FOODS.'/'.$intentId->toString(), new \DateTimeImmutable('2026-03-03 10:00:00 UTC'))));
+        $this->transactions->run(fn () => $this->uploadIntents->add(UploadIntent::open($intentId, new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), UploadPurpose::Screenshot, 'sketch', self::SHOP_12, 2048, ['image/png'], 'uploads/'.self::ACME_FOODS.'/'.$intentId->toString(), new \DateTimeImmutable('2026-03-03 10:00:00 UTC'))));
 
         try {
             $this->complete(self::MIA, $intentId->toString());
