@@ -13,10 +13,10 @@ use App\Media\Domain\UploadPolicy;
 
 /**
  * ImageEncoder as the contract states it, for a box without libvips: it decodes only what ImageFixtures builds (each
- * format's structure is read on its own, not by the header reader under test), refuses what does not decode fully as
- * the stated format or has more pixels than UploadPolicy::MAX_PIXELS, and answers two lossless WebPs of the
- * contract's sizes: scaled down to the maximum width, never up, aspect ratio kept, and holding 32 hash bytes of the
- * original per variant instead of any byte of it.
+ * format's structure is read on its own, not by the header reader under test), ignores bytes after the end of the
+ * image as libpng, libjpeg and libwebp do, refuses what does not decode fully as the stated format or has more pixels
+ * than UploadPolicy::MAX_PIXELS, and answers two lossless WebPs of the contract's sizes: scaled down to the maximum
+ * width, never up, aspect ratio kept, and holding 32 hash bytes of the original per variant instead of any byte of it.
  */
 final class FakeImageEncoder implements ImageEncoder
 {
@@ -151,9 +151,11 @@ final class FakeImageEncoder implements ImageEncoder
     private static function decodeWebp(string $bytes): array
     {
         $riff = unpack('a4magic/Vsize/a4form', $bytes);
-        if (false === $riff || 'RIFF' !== $riff['magic'] || 'WEBP' !== $riff['form'] || 8 + $riff['size'] !== \strlen($bytes)) {
+        if (false === $riff || 'RIFF' !== $riff['magic'] || 'WEBP' !== $riff['form'] || 8 + $riff['size'] > \strlen($bytes)) {
             throw new UndecodableImage();
         }
+        // As libwebp does, a container cut short is refused and any bytes after it, such as a polyglot's tail, are ignored.
+        $bytes = substr($bytes, 0, 8 + $riff['size']);
         $offset = 12;
         $size = null;
         while ($offset + 8 <= \strlen($bytes)) {

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Media\Processing;
+namespace App\Tests\Unit\Media\Application\Processing;
 
 use App\Media\Api\Event\MediaReady;
 use App\Media\Api\Event\MediaRejected;
@@ -19,11 +19,13 @@ use App\Media\Domain\MediaRejectReason;
 use App\Media\Domain\MediaStatus;
 use App\Media\Domain\UploadPolicy;
 use App\Media\Infrastructure\Processing\PurePhpImageHeaderReader;
+use App\Media\Infrastructure\Processing\UnavailableImageEncoder;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Fixtures\Media\FakeImageEncoder;
 use App\Tests\Fixtures\Media\ImageFixtures;
+use App\Tests\Fixtures\Media\PassThroughImageEncoder;
 use App\Tests\Unit\Media\Application\InMemoryMediaObjects;
 use App\Tests\Unit\Media\Application\InMemoryTransactions;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
@@ -33,8 +35,9 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * CleanUpload over in-memory ports that behave like the Doctrine, Flysystem, Messenger and ledger ones, with the real
- * PurePhpImageHeaderReader and a FakeImageEncoder. The clock stands at 2026-03-02 10:00 UTC. Every rejection is checked
- * for its reason, its event, the deleted upload and that nothing else was stored.
+ * PurePhpImageHeaderReader and a FakeImageEncoder; some cases use the UnavailableImageEncoder that dev and prod run
+ * today, or a PassThroughImageEncoder that breaks the contract as a real encoder could. The clock stands at 2026-03-02
+ * 10:00 UTC. Every rejection is checked for its reason, its event, the deleted upload and that nothing else was stored.
  */
 final class CleanUploadTest extends TestCase
 {
@@ -149,22 +152,122 @@ final class CleanUploadTest extends TestCase
         self::assertSame(hash('sha256', $polyglot), $this->stateOf(self::FIRST_MEDIA)[2], 'The hash is of the original as uploaded.');
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function polyglotsOfTheOtherTypes(): iterable
+    {
+        yield 'a jpeg' => [ImageFixtures::withAppended(ImageFixtures::jpeg(64, 64)), 'image/jpeg'];
+        yield 'a lossless webp' => [ImageFixtures::withAppended(ImageFixtures::webpLossless(64, 64)), 'image/webp'];
+        yield 'a lossy webp' => [ImageFixtures::withAppended(ImageFixtures::webpLossy(64, 64)), 'image/webp'];
+    }
+
     #[Test]
-    public function anEncoderThatCopiesTheOriginalIntoAVariantIsRefusedAndNothingIsStored(): void
+    #[DataProvider('polyglotsOfTheOtherTypes')]
+    public function aJpegOrWebpWithAppendedScriptBytesLeavesNoByteOfThemInAnyStoredVariant(string $polyglot, string $mime): void
+    {
+        $this->upload(self::FIRST_MEDIA, $polyglot, $mime);
+
+        $this->clean(self::FIRST_MEDIA);
+
+        self::assertSame(MediaStatus::Ready, $this->stateOf(self::FIRST_MEDIA)[0]);
+        $keys = $this->mediaFiles->keys();
+        self::assertCount(2, $keys);
+        foreach ($keys as $key) {
+            $variant = $this->mediaFiles->bytesOf($key);
+            self::assertStringNotContainsString(ImageFixtures::SCRIPT_BYTES, $variant);
+            self::assertStringNotContainsString('<?php', $variant);
+            self::assertSame(self::riffContainerLengthOf($variant), \strlen($variant), 'The variant does not end where its RIFF container ends.');
+        }
+    }
+
+    #[Test]
+    public function aWebpPolyglotThatTheEncoderPassesThroughIsRefusedForItsTailAndNothingIsStored(): void
+    {
+        $polyglot = ImageFixtures::withAppended(ImageFixtures::webpLossless(100, 50), ImageFixtures::SCRIPT_BYTES);
+        $this->upload(self::FIRST_MEDIA, $polyglot, 'image/webp');
+        $passThrough = new PassThroughImageEncoder();
+
+        try {
+            $this->cleanWith($passThrough, self::FIRST_MEDIA);
+            self::fail('A variant carrying the script after its WebP container was stored.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('The image encoder returned a variant whose length is not that of its WebP container.', $refusal->getMessage());
+        }
+
+        self::assertSame(1, $passThrough->encodeCount);
+        $this->assertNothingChangedFor(self::FIRST_MEDIA, $polyglot);
+    }
+
+    #[Test]
+    public function aCleanWebpThatTheEncoderPassesThroughIsRefusedAsTheOriginalAndNothingIsStored(): void
+    {
+        $original = ImageFixtures::webpLossless(100, 50);
+        $this->upload(self::FIRST_MEDIA, $original, 'image/webp');
+        $passThrough = new PassThroughImageEncoder();
+
+        try {
+            $this->cleanWith($passThrough, self::FIRST_MEDIA);
+            self::fail('A variant that is the original was stored.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('The image encoder returned the original as a variant.', $refusal->getMessage());
+        }
+
+        self::assertSame(1, $passThrough->encodeCount);
+        $this->assertNothingChangedFor(self::FIRST_MEDIA, $original);
+    }
+
+    #[Test]
+    public function aPngPolyglotThatTheEncoderPassesThroughIsRefusedAsNoWebpAndNothingIsStored(): void
     {
         $polyglot = ImageFixtures::withAppended(ImageFixtures::png(64, 64));
         $this->upload(self::FIRST_MEDIA, $polyglot, 'image/png');
-        $copying = $this->encoderReturning(static fn (string $original): EncodedImage => new EncodedImage(new EncodedVariant($original, 64, 64), new EncodedVariant($original, 64, 64)));
 
         try {
-            $this->onceOnlyHandling->deliver('message-1');
-            $this->cleanUploadWith($copying)->__invoke(new ProcessUpload(self::ACME_FOODS, self::FIRST_MEDIA), new \DateTimeImmutable(self::NOW));
+            $this->cleanWith(new PassThroughImageEncoder(), self::FIRST_MEDIA);
             self::fail('A variant that is the original was stored.');
         } catch (\LogicException $refusal) {
             self::assertSame('The image encoder returned a variant that is not a still WebP of its stated size, at most 1920 px wide.', $refusal->getMessage());
         }
 
         $this->assertNothingChangedFor(self::FIRST_MEDIA, $polyglot);
+    }
+
+    #[Test]
+    public function withTheUnavailableEncoderACheckedUploadStaysPendingWithItsUploadAndPublishesNothing(): void
+    {
+        $original = ImageFixtures::png(64, 64);
+        $this->upload(self::FIRST_MEDIA, $original, 'image/png');
+
+        try {
+            $this->cleanWith(new UnavailableImageEncoder(), self::FIRST_MEDIA);
+            self::fail('An upload was finished without an encoder.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame('No image encoder is installed, so uploads cannot be re-encoded yet.', $failure->getMessage());
+        }
+
+        $this->assertNothingChangedFor(self::FIRST_MEDIA, $original);
+    }
+
+    #[Test]
+    public function withTheUnavailableEncoderADuplicateOfAReadyPictureStillBecomesReadyWithItsVariants(): void
+    {
+        $original = ImageFixtures::png(300, 200);
+        $this->upload(self::FIRST_MEDIA, $original, 'image/png');
+        $this->clean(self::FIRST_MEDIA, 'message-1');
+        $firstState = $this->stateOf(self::FIRST_MEDIA);
+        self::assertSame(MediaStatus::Ready, $firstState[0]);
+        $storedAfterFirst = $this->mediaFiles->keys();
+        $this->upload(self::SECOND_MEDIA, $original, 'image/png');
+
+        $this->cleanWith(new UnavailableImageEncoder(), self::SECOND_MEDIA, 'message-2');
+
+        self::assertSame($firstState, $this->stateOf(self::SECOND_MEDIA));
+        self::assertSame($storedAfterFirst, $this->mediaFiles->keys(), 'No variant was written, and the second upload object is deleted.');
+        self::assertEquals(
+            [new MediaReady(self::ACME_FOODS, self::FIRST_MEDIA, new \DateTimeImmutable(self::NOW)), new MediaReady(self::ACME_FOODS, self::SECOND_MEDIA, new \DateTimeImmutable(self::NOW))],
+            $this->mediaEvents->published(),
+        );
     }
 
     /**
@@ -175,6 +278,7 @@ final class CleanUploadTest extends TestCase
         $good = static fn (): EncodedVariant => new EncodedVariant(ImageFixtures::webpLossless(100, 50), 100, 50);
         $notReadable = 'The image encoder returned a variant that is no readable WebP.';
         $notStill = 'The image encoder returned a variant that is not a still WebP of its stated size, at most %d px wide.';
+        $notItsContainer = 'The image encoder returned a variant whose length is not that of its WebP container.';
 
         yield 'a view that is junk' => [static fn (): EncodedImage => new EncodedImage(new EncodedVariant('junk', 100, 50), $good()), $notReadable];
         yield 'a thumb that is a png' => [static fn (): EncodedImage => new EncodedImage($good(), new EncodedVariant(ImageFixtures::png(10, 10), 10, 10)), 'The image encoder returned a variant that is not a still WebP of its stated size, at most 480 px wide.'];
@@ -183,6 +287,9 @@ final class CleanUploadTest extends TestCase
         yield 'a view wider than 1920' => [static fn (): EncodedImage => new EncodedImage(new EncodedVariant(ImageFixtures::webpLossless(1921, 10), 1921, 10), $good()), \sprintf($notStill, 1920)];
         yield 'a thumb wider than 480' => [static fn (): EncodedImage => new EncodedImage($good(), new EncodedVariant(ImageFixtures::webpLossless(481, 10), 481, 10)), \sprintf($notStill, 480)];
         yield 'an animated view' => [static fn (): EncodedImage => new EncodedImage(new EncodedVariant(ImageFixtures::webpExtended(100, 50, animationFlag: true), 100, 50), $good()), \sprintf($notStill, 1920)];
+        yield 'a view with script bytes after its container' => [static fn (): EncodedImage => new EncodedImage(new EncodedVariant(ImageFixtures::withAppended(ImageFixtures::webpLossless(100, 50)), 100, 50), $good()), $notItsContainer];
+        yield 'a thumb with one byte after its container' => [static fn (): EncodedImage => new EncodedImage($good(), new EncodedVariant(ImageFixtures::webpLossless(100, 50)."\x00", 100, 50)), $notItsContainer];
+        yield 'a thumb cut short of its container' => [static fn (): EncodedImage => new EncodedImage($good(), new EncodedVariant(substr(ImageFixtures::webpLossless(100, 50), 0, -1), 100, 50)), $notItsContainer];
     }
 
     /**
@@ -197,8 +304,7 @@ final class CleanUploadTest extends TestCase
         $breaking = $this->encoderReturning(static fn (): EncodedImage => $encoded());
 
         try {
-            $this->onceOnlyHandling->deliver('message-1');
-            $this->cleanUploadWith($breaking)->__invoke(new ProcessUpload(self::ACME_FOODS, self::FIRST_MEDIA), new \DateTimeImmutable(self::NOW));
+            $this->cleanWith($breaking, self::FIRST_MEDIA);
             self::fail('An encoder that broke its contract was trusted.');
         } catch (\LogicException $refusal) {
             self::assertSame($expectedRefusal, $refusal->getMessage());
@@ -302,7 +408,8 @@ final class CleanUploadTest extends TestCase
     public static function picturesAboveThePolicy(): iterable
     {
         yield '50,000 x 50,000 px' => [ImageFixtures::pngClaiming(50_000, 50_000), MediaRejectReason::TooManyPixels];
-        yield 'just over 40 megapixels' => [ImageFixtures::pngClaiming(16_384, 2_442), MediaRejectReason::TooManyPixels];
+        yield '40,000,005 px, the fewest above 40 megapixels with both sides allowed' => [ImageFixtures::pngClaiming(3_015, 13_267), MediaRejectReason::TooManyPixels];
+        yield '40,009,728 px with a width of exactly 16,384' => [ImageFixtures::pngClaiming(16_384, 2_442), MediaRejectReason::TooManyPixels];
         yield '7,000 x 7,000 px' => [ImageFixtures::pngClaiming(7_000, 7_000), MediaRejectReason::TooManyPixels];
         yield 'a side of 16,385 px' => [ImageFixtures::pngClaiming(16_385, 1), MediaRejectReason::TooManyPixels];
         yield 'a height of 16,385 px' => [ImageFixtures::pngClaiming(1, 16_385), MediaRejectReason::TooManyPixels];
@@ -327,10 +434,24 @@ final class CleanUploadTest extends TestCase
         self::assertSame(1, \count($this->mediaFiles->reads()), 'Only the leading bytes were read.');
     }
 
-    #[Test]
-    public function aPictureOfExactly40MegapixelsAndASideOf16384PassesTheHeaderChecksAndReachesTheEncoder(): void
+    /**
+     * @return iterable<string, array{int, int}>
+     */
+    public static function picturesAtThePolicyLimits(): iterable
     {
-        $this->upload(self::FIRST_MEDIA, ImageFixtures::pngClaiming(16_384, 2_441), 'image/png');
+        yield 'exactly 40,000,000 px' => [8_000, 5_000];
+        yield 'a width of exactly 16,384 px, at 39,993,344 px' => [16_384, 2_441];
+        yield 'a height of exactly 16,384 px, at 39,993,344 px' => [2_441, 16_384];
+    }
+
+    /**
+     * The picture only claims its size, so FakeImageEncoder cannot decode it: reaching the encoder is what is checked.
+     */
+    #[Test]
+    #[DataProvider('picturesAtThePolicyLimits')]
+    public function aPictureAtThePixelOrSideLimitPassesTheHeaderChecksAndReachesTheEncoder(int $width, int $height): void
+    {
+        $this->upload(self::FIRST_MEDIA, ImageFixtures::pngClaiming($width, $height), 'image/png');
 
         $this->clean(self::FIRST_MEDIA);
 
@@ -650,6 +771,22 @@ final class CleanUploadTest extends TestCase
     {
         $this->onceOnlyHandling->deliver($messageId);
         $this->cleanUpload->__invoke(new ProcessUpload($organizationId, $mediaId), new \DateTimeImmutable(self::NOW));
+    }
+
+    private function cleanWith(ImageEncoder $imageEncoder, string $mediaId, string $messageId = 'message-1'): void
+    {
+        $this->onceOnlyHandling->deliver($messageId);
+        $this->cleanUploadWith($imageEncoder)->__invoke(new ProcessUpload(self::ACME_FOODS, $mediaId), new \DateTimeImmutable(self::NOW));
+    }
+
+    private static function riffContainerLengthOf(string $webp): int
+    {
+        $riffSize = unpack('V', $webp, 4);
+        self::assertIsArray($riffSize);
+        $size = $riffSize[1] ?? null;
+        self::assertIsInt($size);
+
+        return 8 + $size;
     }
 
     private function upload(string $mediaId, string $bytes, string $mime, ?int $declaredBytes = null, string $organizationId = self::ACME_FOODS): void

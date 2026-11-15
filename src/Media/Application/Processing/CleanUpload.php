@@ -52,7 +52,8 @@ final readonly class CleanUpload
     /**
      * @throws \LogicException   when the message's organization is not the tenant, its media object is not found, or
      *                           the encoder breaks its contract; nothing is stored then
-     * @throws \RuntimeException when the bucket cannot be reached, so the message is retried
+     * @throws \RuntimeException when the bucket cannot be reached or the encoder cannot run, so the message is retried
+     *                           and the object stays pending
      */
     public function __invoke(ProcessUpload $request, \DateTimeImmutable $now): void
     {
@@ -146,8 +147,8 @@ final readonly class CleanUpload
         } catch (UndecodableImage) {
             return MediaRejectReason::Unreadable;
         }
-        $this->requireWebp($encoded->view, ImageEncoder::VIEW_MAX_WIDTH);
-        $this->requireWebp($encoded->thumb, ImageEncoder::THUMB_MAX_WIDTH);
+        $this->requireWebp($encoded->view, ImageEncoder::VIEW_MAX_WIDTH, $original->bytes);
+        $this->requireWebp($encoded->thumb, ImageEncoder::THUMB_MAX_WIDTH, $original->bytes);
 
         $viewKey = MediaVariantKey::of($mediaObject->organizationId(), $mediaObject->id(), $mediaObject->createdAt(), MediaVariant::View)->toString();
         $thumbKey = MediaVariantKey::of($mediaObject->organizationId(), $mediaObject->id(), $mediaObject->createdAt(), MediaVariant::Thumb)->toString();
@@ -162,9 +163,11 @@ final readonly class CleanUpload
     }
 
     /**
-     * Only a still WebP of the stated size and no wider than its maximum is ever stored, whatever the encoder returns.
+     * Only a still WebP of the stated size, no wider than its maximum, exactly as long as its RIFF container and not the
+     * original itself is ever stored, whatever the encoder returns: the header alone would let an encoder that passed a
+     * WebP polyglot through store its tail.
      */
-    private function requireWebp(EncodedVariant $variant, int $maxWidth): void
+    private function requireWebp(EncodedVariant $variant, int $maxWidth, string $original): void
     {
         try {
             $header = $this->imageHeaderReader->read(substr($variant->bytes, 0, ImageHeaderReader::LEADING_BYTES));
@@ -173,6 +176,14 @@ final readonly class CleanUpload
         }
         if (ImageFormat::Webp !== $header->format || $header->isAnimated || $header->width !== $variant->width || $header->height !== $variant->height || $variant->width > $maxWidth) {
             throw new \LogicException(\sprintf('The image encoder returned a variant that is not a still WebP of its stated size, at most %d px wide.', $maxWidth));
+        }
+        // The RIFF size counts every byte after its own field (RFC 9649, 2.5); the header reader confirmed the 12 bytes.
+        $riffSize = unpack('V', $variant->bytes, 4);
+        if (false === $riffSize || !\is_int($riffSize[1] ?? null) || 8 + $riffSize[1] !== \strlen($variant->bytes)) {
+            throw new \LogicException('The image encoder returned a variant whose length is not that of its WebP container.');
+        }
+        if ($variant->bytes === $original) {
+            throw new \LogicException('The image encoder returned the original as a variant.');
         }
     }
 }
