@@ -75,9 +75,50 @@ final class DbalTicketKeyQueriesTest extends KernelTestCase
         $this->queries()->keyOf(new TicketId(self::ACME_TICKET));
     }
 
+    #[Test]
+    public function theKeyOfATicketOfTheTenantGivesItsId(): void
+    {
+        self::assertSame(self::ACME_TICKET, $this->idAs(self::ACME_FOODS, 'SHOP-412'));
+        self::assertSame(self::BETA_TICKET, $this->idAs(self::BETA_BAKERY, 'SHOP-7'));
+    }
+
+    /**
+     * Both organizations have a SHOP project, so SHOP-7 is a key Acme Foods could have but does not.
+     */
+    #[Test]
+    public function aKeyOfAnotherOrganizationAnotherCaseOrNoTicketGivesNoId(): void
+    {
+        self::assertNull($this->idAs(self::ACME_FOODS, 'SHOP-7'));
+        self::assertNull($this->idAs(self::ACME_FOODS, 'shop-412'));
+        self::assertNull($this->idAs(self::ACME_FOODS, 'SHOP-413'));
+        self::assertNull($this->idAs(self::ACME_FOODS, ''));
+    }
+
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTicketId(): void
+    {
+        $idOfAcmeTicket = static fn (Connection $connection): ?string => new DbalTicketKeyQueries($connection, self::getContainer()->get(TenantContext::class))->idOf('SHOP-412')?->toString();
+        self::assertSame(self::ACME_TICKET, $this->ownTransactions()->rolledBackAs(self::ACME_FOODS, $idOfAcmeTicket));
+
+        self::assertNull($this->ownTransactions()->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $idOfAcmeTicket));
+    }
+
+    #[Test]
+    public function noTenantIsRefusedForAnId(): void
+    {
+        $this->expectException(TenantNotSet::class);
+
+        $this->queries()->idOf('SHOP-412');
+    }
+
     private function keyAs(string $organizationId, string $ticketId): ?string
     {
         return $this->transactions()->rolledBackAs($organizationId, fn (): ?string => $this->queries()->keyOf(new TicketId($ticketId)));
+    }
+
+    private function idAs(string $organizationId, string $key): ?string
+    {
+        return $this->transactions()->rolledBackAs($organizationId, fn (): ?string => $this->queries()->idOf($key)?->toString());
     }
 
     private function queries(): DbalTicketKeyQueries

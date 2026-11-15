@@ -28,4 +28,18 @@ final readonly class DbalTicketKeyQueries implements TicketKeyQueries
             default => throw new \LogicException('A ticket key from the database is not text.'),
         };
     }
+
+    public function idOf(string $key): ?TicketId
+    {
+        $ticketId = $this->connection->fetchOne(
+            'SELECT id FROM tkt_ticket WHERE organization_id = ? AND key = ?',
+            [$this->tenantContext->require()->toString(), $key],
+        );
+
+        return match (true) {
+            false === $ticketId => null,
+            \is_string($ticketId) => new TicketId($ticketId),
+            default => throw new \LogicException('A ticket id from the database is not text.'),
+        };
+    }
 }
