@@ -52,6 +52,7 @@ final class PresignedDownloadsMinioTest extends TestCase
         self::assertSame($webp, $response->getContent());
         self::assertSame('image/webp', $response->getHeaders()['content-type'][0] ?? null);
         self::assertSame('inline', $response->getHeaders()['content-disposition'][0] ?? null);
+        self::assertSame('private, max-age=240, immutable', $response->getHeaders()['cache-control'][0] ?? null);
     }
 
     #[Test]

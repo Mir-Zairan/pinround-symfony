@@ -18,9 +18,10 @@ interface SignedUrls
 
     /**
      * Reads every media object of $mediaIds in one query and signs, for each ready one, a GET URL of its $variant that
-     * works for 5 minutes from $at and makes the storage answer `Content-Type: image/webp` and
-     * `Content-Disposition: inline`. Signing is local: no request goes to the storage. It runs inside the request's
-     * transaction, whose tenant is $organizationId.
+     * works for 5 minutes from the start of $at's minute (so at least 4 minutes after $at); calls in the same minute
+     * give the same URL. The storage answers with `Content-Type: image/webp`, `Content-Disposition: inline` and
+     * `Cache-Control: private, max-age=240, immutable`. Signing is local: no request goes to the storage. It runs
+     * inside the request's transaction, whose tenant is $organizationId.
      *
      * @param list<string> $mediaIds at most MAX_MEDIA_IDS; a malformed, unknown or another organization's id is left
      *                               out of the answer, and an id given twice is answered once

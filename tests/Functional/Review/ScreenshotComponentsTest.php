@@ -36,9 +36,12 @@ final class ScreenshotComponentsTest extends KernelTestCase
     #[Test]
     public function aReadyScreenshotShowsItsPictureAndNoPlaceholder(): void
     {
-        $crawler = $this->renderScreenshot(self::view());
+        $html = $this->render(Screenshot::class, ['view' => self::view()]);
+        $crawler = new Crawler($html);
 
         self::assertSame('/media/shop-checkout.png', $crawler->filter('.screenshot__frame img.screenshot__image')->attr('src'));
+        self::assertCount(0, $crawler->filter('.screenshot__frame--shaped'));
+        self::assertStringNotContainsString('<style', $html);
         self::assertCount(0, $crawler->filter('.screenshot__placeholder'));
         self::assertCount(0, $crawler->filter('[role="status"]'));
         self::assertCount(0, $crawler->filter('.screenshot__frame--placeholder'));
