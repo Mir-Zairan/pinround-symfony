@@ -215,6 +215,18 @@ test('a note past 1,000 characters is cut and the page says so', async ({ page }
   await expect(status).toHaveText('');
 });
 
+test('a note of emoji reaches 1,000 characters and is cut after that, as the server counts', async ({ page }) => {
+  const { addPin, note, status } = await openEditableExample(page);
+  await addPin.click();
+
+  await note(1).fill('😀'.repeat(1000));
+  expect([...(await note(1).inputValue())]).toHaveLength(1000);
+
+  await note(1).fill('😀'.repeat(1100));
+  expect([...(await note(1).inputValue())]).toHaveLength(1000);
+  await expect(status).toHaveText('A note holds at most 1,000 characters. Anything more is cut.');
+});
+
 test('the note bubble shows on focus and while the pin is selected', async ({ page }) => {
   const { form, addPin, note, marker } = await openEditableExample(page);
   await addPin.click();

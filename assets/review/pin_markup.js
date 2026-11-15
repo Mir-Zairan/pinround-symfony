@@ -18,7 +18,7 @@ export function buildMarker(number) {
 }
 
 /** The list item with the note field and Remove button of a pin added in the browser. */
-export function buildListItem(number, noteMax) {
+export function buildListItem(number) {
   const item = document.createElement('li');
   item.className = 'pin-list__item';
   item.value = number;
@@ -30,7 +30,6 @@ export function buildListItem(number, noteMax) {
   field.className = 'pin-list__note';
   field.name = `pins[${number}][note]`;
   field.rows = 2;
-  field.maxLength = noteMax;
   field.setAttribute('aria-label', `Note for pin ${number}`);
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -103,4 +102,20 @@ export function placeMarker(marker, x, y) {
   marker.dataset.xPercent = x.toFixed(2);
   marker.dataset.yPercent = y.toFixed(2);
   marker.classList.toggle('pin--bubble-left', x > BUBBLE_FLIP_PERCENT);
+}
+
+/** The pins the server printed into the layer: their positions by number, the highest number and the selected one. */
+export function readPins(layer) {
+  const pins = new Map();
+  let lastNumber = 0;
+  let selectedNumber = null;
+  for (const marker of layer.querySelectorAll('.pin')) {
+    const number = Number(marker.dataset.pinNumber);
+    pins.set(number, { x: Number(marker.dataset.xPercent), y: Number(marker.dataset.yPercent) });
+    lastNumber = Math.max(lastNumber, number);
+    if (marker.classList.contains('pin--selected')) {
+      selectedNumber = number;
+    }
+  }
+  return { pins, lastNumber, selectedNumber };
 }

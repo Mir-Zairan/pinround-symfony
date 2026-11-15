@@ -198,11 +198,13 @@ textarea.pin-list__note {
 }
 
 /* Narrow screens: the bubble opens below the ring, on the side of the picture the ring is not near, so it never leaves
-   the viewport. */
-@media (max-width: 480px) {
+   the picture. At 35vw a bubble that starts at the ring (60% across at most) ends inside a picture that fills the
+   viewport less its page padding, up to the 640px breakpoint. */
+@media (max-width: 640px) {
   .pin__bubble {
     top: calc(100% + var(--space-8));
     left: 0;
+    max-width: min(240px, 35vw);
     transform: none;
   }
 
