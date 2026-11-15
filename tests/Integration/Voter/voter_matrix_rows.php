@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Conversation\Api\ConversationPermission;
+use App\Media\Api\MediaPermission;
 use App\Notification\Api\PingPermission;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
@@ -23,6 +24,8 @@ use App\Workflow\Api\WorkflowPermission;
  *            Or a team-only ticket of Acme Foods: "Team-only Shop ticket", or "Team-only ticket with no team", both
  *            reported by someone who is no actor here; or "Team-only Support ticket reported by Mia" (a Viewer of
  *            Support) or "… reported by Omar" (no role in Support).
+ *            Or an upload target (MEDIA_UPLOAD): "Upload to a team-only Shop ticket" or "… Support ticket", "Upload to a
+ *            ticket nobody has", "Upload to a target of an unknown kind".
  * expected:  granted or denied.
  * twoStepProof: optional; decides for a person whose two-step login is on. true: they typed a code in this session 30
  *            minutes ago, within the 1 hour admin pages allow; an int: the code is that many seconds old; 'noCode': no
@@ -296,4 +299,16 @@ return [
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Omar', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'denied'],
     ['source' => $pingAPerson, 'attribute' => PingPermission::SEND, 'actor' => 'Noor', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
+
+    ['source' => $leadRights, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Lena', 'subject' => 'Upload to a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $memberRights, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Omar', 'subject' => 'Upload to a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $leadRights, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Noor', 'subject' => 'Upload to a team-only Support ticket', 'expected' => 'granted'],
+    ['source' => $viewerRights, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Raj', 'subject' => 'Upload to a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $viewerRights, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Mia', 'subject' => 'Upload to a team-only Support ticket', 'expected' => 'denied'],
+    ['source' => $adminMayNotEditTickets, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Sara', 'subject' => 'Upload to a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $teamOnlyTickets, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Omar', 'subject' => 'Upload to a team-only Support ticket', 'expected' => 'denied'],
+    ['source' => $teamOnlyTickets, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Noor', 'subject' => 'Upload to a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Ben', 'subject' => 'Upload to a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Lena', 'subject' => 'Upload to a ticket nobody has', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Lena', 'subject' => 'Upload to a target of an unknown kind', 'expected' => 'denied'],
 ];

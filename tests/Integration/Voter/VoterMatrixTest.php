@@ -11,6 +11,7 @@ use App\Identity\Domain\PasswordHash;
 use App\Identity\Domain\TwoStepLogin;
 use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Media\Api\UploadTarget;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Application\OpenInvitationLink;
 use App\Organization\Domain\TeamSlug;
@@ -20,6 +21,8 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\Ticketing\TicketRows;
+use App\Tests\Integration\Workflow\WorkflowRows;
 use App\Ticketing\Api\TicketVisibilityFacts;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -52,6 +55,9 @@ use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
  * member (tester) of Shop and a viewer of Support; Raj is a Manager and a viewer of Shop; Sara is an Admin with no team
  * role; Noor has no org role, leads Support and is the organization's triager. Beta Bakery: Ben is its Admin and leads
  * its one team, Checkout.
+ *
+ * The upload subjects name tickets of Acme Foods that are rows (the Media voter asks Ticketing, which reads them): a
+ * team-only ticket of Shop and one of Support. For Ben, in Beta Bakery as tenant, they are another organization's.
  */
 final class VoterMatrixTest extends KernelTestCase
 {
@@ -97,6 +103,20 @@ final class VoterMatrixTest extends KernelTestCase
     /** Reported the tickets no person of PEOPLE reported, so no row's actor sees those as their reporter. */
     private const string REPORTER = '0197a3c0-0000-7000-8000-0000000009c9';
 
+    private const string TO_DO_STEP = '0197a3c0-0000-7000-8000-0000000009f1';
+    private const string PROJECT = '0197a3c0-0000-7000-8000-0000000009f2';
+    private const string SHOP_TICKET = '0197a3c0-0000-7000-8000-0000000009f3';
+    private const string SUPPORT_TICKET = '0197a3c0-0000-7000-8000-0000000009f4';
+    private const string NO_TICKET = '0197a3c0-0000-7000-8000-0000000009f5';
+
+    /** Each upload target by the subject's name: the kind and the id of the target in its module. */
+    private const array UPLOAD_TARGETS = [
+        'Upload to a team-only Shop ticket' => ['ticket', self::SHOP_TICKET],
+        'Upload to a team-only Support ticket' => ['ticket', self::SUPPORT_TICKET],
+        'Upload to a ticket nobody has' => ['ticket', self::NO_TICKET],
+        'Upload to a target of an unknown kind' => ['screenshot-wall', self::SHOP_TICKET],
+    ];
+
     private const string ROLES_DOC = __DIR__.'/../../../docs/00-product/personas-and-roles.md';
 
     /** Not the wall clock's time, so a check that ignores the app clock decides differently. */
@@ -104,7 +124,7 @@ final class VoterMatrixTest extends KernelTestCase
 
     public static function setUpBeforeClass(): void
     {
-        self::rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        self::removeSeededRows();
         self::transactions()->committedAs(self::ACME_FOODS, static function (): void {
             self::addMembership(self::ACME_FOODS, 'Lena', '{admin}');
             self::addMembership(self::ACME_FOODS, 'Omar', '{}');
@@ -133,12 +153,13 @@ final class VoterMatrixTest extends KernelTestCase
             self::addTeam(self::BETA_BAKERY, self::CHECKOUT, 'Checkout', 'Ben');
             self::addTeamMember(self::BETA_BAKERY, self::CHECKOUT, 'Ben', 'lead', 'developer');
         });
+        self::addTicketsOfAcmeFoods();
         self::ensureKernelShutdown();
     }
 
     public static function tearDownAfterClass(): void
     {
-        self::rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        self::removeSeededRows();
         self::ensureKernelShutdown();
         parent::tearDownAfterClass();
     }
@@ -244,8 +265,11 @@ final class VoterMatrixTest extends KernelTestCase
         ));
     }
 
-    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts
+    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget
     {
+        if (isset(self::UPLOAD_TARGETS[$name])) {
+            return new UploadTarget(...self::UPLOAD_TARGETS[$name]);
+        }
         if (isset(self::ORGANIZATIONS[$name])) {
             return new OrganizationId(self::ORGANIZATIONS[$name]);
         }
@@ -355,6 +379,35 @@ final class VoterMatrixTest extends KernelTestCase
             "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, ?, ?, '2027-03-15 10:00:00+00')",
             [$organizationId, $teamId, self::PEOPLE[$person][0], $teamRole, $job],
         );
+    }
+
+    /**
+     * Through the migrator, which owns the tables: a To do step, a project with no team and two team-only tickets, one
+     * of Shop and one of Support, reported by someone who is no actor here.
+     */
+    private static function addTicketsOfAcmeFoods(): void
+    {
+        $tenantContext = self::tenantContext();
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            self::migrator()->transactional(static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'To do', 'todo', 'todo', 'core', 1)",
+                [self::ACME_FOODS, self::TO_DO_STEP],
+            ));
+        } finally {
+            $tenantContext->clear();
+        }
+        $tickets = new TicketRows(self::migrator(), $tenantContext);
+        $tickets->addProjectOf(self::ACME_FOODS, self::PROJECT);
+        $tickets->addWithAudienceOf(self::ACME_FOODS, self::SHOP_TICKET, self::PROJECT, 1, 'team', self::SHOP, self::REPORTER);
+        $tickets->addWithAudienceOf(self::ACME_FOODS, self::SUPPORT_TICKET, self::PROJECT, 2, 'team', self::SUPPORT, self::REPORTER);
+    }
+
+    private static function removeSeededRows(): void
+    {
+        new TicketRows(self::migrator(), self::tenantContext())->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        new WorkflowRows(self::migrator(), self::tenantContext())->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        self::rows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
     }
 
     /**
