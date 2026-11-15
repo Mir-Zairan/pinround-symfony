@@ -366,6 +366,40 @@ test.describe('two people on one ticket', () => {
     await omar.context.close();
   });
 
+  test("a Reply Omar folded away with Cancel keeps its text: the thread waits until he clears it, then shows Lena's comment", async ({ browser }) => {
+    const { key, omar } = await openNewTicketAsOmar(browser, `Store hours show the old times ${randomUUID().slice(0, 8)}`);
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openThread(lena.page, key);
+    const ownMessage = await postOwnCommentAndSettle(omar.page, key, `Hours changed on Monday ${randomUUID().slice(0, 8)}`);
+    const replyDraft = `Only for the town stores ${randomUUID().slice(0, 8)}`;
+    const comment = `The app still shows nine to five ${randomUUID().slice(0, 8)}`;
+    const replyBox = ownMessage.locator('details.thread__reply-box');
+    const replyField = replyBox.getByLabel('Write a reply');
+    await replyBox.locator(':scope > summary').click();
+    await replyField.fill(replyDraft);
+    await replyBox.getByRole('button', { name: 'Cancel' }).click();
+    await expect(replyField).toBeHidden();
+    const requests = recordRequests(omar.page);
+    // Omar's own signal is fetched already, so the next signal fetch is of the one that carries Lena's comment.
+    const lenasSignalFetch = pageFetchAfterNow(omar.page, key);
+
+    await postComment(lena.page, comment);
+    expect((await lenasSignalFetch).status()).toBe(200);
+
+    // The thread's reload, had the folded box not held it, would have started with that fetch.
+    expect(threadLoads(requests, key).map((request) => request.url())).toEqual([]);
+    await expect(messageWithText(omar.page, comment)).toHaveCount(0);
+    await replyBox.locator(':scope > summary').click();
+    await expect(replyField).toHaveValue(replyDraft);
+
+    await replyField.fill('');
+    await replyBox.getByRole('button', { name: 'Cancel' }).click();
+
+    await expect(messageWithText(omar.page, comment)).toHaveCount(1, { timeout: SHOWS_WITHIN_MS });
+    await lena.context.close();
+    await omar.context.close();
+  });
+
   test("the ping sheet Omar has open keeps its note: People waits until he closes it, then shows Lena's move", async ({ browser }) => {
     const { key, omar } = await openNewTicketAsOmar(browser, `Store picker forgets the town ${randomUUID().slice(0, 8)}`);
     const lena = await openAs(browser, LENA_STORAGE_STATE);
@@ -1171,24 +1205,27 @@ test.describe("the bell's push", () => {
     );
     expectOmarUnderBellCaps();
     const key = await makeTicketForOmar(browser, `Coupon field clears itself ${randomUUID().slice(0, 8)}`);
+    // The card that holds focus is the test's own: seeded cards may be gone, as other specs' moves clear pings.
+    const focusedKey = await makeTicketForOmar(browser, `Coupon code accepts spaces ${randomUUID().slice(0, 8)}`);
+    const firstPing = await pingOmarAsMia(browser, focusedKey, `Can you check the coupon code? ${randomUUID().slice(0, 8)}`);
+    await firstPing.context.close();
     const omar = await openAs(browser, OMAR_STORAGE_STATE);
     const streamOpened = omar.page.waitForResponse((response) => pathOf(response.request()) === HUB_PATH);
     await omar.page.goto('/', { waitUntil: 'networkidle' });
     expect((await streamOpened).status()).toBe(200);
     await openBellPopover(omar.page);
-    const cards = bellPopover(omar.page).getByRole('article');
-    await expect(cards.nth(1), 'Omar has at least two cards: run make seed').toBeVisible();
-    const secondCardName = await cards.nth(1).getAttribute('aria-label');
-    expect(secondCardName).not.toBeNull();
-    const secondCardsDone = bellPopover(omar.page).getByRole('article', { name: secondCardName!, exact: true }).getByRole('button', { name: 'Done' });
-    await secondCardsDone.focus();
+    // The worker writes the card from the ping's event, so it may come with a push after the popover opened.
+    const focusedCard = bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${focusedKey}`, exact: true });
+    await expect(focusedCard).toBeVisible({ timeout: SHOWS_WITHIN_MS });
+    const focusedCardsDone = focusedCard.getByRole('button', { name: 'Done' });
+    await focusedCardsDone.focus();
     await recordBellLoadingText(omar.page);
-    const miasCard = bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}` });
+    const miasCard = bellPopover(omar.page).getByRole('article', { name: `Mia pinged you on ${key}`, exact: true });
 
     const mia = await pingOmarAsMia(browser, key, `Can you check the coupon field? ${randomUUID().slice(0, 8)}`);
 
     await expect(miasCard).toBeVisible({ timeout: SHOWS_WITHIN_MS });
-    await expect(secondCardsDone).toBeFocused();
+    await expect(focusedCardsDone).toBeFocused();
     await expect(omar.page.locator('html')).not.toHaveAttribute('data-e2e-bell-loading-shown');
     await mia.context.close();
     await omar.context.close();

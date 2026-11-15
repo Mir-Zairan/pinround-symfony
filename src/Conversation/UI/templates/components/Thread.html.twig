@@ -68,7 +68,7 @@
                         {% endfor %}
                         {% if message.isAnswerable %}
                             {#- Answering resumes the ticket and changes its header, so the answer's redirect replaces the whole page. -#}
-                            <details class="thread__answer" {{ stimulus_controller('reply-box') }} data-action="toggle->reply-box#focus turbo:submit-end->reply-box#settle">
+                            <details class="thread__answer" data-live-keeps-text {{ stimulus_controller('reply-box') }} data-action="toggle->reply-box#focus turbo:submit-end->reply-box#settle">
                                 <summary class="btn btn-text btn-sm" {{ stimulus_target('reply-box', 'opener') }}>Answer</summary>
                                 <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::ANSWER_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__answer-form" data-turbo-frame="_top">
                                     <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
@@ -85,7 +85,7 @@
                         {% if message.isReplyable or message.isResolvable or message.isEditable or message.isRemovable %}
                             <div class="thread__actions">
                                 {% if message.isReplyable %}
-                                    <details class="thread__reply-box" {{ stimulus_controller('reply-box') }} data-action="toggle->reply-box#focus turbo:submit-end->reply-box#settle">
+                                    <details class="thread__reply-box" data-live-keeps-text {{ stimulus_controller('reply-box') }} data-action="toggle->reply-box#focus turbo:submit-end->reply-box#settle">
                                         <summary class="btn btn-text btn-sm" {{ stimulus_target('reply-box', 'opener') }}>Reply</summary>
                                         <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::REPLY_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__reply-form">
                                             <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">

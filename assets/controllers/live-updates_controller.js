@@ -33,17 +33,20 @@ const FORM_FIELDS = 'input, textarea, select';
 // An open dialog, or an open disclosure with text to type in (a message's edit form), keeps what the person wrote
 // there after they click away; a refresh would close it and lose the text.
 const OPEN_EDITORS = 'dialog[open], details[open] :is(textarea, input[type="text"])';
+// A box whose Cancel folds it away and keeps the text (the thread's Answer and Reply boxes) is still in use while that
+// text is changed, open or not.
+const KEPT_TEXT = '[data-live-keeps-text] :is(textarea, input[type="text"])';
 
 // Events after which a held part or visit may be free again: focus moved, a disclosure opened or closed, a dialog closed. None
 // of toggle and close bubbles, so they are heard in the capture phase.
 const HOLD_ENDING_EVENTS = ['focusin', 'focusout', 'toggle', 'close'];
 
-// A part with an open editor, or with a field being typed in, is held rather than lose the text: a swapped part loses
-// both, a reloaded frame keeps only what sits in a data-turbo-permanent element. A focused button or link holds nothing:
-// its copy in the fresh part takes the focus back.
+// A part with an open editor, with a field being typed in, or with a folded box that promises to keep its text, is held
+// rather than lose the text: a swapped part loses both, a reloaded frame keeps only what sits in a data-turbo-permanent
+// element. A focused button or link holds nothing: its copy in the fresh part takes the focus back.
 function isPartInUse(part) {
   const focused = document.activeElement;
-  if (part.querySelector(OPEN_EDITORS) !== null) {
+  if (part.querySelector(OPEN_EDITORS) !== null || [...part.querySelectorAll(KEPT_TEXT)].some(isFieldChanged)) {
     return true;
   }
   if (focused === null || !part.contains(focused) || !focused.matches(FORM_FIELDS)) {
