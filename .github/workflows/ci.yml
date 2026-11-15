@@ -173,7 +173,8 @@ jobs:
   e2e:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # About 3 minutes of setup and 6 to 8 of Playwright since phase 4's live update specs; 20 leaves room.
+    timeout-minutes: 20
     env:
       # Read by `docker compose` and `make`: the CI override replaces app's depends_on.
       COMPOSE_FILE: compose.yaml:compose.ci.yaml
@@ -202,7 +203,7 @@ jobs:
             APP_GID=${{ env.APP_GID }}
           cache-from: type=gha,scope=e2e-dev
           cache-to: type=gha,scope=e2e-dev,mode=max
-      # No minio, mailpit, workers or scheduler: see compose.ci.yaml. vendor/ and assets/vendor come from
+      # No minio, mailpit, worker-heavy or scheduler: see compose.ci.yaml. vendor/ and assets/vendor come from
       # php-setup, so the entrypoint skips composer install.
       - name: Start the stack
         run: docker compose --env-file .env --env-file .env.dev up -d --wait app
@@ -216,6 +217,10 @@ jobs:
           echo "::add-mask::$demo_password"
           echo "DEMO_PASSWORD=$demo_password" >> "$GITHUB_ENV"
           DEMO_PASSWORD="$demo_password" make --no-print-directory seed
+      # The live update and bell specs need the outbox relay and worker (async_notify publishes to the hub). They
+      # connect as pinround_app, so they start once the roles and tables exist.
+      - name: Start the outbox relay and the notify worker
+        run: docker compose --env-file .env --env-file .env.dev up -d --wait worker-outbox worker
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.12"
@@ -231,7 +236,7 @@ jobs:
           E2E_PASSWORD: ${{ env.DEMO_PASSWORD }}
       - name: Show the app logs
         if: failure()
-        run: docker compose --env-file .env --env-file .env.dev logs app
+        run: docker compose --env-file .env --env-file .env.dev logs app worker-outbox worker
       - name: Keep the Playwright traces
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
