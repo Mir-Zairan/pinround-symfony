@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 import { LENA_STORAGE_STATE } from './auth';
 
 test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 900 } });
@@ -7,7 +7,28 @@ test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 90
 // path is run with the three calls answered in the browser: a browser PUT to the bucket needs its CORS to allow this
 // origin, which the dev stack does for the app's own origin only.
 const FIELD = '#gallery-upload';
-const STORAGE_URL = 'https://storage.example.test/uploads/slot';
+// The dev stack's OBJECT_STORAGE_PUBLIC_URL (.env.dev), the only storage origin the page's CSP lets it connect to.
+const STORAGE_URL = 'http://localhost:9000/pinround-dev/uploads/slot';
+const APP_ORIGIN = new URL(process.env.E2E_BASE_URL ?? 'https://localhost').origin;
+// What the bucket's CORS rule answers for the app's origin; a PUT with a Content-Type is preflighted.
+const STORAGE_CORS = {
+  'Access-Control-Allow-Origin': APP_ORIGIN,
+  'Access-Control-Allow-Methods': 'PUT, GET, HEAD',
+  'Access-Control-Allow-Headers': 'content-type',
+  Vary: 'Origin',
+};
+
+// Answers the browser's preflight like the bucket, and each PUT with what onPut returns.
+async function routeStorage(page: Page, onPut: (route: Route) => Promise<{ status: number; body?: string }> | { status: number; body?: string } = () => ({ status: 200 })) {
+  await page.route(STORAGE_URL, async (route) => {
+    if ('OPTIONS' === route.request().method()) {
+      await route.fulfill({ status: 200, headers: STORAGE_CORS, body: '' });
+      return;
+    }
+    const { status, body = '' } = await onPut(route);
+    await route.fulfill({ status, headers: STORAGE_CORS, body }).catch(() => {});
+  });
+}
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 const MULTIBYTE_NAME = 'Café ☕ 画面.png';
 const MEDIA_ID = '0192f3a0-7b2c-7d3e-8a4f-5b6c7d8e9f02';
@@ -54,11 +75,11 @@ test('a member uploads a PNG: it is put to the presigned URL and the hidden inpu
     beginToken = route.request().headers()['x-csrf-token'];
     await route.fulfill(beginAnswer('intent-1'));
   });
-  await page.route(STORAGE_URL, async (route) => {
+  await routeStorage(page, (route) => {
     calls.push('put');
     putHeaders = route.request().headers();
     putBytes = route.request().postDataBuffer()?.length ?? 0;
-    await route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' });
+    return { status: 200 };
   });
   await page.route('**/media/intents/intent-1/complete', async (route) => {
     calls.push('complete');
@@ -119,7 +140,7 @@ test('a picture pasted from the clipboard is uploaded like a picked one', async 
   await page.route('**/media/intents', async (route) => {
     await route.fulfill(beginAnswer('intent-2'));
   });
-  await page.route(STORAGE_URL, (route) => route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' }));
+  await routeStorage(page);
   await page.route('**/media/intents/intent-2/complete', (route) => route.fulfill({ status: 202, json: { mediaId: 'pasted-media-id', status: 'pending' } }));
   const { input, mediaId } = await openUploadField(page);
 
@@ -149,7 +170,7 @@ test('the server refusal text is shown, and the hidden input stays empty', async
 test('a refused storage PUT says the file could not be stored and sends no complete call', async ({ page }) => {
   let isCompleteCalled = false;
   await page.route('**/media/intents', (route) => route.fulfill(beginAnswer('intent-3')));
-  await page.route(STORAGE_URL, (route) => route.fulfill({ status: 403, headers: { 'Access-Control-Allow-Origin': '*' }, body: '<Error/>' }));
+  await routeStorage(page, () => ({ status: 403, body: '<Error/>' }));
   await page.route('**/media/intents/intent-3/complete', (route) => {
     isCompleteCalled = true;
     return route.fulfill({ status: 202, json: { mediaId: 'never', status: 'pending' } });
@@ -186,7 +207,7 @@ for (const [code, message] of [
 ] as const) {
   test(`a ${code} answer to the complete call shows the server's own message and leaves the hidden input empty`, async ({ page }) => {
     await page.route('**/media/intents', (route) => route.fulfill(beginAnswer('intent-4')));
-    await page.route(STORAGE_URL, (route) => route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' }));
+    await routeStorage(page);
     await page.route('**/media/intents/intent-4/complete', (route) => route.fulfill({ status: code, json: { message } }));
     const { input, status, mediaId, preview } = await openUploadField(page);
 
@@ -204,7 +225,7 @@ test('a new upload clears the media id of the previous one, and a refused begin 
     beginCount += 1;
     return 1 === beginCount ? route.fulfill(beginAnswer('intent-5')) : route.fulfill({ status: 422, json: { message: 'The page was open too long. Try again.' } });
   });
-  await page.route(STORAGE_URL, (route) => route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' }));
+  await routeStorage(page);
   await page.route('**/media/intents/intent-5/complete', (route) => route.fulfill({ status: 202, json: { mediaId: MEDIA_ID, status: 'pending' } }));
   const { input, status, mediaId } = await openUploadField(page);
   await input.setInputFiles({ name: 'first.png', mimeType: 'image/png', buffer: PNG });
@@ -227,10 +248,10 @@ test('a second file picked while one uploads is ignored: one begin call, and the
     beginCount += 1;
     return route.fulfill(beginAnswer('intent-6'));
   });
-  await page.route(STORAGE_URL, async (route) => {
+  await routeStorage(page, async () => {
     putStarted();
     await putHeld;
-    await route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' });
+    return { status: 200 };
   });
   await page.route('**/media/intents/intent-6/complete', (route) => route.fulfill({ status: 202, json: { mediaId: MEDIA_ID, status: 'pending' } }));
   const { input, status, mediaId } = await openUploadField(page);
@@ -272,10 +293,10 @@ test('leaving the page mid-upload aborts it: no complete call is made', async ({
   let putStarted: () => void = () => {};
   const hasPutStarted = new Promise<void>((resolve) => (putStarted = resolve));
   await page.route('**/media/intents', (route) => route.fulfill(beginAnswer('intent-7')));
-  await page.route(STORAGE_URL, async (route) => {
+  await routeStorage(page, async () => {
     putStarted();
     await putHeld;
-    await route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' }).catch(() => {});
+    return { status: 200 };
   });
   await page.route('**/media/intents/intent-7/complete', (route) => {
     isCompleteCalled = true;
