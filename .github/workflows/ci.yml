@@ -143,8 +143,8 @@ jobs:
           -f docker/postgres/roles.sql
       # The test-only readonly connection proves what pinround_readonly is refused.
       # The object-storage group (Media against MinIO) runs locally only: this job has no MinIO, only the stand-in
-      # listener above, so its uploads, CORS preflights and reads would fail here. The libvips group runs the vips
-      # tool of the app image (Dockerfile); this job runs on the runner, not in that image.
+      # listener above, so its uploads, CORS preflights and reads would fail here. The libvips group needs the vips
+      # tool of the app image, so the build job runs it in that image.
       - run: composer test:integration -- --exclude-group object-storage --exclude-group libvips
         env:
           READONLY_DATABASE_URL: postgresql://pinround_readonly:change-me-ci-only-readonly-db@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
@@ -154,7 +154,9 @@ jobs:
 
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    # About 3 minutes for the prod image; the dev image reuses its base stage, and php-setup plus the libvips tests
+    # add about 2.
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -171,6 +173,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - run: sh tests/shell/compose-config-check.sh
+      # The libvips group runs VipsImageEncoder against the vips tool the Dockerfile installs (libvips 8.14 of
+      # bookworm), so it runs in the dev image, which shares the prod image's base stage and has PHPUnit's dev vendor
+      # mounted from php-setup. Same build args as above, so the base layers come from that build.
+      - uses: ./.github/actions/php-setup
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: dev
+          load: true
+          push: false
+          tags: pinround-app:ci-libvips
+          build-args: |
+            APP_UID=1000
+            APP_GID=1000
+          cache-from: type=gha
+      # Only the test file is named: given the whole suite, PHPUnit would run every data provider, and Foundry's boot
+      # the kernel. No network, as the group needs no database or service. The runner user owns the mounted checkout;
+      # --fail-on-skipped turns a missing vips into a failure.
+      - name: Run the libvips tests in the app image
+        run: >-
+          docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp
+          -v "$PWD:/app" -w /app pinround-app:ci-libvips
+          php vendor/bin/phpunit --group libvips --fail-on-skipped --fail-on-empty-test-suite
+          tests/Integration/Media/Processing/VipsImageEncoderTest.php
 
   # The dev stack without file storage or mail (compose.ci.yaml), then every Playwright spec but the pixel compares.
   # Runs on pull requests and on pushes to main only.

@@ -22,7 +22,8 @@ use Symfony\Component\Process\Process;
  * VipsImageEncoder with the real vips tool of the image's libvips-tools package. The JPEG and WebP originals are made
  * from an ImageFixtures PNG by that same tool, because the fixtures' own JPEG and WebP hold no decodable pixels. Each
  * variant is checked as CleanUpload checks it before storing: a still WebP of its stated size, exactly as long as its
- * RIFF container and not the original. Skipped where vips is not on the PATH; CI's integration job excludes the group.
+ * RIFF container and not the original. Skipped where vips is not on the PATH; CI runs the group in the app image (the
+ * build job's "Run the libvips tests in the app image" step).
  */
 #[Group('libvips')]
 final class VipsImageEncoderTest extends TestCase
@@ -88,7 +89,7 @@ final class VipsImageEncoderTest extends TestCase
     }
 
     #[Test]
-    public function aTallPictureIsLimitedByItsWidthOnly(): void
+    public function aTallPictureWithinWebpsLargestSideIsLimitedByItsWidthOnly(): void
     {
         $original = ImageFixtures::png(600, 3000);
 
@@ -96,6 +97,17 @@ final class VipsImageEncoderTest extends TestCase
 
         self::assertCleanWebp($encoded->view, 600, 3000, $original);
         self::assertCleanWebp($encoded->thumb, 480, 2400, $original);
+    }
+
+    #[Test]
+    public function aPictureTallerThanWebpAllowsIsScaledDownTo16383PxHighKeepingItsAspectRatio(): void
+    {
+        $original = ImageFixtures::png(600, 16_384);
+
+        $encoded = self::encoder()->encode($original, ImageFormat::Png);
+
+        self::assertCleanWebp($encoded->view, 600, 16_383, $original);
+        self::assertCleanWebp($encoded->thumb, 480, 13_107, $original);
     }
 
     #[Test]

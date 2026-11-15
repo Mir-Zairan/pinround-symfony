@@ -12,6 +12,7 @@ use App\Media\Application\Processing\ImageHeaderReader;
 use App\Media\Application\Processing\UndecodableImage;
 use App\Media\Application\Processing\UnknownImageFormat;
 use App\Media\Application\Processing\UnreadableImageHeader;
+use Symfony\Component\Process\Exception\ProcessSignaledException;
 use Symfony\Component\Process\Exception\ProcessStartFailedException;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
@@ -20,9 +21,10 @@ use Symfony\Component\Process\Process;
  * The ImageEncoder of worker-media: it runs the libvips command-line tool (the image's libvips-tools package) through
  * Process with an argument list, never a shell string (media-pipeline.md, Processing worker). The original is decoded
  * whole by its own format's loader with fail-on=error into a vips file, so a file cut short or broken is refused and
- * nothing after its image data is read. Each variant is a thumbnail of that file, scaled down to its maximum width
- * only, made sRGB and saved as WebP, of which only the picture's own chunks are kept. The files live in a directory only
- * this process's user can open (0700), which is deleted before encode() returns.
+ * nothing after its image data is read. Each variant is a thumbnail of that file, scaled down to its maximum width and
+ * to WebP's largest side, made sRGB and saved as WebP, of which only the picture's own chunks are kept. vips inherits
+ * only PATH, HOME, TMPDIR and LANG. The files live in a directory only this process's user can open (0700), which is
+ * deleted before encode() returns.
  */
 final readonly class VipsImageEncoder implements ImageEncoder
 {
@@ -31,10 +33,21 @@ final readonly class VipsImageEncoder implements ImageEncoder
     /** WebP quality (0-100) per variant, as media-pipeline.md sets it. */
     private const int VIEW_QUALITY = 85;
     private const int THUMB_QUALITY = 75;
-    /** The largest height vips thumbnail takes: the box it fits a variant into is then limited by the width alone. */
-    private const int UNLIMITED_HEIGHT = 10_000_000;
+    /**
+     * WebP stores each side in 14 bits, so webpsave refuses a side above 16,383 px, while UploadPolicy allows 16,384:
+     * a variant is fitted into its maximum width by this height.
+     */
+    private const int WEBP_MAX_SIDE_PIXELS = 16_383;
     /** What the shell answers when the program cannot be executed (126) or is not found (127); vips itself exits 1. */
     private const array EXIT_CODES_OF_A_MISSING_TOOL = [126, 127];
+    /**
+     * Signals of a decoder that crashed on the bytes it was given (SIGILL 4, SIGABRT 6, SIGBUS 7, SIGFPE 8, SIGSEGV 11;
+     * Linux numbers, as the pcntl constants are not loaded). Any other signal, SIGKILL from the OOM killer above all,
+     * came from outside and says nothing about the picture.
+     */
+    private const array CRASH_SIGNALS = [4, 6, 7, 8, 11];
+    /** The only variables vips inherits; the worker's environment holds database, storage and encryption secrets. */
+    private const array INHERITED_VARIABLES = ['PATH', 'HOME', 'TMPDIR', 'LANG'];
     /** The chunks of a still WebP's pixels (RFC 9649, 2.7); any other chunk is metadata or animation. */
     private const array PICTURE_CHUNKS = ['VP8X', 'VP8 ', 'VP8L', 'ALPH'];
     /** The ICC profile (0x20), EXIF (0x08) and XMP (0x04) flags of a VP8X chunk's first byte. */
@@ -48,8 +61,11 @@ final readonly class VipsImageEncoder implements ImageEncoder
     }
 
     /**
-     * @throws UndecodableImage  when vips refuses the original, runs past the timeout or writes an empty variant
-     * @throws \RuntimeException when vips cannot be started or the temporary files cannot be written, so the caller
+     * @throws UndecodableImage  when vips refuses the original (any exit code but 0, 126 and 127), crashes on it
+     *                           (SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV), runs past the timeout or writes an empty
+     *                           variant
+     * @throws \RuntimeException when vips cannot be started (exit code 126 or 127), is stopped by any other signal
+     *                           (SIGKILL from the OOM killer) or the temporary files cannot be written, so the caller
      *                           retries; or when vips writes a variant that is no WebP
      */
     public function encode(string $original, ImageFormat $format): EncodedImage
@@ -76,7 +92,7 @@ final readonly class VipsImageEncoder implements ImageEncoder
     {
         $this->runVips([
             'thumbnail', $decodedPath, \sprintf('%s[strip,Q=%d]', $variantPath, $quality), (string) $maxWidth,
-            '--height', (string) self::UNLIMITED_HEIGHT, '--size', 'down', '--export-profile', 'srgb',
+            '--height', (string) self::WEBP_MAX_SIDE_PIXELS, '--size', 'down', '--export-profile', 'srgb',
         ]);
 
         $written = is_file($variantPath) ? file_get_contents($variantPath) : false;
@@ -99,7 +115,7 @@ final readonly class VipsImageEncoder implements ImageEncoder
     private function runVips(array $arguments): void
     {
         // vips warns once per broken tile, megabytes for a large broken file; only the exit code is used.
-        $process = new Process([$this->vipsBinary, ...$arguments], timeout: $this->timeoutSecondsPerRun);
+        $process = new Process([$this->vipsBinary, ...$arguments], env: self::childEnvironment(), timeout: $this->timeoutSecondsPerRun);
         $process->disableOutput();
         try {
             $exitCode = $process->run();
@@ -107,6 +123,11 @@ final readonly class VipsImageEncoder implements ImageEncoder
             throw new \RuntimeException('The vips tool could not be started.', 0, $notStarted);
         } catch (ProcessTimedOutException) {
             throw new UndecodableImage(\sprintf('vips %s ran longer than %s seconds.', $arguments[0], $this->timeoutSecondsPerRun));
+        } catch (ProcessSignaledException $signaled) {
+            if (\in_array($signaled->getSignal(), self::CRASH_SIGNALS, true)) {
+                throw new UndecodableImage(\sprintf('vips %s crashed on the image (signal %d).', $arguments[0], $signaled->getSignal()));
+            }
+            throw new \RuntimeException(\sprintf('vips %s was stopped by signal %d.', $arguments[0], $signaled->getSignal()), 0, $signaled);
         }
         if (\in_array($exitCode, self::EXIT_CODES_OF_A_MISSING_TOOL, true)) {
             throw new \RuntimeException('The vips tool is not installed or cannot be executed.');
@@ -152,6 +173,24 @@ final readonly class VipsImageEncoder implements ImageEncoder
         }
 
         return 'RIFF'.pack('V', 4 + \strlen($pictureChunks)).'WEBP'.$pictureChunks;
+    }
+
+    /**
+     * Process passes on every variable of getenv() and $_ENV that is not set to false here.
+     *
+     * @return array<string, string|false>
+     */
+    private static function childEnvironment(): array
+    {
+        $environment = [];
+        foreach (array_keys(getenv() + $_ENV) as $name) {
+            $environment[(string) $name] = false;
+        }
+        foreach (self::INHERITED_VARIABLES as $name) {
+            $environment[$name] = getenv($name);
+        }
+
+        return $environment;
     }
 
     private static function loaderOf(ImageFormat $format): string

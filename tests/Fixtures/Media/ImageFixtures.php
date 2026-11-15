@@ -90,25 +90,26 @@ final class ImageFixtures
     }
 
     /**
-     * An extended WebP (VP8X) of a canvas $width × $height. $animationFlag sets the flag byte's Animation bit;
-     * $animationChunks puts ANIM and ANMF chunks where the bitstream would be. Neither: a still picture.
+     * An extended WebP (VP8X) of a canvas $width × $height. $animationFlag sets the flag byte's Animation bit (0x02);
+     * $animationChunks puts ANIM and ANMF chunks where the bitstream would be. Neither: a still picture. $alphaFlag sets
+     * the Alpha bit (0x10).
      */
-    public static function webpExtended(int $width, int $height, bool $animationFlag = false, bool $animationChunks = false): string
+    public static function webpExtended(int $width, int $height, bool $animationFlag = false, bool $animationChunks = false, bool $alphaFlag = false): string
     {
         $frames = $animationChunks
             ? self::riffChunk('ANIM', "\x00\x00\x00\x00\x00\x00").self::riffChunk('ANMF', str_repeat("\x00", 16))
             : self::losslessChunk($width, $height, "\x00\x00\x00\x00");
 
-        return self::riff(self::canvasChunk($width, $height, $animationFlag ? 0x02 : 0x00).$frames);
+        return self::riff(self::canvasChunk($width, $height, ($animationFlag ? 0x02 : 0x00) | ($alphaFlag ? 0x10 : 0x00)).$frames);
     }
 
     /**
-     * webpExtended($width, $height) with an ICC profile, EXIF (an odd length, so padded) and XMP chunk around its
-     * bitstream, each announced by its flag in the VP8X header.
+     * webpExtended($width, $height, alphaFlag: true) with an ICC profile, EXIF (an odd length, so padded) and XMP chunk
+     * around its bitstream, each announced by its flag in the VP8X header next to the Alpha flag.
      */
     public static function webpWithMetadata(int $width, int $height): string
     {
-        return self::riff(self::canvasChunk($width, $height, 0x20 | 0x08 | 0x04)
+        return self::riff(self::canvasChunk($width, $height, 0x20 | 0x10 | 0x08 | 0x04)
             .self::riffChunk('ICCP', 'an icc profile')
             .self::losslessChunk($width, $height, "\x00\x00\x00\x00")
             .self::riffChunk('EXIF', "Exif\x00\x00GPS 52N")

@@ -92,14 +92,27 @@ Runs on the `media` transport ([ADR-0009](../03-adr/0009-async-messaging-and-out
 6. Delete the upload object.
 7. Publish `MediaReady` (outbox) so Review can update the round and Notification can push the change.
 
-**How libvips runs:** `VipsImageEncoder` runs the `vips` command-line tool (Debian bookworm's `libvips-tools`, libvips 8.14, installed in the Dockerfile's base stage) through `symfony/process`, with an argument list and never a shell string. This needs no FFI extension, no PECL extension and no new Composer package, and a crash or a runaway decode stays in a child process. Per upload, in a new directory only the worker's user can open (0700), deleted when the encoder returns:
+**How libvips runs:** `VipsImageEncoder` runs the `vips` command-line tool (Debian bookworm's `libvips-tools`, pinned to `8.14.1-*` in the Dockerfile's base stage) through `symfony/process`, with an argument list and never a shell string. This needs no FFI extension, no PECL extension and no new Composer package, and a crash or a runaway decode stays in a child process. The child inherits only `PATH`, `HOME`, `TMPDIR` and `LANG`: every other variable of the worker (database URLs, the storage secret, the encryption keys) is withheld. Per upload, in a new directory only the worker's user can open (0700), deleted when the encoder returns:
 
 - `vips pngload|jpegload|webpload <original> decoded.v --fail-on error`: the loader of the format the signature showed, and no other, decodes the whole file; a file cut short or broken fails. Bytes after the image data (a polyglot's tail) are never read.
-- `vips thumbnail decoded.v view.webp[strip,Q=85] 1920 --height 10000000 --size down --export-profile srgb`, and the same with `thumb.webp[strip,Q=75] 480`: scaled down to the width only, never up, aspect ratio kept, turned upright by its orientation tag and made sRGB.
-- libvips 8.14 writes an EXIF chunk into a WebP even with `strip`, so the encoder keeps only the picture chunks (`VP8X`, `VP8 `, `VP8L`, `ALPH`) and clears the ICC, EXIF and XMP flags of `VP8X`. Width and height come from the result's header.
-- Each run has a 30 s timeout. A refusal (exit code 1), a timeout or a missing result is `UndecodableImage`, so the object is rejected as unreadable. A tool that cannot start (exit code 126 or 127) or a result that is no WebP is a `RuntimeException`: the message is retried and the object stays pending.
+- `vips thumbnail decoded.v view.webp[strip,Q=85] 1920 --height 16383 --size down --export-profile srgb`, and the same with `thumb.webp[strip,Q=75] 480`: scaled down to fit 1920 (or 480) px wide and 16,383 px high, never up, aspect ratio kept, turned upright by its orientation tag and made sRGB. The height cap is WebP's largest side (14 bits): `UploadPolicy` allows 16,384 px, and `webpsave` refuses a picture of 16,384 px ("image too large"), so a 600 × 16,384 picture becomes a 600 × 16,383 view.
+- libvips 8.14 writes an EXIF chunk into a WebP even with `strip`, so the encoder keeps only the picture chunks (`VP8X`, `VP8 `, `VP8L`, `ALPH`) and clears the ICC, EXIF and XMP flags of `VP8X`; its other flags (alpha) stay. Width and height come from the result's header.
+- Each run has a 30 s timeout. How a run ends decides what happens to the object:
 
-Tests: `tests/Unit/Media/Infrastructure/Processing/VipsImageEncoderTest.php` runs the encoder against a stand-in for the tool; `tests/Integration/Media/Processing/VipsImageEncoderTest.php` (group `libvips`) runs the real tool and is skipped where `vips` is not on the PATH. CI's integration job excludes that group. Time per image (the p95 ≤ 10 s target for a 15 MB image) is not measured yet.
+| vips ends with | Result | Object |
+|---|---|---|
+| exit code 0 and a WebP variant | the variant | ready |
+| any exit code other than 0, 126 and 127 (vips refuses with 1) | `UndecodableImage` | rejected as unreadable |
+| a crash signal: SIGILL, SIGABRT, SIGBUS, SIGFPE or SIGSEGV | `UndecodableImage` | rejected as unreadable |
+| the 30 s timeout | `UndecodableImage` | rejected as unreadable |
+| exit code 0 and no variant, or an empty one | `UndecodableImage` | rejected as unreadable |
+| exit code 126 or 127, or no process could be started | `RuntimeException` | pending; the message is retried |
+| any other signal (SIGKILL from the OOM killer, SIGTERM) | `RuntimeException` | pending; the message is retried |
+| exit code 0 and a variant that is no WebP container | `RuntimeException` | pending; the message is retried |
+
+**What the package brings:** `libvips-tools` with `--no-install-recommends` still pulls every loader libvips 8.14 is built with (171 packages in its dependency tree, many already in the base image): ImageMagick 6 (`libmagickcore-6.q16-6`), librsvg, poppler, OpenSlide, libheif, libjxl, matio, cfitsio, OpenEXR, libtiff and libgsf among them. They are accepted: the encoder names its loader (`pngload`, `jpegload` or `webpload`) for the original and reads only its own `.v` file after that, so no other loader is ever given an upload. `VIPS_BLOCK_UNTRUSTED` cannot shut them off in 8.14, because it blocks `vipsload` too.
+
+Tests: `tests/Unit/Media/Infrastructure/Processing/VipsImageEncoderTest.php` runs the encoder against a stand-in for the tool; `tests/Integration/Media/Processing/VipsImageEncoderTest.php` (group `libvips`) runs the real tool and is skipped where `vips` is not on the PATH. CI's `build` job runs that group in a container of the dev image, with `--fail-on-skipped` (step "Run the libvips tests in the app image"); the `integration` job excludes it. Time per image (the p95 ≤ 10 s target for a 15 MB image) is not measured yet.
 
 ## Storage key layout
 
