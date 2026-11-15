@@ -13,6 +13,7 @@ use App\Media\Api\UploadTargetDenied;
 use App\Media\Domain\MediaId;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaObjects;
+use App\Media\Domain\StorageQuota;
 use App\Media\Domain\UploadIntent;
 use App\Media\Domain\UploadIntentId;
 use App\Media\Domain\UploadIntents;
@@ -35,6 +36,7 @@ final readonly class DirectUploads implements Uploads
     public const string EXPIRED = 'The page was open too long. Try again.';
     public const string USED_ALREADY = 'This upload has ended. Upload the file again.';
     public const string STORAGE_FULL = "Your company's storage is full. Ask your admin.";
+    public const string TOO_MANY_WAITING = 'You have too many uploads waiting. Finish or wait for them, then try again.';
 
     /**
      * @param int $organizationQuotaBytes what each organization may store, UploadPolicy::UNLIMITED_QUOTA for no limit
@@ -44,6 +46,7 @@ final readonly class DirectUploads implements Uploads
     public function __construct(
         private UploadIntents $uploadIntents,
         private MediaObjects $mediaObjects,
+        private StorageQuota $storageQuota,
         private UploadUrlSigner $uploadUrlSigner,
         private UploadProcessingQueue $uploadProcessingQueue,
         private MediaTargetAuthorizers $mediaTargetAuthorizers,
@@ -66,7 +69,7 @@ final readonly class DirectUploads implements Uploads
             throw new UploadRefused('This file is empty or bigger than 15 MB. Pick a screenshot of up to 15 MB.');
         }
         $this->requireTenant($organizationId);
-        $this->requireRoomFor($organizationId, $bytes, $at);
+        $this->requireRoomFor($organizationId, $userId, $bytes, $at);
         $this->requireMayAttach($organizationId, $userId, $target->kind, $target->id);
 
         $intentId = $this->uploadIntents->nextIdentity();
@@ -126,16 +129,19 @@ final readonly class DirectUploads implements Uploads
 
     /**
      * The lock lasts until the caller's transaction commits, after the intent is stored, so a second begin of the
-     * organization counts it.
+     * organization counts it. It is taken without a quota too, as the count of a person's open uploads needs it.
      */
-    private function requireRoomFor(OrganizationId $organizationId, int $bytes, \DateTimeImmutable $at): void
+    private function requireRoomFor(OrganizationId $organizationId, UserId $userId, int $bytes, \DateTimeImmutable $at): void
     {
+        $this->storageQuota->lock($organizationId);
+        if (!UploadPolicy::allowsAnotherOpenUpload($this->uploadIntents->openCountOf($userId, $at))) {
+            throw new UploadRefused(self::TOO_MANY_WAITING);
+        }
         if (UploadPolicy::UNLIMITED_QUOTA === $this->organizationQuotaBytes) {
             return;
         }
 
-        $this->uploadIntents->lockQuotaOf($organizationId);
-        $usedBytes = $this->mediaObjects->storedBytes() + $this->uploadIntents->openBytesAt($at);
+        $usedBytes = $this->storageQuota->bytesInUseAt($organizationId, $at);
         if (!UploadPolicy::fitsQuota($this->organizationQuotaBytes, $usedBytes, $bytes)) {
             throw new UploadRefused(self::STORAGE_FULL);
         }

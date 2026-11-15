@@ -31,10 +31,9 @@ use Symfony\Component\Routing\Attribute\Route;
  * object. Both need a member of the tenant, the form token in the X-CSRF-Token header and a body of at most 4 KB.
  *
  * In that order: a person with no actor in the tenant is forbidden; a missing or wrong token answers 422 as an expired
- * page; a larger body 413; a body that is no begin request 400. Begin then asks MediaPermission UPLOAD on the target
- * (403), and Uploads refuses a file type or size, or a file the organization's storage has no room for, with its plain
- * message (422) before any URL is signed. Complete runs
- * outside the request transaction, as Uploads::complete() opens its own, and answers an intent its person did not
+ * page; a larger body 413; a body that is no begin request 400. Begin then asks MediaPermission UPLOAD on the target (403), and Uploads refuses a file type or size, a person
+ * with too many uploads waiting, or a file the organization's storage has no room for, with its plain message (422)
+ * before any URL is signed. Complete runs outside the request transaction, as Uploads::complete() opens its own, and answers an intent its person did not
  * begin, of another organization or with a malformed id as not found (404), a target they may no longer add to as
  * forbidden (403), and a used or expired intent with Uploads' message (422).
  */

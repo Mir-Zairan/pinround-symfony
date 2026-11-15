@@ -13,6 +13,7 @@ use App\Media\Application\MediaTargetAuthorizers;
 use App\Media\Application\ProcessUpload;
 use App\Media\Application\UploadProcessingQueue;
 use App\Media\Infrastructure\Doctrine\DoctrineMediaObjects;
+use App\Media\Infrastructure\Doctrine\DoctrineStorageQuota;
 use App\Media\Infrastructure\Doctrine\DoctrineUploadIntents;
 use App\Media\Infrastructure\Messenger\MessengerUploadProcessingQueue;
 use App\Media\Infrastructure\Storage\ObjectStorageSettings;
@@ -70,17 +71,6 @@ final class DirectUploadsTest extends KernelTestCase
     public function theContainerGivesTheUploadsApiAsDirectUploads(): void
     {
         self::assertInstanceOf(DirectUploads::class, self::getContainer()->get('test.media_uploads'));
-    }
-
-    /**
-     * .env.test leaves MEDIA_ORG_QUOTA_BYTES unset, so the container gives the default of media-pipeline.md.
-     */
-    #[Test]
-    public function theContainerGivesEachOrganizationA50GibQuotaByDefault(): void
-    {
-        $uploads = self::getContainer()->get('test.media_uploads');
-
-        self::assertSame(self::FIFTY_GIB, new \ReflectionProperty(DirectUploads::class, 'organizationQuotaBytes')->getValue($uploads));
     }
 
     #[Test]
@@ -298,6 +288,7 @@ final class DirectUploadsTest extends KernelTestCase
         return new DirectUploads(
             new DoctrineUploadIntents($entityManager),
             new DoctrineMediaObjects($entityManager),
+            new DoctrineStorageQuota($entityManager),
             new PresignedUploads(new ObjectStorageSettings('http://minio:9000', 'https://files.example.test', 'pinround', 'eu-west-1', 'acme-key', 'acme-secret'), $this->clock),
             $uploadProcessingQueue ?? new MessengerUploadProcessingQueue(self::getContainer()->get('command.bus'), $this->connection()),
             new MediaTargetAuthorizers([$this->ticketAuthorizer]),

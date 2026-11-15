@@ -52,11 +52,14 @@ final class DirectUploadsTest extends TestCase
     private CountingClock $signingClock;
     private TenantContext $tenantContext;
     private InMemoryTransactions $transactions;
+    private PortCallLog $portCallLog;
     private InMemoryUploadIntents $uploadIntents;
     private InMemoryMediaObjects $mediaObjects;
+    private InMemoryStorageQuota $storageQuota;
     private InMemoryUploadProcessingQueue $uploadProcessingQueue;
     private RecordingMediaTargetAuthorizer $ticketAuthorizer;
     private DirectUploads $uploads;
+    private int $callCountOfTheSeed = 0;
 
     protected function setUp(): void
     {
@@ -65,8 +68,10 @@ final class DirectUploadsTest extends TestCase
         $this->tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
         $this->transactions = new InMemoryTransactions($this->tenantContext);
-        $this->uploadIntents = new InMemoryUploadIntents($this->transactions, $this->tenantContext);
+        $this->portCallLog = new PortCallLog();
+        $this->uploadIntents = new InMemoryUploadIntents($this->transactions, $this->tenantContext, $this->portCallLog);
         $this->mediaObjects = new InMemoryMediaObjects($this->transactions, $this->tenantContext);
+        $this->storageQuota = new InMemoryStorageQuota($this->transactions, $this->tenantContext, $this->mediaObjects, $this->uploadIntents, $this->portCallLog);
         $this->uploadProcessingQueue = new InMemoryUploadProcessingQueue($this->transactions);
         $this->ticketAuthorizer = new RecordingMediaTargetAuthorizer(self::TICKET);
         $this->ticketAuthorizer->allow(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::SHOP_12);
@@ -222,25 +227,69 @@ final class DirectUploadsTest extends TestCase
     }
 
     #[Test]
-    public function aBeginWithNoQuotaOutsideATransactionIsStillRefusedByTheStore(): void
+    public function aBeginWithNoQuotaOutsideATransactionIsRefusedAtTheLock(): void
     {
         try {
             $this->uploadsWithQuota(UploadPolicy::UNLIMITED_QUOTA)->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::shop12(), 'screenshot', 'image/png', 2048, $this->clock->now());
             self::fail('An upload was begun outside a transaction.');
         } catch (\LogicException $refusal) {
-            self::assertSame('Adding an upload intent needs an open transaction.', $refusal->getMessage());
+            self::assertSame('Locking the storage quota needs an open transaction.', $refusal->getMessage());
         }
 
         self::assertSame([], $this->uploadIntents->storedRows());
         self::assertSame(0, $this->signingClock->readCount);
     }
 
+    /**
+     * Counted before the lock, a second begin of the organization could count before the first one's intent is stored.
+     */
     #[Test]
-    public function aBeginTakesTheQuotaLockOfItsOrganization(): void
+    public function aBeginLocksItsOrganizationsQuotaBeforeItCountsAndStores(): void
     {
-        $this->begin('image/png', 2048);
+        $slot = $this->begin('image/png', 2048);
 
-        self::assertSame([self::ACME_FOODS], $this->uploadIntents->quotaLocksTaken());
+        self::assertSame(['lock '.self::ACME_FOODS, 'openCountOf '.self::MIA, 'bytesInUseAt '.self::ACME_FOODS, 'add '.$slot->intentId], $this->portCallLog->calls());
+    }
+
+    #[Test]
+    public function aPersonWithOneUploadLessThanTheMostWaitingMayBeginOneMore(): void
+    {
+        $this->seedOpenIntentsOfMia(UploadPolicy::MAX_OPEN_UPLOADS_PER_USER - 1);
+
+        $slot = $this->begin('image/png', 2048);
+
+        self::assertContains($slot->intentId, $this->storedIntentIds());
+        self::assertCount(UploadPolicy::MAX_OPEN_UPLOADS_PER_USER, $this->openIntentsOfMiaInAcmeFoods());
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function quotas(): iterable
+    {
+        yield 'a quota' => [self::FIFTY_GIB];
+        yield 'no quota' => [UploadPolicy::UNLIMITED_QUOTA];
+    }
+
+    #[Test]
+    #[DataProvider('quotas')]
+    public function aPersonWithTheMostUploadsWaitingIsRefusedBeforeTheBytesAreCountedAndNothingIsStored(int $organizationQuotaBytes): void
+    {
+        $this->seedOpenIntentsOfMia(UploadPolicy::MAX_OPEN_UPLOADS_PER_USER);
+        $intentsBefore = $this->storedIntentIds();
+        $this->uploads = $this->uploadsWithQuota($organizationQuotaBytes);
+
+        try {
+            $this->begin('image/png', 2048);
+            self::fail('A person with the most uploads waiting began one more.');
+        } catch (UploadRefused $refused) {
+            self::assertSame('You have too many uploads waiting. Finish or wait for them, then try again.', $refused->getMessage());
+        }
+
+        self::assertSame($intentsBefore, $this->storedIntentIds());
+        self::assertSame(0, $this->signingClock->readCount);
+        self::assertSame([], $this->ticketAuthorizer->asked(), 'Too many uploads waiting are refused before the target is asked about.');
+        self::assertSame(['lock '.self::ACME_FOODS, 'openCountOf '.self::MIA], $this->callsAfterTheSeed());
     }
 
     #[Test]
@@ -272,10 +321,14 @@ final class DirectUploadsTest extends TestCase
         self::assertSame($intentsBefore, $this->storedIntentIds());
         self::assertSame(0, $this->signingClock->readCount);
         self::assertSame([], $this->ticketAuthorizer->asked(), 'A full storage is refused before the target is asked about.');
+        self::assertSame(['lock '.self::ACME_FOODS, 'openCountOf '.self::MIA, 'bytesInUseAt '.self::ACME_FOODS], $this->callsAfterTheSeed());
     }
 
+    /**
+     * The lock still guards the count of a person's open uploads, but no bytes are counted.
+     */
     #[Test]
-    public function noQuotaTakesNoLockAndTakesAnUploadWhateverIsStored(): void
+    public function noQuotaCountsNoBytesAndTakesAnUploadWhateverIsStored(): void
     {
         $this->seedStorageUse();
         $this->uploads = $this->uploadsWithQuota(UploadPolicy::UNLIMITED_QUOTA);
@@ -283,7 +336,7 @@ final class DirectUploadsTest extends TestCase
         $slot = $this->begin('image/png', UploadPolicy::MAX_BYTES);
 
         self::assertContains($slot->intentId, $this->storedIntentIds());
-        self::assertSame([], $this->uploadIntents->quotaLocksTaken());
+        self::assertSame(['lock '.self::ACME_FOODS, 'openCountOf '.self::MIA, 'add '.$slot->intentId], $this->callsAfterTheSeed());
     }
 
     #[Test]
@@ -306,7 +359,7 @@ final class DirectUploadsTest extends TestCase
         }
 
         $this->assertNothingBegun();
-        self::assertSame([], $this->uploadIntents->quotaLocksTaken(), 'The tenant is checked before the quota is locked.');
+        self::assertSame([], $this->portCallLog->calls(), 'The tenant is checked before the quota is locked.');
     }
 
     #[Test]
@@ -610,6 +663,7 @@ final class DirectUploadsTest extends TestCase
         return new DirectUploads(
             $this->uploadIntents,
             $this->mediaObjects,
+            $this->storageQuota,
             new PresignedUploads(new ObjectStorageSettings('http://minio:9000', 'https://files.example.test', 'pinround', 'eu-west-1', 'acme-key', 'acme-secret'), $this->signingClock),
             $this->uploadProcessingQueue,
             new MediaTargetAuthorizers([$this->ticketAuthorizer]),
@@ -648,6 +702,60 @@ final class DirectUploadsTest extends TestCase
             $this->uploadIntents->add($this->intentOf($otherOrganization, 50_000, UploadPolicy::intentExpiryFor($now)));
         });
         $this->tenantContext->set($acmeFoods);
+        $this->callCountOfTheSeed = \count($this->portCallLog->calls());
+    }
+
+    /**
+     * $count open intents of Mia in Acme Foods, beside ones that must not count: a used and an expired one of Mia, three
+     * open ones of Omar and three of Mia in another organization. Counting any of those refuses a begin that
+     * aPersonWithOneUploadLessThanTheMostWaitingMayBeginOneMore takes.
+     */
+    private function seedOpenIntentsOfMia(int $count): void
+    {
+        $now = $this->clock->now();
+        $acmeFoods = new OrganizationId(self::ACME_FOODS);
+        $this->transactions->run(function () use ($acmeFoods, $now, $count): void {
+            for ($i = 0; $i < $count; ++$i) {
+                $this->uploadIntents->add($this->intentOf($acmeFoods, 100, UploadPolicy::intentExpiryFor($now)));
+            }
+            $used = $this->intentOf($acmeFoods, 100, UploadPolicy::intentExpiryFor($now));
+            $this->uploadIntents->add($used);
+            $this->uploadIntents->recordUse($used, $now);
+            $this->uploadIntents->add($this->intentOf($acmeFoods, 100, $now));
+            for ($i = 0; $i < 3; ++$i) {
+                $this->uploadIntents->add($this->intentOf($acmeFoods, 100, UploadPolicy::intentExpiryFor($now), self::OMAR));
+            }
+        });
+        $otherOrganization = new OrganizationId(self::OTHER_ORGANIZATION);
+        $this->tenantContext->set($otherOrganization);
+        $this->transactions->run(function () use ($otherOrganization, $now): void {
+            for ($i = 0; $i < 3; ++$i) {
+                $this->uploadIntents->add($this->intentOf($otherOrganization, 100, UploadPolicy::intentExpiryFor($now)));
+            }
+        });
+        $this->tenantContext->set($acmeFoods);
+        $this->callCountOfTheSeed = \count($this->portCallLog->calls());
+    }
+
+    /**
+     * @return list<UploadIntent>
+     */
+    private function openIntentsOfMiaInAcmeFoods(): array
+    {
+        $now = $this->clock->now();
+
+        return array_values(array_filter(
+            $this->uploadIntents->storedRows(),
+            static fn (UploadIntent $intent): bool => self::ACME_FOODS === $intent->organizationId()->toString() && self::MIA === $intent->userId()->toString() && null === $intent->usedAt() && $intent->expiresAt() > $now,
+        ));
+    }
+
+    /**
+     * @return list<string> what the ports were asked since the last seed
+     */
+    private function callsAfterTheSeed(): array
+    {
+        return \array_slice($this->portCallLog->calls(), $this->callCountOfTheSeed);
     }
 
     private function mediaObjectOf(OrganizationId $organizationId, int $bytes): MediaObject
@@ -657,11 +765,11 @@ final class DirectUploadsTest extends TestCase
         return MediaObject::upload($mediaId, $organizationId, 'uploads/'.$organizationId->toString().'/'.$mediaId->toString(), 'image/png', $bytes, new UserId(self::MIA), $this->clock->now());
     }
 
-    private function intentOf(OrganizationId $organizationId, int $maxBytes, \DateTimeImmutable $expiresAt): UploadIntent
+    private function intentOf(OrganizationId $organizationId, int $maxBytes, \DateTimeImmutable $expiresAt, string $userId = self::MIA): UploadIntent
     {
         $intentId = $this->uploadIntents->nextIdentity();
 
-        return UploadIntent::open($intentId, $organizationId, new UserId(self::MIA), UploadPurpose::Screenshot, self::TICKET, self::SHOP_12, $maxBytes, ['image/png'], 'uploads/'.$organizationId->toString().'/'.$intentId->toString(), $expiresAt);
+        return UploadIntent::open($intentId, $organizationId, new UserId($userId), UploadPurpose::Screenshot, self::TICKET, self::SHOP_12, $maxBytes, ['image/png'], 'uploads/'.$organizationId->toString().'/'.$intentId->toString(), $expiresAt);
     }
 
     /**

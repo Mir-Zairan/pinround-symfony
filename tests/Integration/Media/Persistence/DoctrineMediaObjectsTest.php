@@ -313,45 +313,6 @@ final class DoctrineMediaObjectsTest extends KernelTestCase
     }
 
     /**
-     * The rejected object and the other organization's are larger than the ones counted, so counting either shows.
-     */
-    #[Test]
-    public function storedBytesSumsTheTenantsPendingAndReadyObjects(): void
-    {
-        $this->addMediaOfSize(self::ACME_FOODS, self::ACME_PENDING, 3_000);
-        $this->addMediaOfSize(self::ACME_FOODS, self::ACME_READY_LATER, 4_000, ready: true);
-        $this->addMediaOfSize(self::ACME_FOODS, self::ACME_READY_OTHER_PICTURE, 50_000, rejected: true);
-        $this->addMediaOfSize(self::OTHER_ORGANIZATION, self::OTHER_READY_OLDEST, 80_000, ready: true);
-
-        $storedBytesOfAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->mediaObjects()->storedBytes());
-        $storedBytesOfOther = $this->transactions()->rolledBackAs(self::OTHER_ORGANIZATION, fn (): int => $this->mediaObjects()->storedBytes());
-
-        self::assertSame(7_000, $storedBytesOfAcme);
-        self::assertSame(80_000, $storedBytesOfOther);
-    }
-
-    #[Test]
-    public function storedBytesIsZeroWithNoObjectsThatTakeSpace(): void
-    {
-        $this->addMediaOfSize(self::ACME_FOODS, self::ACME_PENDING, 50_000, rejected: true);
-        $this->addMediaOfSize(self::OTHER_ORGANIZATION, self::OTHER_READY_OLDEST, 80_000, ready: true);
-
-        self::assertSame(0, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->mediaObjects()->storedBytes()));
-    }
-
-    /**
-     * A size past 4 GiB, which a 32-bit integer would wrap, comes back whole.
-     */
-    #[Test]
-    public function storedBytesKeepsLargeTotalsWhole(): void
-    {
-        $this->addMediaOfSize(self::ACME_FOODS, self::ACME_PENDING, 53_687_091_200);
-        $this->addMediaOfSize(self::ACME_FOODS, self::ACME_READY_LATER, 3, ready: true);
-
-        self::assertSame(53_687_091_203, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->mediaObjects()->storedBytes()));
-    }
-
-    /**
      * @return iterable<string, array{\Closure(DoctrineMediaObjects): mixed, string}>
      */
     public static function readsOutsideATransaction(): iterable
@@ -359,7 +320,6 @@ final class DoctrineMediaObjectsTest extends KernelTestCase
         yield 'byId' => [static fn (DoctrineMediaObjects $mediaObjects): mixed => $mediaObjects->byId(new MediaId(self::ACME_PENDING)), 'Reading a media object needs an open transaction.'];
         yield 'lockById' => [static fn (DoctrineMediaObjects $mediaObjects): mixed => $mediaObjects->lockById(new MediaId(self::ACME_PENDING)), 'Locking a media object needs an open transaction.'];
         yield 'readyBySha256' => [static fn (DoctrineMediaObjects $mediaObjects): mixed => $mediaObjects->readyBySha256(self::SAME_PICTURE), 'Reading a media object needs an open transaction.'];
-        yield 'storedBytes' => [static fn (DoctrineMediaObjects $mediaObjects): mixed => $mediaObjects->storedBytes(), 'Reading the stored media objects needs an open transaction.'];
     }
 
     /**
@@ -386,20 +346,6 @@ final class DoctrineMediaObjectsTest extends KernelTestCase
             $mediaObject = $this->mediaOf($organizationId, $id, $createdAt);
             if (null !== $sha256) {
                 $mediaObject->markReady($sha256, 1280, 800, ['thumb' => $id.'/thumb.webp', 'full' => $id.'/full.webp']);
-            }
-            $this->mediaObjects()->add($mediaObject);
-        });
-    }
-
-    private function addMediaOfSize(string $organizationId, string $id, int $bytes, bool $ready = false, bool $rejected = false): void
-    {
-        $this->transactions()->committedAs($organizationId, function () use ($organizationId, $id, $bytes, $ready, $rejected): void {
-            $mediaObject = MediaObject::upload(new MediaId($id), new OrganizationId($organizationId), 'uploads/'.$id, 'image/png', $bytes, new UserId(self::MIA), new \DateTimeImmutable('2026-03-02 10:00:00+00:00'));
-            if ($ready) {
-                $mediaObject->markReady(self::SAME_PICTURE, 1280, 800, ['view' => $id.'/view.webp']);
-            }
-            if ($rejected) {
-                $mediaObject->reject('Not a picture.');
             }
             $this->mediaObjects()->add($mediaObject);
         });

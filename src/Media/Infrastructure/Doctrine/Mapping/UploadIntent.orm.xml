@@ -6,6 +6,12 @@
     <entity name="App\Media\Domain\UploadIntent" table="med_upload_intent">
         <indexes>
             <index name="med_upload_intent_expires_at_idx" columns="organization_id,expires_at"/>
+            <!-- Key columns, as DBAL cannot express INCLUDE: the quota's sum and a person's open count read only the index. -->
+            <index name="med_upload_intent_open_idx" columns="organization_id,expires_at,user_id,max_bytes">
+                <options>
+                    <option name="where">(used_at IS NULL)</option>
+                </options>
+            </index>
         </indexes>
 
         <id name="organizationId" type="guid" column="organization_id" position="0"/>

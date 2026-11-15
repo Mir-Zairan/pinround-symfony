@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Media\Domain;
 
-use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 
 interface UploadIntents
 {
@@ -37,18 +37,9 @@ interface UploadIntents
     public function recordUse(UploadIntent $intent, \DateTimeImmutable $at): void;
 
     /**
-     * Holds the organization's storage quota until the open transaction ends, so a second begin of the same
-     * organization waits here and then counts the intent of the first one. Other organizations do not wait.
+     * How many of the tenant's intents $userId began that are neither used nor expired by $at; 0 when there are none.
      *
      * @throws \LogicException when no transaction is open
      */
-    public function lockQuotaOf(OrganizationId $organizationId): void;
-
-    /**
-     * The bytes the tenant's open intents may still put in the bucket: the sum of max bytes of those neither used nor
-     * expired by $at; 0 when there are none. A used intent's file is counted as its media object instead.
-     *
-     * @throws \LogicException when no transaction is open
-     */
-    public function openBytesAt(\DateTimeImmutable $at): int;
+    public function openCountOf(UserId $userId, \DateTimeImmutable $at): int;
 }

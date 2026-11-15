@@ -7,7 +7,6 @@ namespace App\Media\Infrastructure\Doctrine;
 use App\Media\Domain\MediaId;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaObjects;
-use App\Media\Domain\MediaStatus;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
@@ -88,18 +87,6 @@ final readonly class DoctrineMediaObjects implements MediaObjects
             ->getOneOrNullResult();
 
         return $mediaObject instanceof MediaObject ? $mediaObject : null;
-    }
-
-    /**
-     * Served by med_object_status_created_at_idx; the tenant filter supplies the organization.
-     */
-    public function storedBytes(): int
-    {
-        $this->requireTransaction('Reading the stored media objects needs an open transaction.');
-
-        return ByteSum::of($this->entityManager->createQuery('SELECT COALESCE(SUM(m.bytes), 0) FROM '.MediaObject::class.' m WHERE m.status IN (:takingSpace)')
-            ->setParameter('takingSpace', [MediaStatus::Pending->value, MediaStatus::Ready->value])
-            ->getSingleScalarResult());
     }
 
     /**

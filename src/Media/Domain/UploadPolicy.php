@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Media\Domain;
 
 /**
- * What a direct upload may be (ADR-0011), how long its intent lasts (media-pipeline.md, Failure handling) and whether
- * it fits the organization's storage quota (media-pipeline.md, Quotas).
+ * What a direct upload may be (ADR-0011), how long its intent lasts (media-pipeline.md, Failure handling), how many a
+ * person may hold open and whether it fits the organization's storage quota (media-pipeline.md, Quotas).
  */
 final class UploadPolicy
 {
@@ -18,6 +18,12 @@ final class UploadPolicy
 
     /** A quota of 0 bytes is no quota, for a self-hosted install whose operator sets none. */
     public const int UNLIMITED_QUOTA = 0;
+
+    /**
+     * Each open intent holds its declared bytes of the quota for a day, so this bounds what one person can hold back
+     * from the rest of the organization: 20 × 15 MB.
+     */
+    public const int MAX_OPEN_UPLOADS_PER_USER = 20;
 
     /** An interrupted upload's intent lasts a day, as does its bucket object. */
     private const string INTENT_LIFETIME = 'P1D';
@@ -37,6 +43,14 @@ final class UploadPolicy
     public static function allowsSize(int $bytes): bool
     {
         return $bytes >= 1 && $bytes <= self::MAX_BYTES;
+    }
+
+    /**
+     * Whether a person who holds $openUploads intents neither used nor expired may begin one more.
+     */
+    public static function allowsAnotherOpenUpload(int $openUploads): bool
+    {
+        return $openUploads < self::MAX_OPEN_UPLOADS_PER_USER;
     }
 
     /**

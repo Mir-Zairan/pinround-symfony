@@ -130,7 +130,8 @@ services:
     App\Media\Application\MediaTargetAuthorizers:
         arguments:
             $authorizers: !tagged_iterator app.media_target_authorizer
-    # A value that is no whole number fails the request; a negative one is refused by DirectUploads.
+    # The int: processor fails the request on a value that is no number, but cuts a fraction off (1.5 is 1 byte) and
+    # takes exponent notation (5e10 is 50 GB); a negative value is refused by DirectUploads.
     App\Media\Application\DirectUploads:
         arguments:
             $organizationQuotaBytes: '%env(int:default:media.organization_quota_default_bytes:MEDIA_ORG_QUOTA_BYTES)%'

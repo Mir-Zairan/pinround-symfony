@@ -35,6 +35,24 @@ final class UploadPolicyTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{int, bool}>
+     */
+    public static function openUploadCounts(): iterable
+    {
+        yield 'none' => [0, true];
+        yield 'one less than the most' => [19, true];
+        yield 'the most' => [20, false];
+        yield 'more than the most, as after the limit was lowered' => [21, false];
+    }
+
+    #[Test]
+    #[DataProvider('openUploadCounts')]
+    public function aPersonMayHoldTwentyUploadsOpenAtMost(int $openUploads, bool $allowsAnother): void
+    {
+        self::assertSame($allowsAnother, UploadPolicy::allowsAnotherOpenUpload($openUploads));
+    }
+
+    /**
      * @return iterable<string, array{int, int}>
      */
     public static function negativeAmounts(): iterable

@@ -8,16 +8,13 @@ use App\Media\Domain\UploadIntent;
 use App\Media\Domain\UploadIntentId;
 use App\Media\Domain\UploadIntents;
 use App\Media\Domain\UploadIntentUnusable;
-use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
 
 final readonly class DoctrineUploadIntents implements UploadIntents
 {
-    /** Names the lock among every module's advisory locks, which share one key space. */
-    public const string QUOTA_LOCK_PREFIX = 'med_upload_quota:';
-
     public function __construct(private EntityManagerInterface $entityManager)
     {
     }
@@ -83,28 +80,21 @@ final readonly class DoctrineUploadIntents implements UploadIntents
     }
 
     /**
-     * A transaction-scoped advisory lock rather than a row lock, as the organization may have no row to lock yet.
+     * Served index-only by med_upload_intent_open_idx; the tenant filter supplies the organization.
      */
-    public function lockQuotaOf(OrganizationId $organizationId): void
-    {
-        $this->requireTransaction('Locking the storage quota needs an open transaction.');
-
-        $this->entityManager->getConnection()->executeStatement(
-            'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
-            [self::QUOTA_LOCK_PREFIX.$organizationId->toString()],
-        );
-    }
-
-    /**
-     * Served by med_upload_intent_expires_at_idx; the tenant filter supplies the organization.
-     */
-    public function openBytesAt(\DateTimeImmutable $at): int
+    public function openCountOf(UserId $userId, \DateTimeImmutable $at): int
     {
         $this->requireTransaction('Reading the open upload intents needs an open transaction.');
 
-        return ByteSum::of($this->entityManager->createQuery('SELECT COALESCE(SUM(i.maxBytes), 0) FROM '.UploadIntent::class.' i WHERE i.usedAt IS NULL AND i.expiresAt > :at')
+        $openCount = $this->entityManager->createQuery('SELECT COUNT(i.id) FROM '.UploadIntent::class.' i WHERE i.userId = :userId AND i.usedAt IS NULL AND i.expiresAt > :at')
+            ->setParameter('userId', $userId->toString())
             ->setParameter('at', $at, Types::DATETIMETZ_IMMUTABLE)
-            ->getSingleScalarResult());
+            ->getSingleScalarResult();
+        if (!\is_int($openCount)) {
+            throw new \UnexpectedValueException('A count of upload intents must be a whole number.');
+        }
+
+        return $openCount;
     }
 
     /**

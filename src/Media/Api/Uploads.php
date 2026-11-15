@@ -19,8 +19,8 @@ interface Uploads
      * Stores an upload intent of $userId for $target that expires a day after $at and signs a PUT URL for it that pins
      * $mime and exactly $bytes. It writes under row-level security, so it needs an open transaction whose tenant is
      * $organizationId; the intent is kept only if that transaction commits. A refused upload stores and signs nothing.
-     * Under a storage quota, the organization's begins wait for each other until that transaction ends, so two at
-     * once cannot both take the last free bytes.
+     * The organization's begins wait for each other until that transaction ends, so two at once cannot both take the
+     * last free bytes or a person's last open upload.
      *
      * @param string $purpose one of the upload purposes, today only "screenshot"
      * @param string $mime    the declared media type: image/png, image/jpeg or image/webp, exactly
@@ -28,9 +28,11 @@ interface Uploads
      *
      * @throws UploadRefused             when the purpose is unknown, the type is not allowed or the size is out of
      *                                   bounds, in that order, before any write; then, under the right tenant, when
-     *                                   $bytes do not fit the organization's quota beside its pending and ready media
-     *                                   objects and its unused, unexpired intents ("Your company's storage is full.
-     *                                   Ask your admin.")
+     *                                   $userId holds 20 unused, unexpired intents already ("You have too many uploads
+     *                                   waiting. Finish or wait for them, then try again."), and when $bytes do not
+     *                                   fit the organization's quota beside its pending and ready media objects and
+     *                                   its unused, unexpired intents ("Your company's storage is full. Ask your
+     *                                   admin.")
      * @throws UploadTargetDenied        when the MediaTargetAuthorizer of $target's kind refuses $userId, or no
      *                                   authorizer decides that kind
      * @throws \InvalidArgumentException when $target's kind is longer than 40 characters or its id longer than 100, which
