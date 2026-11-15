@@ -77,7 +77,7 @@ final class UploadIntentTest extends TestCase
     public function aTargetOutOfBoundsIsRefused(string $targetKind, string $targetId, string $refusal): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage($refusal);
+        $this->expectExceptionMessageIsOrContains($refusal);
 
         $this->open(targetKind: $targetKind, targetId: $targetId);
     }
@@ -86,7 +86,7 @@ final class UploadIntentTest extends TestCase
     public function aSlotWithoutRoomForOneByteIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('An upload intent needs a maximum size of at least one byte.');
+        $this->expectExceptionMessageIsOrContains('An upload intent needs a maximum size of at least one byte.');
 
         $this->open(maxBytes: 0);
     }
@@ -108,7 +108,7 @@ final class UploadIntentTest extends TestCase
     public function aSlotWithoutStorageKeyIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('An upload intent needs a storage key.');
+        $this->expectExceptionMessageIsOrContains('An upload intent needs a storage key.');
 
         $this->open(storageKey: '');
     }

@@ -102,7 +102,7 @@ final class PresignedUploadsTest extends TestCase
     public function itRefusesAContentTypeThatIsNotAnAcceptedPicture(string $contentType): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('An upload must be image/png, image/jpeg or image/webp, without parameters.');
+        $this->expectExceptionMessageIsOrContains('An upload must be image/png, image/jpeg or image/webp, without parameters.');
 
         $this->uploads()->forPut(self::key(), $contentType, 2048);
     }
@@ -130,7 +130,7 @@ final class PresignedUploadsTest extends TestCase
     public function itRefusesASizeOverFifteenMegabytes(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('An upload may be at most 15 MB (15728640 bytes).');
+        $this->expectExceptionMessageIsOrContains('An upload may be at most 15 MB (15728640 bytes).');
 
         $this->uploads()->forPut(self::key(), 'image/png', 15 * 1024 * 1024 + 1);
     }
@@ -139,7 +139,7 @@ final class PresignedUploadsTest extends TestCase
     public function itRefusesTheLargestIntegerAsASize(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('An upload may be at most 15 MB');
+        $this->expectExceptionMessageIsOrContains('An upload may be at most 15 MB');
 
         $this->uploads()->forPut(self::key(), 'image/png', \PHP_INT_MAX);
     }
@@ -157,7 +157,7 @@ final class PresignedUploadsTest extends TestCase
     public function itRefusesASizeBelowOneByte(int $contentLength): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('at least one byte');
+        $this->expectExceptionMessageIsOrContains('at least one byte');
 
         $this->uploads()->forPut(self::key(), 'image/png', $contentLength);
     }

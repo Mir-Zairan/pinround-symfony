@@ -37,7 +37,7 @@ final class PinTest extends TestCase
     public function itRefusesAPositionOutsideThePicture(float $x, float $y): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A pin must sit inside the picture: x and y go from 0 to 100.');
+        $this->expectExceptionMessageIsOrContains('A pin must sit inside the picture: x and y go from 0 to 100.');
 
         self::pin(1, $x, $y, 'Header is cut off');
     }
@@ -68,7 +68,7 @@ final class PinTest extends TestCase
     public function itRefusesANumberBelowOne(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A pin number starts at 1.');
+        $this->expectExceptionMessageIsOrContains('A pin number starts at 1.');
 
         self::pin(0, 10.0, 10.0, 'Header is cut off');
     }
@@ -83,7 +83,7 @@ final class PinTest extends TestCase
     public function itRefusesANoteOverTheCapCountingCharactersNotBytes(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A pin note holds at most 1000 characters.');
+        $this->expectExceptionMessageIsOrContains('A pin note holds at most 1000 characters.');
 
         self::pin(1, 10.0, 10.0, str_repeat('é', Pin::NOTE_MAX_LENGTH + 1));
     }

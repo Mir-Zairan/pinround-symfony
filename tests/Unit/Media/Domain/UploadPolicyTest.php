@@ -90,7 +90,7 @@ final class UploadPolicyTest extends TestCase
     public function aNegativeQuotaOrUsedTotalIsRefusedRatherThanReadAsRoom(int $quotaBytes, int $usedBytes): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A storage quota and the bytes used of it are 0 or more.');
+        $this->expectExceptionMessageIsOrContains('A storage quota and the bytes used of it are 0 or more.');
 
         UploadPolicy::fitsQuota($quotaBytes, $usedBytes, 1);
     }

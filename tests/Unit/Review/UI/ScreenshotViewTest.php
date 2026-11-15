@@ -17,7 +17,7 @@ final class ScreenshotViewTest extends TestCase
     public function itRefusesATitleOver120Characters(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A picture title holds at most 120 characters.');
+        $this->expectExceptionMessageIsOrContains('A picture title holds at most 120 characters.');
 
         self::view(title: str_repeat('é', 121));
     }
@@ -32,7 +32,7 @@ final class ScreenshotViewTest extends TestCase
     public function itRefusesASummaryOver600Characters(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A picture summary holds at most 600 characters.');
+        $this->expectExceptionMessageIsOrContains('A picture summary holds at most 600 characters.');
 
         self::view(summary: str_repeat('é', 601));
     }
@@ -56,7 +56,7 @@ final class ScreenshotViewTest extends TestCase
     public function itRefusesAnIdThatCouldBreakOutOfAStyleRule(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A screenshot id uses lowercase letters, digits and dashes, and starts with a letter.');
+        $this->expectExceptionMessageIsOrContains('A screenshot id uses lowercase letters, digits and dashes, and starts with a letter.');
 
         new ScreenshotView("shot-1{}\n", '/i.png', 800, 450, 'Checkout');
     }
@@ -65,7 +65,7 @@ final class ScreenshotViewTest extends TestCase
     public function itRefusesAZeroSize(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A screenshot needs a width and a height of at least 1.');
+        $this->expectExceptionMessageIsOrContains('A screenshot needs a width and a height of at least 1.');
 
         new ScreenshotView('shot-1', '/i.png', 0, 450, 'Checkout');
     }
@@ -95,7 +95,7 @@ final class ScreenshotViewTest extends TestCase
     public function aReadyScreenshotNeedsItsPicturesUrlAndSize(?string $imageUrl, ?int $width, ?int $height): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A ready screenshot needs the URL, the width and the height of its picture.');
+        $this->expectExceptionMessageIsOrContains('A ready screenshot needs the URL, the width and the height of its picture.');
 
         new ScreenshotView('shot-1', $imageUrl, $width, $height, 'Checkout');
     }
@@ -114,7 +114,7 @@ final class ScreenshotViewTest extends TestCase
     public function aScreenshotThatIsNotReadyHasNoPictureToShow(MediaImageStatus $status): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Only a ready screenshot has a picture to show.');
+        $this->expectExceptionMessageIsOrContains('Only a ready screenshot has a picture to show.');
 
         new ScreenshotView('shot-1', '/i.png', 800, 450, 'Checkout', status: $status);
     }
@@ -136,7 +136,7 @@ final class ScreenshotViewTest extends TestCase
     public function aWidthWithoutAHeightIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A screenshot knows both its width and its height, or neither.');
+        $this->expectExceptionMessageIsOrContains('A screenshot knows both its width and its height, or neither.');
 
         new ScreenshotView('shot-1', null, 800, null, 'Checkout', status: MediaImageStatus::Pending);
     }
@@ -145,7 +145,7 @@ final class ScreenshotViewTest extends TestCase
     public function aPendingScreenshotOfZeroHeightIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A screenshot needs a width and a height of at least 1.');
+        $this->expectExceptionMessageIsOrContains('A screenshot needs a width and a height of at least 1.');
 
         new ScreenshotView('shot-1', null, 800, 0, 'Checkout', status: MediaImageStatus::Pending);
     }
@@ -177,7 +177,7 @@ final class ScreenshotViewTest extends TestCase
     public function itRefusesTwoPinsWithTheSameNumber(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Pin 2 appears twice on one screenshot.');
+        $this->expectExceptionMessageIsOrContains('Pin 2 appears twice on one screenshot.');
 
         self::view(pins: [new PinView(2, 10.0, 10.0, 'a'), new PinView(2, 20.0, 20.0, 'b')]);
     }

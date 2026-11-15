@@ -51,7 +51,7 @@ final class MediaTargetAuthorizersTest extends TestCase
     public function twoAuthorizersOfOneKindAreRefused(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Two media target authorizers decide the kind "ticket".');
+        $this->expectExceptionMessageIsOrContains('Two media target authorizers decide the kind "ticket".');
 
         new MediaTargetAuthorizers([new RecordingMediaTargetAuthorizer('ticket'), new RecordingMediaTargetAuthorizer('ticket')]);
     }

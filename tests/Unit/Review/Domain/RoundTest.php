@@ -50,7 +50,7 @@ final class RoundTest extends TestCase
     public function aReportNeedsAtLeastOneScreenshot(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A report round needs at least one screenshot.');
+        $this->expectExceptionMessageIsOrContains('A report round needs at least one screenshot.');
 
         self::report([]);
     }
@@ -67,7 +67,7 @@ final class RoundTest extends TestCase
         $screenshots[] = self::screenshot(Round::MAX_SCREENSHOTS);
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A round holds at most 50 screenshots.');
+        $this->expectExceptionMessageIsOrContains('A round holds at most 50 screenshots.');
 
         self::report($screenshots);
     }
@@ -76,7 +76,7 @@ final class RoundTest extends TestCase
     public function aReportRefusesTwoScreenshotsAtOnePosition(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Two screenshots of one round cannot share a position.');
+        $this->expectExceptionMessageIsOrContains('Two screenshots of one round cannot share a position.');
 
         self::report([self::screenshot(0), self::screenshot(1), self::screenshot(1)]);
     }

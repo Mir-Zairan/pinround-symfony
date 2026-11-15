@@ -77,7 +77,7 @@ final class PresignedDownloadsTest extends TestCase
     public function anEmptyKeyIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A signed URL needs the storage key of what it shows.');
+        $this->expectExceptionMessageIsOrContains('A signed URL needs the storage key of what it shows.');
 
         $this->downloads()->forGet('', new \DateTimeImmutable(self::SIGNED_AT));
     }

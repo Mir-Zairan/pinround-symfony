@@ -37,7 +37,7 @@ final class ScreenshotTest extends TestCase
     public function itRefusesAMediaIdThatIsNotAUuidV7(string $mediaId): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A screenshot needs the id of an uploaded picture.');
+        $this->expectExceptionMessageIsOrContains('A screenshot needs the id of an uploaded picture.');
 
         Screenshot::of(new ScreenshotId(self::SCREENSHOT), $mediaId, 0, null, null, []);
     }
@@ -56,7 +56,7 @@ final class ScreenshotTest extends TestCase
         self::assertSame(0, self::screenshot(0)->position());
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A screenshot position starts at 0.');
+        $this->expectExceptionMessageIsOrContains('A screenshot position starts at 0.');
 
         self::screenshot(-1);
     }
@@ -73,7 +73,7 @@ final class ScreenshotTest extends TestCase
     public function itRefusesATitleOneCharacterOverTheCap(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A picture title holds at most 120 characters.');
+        $this->expectExceptionMessageIsOrContains('A picture title holds at most 120 characters.');
 
         self::screenshot(0, str_repeat('é', Screenshot::TITLE_MAX_LENGTH + 1));
     }
@@ -90,7 +90,7 @@ final class ScreenshotTest extends TestCase
     public function itRefusesASummaryOneCharacterOverTheCap(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A picture summary holds at most 600 characters.');
+        $this->expectExceptionMessageIsOrContains('A picture summary holds at most 600 characters.');
 
         self::screenshot(0, null, str_repeat('é', Screenshot::SUMMARY_MAX_LENGTH + 1));
     }
@@ -129,7 +129,7 @@ final class ScreenshotTest extends TestCase
         $pins[] = self::pin(Screenshot::MAX_PINS + 1);
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A picture holds at most 100 pins.');
+        $this->expectExceptionMessageIsOrContains('A picture holds at most 100 pins.');
 
         self::screenshot(0, null, null, $pins);
     }
@@ -138,7 +138,7 @@ final class ScreenshotTest extends TestCase
     public function itRefusesTwoPinsWithOneNumber(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Pin 2 appears twice on one screenshot.');
+        $this->expectExceptionMessageIsOrContains('Pin 2 appears twice on one screenshot.');
 
         self::screenshot(0, null, null, [self::pin(1), self::pin(2), self::pin(2)]);
     }

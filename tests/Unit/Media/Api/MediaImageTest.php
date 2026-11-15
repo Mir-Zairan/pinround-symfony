@@ -36,7 +36,7 @@ final class MediaImageTest extends TestCase
     public function aReadyPictureWithoutAUrlIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A ready picture needs a URL.');
+        $this->expectExceptionMessageIsOrContains('A ready picture needs a URL.');
 
         MediaImage::ready(self::MEDIA_ID, '', 1280, 800);
     }
@@ -55,7 +55,7 @@ final class MediaImageTest extends TestCase
     public function aReadyPictureBelowOnePixelIsRefused(?int $width, ?int $height): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A picture is at least one pixel wide and high.');
+        $this->expectExceptionMessageIsOrContains('A picture is at least one pixel wide and high.');
 
         MediaImage::ready(self::MEDIA_ID, '/view.webp', $width, $height);
     }
@@ -64,7 +64,7 @@ final class MediaImageTest extends TestCase
     public function aRejectedPictureWithoutAReasonIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A rejected picture needs the reason it was refused.');
+        $this->expectExceptionMessageIsOrContains('A rejected picture needs the reason it was refused.');
 
         MediaImage::rejected(self::MEDIA_ID, " \n");
     }

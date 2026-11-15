@@ -62,7 +62,7 @@ final class UploadKeyTest extends TestCase
     public function noUserTextReachesTheKeyThroughTheOrganizationId(string $text): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('canonical UUIDv7');
+        $this->expectExceptionMessageIsOrContains('canonical UUIDv7');
 
         UploadKey::forIntent(new OrganizationId($text), new UploadIntentId(self::INTENT));
     }

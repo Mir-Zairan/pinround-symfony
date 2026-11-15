@@ -49,7 +49,7 @@ final class ByteSumTest extends TestCase
     public function anythingElseIsRefusedRatherThanCountedAsNoBytes(mixed $sum): void
     {
         $this->expectException(\UnexpectedValueException::class);
-        $this->expectExceptionMessage('A sum of bytes must be a whole number of 0 or more of at most 18 digits.');
+        $this->expectExceptionMessageIsOrContains('A sum of bytes must be a whole number of 0 or more of at most 18 digits.');
 
         ByteSum::of($sum);
     }

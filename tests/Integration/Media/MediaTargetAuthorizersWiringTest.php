@@ -27,7 +27,7 @@ final class MediaTargetAuthorizersWiringTest extends KernelTestCase
         $byKind = new \ReflectionProperty(MediaTargetAuthorizers::class, 'byKind')->getValue($authorizers);
         self::assertIsArray($byKind);
 
-        $authorizerClassByKind = array_map(static fn (mixed $authorizer): string => get_debug_type($authorizer), $byKind);
+        $authorizerClassByKind = array_map(get_debug_type(...), $byKind);
         // The tag gives no order; sorting keeps each kind paired with its class, which canonicalizing would not.
         ksort($authorizerClassByKind);
 

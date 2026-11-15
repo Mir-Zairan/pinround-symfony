@@ -220,7 +220,7 @@ final class SignedVariantUrlsTest extends TestCase
     public function outsideATransactionNothingIsRead(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Reading media objects needs an open transaction.');
+        $this->expectExceptionMessageIsOrContains('Reading media objects needs an open transaction.');
 
         $this->signedUrls->forVariants(new OrganizationId(self::ACME_FOODS), [self::READY], 'view', new \DateTimeImmutable(self::SIGNED_AT));
     }
@@ -236,7 +236,7 @@ final class SignedVariantUrlsTest extends TestCase
         });
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The ready media object '.$withoutThumb.' has no thumb variant stored.');
+        $this->expectExceptionMessageIsOrContains('The ready media object '.$withoutThumb.' has no thumb variant stored.');
 
         $this->forVariants([$withoutThumb], 'thumb');
     }

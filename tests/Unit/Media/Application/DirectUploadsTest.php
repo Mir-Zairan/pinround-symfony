@@ -343,7 +343,7 @@ final class DirectUploadsTest extends TestCase
     public function aNegativeQuotaIsRefusedWhenTheServiceIsBuilt(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('The storage quota of an organization is 0 (no limit) or more bytes.');
+        $this->expectExceptionMessageIsOrContains('The storage quota of an organization is 0 (no limit) or more bytes.');
 
         $this->uploadsWithQuota(-1);
     }

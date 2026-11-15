@@ -29,7 +29,7 @@ final class PinViewTest extends TestCase
     public function itRefusesAPositionOutsideThePicture(float $x, float $y): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A pin must sit inside the picture: x and y go from 0 to 100.');
+        $this->expectExceptionMessageIsOrContains('A pin must sit inside the picture: x and y go from 0 to 100.');
 
         new PinView(1, $x, $y, 'Header is cut off');
     }
@@ -45,7 +45,7 @@ final class PinViewTest extends TestCase
     public function itRefusesANoteOverOneThousandCharacters(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A pin note holds at most 1000 characters.');
+        $this->expectExceptionMessageIsOrContains('A pin note holds at most 1000 characters.');
 
         new PinView(1, 10.0, 10.0, str_repeat('é', 1001));
     }
@@ -60,7 +60,7 @@ final class PinViewTest extends TestCase
     public function itRefusesANumberBelowOne(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A pin number starts at 1.');
+        $this->expectExceptionMessageIsOrContains('A pin number starts at 1.');
 
         new PinView(0, 10.0, 10.0, '');
     }
