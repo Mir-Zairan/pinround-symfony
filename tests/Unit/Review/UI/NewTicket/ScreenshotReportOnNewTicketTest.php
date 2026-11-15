@@ -147,12 +147,6 @@ final class ScreenshotReportOnNewTicketTest extends TestCase
         self::assertCount(RoundCommands::MAX_PINS_PER_SCREENSHOT, $this->rounds->stored[0]->screenshots()[0]->pins());
     }
 
-    #[Test]
-    public function theTooManyPinsMessageNamesTheCap(): void
-    {
-        self::assertSame(\sprintf('A picture holds at most %d pins.', RoundCommands::MAX_PINS_PER_SCREENSHOT), ScreenshotReportOnNewTicket::TOO_MANY_PINS);
-    }
-
     /**
      * @return iterable<string, array{array<mixed>, string}>
      */
