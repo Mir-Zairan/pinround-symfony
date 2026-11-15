@@ -57,14 +57,21 @@ typing.
 - A token can never create a live ticket, through MCP or through the REST API `/api/v1`. No token endpoint creates a
   ticket or a round on a ticket from a report; the REST endpoint `POST /api/v1/reports` is the same report draft as
   `create_report` (same scope, same caps, same privacy). The owner opens the draft in "Report drafts", can edit it, and clicks Send;
-  Send runs the same path as the Report a problem form and calls `RoundCommands::createReport` (Round 0).
+  Send creates the ticket through Ticketing's Api and then Round 0 through `RoundCommands::createReport`.
 - **Owning module: Review (`rvw_`).** The draft holds screenshots with title, summary and pins, which Review owns, and
   Send hands the same content to `RoundCommands::createReport`. It is stored in the new table `rvw_report_draft`
   ([data-model.md](../02-architecture/data-model.md#review-and-media)): tenant table, `organization_id` first in the
-  primary key and in every index, row-level security on. Api: `Review\Api\ReportDrafts::create(OrganizationId, UserId $owner, ProjectId, ReportDraftContent): ReportDraftId`
+  primary key and in every index, row-level security on. The draft's screenshots stay one jsonb array in that table
+  (each item: media id, title, summary, pins), at most 10 screenshots per draft; more is refused with a plain message.
+  Api: `Review\Api\ReportDrafts::create(OrganizationId, UserId $owner, string $projectKey, ReportDraftContent): ReportDraftId`
   (called by `create_report` and `POST /api/v1/reports`), `ReportDrafts::forOwner(UserId): list<ReportDraftView>` and
-  `ReportDrafts::send(ReportDraftId, UserId): TicketKey` (only the UI calls `send`; the project is checked through the
-  Ticketing Api).
+  `ReportDrafts::send(ReportDraftId, UserId): string` (returns the new ticket key; only the UI calls `send`). The
+  signatures use strings and SharedKernel ids, never Ticketing types.
+- **The UI is Review's.** The "Report drafts" list, the page to open and edit a draft, and Send are in `src/Review/UI`,
+  not in Ticketing's `ReportForm`; the Report a problem page only links to the list. Send creates the ticket through
+  `Ticketing\Api\TicketCommands::create` with plain values (project key as a string, title and detail strings), so the
+  project is checked by Ticketing and Ticketing never calls Review's Api (that would be a forbidden edge and a
+  Ticketing-Review cycle).
 - New token scope `reports:write`. It is not part of Claude Code's default scopes (`read` + `rounds:write`); the user
   ticks it when creating the token. A call without it gets an MCP error and nothing is created.
 - Screenshots use the same upload path: `create_upload`, presigned PUT, then the tool takes the `upload_id`.
@@ -78,6 +85,9 @@ typing.
 - Good: no new storage path; reuses the draft privacy and the upload rules.
 - Bad: one more list for the reporter ("Report drafts") and one more state to clean up (old report drafts need a
   retention rule, set in P06).
+- Bad: Review's UI creates a ticket, so it depends on Ticketing's Api; Ticketing must never depend on Review's Api.
+  Deptrac guards the edge.
+- Neutral: a draft holds at most 10 screenshots, fewer than a round's 50, to keep the jsonb row small.
 - Neutral: one more scope on the token page.
 
 ## Confirmation
@@ -111,4 +121,7 @@ typing.
 - Related: [ADR-0017](0017-private-draft-rounds.md), [ADR-0020](0020-ai-safety-and-prompt-injection.md),
   [ADR-0021](0021-mcp-server.md), [FR-RND-16](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds),
   [FR-MCP-12](../01-requirements/functional-requirements.md#mcp--mcp-server-and-agent-api).
+- 2026-11-15 (edited in place, this ADR has not landed on main): the owner decided that Review owns the drafts list,
+  the edit page and Send in its own UI; `ReportDrafts` signatures use strings and SharedKernel ids; Send goes through
+  `Ticketing\Api\TicketCommands::create`; a draft holds at most 10 screenshots.
 - Revisit when: reporters ask to let a trusted agent send without a click (then a new ADR must weigh ADR-0020).

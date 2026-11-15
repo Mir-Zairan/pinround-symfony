@@ -6,7 +6,7 @@ How screenshots get from a person's screen into pinround safely, and how they ar
 
 - [Why screenshots need their own pipeline](#why-screenshots-need-their-own-pipeline) — the scene.
 - [Upload flow](#upload-flow) — presigned PUT, sequence diagram.
-- [Validation rules](#validation-rules) — types, sizes, checks.
+- [Validation rules](#validation-rules) — checks before the presigned URL (with what the URL pins) and checks in the worker.
 - [Processing worker](#processing-worker) — verify, re-encode, thumbnails.
 - [Storage key layout](#storage-key-layout) — where each file lives.
 - [Serving images](#serving-images) — signed URLs after a voter check.
@@ -56,10 +56,10 @@ Before the presigned URL:
 - Size ≤ 15 MB.
 - The person may add a screenshot to this round or report (voter).
 - The org is under its quota.
+- **Upload URL:** the presigned PUT pins the declared `Content-Type` and the exact `Content-Length`, so the storage refuses any other type or length.
 
 In the worker:
 
-- **Upload URL:** the presigned PUT pins the declared `Content-Type` and the exact `Content-Length`, so the storage refuses any other type or length.
 - **Size first:** the worker does a `HEAD` on the upload object and checks its size against the intent's `max_bytes`. If it is bigger, the object is deleted and the `MediaObject` is rejected (`MediaObject::reject`). The intent itself has no rejected state; it only records the limits and whether it was used.
 - Magic bytes must match a PNG, JPEG or WebP signature.
 - **Dimensions from the header, before decoding:** width × height ≤ 40 megapixels is read from the image header (libvips header-only load). Only then is the image decoded fully. This stops decompression bombs before they use memory.
