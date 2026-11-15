@@ -40,7 +40,8 @@ use Zenstruck\Foundry\Test\Factories;
  * The two JSON calls of a direct upload, POST /media/intents and POST /media/intents/{id}/complete, for Acme Foods'
  * SHOP-1 through the real firewall, voters, session, database and outbox. The clock is fixed on 6 Nov 2026, before
  * today: a clock ahead of the login would end the session as idle. Every refusal also proves that no intent, media
- * object or outbox row was written, or that the intent stayed unused.
+ * object or outbox row was written, or that the intent stayed unused. The begin limiter counts on the state Valkey,
+ * shared with other checkouts, keyed by user id; every test has new users, so their counts start empty.
  */
 final class UploadIntentsTest extends WebTestCase
 {
@@ -308,6 +309,105 @@ final class UploadIntentsTest extends WebTestCase
     }
 
     /**
+     * A used, an expired and Lena's intent do not wait for Omar, so only his 19 open ones count.
+     */
+    #[Test]
+    public function omarWithNineteenUploadsWaitingMayBeginATwentieth(): void
+    {
+        $this->seedShop();
+        for ($i = 0; $i < 19; ++$i) {
+            $this->addOpenIntentOfOmar();
+        }
+        $this->addIntentOf('Omar', usedAt: '2026-11-06 11:00:00+00');
+        $this->addIntentOf('Omar', expiresAt: '2026-11-06 11:59:59+00');
+        $this->addIntentOf('Lena');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(201);
+        self::assertCount(23, $this->storedIntents());
+    }
+
+    #[Test]
+    public function omarWithTwentyUploadsWaitingIsRefusedWithThePlainMessageAndNothingIsStored(): void
+    {
+        $this->seedShop();
+        for ($i = 0; $i < 20; ++$i) {
+            $this->addOpenIntentOfOmar();
+        }
+        $intentsBefore = $this->storedIntents();
+        self::assertCount(20, $intentsBefore);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(['message' => DirectUploads::TOO_MANY_WAITING], $this->answer());
+        self::assertSame($intentsBefore, $this->storedIntents());
+        self::assertSame([], $this->storedMediaObjects());
+        self::assertSame([], $this->queuedMessages());
+    }
+
+    /**
+     * The limiter counts on the wall clock, not the fixed one, so the wait is checked as a range.
+     */
+    #[Test]
+    public function omarsSixtyFirstBeginWithinAMinuteIsRefusedWithAWaitAndStoresNothingMore(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->spendBeginsOf('Omar', 59);
+        $this->beginAsTheLoggedInPerson();
+        $intentsBefore = $this->storedIntents();
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(429);
+        self::assertSame(['message' => UploadIntentController::ADDING_TOO_FAST], $this->answer());
+        $retryAfter = $this->client->getResponse()->headers->get('Retry-After');
+        self::assertIsString($retryAfter);
+        self::assertMatchesRegularExpression('/\A[0-9]+\z/', $retryAfter);
+        self::assertGreaterThanOrEqual(30, (int) $retryAfter);
+        self::assertLessThanOrEqual(60, (int) $retryAfter);
+        self::assertCount(1, $intentsBefore);
+        self::assertSame($intentsBefore, $this->storedIntents());
+        self::assertSame([], $this->storedMediaObjects());
+        self::assertSame([], $this->queuedMessages());
+    }
+
+    #[Test]
+    public function omarsSpentBeginsDoNotHoldBackLena(): void
+    {
+        $this->seedShop();
+        $this->spendBeginsOf('Omar', 60);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(201);
+        self::assertSame([$this->idOf('Lena')], array_column($this->storedIntents(), 'user_id'));
+    }
+
+    /**
+     * A page of another site can post in Omar's session but has no form token, so it must not spend his last begin.
+     */
+    #[Test]
+    public function aBeginWithAWrongFormTokenSpendsNoneOfOmarsBegins(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->spendBeginsOf('Omar', 59);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), 'not-a-token');
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(['message' => UploadIntentController::FORM_EXPIRED], $this->answer());
+        $this->beginAsTheLoggedInPerson();
+        self::assertCount(1, $this->storedIntents());
+    }
+
+    /**
      * The organization voter grants, so only the controller's own check of the actor stands in the way.
      */
     #[Test]
@@ -568,15 +668,35 @@ final class UploadIntentsTest extends WebTestCase
      */
     private function addOpenIntentOfOmar(): string
     {
+        return $this->addIntentOf('Omar');
+    }
+
+    /**
+     * @param string      $expiresAt a timestamp with its offset; the default is a day after the fixed time
+     * @param string|null $usedAt    a timestamp with its offset, before $expiresAt; null leaves the intent unused
+     *
+     * @return string the id of an intent $person began for SHOP-1
+     */
+    private function addIntentOf(string $person, string $expiresAt = '2026-11-07 12:00:00+00', ?string $usedAt = null): string
+    {
         $intentId = Uuid::v7()->toRfc4122();
-        $parameters = [$this->acmeFoods->toString(), $intentId, $this->idOf('Omar'), $this->shopTicket, self::SCREENSHOT_BYTES, \sprintf('uploads/%s/%s', $this->acmeFoods->toString(), $intentId)];
+        $parameters = [$this->acmeFoods->toString(), $intentId, $this->idOf($person), $this->shopTicket, self::SCREENSHOT_BYTES, \sprintf('uploads/%s/%s', $this->acmeFoods->toString(), $intentId), $expiresAt, $usedAt];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO med_upload_intent (organization_id, id, user_id, purpose, target_kind, target_id, max_bytes, mime_allowed, storage_key, expires_at)
-             VALUES (?, ?, ?, 'screenshot', 'ticket', ?, ?, '{image/png}', ?, TIMESTAMPTZ '2026-11-07 12:00:00+00')",
+            "INSERT INTO med_upload_intent (organization_id, id, user_id, purpose, target_kind, target_id, max_bytes, mime_allowed, storage_key, expires_at, used_at)
+             VALUES (?, ?, ?, 'screenshot', 'ticket', ?, ?, '{image/png}', ?, CAST(? AS TIMESTAMPTZ), CAST(? AS TIMESTAMPTZ))",
             $parameters,
         ));
 
         return $intentId;
+    }
+
+    /**
+     * Spends begins of $person as if they had sent them a moment ago.
+     */
+    private function spendBeginsOf(string $person, int $begins): void
+    {
+        $beginsPerUser = self::getContainer()->get('limiter.media_upload_begin_per_user');
+        self::assertTrue($beginsPerUser->create($this->idOf($person))->consume($begins)->isAccepted());
     }
 
     /**
