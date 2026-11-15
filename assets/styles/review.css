@@ -234,6 +234,12 @@ textarea.pin-list__note {
   cursor: crosshair;
 }
 
+/* Without this the browser starts dragging the picture itself when a marker is dragged, and cancels the pointer. */
+.pin-placer .screenshot__image {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
 .pin-list__remove {
   flex: none;
 }

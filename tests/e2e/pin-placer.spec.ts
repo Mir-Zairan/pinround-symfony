@@ -52,7 +52,8 @@ test('a click is written as a percent of the picture rounded to 0.1, with two de
   const x = await field('pins[1][x]').inputValue();
   expect(x).toMatch(/^\d+\.\d0$/);
   expect(Math.abs(Number(x) - 33.3)).toBeLessThanOrEqual(0.15);
-  expect(await field('pins[1][y]').inputValue()).toBe('50.00');
+  // Mouse positions are whole pixels and the frame sits at a half pixel, so the middle reads 49.9 or 50.0.
+  expect(Math.abs(Number(await field('pins[1][y]').inputValue()) - 50)).toBeLessThanOrEqual(0.15);
 });
 
 test('a click adds pin 1 at the clicked percent and it keeps its spot when the window resizes', async ({ page }) => {
@@ -75,7 +76,7 @@ test('a click adds pin 1 at the clicked percent and it keeps its spot when the w
   expect(after.y).toBeCloseTo(before.y, 0);
 });
 
-test('a click on the very edge puts the pin on 0 or 100, never outside', async ({ page }) => {
+test('a click on the very edge puts the pin on 0 or within one pixel of 100, never outside', async ({ page }) => {
   const { frame, field } = await openEditableExample(page);
 
   const picture = (await frame.boundingBox())!;
@@ -85,8 +86,35 @@ test('a click on the very edge puts the pin on 0 or 100, never outside', async (
 
   expect(await field('pins[1][x]').inputValue()).toBe('0.00');
   expect(await field('pins[1][y]').inputValue()).toBe('0.00');
-  expect(await field('pins[2][x]').inputValue()).toBe('100.00');
-  expect(await field('pins[2][y]').inputValue()).toBe('100.00');
+  // The last whole pixel inside the picture is 100 / width percent short of the edge.
+  for (const name of ['pins[2][x]', 'pins[2][y]']) {
+    const percent = Number(await field(name).inputValue());
+    expect(percent).toBeGreaterThanOrEqual(99.8);
+    expect(percent).toBeLessThanOrEqual(100);
+  }
+});
+
+test('a pin dragged past the picture stops on 0 or 100', async ({ page }) => {
+  const { frame, addPin, marker, field } = await openEditableExample(page);
+  await addPin.click();
+  const picture = (await frame.boundingBox())!;
+  const pin = (await marker(1).boundingBox())!;
+
+  await page.mouse.move(pin.x + pin.width / 2, pin.y + pin.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(picture.x + picture.width + 60, picture.y + picture.height + 60, { steps: 5 });
+  await page.mouse.up();
+
+  expect(await field('pins[1][x]').inputValue()).toBe('100.00');
+  expect(await field('pins[1][y]').inputValue()).toBe('100.00');
+
+  await page.mouse.move(picture.x + picture.width, picture.y + picture.height);
+  await page.mouse.down();
+  await page.mouse.move(picture.x - 60, picture.y - 60, { steps: 5 });
+  await page.mouse.up();
+
+  expect(await field('pins[1][x]').inputValue()).toBe('0.00');
+  expect(await field('pins[1][y]').inputValue()).toBe('0.00');
 });
 
 test('a person can drag a pin with the mouse', async ({ page }) => {
@@ -215,6 +243,69 @@ test('a note past 1,000 characters is cut and the page says so', async ({ page }
   await expect(status).toHaveText('');
 });
 
+const FULL_NOTE = '0123456789'.repeat(100);
+
+async function fullNoteWithCaretAt(page: Page, caret: number) {
+  const example = await openEditableExample(page);
+  await example.addPin.click();
+  await example.note(1).fill(FULL_NOTE);
+  await example.note(1).evaluate((field: HTMLTextAreaElement, position) => field.setSelectionRange(position, position), caret);
+  return example;
+}
+
+test('typing in the middle of a full note changes nothing and the caret stays', async ({ page }) => {
+  const { note, status, marker } = await fullNoteWithCaretAt(page, 500);
+
+  await page.keyboard.type('Z');
+
+  expect(await note(1).inputValue()).toBe(FULL_NOTE);
+  expect(await note(1).evaluate((field: HTMLTextAreaElement) => field.selectionStart)).toBe(500);
+  await expect(status).toHaveText('A note holds at most 1,000 characters. Anything more is cut.');
+  await expect(marker(1)).toHaveAttribute('aria-label', `Pin 1: ${FULL_NOTE}`);
+});
+
+test('typing over a selection in a full note replaces it, and deleting still works', async ({ page }) => {
+  const { note } = await fullNoteWithCaretAt(page, 500);
+  await note(1).evaluate((field: HTMLTextAreaElement) => field.setSelectionRange(500, 503));
+
+  await page.keyboard.type('Z');
+
+  expect(await note(1).inputValue()).toBe(`${FULL_NOTE.slice(0, 500)}Z${FULL_NOTE.slice(503)}`);
+
+  await page.keyboard.press('Backspace');
+
+  expect(await note(1).inputValue()).toBe(`${FULL_NOTE.slice(0, 500)}${FULL_NOTE.slice(503)}`);
+});
+
+test('a paste in the middle of a nearly full note inserts only what fits and says so', async ({ page }) => {
+  const { note, status } = await fullNoteWithCaretAt(page, 500);
+  await note(1).evaluate((field: HTMLTextAreaElement) => {
+    field.value = field.value.slice(0, 995);
+    field.setSelectionRange(500, 500);
+  });
+
+  await page.keyboard.insertText('ABCDEFGHIJ');
+
+  const value = await note(1).inputValue();
+  expect(value).toBe(`${FULL_NOTE.slice(0, 500)}ABCDE${FULL_NOTE.slice(500, 995)}`);
+  expect(await note(1).evaluate((field: HTMLTextAreaElement) => field.selectionStart)).toBe(505);
+  await expect(status).toHaveText('A note holds at most 1,000 characters. Anything more is cut.');
+});
+
+test('an emoji that does not fit is refused whole, never split', async ({ page }) => {
+  const { note } = await fullNoteWithCaretAt(page, 10);
+  await note(1).evaluate((field: HTMLTextAreaElement) => {
+    field.value = field.value.slice(0, 999);
+    field.setSelectionRange(10, 10);
+  });
+
+  await page.keyboard.insertText('😀😀');
+
+  const value = await note(1).inputValue();
+  expect([...value]).toHaveLength(1000);
+  expect(value).toBe(`${FULL_NOTE.slice(0, 10)}😀${FULL_NOTE.slice(10, 999)}`);
+});
+
 test('a note of emoji reaches 1,000 characters and is cut after that, as the server counts', async ({ page }) => {
   const { addPin, note, status } = await openEditableExample(page);
   await addPin.click();
@@ -294,29 +385,40 @@ test('a pin loaded with the page keeps its position until it is moved, then has 
   expect(await field('pins[2][x]').inputValue()).toBe('70.55');
 });
 
-test.describe('at 360px wide', () => {
-  test.use({ viewport: { width: 360, height: 800 } });
+for (const width of [360, 481, 600]) {
+  test.describe(`at ${width}px wide`, () => {
+    test.use({ viewport: { width, height: 800 } });
 
-  test('a selected pin with a long note never makes the page scroll sideways', async ({ page }) => {
-    const { frame, marker, note } = await openEditableExample(page);
-    const picture = (await frame.boundingBox())!;
-    const hasSidewaysScroll = () =>
-      page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+    test('a selected pin with a long note never makes the page scroll sideways or leaves the picture', async ({ page }) => {
+      const { frame, marker, note } = await openEditableExample(page);
+      const picture = (await frame.boundingBox())!;
+      const hasSidewaysScroll = () =>
+        page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+      const expectBubbleInsideFrame = async () => {
+        const bubble = (await frame.locator('.pin--selected .pin__bubble').boundingBox())!;
+        const box = (await frame.boundingBox())!;
+        expect(bubble.x).toBeGreaterThanOrEqual(box.x - 0.5);
+        expect(bubble.x + bubble.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+      };
 
-    await frame.click({ position: { x: picture.width * 0.55, y: picture.height * 0.3 } });
-    await note(1).fill('Short');
-    await frame.click({ position: { x: picture.width * 0.9, y: picture.height * 0.6 } });
-    await note(2).fill('A long note that needs more than one line. '.repeat(5));
+      // Pin 2 goes above pin 1, so pin 1's bubble (which opens below its ring) does not cover the second click.
+      await frame.click({ position: { x: picture.width * 0.9, y: picture.height * 0.4 } });
+      await note(1).fill('Another long note that needs more than one line. '.repeat(5));
+      await frame.click({ position: { x: picture.width * 0.6, y: picture.height * 0.08 } });
+      await note(2).fill('A long note that needs more than one line. '.repeat(5));
 
-    await expect(frame.locator('.pin--selected .pin__bubble')).toBeVisible();
-    expect(await hasSidewaysScroll()).toBe(false);
+      await expect(frame.locator('.pin--selected .pin__bubble')).toBeVisible();
+      expect(await hasSidewaysScroll()).toBe(false);
+      await expectBubbleInsideFrame();
 
-    await note(1).fill('Another long note that needs more than one line. '.repeat(5));
-    await marker(2).focus();
-    await marker(1).focus();
+      await marker(1).focus();
+      await marker(2).focus();
+      await marker(1).focus();
 
-    await expect(frame.locator('.pin--selected .pin__bubble')).toBeVisible();
-    await expect(marker(1)).toHaveAttribute('aria-pressed', 'true');
-    expect(await hasSidewaysScroll()).toBe(false);
+      await expect(frame.locator('.pin--selected .pin__bubble')).toBeVisible();
+      await expect(marker(1)).toHaveAttribute('aria-pressed', 'true');
+      expect(await hasSidewaysScroll()).toBe(false);
+      await expectBubbleInsideFrame();
+    });
   });
-});
+}

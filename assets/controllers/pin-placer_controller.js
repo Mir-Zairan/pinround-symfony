@@ -3,7 +3,8 @@ import { PinBoard } from '../review/pin_board.js';
 import { beginDrag, hasPassedDragThreshold } from '../review/pin_drag.js';
 import { commandForKey } from '../review/pin_keyboard.js';
 import { describeMarker, findMarker } from '../review/pin_markup.js';
-import { cutNote, noteLength, percentOfPicture } from '../review/pin_position.js';
+import { cutNoteField, limitInsertion } from '../review/pin_note_limit.js';
+import { noteLength, percentOfPicture } from '../review/pin_position.js';
 
 // Adds, moves, describes and removes the pins of one editable screenshot, by mouse or keyboard. The pins and their
 // elements are kept by PinBoard: the markers (PinLayer), the note fields pins[n][note] (PinList) and hidden fields
@@ -27,6 +28,11 @@ export default class extends Controller {
     this.drag = null;
     this.dragJustEnded = false;
     this.isLimitShown = false;
+    this.element.addEventListener('beforeinput', this.onBeforeinput);
+  }
+
+  disconnect() {
+    this.element.removeEventListener('beforeinput', this.onBeforeinput);
   }
 
   addAtCentre() {
@@ -79,8 +85,21 @@ export default class extends Controller {
     if (!field) {
       return;
     }
-    // The field has no maxlength: browsers count UTF-16 units, the server counts code points.
-    field.value = cutNote(field.value, this.noteMaxValue);
+    // Fallback for input that beforeinput cannot refuse (IME composition, browsers without it): cut the end, keep the caret.
+    cutNoteField(field, this.noteMaxValue);
+    this.refreshNote(field);
+  }
+
+  // The field has no maxlength: browsers count UTF-16 units, the server counts code points. Registered in connect()
+  // because the form's data-action list is printed by EditableScreenshot.
+  onBeforeinput = (event) => {
+    const field = limitInsertion(event, this.noteMaxValue);
+    if (field) {
+      this.refreshNote(field);
+    }
+  };
+
+  refreshNote(field) {
     const isFull = noteLength(field.value) >= this.noteMaxValue;
     if (isFull || this.isLimitShown) {
       this.board.say(isFull ? `A note holds at most ${this.noteMaxValue.toLocaleString('en')} characters. Anything more is cut.` : '');
