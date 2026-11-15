@@ -20,9 +20,12 @@ export default class extends Controller {
   connect() {
     this.isUploading = false;
     this.previewUrl = null;
+    this.abortController = null;
   }
 
   disconnect() {
+    this.abortController?.abort();
+    cancelAnimationFrame(this.sayFrame);
     this.clearPreview();
   }
 
@@ -58,7 +61,7 @@ export default class extends Controller {
       return;
     }
     this.isUploading = true;
-    this.inputTarget.disabled = true;
+    const { signal } = (this.abortController = new AbortController());
     this.mediaIdTarget.value = '';
     this.showPreview(file);
     this.showProgress(0);
@@ -68,24 +71,33 @@ export default class extends Controller {
         purpose: this.purposeValue,
         file,
         target: { kind: this.targetKindValue, id: this.targetIdValue },
-      });
-      await putFile(slot.url, slot.headers, file, (fraction) => this.showProgress(fraction));
-      const { mediaId } = await completeUpload(this.urlValue, this.csrfTokenValue, slot.intentId);
+      }, signal);
+      await putFile(slot.url, slot.headers, file, (fraction) => this.showProgress(fraction), signal);
+      const { mediaId } = await completeUpload(this.urlValue, this.csrfTokenValue, slot.intentId, signal);
       this.mediaIdTarget.value = mediaId;
       this.say(`${file.name} uploaded.`);
       this.dispatch('uploaded', { detail: { mediaId } });
     } catch (failure) {
+      if (signal.aborted) {
+        return;
+      }
       this.clearPreview();
       this.say(failure instanceof UploadFailed ? failure.message : 'The upload failed. Try again.');
     } finally {
       this.isUploading = false;
-      this.inputTarget.disabled = false;
-      this.progressTarget.hidden = true;
+      if (!signal.aborted) {
+        this.progressTarget.hidden = true;
+      }
     }
   }
 
+  // The text is cleared first and set on the next frame: a live region does not announce a message equal to the last.
   say(message) {
-    this.statusTarget.textContent = message;
+    this.statusTarget.textContent = '';
+    cancelAnimationFrame(this.sayFrame);
+    this.sayFrame = requestAnimationFrame(() => {
+      this.statusTarget.textContent = message;
+    });
   }
 
   showProgress(fraction) {

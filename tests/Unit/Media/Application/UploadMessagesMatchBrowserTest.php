@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Functional\Media;
+namespace App\Tests\Unit\Media\Application;
 
 use App\Media\Domain\UploadPolicy;
 use PHPUnit\Framework\Attributes\Test;
@@ -14,8 +14,8 @@ use PHPUnit\Framework\TestCase;
  */
 final class UploadMessagesMatchBrowserTest extends TestCase
 {
-    private const string BROWSER_CHECKS = __DIR__.'/../../../assets/review/upload_checks.js';
-    private const string SERVER_UPLOADS = __DIR__.'/../../../src/Media/Application/DirectUploads.php';
+    private const string BROWSER_CHECKS = __DIR__.'/../../../../assets/review/upload_checks.js';
+    private const string SERVER_UPLOADS = __DIR__.'/../../../../src/Media/Application/DirectUploads.php';
 
     #[Test]
     public function theBrowserRefusesATypeAndASizeWithTheServersTexts(): void
