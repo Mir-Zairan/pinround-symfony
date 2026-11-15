@@ -99,10 +99,6 @@
                         {% endif %}
                     </div>
                 {% endif %}
-                {# The screenshot part goes here: it posts screenshot_media_id, screenshot_title, screenshot_summary and pins[n][x|y|note], shows `report` as sent and the error errors.screenshot. #}
-                {% if errors.screenshot is defined %}
-                    <p class="profile__error" id="screenshot-error">{{ errors.screenshot }}</p>
-                {% endif %}
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
                 <div>
                     <twig:Button type="submit">Make ticket</twig:Button>
