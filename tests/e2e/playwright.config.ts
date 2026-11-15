@@ -12,6 +12,14 @@ export default defineConfig({
   },
   projects: [
     { name: 'setup', testMatch: 'auth.setup.ts' },
-    { name: 'chromium', testMatch: '*.spec.ts', use: { ...devices['Desktop Chrome'] }, dependencies: ['setup'] },
+    // Pure-function specs run in Node with no page, so they need neither the app nor a login.
+    { name: 'node', testMatch: 'pin-position.spec.ts' },
+    {
+      name: 'chromium',
+      testMatch: '*.spec.ts',
+      testIgnore: 'pin-position.spec.ts',
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup'],
+    },
   ],
 });

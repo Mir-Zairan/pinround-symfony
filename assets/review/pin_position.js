@@ -43,3 +43,9 @@ export function cutNote(note, maxLength) {
   const codePoints = [...note];
   return codePoints.length <= maxLength ? note : codePoints.slice(0, maxLength).join('');
 }
+
+/** The pin number next to the given one in the list (the next, else the previous), or undefined when it stands alone. */
+export function neighbourNumber(numbers, number) {
+  const index = numbers.indexOf(number);
+  return numbers[index + 1] ?? numbers[index - 1];
+}

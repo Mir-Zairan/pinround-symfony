@@ -123,7 +123,7 @@ final class ScreenshotComponentsTest extends KernelTestCase
     }
 
     #[Test]
-    public function theEditableListHoldsOneNoteFieldPerPinCappedAtTheNoteLimit(): void
+    public function theEditableListHoldsOneNoteFieldPerPinWithoutAMaxlengthAttribute(): void
     {
         $list = new Crawler($this->render(PinList::class, ['view' => self::view(pins: self::pins()), 'isEditable' => true]));
 
@@ -131,7 +131,7 @@ final class ScreenshotComponentsTest extends KernelTestCase
         self::assertCount(3, $fields);
         self::assertSame('pins[2][note]', $fields->eq(1)->attr('name'));
         self::assertSame('Note for pin 2', $fields->eq(1)->attr('aria-label'));
-        self::assertSame('1000', $fields->eq(1)->attr('maxlength'));
+        self::assertNull($fields->eq(1)->attr('maxlength'), 'maxlength counts UTF-16 units; the controller enforces the code-point limit');
         self::assertSame('header is cut off', $fields->eq(1)->text());
         $removeButtons = $list->filter('button.pin-list__remove[data-pin-remove]');
         self::assertCount(3, $removeButtons);
