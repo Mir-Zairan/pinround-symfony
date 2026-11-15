@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Review\Application;
 
-use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadedMedia;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
@@ -31,7 +30,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         private Rounds $rounds,
         private TicketTurnQueries $ticketTurnQueries,
         private TenantContext $tenantContext,
-        private UploadedMedia $uploadedMedia,
+        private ReportPictures $reportPictures,
     ) {
     }
 
@@ -75,8 +74,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
     }
 
     /**
-     * One read for all pictures, before any id is taken; the first screenshot in the list with a refused picture names
-     * the reason.
+     * Before any id is taken, so a refused picture builds nothing.
      *
      * @param list<ScreenshotWithPins> $screenshots at most Round::MAX_SCREENSHOTS, which UploadedMedia::MAX_MEDIA_IDS covers
      *
@@ -84,21 +82,13 @@ final readonly class UseCaseRoundCommands implements RoundCommands
      */
     private function requireOwnProcessedMedia(OrganizationId $organizationId, UserId $reporterId, array $screenshots): void
     {
-        $states = $this->uploadedMedia->statesOf(
+        $refusal = $this->reportPictures->refusalOf(
             $organizationId,
             $reporterId,
             array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $screenshots),
         );
-        foreach ($screenshots as $screenshot) {
-            $refusal = match ($states[strtolower($screenshot->mediaId)] ?? null) {
-                null => RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU,
-                MediaImageStatus::Pending => RoundRefused::MEDIA_STILL_PROCESSING,
-                MediaImageStatus::Rejected => RoundRefused::MEDIA_REJECTED,
-                MediaImageStatus::Ready => null,
-            };
-            if (null !== $refusal) {
-                throw new RoundRefused($refusal);
-            }
+        if (null !== $refusal) {
+            throw new RoundRefused($refusal);
         }
     }
 

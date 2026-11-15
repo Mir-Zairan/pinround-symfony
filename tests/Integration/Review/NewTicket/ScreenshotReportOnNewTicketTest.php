@@ -158,6 +158,31 @@ final class ScreenshotReportOnNewTicketTest extends KernelTestCase
     }
 
     /**
+     * The transaction runs as Acme Foods and commits, and Lena's picture is ready there, so only attach's tenant check
+     * keeps it out of Acme Foods' rounds for a Beta Bakery request.
+     */
+    #[Test]
+    public function attachForAnotherOrganizationThanTheTenantsFailsAndNothingIsSaved(): void
+    {
+        $posted = self::posted(self::LENAS_READY_MEDIA, [1 => ['x' => '12.50', 'y' => '80.00', 'note' => 'Total is off']]);
+
+        $failure = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($posted): ?string {
+            try {
+                $this->report()->attach(new OrganizationId(self::BETA_BAKERY), new UserId(self::LENA), new TicketId(self::TICKET), $posted, new \DateTimeImmutable(self::REPORTED_AT));
+            } catch (\LogicException $wrongTenant) {
+                return $wrongTenant->getMessage();
+            }
+
+            return null;
+        });
+
+        self::assertSame('The new ticket\'s report is read and saved under the tenant of its own organization.', $failure);
+        self::assertSame([['rounds' => 0, 'screenshots' => 0, 'pins' => 0]], $this->rowsAs(
+            'SELECT (SELECT count(*) FROM rvw_round WHERE ticket_id = ?) AS rounds, (SELECT count(*) FROM rvw_screenshot) AS screenshots, (SELECT count(*) FROM rvw_pin) AS pins',
+        ));
+    }
+
+    /**
      * Omar's picture is there and ready for Omar, so the refusal above comes from the uploader check alone.
      */
     #[Test]

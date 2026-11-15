@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Review\UI\NewTicket;
 use App\Media\Api\MediaImageStatus;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
+use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
 use App\Review\Domain\Pin;
 use App\Review\Domain\Round;
@@ -46,6 +47,7 @@ final class ScreenshotReportOnNewTicketTest extends TestCase
     private const string LENAS_MEDIA_AT_BETA_BAKERY = '0197a3c0-0000-7000-8000-000000000d06';
 
     private InMemoryRounds $rounds;
+    private TenantContext $tenantContext;
     private InMemoryUploadedMedia $uploadedMedia;
     private ScreenshotReportOnNewTicket $report;
     private \DateTimeImmutable $reportedAt;
@@ -53,23 +55,62 @@ final class ScreenshotReportOnNewTicketTest extends TestCase
     protected function setUp(): void
     {
         $this->rounds = new InMemoryRounds();
-        $this->uploadedMedia = new InMemoryUploadedMedia([
+        $this->tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
+        $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $this->uploadedMedia = new InMemoryUploadedMedia($this->tenantContext, [
             [self::ACME_FOODS, self::READY_MEDIA, self::LENA, MediaImageStatus::Ready],
             [self::ACME_FOODS, self::PENDING_MEDIA, self::LENA, MediaImageStatus::Pending],
             [self::ACME_FOODS, self::REJECTED_MEDIA, self::LENA, MediaImageStatus::Rejected],
             [self::ACME_FOODS, self::OMARS_MEDIA, self::OMAR, MediaImageStatus::Ready],
             [self::BETA_BAKERY, self::LENAS_MEDIA_AT_BETA_BAKERY, self::LENA, MediaImageStatus::Ready],
         ]);
-        $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
-        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $reportPictures = new ReportPictures($this->uploadedMedia);
         $roundCommands = new UseCaseRoundCommands(
             $this->rounds,
             new InMemoryTicketTurnQueries([self::snapshot()], new TicketId(self::BROKEN_TICKET)),
-            $tenantContext,
-            $this->uploadedMedia,
+            $this->tenantContext,
+            $reportPictures,
         );
-        $this->report = new ScreenshotReportOnNewTicket($roundCommands, $this->uploadedMedia);
+        $this->report = new ScreenshotReportOnNewTicket($roundCommands, $reportPictures, $this->tenantContext);
         $this->reportedAt = new \DateTimeImmutable('2026-03-04 09:30:00+00:00');
+    }
+
+    /**
+     * createReport saves under the tenant, Acme Foods, whatever organization attach is given, so only attach's own check
+     * keeps Lena's ready Acme Foods picture from being saved for a Beta Bakery request.
+     */
+    #[Test]
+    public function attachUnderAnotherOrganizationThanTheTenantsFailsAndSavesNothing(): void
+    {
+        $posted = self::posted(self::READY_MEDIA, 'Checkout page', '', [1 => ['x' => '10', 'y' => '20', 'note' => '']]);
+
+        $this->assertWrongTenant(fn () => $this->report->attach(new OrganizationId(self::BETA_BAKERY), new UserId(self::LENA), new TicketId(self::TICKET), $posted, $this->reportedAt));
+
+        self::assertSame([], $this->rounds->stored);
+        self::assertSame(0, $this->rounds->issuedRoundIds);
+        self::assertSame([], $this->uploadedMedia->askedMediaIds);
+    }
+
+    #[Test]
+    public function attachWithNoTenantFailsAndSavesNothing(): void
+    {
+        $this->tenantContext->clear();
+
+        $this->assertWrongTenant(fn () => $this->attach(self::posted(self::READY_MEDIA, '', '', [])));
+
+        self::assertSame([], $this->rounds->stored);
+        self::assertSame([], $this->uploadedMedia->askedMediaIds);
+    }
+
+    /**
+     * Lena's Beta Bakery picture is ready for her there; the check fails before Media is asked.
+     */
+    #[Test]
+    public function refusalOfUnderAnotherOrganizationThanTheTenantsFailsBeforeAnyRead(): void
+    {
+        $this->assertWrongTenant(fn () => $this->report->refusalOf(new OrganizationId(self::BETA_BAKERY), new UserId(self::LENA), self::posted(self::LENAS_MEDIA_AT_BETA_BAKERY, '', '', [])));
+
+        self::assertSame([], $this->uploadedMedia->askedMediaIds);
     }
 
     #[Test]
@@ -269,6 +310,16 @@ final class ScreenshotReportOnNewTicketTest extends TestCase
     private function attach(array $posted): void
     {
         $this->report->attach(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), new TicketId(self::TICKET), $posted, $this->reportedAt);
+    }
+
+    private function assertWrongTenant(callable $call): void
+    {
+        try {
+            $call();
+            self::fail('The report was read or saved under another tenant.');
+        } catch (\LogicException $wrongTenant) {
+            self::assertSame('The new ticket\'s report is read and saved under the tenant of its own organization.', $wrongTenant->getMessage());
+        }
     }
 
     /**

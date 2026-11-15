@@ -8,6 +8,7 @@ use App\Media\Api\MediaImageStatus;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
 use App\Review\Domain\Pin;
 use App\Review\Domain\Round;
@@ -56,7 +57,9 @@ final class UseCaseRoundCommandsTest extends TestCase
     {
         $this->rounds = new InMemoryRounds();
         $this->tickets = new InMemoryTicketTurnQueries([self::snapshot()], new TicketId(self::BROKEN_TICKET));
-        $this->uploadedMedia = new InMemoryUploadedMedia([
+        $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $this->uploadedMedia = new InMemoryUploadedMedia($tenantContext, [
             [self::ACME_FOODS, self::MEDIA, self::LENA, MediaImageStatus::Ready],
             [self::ACME_FOODS, self::OTHER_MEDIA, self::LENA, MediaImageStatus::Ready],
             [self::ACME_FOODS, self::PENDING_MEDIA, self::LENA, MediaImageStatus::Pending],
@@ -64,9 +67,7 @@ final class UseCaseRoundCommandsTest extends TestCase
             [self::ACME_FOODS, self::OMARS_MEDIA, self::OMAR, MediaImageStatus::Ready],
             [self::BETA_BAKERY, self::LENAS_MEDIA_AT_BETA_BAKERY, self::LENA, MediaImageStatus::Ready],
         ]);
-        $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
-        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
-        $this->commands = new UseCaseRoundCommands($this->rounds, $this->tickets, $tenantContext, $this->uploadedMedia);
+        $this->commands = new UseCaseRoundCommands($this->rounds, $this->tickets, $tenantContext, new ReportPictures($this->uploadedMedia));
         $this->reportedAt = new \DateTimeImmutable('2026-03-04 09:30:00+00:00');
     }
 
@@ -275,7 +276,7 @@ final class UseCaseRoundCommandsTest extends TestCase
     #[Test]
     public function itFailsWhenNoOrganizationIsSetAndAsksNothing(): void
     {
-        $commands = new UseCaseRoundCommands($this->rounds, $this->tickets, new TenantContext(new RecordingTenantSwitchGuard()), $this->uploadedMedia);
+        $commands = new UseCaseRoundCommands($this->rounds, $this->tickets, new TenantContext(new RecordingTenantSwitchGuard()), new ReportPictures($this->uploadedMedia));
 
         try {
             $commands->createReport(new TicketId(self::TICKET), self::screenshots(1), new UserId(self::LENA), $this->reportedAt);

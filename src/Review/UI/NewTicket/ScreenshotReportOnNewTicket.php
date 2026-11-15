@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Review\UI\NewTicket;
 
-use App\Media\Api\MediaImageStatus;
-use App\Media\Api\UploadedMedia;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\ReportPictures;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -25,19 +25,21 @@ final readonly class ScreenshotReportOnNewTicket implements NewTicketReport
     public const string REPORT_UNREADABLE = 'We could not read the screenshot part of the form. Try again.';
     public const string PIN_SPOT_UNREADABLE = 'Place each pin on the picture again.';
     public const string CONTENT_WITHOUT_SCREENSHOT = 'Add a screenshot, or clear its title, summary and pins.';
-    public const string TOO_MANY_PINS = 'A picture holds at most 100 pins.';
+    public const string TOO_MANY_PINS = 'A picture holds at most '.RoundCommands::MAX_PINS_PER_SCREENSHOT.' pins.';
 
     // As pin_markup.js writes it ("12.50"): is_numeric would also let in a sign, an exponent and spaces.
     private const string PIN_PERCENT = '/\A\d{1,3}(?:\.\d+)?\z/';
 
     public function __construct(
         private RoundCommands $roundCommands,
-        private UploadedMedia $uploadedMedia,
+        private ReportPictures $reportPictures,
+        private TenantContext $tenantContext,
     ) {
     }
 
     public function refusalOf(OrganizationId $organizationId, UserId $reporterId, array $postedReport): ?string
     {
+        $this->requireTenant($organizationId);
         try {
             $screenshot = self::screenshotOf($postedReport);
         } catch (NewTicketReportRefused $unreadable) {
@@ -47,18 +49,12 @@ final readonly class ScreenshotReportOnNewTicket implements NewTicketReport
             return null;
         }
 
-        $states = $this->uploadedMedia->statesOf($organizationId, $reporterId, [$screenshot->mediaId]);
-
-        return match ($states[strtolower($screenshot->mediaId)] ?? null) {
-            null => RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU,
-            MediaImageStatus::Pending => RoundRefused::MEDIA_STILL_PROCESSING,
-            MediaImageStatus::Rejected => RoundRefused::MEDIA_REJECTED,
-            MediaImageStatus::Ready => null,
-        };
+        return $this->reportPictures->refusalOf($organizationId, $reporterId, [$screenshot->mediaId]);
     }
 
     public function attach(OrganizationId $organizationId, UserId $reporterId, TicketId $ticketId, array $postedReport, \DateTimeImmutable $reportedAt): void
     {
+        $this->requireTenant($organizationId);
         $screenshot = self::screenshotOf($postedReport);
         if (null === $screenshot) {
             return;
@@ -68,6 +64,18 @@ final readonly class ScreenshotReportOnNewTicket implements NewTicketReport
             $this->roundCommands->createReport($ticketId, [$screenshot], $reporterId, $reportedAt);
         } catch (RoundRefused $refused) {
             throw new NewTicketReportRefused($refused->getMessage(), 0, $refused);
+        }
+    }
+
+    /**
+     * createReport saves under the request's tenant and never sees $organizationId, so a mismatch is refused here.
+     *
+     * @throws \LogicException when no tenant is set or it is not $organizationId
+     */
+    private function requireTenant(OrganizationId $organizationId): void
+    {
+        if (true !== $this->tenantContext->get()?->equals($organizationId)) {
+            throw new \LogicException('The new ticket\'s report is read and saved under the tenant of its own organization.');
         }
     }
 
