@@ -386,14 +386,109 @@ final class DoctrineUploadIntentsTest extends KernelTestCase
         self::assertNull($this->storedUsedAt(self::ACME_INTENT));
     }
 
-    private function addIntent(string $organizationId, string $id, string $userId, string $expiresAt): void
+    /**
+     * Acme Foods' rows the sum must leave out are larger than the ones it counts, so leaving any in shows.
+     */
+    #[Test]
+    public function openBytesAtSumsTheTenantsIntentsThatAreNeitherUsedNorExpired(): void
     {
-        $this->transactions()->committedAs($organizationId, fn () => $this->uploadIntents()->add($this->intentOf($organizationId, $id, $userId, $expiresAt)));
+        $this->addIntent(self::ACME_FOODS, self::ACME_INTENT, self::MIA, '2026-03-02 10:15:00+00:00', 1_000);
+        $this->addIntent(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000e1421', self::MIA, '2026-03-02 10:00:01+00:00', 200);
+        $this->addIntent(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000e1422', self::MIA, self::NOW, 50_000);
+        $this->addIntent(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000e1423', self::MIA, '2026-03-02 09:00:00+00:00', 60_000);
+        $this->addIntent(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000e1424', self::MIA, '2026-03-02 10:15:00+00:00', 70_000);
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $usedIntent = $this->uploadIntents()->byId(new UploadIntentId('0197a3c0-0000-7000-8000-0000000e1424'));
+            self::assertNotNull($usedIntent);
+            $this->uploadIntents()->recordUse($usedIntent, new \DateTimeImmutable('2026-03-02 09:59:00+00:00'));
+        });
+        $this->addIntent(self::OTHER_ORGANIZATION, self::OTHER_INTENT, self::OMAR, '2026-03-02 10:15:00+00:00', 80_000);
+
+        $openBytesOfAcme = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->uploadIntents()->openBytesAt($this->clock->now()));
+        $openBytesOfOther = $this->transactions()->rolledBackAs(self::OTHER_ORGANIZATION, fn (): int => $this->uploadIntents()->openBytesAt($this->clock->now()));
+
+        self::assertSame(1_200, $openBytesOfAcme);
+        self::assertSame(80_000, $openBytesOfOther);
     }
 
-    private function intentOf(string $organizationId, string $id, string $userId, string $expiresAt): UploadIntent
+    #[Test]
+    public function openBytesAtIsZeroWithNoIntents(): void
     {
-        return UploadIntent::open(new UploadIntentId($id), new OrganizationId($organizationId), new UserId($userId), UploadPurpose::Screenshot, 'ticket', 'SHOP-12', 10_485_760, ['image/png', 'image/webp'], (self::ACME_FOODS === $organizationId ? 'acme/' : 'other/').$id, new \DateTimeImmutable($expiresAt));
+        $this->addIntent(self::OTHER_ORGANIZATION, self::OTHER_INTENT, self::OMAR, '2026-03-02 10:15:00+00:00', 80_000);
+
+        self::assertSame(0, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->uploadIntents()->openBytesAt($this->clock->now())));
+    }
+
+    /**
+     * lock_timeout stands in for the wait of a second begin, which one PHP process cannot sit through.
+     */
+    #[Test]
+    public function lockQuotaOfMakesTheOrganizationsNextLockWaitUntilTheTransactionEndsAndNoOtherOrganizations(): void
+    {
+        $otherRequest = $this->otherSession();
+        $lockInOtherRequest = static fn (string $organizationId): mixed => $otherRequest->transactional(static function (Connection $session) use ($organizationId): mixed {
+            $session->executeStatement("SET LOCAL lock_timeout = '200ms'");
+
+            return $session->fetchOne('SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtextextended(?, 0))) AS taken', [DoctrineUploadIntents::QUOTA_LOCK_PREFIX.$organizationId]);
+        });
+
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($lockInOtherRequest): void {
+            $this->uploadIntents()->lockQuotaOf(new OrganizationId(self::ACME_FOODS));
+            try {
+                $lockInOtherRequest(self::ACME_FOODS);
+                self::fail('A second quota lock of the organization did not wait for the first.');
+            } catch (DriverException $exception) {
+                self::assertSame('55P03', $exception->getSQLState());
+            }
+            self::assertSame(1, $lockInOtherRequest(self::OTHER_ORGANIZATION), 'Another organization waited for Acme Foods\' quota.');
+        });
+        self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
+        $lockedAfterTheEnd = $lockInOtherRequest(self::ACME_FOODS);
+        self::getContainer()->get(TenantContext::class)->clear();
+        $otherRequest->close();
+
+        self::assertSame(1, $lockedAfterTheEnd);
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(DoctrineUploadIntents): mixed, string}>
+     */
+    public static function quotaCallsOutsideATransaction(): iterable
+    {
+        yield 'lockQuotaOf' => [static function (DoctrineUploadIntents $uploadIntents): mixed {
+            $uploadIntents->lockQuotaOf(new OrganizationId(self::ACME_FOODS));
+
+            return null;
+        }, 'Locking the storage quota needs an open transaction.'];
+        yield 'openBytesAt' => [static fn (DoctrineUploadIntents $uploadIntents): mixed => $uploadIntents->openBytesAt(new \DateTimeImmutable(self::NOW)), 'Reading the open upload intents needs an open transaction.'];
+    }
+
+    /**
+     * @param \Closure(DoctrineUploadIntents): mixed $call
+     */
+    #[Test]
+    #[DataProvider('quotaCallsOutsideATransaction')]
+    public function aQuotaCallOutsideATransactionIsRefused(\Closure $call, string $refusal): void
+    {
+        self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $call($this->uploadIntents());
+            self::fail('A quota call ran outside a transaction.');
+        } catch (\LogicException $refused) {
+            self::assertSame($refusal, $refused->getMessage());
+        } finally {
+            self::getContainer()->get(TenantContext::class)->clear();
+        }
+    }
+
+    private function addIntent(string $organizationId, string $id, string $userId, string $expiresAt, int $maxBytes = 10_485_760): void
+    {
+        $this->transactions()->committedAs($organizationId, fn () => $this->uploadIntents()->add($this->intentOf($organizationId, $id, $userId, $expiresAt, $maxBytes)));
+    }
+
+    private function intentOf(string $organizationId, string $id, string $userId, string $expiresAt, int $maxBytes = 10_485_760): UploadIntent
+    {
+        return UploadIntent::open(new UploadIntentId($id), new OrganizationId($organizationId), new UserId($userId), UploadPurpose::Screenshot, 'ticket', 'SHOP-12', $maxBytes, ['image/png', 'image/webp'], (self::ACME_FOODS === $organizationId ? 'acme/' : 'other/').$id, new \DateTimeImmutable($expiresAt));
     }
 
     private function storedUsedAt(string $id): ?\DateTimeImmutable

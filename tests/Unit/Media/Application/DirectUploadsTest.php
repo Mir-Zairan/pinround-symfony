@@ -15,6 +15,7 @@ use App\Media\Application\ProcessUpload;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaStatus;
 use App\Media\Domain\UploadIntent;
+use App\Media\Domain\UploadPolicy;
 use App\Media\Domain\UploadPurpose;
 use App\Media\Infrastructure\Storage\ObjectStorageSettings;
 use App\Media\Infrastructure\Storage\PresignedUploads;
@@ -41,6 +42,11 @@ final class DirectUploadsTest extends TestCase
     private const string NOW = '2026-03-02 10:00:00 UTC';
     private const string TICKET = 'ticket';
     private const string SHOP_12 = 'SHOP-12';
+    private const int FIFTY_GIB = 50 * 1024 * 1024 * 1024;
+
+    /** What seedStorageUse() counts against the quota: 3 000 pending, 4 000 ready and 2 000 of an open intent. */
+    private const int SEEDED_BYTES_IN_USE = 9_000;
+    private const int QUOTA = 10_000;
 
     private MockClock $clock;
     private CountingClock $signingClock;
@@ -65,15 +71,7 @@ final class DirectUploadsTest extends TestCase
         $this->ticketAuthorizer = new RecordingMediaTargetAuthorizer(self::TICKET);
         $this->ticketAuthorizer->allow(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::SHOP_12);
         $this->ticketAuthorizer->allow(new OrganizationId(self::OTHER_ORGANIZATION), new UserId(self::MIA), self::SHOP_12);
-        $this->uploads = new DirectUploads(
-            $this->uploadIntents,
-            $this->mediaObjects,
-            new PresignedUploads(new ObjectStorageSettings('http://minio:9000', 'https://files.example.test', 'pinround', 'eu-west-1', 'acme-key', 'acme-secret'), $this->signingClock),
-            $this->uploadProcessingQueue,
-            new MediaTargetAuthorizers([$this->ticketAuthorizer]),
-            $this->transactions,
-            $this->tenantContext,
-        );
+        $this->uploads = $this->uploadsWithQuota(self::FIFTY_GIB);
     }
 
     #[Test]
@@ -216,11 +214,85 @@ final class DirectUploadsTest extends TestCase
             $this->uploads->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::shop12(), 'screenshot', 'image/png', 2048, $this->clock->now());
             self::fail('An upload was begun outside a transaction.');
         } catch (\LogicException $refusal) {
+            self::assertSame('Locking the storage quota needs an open transaction.', $refusal->getMessage());
+        }
+
+        self::assertSame([], $this->uploadIntents->storedRows());
+        self::assertSame(0, $this->signingClock->readCount);
+    }
+
+    #[Test]
+    public function aBeginWithNoQuotaOutsideATransactionIsStillRefusedByTheStore(): void
+    {
+        try {
+            $this->uploadsWithQuota(UploadPolicy::UNLIMITED_QUOTA)->begin(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), self::shop12(), 'screenshot', 'image/png', 2048, $this->clock->now());
+            self::fail('An upload was begun outside a transaction.');
+        } catch (\LogicException $refusal) {
             self::assertSame('Adding an upload intent needs an open transaction.', $refusal->getMessage());
         }
 
         self::assertSame([], $this->uploadIntents->storedRows());
         self::assertSame(0, $this->signingClock->readCount);
+    }
+
+    #[Test]
+    public function aBeginTakesTheQuotaLockOfItsOrganization(): void
+    {
+        $this->begin('image/png', 2048);
+
+        self::assertSame([self::ACME_FOODS], $this->uploadIntents->quotaLocksTaken());
+    }
+
+    #[Test]
+    public function aBeginThatFillsTheQuotaExactlyIsTaken(): void
+    {
+        $this->seedStorageUse();
+        $this->uploads = $this->uploadsWithQuota(self::QUOTA);
+
+        $slot = $this->begin('image/png', self::QUOTA - self::SEEDED_BYTES_IN_USE);
+
+        self::assertContains($slot->intentId, $this->storedIntentIds());
+        self::assertSame(['Content-Type' => 'image/png', 'Content-Length' => '1000'], $slot->headers);
+    }
+
+    #[Test]
+    public function aBeginOneByteOverTheQuotaIsRefusedAsStorageFullAndStoresNothing(): void
+    {
+        $this->seedStorageUse();
+        $intentsBefore = $this->storedIntentIds();
+        $this->uploads = $this->uploadsWithQuota(self::QUOTA);
+
+        try {
+            $this->begin('image/png', self::QUOTA - self::SEEDED_BYTES_IN_USE + 1);
+            self::fail('An upload past the quota was begun.');
+        } catch (UploadRefused $refused) {
+            self::assertSame("Your company's storage is full. Ask your admin.", $refused->getMessage());
+        }
+
+        self::assertSame($intentsBefore, $this->storedIntentIds());
+        self::assertSame(0, $this->signingClock->readCount);
+        self::assertSame([], $this->ticketAuthorizer->asked(), 'A full storage is refused before the target is asked about.');
+    }
+
+    #[Test]
+    public function noQuotaTakesNoLockAndTakesAnUploadWhateverIsStored(): void
+    {
+        $this->seedStorageUse();
+        $this->uploads = $this->uploadsWithQuota(UploadPolicy::UNLIMITED_QUOTA);
+
+        $slot = $this->begin('image/png', UploadPolicy::MAX_BYTES);
+
+        self::assertContains($slot->intentId, $this->storedIntentIds());
+        self::assertSame([], $this->uploadIntents->quotaLocksTaken());
+    }
+
+    #[Test]
+    public function aNegativeQuotaIsRefusedWhenTheServiceIsBuilt(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('The storage quota of an organization is 0 (no limit) or more bytes.');
+
+        $this->uploadsWithQuota(-1);
     }
 
     #[Test]
@@ -234,6 +306,7 @@ final class DirectUploadsTest extends TestCase
         }
 
         $this->assertNothingBegun();
+        self::assertSame([], $this->uploadIntents->quotaLocksTaken(), 'The tenant is checked before the quota is locked.');
     }
 
     #[Test]
@@ -530,6 +603,73 @@ final class DirectUploadsTest extends TestCase
     private static function shop12(): UploadTarget
     {
         return new UploadTarget(self::TICKET, self::SHOP_12);
+    }
+
+    private function uploadsWithQuota(int $organizationQuotaBytes): DirectUploads
+    {
+        return new DirectUploads(
+            $this->uploadIntents,
+            $this->mediaObjects,
+            new PresignedUploads(new ObjectStorageSettings('http://minio:9000', 'https://files.example.test', 'pinround', 'eu-west-1', 'acme-key', 'acme-secret'), $this->signingClock),
+            $this->uploadProcessingQueue,
+            new MediaTargetAuthorizers([$this->ticketAuthorizer]),
+            $this->transactions,
+            $this->tenantContext,
+            $organizationQuotaBytes,
+        );
+    }
+
+    /**
+     * Acme Foods' files that count, SEEDED_BYTES_IN_USE in all, beside 50 000 bytes each that must not: a rejected
+     * object, an intent that expires at this moment, a used intent, and another organization's object and intent.
+     */
+    private function seedStorageUse(): void
+    {
+        $now = $this->clock->now();
+        $acmeFoods = new OrganizationId(self::ACME_FOODS);
+        $this->transactions->run(function () use ($acmeFoods, $now): void {
+            $this->mediaObjects->add($this->mediaObjectOf($acmeFoods, 3_000));
+            $ready = $this->mediaObjectOf($acmeFoods, 4_000);
+            $ready->markReady(str_repeat('a', 64), 1280, 800, ['view' => 'media/view.webp']);
+            $this->mediaObjects->add($ready);
+            $rejected = $this->mediaObjectOf($acmeFoods, 50_000);
+            $rejected->reject('Not a picture.');
+            $this->mediaObjects->add($rejected);
+            $this->uploadIntents->add($this->intentOf($acmeFoods, 2_000, UploadPolicy::intentExpiryFor($now)));
+            $this->uploadIntents->add($this->intentOf($acmeFoods, 50_000, $now));
+            $used = $this->intentOf($acmeFoods, 50_000, UploadPolicy::intentExpiryFor($now));
+            $this->uploadIntents->add($used);
+            $this->uploadIntents->recordUse($used, $now);
+        });
+        $otherOrganization = new OrganizationId(self::OTHER_ORGANIZATION);
+        $this->tenantContext->set($otherOrganization);
+        $this->transactions->run(function () use ($otherOrganization, $now): void {
+            $this->mediaObjects->add($this->mediaObjectOf($otherOrganization, 50_000));
+            $this->uploadIntents->add($this->intentOf($otherOrganization, 50_000, UploadPolicy::intentExpiryFor($now)));
+        });
+        $this->tenantContext->set($acmeFoods);
+    }
+
+    private function mediaObjectOf(OrganizationId $organizationId, int $bytes): MediaObject
+    {
+        $mediaId = $this->mediaObjects->nextIdentity();
+
+        return MediaObject::upload($mediaId, $organizationId, 'uploads/'.$organizationId->toString().'/'.$mediaId->toString(), 'image/png', $bytes, new UserId(self::MIA), $this->clock->now());
+    }
+
+    private function intentOf(OrganizationId $organizationId, int $maxBytes, \DateTimeImmutable $expiresAt): UploadIntent
+    {
+        $intentId = $this->uploadIntents->nextIdentity();
+
+        return UploadIntent::open($intentId, $organizationId, new UserId(self::MIA), UploadPurpose::Screenshot, self::TICKET, self::SHOP_12, $maxBytes, ['image/png'], 'uploads/'.$organizationId->toString().'/'.$intentId->toString(), $expiresAt);
+    }
+
+    /**
+     * @return list<string> of every organization
+     */
+    private function storedIntentIds(): array
+    {
+        return array_map(static fn (UploadIntent $intent): string => $intent->id()->toString(), $this->uploadIntents->storedRows());
     }
 
     private function begin(string $mime, int $bytes): UploadSlot

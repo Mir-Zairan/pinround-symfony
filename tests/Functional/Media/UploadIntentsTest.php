@@ -5,9 +5,16 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Media;
 
 use App\Identity\Domain\User;
+use App\Media\Api\MediaPermission;
+use App\Media\Api\UploadTarget;
 use App\Media\Application\DirectUploads;
 use App\Media\Application\ProcessUpload;
 use App\Media\UI\Controller\UploadIntentController;
+use App\Media\UI\Voter\UploadVoter;
+use App\Organization\Api\ActorContext;
+use App\Organization\Api\CurrentActor;
+use App\Organization\Infrastructure\Security\RequestScopedCurrentActor;
+use App\Organization\UI\Voter\OrganizationVoter;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -22,7 +29,11 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Messenger\Transport\Serialization\PhpSerializer;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Component\Security\Core\Authorization\Voter\Vote;
+use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 use Symfony\Component\Uid\Uuid;
+use Symfony\Contracts\Service\ResetInterface;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -44,6 +55,8 @@ final class UploadIntentsTest extends WebTestCase
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string BEGIN_PATH = '/media/intents';
     private const int SCREENSHOT_BYTES = 245_760;
+    /** The default quota, as .env.test leaves MEDIA_ORG_QUOTA_BYTES unset. */
+    private const int FIFTY_GIB = 53_687_091_200;
     private const string NOBODY_INTENT_ID = '0197a3c0-0000-7000-8000-00000000dead';
     private const array JSON_HEADERS = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'];
 
@@ -265,6 +278,98 @@ final class UploadIntentsTest extends WebTestCase
     }
 
     #[Test]
+    public function aBeginThatFillsTheOrganizationsStorageExactlyIsAccepted(): void
+    {
+        $this->seedShop();
+        $this->addPendingObjectOf(self::FIFTY_GIB - self::SCREENSHOT_BYTES);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(201);
+        self::assertCount(1, $this->storedIntents());
+    }
+
+    #[Test]
+    public function aBeginOneByteOverTheOrganizationsStorageIsRefusedWithThePlainMessageAndStoresNothing(): void
+    {
+        $this->seedShop();
+        $this->addPendingObjectOf(self::FIFTY_GIB - self::SCREENSHOT_BYTES + 1);
+        $objectsBefore = $this->storedMediaObjects();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $this->uploadToken());
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(['message' => "Your company's storage is full. Ask your admin."], $this->answer());
+        self::assertSame([], $this->storedIntents());
+        self::assertSame($objectsBefore, $this->storedMediaObjects());
+        self::assertSame([], $this->queuedMessages());
+    }
+
+    /**
+     * The organization voter grants, so only the controller's own check of the actor stands in the way.
+     */
+    #[Test]
+    public function aBeginWithNoActorIsForbiddenAndStoresNothing(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+        $token = $this->uploadToken();
+        $this->replaceActorAndOrganizationVoterWithNoActor();
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $token);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['message' => UploadIntentController::NOT_ALLOWED], $this->answer());
+        $this->assertNothingStored();
+    }
+
+    #[Test]
+    public function aCompleteWithNoActorIsForbiddenAndTheIntentStaysUnused(): void
+    {
+        $this->seedShop();
+        $intentId = $this->addOpenIntentOfOmar();
+        $this->logIn($this->client, $this->people['Omar']);
+        $token = $this->uploadToken();
+        $this->replaceActorAndOrganizationVoterWithNoActor();
+
+        $this->postJson($this->completePathOf($intentId), '', $token);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['message' => UploadIntentController::NOT_ALLOWED], $this->answer());
+        $this->assertIntentStayedUnused();
+    }
+
+    /**
+     * Mia is a viewer of Shop, so the ticket authorizer refuses her when Uploads asks it again after the voter.
+     */
+    #[Test]
+    public function aBeginTheVoterAllowsButTheTargetAuthorizerRefusesIsForbiddenAndStoresNothing(): void
+    {
+        $this->seedShop('viewer');
+        $this->logIn($this->client, $this->people['Mia']);
+        $token = $this->uploadToken();
+        self::getContainer()->set(UploadVoter::class, new class extends Voter {
+            protected function supports(string $attribute, mixed $subject): bool
+            {
+                return MediaPermission::UPLOAD === $attribute && $subject instanceof UploadTarget;
+            }
+
+            protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
+            {
+                return true;
+            }
+        });
+
+        $this->postJson(self::BEGIN_PATH, $this->beginBody(), $token);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['message' => UploadIntentController::NOT_ALLOWED], $this->answer());
+        $this->assertNothingStored();
+    }
+
+    #[Test]
     public function omarCompletesHisUploadAndOneProcessUploadIsQueued(): void
     {
         $this->seedShop();
@@ -445,6 +550,61 @@ final class UploadIntentsTest extends WebTestCase
             );
 
             return 0;
+        });
+    }
+
+    private function addPendingObjectOf(int $bytes): void
+    {
+        $parameters = [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $bytes, $this->idOf('Lena')];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO med_object (organization_id, id, storage_key, mime, bytes, uploaded_by, created_at, status)
+             VALUES (?, ?, 'uploads/seeded', 'image/png', ?, ?, TIMESTAMPTZ '2026-11-05 10:00:00+00', 'pending')",
+            $parameters,
+        ));
+    }
+
+    /**
+     * @return string the id of an intent Omar began for SHOP-1 at the fixed time, unused
+     */
+    private function addOpenIntentOfOmar(): string
+    {
+        $intentId = Uuid::v7()->toRfc4122();
+        $parameters = [$this->acmeFoods->toString(), $intentId, $this->idOf('Omar'), $this->shopTicket, self::SCREENSHOT_BYTES, \sprintf('uploads/%s/%s', $this->acmeFoods->toString(), $intentId)];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO med_upload_intent (organization_id, id, user_id, purpose, target_kind, target_id, max_bytes, mime_allowed, storage_key, expires_at)
+             VALUES (?, ?, ?, 'screenshot', 'ticket', ?, ?, '{image/png}', ?, TIMESTAMPTZ '2026-11-07 12:00:00+00')",
+            $parameters,
+        ));
+
+        return $intentId;
+    }
+
+    /**
+     * Call it before the first request, while neither is built yet. The kernel resets the real actor between
+     * requests, so the stand-in is resettable too.
+     */
+    private function replaceActorAndOrganizationVoterWithNoActor(): void
+    {
+        self::getContainer()->set(OrganizationVoter::class, new class extends Voter {
+            protected function supports(string $attribute, mixed $subject): bool
+            {
+                return $subject instanceof OrganizationId;
+            }
+
+            protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
+            {
+                return true;
+            }
+        });
+        self::getContainer()->set(RequestScopedCurrentActor::class, new class implements CurrentActor, ResetInterface {
+            public function actorFor(mixed $tokenUser): ?ActorContext
+            {
+                return null;
+            }
+
+            public function reset(): void
+            {
+            }
         });
     }
 

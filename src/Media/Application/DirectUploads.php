@@ -34,7 +34,13 @@ final readonly class DirectUploads implements Uploads
     /** The intent lasts a day after the page began it, so the page has been open that long. */
     public const string EXPIRED = 'The page was open too long. Try again.';
     public const string USED_ALREADY = 'This upload has ended. Upload the file again.';
+    public const string STORAGE_FULL = "Your company's storage is full. Ask your admin.";
 
+    /**
+     * @param int $organizationQuotaBytes what each organization may store, UploadPolicy::UNLIMITED_QUOTA for no limit
+     *
+     * @throws \InvalidArgumentException when $organizationQuotaBytes is negative
+     */
     public function __construct(
         private UploadIntents $uploadIntents,
         private MediaObjects $mediaObjects,
@@ -43,7 +49,11 @@ final readonly class DirectUploads implements Uploads
         private MediaTargetAuthorizers $mediaTargetAuthorizers,
         private Transactions $transactions,
         private TenantContext $tenantContext,
+        private int $organizationQuotaBytes,
     ) {
+        if ($organizationQuotaBytes < 0) {
+            throw new \InvalidArgumentException('The storage quota of an organization is 0 (no limit) or more bytes.');
+        }
     }
 
     public function begin(OrganizationId $organizationId, UserId $userId, UploadTarget $target, string $purpose, string $mime, int $bytes, \DateTimeImmutable $at): UploadSlot
@@ -56,6 +66,7 @@ final readonly class DirectUploads implements Uploads
             throw new UploadRefused('This file is empty or bigger than 15 MB. Pick a screenshot of up to 15 MB.');
         }
         $this->requireTenant($organizationId);
+        $this->requireRoomFor($organizationId, $bytes, $at);
         $this->requireMayAttach($organizationId, $userId, $target->kind, $target->id);
 
         $intentId = $this->uploadIntents->nextIdentity();
@@ -110,6 +121,23 @@ final readonly class DirectUploads implements Uploads
     {
         if (true !== $this->tenantContext->get()?->equals($organizationId)) {
             throw new \LogicException('An upload runs under the tenant of its own organization.');
+        }
+    }
+
+    /**
+     * The lock lasts until the caller's transaction commits, after the intent is stored, so a second begin of the
+     * organization counts it.
+     */
+    private function requireRoomFor(OrganizationId $organizationId, int $bytes, \DateTimeImmutable $at): void
+    {
+        if (UploadPolicy::UNLIMITED_QUOTA === $this->organizationQuotaBytes) {
+            return;
+        }
+
+        $this->uploadIntents->lockQuotaOf($organizationId);
+        $usedBytes = $this->mediaObjects->storedBytes() + $this->uploadIntents->openBytesAt($at);
+        if (!UploadPolicy::fitsQuota($this->organizationQuotaBytes, $usedBytes, $bytes)) {
+            throw new UploadRefused(self::STORAGE_FULL);
         }
     }
 

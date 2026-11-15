@@ -10,6 +10,7 @@ use App\Media\Api\UploadRefused;
 use App\Media\Api\Uploads;
 use App\Media\Api\UploadTarget;
 use App\Media\Api\UploadTargetDenied;
+use App\Media\Application\DirectUploads;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
@@ -31,7 +32,8 @@ use Symfony\Component\Routing\Attribute\Route;
  *
  * In that order: a person with no actor in the tenant is forbidden; a missing or wrong token answers 422 as an expired
  * page; a larger body 413; a body that is no begin request 400. Begin then asks MediaPermission UPLOAD on the target
- * (403), and Uploads refuses a file type or size with its plain message (422) before any URL is signed. Complete runs
+ * (403), and Uploads refuses a file type or size, or a file the organization's storage has no room for, with its plain
+ * message (422) before any URL is signed. Complete runs
  * outside the request transaction, as Uploads::complete() opens its own, and answers an intent its person did not
  * begin, of another organization or with a malformed id as not found (404), a target they may no longer add to as
  * forbidden (403), and a used or expired intent with Uploads' message (422).
@@ -49,7 +51,8 @@ final class UploadIntentController extends AbstractController
 
     public const string NOT_ALLOWED = 'You may not add a file here.';
     public const string NOTHING_TO_ADD_TO = 'Nothing you may add a file to has that id.';
-    public const string FORM_EXPIRED = 'The page was open too long. Try again.';
+    /** An expired form token and an expired intent both mean the page sat open too long, so they say it alike. */
+    public const string FORM_EXPIRED = DirectUploads::EXPIRED;
     public const string BODY_TOO_LARGE = 'This upload request is larger than 4 KB. Reload the page and try again.';
     public const string NOT_A_BEGIN_REQUEST = 'This upload request needs a purpose, a file type, a size and a target. Reload the page and try again.';
 
