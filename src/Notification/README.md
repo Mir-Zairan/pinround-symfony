@@ -1,6 +1,6 @@
 # Notification
 
-Pings, the bell, mutes and email digests. Pings are rate limited and clear by themselves when the person acts on the ticket. It owns the tables `ntf_ping`, `ntf_notification`, `ntf_mute` and `ntf_delivery`. Its Api is `PingCommands` and `NotificationQueries`. It may use the Api of Organization and Ticketing.
+Pings, the bell, mutes and email digests. Pings are rate limited and clear by themselves when the person acts on the ticket. It owns the tables `ntf_ping`, `ntf_notification`, `ntf_mute` and `ntf_delivery`. Its Api is `PingCommands` and `NotificationQueries`. It may use the Api of Organization, Ticketing and Conversation (`MessageQueries`: whether a question is still open or a message still present, for `NotifyRecipients`). `Application\Notify\MarkMessageNotificationsDone` closes the `question` row of an answered question, and the `question` and `reply` rows about a withdrawn question or a removed comment.
 
 Its events, in `Api\Event`, are `PingSent` and `PingCleared` (`PingEvent`, which extends `NotificationEvent`; ids only, through the outbox to `async_notify`); `Domain\QuietHours` decides whether a notification is held until 09:00.
 

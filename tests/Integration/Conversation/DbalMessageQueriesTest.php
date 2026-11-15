@@ -17,8 +17,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * DbalMessageQueries on the real cnv_message as pinround_app. Omar wrote every message on SHOP-1, one for each state a
- * message can be in; Beta Bakery holds a present comment with the removed comment's id, so only the organization filter
- * and row-level security keep it out.
+ * message can be in; Beta Bakery holds a present comment with the removed comment's id and an open question with the
+ * withdrawn one's id, so only the organization filter and row-level security keep them out.
  */
 final class DbalMessageQueriesTest extends KernelTestCase
 {
@@ -38,6 +38,7 @@ final class DbalMessageQueriesTest extends KernelTestCase
     private const string ANSWERED_QUESTION = '0197a3c0-0000-7000-8000-0000000ec105';
     private const string WITHDRAWN_QUESTION = '0197a3c0-0000-7000-8000-0000000ec106';
     private const string NO_MESSAGE = '0197a3c0-0000-7000-8000-0000000ec107';
+    private const string ANSWERED_THEN_REMOVED_QUESTION = '0197a3c0-0000-7000-8000-0000000ec108';
 
     protected function setUp(): void
     {
@@ -51,7 +52,9 @@ final class DbalMessageQueriesTest extends KernelTestCase
         $this->addMessage(self::ACME_FOODS, self::TICKET, self::OPEN_QUESTION, 'question');
         $this->addMessage(self::ACME_FOODS, self::TICKET, self::ANSWERED_QUESTION, 'question', resolvedAt: '2027-03-15 10:05:00+00');
         $this->addMessage(self::ACME_FOODS, self::TICKET, self::WITHDRAWN_QUESTION, 'question', removedAt: '2027-03-15 10:07:00+00');
+        $this->addMessage(self::ACME_FOODS, self::TICKET, self::ANSWERED_THEN_REMOVED_QUESTION, 'question', resolvedAt: '2027-03-15 10:05:00+00', removedAt: '2027-03-15 10:08:00+00');
         $this->addMessage(self::BETA_BAKERY, self::BETA_TICKET, self::REMOVED_COMMENT, 'comment');
+        $this->addMessage(self::BETA_BAKERY, self::BETA_TICKET, self::WITHDRAWN_QUESTION, 'question');
     }
 
     protected function tearDown(): void
@@ -62,23 +65,33 @@ final class DbalMessageQueriesTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{string, bool}>
+     * Each message, whether it is an open question, and whether it is present.
+     *
+     * @return iterable<string, array{string, bool, bool}>
      */
     public static function messages(): iterable
     {
-        yield 'a comment' => [self::COMMENT, true];
-        yield 'a resolved comment' => [self::RESOLVED_COMMENT, true];
-        yield 'a removed comment' => [self::REMOVED_COMMENT, false];
-        yield 'an open question' => [self::OPEN_QUESTION, true];
-        yield 'an answered question' => [self::ANSWERED_QUESTION, true];
-        yield 'a withdrawn question' => [self::WITHDRAWN_QUESTION, false];
-        yield 'an id that names no message' => [self::NO_MESSAGE, false];
-        yield 'a malformed id' => ['not-a-uuid', false];
+        yield 'a comment' => [self::COMMENT, false, true];
+        yield 'a resolved comment' => [self::RESOLVED_COMMENT, false, true];
+        yield 'a removed comment' => [self::REMOVED_COMMENT, false, false];
+        yield 'an open question' => [self::OPEN_QUESTION, true, true];
+        yield 'an answered question' => [self::ANSWERED_QUESTION, false, true];
+        yield 'a withdrawn question' => [self::WITHDRAWN_QUESTION, false, false];
+        yield 'an answered question removed later' => [self::ANSWERED_THEN_REMOVED_QUESTION, false, false];
+        yield 'an id that names no message' => [self::NO_MESSAGE, false, false];
+        yield 'a malformed id' => ['not-a-uuid', false, false];
     }
 
     #[Test]
     #[DataProvider('messages')]
-    public function onlyAMessageOfTheOrganizationThatIsNotRemovedIsPresent(string $messageId, bool $isPresent): void
+    public function onlyAQuestionOfTheOrganizationThatIsNeitherAnsweredNorWithdrawnIsOpen(string $messageId, bool $isOpenQuestion, bool $isPresent): void
+    {
+        self::assertSame($isOpenQuestion, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): bool => $this->messageQueries()->isOpenQuestion($messageId)));
+    }
+
+    #[Test]
+    #[DataProvider('messages')]
+    public function onlyAMessageOfTheOrganizationThatIsNotRemovedIsPresent(string $messageId, bool $isOpenQuestion, bool $isPresent): void
     {
         self::assertSame($isPresent, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): bool => $this->messageQueries()->isPresent($messageId)));
     }
@@ -86,30 +99,53 @@ final class DbalMessageQueriesTest extends KernelTestCase
     #[Test]
     public function anotherOrganizationReadsOnlyItsOwnMessageOfTheSameId(): void
     {
-        self::assertTrue($this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): bool => $this->messageQueries()->isPresent(self::REMOVED_COMMENT)));
-        self::assertFalse($this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): bool => $this->messageQueries()->isPresent(self::COMMENT)));
+        $betaReads = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => [
+            $this->messageQueries()->isPresent(self::REMOVED_COMMENT),
+            $this->messageQueries()->isPresent(self::COMMENT),
+            $this->messageQueries()->isOpenQuestion(self::WITHDRAWN_QUESTION),
+            $this->messageQueries()->isOpenQuestion(self::OPEN_QUESTION),
+        ]);
+
+        self::assertSame([true, false, true, false], $betaReads);
     }
 
+    /**
+     * @return iterable<string, array{\Closure(DbalMessageQueries, string): bool}>
+     */
+    public static function reads(): iterable
+    {
+        yield 'isOpenQuestion' => [static fn (DbalMessageQueries $queries, string $messageId): bool => $queries->isOpenQuestion($messageId)];
+        yield 'isPresent' => [static fn (DbalMessageQueries $queries, string $messageId): bool => $queries->isPresent($messageId)];
+    }
+
+    /**
+     * @param \Closure(DbalMessageQueries, string): bool $read
+     */
     #[Test]
-    public function readingWithNoOpenTransactionIsRefused(): void
+    #[DataProvider('reads')]
+    public function readingWithNoOpenTransactionIsRefused(\Closure $read): void
     {
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         try {
             $this->expectExceptionObject(new \LogicException('A message is read in a transaction under the organization as tenant; none is open.'));
-            $this->messageQueries()->isPresent(self::COMMENT);
+            $read($this->messageQueries(), self::OPEN_QUESTION);
         } finally {
             $this->tenantContext()->clear();
         }
     }
 
+    /**
+     * @param \Closure(DbalMessageQueries, string): bool $read
+     */
     #[Test]
-    public function readingWithNoTenantIsRefusedEvenForAMalformedId(): void
+    #[DataProvider('reads')]
+    public function readingWithNoTenantIsRefusedEvenForAMalformedId(\Closure $read): void
     {
         $connection = self::getContainer()->get('doctrine.dbal.default_connection');
         $connection->beginTransaction();
         try {
             $this->expectException(TenantNotSet::class);
-            $this->messageQueries()->isPresent('not-a-uuid');
+            $read($this->messageQueries(), 'not-a-uuid');
         } finally {
             $connection->rollBack();
         }

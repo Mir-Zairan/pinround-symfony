@@ -8,7 +8,6 @@ use App\Conversation\Api\Event\QuestionAnswered;
 use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\Event\ReplyPosted;
 use App\Conversation\Api\MessageQueries;
-use App\Conversation\Api\QuestionQueries;
 use App\Notification\Api\BellView;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Api\NotificationQueries;
@@ -67,7 +66,6 @@ final class NotifyRecipientsTest extends TestCase
     /** @var list<string> user id strings with TICKET muted */
     private array $mutedBy = [];
     private bool $isTicketGone = false;
-    private QuestionQueriesDouble $questionQueries;
     private MessageQueriesDouble $messageQueries;
 
     protected function setUp(): void
@@ -75,8 +73,7 @@ final class NotifyRecipientsTest extends TestCase
         $this->onceOnlyHandling = new OnceOnlyHandlingDouble();
         $this->onceOnlyHandling->messageId = 'message-1';
         $this->notifications = new NotificationsDouble();
-        $this->questionQueries = new QuestionQueriesDouble($this->notifications, [self::MESSAGE, self::OTHER_MESSAGE]);
-        $this->messageQueries = new MessageQueriesDouble($this->notifications, [self::MESSAGE, self::OTHER_MESSAGE]);
+        $this->messageQueries = new MessageQueriesDouble($this->notifications, [self::MESSAGE, self::OTHER_MESSAGE], [self::MESSAGE, self::OTHER_MESSAGE]);
         $this->bellRefreshes = new BellRefreshesDouble();
         $this->pings = new InMemoryPings();
         $this->pings->actAsTenant(new OrganizationId(self::ACME_FOODS));
@@ -181,7 +178,7 @@ final class NotifyRecipientsTest extends TestCase
     #[Test]
     public function aQuestionAnsweredOrWithdrawnBeforeItsEventIsHandledNotifiesNobodyWhileAnOpenOneStillDoes(): void
     {
-        $this->questionQueries = new QuestionQueriesDouble($this->notifications, [self::OTHER_MESSAGE]);
+        $this->messageQueries = new MessageQueriesDouble($this->notifications, [self::MESSAGE, self::OTHER_MESSAGE], [self::OTHER_MESSAGE]);
 
         $this->notify($this->questionTo(self::OMAR));
         $this->onceOnlyHandling->messageId = 'message-2';
@@ -196,8 +193,7 @@ final class NotifyRecipientsTest extends TestCase
     {
         $this->notify($this->questionTo(self::OMAR));
 
-        self::assertSame([[self::MESSAGE, true]], $this->questionQueries->checks);
-        self::assertSame([], $this->messageQueries->checks);
+        self::assertSame([['isOpenQuestion', self::MESSAGE, true]], $this->messageQueries->checks);
         self::assertCount(1, $this->notifications->rows);
     }
 
@@ -211,8 +207,7 @@ final class NotifyRecipientsTest extends TestCase
     #[DataProvider('events')]
     public function onlyAQuestionAndAReplyWaitForTheirMessage(object $event, NotificationKind $kind, string $recipientId, array $sourceIds): void
     {
-        $this->questionQueries = new QuestionQueriesDouble($this->notifications, []);
-        $this->messageQueries = new MessageQueriesDouble($this->notifications, []);
+        $this->messageQueries = new MessageQueriesDouble($this->notifications, [], []);
 
         $this->notify($event);
 
@@ -224,7 +219,7 @@ final class NotifyRecipientsTest extends TestCase
     #[Test]
     public function aReplyAboutARemovedMessageNotifiesNobodyWhileOneAboutAPresentMessageStillDoes(): void
     {
-        $this->messageQueries = new MessageQueriesDouble($this->notifications, [self::OTHER_MESSAGE]);
+        $this->messageQueries = new MessageQueriesDouble($this->notifications, [self::OTHER_MESSAGE], []);
         $at = new \DateTimeImmutable(self::OCCURRED_AT);
 
         $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::REPLY, self::OMAR, self::LENA, $at));
@@ -242,20 +237,19 @@ final class NotifyRecipientsTest extends TestCase
     #[Test]
     public function aReplyAboutAnAnsweredQuestionStillNotifiesItsAuthor(): void
     {
-        $this->questionQueries = new QuestionQueriesDouble($this->notifications, []);
+        $this->messageQueries = new MessageQueriesDouble($this->notifications, [self::MESSAGE], []);
 
         $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::REPLY, self::OMAR, self::LENA, new \DateTimeImmutable(self::OCCURRED_AT)));
 
         self::assertSame([self::OMAR], $this->recipientsOfRows());
-        self::assertSame([], $this->questionQueries->checks);
     }
 
     #[Test]
-    public function aReplysMessageIsCheckedWhileTheLockAboutItIsHeld(): void
+    public function aReplysMessageIsCheckedForPresenceWhileTheLockAboutItIsHeld(): void
     {
         $this->notify(new ReplyPosted(self::ACME_FOODS, self::TICKET, self::MESSAGE, self::REPLY, self::OMAR, self::LENA, new \DateTimeImmutable(self::OCCURRED_AT)));
 
-        self::assertSame([[self::MESSAGE, true]], $this->messageQueries->checks);
+        self::assertSame([['isPresent', self::MESSAGE, true]], $this->messageQueries->checks);
         self::assertCount(1, $this->notifications->rows);
     }
 
@@ -485,7 +479,6 @@ final class NotifyRecipientsTest extends TestCase
             $this->bellRefreshes,
             $this->pings,
             new DeliveryTimes(self::pingSettingsQueries($this->isQuietHoursOn), new InMemoryMemberTimeZones(self::ACME_FOODS, [self::OMAR => 'Europe/Berlin'])),
-            $this->questionQueries,
             $this->messageQueries,
         );
 
@@ -707,48 +700,33 @@ final class NotificationsDouble implements Notifications
 }
 
 /**
- * Like DbalQuestionQueries: a question is open while its id is among $openQuestionIds. It records, for each check,
- * whether the notifications double held the lock about that question when it was made.
- */
-final class QuestionQueriesDouble implements QuestionQueries
-{
-    /** @var list<array{string, bool}> each checked question id and whether its lock was held then */
-    public array $checks = [];
-
-    /**
-     * @param list<string> $openQuestionIds
-     */
-    public function __construct(private readonly NotificationsDouble $notifications, private readonly array $openQuestionIds)
-    {
-    }
-
-    public function isOpen(string $questionId): bool
-    {
-        $this->checks[] = [$questionId, \in_array($questionId, $this->notifications->lockedMessageIds, true)];
-
-        return \in_array($questionId, $this->openQuestionIds, true);
-    }
-}
-
-/**
- * Like DbalMessageQueries: a message is present while its id is among $presentMessageIds. It records, for each check,
- * whether the notifications double held the lock about that message when it was made.
+ * Like DbalMessageQueries: a message is present while its id is among $presentMessageIds, and an open question only
+ * while it is also among $openQuestionIds, as a removed question is never open. It records, for each check, the read,
+ * the message id and whether the notifications double held the lock about that message when it was made.
  */
 final class MessageQueriesDouble implements MessageQueries
 {
-    /** @var list<array{string, bool}> each checked message id and whether its lock was held then */
+    /** @var list<array{string, string, bool}> each read, its message id and whether the lock about it was held then */
     public array $checks = [];
 
     /**
      * @param list<string> $presentMessageIds
+     * @param list<string> $openQuestionIds
      */
-    public function __construct(private readonly NotificationsDouble $notifications, private readonly array $presentMessageIds)
+    public function __construct(private readonly NotificationsDouble $notifications, private readonly array $presentMessageIds, private readonly array $openQuestionIds)
     {
+    }
+
+    public function isOpenQuestion(string $messageId): bool
+    {
+        $this->checks[] = ['isOpenQuestion', $messageId, \in_array($messageId, $this->notifications->lockedMessageIds, true)];
+
+        return \in_array($messageId, $this->openQuestionIds, true) && \in_array($messageId, $this->presentMessageIds, true);
     }
 
     public function isPresent(string $messageId): bool
     {
-        $this->checks[] = [$messageId, \in_array($messageId, $this->notifications->lockedMessageIds, true)];
+        $this->checks[] = ['isPresent', $messageId, \in_array($messageId, $this->notifications->lockedMessageIds, true)];
 
         return \in_array($messageId, $this->presentMessageIds, true);
     }

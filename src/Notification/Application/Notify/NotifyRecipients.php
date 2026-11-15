@@ -8,7 +8,6 @@ use App\Conversation\Api\Event\QuestionAnswered;
 use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\Event\ReplyPosted;
 use App\Conversation\Api\MessageQueries;
-use App\Conversation\Api\QuestionQueries;
 use App\Notification\Api\Event\PingSent;
 use App\Notification\Api\NotificationQueries;
 use App\Notification\Application\Realtime\BellRefreshes;
@@ -59,7 +58,6 @@ final readonly class NotifyRecipients
         private BellRefreshes $bellRefreshes,
         private Pings $pings,
         private DeliveryTimes $deliveryTimes,
-        private QuestionQueries $questionQueries,
         private MessageQueries $messageQueries,
     ) {
     }
@@ -91,12 +89,10 @@ final readonly class NotifyRecipients
                 }
             }
             if (null !== $closableMessageId) {
-                // MarkMessageNotificationsDone takes the same lock, so it marks the row written here or runs first and
-                // the message already reads as closed. A reply is still news once its question is answered, so it
-                // waits only for its message to be present.
+                // Same lock as MarkMessageNotificationsDone; a reply still counts once its question is answered.
                 $this->notifications->lockAboutMessage($organizationId, $closableMessageId);
                 $isStillOpen = NotificationKind::Question === $kind
-                    ? $this->questionQueries->isOpen($closableMessageId)
+                    ? $this->messageQueries->isOpenQuestion($closableMessageId)
                     : $this->messageQueries->isPresent($closableMessageId);
                 if (!$isStillOpen) {
                     return;

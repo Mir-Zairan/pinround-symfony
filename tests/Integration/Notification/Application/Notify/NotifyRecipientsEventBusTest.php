@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Notification\Application\Notify;
 
+use App\Conversation\Api\Event\MessageRemoved;
 use App\Conversation\Api\Event\QuestionAnswered;
 use App\Conversation\Api\Event\QuestionAsked;
 use App\Conversation\Api\Event\ReplyPosted;
@@ -43,6 +44,7 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
     private const string QUESTION = '0197a3c0-0000-7000-8000-0000000058c1';
     private const string ASKED_AT = '2027-03-15 10:00:00 UTC';
     private const string ANSWERED_AT = '2027-03-15 11:00:00 UTC';
+    private const string REMOVED_AT = '2027-03-16 10:30:00 UTC';
     private const string PING = '0197a3c0-0000-7000-8000-0000000058d1';
     private const string PINGED_AT = '2027-03-16 09:00:00 UTC';
     private const string COMMENT = '0197a3c0-0000-7000-8000-0000000058c2';
@@ -101,6 +103,50 @@ final class NotifyRecipientsEventBusTest extends VisibilityLeakCast
             [self::ACME_FOODS, $mia, null],
         ], $this->sentBellRefreshes());
         self::assertSame([['question', true], ['answer', false]], $this->acmeNotificationsDone());
+    }
+
+    /**
+     * Lena withdraws her question to Mia after Sara replied to it: the removal, delivered twice, marks Mia's question
+     * row and Lena's reply row done through MarkMessageNotificationsDone and refreshes each of their bells once.
+     */
+    #[Test]
+    public function aRemovalDeliveredTwiceOnTheEventBusMarksTheRowsAboutTheMessageDoneAndRefreshesEachBellOnce(): void
+    {
+        $lena = self::VIEWERS['Lena'][0];
+        $mia = self::VIEWERS['Mia'][0];
+        $sara = self::VIEWERS['Sara'][0];
+        self::transactions()->committedAs(self::ACME_FOODS, static function () use ($lena, $mia, $sara): void {
+            self::addOpenQuestion(self::teamOnlyTicketId(), self::QUESTION, 'Mia', 'Lena', self::ASKED_AT);
+            $eventBus = self::getContainer()->get('event.bus');
+            $eventBus->dispatch(new QuestionAsked(self::ACME_FOODS, self::teamOnlyTicketId(), self::QUESTION, $mia, $lena, new \DateTimeImmutable(self::ASKED_AT)));
+            $eventBus->dispatch(new ReplyPosted(self::ACME_FOODS, self::teamOnlyTicketId(), self::QUESTION, self::REPLY, $lena, $sara, new \DateTimeImmutable(self::REPLIED_AT)));
+        });
+        self::runTheWorkerUntilIdle('outbox');
+        foreach ($this->asyncNotify()->getSent() as $envelope) {
+            self::deliverFromAsyncNotify($envelope);
+        }
+        self::assertSame([['question', false], ['reply', false]], $this->acmeNotificationsDone());
+        $this->asyncNotify()->reset();
+
+        self::transactions()->committedAs(self::ACME_FOODS, static function () use ($lena): void {
+            self::assertSame(1, self::connection()->executeStatement(
+                'UPDATE cnv_message SET removed_at = ? WHERE organization_id = ? AND id = ?',
+                [self::REMOVED_AT, self::ACME_FOODS, self::QUESTION],
+            ));
+            self::getContainer()->get('event.bus')->dispatch(new MessageRemoved(self::ACME_FOODS, self::teamOnlyTicketId(), self::QUESTION, $lena, new \DateTimeImmutable(self::REMOVED_AT)));
+        });
+        self::runTheWorkerUntilIdle('outbox');
+        $relayed = $this->asyncNotify()->getSent();
+        self::assertSame([MessageRemoved::class], array_map(static fn (Envelope $envelope): string => $envelope->getMessage()::class, $relayed));
+
+        self::deliverFromAsyncNotify($relayed[0]);
+        self::deliverFromAsyncNotify($relayed[0]);
+
+        self::assertSame([['question', true], ['reply', true]], $this->acmeNotificationsDone());
+        self::assertEqualsCanonicalizing([
+            [self::ACME_FOODS, $mia, null],
+            [self::ACME_FOODS, $lena, null],
+        ], $this->sentBellRefreshes());
     }
 
     #[Test]
