@@ -70,6 +70,32 @@ final class PresignedUploadsMinioTest extends TestCase
     }
 
     #[Test]
+    public function aPutWithAnotherAllowedPictureTypeIsRefusedToo(): void
+    {
+        $key = $this->newKey();
+        $put = $this->uploads(new NativeClock())->forPut($key, 'image/png', \strlen(self::PNG_BODY));
+
+        $response = $this->putWithHeaders($put->url, ['Content-Type' => 'image/jpeg', 'Content-Length' => (string) \strlen(self::PNG_BODY)], self::PNG_BODY);
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString('SignatureDoesNotMatch', $response->getContent(false));
+        self::assertFalse($this->storage()->fileExists($key->toString()));
+    }
+
+    #[Test]
+    public function aUrlIsSignedForFiveMinutesFromTheClocksNow(): void
+    {
+        $signedAt = new MockClock('2026-03-10 09:00:00 UTC');
+        $put = $this->uploads($signedAt)->forPut($this->newKey(), 'image/png', \strlen(self::PNG_BODY));
+
+        parse_str((string) parse_url($put->url, \PHP_URL_QUERY), $query);
+
+        self::assertSame('300', $query['X-Amz-Expires'] ?? null);
+        self::assertSame('20260310T090000Z', $query['X-Amz-Date'] ?? null);
+        self::assertEquals(new \DateTimeImmutable('2026-03-10 09:05:00 UTC'), $put->expiresAt);
+    }
+
+    #[Test]
     public function aPutWithoutAContentTypeIsRefusedAndStoresNothing(): void
     {
         $key = $this->newKey();

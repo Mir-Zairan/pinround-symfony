@@ -59,8 +59,8 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 **Files:** `src/Media/**` (`UI/Controller/UploadIntentController`, `UI/Voter/UploadVoter`), `src/Ticketing/UI/Media/TicketMediaTarget.php`, `assets/controllers/presigned-upload_controller.js`, `config/packages/flysystem.yaml`.
 **Acceptance criteria:**
 - [x] A 16 MB file or a GIF is refused before any URL is issued, with a plain message. (`tests/Functional/Media/UploadIntentsTest.php`, `aFileOfTheWrongTypeOrSizeIsRefusedBeforeAnyUrlWithThePlainMessage`.)
-- [ ] A presigned URL cannot be used after 5 minutes or for another content type.
-- [ ] Anonymous GET on the uploaded object fails.
+- [x] A presigned URL cannot be used after 5 minutes or for another content type. (`tests/Integration/Media/Storage/PresignedUploadsMinioTest.php`: `aUrlSignedLongerAgoThanItsFiveMinutesIsRefused`, `aUrlIsSignedForFiveMinutesFromTheClocksNow`, `aPutWithAnotherContentTypeIsRefusedAndStoresNothing`, `aPutWithAnotherAllowedPictureTypeIsRefusedToo`.)
+- [x] Anonymous GET on the uploaded object fails. (`PresignedUploadsMinioTest`, `anAnonymousGetOfAnUploadedObjectIsRefused`.)
 **Tests:** unit (validation), integration with MinIO in CI, functional intent/complete, voter + isolation.
 **Security notes:** the storage key never contains user input; intents are single use; size limits in the presigned URL are not trusted alone (the worker checks again in P05.T2).
 **Prototype check:** none (backend task).
