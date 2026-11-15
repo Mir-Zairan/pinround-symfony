@@ -30,7 +30,7 @@ final class RoundsController extends AbstractController
 {
     public const string ROUNDS_ROUTE = 'review_rounds';
 
-    /** TicketShowController's route and not-found text, which Review's UI may not import (deptrac); RoundsControllerTest keeps them the same. */
+    /** TicketShowController's route and not-found text, which Review's UI may not import (deptrac); RoundsFrameTest keeps them the same. */
     public const string TICKET_ROUTE = 'ticket_show';
     public const string NOT_FOUND = 'No ticket you may see has that key.';
 

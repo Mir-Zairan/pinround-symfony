@@ -4,7 +4,7 @@
         <twig:EmptyState :message="constant('App\\Review\\UI\\Component\\RoundsSection::EMPTY')" />
     {% else %}
         {% for card in section.cards %}
-            <article class="round-card{% if card.isPrivateDraft %} round-card--private{% endif %}" id="{{ card.domId }}" aria-labelledby="{{ card.domId }}-heading">
+            <twig:Card tag="article" :class="'round-card' ~ (card.isPrivateDraft ? ' round-card--private' : '')" id="{{ card.domId }}" aria-labelledby="{{ card.domId }}-heading">
                 <header class="round-card__header">
                     <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>
                     {% if card.isPrivateDraft %}<twig:Tag class="round-card__private">PRIVATE</twig:Tag>{% endif %}
@@ -14,16 +14,24 @@
                         <twig:Button variant="outline" size="sm" :disabled="true" class="round-card__open">Open round</twig:Button>
                     {% endif %}
                 </header>
-                {% for screenshot in card.screenshots %}
+                {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
+                {% if card.emptyNote is not null %}<p class="round-card__empty">{{ card.emptyNote }}</p>{% endif %}
+                {% for item in card.screenshots %}
                     <div class="round-card__screenshot">
-                        <twig:Screenshot :view="screenshot" loading="lazy" />
-                        <twig:PinList :view="screenshot" />
+                        {% if item.label is not null %}
+                            <p class="round-card__screenshot-label">
+                                <span>{{ item.label }}</span>
+                                <twig:Tag class="verdict-tag {{ item.verdictClass }}">{{ item.verdictLabel }}</twig:Tag>
+                            </p>
+                        {% endif %}
+                        <twig:Screenshot :view="item.view" :headingLevel="4" loading="lazy" />
+                        <twig:PinList :view="item.view" />
                     </div>
                 {% endfor %}
                 {% if card.moreScreenshotsNote is not null %}
                     <p class="round-card__more">{{ card.moreScreenshotsNote }}</p>
                 {% endif %}
-            </article>
+            </twig:Card>
         {% endfor %}
         {% if section.olderRoundsNote is not null %}
             <p class="rounds__older">{{ section.olderRoundsNote }}</p>

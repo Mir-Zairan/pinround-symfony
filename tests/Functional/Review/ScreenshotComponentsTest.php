@@ -133,6 +133,19 @@ final class ScreenshotComponentsTest extends KernelTestCase
     }
 
     #[Test]
+    public function theTitleIsAnH3ByDefaultAndTakesTheHeadingLevelGiven(): void
+    {
+        $view = self::view(title: 'Checkout page');
+
+        self::assertSame(['Checkout page'], $this->renderScreenshot($view)->filter('h3.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+        $deeper = new Crawler($this->render(Screenshot::class, ['view' => $view, 'headingLevel' => 4]));
+        self::assertSame(['Checkout page'], $deeper->filter('h4.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+        self::assertCount(0, $deeper->filter('h3'));
+        $clamped = new Crawler($this->render(Screenshot::class, ['view' => $view, 'headingLevel' => 9]));
+        self::assertCount(1, $clamped->filter('h6.screenshot__title'));
+    }
+
+    #[Test]
     public function theTextBoxIsAbsentWhenTitleAndSummaryAreEmpty(): void
     {
         $crawler = $this->renderScreenshot(self::view(title: '  ', summary: ''));
@@ -208,7 +221,7 @@ final class ScreenshotComponentsTest extends KernelTestCase
         $numbers = $list->filter('.pin-list__number')->each(static fn (Crawler $number): string => $number->text());
         self::assertSame(['1', '2', '4'], $numbers);
         self::assertSame($numbers, $layer->filter('.pin__tab')->each(static fn (Crawler $tab): string => $tab->text()));
-        self::assertSame(['address is cut off', 'header is cut off', ''], $list->filter('p.pin-list__note')->each(static fn (Crawler $note): string => $note->text()));
+        self::assertSame(['address is cut off', 'header is cut off', '(no note)'], $list->filter('p.pin-list__note')->each(static fn (Crawler $note): string => $note->text()));
         self::assertCount(0, $list->filter('textarea'));
         self::assertCount(1, $list->filter('.pin-list__item--ai'));
     }

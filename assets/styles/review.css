@@ -324,13 +324,9 @@ textarea.pin-list__note {
   display: flex;
   flex-direction: column;
   gap: var(--space-12);
-  padding: 18px 20px;
-  border: 1px solid var(--outline-var);
-  border-radius: 16px;
-  background: var(--s-lowest);
 }
 
-.round-card--private {
+.card.round-card--private {
   border: 1.5px dashed var(--outline);
 }
 
@@ -349,6 +345,8 @@ textarea.pin-list__note {
 }
 
 .round-card__status,
+.round-card__description,
+.round-card__empty,
 .round-card__more,
 .rounds__older {
   margin: 0;
@@ -364,4 +362,28 @@ textarea.pin-list__note {
   display: flex;
   flex-direction: column;
   gap: var(--space-12);
+}
+
+.round-card__screenshot-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.tag.verdict-tag--none {
+  background: var(--s-highest);
+  color: var(--on-surface-var);
+}
+
+.tag.verdict-tag--looks-right {
+  background: var(--passed-container);
+  color: var(--on-passed-container);
+}
+
+.tag.verdict-tag--not-right {
+  background: var(--error-container);
+  color: var(--on-error-container);
 }

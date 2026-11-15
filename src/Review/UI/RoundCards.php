@@ -36,6 +36,10 @@ final readonly class RoundCards
     private const string DISMISSED = 'dismissed';
     private const string LOOKS_RIGHT = 'looks_right';
     private const string AI = 'ai';
+    private const string NOT_RIGHT = 'not_right';
+
+    private const string PRIVATE_DRAFT_DESCRIPTION = 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.';
+    private const string EMPTY_DRAFT_NOTE = 'No screenshots yet. Add one here, or let Claude Code add them.';
 
     public function __construct(
         private RoundsVisibleTo $roundsVisibleTo,
@@ -87,7 +91,7 @@ final readonly class RoundCards
                 ++$looksRightCount;
             }
             if (\count($screenshots) < self::MAX_PICTURES_PER_CARD) {
-                $screenshots[] = $this->screenshotViewOf($round, $screenshot, $images[$screenshot->mediaId] ?? null, $shownPins);
+                $screenshots[] = $this->cardScreenshotOf($round, $screenshot, $images[$screenshot->mediaId] ?? null, $shownPins);
             }
         }
         $notShown = \count($round->screenshots) - \count($screenshots);
@@ -96,12 +100,23 @@ final readonly class RoundCards
         if (self::REPORT === $round->kind) {
             return new RoundCard($domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false, $moreNote);
         }
-        $status = \sprintf('%d of %d look right', $looksRightCount, \count($round->screenshots));
+        $status = [] === $round->screenshots ? null : \sprintf('%d of %d look right', $looksRightCount, \count($round->screenshots));
+        $emptyNote = [] === $round->screenshots ? self::EMPTY_DRAFT_NOTE : null;
         if ($round->isUnsharedDraft()) {
-            return new RoundCard($domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote);
+            return new RoundCard($domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
         }
 
-        return new RoundCard($domId, \sprintf('Round %d · self-check by %s', $round->number ?? 0, $ownerName), $status, false, $screenshots, false, $moreNote);
+        return new RoundCard(
+            $domId,
+            \sprintf('Round %d · self-check by %s', $round->number ?? 0, $ownerName),
+            $status,
+            false,
+            $screenshots,
+            false,
+            $moreNote,
+            \sprintf('What %s checked before passing the ticket on.', $ownerName),
+            $emptyNote,
+        );
     }
 
     /**
@@ -117,6 +132,24 @@ final readonly class RoundCards
         }
 
         return $pins;
+    }
+
+    /**
+     * @param list<PinView> $pins
+     */
+    private function cardScreenshotOf(RoundView $round, RoundScreenshotView $screenshot, ?MediaImage $image, array $pins): RoundCardScreenshot
+    {
+        $view = $this->screenshotViewOf($round, $screenshot, $image, $pins);
+        if (RoundView::DRAFT !== $round->kind) {
+            return new RoundCardScreenshot($view);
+        }
+        [$verdictLabel, $verdictClass] = match ($screenshot->verdict) {
+            self::LOOKS_RIGHT => [RoundCardScreenshot::LOOKS_RIGHT, 'verdict-tag--looks-right'],
+            self::NOT_RIGHT => [RoundCardScreenshot::NOT_RIGHT, 'verdict-tag--not-right'],
+            default => [RoundCardScreenshot::NO_VERDICT, 'verdict-tag--none'],
+        };
+
+        return new RoundCardScreenshot($view, \sprintf('Screenshot %d', $screenshot->position + 1), $verdictLabel, $verdictClass);
     }
 
     /**

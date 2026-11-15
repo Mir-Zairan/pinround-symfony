@@ -2,7 +2,7 @@
     {% if this.view.title is not null or this.view.summary is not null %}
         <figcaption class="screenshot__text">
             {% if this.view.title is not null %}
-                <h3 class="screenshot__title">{{ this.view.title }}</h3>
+                <{{ this.titleTag }} class="screenshot__title">{{ this.view.title }}</{{ this.titleTag }}>
             {% endif %}
             {% if this.view.summary is not null %}
                 <p class="screenshot__summary">{{ this.view.summary }}</p>

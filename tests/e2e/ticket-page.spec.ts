@@ -44,6 +44,23 @@ test('the ticket page has no serious accessibility violations', async ({ page })
   expect(await seriousViolations(page)).toEqual([]);
 });
 
+// The Rounds frame loads when its section scrolls into view. The demo seed and the e2e journeys make no round, and
+// nothing in the app can make one without a stored picture, so the frame is checked here as the empty state a ticket
+// with no round shows; RoundsFrameTest covers the cards.
+async function openRounds(page: Page): Promise<void> {
+  await openTicket(page);
+  const frameLoaded = page.waitForResponse((response) => /^\/t\/[A-Z]+-\d+\/rounds$/.test(new URL(response.url()).pathname) && response.request().method() === 'GET');
+  await page.getByRole('heading', { level: 2, name: 'Rounds' }).scrollIntoViewIfNeeded();
+  expect((await frameLoaded).status()).toBe(200);
+  await expect(page.locator('turbo-frame#ticket-rounds .empty-state')).toBeVisible();
+}
+
+test('the loaded Rounds section has no serious accessibility violations', async ({ page }) => {
+  await openRounds(page);
+
+  expect(await seriousViolations(page)).toEqual([]);
+});
+
 test('Show the full ask swaps the cut text for the whole ask and Show less swaps it back', async ({ page }) => {
   await openTicket(page);
   const shortAsk = page.locator('.ticket__ask-text--short');
@@ -113,5 +130,15 @@ test.describe('at 360 px', () => {
     const main = await page.locator('.ticket__main').boundingBox();
     const aside = await page.locator('.ticket__aside').boundingBox();
     expect(aside?.y ?? 0).toBeGreaterThanOrEqual((main?.y ?? 0) + (main?.height ?? 0));
+  });
+
+  test('the page with the Rounds section loaded does not scroll sideways', async ({ page }) => {
+    await openRounds(page);
+
+    const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
   });
 });

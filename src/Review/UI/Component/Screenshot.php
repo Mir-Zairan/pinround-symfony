@@ -20,6 +20,14 @@ final class Screenshot
     /** The picture's loading attribute: "lazy" for a card among many, null for the browser's default (eager). */
     public ?string $loading = null;
 
+    /** The level of the title's heading, 1 to 6; a screenshot inside a card whose heading is an h3 passes 4. */
+    public int $headingLevel = 3;
+
+    public function titleTag(): string
+    {
+        return 'h'.max(1, min(6, $this->headingLevel));
+    }
+
     public function frameId(): string
     {
         return $this->view->domId.'-frame';

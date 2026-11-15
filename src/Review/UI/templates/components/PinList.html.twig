@@ -7,7 +7,7 @@
                     <textarea class="pin-list__note" name="pins[{{ pin.number }}][note]" rows="2" aria-label="Note for pin {{ pin.number }}">{{ pin.note }}</textarea>
                     <button type="button" class="btn btn-sm btn-text pin-list__remove" data-pin-remove aria-label="Remove pin {{ pin.number }}">Remove</button>
                 {% else %}
-                    <p class="pin-list__note">{{ pin.note }}</p>
+                    <p class="pin-list__note">{% if pin.singleLineNote is same as('') %}(no note){% else %}{{ pin.note }}{% endif %}</p>
                 {% endif %}
             </li>
         {% endfor %}

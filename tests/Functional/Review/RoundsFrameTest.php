@@ -8,11 +8,18 @@ use App\Identity\Domain\User;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\RoundCards;
 use App\Review\UI\RoundsController;
+use App\Review\UI\RoundsSectionView;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TicketId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Tests\Integration\Organization\TenantTransactions;
+use App\Ticketing\Api\TicketVisibility;
+use App\Ticketing\UI\TicketShowController;
 use Doctrine\DBAL\Connection;
+use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -221,7 +228,7 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     #[Test]
-    public function aTeamOnlyTicketsRoundsReachNoOneOutsideTheTeam(): void
+    public function aTeamOnlyTicketsFrameShowsItsRoundsToTheTeamLeadAndAnswers404ForAManagerOutsideTheTeam(): void
     {
         $ticketId = $this->addTicket('SHOP-1', 'team');
         $roundId = $this->addRound($ticketId, 0, 'report', 'Lena', self::SHARED_AT);
@@ -237,6 +244,172 @@ final class RoundsFrameTest extends WebTestCase
         self::assertResponseStatusCodeSame(404);
         self::assertStringNotContainsString(self::TEAM_ONLY_TITLE, (string) $this->client->getResponse()->getContent());
         self::assertCount(0, $this->client->getCrawler()->filter('.round-card, .screenshot, img.screenshot__image'));
+    }
+
+    #[Test]
+    public function theCardsOfAViewerWhoMayNotSeeATeamOnlyTicketAreTheEmptyStateWithNoRoundText(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1', 'team');
+        $roundId = $this->addRound($ticketId, 0, 'report', 'Lena', self::SHARED_AT);
+        $this->addScreenshot($roundId, $this->addMedia('ready'), 0, self::TEAM_ONLY_TITLE, null);
+        $this->addPin($this->addScreenshot($roundId, $this->addMedia('ready'), 1, null, null), 1, '10.00', '10.00', 'Hidden note', 'Lena');
+        $roundCards = self::getContainer()->get(RoundCards::class);
+        $transactions = new TenantTransactions(self::getContainer()->get(EntityManagerInterface::class), self::getContainer()->get(TenantContext::class));
+        $sees = TicketVisibility::for($this->acmeFoods, $this->people['Lena']->id(), [$this->shop], false, null);
+        $doesNotSee = TicketVisibility::for($this->acmeFoods, $this->people['Raj']->id(), [], false, null);
+
+        $seen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $sees, new \DateTimeImmutable(self::NOW)));
+        $unseen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $doesNotSee, new \DateTimeImmutable(self::NOW)));
+
+        self::assertCount(1, $seen->cards, 'The same rounds are there for a viewer who may see the ticket.');
+        self::assertSame([], $unseen->cards);
+        self::assertSame(0, $unseen->olderRoundsNotShown);
+        self::assertStringNotContainsString(self::TEAM_ONLY_TITLE, serialize($unseen));
+    }
+
+    #[Test]
+    public function aKeptAiPinKeepsItsAiMarkOnThePictureAndInTheList(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $roundId = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $screenshotId = $this->addScreenshot($roundId, $this->addMedia('ready'), 0, null, null);
+        $this->addPin($screenshotId, 1, '10.00', '10.00', 'A human pin', 'Mia');
+        $this->addPin($screenshotId, 2, '20.00', '20.00', 'A kept AI pin', 'Mia', 'ai', 'kept');
+        $this->addPin($screenshotId, 3, '30.00', '30.00', 'An AI pin waiting', 'Mia', 'ai', 'suggested');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['2', '3'], $page->filter(self::ROUNDS.' .pin--ai')->each(static fn (Crawler $pin): string => (string) $pin->attr('data-pin-number')));
+        self::assertSame(['2', '3'], $page->filter(self::ROUNDS.' .pin-list__item--ai')->each(static fn (Crawler $item): string => (string) $item->attr('data-pin-number')));
+        self::assertCount(3, $page->filter(self::ROUNDS.' .pin-list__item'));
+        self::assertSame('Round 0 · Report · by Mia · 3 pins', $page->filter(self::ROUNDS.' .round-card__headline')->text());
+    }
+
+    #[Test]
+    public function aRoundOfSomeoneWhoIsNoMemberIsByAFormerMemberAndItsDraftDescriptionSaysSo(): void
+    {
+        $this->people['Noor'] = $this->createUserWithoutOrganization('Noor');
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addRound($ticketId, 0, 'report', 'Noor', self::SHARED_AT);
+        $this->addRound($ticketId, 1, 'review', 'Noor', self::SHARED_AT);
+        $this->addRound($ticketId, 2, 'draft', 'Noor', self::SHARED_AT);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['Round 0 · Report · by a former member · 0 pins', 'Round 1 · Review · by a former member', 'Round 2 · self-check by a former member'],
+            $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
+        );
+        self::assertSame('What a former member checked before passing the ticket on.', $page->filter(self::ROUNDS.' .round-card__description')->text());
+        self::assertStringNotContainsString('Noor', (string) $this->client->getResponse()->getContent());
+    }
+
+    #[Test]
+    public function aPrivateDraftHasItsDescriptionAndASharedOneNamesItsOwnerAndCardsAreTheSharedCardComponent(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addRound($ticketId, 1, 'draft', 'Lena', self::SHARED_AT);
+        $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addRound($ticketId, 2, 'review', 'Lena', self::SHARED_AT);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['What Lena checked before passing the ticket on.', 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.'],
+            $page->filter(self::ROUNDS.' .round-card__description')->each(static fn (Crawler $description): string => $description->text()),
+            'A review round has no description.',
+        );
+        self::assertCount(3, $page->filter(self::ROUNDS.' article.card.round-card'));
+    }
+
+    #[Test]
+    public function aDraftWithNoScreenshotsShowsNoStatusAndSaysHowToAddOne(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(2, $page->filter(self::ROUNDS.' .round-card'));
+        self::assertCount(0, $page->filter(self::ROUNDS.' .round-card__status'));
+        self::assertStringNotContainsString('0 of 0', (string) $this->client->getResponse()->getContent());
+        self::assertSame(['No screenshots yet. Add one here, or let Claude Code add them.'], $page->filter(self::ROUNDS.' .round-card__empty')->each(static fn (Crawler $note): string => $note->text()), 'The report has none.');
+    }
+
+    #[Test]
+    public function aDraftsScreenshotsAreNumberedWithAVerdictTagThatSaysItInWordsAndTheReportsAreNot(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Report shot', null, 'looks_right');
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addScreenshot($draft, $this->addMedia('ready'), 2, 'Third', null, 'not_right');
+        $this->addScreenshot($draft, $this->addMedia('ready'), 0, 'First', null);
+        $this->addScreenshot($draft, $this->addMedia('ready'), 1, 'Second', null, 'looks_right');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $labels = $page->filter(self::ROUNDS.' .round-card__screenshot-label');
+        self::assertCount(3, $labels, 'Only the draft numbers its screenshots.');
+        self::assertSame(
+            ['Screenshot 1 No verdict yet', 'Screenshot 2 Looks right', 'Screenshot 3 Not right yet'],
+            $labels->each(static fn (Crawler $label): string => $label->text()),
+        );
+        self::assertSame(
+            ['verdict-tag--none', 'verdict-tag--looks-right', 'verdict-tag--not-right'],
+            $labels->filter('.tag')->each(static fn (Crawler $tag): string => array_values(array_filter(explode(' ', (string) $tag->attr('class')), static fn (string $class): bool => str_starts_with($class, 'verdict-tag--')))[0]),
+        );
+        self::assertCount(0, $page->filter(self::ROUNDS.' .round-card')->eq(0)->filter('.tag'), 'The report card is first.');
+    }
+
+    #[Test]
+    public function screenshotTitlesAreHeadingsOneLevelBelowTheCardHeading(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Report shot', null);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Round 0 · Report · by Mia · 0 pins'], $page->filter(self::ROUNDS.' h3')->each(static fn (Crawler $heading): string => $heading->text()));
+        self::assertSame(['Report shot'], $page->filter(self::ROUNDS.' h4.screenshot__title')->each(static fn (Crawler $heading): string => $heading->text()));
+    }
+
+    #[Test]
+    public function aPinWithABlankNoteReadsNoNoteInTheList(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $screenshotId = $this->addScreenshot($report, $this->addMedia('ready'), 0, null, null);
+        $this->addPin($screenshotId, 1, '10.00', '10.00', '', 'Mia');
+        $this->addPin($screenshotId, 2, '30.00', '30.00', 'A real note', 'Mia');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['(no note)', 'A real note'], $page->filter(self::ROUNDS.' .pin-list__item .pin-list__note')->each(static fn (Crawler $note): string => $note->text()));
+    }
+
+    #[Test]
+    public function theRoundsControllerKeepsTheTicketRouteAndTheNotFoundTextOfTheTicketPage(): void
+    {
+        self::assertSame(self::constantOf(TicketShowController::class, 'ROUTE'), self::constantOf(RoundsController::class, 'TICKET_ROUTE'));
+        self::assertSame(self::constantOf(TicketShowController::class, 'NOT_FOUND'), self::constantOf(RoundsController::class, 'NOT_FOUND'));
+        self::assertSame('/t/SHOP-1', self::getContainer()->get('router')->generate(RoundsController::TICKET_ROUTE, ['key' => 'SHOP-1']));
     }
 
     /**
@@ -468,6 +641,14 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertSame(self::EMPTY_FRAME_QUERIES, $noRoundQueryCount);
         self::assertSame(self::EMPTY_FRAME_QUERIES + 5, $oneRoundQueryCount, 'The rounds, screenshots, pins, the owners\' names and the signing.');
+    }
+
+    /**
+     * @param class-string $class
+     */
+    private static function constantOf(string $class, string $name): mixed
+    {
+        return new \ReflectionClassConstant($class, $name)->getValue();
     }
 
     private function queryCountOf(string $uri): int
