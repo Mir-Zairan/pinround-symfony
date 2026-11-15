@@ -111,7 +111,7 @@ final readonly class RoundCards
         $domId = 'screenshot-'.$screenshot->id;
         $altText = $screenshot->title ?? \sprintf('Screenshot %d of %s', $screenshot->position + 1, $round->isUnsharedDraft() ? 'your draft round' : 'round '.($round->number ?? 0));
         // A picture Media does not know is shown as refused rather than left out, so a round never loses a screenshot silently.
-        $status = $image?->status ?? MediaImageStatus::Rejected;
+        $status = $image->status ?? MediaImageStatus::Rejected;
         if (MediaImageStatus::Ready === $status && null !== $image && null !== $image->url && null !== $image->width && null !== $image->height) {
             return new ScreenshotView($domId, $image->url, $image->width, $image->height, $altText, $screenshot->title, $screenshot->summary, $pins);
         }
