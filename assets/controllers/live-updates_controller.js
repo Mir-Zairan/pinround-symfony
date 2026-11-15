@@ -131,7 +131,7 @@ function focusedControlOf(part) {
   const anchor = focused.parentElement.closest('[id]');
   const label = labelOf(focused);
   const index = controlsLike(anchor, focused.localName, label).indexOf(focused);
-  return { anchorId: anchor.id, localName: focused.localName, label, index };
+  return { anchorId: anchor.id, localName: focused.localName, label, index, tabIndex: focused.getAttribute('tabindex') };
 }
 
 // Replacing a part drops the focus it held to the body; this gives it to the same control in the fresh part, unless
@@ -143,9 +143,15 @@ function refocus(focusedControl, part) {
   }
   const anchor = document.getElementById(focusedControl.anchorId);
   const control = anchor === null ? null : (controlsLike(anchor, focusedControl.localName, focusedControl.label)[focusedControl.index] ?? null);
-  if (control !== null && part.contains(control)) {
-    control.focus({ preventScroll: true });
+  if (control === null || !part.contains(control)) {
+    return;
   }
+  // A heading or message that got focus after an action (tabindex="-1", from a script or the redirected page's
+  // autofocus) has no tabindex in the fresh copy, and focus() on it would do nothing.
+  if (focusedControl.tabIndex !== null && !control.hasAttribute('tabindex')) {
+    control.setAttribute('tabindex', focusedControl.tabIndex);
+  }
+  control.focus({ preventScroll: true });
 }
 
 // Follows the live updates of a page (realtime-and-notifications.md): asks POST /realtime/token for the subscriber
