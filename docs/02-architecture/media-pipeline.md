@@ -63,7 +63,7 @@ In this order:
 - The org is under its quota: stored images plus open upload intents, counted in one statement under a per-org lock.
 - The person has fewer than 20 open (unused, unexpired) intents.
 - The target's authorizer allows it again, inside the same transaction.
-- A per-person rate limit on starting uploads (429).
+- A per-person rate limit on starting uploads: 60 a minute, then 429 with a Retry-After header.
 - **Upload URL:** the presigned PUT pins the declared `Content-Type` and the exact `Content-Length`, so the storage refuses any other type or length.
 
 In the worker:
@@ -141,7 +141,7 @@ exports/{orgId}/{exportId}.zip                   # org exports, lifecycle rule: 
 | Signed URL expired on an open page | Image reloads automatically | Browser requests a new URL |
 | Quota full | "Your company's storage is full. Ask your admin." (422) | Nothing stored. Admin notice not built yet |
 | Too many uploads waiting (20 open) | "You have too many uploads waiting. Finish or wait for them, then try again." (422) | Nothing stored |
-| Starting uploads too fast | "Too many requests" (429) | Nothing stored |
+| Starting uploads too fast | "You are adding files too fast. Wait a minute and try again." (429) | Nothing stored |
 
 ## Other inputs
 
