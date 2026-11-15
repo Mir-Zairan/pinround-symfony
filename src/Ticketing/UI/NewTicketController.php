@@ -14,9 +14,12 @@ use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
+use App\Ticketing\Api\NewTicketReport;
+use App\Ticketing\Api\NewTicketReportRefused;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\TeamProjectChoice;
 use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Api\TicketKeyQueries;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
@@ -39,6 +42,9 @@ use Symfony\Component\Uid\Uuid;
  * leads none of the offered teams. A Lead who picks a project of a team they do not lead gets a field error instead.
  * A made ticket opens on its own page with the toast CREATED.
  *
+ * An optional screenshot with its title, summary and pins (P05.T5) is saved by NewTicketReport as the ticket's Round 0
+ * in the same transaction; a refused one is the field error "screenshot" and makes no ticket.
+ *
  * Without the request transaction: a refused create has already taken the project's next number, and only rolling
  * back the whole transaction gives it back. Transactions gives each request a transaction of its own; a refusal leaves
  * it as TicketFormRefused, which carries the form page with its errors.
@@ -56,6 +62,12 @@ final class NewTicketController extends AbstractController
     public const string TYPE_FIELD = 'type';
     public const string PRIORITY_FIELD = 'priority';
     public const string ASSIGNEE_FIELD = 'assignee_id';
+    /** The screenshot part, saved as the ticket's Round 0; an empty SCREENSHOT_MEDIA_FIELD is no screenshot. */
+    public const string SCREENSHOT_MEDIA_FIELD = 'screenshot_media_id';
+    public const string SCREENSHOT_TITLE_FIELD = 'screenshot_title';
+    public const string SCREENSHOT_SUMMARY_FIELD = 'screenshot_summary';
+    /** Posted as pins[n][x], pins[n][y] and pins[n][note], x and y in percent of the picture. */
+    public const string PINS_FIELD = 'pins';
 
     /** By the value TicketCommands::create takes, in the order the form shows them. */
     public const array TYPE_LABELS = ['bug' => 'Bug', 'story' => 'Story', 'task' => 'Task'];
@@ -89,6 +101,8 @@ final class NewTicketController extends AbstractController
         private readonly TeamQueries $teamQueries,
         private readonly UserQueries $userQueries,
         private readonly TicketCommands $ticketCommands,
+        private readonly TicketKeyQueries $ticketKeyQueries,
+        private readonly NewTicketReport $newTicketReport,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -129,12 +143,16 @@ final class NewTicketController extends AbstractController
                     }
                     $errors['assignee'] = self::ASSIGNEE_NOT_LED;
                 }
+                $screenshotRefusal = $this->newTicketReport->refusalOf($actor->organizationId(), $actor->userId(), $input->report);
+                if (null !== $screenshotRefusal) {
+                    $errors['screenshot'] = $screenshotRefusal;
+                }
                 if ([] !== $errors) {
                     throw new TicketFormRefused($this->renderTicketForm($actor, $choices, $input, $errors));
                 }
 
                 try {
-                    return $this->ticketCommands->create(
+                    $key = $this->ticketCommands->create(
                         $actor->organizationId(),
                         $actor->userId(),
                         $project->id(),
@@ -145,6 +163,10 @@ final class NewTicketController extends AbstractController
                         '' === $input->assigneeId ? null : new UserId($input->assigneeId),
                         $now,
                     );
+                    $ticketId = $this->ticketKeyQueries->idOf($key) ?? throw new \LogicException(\sprintf('The ticket %s just made is not found by its key.', $key));
+                    $this->newTicketReport->attach($actor->organizationId(), $actor->userId(), $ticketId, $input->report, $now);
+
+                    return $key;
                 } catch (TicketTitleMissing) {
                     $errors = ['title' => self::TITLE_MISSING];
                 } catch (TicketTitleOverLimit) {
@@ -153,6 +175,8 @@ final class NewTicketController extends AbstractController
                     $errors = ['description' => self::DESCRIPTION_OVER_LIMIT];
                 } catch (AssigneeNotInTeam) {
                     $errors = ['assignee' => self::ASSIGNEE_NOT_IN_TEAM];
+                } catch (NewTicketReportRefused $screenshotRefused) {
+                    $errors = ['screenshot' => $screenshotRefused->getMessage()];
                 } catch (ProjectNotFound|ProjectHasNoTeam) {
                     // The project was removed or lost its team after the choices were read: as if it had been forged.
                     throw $this->createAccessDeniedException('You may not make tickets in that project.');
@@ -244,7 +268,7 @@ final class NewTicketController extends AbstractController
      * Needs the transaction run opens: for a Lead, it reads the people, names and team names of the teams they lead.
      *
      * @param list<TeamProjectChoice> $choices
-     * @param array<string, string>   $errors  by field, with "form" for the whole form
+     * @param array<string, string>   $errors  by field, with "form" for the whole form and "screenshot" for the screenshot part
      */
     private function renderTicketForm(ActorContext $actor, array $choices, TicketFormInput $input, array $errors = []): Response
     {
@@ -257,6 +281,7 @@ final class NewTicketController extends AbstractController
             'typeLabels' => self::TYPE_LABELS,
             'priorityLabels' => self::PRIORITY_LABELS,
             'input' => $input,
+            'report' => $input->report,
             'errors' => $errors,
             'titleMaxLength' => self::TITLE_MAX_LENGTH,
             'descriptionMaxLength' => self::DESCRIPTION_MAX_LENGTH,
