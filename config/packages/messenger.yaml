@@ -147,6 +147,9 @@ framework:
             # Sent at once by QueueTicketPagesRefreshHandler, and again with a DelayStamp by RefreshTicketPagesHandler;
             # the hub is published to from worker-notify only (ADR-0023).
             App\Notification\Infrastructure\Mercure\RefreshTicketPages: async_notify
+            # Sent by DirectUploads::complete() once its transaction has committed, not through the outbox, for
+            # worker-media. Until its handler exists, a consumed message fails and waits in failed for a retry.
+            App\Media\Application\ProcessUpload: async_media
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.
