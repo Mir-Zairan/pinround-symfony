@@ -318,6 +318,10 @@ when@test:
         test.media_presigned_uploads:
             alias: App\Media\Infrastructure\Storage\PresignedUploads
             public: true
+        # No route begins or completes an upload before the upload controller; the tests get the Api as it will.
+        test.media_uploads:
+            alias: App\Media\Api\Uploads
+            public: true
 
         # Tests read the spans the app exported from this exporter; the endpoint stays empty so nothing leaves the host.
         tracing.in_memory_exporter:
