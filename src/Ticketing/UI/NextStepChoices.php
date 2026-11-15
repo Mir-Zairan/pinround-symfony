@@ -14,6 +14,7 @@ use App\Workflow\Api\MoveChoiceGroup;
 use App\Workflow\Api\MoveChoices;
 use App\Workflow\Api\NeedsYouKind;
 use App\Workflow\Api\NowNext;
+use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\TeamMemberLoad;
 use App\Workflow\Api\TransitionPolicy;
@@ -31,6 +32,10 @@ final readonly class NextStepChoices
     public const string CHECK = 'Take a quick look at this new ticket.';
     public const string NOTHING_FOR_YOU = 'Nothing for you. %s.';
     public const string NOTHING_FOR_YOU_NOW = 'Nothing for you now. %s’s turn.';
+    public const string ANSWER_THE_QUESTION = 'Answer %s’s question below.';
+    /** Only the asker is told of the answer (NotifyRecipients), so only the asker reads that they get a notification. */
+    public const string WAIT_FOR_YOUR_ANSWER = 'Wait for %s’s answer. You get one notification.';
+    public const string WAIT_FOR_THE_ANSWER = 'Wait for %s’s answer.';
 
     /** The core code of Needs input; MoveTicket keeps its own, as Ticketing's Application may not import its UI. */
     private const string NEEDS_INPUT = 'input';
@@ -169,6 +174,10 @@ final readonly class NextStepChoices
 
     private function sentenceOf(PageTurn $pageTurn, ActorInTeam $actor): string
     {
+        $askedUserId = $pageTurn->ticket->askedUserId;
+        if (null !== $askedUserId) {
+            return self::pausedSentenceOf($pageTurn->context, $askedUserId, $actor->userId);
+        }
         $turn = $pageTurn->turn;
         if (null === $turn->kind) {
             return self::DONE;
@@ -184,5 +193,22 @@ final readonly class NextStepChoices
         $name = (null === $turn->userId ? null : $pageTurn->context->firstNameOf($turn->userId)) ?? $turn->label ?? ucfirst(PersonNames::UNKNOWN_PERSON);
 
         return \sprintf(self::NOTHING_FOR_YOU_NOW, $name);
+    }
+
+    /**
+     * Whatever the viewer's role: the asked person answers even without a team role, and nobody moves the ticket meanwhile.
+     */
+    private static function pausedSentenceOf(NowNextContext $context, UserId $askedUserId, UserId $viewerId): string
+    {
+        if ($askedUserId->equals($viewerId)) {
+            $askerName = null === $context->askerId ? null : $context->firstNameOf($context->askerId);
+
+            return \sprintf(self::ANSWER_THE_QUESTION, $askerName ?? PersonNames::UNKNOWN_PERSON);
+        }
+        $askedName = $context->firstNameOf($askedUserId) ?? PersonNames::UNKNOWN_PERSON;
+
+        return null !== $context->askerId && $context->askerId->equals($viewerId)
+            ? \sprintf(self::WAIT_FOR_YOUR_ANSWER, $askedName)
+            : \sprintf(self::WAIT_FOR_THE_ANSWER, $askedName);
     }
 }

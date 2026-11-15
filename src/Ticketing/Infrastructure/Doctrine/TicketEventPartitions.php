@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Doctrine;
 
-use App\SharedKernel\Infrastructure\Doctrine\Migration\TenantTable;
+use App\SharedKernel\Infrastructure\Doctrine\Migration\MonthlyPartitions;
 use Doctrine\DBAL\Connection;
 
 /**
- * The monthly partitions of tkt_ticket_event, named tkt_ticket_event_YYYYMM with UTC month bounds. One place for the
- * DDL of a month, so the migrations and AddTicketEventPartitions create the same partition.
+ * The monthly partitions of tkt_ticket_event (MonthlyPartitions), so the migrations and AddTicketEventPartitions
+ * create the same partition, and the lock that keeps two writers of them apart.
  */
 final class TicketEventPartitions
 {
@@ -32,15 +32,7 @@ final class TicketEventPartitions
      */
     public static function monthsWithoutPartition(Connection $connection, \DateTimeImmutable $from, \DateTimeImmutable $through): array
     {
-        $missingMonths = [];
-        $lastMonth = self::monthOf($through);
-        for ($month = self::monthOf($from); $month <= $lastMonth; $month = $month->modify('first day of next month')) {
-            if (null === $connection->fetchOne('SELECT to_regclass(?)', ['public.'.self::partitionNameFor($month)])) {
-                $missingMonths[] = $month;
-            }
-        }
-
-        return $missingMonths;
+        return MonthlyPartitions::monthsWithoutPartition($connection, self::PARENT, $from, $through);
     }
 
     /**
@@ -48,7 +40,7 @@ final class TicketEventPartitions
      */
     public static function monthOf(\DateTimeImmutable $instant): \DateTimeImmutable
     {
-        return $instant->setTimezone(new \DateTimeZone('UTC'))->modify('first day of this month midnight');
+        return MonthlyPartitions::monthOf($instant);
     }
 
     /**
@@ -56,34 +48,16 @@ final class TicketEventPartitions
      */
     public static function partitionNameFor(\DateTimeImmutable $month): string
     {
-        return self::PARENT.'_'.self::monthOf($month)->format('Ym');
+        return MonthlyPartitions::partitionNameFor(self::PARENT, $month);
     }
 
     /**
-     * Creates the partition, turns row-level security on for it and takes every right from the roles that read through
-     * the parent: PostgreSQL copies neither the RLS flags nor the policy to a partition, and a direct query uses the
-     * partition's own. Grants stay on the parent only.
-     *
      * @param \DateTimeImmutable $month any instant; its UTC month is the partition's range
      *
-     * @return list<string>
+     * @return list<string> see MonthlyPartitions::statementsFor
      */
     public static function statementsFor(\DateTimeImmutable $month): array
     {
-        $firstDay = self::monthOf($month);
-        $partition = self::partitionNameFor($firstDay);
-
-        return [
-            // Explicit +00: the bounds are UTC months whatever the session's time zone.
-            \sprintf(
-                "CREATE TABLE %s PARTITION OF %s FOR VALUES FROM ('%s+00') TO ('%s+00')",
-                $partition,
-                self::PARENT,
-                $firstDay->format('Y-m-d'),
-                $firstDay->modify('first day of next month')->format('Y-m-d'),
-            ),
-            ...TenantTable::enableRls($partition),
-            \sprintf('REVOKE ALL ON %s FROM PUBLIC, pinround_app, pinround_readonly', $partition),
-        ];
+        return MonthlyPartitions::statementsFor(self::PARENT, $month);
     }
 }

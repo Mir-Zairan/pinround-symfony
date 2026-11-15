@@ -1,0 +1,19 @@
+<div class="upload-field" id="{{ this.fieldId }}"
+    data-controller="presigned-upload"
+    data-presigned-upload-url-value="{{ path('media_upload_intent_begin') }}"
+    data-presigned-upload-csrf-token-value="{{ csrf_token('media_upload') }}"
+    data-presigned-upload-target-kind-value="{{ this.targetKind }}"
+    data-presigned-upload-target-id-value="{{ this.targetId }}"
+    data-action="paste->presigned-upload#paste dragover->presigned-upload#dragOver drop->presigned-upload#drop"
+>
+    <label class="upload-field__drop" for="{{ this.fieldId }}-file">
+        <span>Drop, paste or pick a screenshot</span>
+        <span class="upload-field__hint">PNG, JPEG or WebP, up to 15 MB.</span>
+    </label>
+    <input class="upload-field__input" id="{{ this.fieldId }}-file" type="file" accept="image/png,image/jpeg,image/webp"
+        data-presigned-upload-target="input" data-action="change->presigned-upload#choose">
+    <progress class="upload-field__progress" max="100" value="0" hidden aria-label="Upload progress" data-presigned-upload-target="progress"></progress>
+    <img class="upload-field__preview" alt="Preview of the screenshot you picked" hidden data-presigned-upload-target="preview">
+    <p class="upload-field__status" role="status" aria-live="polite" data-presigned-upload-target="status"></p>
+    <input type="hidden" name="{{ this.fieldName }}" value="" data-presigned-upload-target="mediaId">
+</div>

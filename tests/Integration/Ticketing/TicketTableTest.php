@@ -15,8 +15,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * The tkt_ticket and tkt_summary tables as Version20261111120000 creates them, with the search column of
- * Version20261112100000: their indexes, row-level security, the checks the database keeps on its own and the foreign
- * keys that tie summaries and turn rows to their ticket.
+ * Version20261112100000 and the question pause of Version20261115100000: their indexes, row-level security, the checks
+ * the database keeps on its own and the foreign keys that tie summaries and turn rows to their ticket.
  */
 final class TicketTableTest extends KernelTestCase
 {
@@ -27,6 +27,7 @@ final class TicketTableTest extends KernelTestCase
     private const string SUMMARY = '0197a3c0-0000-7000-8000-0000000032e9';
     private const string TO_DO_STEP = '0197a3c0-0000-7000-8000-0000000032f9';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000032f1';
+    private const string OMAR = '0197a3c0-0000-7000-8000-0000000032f2';
     private const string CHECK_VIOLATION = '23514';
 
     protected function setUp(): void
@@ -209,6 +210,44 @@ final class TicketTableTest extends KernelTestCase
         self::assertSame([1, 1, 1, 1, 1], $inserted);
     }
 
+    /**
+     * @return iterable<string, array{array<string, string>}>
+     */
+    public static function halfSetQuestionPauses(): iterable
+    {
+        yield 'an asked person without an asker' => [['asked_user_id' => self::LENA]];
+        yield 'an asker without an asked person' => [['asker_id' => self::LENA]];
+    }
+
+    /**
+     * As the migrator, since a hand fix or a DBAL write outside the ticket would come from there.
+     *
+     * @param array<string, string> $change
+     */
+    #[Test]
+    #[DataProvider('halfSetQuestionPauses')]
+    public function theDatabaseRefusesAHalfSetQuestionPause(array $change): void
+    {
+        try {
+            $this->rolledBackAsTheMigrator(fn (Connection $migrator): int|string => $this->insertTicket($migrator, $change));
+            self::fail('The database accepted the ticket.');
+        } catch (DriverException $refusal) {
+            self::assertSame([self::CHECK_VIOLATION, true], [$refusal->getSQLState(), str_contains($refusal->getMessage(), 'tkt_ticket_question_pause_check')]);
+        }
+    }
+
+    #[Test]
+    public function theDatabaseAcceptsAQuestionPauseWithBothPeople(): void
+    {
+        $pause = $this->rolledBackAsTheMigrator(function (Connection $migrator): array|false {
+            $this->insertTicket($migrator, ['asked_user_id' => self::LENA, 'asker_id' => self::OMAR]);
+
+            return $migrator->fetchAssociative('SELECT asked_user_id, asker_id FROM tkt_ticket WHERE id = ?', [self::TICKET]);
+        });
+
+        self::assertSame(['asked_user_id' => self::LENA, 'asker_id' => self::OMAR], $pause);
+    }
+
     #[Test]
     public function theDatabaseRefusesASummaryOfAnUnknownSource(): void
     {
@@ -249,11 +288,7 @@ final class TicketTableTest extends KernelTestCase
     #[Test]
     public function removingATicketRemovesItsTurnRowAndSummaries(): void
     {
-        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
-        $tenantContext = self::getContainer()->get(TenantContext::class);
-        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
-        $migrator->beginTransaction();
-        try {
+        $this->rolledBackAsTheMigrator(function (Connection $migrator): void {
             $this->insertTicket($migrator, []);
             $this->insertTurn($migrator, self::TICKET);
             $this->insertSummary($migrator, self::TICKET, 'human');
@@ -263,10 +298,7 @@ final class TicketTableTest extends KernelTestCase
 
             self::assertSame([1, 1], $before);
             self::assertSame([0, 0], [$migrator->fetchOne('SELECT count(*) FROM ins_ticket_turn'), $migrator->fetchOne('SELECT count(*) FROM tkt_summary')]);
-        } finally {
-            $migrator->rollBack();
-            $tenantContext->clear();
-        }
+        });
     }
 
     /**
@@ -342,6 +374,27 @@ final class TicketTableTest extends KernelTestCase
             return $work($connection);
         } finally {
             $connection->rollBack();
+            $tenantContext->clear();
+        }
+    }
+
+    /**
+     * @template T
+     *
+     * @param \Closure(Connection): T $work
+     *
+     * @return T
+     */
+    private function rolledBackAsTheMigrator(\Closure $work): mixed
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $migrator->beginTransaction();
+        try {
+            return $work($migrator);
+        } finally {
+            $migrator->rollBack();
             $tenantContext->clear();
         }
     }

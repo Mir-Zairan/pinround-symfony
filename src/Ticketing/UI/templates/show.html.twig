@@ -9,6 +9,15 @@
 
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/thread.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/ping-sheet.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+{% endblock %}
+
+{% block live_updates %}
+    {#- Notification's component, by name, as Ticketing's UI may not use Notification (deptrac.yaml). A refresh signal
+        fetches again what carries data-live-refresh: the thread's frame and the parts a move's Turbo Stream replaces. -#}
+    {{ component('LiveUpdates', {ticketId: ticket.id.toString}) }}
 {% endblock %}
 
 {% block main %}
@@ -81,10 +90,11 @@
                     {% endif %}
                 </section>
 
-                <section class="ticket__section" aria-labelledby="ticket-rounds-heading">
-                    <h2 id="ticket-rounds-heading" class="ticket__section-title">Rounds</h2>
-                    <twig:EmptyState message="No rounds yet. The developer starts round 1 from Claude Code: it shoots the screens and puts them here." />
-                </section>
+                {#- Conversation's component, embedded by name: Ticketing's UI may not use Conversation's Api (deptrac). -#}
+                {{ component('ThreadFrame', {key: ticket.key}) }}
+
+                {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). It passes the key only: the lazy frame's own request decides who may see the rounds. -#}
+                {{ component('RoundsSection', {key: ticket.key}) }}
             </div>
 
             <aside class="ticket__aside">

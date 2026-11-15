@@ -9,10 +9,21 @@ parameters:
         # Short jobs for worker-notify too, today the second invalidation of the workflow cache
         # (InvalidateWorkflowCacheHandler).
         App\Workflow\Api\Event\WorkflowEvent: async_notify
-        # Short jobs for worker-notify too; no handler yet, the consumers come with Insight, Notification and Audit.
+        # Short jobs for worker-notify too, today queueing the ticket page refresh (QueueTicketPagesRefreshHandler); more
+        # consumers come with Insight, Notification and Audit.
         App\Ticketing\Api\Event\TicketEvent: async_notify
+        # Short jobs for worker-notify too, today queueing the ticket page refresh (QueueTicketPagesRefreshHandler); more
+        # consumers come with Notification, Insight and Integration.
+        App\Conversation\Api\Event\ConversationEvent: async_notify
+        # Short jobs for worker-notify too, today queueing the ticket page refresh of a PingEvent
+        # (QueueTicketPagesRefreshHandler); more consumers come with Insight and Audit.
+        App\Notification\Api\Event\NotificationEvent: async_notify
         # Short jobs for worker-notify too, today clearing a renamed person's cached teams (ForgetRenamedPersonHandler).
         App\Identity\Api\Event\IdentityEvent: async_notify
+        # Short jobs for worker-notify too; no module handles MediaReady or MediaRejected yet.
+        App\Media\Api\Event\MediaEvent: async_notify
+        # Checking and re-encoding an uploaded picture, for worker-media (ProcessUploadHandler).
+        App\Media\Application\ProcessUpload: async_media
 
 framework:
     messenger:
@@ -137,14 +148,32 @@ framework:
             # Mail sent through MailerInterface goes out from worker-notify (ADR-0033). Symfony's handler of it is not
             # once-only: a redelivered message can send the email twice.
             Symfony\Component\Mailer\Messenger\SendEmailMessage: async_notify
+            # Sent at once by QueueTicketPagesRefreshHandler, and again with a DelayStamp by RefreshTicketPagesHandler;
+            # the hub is published to from worker-notify only (ADR-0023).
+            App\Notification\Infrastructure\Mercure\RefreshTicketPages: async_notify
+            # Dispatched on command.bus by MessengerUploadProcessingQueue inside the transaction that adds the media
+            # object, so the worker never looks for an uncommitted row; the relay moves it on to async_media.
+            App\Media\Application\ProcessUpload: outbox
+            # Sent after the current bus by worker-notify's handlers; RefreshBellHandler publishes it there (ADR-0023).
+            App\Notification\Application\Realtime\RefreshBell: async_notify
+            # Sent with a TenantStamp by ReleaseHeldNotifications every 5 minutes, one per organization with due notifications.
+            App\Notification\Infrastructure\Scheduler\ReleaseDueNotifications: async_notify
+            # Sent with a TenantStamp by QueueDigests every 15 minutes, one per person with a ping or question due in a digest.
+            App\Notification\Application\Digest\SendDigest: async_notify
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.
             App\Workflow\Api\Event\WorkflowEvent: outbox
             # Domain events of Ticketing, the same way.
             App\Ticketing\Api\Event\TicketEvent: outbox
+            # Domain events of Conversation, the same way.
+            App\Conversation\Api\Event\ConversationEvent: outbox
+            # Domain events of Notification, the same way.
+            App\Notification\Api\Event\NotificationEvent: outbox
             # Domain events of Identity, the same way.
             App\Identity\Api\Event\IdentityEvent: outbox
+            # Domain events of Media, dispatched on event.bus by the processing worker inside its transaction.
+            App\Media\Api\Event\MediaEvent: outbox
 
 when@test:
     parameters:
@@ -152,7 +181,11 @@ when@test:
             App\Organization\Api\Event\OrganizationEvent: async_notify
             App\Workflow\Api\Event\WorkflowEvent: async_notify
             App\Ticketing\Api\Event\TicketEvent: async_notify
+            App\Conversation\Api\Event\ConversationEvent: async_notify
+            App\Notification\Api\Event\NotificationEvent: async_notify
             App\Identity\Api\Event\IdentityEvent: async_notify
+            App\Media\Api\Event\MediaEvent: async_notify
+            App\Media\Application\ProcessUpload: async_media
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey
             App\Tests\Fixtures\Messaging\OutageProbeRecorded: valkey_with_outage

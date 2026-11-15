@@ -16,6 +16,11 @@ framework:
                 adapter: cache.adapter.redis
                 tags: true
                 default_lifetime: 86400
+            # The count on each person's bell (BellCountCache), kept a minute at most (realtime-and-notifications.md).
+            cache.bell_count:
+                adapter: cache.adapter.redis
+                tags: true
+                default_lifetime: 60
 
 when@test:
     framework:
@@ -28,5 +33,8 @@ when@test:
                     adapter: test.cache.adapter.array_kept_between_requests
                     tags: true
                 cache.team_people:
+                    adapter: test.cache.adapter.array_kept_between_requests
+                    tags: true
+                cache.bell_count:
                     adapter: test.cache.adapter.array_kept_between_requests
                     tags: true

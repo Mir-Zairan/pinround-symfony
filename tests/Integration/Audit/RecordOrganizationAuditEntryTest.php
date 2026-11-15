@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Audit;
 
 use App\Audit\Application\RecordOrganizationAuditEntry;
+use App\Organization\Api\Event\MemberJoined;
 use App\SharedKernel\Application\TenantContext;
 use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Organization\OrganizationCommandsOnTheEventBus;
@@ -15,6 +16,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 
 /**
@@ -60,29 +62,28 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
         self::runTheWorkerUntilIdle('async_notify');
 
         $rows = $this->auditRows();
+        $teamId = array_column($rows, 'target_id', 'action')['team.created'] ?? null;
+        self::assertIsString($teamId);
+        // Messenger relays the events of one second in no set order (data-model.md, messenger_outbox), so the ids
+        // carry none either: the rows are compared in action and target order.
+        $expected = self::inActionAndTargetOrder([
+            ['system', null, 'member.joined', 'user', OrganizationCommandsOnTheEventBus::SARA, ['org_roles' => ['admin']]],
+            ['user', OrganizationCommandsOnTheEventBus::SARA, 'member.joined', 'user', OrganizationCommandsOnTheEventBus::LENA, ['org_roles' => ['admin']]],
+            ['user', OrganizationCommandsOnTheEventBus::SARA, 'member.joined', 'user', OrganizationCommandsOnTheEventBus::OMAR, ['org_roles' => []]],
+            ['user', OrganizationCommandsOnTheEventBus::SARA, 'team.created', 'team', $teamId, ['lead_user_id' => OrganizationCommandsOnTheEventBus::LENA]],
+            ['user', OrganizationCommandsOnTheEventBus::SARA, 'team_role.changed', 'user', OrganizationCommandsOnTheEventBus::OMAR, ['team_id' => $teamId, 'from' => null, 'to' => 'member']],
+            ['user', OrganizationCommandsOnTheEventBus::SARA, 'org_roles.changed', 'user', OrganizationCommandsOnTheEventBus::LENA, ['from' => ['admin'], 'to' => ['admin', 'manager']]],
+        ]);
+        $actual = self::inActionAndTargetOrder(array_map(
+            static fn (array $row): array => [$row['actor_kind'], $row['actor_user_id'], $row['action'], $row['target_type'], $row['target_id'], $row['data']],
+            $rows,
+        ));
         self::assertSame(
-            [
-                ['system', null, 'member.joined', 'user', OrganizationCommandsOnTheEventBus::SARA],
-                ['user', OrganizationCommandsOnTheEventBus::SARA, 'member.joined', 'user', OrganizationCommandsOnTheEventBus::LENA],
-                ['user', OrganizationCommandsOnTheEventBus::SARA, 'member.joined', 'user', OrganizationCommandsOnTheEventBus::OMAR],
-                ['user', OrganizationCommandsOnTheEventBus::SARA, 'team.created', 'team', $rows[3]['target_id']],
-                ['user', OrganizationCommandsOnTheEventBus::SARA, 'team_role.changed', 'user', OrganizationCommandsOnTheEventBus::OMAR],
-                ['user', OrganizationCommandsOnTheEventBus::SARA, 'org_roles.changed', 'user', OrganizationCommandsOnTheEventBus::LENA],
-            ],
-            array_map(static fn (array $row): array => [$row['actor_kind'], $row['actor_user_id'], $row['action'], $row['target_type'], $row['target_id']], $rows),
+            array_map(static fn (array $row): array => \array_slice($row, 0, 5), $expected),
+            array_map(static fn (array $row): array => \array_slice($row, 0, 5), $actual),
         );
         // jsonb keeps its own key order, so the data is compared by key.
-        self::assertEquals(
-            [
-                ['org_roles' => ['admin']],
-                ['org_roles' => ['admin']],
-                ['org_roles' => []],
-                ['lead_user_id' => OrganizationCommandsOnTheEventBus::LENA],
-                ['team_id' => $rows[3]['target_id'], 'from' => null, 'to' => 'member'],
-                ['from' => ['admin'], 'to' => ['admin', 'manager']],
-            ],
-            array_map(static fn (array $row): array => $row['data'], $rows),
-        );
+        self::assertEquals(array_column($expected, 5), array_column($actual, 5));
         self::assertSame(array_fill(0, 6, '2027-03-14 08:30:00'), array_column($rows, 'at'), 'Each row keeps the time of its event, not of its handling.');
         foreach ($rows as $row) {
             self::assertEqualsCanonicalizing(RecordOrganizationAuditEntry::DATA_KEYS[$row['action']] ?? [], array_keys($row['data']));
@@ -120,7 +121,14 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
         $asyncNotify = self::getContainer()->get('messenger.transport.async_notify');
         self::assertInstanceOf(InMemoryTransport::class, $asyncNotify);
 
-        $asyncNotify->send($asyncNotify->getSent()[0]);
+        // Picked by its message, not by its place: the relay sends the events of one second in no set order.
+        $sarasJoining = array_values(array_filter(
+            $asyncNotify->getSent(),
+            static fn (Envelope $envelope): bool => $envelope->getMessage() instanceof MemberJoined && OrganizationCommandsOnTheEventBus::SARA === $envelope->getMessage()->userId,
+        ));
+        self::assertCount(1, $sarasJoining);
+
+        $asyncNotify->send($sarasJoining[0]);
         self::runTheWorkerUntilIdle('async_notify');
 
         self::assertCount(7, $asyncNotify->getSent());
@@ -156,6 +164,18 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
                 'data' => $data,
             ];
         }, $rows);
+    }
+
+    /**
+     * @param list<array{mixed, mixed, string, mixed, mixed, array<mixed>}> $rows actor kind, actor, action, target type, target, data
+     *
+     * @return list<array{mixed, mixed, string, mixed, mixed, array<mixed>}>
+     */
+    private static function inActionAndTargetOrder(array $rows): array
+    {
+        usort($rows, static fn (array $a, array $b): int => [$a[2], $a[4]] <=> [$b[2], $b[4]]);
+
+        return $rows;
     }
 
     private function rawDataOf(string $targetId): mixed

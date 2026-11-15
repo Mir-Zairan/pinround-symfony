@@ -61,7 +61,7 @@ Server time, p95, warm cache, measured at the app (see [ADR-0029](../03-adr/0029
 | Ticket page | ≤ 250 ms | 10 |
 | Search | ≤ 300 ms | 3 |
 | Thumbnail first byte (object storage/CDN) | ≤ 150 ms | 0 |
-| Action (move, answer, ping) | ≤ 150 ms | 6 writes, side effects async |
+| Action (move, answer, ping) | ≤ 150 ms | 6 writes, side effects async; a warm move ≤ 9 queries in all, the 9th the lock on the mover's open pings for auto-clear (a user decision of 2026-11-14) |
 
 Browser: LCP ≤ 2.0 s on a mid laptop, INP ≤ 200 ms, JavaScript ≤ 120 KB gzip per page.
 

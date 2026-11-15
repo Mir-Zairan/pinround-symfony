@@ -191,7 +191,7 @@ Details: [media-pipeline.md](media-pipeline.md).
 Headers on every response the app answers:
 
 ```http
-Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{random}'; style-src 'self' 'nonce-{random}'; img-src 'self' https://{bucket-host} data:; connect-src 'self' https://{mercure-host} http://localhost:11434; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{random}'; style-src 'self' 'nonce-{random}'; img-src 'self' https://{bucket-host} data:; connect-src 'self' https://{bucket-host} https://{mercure-host} http://localhost:11434; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
 Strict-Transport-Security: max-age=63072000; includeSubDomains
 X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin

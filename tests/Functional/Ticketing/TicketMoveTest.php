@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
+use App\Notification\Infrastructure\Mercure\RefreshTicketPagesHandler;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -27,6 +28,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\DomCrawler\Form;
+use Symfony\Component\Mercure\Debug\TraceableHub;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -58,7 +60,10 @@ final class TicketMoveTest extends WebTestCase
     private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
     /** base.html.twig's toast region, which a streamed toast updates. */
     private const string TOAST_REGION_ID = 'toast-region';
-    /** The stream answer's re-read of the ticket page, warm, by the first table each statement reads. */
+    /**
+     * The stream answer's re-read of the ticket page, warm, by the first table each statement reads. People's Ping
+     * buttons add none: the ping limit comes with the settings the re-read already read, the pinged state from Valkey.
+     */
     private const array RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', '"COMMIT"'];
     /** A lead's re-read: their box offers the Needs input dialog, so it also reads which of the ticket's people are members. */
     private const array LEAD_RE_READ_STATEMENTS = ['"START TRANSACTION"', self::TENANT_STATEMENT, 'tkt_ticket', 'idn_user', 'tkt_ticket_event', 'ins_ticket_turn', 'org_membership', '"COMMIT"'];
@@ -234,6 +239,26 @@ final class TicketMoveTest extends WebTestCase
             [...$stateBefore, 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $stateBefore['events'] + 1, 'outbox' => $stateBefore['outbox'] + 1],
             $this->stateOfTicket(),
         );
+    }
+
+    #[Test]
+    public function aMovePublishesNoLiveUpdateInTheRequestOnlyItsEventToTheOutbox(): void
+    {
+        $this->addTicket(['step' => 'todo']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields());
+
+        // Read before the redirect is followed: the next request resets the hub's trace.
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame([], $this->tracedHub()->getMessages(), 'the refresh is published by worker-notify, never by the request');
+        self::assertSame('Moved to In progress.', $this->toastAfterTheRedirect());
+        self::assertSame($stateBefore['outbox'] + 1, $this->stateOfTicket()['outbox']);
+
+        // The trace is of the hub the refresh handler publishes to, so its empty list is not one nobody writes to.
+        $refreshTicketPages = self::getContainer()->get(RefreshTicketPagesHandler::class);
+        self::assertSame($this->tracedHub(), new \ReflectionProperty(RefreshTicketPagesHandler::class, 'hub')->getValue($refreshTicketPages));
     }
 
     /**
@@ -898,7 +923,7 @@ final class TicketMoveTest extends WebTestCase
      * The stream answer reads the ticket's page again after the move's transaction, in one of its own: the same refusal
      * answered by stream and by redirect differs by that read alone, warm: 7 queries with the transaction's own
      * statements, the ticket, the names, What happened's moves and the saved turn among them, and for a lead an 8th,
-     * the Needs input dialog's one read of which of the ticket's people are members.
+     * the Needs input dialog's one read of which of the ticket's people are members. People's Ping buttons read no SQL.
      */
     #[Test]
     public function theStreamAnswerReadsTheTicketAgainInTheBudgetedQueries(): void
@@ -1284,17 +1309,17 @@ final class TicketMoveTest extends WebTestCase
                 throw new \LogicException('The move routes create no ticket.');
             }
 
-            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): void
+            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int
             {
                 throw new \LogicException('Only moveTo is replaced.');
             }
 
-            public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): void
+            public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): int
             {
                 throw new \LogicException('Only moveTo is replaced.');
             }
 
-            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): void
+            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): int
             {
                 throw $this->fault;
             }
@@ -1367,6 +1392,12 @@ final class TicketMoveTest extends WebTestCase
         self::assertCount(1, $toast);
 
         return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /** The test env's default hub: kernel.debug wraps it in the bundle's trace for the profiler. */
+    private function tracedHub(): TraceableHub
+    {
+        return self::getContainer()->get('mercure.hub.default.traceable');
     }
 
     /**

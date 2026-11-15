@@ -17,7 +17,7 @@ Claude Code connects to pinround with a personal token. It can do only what that
 
 ## Status and people
 
-- Status: Accepted
+- Status: Accepted. Superseded in part by [ADR-0039](0039-agents-file-report-drafts-a-person-sends-them.md) (scope `reports:write`, tool `create_report`)
 - Date: 2026-11-06
 - Deciders: Zairan (lead), Toyib (developer), Anka (tester)
 

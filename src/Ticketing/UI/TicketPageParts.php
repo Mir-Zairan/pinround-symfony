@@ -10,6 +10,7 @@ use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Application\TicketHistoryEntries;
 use App\Ticketing\Application\TicketHistoryEntry;
+use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\TurnInputs;
 use Psr\Clock\ClockInterface;
@@ -36,6 +37,8 @@ final readonly class TicketPageParts
     /** Workflow's group codes to StatusPill's groups. */
     private const array PILL_GROUPS = ['todo' => 'todo', 'doing' => 'doing', 'check' => 'checking', 'wait' => 'waiting', 'done' => 'done'];
 
+    public const string PAUSED_PILL = 'Waiting · question to %s';
+
     public function __construct(
         private NowNextSentences $nowNextSentences,
         private NextStepChoices $nextStepChoices,
@@ -51,18 +54,26 @@ final readonly class TicketPageParts
     /**
      * The templates' variables; turnLines and nextStep are null for a ticket no team owns, which has no turn.
      *
-     * @return array{ticket: TicketPageView, pillGroup: string, turnLines: array{now: string, next: string|null}|null, nextStep: NextStep|null, people: list<TicketPerson>, activity: list<ActivityLine>}
+     * pillLabel and pillGroup are the step's while no question pauses the ticket, and name the asked person in the
+     * waiting colours while one does (ticket-page.md, Status pill).
+     *
+     * @return array{ticket: TicketPageView, pillLabel: string, pillGroup: string, turnLines: array{now: string, next: string|null}|null, nextStep: NextStep|null, people: list<TicketPerson>, activity: list<ActivityLine>}
      */
     public function of(TicketPageView $ticket, ActorContext $viewer): array
     {
         $historyEntries = $this->ticketHistoryEntries->latestOf($ticket->id, $ticket->createdAt);
-        $historyPeopleIds = TicketHistorySentences::peopleOf($historyEntries);
-        $pageTurn = $this->nowNextSentences->pageTurnOf($ticket, $historyPeopleIds);
-        $displayNames = $pageTurn->context->firstNames ?? $this->nowNextSentences->displayNamesWith($ticket->displayNames, $historyPeopleIds);
+        $askedUserId = $ticket->turnSnapshot->askedUserId;
+        $namedPeopleIds = TicketHistorySentences::peopleOf($historyEntries);
+        if (null !== $askedUserId) {
+            $namedPeopleIds[] = $askedUserId;
+        }
+        $pageTurn = $this->nowNextSentences->pageTurnOf($ticket, $namedPeopleIds);
+        $displayNames = $pageTurn->context->firstNames ?? $this->nowNextSentences->displayNamesWith($ticket->displayNames, $namedPeopleIds);
 
         return [
             'ticket' => $ticket,
-            'pillGroup' => self::pillGroupOf($ticket->groupCode),
+            'pillLabel' => self::pillLabelOf($ticket, $displayNames),
+            'pillGroup' => null === $askedUserId ? self::pillGroupOf($ticket->groupCode) : self::PILL_GROUPS['wait'],
             'turnLines' => null === $pageTurn ? null : $this->nowNextSentences->linesOf($pageTurn),
             'nextStep' => null === $pageTurn ? null : $this->nextStepChoices->of($pageTurn, $viewer, $this->authorizationChecker->isGranted(TicketPermission::MOVE, $ticket->visibilityFacts)),
             'people' => $this->ticketPeople->of(
@@ -103,6 +114,20 @@ final readonly class TicketPageParts
         );
 
         return $lines;
+    }
+
+    /**
+     * @param array<string, string> $displayNames by user id string, the asked person's included
+     */
+    private static function pillLabelOf(TicketPageView $ticket, array $displayNames): string
+    {
+        $askedUserId = $ticket->turnSnapshot->askedUserId;
+        if (null === $askedUserId) {
+            return $ticket->stepName;
+        }
+        $askedName = NowNextContext::firstNameFrom($displayNames[$askedUserId->toString()] ?? '');
+
+        return \sprintf(self::PAUSED_PILL, $askedName ?? PersonNames::UNKNOWN_PERSON);
     }
 
     /**

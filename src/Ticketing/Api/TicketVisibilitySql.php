@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Api;
 
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 
 /**
@@ -14,7 +15,7 @@ use App\SharedKernel\Domain\TeamId;
  *
  * Every parameter is a string and the SQL casts each one, so a caller binds parameters() as they are, with no types.
  * The condition is true for a visible row and false or NULL for a hidden one (a NULL people column makes the IN list
- * NULL): use it as a filter (WHERE, ON, FILTER), never negated.
+ * NULL): use it as a filter (WHERE, ON, FILTER, CASE WHEN), never negated.
  */
 final readonly class TicketVisibilitySql
 {
@@ -36,10 +37,7 @@ final readonly class TicketVisibilitySql
      */
     public static function of(TicketVisibility $visibility, string $tableAlias): self
     {
-        if (1 !== preg_match(self::IDENTIFIER, $tableAlias)) {
-            throw new \InvalidArgumentException('A table alias must be a plain lower-case SQL identifier.');
-        }
-        $prefix = $tableAlias.'_visible_';
+        $prefix = self::parameterPrefixOf($tableAlias);
 
         // pdo_pgsql binds no arrays, so the team ids travel as one uuid[] literal; a uuid holds no comma or brace.
         $teamIdsLiteral = '{'.implode(',', array_map(static fn (TeamId $teamId): string => $teamId->toString(), $visibility->teamIds())).'}';
@@ -67,6 +65,29 @@ final readonly class TicketVisibilitySql
         );
     }
 
+    /**
+     * True only for a row of the organization that is for everyone, so it holds whoever reads the row: for text that
+     * leaves the app with no viewer to check, such as a ticket title in an email (CASE WHEN ... THEN title END).
+     *
+     * @param string $tableAlias the alias of the filtered table in the query, a plain lower-case SQL identifier
+     *
+     * @throws \InvalidArgumentException when the alias is not a plain lower-case SQL identifier
+     */
+    public static function forEveryoneIn(OrganizationId $organizationId, string $tableAlias): self
+    {
+        $prefix = self::parameterPrefixOf($tableAlias);
+
+        return new self(
+            \sprintf(
+                "(%1\$s.organization_id = CAST(:%2\$sorg AS uuid) AND %1\$s.visibility = '%3\$s')",
+                $tableAlias,
+                $prefix,
+                TicketVisibilityFacts::FOR_EVERYONE,
+            ),
+            [$prefix.'org' => $organizationId->toString()],
+        );
+    }
+
     public function sql(): string
     {
         return $this->sql;
@@ -78,6 +99,15 @@ final readonly class TicketVisibilitySql
     public function parameters(): array
     {
         return $this->parameters;
+    }
+
+    private static function parameterPrefixOf(string $tableAlias): string
+    {
+        if (1 !== preg_match(self::IDENTIFIER, $tableAlias)) {
+            throw new \InvalidArgumentException('A table alias must be a plain lower-case SQL identifier.');
+        }
+
+        return $tableAlias.'_visible_';
     }
 
     private static function booleanLiteral(bool $value): string

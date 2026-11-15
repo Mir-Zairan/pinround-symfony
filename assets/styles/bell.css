@@ -1,0 +1,111 @@
+.bell {
+  position: relative;
+  display: inline-block;
+}
+
+/* Under the header on the right; 16 px from each screen edge on a narrow screen. */
+.bell__popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: min(420px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--s-c);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
+}
+
+/* Under the bell, right: 0 would push the popover past the left edge, as the avatar sits right of the bell. Here it
+   hangs from the header (.site-header__inner) instead. */
+@media (max-width: 40em) {
+  .bell {
+    position: static;
+  }
+
+  .bell__popover {
+    right: 16px;
+  }
+}
+
+.bell__popover[hidden] {
+  display: none;
+}
+
+.bell__popover:focus {
+  outline: none;
+}
+
+.bell__popover:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.bell-popover__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bell-popover__title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.bell-popover__muted,
+.bell-popover__empty,
+.bell-popover__loading {
+  margin: 4px 0 12px;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.bell-popover__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ping-card {
+  padding: 12px;
+  border-radius: var(--radius-card);
+  background: var(--ping-container);
+  overflow-wrap: anywhere;
+}
+
+.ping-card__line,
+.ping-card__text {
+  margin: 0 0 6px;
+}
+
+.ping-card__time {
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.ping-card--unread .ping-card__line strong::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  vertical-align: middle;
+}
+
+.ping-card__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ping-card__key {
+  margin-right: auto;
+}

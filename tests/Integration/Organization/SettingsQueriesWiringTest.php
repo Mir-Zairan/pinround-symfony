@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Organization;
 
+use App\Organization\Api\PingSettingsQueries;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\StepPolicy;
 use App\Organization\Infrastructure\Doctrine\DbalSettingsQueries;
@@ -32,7 +33,7 @@ final class SettingsQueriesWiringTest extends KernelTestCase
             {
                 ++$this->reads;
 
-                return new StoredSettings(StepPolicy::Team, null);
+                return new StoredSettings(StepPolicy::Team, null, 4);
             }
         };
         $container->set(DbalSettingsQueries::class, $database);
@@ -48,6 +49,28 @@ final class SettingsQueriesWiringTest extends KernelTestCase
     }
 
     #[Test]
+    public function theAutowiredPingLimitSharesTheRequestsOneSettingsRead(): void
+    {
+        $container = self::getContainer();
+        $database = new class implements StoredSettingsQueries {
+            public int $reads = 0;
+
+            public function settingsOf(OrganizationId $organizationId): StoredSettings
+            {
+                ++$this->reads;
+
+                return new StoredSettings(StepPolicy::Team, null, 8);
+            }
+        };
+        $container->set(DbalSettingsQueries::class, $database);
+
+        $container->get(SettingsQueries::class)->stepPolicyOf(new OrganizationId(self::ACME_FOODS));
+        $pingLimitHours = $container->get(PingSettingsQueries::class)->pingLimitHoursOf(new OrganizationId(self::ACME_FOODS));
+
+        self::assertSame([8, 1], [$pingLimitHours, $database->reads]);
+    }
+
+    #[Test]
     public function theAutowiredSettingsQueriesReadNoTriagerOncePerRequestAndAgainAfterTheKernelReset(): void
     {
         $container = self::getContainer();
@@ -58,7 +81,7 @@ final class SettingsQueriesWiringTest extends KernelTestCase
             {
                 ++$this->triagerReads;
 
-                return new StoredSettings(StepPolicy::Team, null);
+                return new StoredSettings(StepPolicy::Team, null, 4);
             }
         };
         $container->set(DbalSettingsQueries::class, $database);

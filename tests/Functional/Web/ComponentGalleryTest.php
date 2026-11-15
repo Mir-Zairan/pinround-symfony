@@ -23,15 +23,16 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Give SHOP-12 to…', 'Your next step box', 'Your next step', 'Move to Needs input', 'Queue bar'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Give SHOP-12 to…', 'Your next step box', 'Your next step', 'Move to Needs input', 'Queue bar', 'Screenshot with pins', 'Screenshot with pins you place', 'Screenshot with pins already placed', 'Screenshot being processed', 'Screenshot that could not be processed', 'Screenshot upload'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
         // 4 variants x 2 sizes x (normal, disabled, link)
         // plus the one action button inside the empty-state example, the dialog's trigger, Cancel and Confirm, the
         // two person pickers' Cancel and the Assign one's "Give it to…", the next step box's verb, its "Move to another
-        // step…" summary, Cancel and Move, and the two queue bars' Previous, Next ticket or Finish, and Stop
-        self::assertCount(41, $crawler->filter('main .btn'));
+        // step…" summary, Cancel and Move, and the two queue bars' Previous, Next ticket or Finish, and Stop, and the
+        // editable screenshots' two Add pin buttons and the placed pins' Remove buttons
+        self::assertCount(46, $crawler->filter('main .btn'));
         self::assertCount(11, $crawler->filter('main a.btn[href]'));
         self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
-        self::assertCount(8, $crawler->filter('main button.btn.btn-text:not([disabled])'));
+        self::assertCount(11, $crawler->filter('main button.btn.btn-text:not([disabled])'));
     }
 
     #[Test]

@@ -40,6 +40,8 @@
         <field name="testerId" type="guid" column="tester_id" nullable="true"/>
         <field name="waitingOnUserId" type="guid" column="waiting_on_user_id" nullable="true"/>
         <field name="waitingOnLabel" type="text" column="waiting_on_label" nullable="true"/>
+        <field name="askedUserId" type="guid" column="asked_user_id" nullable="true"/>
+        <field name="askerId" type="guid" column="asker_id" nullable="true"/>
         <field name="reporterId" type="guid" column="reporter_id"/>
         <field name="teamId" type="guid" column="team_id" nullable="true"/>
         <field name="visibility" type="text" column="visibility" enum-type="App\Ticketing\Domain\Visibility"/>

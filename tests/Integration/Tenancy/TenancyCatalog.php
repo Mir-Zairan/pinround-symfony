@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Tenancy;
 
 use App\SharedKernel\Infrastructure\Doctrine\Migration\ResolverFunctions;
 use App\SharedKernel\Infrastructure\Doctrine\Migration\TenantTable;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -24,6 +25,47 @@ final readonly class TenancyCatalog
     private const string USER_SCHEMAS = "(SELECT n.oid FROM pg_namespace n
         WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
           AND n.nspname NOT LIKE 'pg\\_temp\\_%' AND n.nspname NOT LIKE 'pg\\_toast\\_temp\\_%')";
+
+    /**
+     * The columns pinround_resolver may SELECT whose type counts as text, see resolverTextColumnsWithout…(): on a table
+     * with a resolver_read policy by any route (its own grant, PUBLIC, a table-wide grant, a role it belongs to), and on
+     * any other table by a grant that names it.
+     */
+    private const string RESOLVER_TEXT_COLUMNS = "WITH resolver_text_column AS (
+            SELECT a.attrelid, a.attnum, a.attname, a.atttypid, a.atttypmod
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_type t ON t.oid = a.atttypid
+            JOIN pg_type v ON v.oid = CASE WHEN t.typcategory = 'A' THEN t.typelem ELSE t.oid END
+            WHERE c.relnamespace IN ".self::USER_SCHEMAS." AND a.attnum > 0 AND NOT a.attisdropped
+              AND (EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = a.attrelid AND p.polname = 'resolver_read')
+                       AND has_column_privilege('pinround_resolver', a.attrelid, a.attnum, 'SELECT')
+                   OR EXISTS (SELECT 1 FROM aclexplode(a.attacl) acl WHERE acl.grantee = 'pinround_resolver'::regrole AND acl.privilege_type = 'SELECT')
+                   OR EXISTS (SELECT 1 FROM aclexplode(c.relacl) acl WHERE acl.grantee = 'pinround_resolver'::regrole AND acl.privilege_type = 'SELECT'))
+              AND v.typcategory NOT IN ('B', 'N', 'D', 'T', 'E')
+              AND COALESCE(NULLIF(v.typbasetype, 0), v.oid) NOT IN ('uuid'::regtype, 'bytea'::regtype)
+        )";
+
+    /**
+     * The functions pinround_resolver owns, and those it may run in a user schema: a resolver function runs whatever it
+     * calls with pinround_resolver's rights, so a function it may run reads as the resolver too.
+     */
+    private const string RESOLVER_FUNCTIONS = "WITH resolver_function AS MATERIALIZED (
+            SELECT p.oid, p.proname, p.prokind, p.prolang, p.proargnames, p.proargmodes,
+                   p.proowner = 'pinround_resolver'::regrole AS is_resolver_owned
+            FROM pg_proc p
+            WHERE p.proowner = 'pinround_resolver'::regrole
+               OR p.pronamespace IN ".self::USER_SCHEMAS." AND has_function_privilege('pinround_resolver', p.oid, 'EXECUTE')
+        )";
+
+    /** How PostgreSQL prints `CHECK (column IN ('a', 'b'))` on a text column; %s is the column as quote_ident() gives it. */
+    private const string CLOSED_SET_CHECK = "/^CHECK \\(\\(%s = ANY \\(ARRAY\\['[a-z0-9_]+'::text(?:, '[a-z0-9_]+'::text)*\\]\\)\\)\\)\\z/";
+
+    /** The comparison by which a resolver function keeps to the transaction's tenant (data-model.md › Row-level security). */
+    private const string TENANT_BINDING = "/\\bp_organization_id\\s*=\\s*NULLIF\\(\\s*current_setting\\('app\\.org_id',\\s*true\\),\\s*''\\s*\\)::uuid/";
+
+    /** A `--` comment to the end of its line, or a block comment with the block comments nested in it, as PostgreSQL nests them. */
+    private const string SQL_COMMENT = '~--[^\n]*|(/\*(?:(?!/\*|\*/)[\s\S]|(?1))*+\*/)~';
 
     private const string TENANT_TABLES = 'WITH RECURSIVE tenant_table AS (
             SELECT c.oid FROM pg_class c
@@ -200,6 +242,116 @@ final readonly class TenancyCatalog
     }
 
     /**
+     * The definition is pg_get_functiondef(), so a BEGIN ATOMIC body (kept in prosqlbody, with prosrc empty) is read
+     * too. A reader keeps to the tenant when it takes p_organization_id as an input and its definition, without its
+     * comments, compares that input with app.org_id. This is a text heuristic: a table named only in dynamic SQL, or a
+     * binding that never filters a row, fools it, so review of each resolver function must back it up.
+     *
+     * @return array<string, array<string, bool>> table name => name of a resolver function (see RESOLVER_FUNCTIONS)
+     *                                            whose definition names the table => whether it keeps to the tenant
+     *                                            of the transaction; overloads of one name keep to it only if all do
+     */
+    public function resolverReadersByTable(): array
+    {
+        $readersByTable = [];
+        foreach ($this->connection->fetchAllAssociative(
+            self::RESOLVER_FUNCTIONS.", resolver_definition AS MATERIALIZED (
+                SELECT f.proname, pg_get_functiondef(f.oid) AS definition,
+                       EXISTS (
+                           SELECT 1 FROM unnest(f.proargnames) WITH ORDINALITY AS arg(name, position)
+                           WHERE arg.name = 'p_organization_id' AND COALESCE(f.proargmodes[arg.position], 'i') IN ('i', 'b')
+                       ) AS takes_organization_id
+                FROM resolver_function f
+                WHERE f.prokind <> 'a'
+             )
+             SELECT c.relname AS table_name, d.proname AS function_name, d.definition, d.takes_organization_id
+             FROM resolver_definition d JOIN pg_class c ON d.definition ~ ('\\m' || c.relname || '\\M')
+             WHERE c.relkind IN ('r', 'p') AND c.relnamespace IN ".self::USER_SCHEMAS.'
+             ORDER BY 1, 2',
+        ) as $reader) {
+            $isTenantBound = true === $reader['takes_organization_id']
+                && 1 === preg_match(self::TENANT_BINDING, self::withoutSqlComments(self::text($reader['definition'])));
+            $table = self::text($reader['table_name']);
+            $function = self::text($reader['function_name']);
+            $readersByTable[$table][$function] = ($readersByTable[$table][$function] ?? true) && $isTenantBound;
+        }
+
+        return $readersByTable;
+    }
+
+    /**
+     * A text column pinround_resolver may read on a resolver_read table lets a resolver read it in every organization,
+     * so it must hold no tenant's text: a validated CHECK on that column alone limits it to a fixed set of values, or
+     * every resolver function whose definition names the table keeps to the transaction's tenant (see
+     * resolverReadersByTable(), and resolverFunctionsInALanguageOtherThan() for definitions that are not SQL text).
+     * Text is any type but boolean, number, date, time, interval, enum, uuid and bytea (a hash matched by exact key),
+     * or an array of those, so a type nobody thought of counts as text.
+     *
+     * @return list<string> "table.column (type): why", for each such column that breaks the rule
+     */
+    public function resolverTextColumnsWithoutAClosedSetOrATenantBoundReader(): array
+    {
+        $readersByTable = $this->resolverReadersByTable();
+
+        $checksByColumn = [];
+        foreach ($this->connection->fetchAllAssociative(
+            self::RESOLVER_TEXT_COLUMNS." SELECT a.attrelid::regclass::text || '.' || a.attname AS column_key, pg_get_constraintdef(k.oid) AS definition
+             FROM resolver_text_column a JOIN pg_constraint k
+               ON k.conrelid = a.attrelid AND k.contype = 'c' AND k.convalidated AND k.conkey = ARRAY[a.attnum]",
+        ) as $check) {
+            $checksByColumn[self::text($check['column_key'])][] = self::text($check['definition']);
+        }
+
+        $violations = [];
+        foreach ($this->connection->fetchAllAssociative(
+            self::RESOLVER_TEXT_COLUMNS.' SELECT c.oid::regclass::text AS table_name, c.relname, a.attname AS column_name,
+                    quote_ident(a.attname) AS quoted_column, format_type(a.atttypid, a.atttypmod) AS type_name
+             FROM resolver_text_column a JOIN pg_class c ON c.oid = a.attrelid
+             ORDER BY 1, 3',
+        ) as $column) {
+            $tableName = self::text($column['table_name']);
+            $closedSet = \sprintf(self::CLOSED_SET_CHECK, preg_quote(self::text($column['quoted_column']), '/'));
+            if ([] !== preg_grep($closedSet, $checksByColumn[$tableName.'.'.self::text($column['column_name'])] ?? [])) {
+                continue;
+            }
+            $readers = $readersByTable[self::text($column['relname'])] ?? [];
+            $unboundReaders = array_keys(array_filter($readers, static fn (bool $isTenantBound): bool => !$isTenantBound));
+            $why = match (true) {
+                [] === $readers => 'no resolver function reads '.self::text($column['relname']),
+                [] !== $unboundReaders => implode(', ', $unboundReaders).' read '.self::text($column['relname']).' without keeping to the tenant of the transaction',
+                default => null,
+            };
+            if (null !== $why) {
+                $violations[] = \sprintf('%s.%s (%s): no CHECK to a fixed set of values, and %s', $tableName, self::text($column['column_name']), self::text($column['type_name']), $why);
+            }
+        }
+
+        return $violations;
+    }
+
+    /**
+     * resolverReadersByTable() reads definitions as SQL text, which a body in another language need not be. Functions
+     * in an untrusted language such as C count only when pinround_resolver owns them: only a superuser or a trusted
+     * extension's script can create one, like the C functions pg_trgm and its kind bring.
+     *
+     * @param non-empty-list<string> $languages the languages whose definitions are SQL text
+     *
+     * @return list<string> "signature is in language name", for each function pinround_resolver owns, or may run in a
+     *                      user schema, written in a language not in $languages
+     */
+    public function resolverFunctionsInALanguageOtherThan(array $languages): array
+    {
+        return self::strings($this->connection->fetchFirstColumn(
+            self::RESOLVER_FUNCTIONS." SELECT f.oid::regprocedure::text || ' is in language ' || l.lanname
+             FROM resolver_function f JOIN pg_language l ON l.oid = f.prolang
+             WHERE l.lanname NOT IN (?) AND (f.is_resolver_owned OR l.lanpltrusted)
+             ORDER BY 1",
+            [$languages],
+            [ArrayParameterType::STRING],
+        ));
+    }
+
+    /**
      * @return list<string> roles $member is a member of; for pinround_app any would lend it that role's rights or policies
      */
     public function rolesGrantedTo(string $member): array
@@ -247,6 +399,16 @@ final readonly class TenancyCatalog
     private static function strings(array $values): array
     {
         return array_map(self::text(...), $values);
+    }
+
+    /**
+     * Each comment becomes a space. A comment marker inside a string literal strips more than a comment, which errs
+     * toward hiding a binding, so toward reporting the reader.
+     */
+    private static function withoutSqlComments(string $sql): string
+    {
+        return preg_replace(self::SQL_COMMENT, ' ', $sql)
+            ?? throw new \UnexpectedValueException('A function definition could not be stripped of its comments.');
     }
 
     private static function text(mixed $value): string

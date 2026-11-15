@@ -25,8 +25,11 @@ final readonly class TicketTurnSnapshot
      * @param string       $visibility      all, or team for a restricted ticket
      * @param string       $priority        one of blocker, critical, major, normal, minor
      * @param bool         $isRiskCheck     true while the ticket's check reasons include "risk"
+     * @param UserId|null  $askedUserId     who must answer the question that pauses the ticket; null while none does
+     * @param UserId|null  $askerId         who asked that question; null exactly when $askedUserId is null
      *
-     * @throws \InvalidArgumentException when the lead does not match the team, or the visibility is not all or team
+     * @throws \InvalidArgumentException when the lead does not match the team, the asker does not match the asked
+     *                                   person, or the visibility is not all or team
      */
     public function __construct(
         public TicketId $ticketId,
@@ -51,13 +54,36 @@ final readonly class TicketTurnSnapshot
         public ?string $waitingOnLabel = null,
         public ?string $previousStepId = null,
         public bool $isRiskCheck = false,
+        public ?UserId $askedUserId = null,
+        public ?UserId $askerId = null,
     ) {
         if ((null === $teamId) !== (null === $leadId) || (null === $leadId) !== (null === $leadDisplayName)) {
             throw new \InvalidArgumentException('A ticket has a team lead and their name exactly when it has a team.');
+        }
+        if ((null === $askedUserId) !== (null === $askerId)) {
+            throw new \InvalidArgumentException('A paused ticket has both the asked person and the asker.');
         }
         // The values of Ticketing's TicketVisibilityFacts::FOR_EVERYONE and TEAM_ONLY, which SharedKernel cannot see.
         if (!\in_array($visibility, ['all', 'team'], true)) {
             throw new \InvalidArgumentException('A ticket visibility must be all or team.');
         }
+    }
+
+    /**
+     * Whom a question on this ticket may ask: its assignee, reporter, reviewer, tester and team lead, in that order,
+     * each once. The team's other members, a pending assignee and whoever the ticket waits on are not among them.
+     *
+     * @return list<UserId>
+     */
+    public function peopleOnTheTicket(): array
+    {
+        $people = [];
+        foreach ([$this->assigneeId, $this->reporterId, $this->reviewerId, $this->testerId, $this->leadId] as $listedId) {
+            if (null !== $listedId) {
+                $people[$listedId->toString()] ??= $listedId;
+            }
+        }
+
+        return array_values($people);
     }
 }

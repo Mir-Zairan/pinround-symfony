@@ -6,6 +6,8 @@
                 <twig:Avatar name="{{ person.name }}" aria-hidden="true"/>
                 <span class="people__name">{{ person.firstName }}{% if person.isViewer %} (you){% endif %}</span>
                 <span class="people__role">{{ person.roleLine }}{% if person.isTheirTurn %}<span class="people__turn"> · their turn</span>{% endif %}</span>
+                {# Filled by the page with what the viewer may do with the person, rendered with this row's person. #}
+                {% block person_actions %}{% endblock %}
             </li>
         {% endfor %}
     </ul>

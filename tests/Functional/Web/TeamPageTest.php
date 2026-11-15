@@ -827,7 +827,7 @@ final class TeamPageTest extends WebTestCase
 
             public function settingsOf(OrganizationId $organizationId): StoredSettings
             {
-                return new StoredSettings($this->stepPolicyOf($organizationId), $this->triagerOf($organizationId));
+                return new StoredSettings($this->stepPolicyOf($organizationId), $this->triagerOf($organizationId), 4);
             }
         };
         self::getContainer()->set(DbalSettingsQueries::class, $settings);

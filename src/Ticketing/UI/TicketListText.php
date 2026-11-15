@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\UI\RelativeTime;
 use App\Ticketing\Api\TicketListGroup;
 use App\Ticketing\Api\TicketListRow;
 use App\Ticketing\Api\TicketListStep;
@@ -83,33 +84,18 @@ final class TicketListText
     }
 
     /**
-     * "now" within a minute (or for a time ahead of $now), then "5 min ago", "3 h ago", and from a day on the date in
-     * the viewer's time zone: "2 Nov", with the year when it is not $now's in that zone.
+     * RelativeTime::sinceOf: "now", "5 min ago", "3 h ago", then "2 Nov".
      */
     public static function updatedOf(\DateTimeImmutable $updatedAt, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
-        $seconds = $now->getTimestamp() - $updatedAt->getTimestamp();
-        if ($seconds < 60) {
-            return 'now';
-        }
-        if ($seconds < 3600) {
-            return \sprintf('%d min ago', intdiv($seconds, 60));
-        }
-        if ($seconds < 86400) {
-            return \sprintf('%d h ago', intdiv($seconds, 3600));
-        }
-
-        return self::dateOf($updatedAt, $now, $viewerTimeZone);
+        return RelativeTime::sinceOf($updatedAt, $now, $viewerTimeZone);
     }
 
     /**
-     * The date in the viewer's time zone, however recent: "2 Nov", with the year when it is not $now's in that zone
-     * ("2 Nov 2025"). The ticket page prints its created date with it too.
+     * RelativeTime::dateOf: "2 Nov", or "2 Nov 2025" in another year. The ticket page prints its created date with it too.
      */
     public static function dateOf(\DateTimeImmutable $at, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
-        $atInZone = $at->setTimezone($viewerTimeZone);
-
-        return $atInZone->format($atInZone->format('Y') === $now->setTimezone($viewerTimeZone)->format('Y') ? 'j M' : 'j M Y');
+        return RelativeTime::dateOf($at, $now, $viewerTimeZone);
     }
 }

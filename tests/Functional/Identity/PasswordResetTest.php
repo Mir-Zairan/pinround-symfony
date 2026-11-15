@@ -169,7 +169,7 @@ final class PasswordResetTest extends WebTestCase
         self::assertResponseRedirects('/login', 302);
         $loginPage = $client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(PasswordResetController::PASSWORD_CHANGED, $loginPage->filter('[role="status"]')->text());
+        self::assertSame(PasswordResetController::PASSWORD_CHANGED, $loginPage->filter('main [role="status"]')->text());
         self::assertSame(302, $this->statusAfterGettingHome($client), 'not logged in automatically');
 
         $this->openLink($client, $link);

@@ -10,6 +10,7 @@ use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
 use App\Ticketing\Domain\TicketVersionConflict;
+use Doctrine\DBAL\LockMode;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
@@ -100,5 +101,32 @@ final readonly class DoctrineTickets implements Tickets
             'organizationId' => $organizationId->toString(),
             'key' => $key->toString(),
         ]);
+    }
+
+    public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket
+    {
+        // A lock taken outside a transaction ends with its statement and would protect nothing.
+        if (!$this->entityManager->getConnection()->isTransactionActive()) {
+            throw new \LogicException('A ticket is locked only inside a transaction.');
+        }
+
+        $identifier = ['organizationId' => $organizationId->toString(), 'id' => $ticketId->toString()];
+        // find() and refresh() rehydrate a ticket the request has loaded already, which its readonly fields refuse with
+        // a LogicException; so lock its row, and refuse it when another request saved it since, as its fields are old.
+        $loaded = $this->entityManager->getUnitOfWork()->tryGetById($identifier, Ticket::class);
+        if ($loaded instanceof Ticket) {
+            $lockedVersion = $this->entityManager->getConnection()->fetchOne(
+                'SELECT version FROM tkt_ticket WHERE organization_id = ? AND id = ? FOR UPDATE',
+                [$organizationId->toString(), $ticketId->toString()],
+                [Types::GUID, Types::GUID],
+            );
+            if (!is_numeric($lockedVersion) || (int) $lockedVersion !== $loaded->version()) {
+                throw new TicketVersionConflict('The ticket was saved by another request after it was read.');
+            }
+
+            return $loaded;
+        }
+
+        return $this->entityManager->find(Ticket::class, $identifier, LockMode::PESSIMISTIC_WRITE);
     }
 }

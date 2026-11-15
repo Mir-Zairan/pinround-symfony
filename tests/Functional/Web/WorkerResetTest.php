@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
+use App\Notification\UI\Controller\PingController;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
@@ -63,12 +64,18 @@ final class WorkerResetTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                foreach (['tkt_ticket', 'wf_step'] as $table) {
+                foreach (['ntf_ping', 'tkt_ticket', 'wf_step'] as $table) {
                     $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
                 }
+                $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
 
                 return 0;
             });
+            // The state Valkey never evicts, so each test's ping slots go with its organizations.
+            $heldSlots = $this->stateValkey()->keys('ping:'.$organizationId.':*');
+            if (\is_array($heldSlots) && [] !== $heldSlots) {
+                $this->stateValkey()->del($heldSlots);
+            }
         }
         $this->removeCommittedProjects();
         $this->removeUsersAndOrganizations();
@@ -85,6 +92,21 @@ final class WorkerResetTest extends WebTestCase
         $this->client->request('GET', '/');
 
         self::assertResponseRedirects('/login', 302);
+    }
+
+    #[Test]
+    public function theNextRequestHasNoStoredCsrfTokenNotedAfterARequestStoredOne(): void
+    {
+        $this->logIn($this->client, $this->createUserWithPassword('Lena Berg'));
+        $this->client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+        $storage = $this->client->getContainer()->get('security.csrf.token_storage');
+        self::assertTrue($storage->hasStoredToken(), 'the page stored no token, so this test proves nothing');
+
+        $this->client->request('GET', '/_test/worker-reset');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($storage->hasStoredToken());
     }
 
     #[Test]
@@ -216,6 +238,49 @@ final class WorkerResetTest extends WebTestCase
         $this->entityManager()->createQuery('SELECT p FROM '.TenantProbe::class.' p')->getSQL();
     }
 
+    /**
+     * PingedState keeps the slots it read for the rest of a request; the next request must read them again, or Lena
+     * would stay pinged on Omar's page after her slot has ended.
+     */
+    #[Test]
+    public function theNextRequestShowsThePingButtonAgainAfterAnEarlierRequestShowedTheSlotHeld(): void
+    {
+        $this->client->setServerParameter('HTTPS', 'on');
+        $clock = new MockClock(new \DateTimeImmutable(self::NOW));
+        self::getContainer()->set('clock', $clock);
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreTodoStepAndShop1($people['Lena'], $people['Omar']);
+        $lenaId = $people['Lena']->id()->toString();
+        $shop1Id = $this->shop1Row()['id'];
+        self::assertIsString($shop1Id);
+        $slotKey = \sprintf('ping:%s:%s:%s:%s', $this->acmeFoods->toString(), $people['Omar']->id()->toString(), $lenaId, $shop1Id);
+        $this->logIn($this->client, $people['Omar']);
+        $this->client->request(
+            'POST',
+            '/t/SHOP-1/ping/'.$lenaId,
+            [
+                PingController::CSRF_FIELD => $this->csrfTokenFor($this->client, PingController::csrfIdOf('SHOP-1')),
+                PingController::MESSAGE_FIELD => 'Hi Lena, could you look at SHOP-1?',
+            ],
+            [],
+            ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'],
+        );
+        self::assertResponseStatusCodeSame(200);
+        $clock->modify('+90 minutes');
+
+        $page = $this->client->request('GET', '/t/SHOP-1');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Pinged · again in 3 h', trim($page->filter('#ping-'.$lenaId)->text()));
+
+        // Valkey ends the slot by its own clock, not the frozen one, so the test ends it by hand.
+        self::assertSame(1, $this->stateValkey()->del($slotKey));
+        $clock->modify('+3 hours');
+        $page = $this->client->request('GET', '/t/SHOP-1');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Ping Lena'], $page->filter('#ping-'.$lenaId.' .dialog__title')->each(static fn (Crawler $title): string => trim($title->text())));
+    }
+
     #[Test]
     public function theNextRequestStartsANewTraceWithNoParentAfterARequestThatThrew(): void
     {
@@ -246,6 +311,11 @@ final class WorkerResetTest extends WebTestCase
     private function entityManager(): EntityManagerInterface
     {
         return $this->client->getContainer()->get('doctrine.orm.default_entity_manager');
+    }
+
+    private function stateValkey(): \Redis
+    {
+        return self::getContainer()->get('state_valkey.connection');
     }
 
     private function responseJson(): mixed

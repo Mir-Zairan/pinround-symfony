@@ -6,6 +6,8 @@ namespace App\Tests\Functional\Web;
 
 use App\Audit\Infrastructure\Health\NextAuditPartitionExists;
 use App\Media\Infrastructure\Health\ObjectStorageIsReachable;
+use App\Notification\Infrastructure\Health\NextNotificationPartitionExists;
+use App\Notification\Infrastructure\Scheduler\AddNotificationPartitions;
 use App\SharedKernel\Infrastructure\Health\DatabaseAnswers;
 use App\SharedKernel\Infrastructure\Health\MigrationsAreCurrent;
 use App\SharedKernel\Infrastructure\Health\ReadinessCheck;
@@ -44,19 +46,20 @@ final class HealthTest extends WebTestCase
         MigrationsAreCurrent::class => 'migrations',
         NextAuditPartitionExists::class => 'next_audit_partition',
         NextTicketEventPartitionExists::class => 'next_ticket_event_partition',
+        NextNotificationPartitionExists::class => 'next_notification_partition',
         'health.cache_valkey_answers' => 'cache_valkey',
         'health.state_valkey_answers' => 'state_valkey',
         ObjectStorageIsReachable::class => 'object_storage',
     ];
 
-    // Inside the months the aud_event and tkt_ticket_event migrations created partitions for (2026-11 to 2027-12), so
+    // Inside the months the aud_event, tkt_ticket_event and ntf_notification migrations created partitions for (2026-11 to 2027-12), so
     // next month always has one.
     private const string NOW = '2027-03-15 10:00:00 UTC';
 
     private KernelBrowser $client;
 
     /** @var list<string> */
-    private array $addedTicketEventPartitions = [];
+    private array $addedPartitions = [];
 
     protected function setUp(): void
     {
@@ -66,7 +69,7 @@ final class HealthTest extends WebTestCase
 
     protected function tearDown(): void
     {
-        foreach ($this->addedTicketEventPartitions as $partition) {
+        foreach ($this->addedPartitions as $partition) {
             self::getContainer()->get('doctrine.dbal.migrator_connection')->executeStatement('DROP TABLE '.$partition);
         }
         parent::tearDown();
@@ -203,8 +206,9 @@ final class HealthTest extends WebTestCase
     public function readyAnswersFailWhenNextMonthHasNoAuditPartition(): void
     {
         $this->freezeTheClockAt('2027-12-15 10:00:00 UTC');
-        // So only the audit check fails: tkt_ticket_event's migrated months end with 2027-12 too.
+        // So only the audit check fails: tkt_ticket_event's and ntf_notification's migrated months end with 2027-12 too.
         $this->runTheTicketEventPartitionJobAt('2027-12-15 10:00:00 UTC');
+        $this->runTheNotificationPartitionJobAt('2027-12-15 10:00:00 UTC');
         $capturedLogRecords = $this->capturedLogRecords();
         $capturedLogRecords->clear();
 
@@ -318,7 +322,7 @@ final class HealthTest extends WebTestCase
     }
 
     /**
-     * NextAuditPartitionExists and NextTicketEventPartitionExists read this clock. Call it before the test's first
+     * The next-partition checks read this clock. Call it before the test's first
      * request: the client reboots the kernel after it, which drops the frozen clock unless the test disabled reboots.
      */
     private function freezeTheClockAt(string $now): void
@@ -331,9 +335,20 @@ final class HealthTest extends WebTestCase
      */
     private function runTheTicketEventPartitionJobAt(string $now): void
     {
-        $this->addedTicketEventPartitions = [
-            ...$this->addedTicketEventPartitions,
+        $this->addedPartitions = [
+            ...$this->addedPartitions,
             ...new AddTicketEventPartitions(self::getContainer()->get('doctrine.dbal.migrator_connection'), new MockClock($now))(),
+        ];
+    }
+
+    /**
+     * For a clock past the migration's ntf_notification months; tearDown drops what the job added.
+     */
+    private function runTheNotificationPartitionJobAt(string $now): void
+    {
+        $this->addedPartitions = [
+            ...$this->addedPartitions,
+            ...new AddNotificationPartitions(self::getContainer()->get('doctrine.dbal.migrator_connection'), new MockClock($now))(),
         ];
     }
 

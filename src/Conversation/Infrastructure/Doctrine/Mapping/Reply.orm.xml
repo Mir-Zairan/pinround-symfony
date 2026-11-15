@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="App\Conversation\Domain\Reply" table="cnv_reply">
+        <indexes>
+            <index name="cnv_reply_message_id_created_at_id_idx" columns="organization_id,message_id,created_at,id"/>
+        </indexes>
+
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
+
+        <field name="messageId" type="guid" column="message_id"/>
+        <field name="authorId" type="guid" column="author_id"/>
+        <field name="body" type="text" column="body"/>
+        <field name="isAnswer" type="boolean" column="is_answer"/>
+        <field name="editedAt" type="datetimetz_immutable" column="edited_at" nullable="true"/>
+        <field name="removedAt" type="datetimetz_immutable" column="removed_at" nullable="true"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+    </entity>
+</doctrine-mapping>

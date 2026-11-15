@@ -14,6 +14,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
+use App\SharedKernel\UI\PingsClearedToast;
 use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
@@ -38,7 +39,8 @@ use Symfony\UX\Turbo\TurboBundle;
 /**
  * The moves of the ticket page (FR-TKT-10, P03.T7, ticket-page.md, Your next step box): a verb button, the lead's
  * "Move to another step…", and the lead's "Give it to…" (P03.T8). Each answers with a toast from {@see MoveToasts}: a Turbo form in a Turbo Stream that also
- * re-renders the ticket's state and its Your next step box, any other form with a redirect to the ticket page.
+ * re-renders the ticket's state and its Your next step box, any other form with a redirect to the ticket page. A move
+ * that cleared the actor's pings on the ticket says how many ({@see PingsClearedToast}).
  *
  * Without the request transaction, as NewTicketController: a move can be refused after its conditional UPDATE, and only
  * rolling back the whole transaction leaves nothing of it. Transactions gives each request a transaction of its own,
@@ -116,16 +118,16 @@ final class TicketMoveController extends AbstractController
                 [$actor, $ticket] = $this->movableTicketOf($key);
                 $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 try {
-                    $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now);
+                    $clearedPingCount = $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now);
                 } catch (MoveRefused $refused) {
                     throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
                 }
 
-                return MoveToasts::ofVerb(
+                return PingsClearedToast::withClearedPings(MoveToasts::ofVerb(
                     $verb,
                     MoveToasts::namesPerson($verb) ? $this->turnFirstNameOf($ticket) : null,
                     MoveToasts::namesStep($verb) ? $this->stepNameAfterMoveOf($ticket) : null,
-                );
+                ), $clearedPingCount);
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -160,7 +162,7 @@ final class TicketMoveController extends AbstractController
                     throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
                 try {
-                    $this->ticketCommands->moveTo(
+                    $clearedPingCount = $this->ticketCommands->moveTo(
                         $actor->organizationId(),
                         $actor->userId(),
                         $key,
@@ -176,7 +178,7 @@ final class TicketMoveController extends AbstractController
                     throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
 
-                return MoveToasts::movedTo($this->listedStepNameOf($stepId));
+                return PingsClearedToast::withClearedPings(MoveToasts::movedTo($this->listedStepNameOf($stepId)), $clearedPingCount);
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -213,12 +215,12 @@ final class TicketMoveController extends AbstractController
                 }
                 $assignee = new UserId(strtolower($assigneeId));
                 try {
-                    $this->ticketCommands->giveTo($actor->organizationId(), $actor->userId(), $key, $assignee, $expectedVersion, $now);
+                    $clearedPingCount = $this->ticketCommands->giveTo($actor->organizationId(), $actor->userId(), $key, $assignee, $expectedVersion, $now);
                 } catch (MoveRefused $refused) {
                     throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
                 }
 
-                return MoveToasts::givenTo($this->firstNameOf($assignee, $ticket));
+                return PingsClearedToast::withClearedPings(MoveToasts::givenTo($this->firstNameOf($assignee, $ticket)), $clearedPingCount);
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -359,9 +361,9 @@ final class TicketMoveController extends AbstractController
     /**
      * A Turbo form gets a Turbo Stream that shows the toast and replaces the header's state and the Your next step box
      * with the ticket as it is now, so a refused or stale page is updated too; their form carries the new version and
-     * token. The ticket is read again in a transaction of its own, after the move's commit or rollback, with the same
-     * 404 and 403 as the move. Any other form gets a redirect to the ticket page with the toast flashed, whatever the
-     * move's outcome.
+     * token. The ticket is read again, and the stream rendered, in a transaction of its own, after the move's commit or
+     * rollback, with the same 404 and 403 as the move. Any other form gets a redirect to the ticket page with the toast
+     * flashed, whatever the move's outcome.
      *
      * @param int $streamStatus 200 for a move made, 422 for one refused
      */
@@ -372,16 +374,17 @@ final class TicketMoveController extends AbstractController
 
             return $this->redirectToRoute(TicketShowController::ROUTE, ['key' => $key], Response::HTTP_SEE_OTHER);
         }
-        $parts = $this->transactions->run(function () use ($key): array {
+
+        // Rendered inside the re-read's transaction, as the ticket page renders inside the request's: People's ping
+        // sheets read the ping limit under the tenant, and outside a transaction they would open one of their own.
+        return $this->transactions->run(function () use ($key, $toast, $streamStatus): Response {
             [$actor, $ticket] = $this->movableTicketOf($key);
 
-            return $this->ticketPageParts->of($ticket, $actor);
+            return $this->render(
+                '@Ticketing/move.stream.html.twig',
+                [...$this->ticketPageParts->of($ticket, $actor), 'toast' => $toast],
+                new Response(null, $streamStatus, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
+            );
         });
-
-        return $this->render(
-            '@Ticketing/move.stream.html.twig',
-            [...$parts, 'toast' => $toast],
-            new Response(null, $streamStatus, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
-        );
     }
 }

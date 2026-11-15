@@ -90,7 +90,7 @@ final class NextStepChoicesTest extends TestCase
         self::assertSame('Test it.', $miaTests->sentence);
         self::assertSame(['pass_it', 'needs_changes'], self::verbsOf($miaTests));
         self::assertNull($miaTests->ruleNote);
-        self::assertSame('Review Omar\'s code.', $this->nextStepOf($review, self::lead(GuardFixtures::LENA))->sentence);
+        self::assertSame('Review Omar’s code.', $this->nextStepOf($review, self::lead(GuardFixtures::LENA))->sentence);
     }
 
     #[Test]
@@ -194,6 +194,53 @@ final class NextStepChoicesTest extends TestCase
 
         self::assertSame('Paused until an unknown person answers the question below.', $nextStep->ruleNote);
         self::assertSame([], $nextStep->groups);
+    }
+
+    #[Test]
+    public function theAskedPersonIsToldToAnswerTheAskersQuestionAndGetsNoVerbs(): void
+    {
+        $pageTurn = self::pausedPageTurn(asked: GuardFixtures::LENA, asker: GuardFixtures::OMAR);
+
+        $lena = $this->nextStepOf($pageTurn, self::lead(GuardFixtures::LENA));
+
+        self::assertSame('Answer Omar’s question below.', $lena->sentence);
+        self::assertSame([], $lena->transitions);
+        self::assertSame([], $lena->groups);
+        self::assertSame('Paused until Lena answers the question below.', $lena->ruleNote);
+    }
+
+    #[Test]
+    public function theAskedPersonWithoutATeamRoleIsStillToldToAnswer(): void
+    {
+        $pageTurn = self::pausedPageTurn(asked: GuardFixtures::MIA, asker: GuardFixtures::OMAR);
+        $mia = new ActorContext(new UserId(GuardFixtures::MIA), new OrganizationId(self::ORGANIZATION), new Roles(false, false, [], [], []));
+
+        self::assertSame('Answer Omar’s question below.', $this->nextStepOf($pageTurn, $mia, mayMove: false)->sentence);
+    }
+
+    #[Test]
+    public function onlyTheAskerIsToldTheyGetANotificationOthersWaitForTheAnswer(): void
+    {
+        $pageTurn = self::pausedPageTurn(asked: GuardFixtures::LENA, asker: GuardFixtures::OMAR);
+
+        $omar = $this->nextStepOf($pageTurn, self::member(GuardFixtures::OMAR));
+        $mia = $this->nextStepOf($pageTurn, self::member(GuardFixtures::MIA));
+        $raj = $this->nextStepOf($pageTurn, self::manager(), mayMove: false);
+
+        self::assertSame('Wait for Lena’s answer. You get one notification.', $omar->sentence);
+        self::assertSame([], $omar->transitions);
+        self::assertSame('Wait for Lena’s answer.', $mia->sentence);
+        self::assertSame('Wait for Lena’s answer.', $raj->sentence);
+    }
+
+    #[Test]
+    public function anAskedPersonOrAskerWithoutANameReadsAnUnknownPerson(): void
+    {
+        $askedRaj = self::pausedPageTurn(asked: GuardFixtures::RAJ, asker: GuardFixtures::OMAR);
+        $rajAsked = self::pausedPageTurn(asked: GuardFixtures::LENA, asker: GuardFixtures::RAJ);
+
+        self::assertSame('Wait for an unknown person’s answer. You get one notification.', $this->nextStepOf($askedRaj, self::member(GuardFixtures::OMAR))->sentence);
+        self::assertSame('Answer an unknown person’s question below.', $this->nextStepOf($rajAsked, self::lead(GuardFixtures::LENA))->sentence);
     }
 
     #[Test]
@@ -387,6 +434,18 @@ final class NextStepChoicesTest extends TestCase
         $team ??= GuardFixtures::team();
 
         return new PageTurn(self::teamId(), $ticket, $team, $turn, new NowNextContext('In progress', self::NAMES, $team, true), GuardFixtures::rules());
+    }
+
+    /**
+     * A ticket in progress with Omar, paused on the question the asker put to the asked person; the turn is theirs.
+     */
+    private static function pausedPageTurn(string $asked, string $asker): PageTurn
+    {
+        $team = GuardFixtures::team();
+        $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, asked: $asked);
+        $context = new NowNextContext('In progress', self::NAMES, $team, true, askerId: new UserId($asker));
+
+        return new PageTurn(self::teamId(), $ticket, $team, new Turn(new UserId($asked), null, NeedsYouKind::Answer), $context, GuardFixtures::rules());
     }
 
     private static function teamId(): TeamId

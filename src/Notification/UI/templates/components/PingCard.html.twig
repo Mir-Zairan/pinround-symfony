@@ -1,0 +1,21 @@
+{%- set routeParameters = {senderId: this.group.senderId.toString, ticketId: this.group.ticketId.toString} -%}
+<article class="ping-card{% if this.group.hasUnread %} ping-card--unread{% endif %}" aria-label="{{ this.senderFirstName }} {{ this.label }} on {{ this.group.ticketKey }}">
+    <p class="ping-card__line">
+        <strong>{{ this.senderFirstName }}</strong> {{ this.label }}
+        <span class="ping-card__time"> · <time datetime="{{ this.group.latestAt|date('c') }}">{{ this.age }}</time></span>
+    </p>
+    {% if this.group.newestPingText is not null %}
+        <p class="ping-card__text">“{{ this.group.newestPingText }}”</p>
+    {% endif %}
+    <div class="ping-card__foot">
+        <span class="ping-card__key mono">{{ this.group.ticketKey }}</span>
+        <form method="post" action="{{ path(this.doneRoute, routeParameters) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token(this.csrfId) }}">
+            <button type="submit" class="btn btn-text btn-sm">Done</button>
+        </form>
+        <form method="post" action="{{ path(this.openRoute, routeParameters) }}" data-turbo-frame="_top">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token(this.csrfId) }}">
+            <button type="submit" class="btn btn-tonal btn-sm">Open</button>
+        </form>
+    </div>
+</article>

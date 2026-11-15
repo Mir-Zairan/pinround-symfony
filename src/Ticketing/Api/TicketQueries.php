@@ -4,12 +4,33 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Api;
 
+use App\SharedKernel\Domain\TicketId;
+
 /**
- * The tickets list and one ticket's page, for those pages and other modules. It reads the organization of TenantContext under row-level
+ * The tickets list, one ticket's page and which tickets a viewer may see, for those pages and other modules. It reads the organization of TenantContext under row-level
  * security, so it needs an open transaction whose tenant is the viewer's organization.
  */
 interface TicketQueries
 {
+    /** The most ticket ids visibleTicketIdsOf() takes in one call. */
+    public const int MAX_CHECKED_TICKET_IDS = 200;
+
+    /**
+     * Which of these tickets the viewer may see (ADR-0013), for a module that keeps ticket ids and must not show a
+     * ticket hidden from its reader. One query on tkt_ticket under the tenant, through TicketVisibilitySql; none for an
+     * empty list.
+     *
+     * @param list<TicketId> $ticketIds at most MAX_CHECKED_TICKET_IDS, repeats included; a repeated id counts once
+     *
+     * @return list<TicketId> the visible ones, each once, in the order first given; an unknown id, another
+     *                        organization's and a hidden one are left out
+     *
+     * @throws \InvalidArgumentException when more than MAX_CHECKED_TICKET_IDS ids are given, before any query
+     * @throws \LogicException           when no transaction is open, no tenant is set, or the viewer is of another
+     *                                   organization than the tenant, before any query
+     */
+    public function visibleTicketIdsOf(TicketVisibility $viewer, array $ticketIds): array;
+
     /**
      * Four queries at most whatever the number of steps: the organization's steps through Workflow's StepQueries in
      * one (none while its cache holds them), the rows of every step in one, the turn users of the shown rows in one,

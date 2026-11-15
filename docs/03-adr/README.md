@@ -9,7 +9,7 @@ This folder holds every important architecture decision for pinround, why we mad
 - [Status lifecycle](#status-lifecycle) — Proposed, Accepted, Deprecated, Superseded.
 - [Naming and format](#naming-and-format) — file names, numbering, the template.
 - [How to change a decision](#how-to-change-a-decision) — superseding instead of editing.
-- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0038.
+- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0041.
 
 ## What an ADR is
 
@@ -65,7 +65,7 @@ stateDiagram-v2
 
 ## All decisions
 
-All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11) (deciders: Zairan Mir, lead, with the team).
+All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15) (deciders: Zairan Mir, lead, with the team).
 
 | ADR | Title | Decision in one line |
 |---|---|---|
@@ -79,7 +79,7 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026
 | [0008](0008-frankenphp-runtime.md) | FrankenPHP runtime | FrankenPHP worker mode with its built-in Mercure hub; the same image for SaaS and self-host. |
 | [0009](0009-async-messaging-and-outbox.md) | Async messaging and outbox | Symfony Messenger; domain events go to an outbox in the same transaction; heavy jobs on Valkey. |
 | [0010](0010-cache-sessions-locks.md) | Cache, sessions, locks | Valkey 8 for cache, sessions, locks, rate limits and jobs, split by eviction policy. |
-| [0011](0011-screenshot-storage-and-processing.md) | Screenshot storage and processing | Private S3-compatible bucket, presigned uploads, libvips re-encoding, short-lived signed reads. |
+| [0011](0011-screenshot-storage-and-processing.md) | Screenshot storage and processing | Private S3-compatible bucket, presigned uploads, libvips re-encoding, short-lived signed reads. Superseded in part by ADR-0041 (how pages read images). |
 | [0012](0012-authentication.md) | Authentication | Password (argon2id) + TOTP MFA + OIDC SSO, sessions in Valkey, scoped personal access tokens. |
 | [0013](0013-authorization.md) | Authorization | Org roles + per-team roles, Symfony voters per action, deny by default, owner-only private data. |
 | [0014](0014-status-model-five-groups.md) | Status model with five groups | Five fixed groups; steps per policy; transitions are named verbs with guard rules, run by our own small engine. |
@@ -107,3 +107,6 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026
 | [0036](0036-organization-setup-steps-in-the-creating-transaction.md) | Set up a new organization's required data in the transaction that creates it | Other modules implement `Organization\Api\OrganizationSetupStep`; `CreateOrganization` runs each step in the transaction that creates the organization, chosen over an `OrganizationCreated` event so no organization exists without its core steps. |
 | [0037](0037-transition-engine-in-workflow-application.md) | The transition engine lives in Workflow's Application layer | The verb catalogue is data in `Workflow\Domain`; the guards, `MoveRights` and `CatalogueTransitionPolicy` live in `Workflow\Application\Transition` behind `Workflow\Api\TransitionPolicy`, which takes plain `ActorInTeam` and `RuleSetView`. Supersedes the Engine bullet of ADR-0014. |
 | [0038](0038-create-ticket-team-form-needs-team-role.md) | Create ticket: team form needs a team role, Report a problem is open to every role | The team ticket form (`/tickets/new`, `TicketCreationVoter`) grants `TICKET_CREATE` only to a Lead, Member or Viewer of the team; the intake's "Report a problem" (P06) stays open to every role. Supersedes ADR-0013's create ticket row. |
+| [0039](0039-agents-file-report-drafts-a-person-sends-them.md) | Agents file report drafts; a person sends them | A new MCP tool `create_report` (scope `reports:write`) creates an owner-only report draft; only a person clicking Send in the app creates the ticket with Round 0; no token endpoint, MCP or REST, creates a ticket. Review owns the draft (`rvw_report_draft`). Adds to ADR-0017 and ADR-0020; supersedes the scope and tool lists of ADR-0021 in part. Superseded in part by ADR-0040 (where the UI lives, signatures, storage). |
+| [0040](0040-report-drafts-live-in-review.md) | Report drafts live in Review | Review's UI (`src/Review/UI`) owns the drafts list, edit page and Send, so Ticketing never calls Review's Api; `ReportDrafts` signatures use strings and SharedKernel ids; Send turns the project key into an id with `ProjectQueries::projectByKey` and calls `TicketCommands::create`; a draft keeps its screenshots as one jsonb array, at most 10. Supersedes part of ADR-0039. |
+| [0041](0041-sign-page-images-at-render-time.md) | Sign page images at render time | A page signs view and thumb URLs while it renders, in one batched read, after its own visibility check; signing times are rounded to the minute and URLs ask for `Cache-Control: private, max-age=240, immutable`. Supersedes the reading rules of ADR-0011 in part. |

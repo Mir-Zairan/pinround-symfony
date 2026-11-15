@@ -169,6 +169,43 @@ final readonly class DbalTicketQueries implements TicketQueries
         return $this->pageViewOf($row, $organizationId);
     }
 
+    public function visibleTicketIdsOf(TicketVisibility $viewer, array $ticketIds): array
+    {
+        if (\count($ticketIds) > self::MAX_CHECKED_TICKET_IDS) {
+            throw new \InvalidArgumentException(\sprintf('At most %d tickets are checked for visibility at once.', self::MAX_CHECKED_TICKET_IDS));
+        }
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('Visible tickets are read in a transaction under the organization as tenant; none is open.');
+        }
+        $organizationId = $this->tenantContext->require();
+        if (!$organizationId->equals($viewer->organizationId())) {
+            throw new \LogicException('Visible tickets are read under the viewer\'s own organization as tenant.');
+        }
+        $uniqueTicketIds = [];
+        foreach ($ticketIds as $ticketId) {
+            $uniqueTicketIds[$ticketId->toString()] ??= $ticketId;
+        }
+        if ([] === $uniqueTicketIds) {
+            return [];
+        }
+
+        $visibleTicket = TicketVisibilitySql::of($viewer, self::TICKET_ALIAS);
+        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a TicketId holds no comma or brace.
+        $visibleIds = $this->connection->fetchFirstColumn(
+            'SELECT ticket.id FROM tkt_ticket AS ticket'
+            .' WHERE ticket.organization_id = CAST(:organization AS uuid) AND ticket.id = ANY(CAST(:ids AS uuid[]))'
+            .' AND '.$visibleTicket->sql(),
+            [
+                'organization' => $organizationId->toString(),
+                'ids' => '{'.implode(',', array_keys($uniqueTicketIds)).'}',
+                ...$visibleTicket->parameters(),
+            ],
+        );
+        $isVisible = array_fill_keys(array_map(static fn (mixed $id): string => self::text($id, 'id'), $visibleIds), true);
+
+        return array_values(array_filter($uniqueTicketIds, static fn (TicketId $ticketId): bool => isset($isVisible[$ticketId->toString()])));
+    }
+
     /**
      * A key that cannot be stored costs no query: TicketKey's format, and the same text back, so a number past the
      * integer range, which no ticket has, is refused too.

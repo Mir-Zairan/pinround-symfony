@@ -1,0 +1,29 @@
+<figure{{ attributes.defaults({class: 'screenshot', id: this.view.domId}) }}>
+    {% if this.view.title is not null or this.view.summary is not null %}
+        <figcaption class="screenshot__text">
+            {% if this.view.title is not null %}
+                <{{ this.titleTag }} class="screenshot__title">{{ this.view.title }}</{{ this.titleTag }}>
+            {% endif %}
+            {% if this.view.summary is not null %}
+                <p class="screenshot__summary">{{ this.view.summary }}</p>
+            {% endif %}
+        </figcaption>
+    {% endif %}
+    {% set hasKnownShape = not this.view.isReady and this.view.width is not null %}
+    <div class="screenshot__frame{% if not this.view.isReady %} screenshot__frame--placeholder{% endif %}{% if hasKnownShape %} screenshot__frame--shaped{% endif %}" id="{{ this.frameId }}">
+        {% if this.view.isReady %}
+            <img class="screenshot__image" src="{{ this.view.imageUrl }}" alt="{{ this.view.altText }}" width="{{ this.view.width }}" height="{{ this.view.height }}" decoding="async"{% if this.loading is not null %} loading="{{ this.loading }}"{% endif %}>
+        {% else %}
+            {% if hasKnownShape %}
+                {#- The CSP allows no style attribute, so the picture's shape is a rule in a style element with the nonce. It sits on the frame, so the pin layer and the box are always the same size. -#}
+                <style nonce="{{ csp_nonce() }}">#{{ this.frameId }}{max-width:{{ this.view.width }}px;aspect-ratio:{{ this.view.width }} / {{ this.view.height }}}</style>
+            {% endif %}
+            {% if this.view.isPending %}
+                <div class="screenshot__placeholder" id="{{ this.placeholderId }}" role="status">Processing…</div>
+            {% else %}
+                <div class="screenshot__placeholder screenshot__placeholder--rejected" id="{{ this.placeholderId }}">We could not process this image. Try again.</div>
+            {% endif %}
+        {% endif %}
+        <twig:PinLayer :view="this.view" :selectedNumber="this.selectedNumber" />
+    </div>
+</figure>

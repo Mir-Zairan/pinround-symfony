@@ -6,7 +6,7 @@ How screenshots get from a person's screen into pinround safely, and how they ar
 
 - [Why screenshots need their own pipeline](#why-screenshots-need-their-own-pipeline) — the scene.
 - [Upload flow](#upload-flow) — presigned PUT, sequence diagram.
-- [Validation rules](#validation-rules) — types, sizes, checks.
+- [Validation rules](#validation-rules) — checks before the presigned URL (with what the URL pins) and checks in the worker.
 - [Processing worker](#processing-worker) — verify, re-encode, thumbnails.
 - [Storage key layout](#storage-key-layout) — where each file lives.
 - [Serving images](#serving-images) — signed URLs after a voter check.
@@ -31,14 +31,18 @@ sequenceDiagram
   participant A as pinround app
   participant S as Object storage (private bucket)
   participant W as Media worker
-  B->>A: POST /media/intents {mime, bytes, sha256}
-  A->>A: Voter: may upload here? quota OK? type/size OK?
-  A->>A: Save upload intent (pending, org, user, expected size)
+  B->>A: POST /media/intents {purpose, mime, bytes, target}
+  A->>A: Member and form token OK? Under 60 begins a minute (else 429)? Every begin with a valid token counts, even one refused later
+  A->>A: Voter: may this person add to the target?
+  A->>A: Type and size OK? Person under 20 open uploads (else "too many uploads waiting")? Quota OK (else "storage full")? Target allowed again?
+  A->>A: Save upload intent (org, user, target kind and id, max bytes, allowed types, expiry)
   A-->>B: {intentId, presigned PUT URL (5 min), headers}
   B->>S: PUT bytes (Content-Type and Content-Length fixed)
   S-->>B: 200
   B->>A: POST /media/intents/{id}/complete
-  A->>W: Message ProcessUpload(intentId) via media queue
+  A->>A: Check the stored target again, mark the intent used
+  A->>A: Write ProcessUpload(organizationId, mediaId) to the outbox, same transaction
+  A->>W: Outbox relay sends it on the async_media queue
   W->>S: GET original
   W->>W: Check magic bytes, decode, re-encode WebP, thumbnails
   W->>S: PUT view + thumb, DELETE upload object
@@ -52,14 +56,21 @@ The browser shows a local preview at once (from the file it already has), so the
 
 Before the presigned URL:
 
+In this order:
+
+- The caller is a member of the organization and sends a valid form token.
+- A per-person rate limit on starting uploads: 60 a minute, then 429 with a Retry-After header. It is spent right after the member and token checks, before the body is read or anything else is asked, so every begin with a valid token counts, even one refused later.
+- The person may add a screenshot to this round or report (voter).
 - MIME declared as `image/png`, `image/jpeg` or `image/webp`.
 - Size ≤ 15 MB.
-- The person may add a screenshot to this round or report (voter).
-- The org is under its quota.
+- The person has fewer than 20 open (unused, unexpired) intents. This and the quota check run under one per-org lock.
+- The org is under its quota (skipped when the quota is unlimited): stored images plus open upload intents, counted in one statement.
+- The target's authorizer allows it again, inside the same transaction.
+- **Upload URL:** the presigned PUT pins the declared `Content-Type` and the exact `Content-Length`, so the storage refuses any other type or length.
 
 In the worker:
 
-- **Size first:** a `HEAD` on the upload object; if its size is bigger than the intent allows (or differs from the declared size), the object is deleted and the intent is `rejected`. We do not rely on the storage to enforce `Content-Length` on a presigned PUT; a test uploads a bigger body and checks it is refused.
+- **Size first:** the worker does a `HEAD` on the upload object and checks its size against the intent's `max_bytes`. If it is bigger, the object is deleted and the `MediaObject` is rejected (`MediaObject::reject`). The intent itself has no rejected state; it only records the limits and whether it was used.
 - Magic bytes must match a PNG, JPEG or WebP signature.
 - **Dimensions from the header, before decoding:** width × height ≤ 40 megapixels is read from the image header (libvips header-only load). Only then is the image decoded fully. This stops decompression bombs before they use memory.
 - libvips must then decode it fully.
@@ -70,7 +81,7 @@ In the worker:
 
 Runs on the `media` transport ([ADR-0009](../03-adr/0009-async-messaging-and-outbox.md)).
 
-1. `HEAD` the upload object and check its size against the intent (delete it if too big).
+1. `HEAD` the upload object and check its size against the intent's `max_bytes` (delete it and reject the `MediaObject` if too big).
 2. Download it to a temp file (limited size) and validate (see above; header dimensions before full decode).
 3. Re-encode with libvips to WebP:
    - `view`: max 1920 px wide, quality ≈ 85.
@@ -97,8 +108,8 @@ exports/{orgId}/{exportId}.zip                   # org exports, lifecycle rule: 
 
 ## Serving images
 
-- The page asks `MediaUrlSigner` for a signed GET URL **after** the voter confirms the viewer may see the round or ticket.
-- URLs expire after 5 minutes. Pages that stay open refresh URLs through a small endpoint when an image fails to load.
+- The page asks `SignedUrls::forVariants` for signed GET URLs **after** the caller's voter confirms the viewer may see the round or ticket; Media itself takes no user.
+- A URL works 5 minutes from its signing time, which is rounded down to the minute, so it works at least 4 minutes and renders in one minute give the same URL; it asks for `Cache-Control: private, max-age=240, immutable`. The caller signs a whole page of pictures with one `SignedUrls::forVariants` call ([ADR-0041](../03-adr/0041-sign-page-images-at-render-time.md)). Pages that stay open refresh URLs through a small endpoint when an image fails to load.
 - Response headers are set through the signed URL parameters where the storage supports them (`response-content-type`, `response-content-disposition`), plus bucket defaults: `X-Content-Type-Options: nosniff`.
 - The app never proxies image bytes through PHP.
 - Draft round images use the same rules: the voter only allows the owner until the round is shared ([ADR-0017](../03-adr/0017-private-draft-rounds.md)).
@@ -130,7 +141,9 @@ exports/{orgId}/{exportId}.zip                   # org exports, lifecycle rule: 
 | File rejected (type, size, not an image) | "This file is not a PNG, JPEG or WebP screenshot." | Upload object deleted, intent `rejected` with reason |
 | Processing failed (worker error) | Spinner turns into "We could not process this image. Try again." | Messenger retries 3 times with backoff, then failure transport + alert |
 | Signed URL expired on an open page | Image reloads automatically | Browser requests a new URL |
-| Quota full | "Your company's storage is full. Ask your admin." | Admins notified |
+| Quota full | "Your company's storage is full. Ask your admin." (422) | Nothing stored. Admin notice not built yet |
+| Too many uploads waiting (20 open) | "You have too many uploads waiting. Finish or wait for them, then try again." (422) | Nothing stored |
+| Starting uploads too fast | "You are adding files too fast. Wait a minute and try again." (429) | Nothing stored |
 
 ## Other inputs
 
@@ -143,3 +156,4 @@ exports/{orgId}/{exportId}.zip                   # org exports, lifecycle rule: 
 - The UI places pins over the image with `left: x%; top: y%`, so they stay on the same spot at any display size.
 - Because coordinates are relative to the re-encoded image, which keeps the aspect ratio of the original, pins placed on the local preview before processing finishes are still correct.
 - Pin numbers are per screenshot, in order of creation. Deleting a pin does not renumber the others (people refer to "pin 3" in comments).
+- The look is not part of the stored model: the UI draws each pin as a hollow ring (dark outer and white inner outline, number in a tab at the ring edge, note in a bubble on hover, focus or select) centred on that point, so the element under it stays readable. See FR-RND-02.

@@ -9,6 +9,7 @@ use App\Insight\Api\TurnProjector;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPeopleQueries;
 use App\Organization\Infrastructure\Cache\TeamPeopleCache;
+use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -83,15 +84,48 @@ final class MoveTicketTest extends KernelTestCase
     private const string MIA = '0197a3c0-0000-7000-8000-00000000e753';
     private const string RAJ = '0197a3c0-0000-7000-8000-00000000e754';
     private const string SARA = '0197a3c0-0000-7000-8000-00000000e755';
+    private const string FIRST_PING_TO_OMAR = '0197a3c0-0000-7000-8000-00000000e761';
+    private const string SECOND_PING_TO_OMAR = '0197a3c0-0000-7000-8000-00000000e762';
+    private const string PING_TO_MIA = '0197a3c0-0000-7000-8000-00000000e763';
+    private const string OMARS_PING_BELL_ROW = '0197a3c0-0000-7000-8000-00000000e771';
+    private const string OMARS_ASSIGNED_BELL_ROW = '0197a3c0-0000-7000-8000-00000000e772';
+    private const string MIAS_PING_BELL_ROW = '0197a3c0-0000-7000-8000-00000000e773';
     private const string KEY = 'SHOP-7';
     private const string MOVED_AT = '2027-03-16 09:30:00+00:00';
+    // Each ping as [id, to_id, cleared_at, cleared_reason] and each bell row as [id, user_id, kind, done_at], in UTC.
+    private const array OPEN_PINGS_AND_BELL_ROWS = [
+        'pings' => [
+            [self::FIRST_PING_TO_OMAR, self::OMAR, null, null],
+            [self::SECOND_PING_TO_OMAR, self::OMAR, null, null],
+            [self::PING_TO_MIA, self::MIA, null, null],
+        ],
+        'bell' => [
+            [self::OMARS_PING_BELL_ROW, self::OMAR, 'ping', null],
+            [self::OMARS_ASSIGNED_BELL_ROW, self::OMAR, 'assigned', null],
+            [self::MIAS_PING_BELL_ROW, self::MIA, 'ping', null],
+        ],
+    ];
+    private const array PINGS_AND_BELL_ROWS_CLEARED_BY_OMARS_MOVE = [
+        'pings' => [
+            [self::FIRST_PING_TO_OMAR, self::OMAR, '2027-03-16 09:30:00', 'acted'],
+            [self::SECOND_PING_TO_OMAR, self::OMAR, '2027-03-16 09:30:00', 'acted'],
+            [self::PING_TO_MIA, self::MIA, null, null],
+        ],
+        'bell' => [
+            [self::OMARS_PING_BELL_ROW, self::OMAR, 'ping', '2027-03-16 09:30:00'],
+            [self::OMARS_ASSIGNED_BELL_ROW, self::OMAR, 'assigned', null],
+            [self::MIAS_PING_BELL_ROW, self::MIA, 'ping', null],
+        ],
+    ];
     private const string NO_TEAM_ROLE_NOTE = 'Managers can read and comment. Only the team moves tickets.';
     private const string TICKET_BY_KEY = 'SELECT t0.project_id AS project_id_1, t0.number AS number_2, t0.key AS key_3,';
     private const string WAITING_TURNS = 'SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn';
     private const string SAVED = 'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?,';
-    // The turn projector's writes, the history row, then the event bus's doctrine_transaction savepoint around the
-    // outbox's own.
+    // Auto-clear's lock of the actor's open pings on the ticket (the auto_clear switch comes with the settings already
+    // read), the turn projector's writes, the history row, then the event bus's doctrine_transaction savepoint around
+    // the outbox's own.
     private const array PROJECTED_AND_PUBLISHED = [
+        'SELECT n0_.ticket_id AS ticket_id_0, ',
         'INSERT INTO ins_project_count_ticket ',
         'INSERT INTO ins_ticket_turn ',
         'INSERT INTO tkt_ticket_event ',
@@ -770,6 +804,11 @@ final class MoveTicketTest extends KernelTestCase
 
                 return $ticket;
             }
+
+            public function lockedOf(OrganizationId $organizationId, TicketId $ticketId): ?Ticket
+            {
+                return new DoctrineTickets($this->entityManager)->lockedOf($organizationId, $ticketId);
+            }
         });
 
         $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $moveTicket->move(
@@ -791,17 +830,22 @@ final class MoveTicketTest extends KernelTestCase
     #[Test]
     public function aThrowAfterTheEventIsWrittenLeavesNoMoveNoHistoryNoEventAndTheTurnRowAsItWas(): void
     {
+        $this->addOpenPingsAndTheirBellRows();
         $stateBefore = $this->storedState();
+        $pingsAndBellRowsBefore = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->pingsAndBellRows());
+        self::assertSame(self::OPEN_PINGS_AND_BELL_ROWS, $pingsAndBellRowsBefore);
 
         $refusal = $this->refusalOf(fn () => $this->transactions()->committedAs(self::ACME_FOODS, function () use ($stateBefore): never {
             $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'start_work', $stateBefore['version'], new \DateTimeImmutable(self::MOVED_AT));
             self::assertCount(1, $this->movedEvents());
+            self::assertSame(self::PINGS_AND_BELL_ROWS_CLEARED_BY_OMARS_MOVE, $this->pingsAndBellRows());
             throw new \RuntimeException('Forced after the publish.');
         }));
 
         self::assertInstanceOf(\RuntimeException::class, $refusal);
         self::assertSame('Forced after the publish.', $refusal->getMessage());
         self::getContainer()->get('doctrine')->resetManager();
+        self::assertSame(self::OPEN_PINGS_AND_BELL_ROWS, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->pingsAndBellRows()));
         self::assertSame($stateBefore, $this->storedState());
     }
 
@@ -859,10 +903,11 @@ final class MoveTicketTest extends KernelTestCase
 
     /**
      * The team's steps, people and rules come from the caches the first move filled, so a verb move reads the ticket
-     * and the team's waiting reviews and tests, then saves, projects and publishes.
+     * and the team's waiting reviews and tests, then saves, locks the actor's open pings on the ticket, projects and
+     * publishes.
      */
     #[Test]
-    public function aWarmVerbMoveRunsEightQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveRunsNineQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -872,11 +917,11 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T7: a move uses at most 8 queries');
+        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P04.T6: a move uses at most 9 queries');
     }
 
     #[Test]
-    public function aWarmMoveToAPlainStepRunsEightQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToAPlainStepRunsNineQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -886,14 +931,14 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T7: a move uses at most 8 queries');
+        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P04.T6: a move uses at most 9 queries');
     }
 
     /**
      * Raj is in the team, but who a ticket waits on may be any member of the organization, so his membership is read.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsTenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -903,15 +948,15 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        // Nine, not eight: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
-        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
+        // Ten, not nine: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
     }
 
     /**
      * With nobody named the ticket waits on Mia, its reporter, whose membership is read as a named person's is.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsTenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -921,14 +966,14 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the reporter\'s membership check');
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the reporter\'s membership check');
     }
 
     /**
      * Put on hold and Go on bring the ticket back to Backlog with the caches warm.
      */
     #[Test]
-    public function aWarmGiveOutOfBacklogRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmGiveOutOfBacklogRunsElevenQueriesBesideItsSavepoints(): void
     {
         $this->setColumns(['step_id' => ShopTeamRows::BACKLOG_STEP, 'assignee_id' => null]);
         $versionBefore = $this->stepAndVersion()[1];
@@ -942,12 +987,12 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::PUBLISHED_AGAIN], $statements);
-        // Ten, not eight: TicketAssigned is a second outbox row with its own notify.
-        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T8: a move plus the TicketAssigned outbox row');
+        // Eleven, not nine: TicketAssigned is a second outbox row with its own notify.
+        self::assertCount(11, self::queriesBesideSavepoints($statements), 'P03.T8: a move plus the TicketAssigned outbox row');
     }
 
     #[Test]
-    public function aWarmGiveInsideToDoRunsEightQueriesBesideItsSavepoints(): void
+    public function aWarmGiveInsideToDoRunsNineQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -957,7 +1002,7 @@ final class MoveTicketTest extends KernelTestCase
         );
 
         self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, 'UPDATE tkt_ticket SET assignee_id = ?,', ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(8, self::queriesBesideSavepoints($statements), 'P03.T8: a give inside To do publishes only TicketAssigned');
+        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P03.T8: a give inside To do publishes only TicketAssigned');
     }
 
     /**
@@ -990,8 +1035,8 @@ final class MoveTicketTest extends KernelTestCase
      * Both moves run in one transaction under Acme Foods, as a request's would, and are rolled back. The first fills
      * the caches; the entity manager is cleared after it, as a new request starts with an empty one.
      *
-     * @param \Closure(): void $warmingMove
-     * @param \Closure(): void $measuredMove
+     * @param \Closure(): mixed $warmingMove
+     * @param \Closure(): mixed $measuredMove
      *
      * @return list<string> the SQL of each statement of the measured move, in the order sent
      */
@@ -1185,6 +1230,46 @@ final class MoveTicketTest extends KernelTestCase
         } finally {
             $this->tenantContext()->clear();
         }
+    }
+
+    /**
+     * Lena's two open pings to Omar and one to Mia on Acme Foods' SHOP-7, with Omar's and Mia's ping bell rows and an
+     * assigned bell row of Omar's that clearing pings must leave alone. Removing the ticket removes them all.
+     */
+    private function addOpenPingsAndTheirBellRows(): void
+    {
+        $ticketId = $this->ticketId()->toString();
+        $this->asMigratorOf(self::ACME_FOODS, static function (Connection $connection) use ($ticketId): void {
+            foreach ([[self::FIRST_PING_TO_OMAR, self::OMAR], [self::SECOND_PING_TO_OMAR, self::OMAR], [self::PING_TO_MIA, self::MIA]] as [$pingId, $toId]) {
+                $connection->executeStatement(
+                    "INSERT INTO ntf_ping (organization_id, id, ticket_id, from_id, to_id, body, created_at) VALUES (?, ?, ?, ?, ?, 'Can you look at this today?', '2027-03-16 08:00:00+00')",
+                    [self::ACME_FOODS, $pingId, $ticketId, self::LENA, $toId],
+                );
+            }
+            foreach ([[self::OMARS_PING_BELL_ROW, self::OMAR, 'ping'], [self::OMARS_ASSIGNED_BELL_ROW, self::OMAR, 'assigned'], [self::MIAS_PING_BELL_ROW, self::MIA, 'ping']] as [$notificationId, $userId, $kind]) {
+                $connection->executeStatement(
+                    "INSERT INTO ntf_notification (organization_id, id, user_id, kind, actor_id, ticket_id, data, created_at) VALUES (?, ?, ?, ?, ?, ?, '{}', '2027-03-16 08:00:00+00')",
+                    [self::ACME_FOODS, $notificationId, $userId, $kind, self::LENA, $ticketId],
+                );
+            }
+        });
+    }
+
+    /**
+     * Reads in the transaction already open, so the caller opens one.
+     *
+     * @return array{pings: list<list<mixed>>, bell: list<list<mixed>>} shaped as OPEN_PINGS_AND_BELL_ROWS
+     */
+    private function pingsAndBellRows(): array
+    {
+        return [
+            'pings' => $this->connection()->fetchAllNumeric(
+                "SELECT id, to_id, to_char(cleared_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), cleared_reason FROM ntf_ping ORDER BY id",
+            ),
+            'bell' => $this->connection()->fetchAllNumeric(
+                "SELECT id, user_id, kind, to_char(done_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') FROM ntf_notification ORDER BY id",
+            ),
+        ];
     }
 
     /**
@@ -1494,6 +1579,8 @@ final class MoveTicketTest extends KernelTestCase
         $container = self::getContainer();
         $snapshots = $container->get('test.ticketing_ticket_turn_snapshots');
         self::assertInstanceOf(TicketTurnSnapshots::class, $snapshots);
+        $pingClearing = $container->get('test.shared_kernel_ping_clearing');
+        \assert($pingClearing instanceof PingClearing);
 
         return new MoveTicket(
             $tickets,
@@ -1508,6 +1595,7 @@ final class MoveTicketTest extends KernelTestCase
             $this->turnProjector(),
             new MessengerTicketEvents($container->get('event.bus'), $this->connection()),
             $container->get(TurnPeopleChoice::class),
+            $pingClearing,
         );
     }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Ticketing;
 
+use App\Conversation\UI\Component\Thread;
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -43,7 +44,6 @@ final class TicketPageTest extends WebTestCase
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string CREATED_THIS_YEAR = '2026-11-04 23:30:00+00';
     private const string UPDATED_AT = '2026-11-10 09:00:00+00';
-    private const string ROUNDS_EMPTY = 'No rounds yet. The developer starts round 1 from Claude Code: it shoots the screens and puts them here.';
     /** The title and default text a refused viewer must never get a word of. */
     private const string HIDDEN_TITLE = 'Price rules for staff';
     private const string HIDDEN_DESCRIPTION = 'Steps to see it are in the title.';
@@ -116,7 +116,12 @@ final class TicketPageTest extends WebTestCase
         self::assertSame("Typing a product name finds nothing.\nIt worked last week.", $page->filter('.ticket__ask-text')->text(normalizeWhitespace: false));
         self::assertCount(0, $page->filter('.ticket__ask-more'));
         self::assertSame('Asked by Lena · 5 Nov', $page->filter('.ticket__ask .ticket__asked')->text());
-        self::assertSame(self::ROUNDS_EMPTY, $page->filter('[aria-labelledby="ticket-rounds-heading"] .empty-state')->text());
+        $roundsFrame = $page->filter('[aria-labelledby="ticket-rounds-heading"] turbo-frame#ticket-rounds');
+        self::assertSame('/t/'.$key.'/rounds', $roundsFrame->attr('src'));
+        self::assertSame('lazy', $roundsFrame->attr('loading'));
+        self::assertSame('Show rounds', $roundsFrame->filter('a[href="/t/'.$key.'/rounds"]')->text());
+        self::assertCount(0, $page->filter('.round-card, .empty-state'), 'The page reads no round: the frame does.');
+        self::assertCount(1, $page->filter('link[rel="stylesheet"][href*="/styles/review"]'));
         self::assertSame([['Assignee', 'Nobody'], ['Priority', 'Major'], ['Created', '5 Nov']], $this->detailsOf($page));
     }
 
@@ -327,6 +332,46 @@ final class TicketPageTest extends WebTestCase
         $this->client->request('GET', '/t/'.$key);
 
         $this->assertNotFoundWithNoWordOfTheTicket();
+    }
+
+    /**
+     * The page follows its own ticket's topic and no other ticket's, and marks what a refresh signal fetches again: the
+     * header's state, the thread's frame, the next step box, People and What happened.
+     */
+    #[Test]
+    public function aMemberFollowsTheLiveUpdatesOfThisTicketOnly(): void
+    {
+        $otherKey = $this->addTicket('Add a gift note');
+        $key = $this->addTicket('Search shows no results');
+        $ticketId = $this->ticketIdOf($key);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $liveUpdates = $page->filter('[data-controller="live-updates"]');
+        self::assertCount(1, $liveUpdates);
+        self::assertSame('["'.$ticketId.'"]', $liveUpdates->attr('data-live-updates-ticket-ids-value'));
+        $subscribeUrl = (string) $liveUpdates->attr('data-live-updates-subscribe-url-value');
+        self::assertStringContainsString('match='.rawurlencode('https://pinround.app/o/'.$this->acmeFoods->toString().'/t/'.$ticketId), $subscribeUrl);
+        self::assertSame(1, substr_count($subscribeUrl, rawurlencode('/t/')));
+        self::assertStringNotContainsString($this->ticketIdOf($otherKey), (string) $this->client->getResponse()->getContent());
+        self::assertSame(
+            [TicketPageParts::STATE_ID, Thread::FRAME_ID, TicketPageParts::NEXT_STEP_ID, TicketPageParts::PEOPLE_ID, TicketPageParts::ACTIVITY_ID],
+            $page->filter('[data-live-refresh]')->each(static fn (Crawler $part): ?string => $part->attr('id')),
+        );
+    }
+
+    #[Test]
+    public function aPersonWhoMayNotSeeTheTicketGetsNotFoundWithNoLiveUpdates(): void
+    {
+        $key = $this->addTicket(self::HIDDEN_TITLE, ['visibility' => 'team']);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $this->client->request('GET', '/t/'.$key);
+
+        $this->assertNotFoundWithNoWordOfTheTicket();
+        self::assertStringNotContainsString($this->ticketIdOf($key), (string) $this->client->getResponse()->getContent());
     }
 
     #[Test]
@@ -628,7 +673,7 @@ final class TicketPageTest extends WebTestCase
         self::assertSame(array_fill(0, $moveForms->count(), MoveToasts::MOVE_FAILED), $moveForms->each(static fn (Crawler $form): ?string => $form->attr('data-failed-toast')));
         $moveList = $box->filter('details.next-step-box__move-to');
         self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog#needs-input-'.$this->stepsByCore['input']));
-        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog:not(#give-it-to-picker)'));
+        self::assertCount($hasMoveList ? 1 : 0, $page->filter('dialog:not(#give-it-to-picker):not([id^="ping-"])'));
         if (!$hasMoveList) {
             self::assertCount(0, $moveList);
             self::assertCount(\count($expectedVerbs), $page->filter('form[action*="/move"]'));
@@ -1023,14 +1068,20 @@ final class TicketPageTest extends WebTestCase
     /**
      * The costliest page: a project list that does not hold the ticket (the project lookup and the plain list's
      * position), a saved turn of someone outside the ticket's people and team and a move by another such person (one
-     * more names query for both), What happened's moves (one query), and the lead's Needs input dialog (one membership
-     * read).
+     * more names query for both), What happened's moves (one query), the lead's Needs input dialog (one membership
+     * read), and People's Ping button for Omar, whose ping limit comes with the settings and whose pinged state comes
+     * from the ping window on Valkey, so it reads none. Conversation's thread and the Rounds section load in lazy frames
+     * of their own requests (TicketThreadTest, RoundsFrameTest), so the page reads none of them.
      */
     #[Test]
     public function theCostliestWarmPageStaysWithinTheTenQueryBudget(): void
     {
         new AddTicketEventPartitions($this->migrator(), new MockClock(new \DateTimeImmutable(self::NOW)))();
         $keys = $this->addTicketsToWalk();
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET assignee_id = ? WHERE key = ?',
+            [$this->people['Omar']->id()->toString(), $keys['X']],
+        ));
         $this->addTurnRow($keys['X'], 'Raj', 'decide');
         $this->addHistoryRow($keys['X'], 'moved', 'Sara', 'todo', 'todo', [], '2026-11-06 11:00:00+00');
         $this->logIn($this->client, $this->people['Lena']);
@@ -1044,6 +1095,7 @@ final class TicketPageTest extends WebTestCase
         self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertSame(['1 h ago · Sara moved it to To do', '5 Nov · Created by Lena'], self::activityLinesOf($this->client->getCrawler()));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
+        self::assertSame('Ping Omar', trim($this->client->getCrawler()->filter('#ping-'.$this->people['Omar']->id()->toString().' .dialog__title')->text()));
         self::assertSame(10, $pageQueryCount);
     }
 
@@ -1075,8 +1127,9 @@ final class TicketPageTest extends WebTestCase
     /**
      * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
      * one query), the ticket, the names of everyone in one batch, What happened's moves in one, the saved turn with the
-     * waiting turns in one query, the ticket's place in the plain open list in one, and for the lead's Needs input
-     * dialog which of the ticket's people are still members in one.
+     * waiting turns in one query, the ticket's place in the plain open list in one, for the lead's Needs input dialog
+     * which of the ticket's people are still members in one. People's Ping buttons read none: the ping limit comes with
+     * the settings and the pinged state from the ping window on Valkey.
      */
     #[Test]
     public function aWarmPageReadsTheBudgetedQueriesBeyondTheShell(): void
@@ -1099,6 +1152,7 @@ final class TicketPageTest extends WebTestCase
             ['Lena · Reporter', 'Omar · Assignee', 'Someone else'],
             $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
         );
+        self::assertSame('Ping Omar', trim($this->client->getCrawler()->filter('#ping-'.$this->people['Omar']->id()->toString().' .dialog__title')->text()));
         self::assertSame(7, $pageQueryCount);
     }
 
@@ -1131,7 +1185,7 @@ final class TicketPageTest extends WebTestCase
 
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__aside .next-step-box'));
-        self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog'));
+        self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog:not([id^="ping-"])'));
         self::assertSame(6, $pageQueryCount);
     }
 
@@ -1379,6 +1433,19 @@ final class TicketPageTest extends WebTestCase
         self::assertIsInt($row['version']);
 
         return [$row['step_id'], $row['version']];
+    }
+
+    private function ticketIdOf(string $key): string
+    {
+        $ticketId = null;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($key, &$ticketId): int {
+            $ticketId = $migrator->fetchOne('SELECT id FROM tkt_ticket WHERE key = ?', [$key]);
+
+            return 0;
+        });
+        self::assertIsString($ticketId);
+
+        return $ticketId;
     }
 
     private function addSteps(): void

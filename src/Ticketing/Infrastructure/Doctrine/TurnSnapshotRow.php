@@ -18,7 +18,8 @@ final class TurnSnapshotRow
     /** The tkt_ticket columns of the snapshot, for a SELECT whose alias for tkt_ticket is "ticket". */
     public const string COLUMNS = "ticket.project_id, ticket.step_id, ticket.previous_step_id, ticket.team_id, ticket.visibility, ticket.priority,
         ticket.release, ticket.reporter_id, ticket.assignee_id, ticket.pending_assignee_id, ticket.reviewer_id, ticket.tester_id,
-        ticket.waiting_on_user_id, ticket.waiting_on_label, 'risk' = ANY (ticket.check_reasons) AS is_risk_check";
+        ticket.waiting_on_user_id, ticket.waiting_on_label, 'risk' = ANY (ticket.check_reasons) AS is_risk_check, ticket.asked_user_id,
+        ticket.asker_id";
 
     private function __construct()
     {
@@ -64,6 +65,8 @@ final class TurnSnapshotRow
             self::textOrNull($row['waiting_on_label'], 'waiting_on_label'),
             self::textOrNull($row['previous_step_id'], 'previous_step_id'),
             true === $row['is_risk_check'],
+            self::userIdOrNull($row['asked_user_id'], 'asked_user_id'),
+            self::userIdOrNull($row['asker_id'], 'asker_id'),
         );
     }
 

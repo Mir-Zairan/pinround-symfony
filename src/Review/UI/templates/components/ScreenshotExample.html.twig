@@ -1,0 +1,8 @@
+<div class="screenshot-example">
+    {% if this.isEditable %}
+        <twig:EditableScreenshot :view="this.view" action="#" />
+    {% else %}
+        <twig:Screenshot :view="this.view" :selectedNumber="this.selectedNumber" />
+        <twig:PinList :view="this.view" :selectedNumber="this.selectedNumber" />
+    {% endif %}
+</div>

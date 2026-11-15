@@ -36,6 +36,10 @@ export const RAJ_EMAIL = 'raj@acme-foods.example';
 // keeps his session stamp, so this session stays logged in while confirm-its-you.spec.ts runs; ticket-move.spec.ts
 // uses it. Missing when a local run found his two-step login already on (auth.setup.ts says why).
 export const RAJ_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'raj.json');
+
+// Mia's session from auth.setup.ts, logged in before login-code.spec.ts turns her two-step login on; live-updates.spec.ts
+// uses it. Missing when a local run found her two-step login already on, as for Raj.
+export const MIA_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'mia.json');
 export const SARA_EMAIL = 'sara@acme-foods.example';
 
 export const TWO_STEP_CODE_STEP_MS = 30_000;

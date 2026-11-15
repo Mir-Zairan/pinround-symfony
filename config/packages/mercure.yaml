@@ -1,0 +1,37 @@
+# The hub built into FrankenPHP (docker/frankenphp/Caddyfile), protocol 1.0 (hub v1.1.6 in FrankenPHP 1.13.5).
+# Publisher and subscriber tokens are signed with different keys, as the Caddyfile checks them: both HS256, which
+# LcobucciFactory calls hmac.sha256. Publishing happens only in worker-notify (ADR-0023), through MERCURE_URL.
+mercure:
+    # The bundle's default, kept in sight: logout expires the subscriber cookie (RealtimeTokenTest pins it).
+    clear_cookie_on_logout: true
+    hubs:
+        default:
+            url: '%env(default::MERCURE_URL)%'
+            public_url: '%env(default::MERCURE_PUBLIC_URL)%'
+            # Without it a stalled hub holds worker-notify for http_client's default of 60 s per refresh.
+            http_client: 'mercure.publisher_http_client'
+            # The name the hub reads under protocol 1.0; the bundle would pick a prefix-less one in debug mode.
+            cookie_name: '__Secure-mercure_access_token'
+            publisher:
+                secret: '%env(MERCURE_PUBLISHER_JWT_KEY)%'
+                algorithm: 'hmac.sha256'
+                topics: ['*']
+                claims: &claims
+                    iss: '%env(MERCURE_JWT_ISSUER)%'
+                    # The Caddyfile's resource_identifier: the hub refuses any other audience.
+                    aud: '%env(MERCURE_PUBLIC_URL)%'
+                    sub: 'pinround'
+                    client_id: 'pinround'
+            subscriber:
+                secret: '%env(MERCURE_SUBSCRIBER_JWT_KEY)%'
+                algorithm: 'hmac.sha256'
+                claims: *claims
+
+services:
+    # A failed or timed-out publish throws, and Messenger retries the RefreshTicketPages (RefreshTicketPagesHandler)
+    # or the RefreshBell (RefreshBellHandler).
+    # timeout is the longest wait for the next byte, max_duration the longest whole request.
+    mercure.publisher_http_client:
+        class: Symfony\Contracts\HttpClient\HttpClientInterface
+        factory: ['@http_client', 'withOptions']
+        arguments: [{ timeout: 2, max_duration: 2 }]

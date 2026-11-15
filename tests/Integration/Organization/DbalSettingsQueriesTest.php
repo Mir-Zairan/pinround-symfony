@@ -159,8 +159,8 @@ final class DbalSettingsQueriesTest extends KernelTestCase
     }
 
     /**
-     * Locked is not the default and Sara is not null, so a settings read that mixed the two keys up or fell back to
-     * the defaults would differ; the query log shows one query for both.
+     * Locked is not the default, Sara is not null and both switches are the opposite of theirs, so a settings read
+     * that mixed the keys up or fell back to the defaults would differ; the query log shows one query for all.
      */
     #[Test]
     public function theStepPolicyAndTheTriagerComeInOneQuery(): void
@@ -169,12 +169,18 @@ final class DbalSettingsQueriesTest extends KernelTestCase
         $debugData = self::getContainer()->get('doctrine.debug_data_holder');
 
         $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($debugData): StoredSettings {
+            $this->connection()->executeStatement(
+                "UPDATE org_settings SET data = data || '{\"ping_limit_hours\": 8, \"auto_clear\": false, \"quiet_hours\": true}'::jsonb",
+            );
             $debugData->reset();
 
             return $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS));
         });
 
-        self::assertSame([StepPolicy::Locked, self::SARA], [$settings->stepPolicy, $settings->triagerId?->toString()]);
+        self::assertSame(
+            [StepPolicy::Locked, self::SARA, 8, false, true],
+            [$settings->stepPolicy, $settings->triagerId?->toString(), $settings->pingLimitHours, $settings->isAutoClearOn, $settings->isQuietHoursOn],
+        );
         $selects = array_filter(array_merge(...array_values($debugData->getData())), static fn (array $query): bool => \is_string($query['sql']) && str_contains($query['sql'], 'org_settings'));
         self::assertCount(1, $selects);
     }
@@ -186,7 +192,10 @@ final class DbalSettingsQueriesTest extends KernelTestCase
 
         $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): StoredSettings => $this->queries()->settingsOf(new OrganizationId(self::BETA_BAKERY)));
 
-        self::assertSame([StepPolicy::Extend, null], [$settings->stepPolicy, $settings->triagerId]);
+        self::assertSame(
+            [StepPolicy::Extend, null, 4, true, false],
+            [$settings->stepPolicy, $settings->triagerId, $settings->pingLimitHours, $settings->isAutoClearOn, $settings->isQuietHoursOn],
+        );
     }
 
     #[Test]
@@ -196,7 +205,36 @@ final class DbalSettingsQueriesTest extends KernelTestCase
 
         $settings = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): StoredSettings => $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS)));
 
-        self::assertSame([StepPolicy::Extend, null], [$settings->stepPolicy, $settings->triagerId]);
+        self::assertSame(
+            [StepPolicy::Extend, null, 4, true, false],
+            [$settings->stepPolicy, $settings->triagerId, $settings->pingLimitHours, $settings->isAutoClearOn, $settings->isQuietHoursOn],
+        );
+    }
+
+    #[Test]
+    public function anUnknownStoredSwitchIsRefusedTogether(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageIsOrContains('org_settings holds an unknown quiet_hours switch.');
+
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): StoredSettings {
+            $this->connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{quiet_hours}', '\"yes\"')");
+
+            return $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS));
+        });
+    }
+
+    #[Test]
+    public function anUnknownStoredPingLimitIsRefusedTogether(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageIsOrContains('org_settings holds an unknown ping limit.');
+
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): StoredSettings {
+            $this->connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{ping_limit_hours}', '2')");
+
+            return $this->queries()->settingsOf(new OrganizationId(self::ACME_FOODS));
+        });
     }
 
     private function triagerAs(string $tenantId, string $askedId): ?UserId

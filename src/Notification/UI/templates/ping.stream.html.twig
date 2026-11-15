@@ -1,0 +1,9 @@
+{#- A ping's answer: the person's Ping button becomes the pinged state when the sender has to wait (againIn not null);
+    any other answer is a refusal that keeps the button, which also goes into the open sheet's alert (PingSheet's
+    pingRefusalId), as the toast region sits behind the modal. The toast says what happened. -#}
+{%- if againIn is not null -%}
+<turbo-stream action="replace" target="{{ pingTargetId }}"><template>{{ include('@Notification/_pinged.html.twig', {isPingedAutofocused: true}) }}</template></turbo-stream>
+{%- else -%}
+<turbo-stream action="update" target="{{ pingTargetId }}-refusal"><template>{{ toast }}</template></turbo-stream>
+{%- endif -%}
+{{ include('@Web/_toast_stream.html.twig', {message: toast}) }}

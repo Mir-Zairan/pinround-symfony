@@ -1,0 +1,166 @@
+{#- The ticket's Questions and comments: the thread, oldest first, then the composer. A thread action's Turbo Stream replaces only the list (isListOnly); thread-composer clears the composer and puts focus back. -#}
+{% set csrf = csrf_token(this.csrfId) %}
+{#- Whom the composer may ask: rendered into the composer, and as markup on the message list for ask-choices to copy in after a live reload. -#}
+{% set askChoices %}
+    {% if mayAsk %}
+        <p class="thread__note" {{ stimulus_target('ask-choices', 'waitNote') }} {{ hasOpenQuestion ? '' : 'hidden' }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::WAIT_FOR_THE_OPEN_QUESTION') }}</p>
+        <div class="thread__people" role="group" aria-label="Whom to ask" {{ stimulus_target('thread-composer', 'people') }} hidden>
+            <span class="thread__to">to</span>
+            {% for person in askablePeople %}
+                <twig:Chip :pressed="loop.first" data-thread-composer-target="person" data-action="thread-composer#choosePerson"
+                    data-user-id="{{ person.userId }}"
+                    data-note="{{ constant('App\\Conversation\\UI\\Component\\Thread::ASK_NOTE')|format(person.firstName) }}"
+                    data-button="{{ constant('App\\Conversation\\UI\\Component\\Thread::ASK_BUTTON')|format(person.firstName) }}">{{ person.firstName }}</twig:Chip>
+            {% endfor %}
+        </div>
+        {#- Sent only in question mode: the comment route has no use for it. -#}
+        <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::ASKED_USER_FIELD') }}" value="{{ (askablePeople|first).userId }}" disabled {{ stimulus_target('thread-composer', 'askedUser') }}>
+    {% endif %}
+{% endset %}
+{% if not isListOnly %}
+<div{{ attributes.defaults({class: 'thread__content'}) }} {{ stimulus_controller('thread-composer')|stimulus_controller('ask-choices', {mayAsk: mayAsk}) }} data-action="turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer">
+{% endif %}
+{#- The permanent composer is not rendered again by a Turbo Stream or a live reload, so the list carries whether a question is open, which turns the composer's Ask a question off, and whom the viewer may ask now, which ask-choices copies into the composer. -#}
+<div id="{{ constant('App\\Conversation\\UI\\Component\\Thread::MESSAGES_ID') }}" class="thread__list" {{ stimulus_target('thread-composer', 'messages')|stimulus_target('ask-choices', 'messages') }} data-has-open-question="{{ hasOpenQuestion ? 'true' : 'false' }}" data-ask-choices="{{ askChoices|escape('html_attr') }}">
+    {% if hasEarlierMessages %}
+        <p class="thread__earlier">Showing the latest {{ constant('App\\Conversation\\Api\\ThreadView::MESSAGE_LIMIT') }} messages.</p>
+    {% endif %}
+    {% if messages is empty %}
+        <twig:EmptyState message="{{ constant('App\\Conversation\\UI\\Component\\Thread::EMPTY_THREAD') }}" />
+    {% else %}
+        <ol class="thread__messages">
+            {% for message in messages %}
+                <li id="thread-message-{{ message.id }}" class="thread__message thread__message--{{ message.kind }}" data-message-id="{{ message.id }}">
+                    {% set messageMarkup %}
+                    <twig:Avatar name="{{ message.authorName }}" class="thread__avatar" aria-hidden="true"/>
+                    <div class="thread__message-main{{ message.isOpenQuestion ? ' thread__message-main--open' }}">
+                        <p class="thread__meta">
+                            <span class="thread__author">{{ message.authorName }}</span> · <time class="thread__time" datetime="{{ message.postedAt }}">{{ message.postedLine }}</time> ·
+                            {%- if message.askedName is not null %} question to {{ message.askedName }}{% else %} {{ message.kind }}{% endif %}
+                            {%- if message.isEdited and not message.isRemoved %} · <span class="thread__edited">edited</span>{% endif %}
+                        </p>
+                        {% if message.isRemoved %}
+                            <p class="thread__body thread__body--removed">{{ constant('App\\Conversation\\UI\\Component\\Thread::REMOVED_MESSAGE') }}</p>
+                        {% else %}
+                            <p class="thread__body">{{ message.body|linkify }}</p>
+                            {% if message.isOpenQuestion %}
+                                <p class="thread__tags"><twig:Tag class="thread__tag--waiting">Waiting on {{ message.askedFirstName }}</twig:Tag></p>
+                            {% elseif message.isAnswered %}
+                                <p class="thread__tags"><twig:Tag class="thread__tag--answered">Answered</twig:Tag></p>
+                            {% endif %}
+                        {% endif %}
+                        {% if message.hasEarlierReplies %}
+                            <p class="thread__earlier thread__earlier-replies">Showing the latest {{ constant('App\\Conversation\\Api\\MessageView::REPLY_LIMIT') }} replies.</p>
+                        {% endif %}
+                        {#- Replies are one level only, so a reply has no actions. -#}
+                        {% for reply in message.replies %}
+                            <div class="thread__reply{{ reply.isAnswer ? ' thread__reply--answer' }}" id="thread-reply-{{ reply.id }}">
+                                <p class="thread__meta">
+                                    <span class="thread__author">{{ reply.authorName }}</span> · <time class="thread__time" datetime="{{ reply.postedAt }}">{{ reply.postedLine }}</time>
+                                    {%- if reply.isAnswer %} · answer{% endif %}
+                                </p>
+                                {% if reply.isRemoved %}
+                                    <p class="thread__body thread__body--removed">{{ constant('App\\Conversation\\UI\\Component\\Thread::REMOVED_REPLY') }}</p>
+                                {% else %}
+                                    <p class="thread__body">{{ reply.body|linkify }}</p>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                        {% if message.isAnswerable %}
+                            {#- Answering resumes the ticket and changes its header, so the answer's redirect replaces the whole page. -#}
+                            <details class="thread__answer" data-live-keeps-text {{ stimulus_controller('reply-box') }} data-action="toggle->reply-box#focus turbo:submit-end->reply-box#settle">
+                                <summary class="btn btn-text btn-sm" {{ stimulus_target('reply-box', 'opener') }}>Answer</summary>
+                                <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::ANSWER_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__answer-form" data-turbo-frame="_top">
+                                    <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                    <label class="visually-hidden" for="thread-answer-{{ message.id }}">Your answer</label>
+                                    <textarea id="thread-answer-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="Your answer" required maxlength="{{ this.maxBodyLength }}" rows="3" {{ stimulus_target('reply-box', 'body') }}></textarea>
+                                    <p class="thread__note">{{ constant('App\\Conversation\\UI\\Component\\Thread::ANSWER_NOTE')|format(stepName) }}</p>
+                                    <div class="thread__answer-buttons">
+                                        <button type="button" class="btn btn-text btn-sm" data-action="reply-box#close">Cancel</button>
+                                        <button type="submit" class="btn btn-filled btn-sm">Answer</button>
+                                    </div>
+                                </form>
+                            </details>
+                        {% endif %}
+                        {% if message.isReplyable or message.isResolvable or message.isEditable or message.isRemovable %}
+                            <div class="thread__actions">
+                                {% if message.isReplyable %}
+                                    <details class="thread__reply-box" data-live-keeps-text {{ stimulus_controller('reply-box') }} data-action="toggle->reply-box#focus turbo:submit-end->reply-box#settle">
+                                        <summary class="btn btn-text btn-sm" {{ stimulus_target('reply-box', 'opener') }}>Reply</summary>
+                                        <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::REPLY_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__reply-form">
+                                            <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                            <label class="visually-hidden" for="thread-reply-body-{{ message.id }}">{{ constant('App\\Conversation\\UI\\Component\\Thread::REPLY_PLACEHOLDER') }}</label>
+                                            <textarea id="thread-reply-body-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::REPLY_PLACEHOLDER') }}" required maxlength="{{ this.maxBodyLength }}" rows="3" {{ stimulus_target('reply-box', 'body') }}></textarea>
+                                            <p class="thread__note">{{ message.replyNote }}</p>
+                                            <div class="thread__answer-buttons">
+                                                <button type="button" class="btn btn-text btn-sm" data-action="reply-box#close">Cancel</button>
+                                                <button type="submit" class="btn btn-filled btn-sm">Reply</button>
+                                            </div>
+                                        </form>
+                                    </details>
+                                {% endif %}
+                                {% if message.isResolvable %}
+                                    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::RESOLVE_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__resolve-form">
+                                        <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                        <button type="submit" class="btn btn-text btn-sm">Resolve</button>
+                                    </form>
+                                {% endif %}
+                                {% if message.isEditable %}
+                                    <details class="thread__edit" {{ stimulus_controller('reply-box') }} data-action="toggle->reply-box#focus turbo:submit-end->reply-box#settle">
+                                        <summary class="btn btn-text btn-sm" {{ stimulus_target('reply-box', 'opener') }}>Edit</summary>
+                                        <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::EDIT_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__edit-form">
+                                            <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                            <label class="visually-hidden" for="thread-edit-{{ message.id }}">Edit your message</label>
+                                            <textarea id="thread-edit-{{ message.id }}" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" required maxlength="{{ this.maxBodyLength }}" rows="3" {{ stimulus_target('reply-box', 'body') }}>{{ message.body }}</textarea>
+                                            <button type="submit" class="btn btn-filled btn-sm">Save</button>
+                                        </form>
+                                    </details>
+                                {% endif %}
+                                {% if message.isRemovable %}
+                                    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::REMOVE_ROUTE'), {key: key, messageId: message.id}) }}" class="thread__remove-form">
+                                        <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+                                        <button type="submit" class="btn btn-text btn-sm">Remove</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    {% endset %}
+                    {% if message.resolvedSummary is not null %}
+                        {#- Folded for everyone; thread.css swaps the line for Hide while it is open. -#}
+                        <details class="thread__fold">
+                            <summary class="thread__fold-summary"><span class="thread__fold-line"><span aria-hidden="true">✓</span> {{ message.resolvedSummary }} · show</span><span class="thread__fold-hide">Hide</span></summary>
+                            <div class="thread__fold-message">{{ messageMarkup }}</div>
+                        </details>
+                    {% else %}
+                        {{ messageMarkup }}
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ol>
+    {% endif %}
+</div>
+{% if not isListOnly %}
+    {#- Permanent, so a live refresh that reloads the frame keeps a comment being written; the id names the ticket, so the form of one ticket never stays on another's page. -#}
+    <form method="post" action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}" class="thread__composer" id="thread-composer-{{ key }}" data-turbo-permanent>
+        <input type="hidden" name="{{ constant('App\\Conversation\\UI\\ThreadController::CSRF_FIELD') }}" value="{{ csrf }}">
+        {#- Each chip carries what the composer becomes when it is chosen; thread-composer switches the form to it. -#}
+        <div class="thread__kinds" role="group" aria-label="What to write">
+            <twig:Chip :pressed="true" data-thread-composer-target="commentChip" data-action="thread-composer#writeComment"
+                data-form-action="{{ path(constant('App\\Conversation\\UI\\ThreadController::COMMENT_ROUTE'), {key: key}) }}"
+                data-placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}"
+                data-note="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_NOTE') }}"
+                data-button="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_BUTTON') }}">Comment</twig:Chip>
+            <twig:Chip :disabled="not mayAsk or hasOpenQuestion" data-thread-composer-target="askChip" data-action="thread-composer#askQuestion"
+                data-form-action="{{ path(constant('App\\Conversation\\UI\\ThreadController::ASK_ROUTE'), {key: key}) }}"
+                data-placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::ASK_PLACEHOLDER') }}">Ask a question</twig:Chip>
+        </div>
+        <div class="thread__ask-choices" {{ stimulus_target('ask-choices', 'choices') }}>{{ askChoices }}</div>
+        <label class="visually-hidden" for="thread-composer-body" {{ stimulus_target('thread-composer', 'label') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}</label>
+        <textarea id="thread-composer-body" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}" required maxlength="{{ this.maxBodyLength }}" rows="3"
+            {{ stimulus_target('thread-composer', 'body') }} data-action="input->thread-composer#update"></textarea>
+        <p class="thread__note" {{ stimulus_target('thread-composer', 'note') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_NOTE') }}</p>
+        <button type="submit" class="btn btn-filled" {{ stimulus_target('thread-composer', 'submit') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_BUTTON') }}</button>
+    </form>
+</div>
+{% endif %}

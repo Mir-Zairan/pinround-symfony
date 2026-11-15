@@ -94,6 +94,8 @@ final readonly class EntityTicketTurnSnapshots implements TicketTurnSnapshots
             $ticket->waitingOnLabel(),
             $ticket->previousStepId(),
             $ticket->isRiskCheck(),
+            $ticket->askedUser(),
+            $ticket->asker(),
         );
     }
 }

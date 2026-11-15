@@ -5,6 +5,7 @@
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/gallery.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
 {% endblock %}
 
 {% block main %}
@@ -239,5 +240,35 @@
         <h2 id="gallery-queue-bar">Queue bar</h2>
         <twig:QueueBar aria-label="Queue, first ticket" label="Code reviews" :place="1" :count="3" nextUrl="/t/SHOP-13" finishUrl="/tickets/queue/finish" stopUrl="/t/SHOP-12/queue/stop" csrfToken="gallery-example" />
         <twig:QueueBar aria-label="Queue, last ticket" label="Code reviews" :place="3" :count="3" previousUrl="/t/SHOP-13" finishUrl="/tickets/queue/finish" stopUrl="/t/SHOP-14/queue/stop" csrfToken="gallery-example" />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-screenshot-heading">
+        <h2 id="gallery-screenshot-heading">Screenshot with pins</h2>
+        <twig:ScreenshotExample />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-pin-placer-heading">
+        <h2 id="gallery-pin-placer-heading">Screenshot with pins you place</h2>
+        <twig:ScreenshotExample :isEditable="true" />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-placed-pins-heading">
+        <h2 id="gallery-placed-pins-heading">Screenshot with pins already placed</h2>
+        <twig:ScreenshotExample :isEditable="true" :hasPins="true" />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-pending-screenshot-heading">
+        <h2 id="gallery-pending-screenshot-heading">Screenshot being processed</h2>
+        <twig:ScreenshotExample status="pending" />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-rejected-screenshot-heading">
+        <h2 id="gallery-rejected-screenshot-heading">Screenshot that could not be processed</h2>
+        <twig:ScreenshotExample status="rejected" />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-upload-heading">
+        <h2 id="gallery-upload-heading">Screenshot upload</h2>
+        <twig:UploadField fieldId="gallery-upload" targetKind="ticket" targetId="00000000-0000-7000-8000-000000000000" />
     </section>
 {% endblock %}

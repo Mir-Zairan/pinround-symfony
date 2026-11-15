@@ -9,22 +9,22 @@ const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // security page with a recovery code, and afterAll turns it off when a test stopped before that. A run takes one of her
 // 5 code tries in 15 minutes and never waits for a new 30-second step. The functional LoginCodeTest and
 // TwoStepLoginOffTest cover the codes, the refusals and the throttle.
-const MIA_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'mia-login-code.json');
+const MIA_LOGIN_CODE_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'mia-login-code.json');
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   await logInAndTurnOnTwoStepLogin(await context.newPage(), MIA_EMAIL, 'Mia');
-  await context.storageState({ path: MIA_STORAGE_STATE });
+  await context.storageState({ path: MIA_LOGIN_CODE_STORAGE_STATE });
   await context.close();
 });
 
 test.afterAll(async ({ browser }) => {
-  if (!existsSync(twoStepCodesFile(MIA_EMAIL)) || !existsSync(MIA_STORAGE_STATE)) {
+  if (!existsSync(twoStepCodesFile(MIA_EMAIL)) || !existsSync(MIA_LOGIN_CODE_STORAGE_STATE)) {
     return;
   }
-  const context = await browser.newContext({ storageState: MIA_STORAGE_STATE });
+  const context = await browser.newContext({ storageState: MIA_LOGIN_CODE_STORAGE_STATE });
   await turnOffTwoStepLogin(await context.newPage(), MIA_EMAIL);
   await context.close();
 });
@@ -85,7 +85,7 @@ test.describe('the code page', () => {
 });
 
 test.describe('the turn-off form on the security page', () => {
-  test.use({ storageState: MIA_STORAGE_STATE });
+  test.use({ storageState: MIA_LOGIN_CODE_STORAGE_STATE });
 
   async function openSecurityPage(page: Page): Promise<void> {
     await page.goto('/me/security');

@@ -166,7 +166,7 @@ FR-TKT-01, FR-TKT-02, FR-TKT-03, FR-TKT-04, FR-TKT-05, FR-TKT-06, FR-TKT-07, FR-
 - [ ] Every catalogue verb works end to end for the right role and is absent for others.
 - [x] A move writes exactly one event row and one outbox row and updates the turn row in the same transaction (rollback test). `MoveTicketTest::aVerbMovesTheTicketAndWritesItsHistoryRowTurnRowAndEvent` (one `moved` row, one outbox body, the turn row and count equal to a fresh refresh, for every built verb) and `aThrowAfterTheEventIsWrittenLeavesNoMoveNoHistoryNoEventAndTheTurnRowAsItWas` (the rollback).
 - [ ] An admin without a team role gets 403 on `POST /t/{key}/move/{verb}`, `/assign`, `/move-to/{stepId}` and on ticket edits, and sees no verb buttons (decision in the brief: admins view, comment, ask and ping, but do not move or edit).
-- [ ] Action p95 ≤ 150 ms is measured in P12.T1; here the move uses ≤ 8 queries (query-count test).
+- [ ] Action p95 ≤ 150 ms is measured in P12.T1; here the move uses ≤ 9 queries (query-count test; 8 in P03, the 9th the lock on the mover's open pings for auto-clear, P04.T6, by the user's decision of 2026-11-14).
 **Tests:** functional tests per verb; rollback test; Playwright journey "Start work → Send to code review → Approve code → Pass it" with four users.
 **Prototype check:** [Your next step box](../04-prototype/screens/ticket-page.md#your-next-step-box), [Every move](../04-prototype/screens/ticket-page.md#every-move), toast texts in [Toast](../04-prototype/screens/dialogs-and-popovers.md#toast).
 **Size:** L

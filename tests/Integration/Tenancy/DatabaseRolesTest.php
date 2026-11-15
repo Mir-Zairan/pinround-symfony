@@ -443,6 +443,176 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * The thread and notification tables (Version20261114120000, Version20261114130000): messages, replies, pings and
+     * notifications are changed but never removed by the app, a mute is removed to unmute, a delivery is only added;
+     * support reads under the tenant policy. Grants on the ntf_notification parent only.
+     */
+    #[Test]
+    public function theConversationAndNotificationTablesGrantTheAppOnlyWhatEachNeeds(): void
+    {
+        $connection = $this->connection();
+        $readOnly = ['pinround_readonly SELECT'];
+        $expectedGrants = [
+            'cnv_message' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE'],
+            'cnv_reply' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE'],
+            'ntf_ping' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE'],
+            'ntf_notification' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE'],
+            'ntf_mute' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT', 'pinround_app DELETE'],
+            'ntf_delivery' => [...$readOnly, 'pinround_app SELECT', 'pinround_app INSERT'],
+        ];
+
+        // The only column rights: what organizations_with_due_notifications (Version20261115140000) and digest_recipients
+        // (Version20261115150000) match on and return.
+        $expectedColumnGrants = ['ntf_notification' => array_map(
+            static fn (string $column): string => 'pinround_resolver SELECT '.$column,
+            ['organization_id', 'deliver_after', 'user_id', 'kind', 'ticket_id', 'read_at', 'done_at', 'created_at'],
+        )];
+
+        foreach ($expectedGrants as $table => $grants) {
+            self::assertEqualsCanonicalizing($grants, $this->grantsToOthersThanTheOwner($connection, $table), $table);
+            self::assertSame('pinround_migrator', $connection->fetchOne('SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]), $table);
+            self::assertEqualsCanonicalizing($expectedColumnGrants[$table] ?? [], $connection->fetchFirstColumn(
+                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
+                 FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)",
+                ['public.'.$table],
+            ), $table);
+        }
+
+        /** @var list<string> $partitions */
+        $partitions = $connection->fetchFirstColumn("SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'public.ntf_notification'::regclass ORDER BY 1");
+        // A database migrated later has more months, so only the months the migration creates are pinned.
+        self::assertSame(
+            [
+                'ntf_notification_202611', 'ntf_notification_202612', 'ntf_notification_202701', 'ntf_notification_202702',
+                'ntf_notification_202703', 'ntf_notification_202704', 'ntf_notification_202705', 'ntf_notification_202706',
+                'ntf_notification_202707', 'ntf_notification_202708', 'ntf_notification_202709', 'ntf_notification_202710',
+                'ntf_notification_202711', 'ntf_notification_202712',
+            ],
+            array_values(array_filter(
+                $partitions,
+                static fn (string $partition): bool => $partition >= 'ntf_notification_202611' && $partition <= 'ntf_notification_202712',
+            )),
+        );
+        foreach ($partitions as $partition) {
+            self::assertMatchesRegularExpression('/^ntf_notification_\d{6}$/', $partition);
+            self::assertSame([], $this->grantsToOthersThanTheOwner($connection, $partition), $partition);
+        }
+    }
+
+    /**
+     * Every index of the thread and notification tables starts with organization_id, with the partial predicates the
+     * thread, the bell, the digest, the release after quiet hours and the rate limit read by.
+     */
+    #[Test]
+    public function theConversationAndNotificationIndexesAllStartWithTheOrganization(): void
+    {
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX cnv_message_pkey ON public.cnv_message USING btree (organization_id, id)',
+                'CREATE INDEX cnv_message_ticket_id_created_at_id_idx ON public.cnv_message USING btree (organization_id, ticket_id, created_at, id)',
+                "CREATE UNIQUE INDEX cnv_message_ticket_id_open_question_key ON public.cnv_message USING btree (organization_id, ticket_id) WHERE ((kind = 'question'::text) AND (resolved_at IS NULL) AND (removed_at IS NULL))",
+                "CREATE INDEX cnv_message_to_user_id_open_question_idx ON public.cnv_message USING btree (organization_id, to_user_id) WHERE ((kind = 'question'::text) AND (resolved_at IS NULL) AND (removed_at IS NULL))",
+                'CREATE UNIQUE INDEX cnv_reply_pkey ON public.cnv_reply USING btree (organization_id, id)',
+                'CREATE INDEX cnv_reply_message_id_created_at_id_idx ON public.cnv_reply USING btree (organization_id, message_id, created_at, id)',
+                'CREATE UNIQUE INDEX ntf_ping_pkey ON public.ntf_ping USING btree (organization_id, id)',
+                'CREATE INDEX ntf_ping_from_id_to_id_ticket_id_created_at_idx ON public.ntf_ping USING btree (organization_id, from_id, to_id, ticket_id, created_at)',
+                'CREATE INDEX ntf_ping_to_id_ticket_id_open_idx ON public.ntf_ping USING btree (organization_id, to_id, ticket_id) WHERE (cleared_at IS NULL)',
+                'CREATE INDEX ntf_ping_ticket_id_idx ON public.ntf_ping USING btree (organization_id, ticket_id)',
+                'CREATE UNIQUE INDEX ntf_notification_pkey ON ONLY public.ntf_notification USING btree (organization_id, id, created_at)',
+                'CREATE INDEX ntf_notification_user_id_actor_id_ticket_id_created_at_idx ON ONLY public.ntf_notification USING btree (organization_id, user_id, actor_id, ticket_id, created_at DESC) WHERE (done_at IS NULL)',
+                'CREATE INDEX ntf_notification_user_id_created_at_unread_idx ON ONLY public.ntf_notification USING btree (organization_id, user_id, created_at) WHERE (read_at IS NULL)',
+                'CREATE INDEX ntf_notification_user_id_created_at_digest_idx ON ONLY public.ntf_notification USING btree (organization_id, user_id, created_at) INCLUDE (deliver_after)'
+                ." WHERE ((read_at IS NULL) AND (done_at IS NULL) AND (ticket_id IS NOT NULL) AND (kind = ANY (ARRAY['ping'::text, 'question'::text])))",
+                'CREATE INDEX ntf_notification_deliver_after_idx ON ONLY public.ntf_notification USING btree (organization_id, deliver_after) WHERE (deliver_after IS NOT NULL)',
+                'CREATE INDEX ntf_notification_ticket_id_idx ON ONLY public.ntf_notification USING btree (organization_id, ticket_id) WHERE (ticket_id IS NOT NULL)',
+                'CREATE UNIQUE INDEX ntf_mute_pkey ON public.ntf_mute USING btree (organization_id, user_id, ticket_id)',
+                'CREATE INDEX ntf_mute_ticket_id_idx ON public.ntf_mute USING btree (organization_id, ticket_id)',
+                'CREATE UNIQUE INDEX ntf_delivery_pkey ON public.ntf_delivery USING btree (organization_id, user_id, window_key)',
+            ],
+            $this->connection()->fetchFirstColumn(
+                "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public'
+                 AND tablename IN ('cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notification', 'ntf_mute', 'ntf_delivery')",
+            ),
+        );
+    }
+
+    /**
+     * The upload slot and picture tables (Version20261115120000): the app reads, adds and changes them and removes
+     * neither, as a used slot and a rejected picture keep their rows; support reads under the tenant policy.
+     */
+    #[Test]
+    public function theMediaTablesGrantTheAppNoDeleteAndSupportOnlyRead(): void
+    {
+        $connection = $this->connection();
+
+        foreach (['med_upload_intent', 'med_object'] as $table) {
+            self::assertEqualsCanonicalizing(
+                ['pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+                $this->grantsToOthersThanTheOwner($connection, $table),
+                $table,
+            );
+            self::assertSame(
+                ['pinround_migrator', true, true],
+                $connection->fetchNumeric('SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]),
+                $table,
+            );
+            self::assertSame([], $connection->fetchFirstColumn(
+                'SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)',
+                ['public.'.$table],
+            ), $table);
+        }
+    }
+
+    /**
+     * The round, picture and pin tables (Version20261115180000): the app reads, adds and changes them and removes none
+     * yet; support reads under the tenant policy.
+     */
+    #[Test]
+    public function theRoundTablesGrantTheAppNoDeleteAndSupportOnlyRead(): void
+    {
+        $connection = $this->connection();
+
+        foreach (['rvw_round', 'rvw_screenshot', 'rvw_pin'] as $table) {
+            self::assertEqualsCanonicalizing(
+                ['pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+                $this->grantsToOthersThanTheOwner($connection, $table),
+                $table,
+            );
+            self::assertSame(
+                ['pinround_migrator', true, true],
+                $connection->fetchNumeric('SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$table]),
+                $table,
+            );
+            self::assertSame([], $connection->fetchFirstColumn(
+                'SELECT a.attname FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = to_regclass(?)',
+                ['public.'.$table],
+            ), $table);
+        }
+    }
+
+    /**
+     * Every index of the media tables starts with organization_id: expired slots are found by time, a picture already
+     * uploaded by its hash, and the pictures of one status by age; the storage quota and a person's open slots are
+     * read from the index alone.
+     */
+    #[Test]
+    public function theMediaIndexesAllStartWithTheOrganization(): void
+    {
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX med_upload_intent_pkey ON public.med_upload_intent USING btree (organization_id, id)',
+                'CREATE INDEX med_upload_intent_expires_at_idx ON public.med_upload_intent USING btree (organization_id, expires_at)',
+                'CREATE UNIQUE INDEX med_object_pkey ON public.med_object USING btree (organization_id, id)',
+                'CREATE INDEX med_object_sha256_idx ON public.med_object USING btree (organization_id, sha256)',
+                'CREATE INDEX med_object_status_created_at_idx ON public.med_object USING btree (organization_id, status, created_at)',
+                'CREATE INDEX med_object_status_bytes_idx ON public.med_object USING btree (organization_id, status, bytes)',
+                'CREATE INDEX med_upload_intent_open_idx ON public.med_upload_intent USING btree (organization_id, expires_at, user_id, max_bytes) WHERE (used_at IS NULL)',
+            ],
+            $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('med_upload_intent', 'med_object')"),
+        );
+    }
+
+    /**
      * Every index of an org_ table starts with organization_id but the documented exceptions: the global slug key, the
      * user_id index of resolve_user_orgs and the token_hash key of resolve_invitation, which run before the tenant is
      * known.
@@ -481,8 +651,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_check_item', 'rvw_report_draft'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);

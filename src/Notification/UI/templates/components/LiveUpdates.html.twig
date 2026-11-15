@@ -1,0 +1,19 @@
+{% if this.subscribeUrl is not null %}
+    {#- The live region is always there and empty to a screen reader until the paused line in it is shown: a region
+        that is itself hidden and then shown with its text already in is not reliably announced. -#}
+    <div{{ attributes.defaults({
+        id: this.elementId,
+        'data-turbo-permanent': '',
+        class: 'live-updates',
+        role: 'status',
+        'aria-live': 'polite',
+        'data-controller': 'live-updates',
+        'data-live-updates-subscribe-url-value': this.subscribeUrl,
+        'data-live-updates-token-url-value': path(this.tokenRoute),
+        'data-live-updates-ticket-ids-value': (this.ticketId is null ? [] : [this.ticketId])|json_encode,
+    }) }}>
+        <p class="live-updates__paused" data-live-updates-target="paused" hidden>
+            Updates paused. <a href="{{ app.request.requestUri }}" class="live-updates__reload" data-live-updates-target="reload" data-turbo="false">Reload</a> to see the latest.
+        </p>
+    </div>
+{% endif %}

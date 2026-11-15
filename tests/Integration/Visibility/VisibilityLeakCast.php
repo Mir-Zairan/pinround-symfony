@@ -167,6 +167,30 @@ abstract class VisibilityLeakCast extends KernelTestCase
         return self::transactions()->rolledBackAs(self::VIEWERS[$viewer][1], static fn (): mixed => $work(self::tokenOf($viewer)));
     }
 
+    /**
+     * Stores an open question as Conversation asks one, in the transaction under Acme Foods that is open: NotifyRecipients
+     * writes a question row only while its question is open. cnv_message allows one open question per ticket.
+     */
+    protected static function addOpenQuestion(string $ticketId, string $questionId, string $askedViewer, string $askingViewer, string $askedAt): void
+    {
+        self::connection()->executeStatement(
+            "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, created_at) VALUES (?, ?, ?, ?, 'question', ?, ?, ?)",
+            [self::ACME_FOODS, $questionId, $ticketId, self::VIEWERS[$askingViewer][0], self::VIEWERS[$askedViewer][0], 'Can you check this?', $askedAt],
+        );
+    }
+
+    /**
+     * Stores a comment as Conversation posts one, in the transaction under Acme Foods that is open: NotifyRecipients
+     * writes a reply row only while the message replied to is present.
+     */
+    protected static function addComment(string $ticketId, string $commentId, string $authorViewer, string $postedAt): void
+    {
+        self::connection()->executeStatement(
+            "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, body, created_at) VALUES (?, ?, ?, ?, 'comment', ?, ?)",
+            [self::ACME_FOODS, $commentId, $ticketId, self::VIEWERS[$authorViewer][0], 'The cart total looks off.', $postedAt],
+        );
+    }
+
     protected static function connection(): Connection
     {
         return self::entityManager()->getConnection();

@@ -12,6 +12,29 @@
 	frankenphp
 }
 
+# The one built-in hub, on the plain-HTTP address the workers publish to over the compose network (compose.yaml's
+# MERCURE_URL). Caddy runs each listening port as its own server with its own copy of a site's handlers, and refuses
+# a second unnamed hub, while a named one would be a second hub no browser listens to; so browsers reach this same hub
+# through SERVER_NAME's proxy below.
+http://{$MERCURE_INTERNAL_HOST:app}:80 {
+	mercure {
+		# The `aud` every token must carry. Unpinned, the hub would expect the URL each request reached, which is
+		# http://app here for both workers and the proxied browsers. No default: an unset value stops Caddy from starting.
+		resource_identifier {$MERCURE_PUBLIC_URL}
+		issuer {$MERCURE_TRUSTED_ISSUERS:https://localhost} {
+			publisher {
+				jwt {env.MERCURE_PUBLISHER_JWT_KEY} {env.MERCURE_PUBLISHER_JWT_ALG}
+			}
+			subscriber {
+				jwt {env.MERCURE_SUBSCRIBER_JWT_KEY} {env.MERCURE_SUBSCRIBER_JWT_ALG}
+			}
+		}
+	}
+	# Only the hub: the app itself stays behind SERVER_NAME's HTTPS.
+	respond 404
+}
+
+# One host name: the Dockerfile healthcheck connects to it.
 {$SERVER_NAME:localhost} {
 	# No `log` directive on purpose: Caddy writes no access log, so no request URI (the tickets list's ?q= holds search
 	# words, ADR-0027) reaches one. A `log` added here must drop it, for example with
@@ -26,15 +49,10 @@
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
 
-	mercure {
-		issuer {$MERCURE_TRUSTED_ISSUERS:https://localhost} {
-			publisher {
-				jwt {env.MERCURE_PUBLISHER_JWT_KEY} {env.MERCURE_PUBLISHER_JWT_ALG}
-			}
-			subscriber {
-				jwt {env.MERCURE_SUBSCRIBER_JWT_KEY} {env.MERCURE_SUBSCRIBER_JWT_ALG}
-			}
-		}
+	# Browsers subscribe here (MERCURE_PUBLIC_URL); the subscriber cookie is scoped to this path. Caddy streams
+	# text/event-stream answers through without buffering.
+	reverse_proxy /.well-known/mercure* 127.0.0.1:80 {
+		header_up Host {$MERCURE_INTERNAL_HOST:app}
 	}
 
 	php_server {

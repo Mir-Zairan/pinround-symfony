@@ -79,6 +79,7 @@ final class LoginConfigTest extends TestCase
                 'cookie_httponly' => true,
                 'cookie_samesite' => 'lax',
                 'cookie_path' => '/',
+                'metadata_update_threshold' => 120,
             ],
             self::at($framework, 'framework', 'session'),
         );
@@ -121,7 +122,7 @@ final class LoginConfigTest extends TestCase
     }
 
     #[Test]
-    public function theLoginPasswordResetPasswordChangeAndTwoStepCodeCountersLiveOnTheStateValkeyInEveryEnvironment(): void
+    public function theLoginPasswordResetPasswordChangeTwoStepCodeAndUploadBeginCountersLiveOnTheStateValkeyInEveryEnvironment(): void
     {
         $rateLimiter = self::config('packages/rate_limiter.yaml');
 
@@ -133,6 +134,7 @@ final class LoginConfigTest extends TestCase
                 'password_reset_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '%identity.password_reset_per_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'password_change_per_user' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.password_change_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'two_step_code_per_user' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.two_step_code_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'media_upload_begin_per_user' => ['policy' => 'fixed_window', 'limit' => 60, 'interval' => '%media.upload_begin_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
             ],
             self::at($rateLimiter, 'framework', 'rate_limiter'),
         );
@@ -144,6 +146,7 @@ final class LoginConfigTest extends TestCase
                 'identity.password_reset_per_ip_minutes' => 60,
                 'identity.password_change_per_user_minutes' => 15,
                 'identity.two_step_code_per_user_minutes' => 15,
+                'media.upload_begin_per_user_minutes' => 1,
             ],
             self::at($rateLimiter, 'parameters'),
         );

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <!-- The where clauses are written as PostgreSQL prints them back, so the schema diff finds them equal. -->
+    <entity name="App\Conversation\Domain\Message" table="cnv_message">
+        <indexes>
+            <index name="cnv_message_ticket_id_created_at_id_idx" columns="organization_id,ticket_id,created_at,id"/>
+            <index name="cnv_message_to_user_id_open_question_idx" columns="organization_id,to_user_id">
+                <options>
+                    <option name="where">((kind = 'question'::text) AND (resolved_at IS NULL) AND (removed_at IS NULL))</option>
+                </options>
+            </index>
+        </indexes>
+        <unique-constraints>
+            <unique-constraint name="cnv_message_ticket_id_open_question_key" columns="organization_id,ticket_id">
+                <options>
+                    <option name="where">((kind = 'question'::text) AND (resolved_at IS NULL) AND (removed_at IS NULL))</option>
+                </options>
+            </unique-constraint>
+        </unique-constraints>
+
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
+
+        <field name="ticketId" type="guid" column="ticket_id"/>
+        <field name="authorId" type="guid" column="author_id"/>
+        <field name="kind" type="text" column="kind" enum-type="App\Conversation\Domain\MessageKind"/>
+        <field name="toUserId" type="guid" column="to_user_id" nullable="true"/>
+        <field name="body" type="text" column="body"/>
+        <field name="resolvedAt" type="datetimetz_immutable" column="resolved_at" nullable="true"/>
+        <field name="resolvedBy" type="guid" column="resolved_by" nullable="true"/>
+        <field name="editedAt" type="datetimetz_immutable" column="edited_at" nullable="true"/>
+        <field name="removedAt" type="datetimetz_immutable" column="removed_at" nullable="true"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+    </entity>
+</doctrine-mapping>

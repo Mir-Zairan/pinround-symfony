@@ -108,7 +108,7 @@ a.seg {
   font-weight: 500;
 }
 
-.chip:hover {
+.chip:hover:not(:disabled, [aria-disabled="true"], [aria-pressed="true"]) {
   background: var(--s-high);
 }
 
@@ -293,6 +293,38 @@ a.seg {
 /* The toast controller writes the text a moment after the page shows; no empty pill until then. */
 .toast:empty {
   display: none;
+}
+
+/* LiveUpdates' "Updates paused" banner, above the page it follows; its top margin is main's top padding (.page). No
+   display here, so its hidden attribute hides it. */
+.live-updates__paused {
+  margin: var(--space-28) 0 0;
+  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-input);
+  background: var(--waiting-container);
+  color: var(--on-waiting-container);
+  font-size: 14px;
+}
+
+.live-updates__reload {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* A multi-line text field: the thread's composer and edit forms, the ping sheet's message. */
+.text-field {
+  display: block;
+  width: 100%;
+  min-height: 88px;
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .dialog {

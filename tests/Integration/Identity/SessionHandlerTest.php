@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Identity;
 
+use App\SharedKernel\Infrastructure\Http\BackgroundReadOnlySessionHandler;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
-use Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler;
 
 /**
- * The session handler dev and prod use (LoginConfigTest pins its definition), on the tests' state Valkey.
+ * The session handler dev and prod use (LoginConfigTest pins its definition), on the tests' state Valkey, outside any
+ * request, where it writes as RedisSessionHandler does (BackgroundReadOnlySessionHandlerTest covers background requests).
  */
 final class SessionHandlerTest extends KernelTestCase
 {
@@ -17,7 +18,7 @@ final class SessionHandlerTest extends KernelTestCase
     public function aSessionRoundTripsThroughTheStateValkeyUnderTheSessionPrefix(): void
     {
         $handler = self::getContainer()->get('test.session_handler');
-        self::assertInstanceOf(RedisSessionHandler::class, $handler);
+        self::assertInstanceOf(BackgroundReadOnlySessionHandler::class, $handler);
         $connection = self::getContainer()->get('state_valkey.connection');
         $sessionId = bin2hex(random_bytes(16));
 
@@ -35,7 +36,7 @@ final class SessionHandlerTest extends KernelTestCase
     public function aSessionKeyLivesEightHoursFromItsLastWriteOrTouch(): void
     {
         $handler = self::getContainer()->get('test.session_handler');
-        self::assertInstanceOf(RedisSessionHandler::class, $handler);
+        self::assertInstanceOf(BackgroundReadOnlySessionHandler::class, $handler);
         $connection = self::getContainer()->get('state_valkey.connection');
         $sessionId = bin2hex(random_bytes(16));
         $key = 'session:'.$sessionId;

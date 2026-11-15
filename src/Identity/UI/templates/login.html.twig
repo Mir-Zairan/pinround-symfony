@@ -14,7 +14,7 @@
         <twig:Card tag="section" class="login__card" aria-labelledby="login-title">
             <p class="logo">{{ block('logo', '@Web/base.html.twig') }}</p>
             <h1 class="login__title" id="login-title">Log in</h1>
-            {% for notice in app.flashes('notice') %}
+            {% for notice in page_flashes('notice') %}
                 <p class="login__notice" role="status">{{ notice }}</p>
             {% endfor %}
             {% if errorMessage %}

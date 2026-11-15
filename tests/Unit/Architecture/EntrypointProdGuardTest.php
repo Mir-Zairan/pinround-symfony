@@ -30,7 +30,7 @@ final class EntrypointProdGuardTest extends TestCase
      */
     public static function guardedVariables(): iterable
     {
-        foreach (['APP_SECRET', 'MERCURE_PUBLISHER_JWT_KEY', 'MERCURE_SUBSCRIBER_JWT_KEY', 'FIELD_ENCRYPTION_KEYS', 'FIELD_ENCRYPTION_CURRENT_KEY_ID'] as $name) {
+        foreach (['APP_SECRET', 'MERCURE_PUBLISHER_JWT_KEY', 'MERCURE_SUBSCRIBER_JWT_KEY', 'FIELD_ENCRYPTION_KEYS', 'FIELD_ENCRYPTION_CURRENT_KEY_ID', 'OBJECT_STORAGE_SECRET_ACCESS_KEY'] as $name) {
             yield $name => [$name];
         }
     }
@@ -83,6 +83,13 @@ final class EntrypointProdGuardTest extends TestCase
     public function prodRefusesTheCommittedAppSecret(string $envFile): void
     {
         self::assertRefused('APP_SECRET', ['APP_SECRET' => self::committedValueOf($envFile, 'APP_SECRET')] + self::realProdEnvironment());
+    }
+
+    #[Test]
+    #[DataProvider('committedEnvFiles')]
+    public function prodRefusesTheCommittedObjectStorageSecret(string $envFile): void
+    {
+        self::assertRefused('OBJECT_STORAGE_SECRET_ACCESS_KEY', ['OBJECT_STORAGE_SECRET_ACCESS_KEY' => self::committedValueOf($envFile, 'OBJECT_STORAGE_SECRET_ACCESS_KEY')] + self::realProdEnvironment());
     }
 
     /**
@@ -165,6 +172,7 @@ final class EntrypointProdGuardTest extends TestCase
             'MERCURE_SUBSCRIBER_JWT_KEY' => 'a-real-subscriber-key',
             'FIELD_ENCRYPTION_KEYS' => self::REAL_FIELD_KEYS,
             'FIELD_ENCRYPTION_CURRENT_KEY_ID' => 'prod-2026-11',
+            'OBJECT_STORAGE_SECRET_ACCESS_KEY' => 'a-real-object-storage-secret',
         ];
     }
 

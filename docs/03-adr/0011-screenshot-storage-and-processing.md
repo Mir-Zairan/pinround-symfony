@@ -17,6 +17,8 @@ Screenshots go straight from the browser to a private S3-compatible bucket, are 
 
 Accepted · 2026-11-06 · Deciders: Zairan Mir (lead).
 
+Superseded in part by [ADR-0041](0041-sign-page-images-at-render-time.md) (how pages read images).
+
 ## Context and problem statement
 
 Mia adds a 4 MB screenshot to a report and drops two pins on it. Omar adds six more

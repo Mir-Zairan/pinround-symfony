@@ -14,9 +14,10 @@ doctrine:
         wrapper_class: &connection_class App\SharedKernel\Infrastructure\Doctrine\CloseOnFailedBeginConnection
         # Tables no entity maps, built by hand-written migrations, that doctrine:migrations:diff would otherwise drop:
         # processed_message, idn_login_attempt, web_home_focus, wf_rule_set (DbalRuleSets; no primary key, so no entity), ins_ticket_turn (DbalTurnProjector), ins_project_counts and ins_project_count_ticket (DbalProjectCountsProjector),
-        # tkt_summary (filled in P08), and aud_event and tkt_ticket_event with their monthly partitions aud_event_YYYYMM and tkt_ticket_event_YYYYMM
-        # (data-model.md, Partitions and retention). The Messenger tables stay visible: Messenger adds them to the expected schema, so diff checks them.
-        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|web_home_focus|wf_rule_set|ins_ticket_turn|ins_project_counts|ins_project_count_ticket|tkt_summary|aud_event(?:_\d{6})?|tkt_ticket_event(?:_\d{6})?)$)~'
+        # tkt_summary (filled in P08), ntf_mute and ntf_delivery, rvw_round, rvw_screenshot and rvw_pin (DbalRounds), and aud_event, tkt_ticket_event and ntf_notification with their monthly partitions
+        # aud_event_YYYYMM, tkt_ticket_event_YYYYMM and ntf_notification_YYYYMM (data-model.md, Partitions and retention).
+        # The Messenger tables stay visible: Messenger adds them to the expected schema, so diff checks them.
+        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|web_home_focus|wf_rule_set|ins_ticket_turn|ins_project_counts|ins_project_count_ticket|tkt_summary|ntf_mute|ntf_delivery|rvw_round|rvw_screenshot|rvw_pin|aud_event(?:_\d{6})?|tkt_ticket_event(?:_\d{6})?|ntf_notification(?:_\d{6})?)$)~'
 
         profiling_collect_backtrace: '%kernel.debug%'
         types:
@@ -44,10 +45,25 @@ doctrine:
                 dir: '%kernel.project_dir%/src/Ticketing/Infrastructure/Doctrine/Mapping'
                 prefix: 'App\Ticketing\Domain'
                 is_bundle: false
+            Conversation:
+                type: xml
+                dir: '%kernel.project_dir%/src/Conversation/Infrastructure/Doctrine/Mapping'
+                prefix: 'App\Conversation\Domain'
+                is_bundle: false
+            Notification:
+                type: xml
+                dir: '%kernel.project_dir%/src/Notification/Infrastructure/Doctrine/Mapping'
+                prefix: 'App\Notification\Domain'
+                is_bundle: false
             Workflow:
                 type: xml
                 dir: '%kernel.project_dir%/src/Workflow/Infrastructure/Doctrine/Mapping'
                 prefix: 'App\Workflow\Domain'
+                is_bundle: false
+            Media:
+                type: xml
+                dir: '%kernel.project_dir%/src/Media/Infrastructure/Doctrine/Mapping'
+                prefix: 'App\Media\Domain'
                 is_bundle: false
         # A result cache that never stores anything, in every environment: TenantFilter's SQL holds no organization
         # id, so a result cache key would not tell organizations apart and could serve one organization's rows to

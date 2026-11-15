@@ -51,4 +51,64 @@ final readonly class DbalUserQueries implements UserQueries
 
         return $users;
     }
+
+    public function timeZonesOf(array $userIds): array
+    {
+        if (\count($userIds) > self::MAX_TIME_ZONE_USER_IDS) {
+            throw new \InvalidArgumentException(\sprintf('Ask for the time zones of at most %d people at once.', self::MAX_TIME_ZONE_USER_IDS));
+        }
+        if ([] === $userIds) {
+            return [];
+        }
+
+        $rows = $this->connection->fetchAllAssociative(
+            'SELECT id, time_zone FROM idn_user WHERE id = ANY(?::uuid[]) ORDER BY id',
+            ['{'.implode(',', array_map(static fn (UserId $userId): string => $userId->toString(), $userIds)).'}'],
+        );
+        $zones = [];
+        foreach ($rows as $row) {
+            if (!\is_string($row['id']) || !\is_string($row['time_zone'])) {
+                throw new \LogicException('A user id or time zone from the database is not a string.');
+            }
+            $zones[$row['id']] = self::timeZoneOrUtc($row['time_zone']);
+        }
+
+        return $zones;
+    }
+
+    public function emailsOf(array $userIds): array
+    {
+        if (\count($userIds) > self::MAX_EMAIL_USER_IDS) {
+            throw new \InvalidArgumentException(\sprintf('Ask for the email addresses of at most %d people at once.', self::MAX_EMAIL_USER_IDS));
+        }
+        if ([] === $userIds) {
+            return [];
+        }
+
+        $rows = $this->connection->fetchAllAssociative(
+            "SELECT id, email FROM idn_user WHERE id = ANY(?::uuid[]) AND status = 'active' ORDER BY id",
+            ['{'.implode(',', array_map(static fn (UserId $userId): string => $userId->toString(), $userIds)).'}'],
+        );
+        $emails = [];
+        foreach ($rows as $row) {
+            if (!\is_string($row['id']) || !\is_string($row['email'])) {
+                throw new \LogicException('A user id or email from the database is not a string.');
+            }
+            $emails[$row['id']] = $row['email'];
+        }
+
+        return $emails;
+    }
+
+    /**
+     * User only stores zones PHP knows, but a zone can leave PHP's list in a later tzdata release.
+     */
+    private static function timeZoneOrUtc(string $name): \DateTimeZone
+    {
+        try {
+            return new \DateTimeZone($name);
+        } catch (\DateInvalidTimeZoneException) {
+            return new \DateTimeZone('UTC');
+        }
+    }
 }

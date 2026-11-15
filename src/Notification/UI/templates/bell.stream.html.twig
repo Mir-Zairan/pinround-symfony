@@ -1,0 +1,5 @@
+{#- The bell after a change: the badge and the popover's body from bell (BellView) and isAutoClearOn, and, when toast is given, the
+    page's toast. -#}
+<turbo-stream action="replace" target="bell-badge"><template>{{ include('@Notification/_bell_badge.html.twig', {openCount: bell.openCount}) }}</template></turbo-stream>
+<turbo-stream action="replace" target="bell-popover-body"><template>{{ component('BellPopover', {bell: bell, isAutoClearOn: isAutoClearOn}) }}</template></turbo-stream>
+{% if toast is defined %}{{ include('@Web/_toast_stream.html.twig', {message: toast}) }}{% endif %}

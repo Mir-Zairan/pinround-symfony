@@ -1,0 +1,493 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Functional\Notification;
+
+use App\Identity\Domain\User;
+use App\Notification\UI\Controller\BellController;
+use App\Organization\UI\Voter\OrganizationVoter;
+use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
+use App\Tests\Functional\Identity\LogsInUsers;
+use App\Tests\Functional\Web\CreatesTeams;
+use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Tests\Integration\Ticketing\TicketRows;
+use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bundle\FrameworkBundle\KernelBrowser;
+use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Component\Security\Core\Authorization\Voter\Vote;
+use Symfony\Component\Security\Core\Authorization\Voter\Voter;
+use Symfony\Component\Uid\Uuid;
+use Zenstruck\Foundry\Test\Factories;
+
+/**
+ * The bell's popover, Done and Open (BellController) through the real firewall, voters, session and request
+ * transaction, over HTTPS, for Omar in Acme Foods. His bell has three pings from Lena about SHOP-1 and a question from
+ * Mia about SHOP-2; next to them sit rows it must leave out: a ping from Lena he already marked done, and a ping from
+ * Lena to Mia about SHOP-2, which is Mia's group, not his.
+ */
+final class BellTest extends WebTestCase
+{
+    use CreatesTeams;
+    use Factories;
+    use IssuesCsrfTokens;
+    use LogsInUsers {
+        tearDown as private removeUsersAndOrganizations;
+    }
+
+    private const string STREAM_MEDIA_TYPE = 'text/vnd.turbo-stream.html';
+    private const string NEWEST_PING_TEXT = 'Could you look at the checkout button?';
+    private const string GROUPED = 'Grouped by person and ticket.';
+    private const string GROUPED_WITH_AUTO_CLEAR = 'Grouped by person and ticket. A ping clears itself when you act on that ticket.';
+
+    private MockClock $clock;
+    private User $omar;
+    private User $lena;
+    private User $mia;
+    private OrganizationId $acmeFoods;
+    private string $shop1;
+    private string $shop2;
+    private string $lenaToMia;
+
+    /** @var array<string, string> the seeded notifications' ids by what they are */
+    private array $rowIds = [];
+
+    protected function tearDown(): void
+    {
+        $this->ticketRows()->removeAllOf(...$this->createdOrganizationIds);
+        $this->removeUsersAndOrganizations();
+    }
+
+    #[Test]
+    public function thePopoverShowsOmarsGroupsLargestFirstWithTheirCountAndAge(): void
+    {
+        $client = $this->omarsClient();
+
+        $frame = $client->request('GET', '/bell');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $frame->filter('turbo-frame#bell-frame #bell-popover-body'));
+        self::assertSame('Pings · 4 open', $frame->filter('#bell-popover-title')->text());
+        self::assertSame(['Lena 3 pings · 5 min ago', 'Mia asked you · 3 h ago'], $frame->filter('.ping-card__line')->each(static fn (Crawler $line): string => $line->text()));
+        self::assertSame(['“'.self::NEWEST_PING_TEXT.'”'], $frame->filter('.ping-card__text')->each(static fn (Crawler $text): string => $text->text()));
+        self::assertSame(['SHOP-1', 'SHOP-2'], $frame->filter('.ping-card__key')->each(static fn (Crawler $key): string => $key->text()));
+        self::assertSame(['Done', 'Open', 'Done', 'Open'], $frame->filter('.ping-card button')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame(['_top'], array_values(array_unique($frame->filter('form[action$="/open"]')->each(static fn (Crawler $form): string => (string) $form->attr('data-turbo-frame')))));
+    }
+
+    #[Test]
+    public function thePopoverSaysAPingClearsItselfWhenAutoClearIsOn(): void
+    {
+        $client = $this->omarsClient();
+        $this->storeAutoClear(true);
+
+        $frame = $client->request('GET', '/bell');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(self::GROUPED_WITH_AUTO_CLEAR, $frame->filter('#bell-popover-body .bell-popover__muted')->text());
+    }
+
+    #[Test]
+    public function thePopoverAndItsDoneStreamLeaveOutTheAutoClearSentenceWhenAutoClearIsOff(): void
+    {
+        $client = $this->omarsClient();
+        $this->storeAutoClear(false);
+
+        $frame = $client->request('GET', '/bell');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(self::GROUPED, $frame->filter('#bell-popover-body .bell-popover__muted')->text());
+
+        $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)], server: ['HTTP_ACCEPT' => self::STREAM_MEDIA_TYPE.', text/html']);
+
+        self::assertResponseStatusCodeSame(200);
+        $stream = new Crawler((string) $client->getResponse()->getContent());
+        $popover = new Crawler($stream->filter('turbo-stream[target="bell-popover-body"] template')->html());
+        self::assertSame(self::GROUPED, $popover->filter('.bell-popover__muted')->text());
+    }
+
+    #[Test]
+    public function aPersonWithNoOpenNotificationsIsToldSo(): void
+    {
+        $client = $this->omarsClient();
+        $this->logIn($client, $this->lena);
+
+        $frame = $client->request('GET', '/bell');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Pings · 0 open', $frame->filter('#bell-popover-title')->text());
+        self::assertSame('No open pings.', $frame->filter('.bell-popover__empty')->text());
+        self::assertCount(0, $frame->filter('.ping-card'));
+    }
+
+    #[Test]
+    public function doneFromThePopoverMarksTheGroupDoneAndAnswersWithTheBadgeThePopoverAndTheToast(): void
+    {
+        $client = $this->omarsClient();
+        $rowsBefore = $this->rows();
+
+        $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)], server: ['HTTP_ACCEPT' => self::STREAM_MEDIA_TYPE.', text/html']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertResponseHeaderSame('Content-Type', self::STREAM_MEDIA_TYPE.'; charset=UTF-8');
+        $stream = new Crawler((string) $client->getResponse()->getContent());
+        $badge = new Crawler($stream->filter('turbo-stream[target="bell-badge"] template')->html());
+        self::assertSame('1', $badge->filter('#bell-badge .bell__badge')->text());
+        self::assertSame('1 open', $badge->filter('#bell-badge .visually-hidden')->text());
+        $popover = new Crawler($stream->filter('turbo-stream[target="bell-popover-body"] template')->html());
+        self::assertSame('Pings · 1 open', $popover->filter('#bell-popover-title')->text());
+        self::assertSame(self::GROUPED_WITH_AUTO_CLEAR, $popover->filter('.bell-popover__muted')->text());
+        self::assertSame(['Mia asked you · 3 h ago'], $popover->filter('.ping-card__line')->each(static fn (Crawler $line): string => $line->text()));
+        self::assertStringContainsString('data-toast-message-value="Marked done."', $stream->filter('turbo-stream[target="toast-region"]')->html());
+        self::assertSame(self::marked($rowsBefore, 'done', 'Lena to Omar on SHOP-1 at 50 min', 'Lena to Omar on SHOP-1 at 20 min', 'Lena to Omar on SHOP-1 at 5 min'), $this->rows());
+    }
+
+    #[Test]
+    public function doneFromAPlainFormGoesHomeWithTheToastAndTheHeaderBadgeDrops(): void
+    {
+        $client = $this->omarsClient();
+        $this->createTeam($this->acmeFoods, 'Shop', $this->omar);
+
+        $home = $client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('4', $home->filter('header .bell__trigger .bell__badge')->text());
+        self::assertSame('4 open', $home->filter('header #bell-badge .visually-hidden')->text());
+
+        $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
+
+        self::assertResponseRedirects('/', 303);
+        $home = $client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Marked done.', $home->filter('#toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+        self::assertSame('1', $home->filter('header .bell__trigger .bell__badge')->text());
+    }
+
+    #[Test]
+    public function openMarksTheGroupReadAndGoesToTheTicket(): void
+    {
+        $client = $this->omarsClient();
+        $rowsBefore = $this->rows();
+
+        $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'open'), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
+
+        self::assertResponseRedirects('/t/SHOP-1', 303);
+        self::assertSame(self::marked($rowsBefore, 'read', 'Lena to Omar on SHOP-1 at 50 min', 'Lena to Omar on SHOP-1 at 20 min', 'Lena to Omar on SHOP-1 at 5 min'), $this->rows());
+    }
+
+    #[Test]
+    public function anotherPersonsGroupIsNotFoundAndStaysOpen(): void
+    {
+        $client = $this->omarsClient();
+        $rowsBefore = $this->rows();
+        self::assertSame(['read' => false, 'done' => false], $rowsBefore['Lena to Mia on SHOP-2']);
+
+        // Lena's ping about SHOP-2 went to Mia; Omar has nothing from Lena about SHOP-2.
+        foreach (['done', 'open'] as $action) {
+            $client->request('POST', $this->groupUrl($this->lena, $this->shop2, $action), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
+            self::assertResponseStatusCodeSame(404, $action);
+            self::assertStringContainsString(BellController::GROUP_NOT_FOUND, (string) $client->getResponse()->getContent(), $action);
+        }
+
+        self::assertSame($rowsBefore, $this->rows());
+    }
+
+    #[Test]
+    public function aGroupAboutATicketOmarCanNoLongerSeeIsNotFoundAndStaysOpen(): void
+    {
+        $client = $this->omarsClient();
+        $this->hideFromOmar($this->shop1);
+        $rowsBefore = $this->rows();
+        self::assertSame(['read' => false, 'done' => false], $rowsBefore['Lena to Omar on SHOP-1 at 5 min']);
+
+        foreach (['done', 'open'] as $action) {
+            $client->request('POST', $this->groupUrl($this->lena, $this->shop1, $action), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
+            self::assertResponseStatusCodeSame(404, $action);
+            self::assertStringContainsString(BellController::GROUP_NOT_FOUND, (string) $client->getResponse()->getContent(), $action);
+        }
+
+        self::assertSame($rowsBefore, $this->rows());
+    }
+
+    #[Test]
+    public function aSecondDoneOfTheSameGroupIsNotFound(): void
+    {
+        $client = $this->omarsClient();
+        $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
+        self::assertResponseRedirects('/', 303);
+        $rowsAfterFirstDone = $this->rows();
+
+        $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(BellController::GROUP_NOT_FOUND, (string) $client->getResponse()->getContent());
+        self::assertSame($rowsAfterFirstDone, $this->rows());
+    }
+
+    #[Test]
+    public function aMalformedIdIsNotFound(): void
+    {
+        $client = $this->omarsClient();
+        $rowsBefore = $this->rows();
+
+        foreach (['/bell/not-an-id/'.$this->shop1.'/done', '/bell/'.$this->lena->id()->toString().'/not-an-id/open'] as $url) {
+            $client->request('POST', $url, [BellController::CSRF_FIELD => $this->csrfToken($client)]);
+            self::assertResponseStatusCodeSame(404, $url);
+            self::assertStringContainsString(BellController::GROUP_NOT_FOUND, (string) $client->getResponse()->getContent(), $url);
+        }
+
+        self::assertSame($rowsBefore, $this->rows());
+    }
+
+    #[Test]
+    public function aPostWithoutAValidCsrfTokenChangesNothing(): void
+    {
+        $client = $this->omarsClient();
+        $rowsBefore = $this->rows();
+
+        foreach (['done', 'open'] as $action) {
+            foreach ([[], [BellController::CSRF_FIELD => 'forged']] as $csrf) {
+                $client->request('POST', $this->groupUrl($this->lena, $this->shop1, $action), $csrf);
+                self::assertResponseStatusCodeSame(422, $action);
+                self::assertSame(BellController::FORM_EXPIRED, $client->getResponse()->getContent(), $action);
+            }
+        }
+
+        self::assertSame($rowsBefore, $this->rows());
+    }
+
+    #[Test]
+    public function everyBellRequestIsRefusedWhenTheOrganizationVoterDenies(): void
+    {
+        $client = $this->omarsClient();
+        $csrfToken = $this->csrfToken($client);
+        $rowsBefore = $this->rows();
+        $this->replaceOrganizationVoter();
+
+        $client->request('GET', '/bell');
+        self::assertResponseStatusCodeSame(403);
+        foreach (['done', 'open'] as $action) {
+            $client->request('POST', $this->groupUrl($this->lena, $this->shop1, $action), [BellController::CSRF_FIELD => $csrfToken]);
+            self::assertResponseStatusCodeSame(403, $action);
+        }
+
+        self::assertSame($rowsBefore, $this->rows());
+    }
+
+    #[Test]
+    public function anAnonymousVisitorIsSentToTheLoginPage(): void
+    {
+        $client = self::createClient([], ['HTTPS' => 'on', 'REMOTE_ADDR' => self::randomIp()]);
+
+        $client->request('GET', '/bell');
+
+        self::assertResponseRedirects('/login', 302);
+    }
+
+    /**
+     * Omar logged in on a client that keeps its kernel, with the clock frozen on a day before today, so an age counted
+     * from the wall clock comes out in days, not minutes.
+     */
+    private function omarsClient(): KernelBrowser
+    {
+        $client = self::createClient([], ['HTTPS' => 'on', 'REMOTE_ADDR' => self::randomIp()]);
+        $client->disableReboot();
+        $this->clock = new MockClock(new \DateTimeImmutable('2026-11-05 12:00:00 UTC'));
+        self::getContainer()->set('clock', $this->clock);
+        $this->omar = $this->createUserWithPassword('Omar Haddad');
+        $this->acmeFoods = new OrganizationId($this->createdOrganizationIds[0]);
+        $this->lena = $this->memberOfAcmeFoods('Lena Berg');
+        $this->mia = $this->memberOfAcmeFoods('Mia Novak');
+        $this->seedBells();
+        $this->logIn($client, $this->omar);
+
+        return $client;
+    }
+
+    private function memberOfAcmeFoods(string $name): User
+    {
+        $user = $this->createUserWithoutOrganization($name);
+        $this->addMembership($user, $this->acmeFoods);
+
+        return $user;
+    }
+
+    private function seedBells(): void
+    {
+        $this->shop1 = Uuid::v7()->toRfc4122();
+        $this->shop2 = Uuid::v7()->toRfc4122();
+        $projectId = Uuid::v7()->toRfc4122();
+        $ticketRows = $this->ticketRows();
+        $ticketRows->addOf($this->acmeFoods->toString(), $this->shop1, $projectId, $this->lena->id()->toString(), 1);
+        $ticketRows->addOf($this->acmeFoods->toString(), $this->shop2, $projectId, $this->lena->id()->toString(), 2);
+
+        $newestPingId = Uuid::v7()->toRfc4122();
+        $this->lenaToMia = Uuid::v7()->toRfc4122();
+        $rows = [
+            'Lena to Omar on SHOP-1 at 50 min' => $this->notification($this->lena, $this->omar, $this->shop1, 'ping', 50 * 60),
+            'Lena to Omar on SHOP-1 at 20 min' => $this->notification($this->lena, $this->omar, $this->shop1, 'ping', 20 * 60),
+            'Lena to Omar on SHOP-1 at 5 min' => $this->notification($this->lena, $this->omar, $this->shop1, 'ping', 5 * 60, ['pingId' => $newestPingId]),
+            'Lena to Omar on SHOP-1, done' => [...$this->notification($this->lena, $this->omar, $this->shop1, 'ping', 60), 'done_at' => $this->secondsAgo(30)],
+            'Mia to Omar on SHOP-2' => $this->notification($this->mia, $this->omar, $this->shop2, 'question', 3 * 3600 + 120),
+            'Lena to Mia on SHOP-2' => [...$this->notification($this->lena, $this->mia, $this->shop2, 'ping', 2 * 60), 'id' => $this->lenaToMia],
+        ];
+        $this->rowIds = array_map(static fn (array $row): string => $row['id'], $rows);
+        $ping = [
+            'organization_id' => $this->acmeFoods->toString(),
+            'id' => $newestPingId,
+            'ticket_id' => $this->shop1,
+            'from_id' => $this->lena->id()->toString(),
+            'to_id' => $this->omar->id()->toString(),
+            'body' => self::NEWEST_PING_TEXT,
+            'created_at' => $this->secondsAgo(5 * 60),
+        ];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($rows, $ping): int {
+            $migrator->insert('ntf_ping', $ping);
+            foreach ($rows as $row) {
+                $migrator->insert('ntf_notification', $row);
+            }
+
+            return \count($rows);
+        });
+    }
+
+    private function storeAutoClear(bool $isAutoClearOn): void
+    {
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO org_settings (organization_id, data, created_at) VALUES (?, jsonb_build_object('auto_clear', ?::boolean), TIMESTAMPTZ '2026-11-01 08:00:00+00')
+             ON CONFLICT (organization_id) DO UPDATE SET data = org_settings.data || EXCLUDED.data",
+            [$this->acmeFoods->toString(), $isAutoClearOn ? 'true' : 'false'],
+        ));
+    }
+
+    /**
+     * TicketRows switches the tenant, which the switch guard refuses while the entity manager holds the test's users or
+     * the last request left its tenant set; the users stay usable detached, as only their ids and names are read.
+     */
+    private function ticketRows(): TicketRows
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->reset();
+        self::getContainer()->get('doctrine.orm.default_entity_manager')->clear();
+
+        return new TicketRows($this->migrator(), $tenantContext);
+    }
+
+    /**
+     * @param array<string, string> $ids what it is about, as pingId
+     *
+     * @return array{id: string}&array<string, string>
+     */
+    private function notification(User $sender, User $recipient, string $ticketId, string $kind, int $secondsAgo, array $ids = []): array
+    {
+        return [
+            'organization_id' => $this->acmeFoods->toString(),
+            'id' => Uuid::v7()->toRfc4122(),
+            'user_id' => $recipient->id()->toString(),
+            'kind' => $kind,
+            'actor_id' => $sender->id()->toString(),
+            'ticket_id' => $ticketId,
+            'data' => json_encode(['actorName' => $sender->name(), 'ticketKey' => $ticketId === $this->shop1 ? 'SHOP-1' : 'SHOP-2', ...$ids], \JSON_THROW_ON_ERROR),
+            'created_at' => $this->secondsAgo($secondsAgo),
+        ];
+    }
+
+    private function secondsAgo(int $seconds): string
+    {
+        return $this->clock->now()->modify(\sprintf('-%d seconds', $seconds))->format('Y-m-d H:i:sP');
+    }
+
+    /**
+     * @return array<string, array{read: bool, done: bool}> whether each seeded notification is read and done, by what it is
+     */
+    private function rows(): array
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->reset();
+        $tenantContext->set($this->acmeFoods);
+        try {
+            $stored = $this->migrator()->transactional(fn (Connection $migrator): array => $migrator->fetchAllAssociativeIndexed(
+                'SELECT id, read_at IS NOT NULL AS read, done_at IS NOT NULL AS done FROM ntf_notification WHERE organization_id = ?',
+                [$this->acmeFoods->toString()],
+            ));
+        } finally {
+            $tenantContext->reset();
+        }
+        self::assertCount(\count($this->rowIds), $stored);
+        $states = [];
+        foreach ($this->rowIds as $name => $id) {
+            self::assertArrayHasKey($id, $stored);
+            $states[$name] = ['read' => true === $stored[$id]['read'], 'done' => true === $stored[$id]['done']];
+        }
+
+        return $states;
+    }
+
+    /**
+     * @param array<string, array{read: bool, done: bool}> $rows
+     * @param 'read'|'done'                                $state
+     *
+     * @return array<string, array{read: bool, done: bool}> the rows, with the named ones now also in that state
+     */
+    private static function marked(array $rows, string $state, string ...$names): array
+    {
+        self::assertSame([], array_values(array_diff($names, array_keys($rows))), 'Every named row is seeded.');
+        $marked = [];
+        foreach ($rows as $name => $row) {
+            $isNamed = \in_array($name, $names, true);
+            $marked[$name] = ['read' => $row['read'] || ($isNamed && 'read' === $state), 'done' => $row['done'] || ($isNamed && 'done' === $state)];
+        }
+
+        return $marked;
+    }
+
+    /**
+     * Moves the ticket into a team of Lena's that Omar is not in and makes it visible to that team only, as when Omar
+     * leaves the ticket's team; his notifications about it stay.
+     */
+    private function hideFromOmar(string $ticketId): void
+    {
+        $lenasTeam = $this->createTeam($this->acmeFoods, 'Payments', $this->lena);
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET visibility = 'team', team_id = ? WHERE id = ?",
+            [$lenasTeam->toString(), $ticketId],
+        ));
+    }
+
+    private function groupUrl(User $sender, string $ticketId, string $action): string
+    {
+        return \sprintf('/bell/%s/%s/%s', $sender->id()->toString(), $ticketId, $action);
+    }
+
+    private function csrfToken(KernelBrowser $client): string
+    {
+        return $this->csrfTokenFor($client, BellController::CSRF_ID);
+    }
+
+    /**
+     * Call it before the voter is built, on a client that keeps its kernel.
+     */
+    private function replaceOrganizationVoter(): void
+    {
+        self::getContainer()->set(OrganizationVoter::class, new class extends Voter {
+            protected function supports(string $attribute, mixed $subject): bool
+            {
+                return $subject instanceof OrganizationId;
+            }
+
+            protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
+            {
+                return false;
+            }
+        });
+    }
+
+    private static function randomIp(): string
+    {
+        return \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254));
+    }
+}

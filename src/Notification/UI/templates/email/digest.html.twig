@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{{ subject }}</title>
+</head>
+<body>
+    <p>Hello,</p>
+    <p>{{ subject }}:</p>
+    <ul>
+        {% for line in lines %}
+            <li>{{ line.actorName }} {{ line.action }} on <a href="{{ line.link }}">{{ line.ticketKey }}</a>: {{ line.label }}</li>
+        {% endfor %}
+    </ul>
+    {% if unlistedCount > 0 %}
+        <p>And {{ unlistedCount }} more in pinround.</p>
+    {% endif %}
+    <p>You get this email at most every 3 hours while things wait on you. <a href="{{ profileLink }}">Open your profile</a></p>
+</body>
+</html>

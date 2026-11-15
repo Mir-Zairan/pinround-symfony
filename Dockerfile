@@ -69,6 +69,8 @@ RUN composer dump-autoload --no-dev --classmap-authoritative \
        MESSENGER_TRANSPORT_DSN="in-memory://" \
        REDIS_CACHE_DSN="redis://localhost:6379" \
        DEFAULT_URI="http://localhost" \
+       MERCURE_URL="http://localhost/.well-known/mercure" \
+       MERCURE_PUBLIC_URL="http://localhost/.well-known/mercure" \
        composer run-script --no-dev post-install-cmd \
     && chmod +x bin/console \
     && php bin/console asset-map:compile
