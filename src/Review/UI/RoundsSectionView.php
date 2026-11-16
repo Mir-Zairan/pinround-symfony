@@ -20,6 +20,20 @@ final readonly class RoundsSectionView
     }
 
     /**
+     * Whether a card is the viewer's own unshared draft, so "Start a draft round" is not offered beside it.
+     */
+    public function hasPrivateDraft(): bool
+    {
+        foreach ($this->cards as $card) {
+            if ($card->isPrivateDraft) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * "3 older rounds are not shown." or "1 older round is not shown."; null when none was left out.
      */
     public function olderRoundsNote(): ?string

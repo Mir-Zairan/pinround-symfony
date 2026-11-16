@@ -28,6 +28,13 @@ final readonly class RoundCards
     public const string UNKNOWN_OWNER = 'a former member';
     public const string VARIANT = 'view';
 
+    /**
+     * The "For Claude Code" box of the viewer's own unshared draft: the line to give Claude Code, with the ticket's key,
+     * and the tools it will use (served in P09).
+     */
+    public const string CLAUDE_CODE_PROMPT = 'Read my pinround notes for %s and fix what is marked “Not right yet”.';
+    public const string CLAUDE_CODE_TOOLS_NOTE = 'Planned: pinround’s tool connection lets Claude Code read these notes and verdicts, and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict. Not built yet.';
+
     /** The pictures one card shows; a round may hold 50 screenshots, and the card says how many more it left out. */
     public const int MAX_PICTURES_PER_CARD = 10;
 
@@ -78,7 +85,7 @@ final readonly class RoundCards
         if (!$this->showsPictures($round)) {
             $title = self::CHECKLIST === $round->kind ? 'Checklist from the report' : 'Review';
 
-            return new RoundCard($domId, \sprintf('Round %d · %s · by %s', $round->number ?? 0, $title, $ownerName), null, false, [], true);
+            return new RoundCard($round->id, $domId, \sprintf('Round %d · %s · by %s', $round->number ?? 0, $title, $ownerName), null, false, [], true);
         }
 
         $screenshots = [];
@@ -98,15 +105,16 @@ final readonly class RoundCards
         $moreNote = 0 === $notShown ? null : (1 === $notShown ? '1 more screenshot is not shown.' : \sprintf('%d more screenshots are not shown.', $notShown));
 
         if (self::REPORT === $round->kind) {
-            return new RoundCard($domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false, $moreNote);
+            return new RoundCard($round->id, $domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false, $moreNote);
         }
         $status = [] === $round->screenshots ? null : \sprintf('%d of %d look right', $looksRightCount, \count($round->screenshots));
         $emptyNote = [] === $round->screenshots ? self::EMPTY_DRAFT_NOTE : null;
         if ($round->isUnsharedDraft()) {
-            return new RoundCard($domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
+            return new RoundCard($round->id, $domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
         }
 
         return new RoundCard(
+            $round->id,
             $domId,
             \sprintf('Round %d · self-check by %s', $round->number ?? 0, $ownerName),
             $status,

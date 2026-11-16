@@ -252,7 +252,7 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | My reports | `GET /my-reports` (`my_reports`) | Insight | Tracker cards grouped Needs you / Stuck / Moving / Done |
 | Round view (prototype "Review round" board) | `GET /t/{key}/rounds/{number}` | Review | Screenshot + PinLayer, before/after, verdicts |
 | Full-screen review (prototype "Review in full screen" board) | `GET /t/{key}/rounds/{number}/focus` | Review | Full-screen pin walker |
-| Draft round | part of the ticket page; `POST /t/{key}/draft…` | Review | `DraftRoundEditor` |
+| Draft round | part of the ticket page's Rounds frame (`GET /t/{key}/rounds`, `review_rounds`); `POST /t/{key}/rounds/draft` (`review_draft_start`), `POST /t/{key}/rounds/{id}/share` (`review_draft_share`), `POST /t/{key}/rounds/{id}/delete` (`review_draft_delete`), `DraftRoundController` | Review | the owner's draft card in `@Review/rounds_frame.html.twig` (PRIVATE tag, buttons, "For Claude Code" box); forms leave the frame (`_top`), a change redirects to `ticket_show#ticket-rounds` with its toast, a refusal is a 422 toast stream; `DraftRoundEditor` (adding pictures, pins, verdicts) is not built yet |
 | Team page | `GET /teams/{slug}` (`team_show`) | Web (reads Organization, Ticketing and Workflow) | Projects, "How work moves here", people with WorkloadBar |
 | Admin tabs | `GET /admin/{tab}` (`web_admin`), tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data; the menu's Admin item opens people | Web (+ owning module per tab) | Admin layout with tab list |
 | Manager "Teams at a glance" | part of `/` for managers | Insight | GroupBar per team |

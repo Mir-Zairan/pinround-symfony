@@ -478,3 +478,50 @@ textarea.screenshot-report__input {
   background: var(--error-container);
   color: var(--on-error-container);
 }
+
+/* The viewer's own unshared draft: its buttons and the "For Claude Code" box (DraftRoundController). */
+.round-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.round-card__form {
+  margin: 0;
+}
+
+.claude-code-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-12);
+  border-radius: var(--radius-input);
+  background: var(--s-c);
+}
+
+.claude-code-box__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.claude-code-box__line {
+  margin: 0;
+}
+
+/* One click selects the whole line, so it copies in one go. */
+.claude-code-box__prompt {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.claude-code-box__tools {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.rounds__start {
+  margin: var(--space-12) 0 0;
+}
