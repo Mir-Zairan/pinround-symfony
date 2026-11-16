@@ -50,6 +50,7 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
     private const string OMAR_DRAFT_ON_OTHER_TICKET = '0197a3c0-0000-7000-8000-0000000f5635';
     private const string BAKERY_DRAFT = '0197a3c0-0000-7000-8000-0000000f5636';
     private const string OMAR_EMPTY_DRAFT = '0197a3c0-0000-7000-8000-0000000f5637';
+    private const string OMAR_REPORT = '0197a3c0-0000-7000-8000-0000000f5638';
     private const string UNKNOWN_ROUND = '0197a3c0-0000-7000-8000-0000000f56ff';
     private const string THIRD_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5641';
     private const string FIRST_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5642';
@@ -75,6 +76,7 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
             [self::OMAR_DELETED_DRAFT, self::TICKET, null, 'draft', self::OMAR, null, 'closed', self::DELETED_AT],
             [self::OMAR_DRAFT_ON_OTHER_TICKET, self::OTHER_TICKET, null, 'draft', self::OMAR, null, 'open', null],
             [self::OMAR_EMPTY_DRAFT, self::EMPTY_DRAFT_TICKET, null, 'draft', self::OMAR, null, 'open', null],
+            [self::OMAR_REPORT, self::TICKET, 0, 'report', self::OMAR, self::SHARED_AT, 'open', null],
         ], [
             [self::THIRD_SCREENSHOT, self::OMAR_DRAFT, 2, 'looks_right', 'Cart', 'All fine.'],
             [self::FIRST_SCREENSHOT, self::OMAR_DRAFT, 0, 'not_right', 'Checkout', 'The total is off.'],
@@ -396,9 +398,10 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
     }
 
     #[Test]
-    public function aDraftOfAnotherPersonADeletedOneAnotherOrganizationsAndAnUnknownOrMalformedIdAreNull(): void
+    public function aDraftOfAnotherPersonADeletedOneARoundThatIsNoDraftAnotherOrganizationsAndAnUnknownOrMalformedIdAreNull(): void
     {
         $cases = [
+            'a round of Omar that is no draft' => [self::ACME_FOODS, self::OMAR_REPORT, self::OMAR],
             'the draft of Lena asked by Omar' => [self::ACME_FOODS, self::LENA_DRAFT, self::OMAR],
             'the draft of Omar asked by Lena' => [self::ACME_FOODS, self::OMAR_DRAFT, self::LENA],
             'a deleted draft of Omar' => [self::ACME_FOODS, self::OMAR_DELETED_DRAFT, self::OMAR],

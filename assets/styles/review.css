@@ -492,6 +492,7 @@ textarea.screenshot-report__input {
 }
 
 /* The owner's draft editor (DraftRoundEditor, draft-round-editor controller). */
+.draft-round-editor,
 .draft-round-editor__body {
   display: flex;
   flex-direction: column;

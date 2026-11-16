@@ -370,6 +370,11 @@ final class DraftRoundEditorTest extends WebTestCase
     public function aDraftSharedInAnotherTabRefusesEveryActionOfItsOwnerWithTheReasonAndChangesNothing(): void
     {
         $this->seedWorld();
+        $unshared = $this->cardHeaderAndPicturesShown();
+        self::assertSame('Draft round · only you can see this', $unshared['headline']);
+        self::assertTrue($unshared['isPrivate']);
+        self::assertSame([$this->firstShot, $this->secondShot], array_keys($unshared['pictures']));
+        self::assertNotContains('', $unshared['pictures']);
         $this->shareInTheDatabase($this->draft, 1);
         $before = $this->stored();
         $actions = [
@@ -386,6 +391,10 @@ final class DraftRoundEditorTest extends WebTestCase
             self::assertResponseStatusCodeSame(200, $action);
             self::assertSame('This draft round is shared, so it no longer changes.', $this->refusalShown(), $action);
             self::assertSame($before, $this->stored(), $action);
+            $shared = $this->cardHeaderAndPicturesShown();
+            self::assertSame('Round 1 · self-check by Omar', $shared['headline'], $action);
+            self::assertFalse($shared['isPrivate'], $action.': a shared round is no longer private.');
+            self::assertSame($unshared['pictures'], $shared['pictures'], $action);
         }
     }
 
@@ -568,7 +577,32 @@ final class DraftRoundEditorTest extends WebTestCase
             $id = (string) $shot->attr('data-screenshot-id');
             self::assertCount(2, $shot->filter('[role="group"] button[aria-pressed]'), $id.' has both verdict toggles.');
             self::assertCount(1, $shot->filter('button[data-live-action-param="removeScreenshot"]'), $id.' has Remove.');
+            $image = $shot->filter('img.screenshot__image');
+            self::assertCount(1, $image, $id.' shows its picture.');
+            self::assertNotSame('', (string) $image->attr('src'), $id.' has a signed image.');
         }
+    }
+
+    /**
+     * The headline, the PRIVATE tag and the pictures of the card in the last response.
+     *
+     * @return array{headline: string, isPrivate: bool, pictures: array<string, string>} pictures: image src by screenshot id
+     */
+    private function cardHeaderAndPicturesShown(): array
+    {
+        $response = new Crawler((string) $this->client->getResponse()->getContent());
+        $pictures = [];
+        foreach ($response->filter('section[data-screenshot-id]') as $section) {
+            $shot = new Crawler($section);
+            $image = $shot->filter('img.screenshot__image');
+            $pictures[(string) $shot->attr('data-screenshot-id')] = 0 === \count($image) ? '' : (string) $image->attr('src');
+        }
+
+        return [
+            'headline' => $response->filter('.round-card__header .round-card__headline')->text(),
+            'isPrivate' => 0 !== \count($response->filter('.round-card__header .round-card__private')),
+            'pictures' => $pictures,
+        ];
     }
 
     private function refusalShown(): ?string

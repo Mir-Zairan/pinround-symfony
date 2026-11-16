@@ -8,7 +8,7 @@
         {% set editorId = card.domId ~ '-editor' %}
         <header class="round-card__header">
             <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>
-            <twig:Tag class="round-card__private">PRIVATE</twig:Tag>
+            {% if card.isPrivateDraft %}<twig:Tag class="round-card__private">PRIVATE</twig:Tag>{% endif %}
             {% if card.status is not null %}<p class="round-card__status" data-draft-status>{{ card.status }}</p>{% endif %}
         </header>
         {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
