@@ -16,9 +16,11 @@ use App\Media\Api\UploadTarget;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Application\OpenInvitationLink;
 use App\Organization\Domain\TeamSlug;
+use App\Review\Api\RoundAccessFacts;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
@@ -124,6 +126,29 @@ final class VoterMatrixTest extends KernelTestCase
         'Upload to a target of an unknown kind' => ['screenshot-wall', self::SHOP_TICKET],
     ];
 
+    private const string DONE_STEP = '0197a3c0-0000-7000-8000-00000000f0d1';
+    private const string ASSIGNED_TICKET = '0197a3c0-0000-7000-8000-0000000009f6';
+    private const string DONE_TICKET = '0197a3c0-0000-7000-8000-0000000009f7';
+    private const string ROUND = '0197a3c0-0000-7000-8000-0000000009f8';
+
+    /** Each ticket id subject of DRAFT_CREATE by name; Omar is the assignee of the two Shop tickets of Acme Foods that have one. */
+    private const array TICKET_IDS = [
+        'Unassigned Shop ticket' => self::SHOP_TICKET,
+        'Shop ticket assigned to Omar' => self::ASSIGNED_TICKET,
+        'Done Shop ticket assigned to Omar' => self::DONE_TICKET,
+        'Ticket nobody has, for a draft round' => self::NO_TICKET,
+    ];
+
+    /** Each round by name: the organization, the ticket, its owner (always Omar), whether it is an unshared draft and whether it is deleted. */
+    private const array ROUNDS = [
+        'Unshared draft round of Omar' => [self::ACME_FOODS, self::SHOP_TICKET, true, false],
+        'Deleted draft round of Omar' => [self::ACME_FOODS, self::SHOP_TICKET, true, true],
+        'Shared round of Omar on a team-only Shop ticket' => [self::ACME_FOODS, self::SHOP_TICKET, false, false],
+        'Shared round of Omar on a team-only Support ticket' => [self::ACME_FOODS, self::SUPPORT_TICKET, false, false],
+        'Shared round of Omar on a ticket nobody has' => [self::ACME_FOODS, self::NO_TICKET, false, false],
+        'Shared round of another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, false, false],
+    ];
+
     private const string ROLES_DOC = __DIR__.'/../../../docs/00-product/personas-and-roles.md';
 
     /** Not the wall clock's time, so a check that ignores the app clock decides differently. */
@@ -204,7 +229,7 @@ final class VoterMatrixTest extends KernelTestCase
         self::getContainer()->set('clock', $clock);
         $accessDecision = new AccessDecision();
         $isGranted = self::transactions()->rolledBackAs($organizationId, function () use ($actor, $attribute, $subject, $accessDecision, $twoStepProof, $clock): bool {
-            if (isset(self::UPLOAD_TARGETS[$subject])) {
+            if (isset(self::UPLOAD_TARGETS[$subject]) || isset(self::TICKET_IDS[$subject]) || isset(self::ROUNDS[$subject])) {
                 self::persistUsersOfEveryone();
             }
             $requestStack = false !== $twoStepProof ? self::requestWithCodeProofOf($actor, $clock, $twoStepProof) : null;
@@ -281,8 +306,16 @@ final class VoterMatrixTest extends KernelTestCase
         ));
     }
 
-    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget|MessageOnTicket
+    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget|MessageOnTicket|TicketId|RoundAccessFacts
     {
+        if (isset(self::TICKET_IDS[$name])) {
+            return new TicketId(self::TICKET_IDS[$name]);
+        }
+        if (isset(self::ROUNDS[$name])) {
+            [$organizationId, $ticketId, $isUnsharedDraft, $isDeleted] = self::ROUNDS[$name];
+
+            return new RoundAccessFacts(new OrganizationId($organizationId), self::ROUND, new TicketId($ticketId), new UserId(self::PEOPLE['Omar'][0]), $isUnsharedDraft, $isDeleted);
+        }
         if (isset(self::UPLOAD_TARGETS[$name])) {
             return new UploadTarget(...self::UPLOAD_TARGETS[$name]);
         }
@@ -431,6 +464,10 @@ final class VoterMatrixTest extends KernelTestCase
                 "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'To do', 'todo', 'todo', 'core', 1)",
                 [self::ACME_FOODS, self::TO_DO_STEP],
             ));
+            self::migrator()->transactional(static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'Done', 'done', 'done', 'core', 7)",
+                [self::ACME_FOODS, self::DONE_STEP],
+            ));
         } finally {
             $tenantContext->clear();
         }
@@ -438,6 +475,9 @@ final class VoterMatrixTest extends KernelTestCase
         $tickets->addProjectOf(self::ACME_FOODS, self::PROJECT);
         $tickets->addWithAudienceOf(self::ACME_FOODS, self::SHOP_TICKET, self::PROJECT, 1, 'team', self::SHOP, self::REPORTER);
         $tickets->addWithAudienceOf(self::ACME_FOODS, self::SUPPORT_TICKET, self::PROJECT, 2, 'team', self::SUPPORT, self::REPORTER);
+        $tickets->addWithAudienceOf(self::ACME_FOODS, self::ASSIGNED_TICKET, self::PROJECT, 3, 'team', self::SHOP, self::REPORTER, ['assignee_id' => self::PEOPLE['Omar'][0]]);
+        $tickets->addWithAudienceOf(self::ACME_FOODS, self::DONE_TICKET, self::PROJECT, 4, 'team', self::SHOP, self::REPORTER, ['assignee_id' => self::PEOPLE['Omar'][0]]);
+        $tickets->moveToStepOf(self::ACME_FOODS, self::DONE_TICKET, self::DONE_STEP);
     }
 
     private static function removeSeededRows(): void
