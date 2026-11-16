@@ -388,6 +388,9 @@ when@test:
         test.review_round_queries:
             alias: App\Review\Api\RoundQueries
             public: true
+        test.review_review_round_queries:
+            alias: App\Review\Api\ReviewRoundQueries
+            public: true
         # No page saves a report before the new ticket form takes a screenshot; ScreenshotReportOnNewTicketTest gets
         # Ticketing's port as that form will.
         test.ticketing_new_ticket_report:
