@@ -45,7 +45,7 @@ async function pingOmarOnNewTicket(browser: Browser, message: string): Promise<s
   const shopValue = await page.locator('select[name="project_id"] option', { hasText: /^SHOP · / }).getAttribute('value');
   expect(shopValue, 'the seeded SHOP project is missing: run make seed').not.toBeNull();
   await page.getByLabel('Project').selectOption(shopValue ?? '');
-  await page.getByLabel('Title').fill(`Check the bell ${randomUUID().slice(0, 8)}`);
+  await page.getByLabel('Title', { exact: true }).fill(`Check the bell ${randomUUID().slice(0, 8)}`);
   await page.getByLabel('Give it to').selectOption({ label: 'Omar' });
   await page.getByRole('button', { name: 'Make ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);

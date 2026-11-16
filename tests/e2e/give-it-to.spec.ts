@@ -24,7 +24,7 @@ async function makeBacklogTicket(page: Page, title: string): Promise<string> {
   const shopValue = await page.locator('select[name="project_id"] option', { hasText: /^SHOP · / }).getAttribute('value');
   expect(shopValue, 'the seeded SHOP project is missing: run make seed').not.toBeNull();
   await page.getByLabel('Project').selectOption(shopValue ?? '');
-  await page.getByLabel('Title').fill(title);
+  await page.getByLabel('Title', { exact: true }).fill(title);
   await page.getByRole('button', { name: 'Make ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
   return new URL(page.url()).pathname.replace('/t/', '');

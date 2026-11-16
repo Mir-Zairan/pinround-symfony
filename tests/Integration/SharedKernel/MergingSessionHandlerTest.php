@@ -45,7 +45,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
 
     protected function tearDown(): void
     {
-        $this->connection->del('session:'.$this->sessionId);
+        $this->connection->del($this->sessionKey());
         parent::tearDown();
     }
 
@@ -56,7 +56,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
             '_security_main' => self::LOGIN,
             self::LOGOUT_TOKEN_KEY => 'logout-token',
         ]);
-        $this->connection->set('session:'.$this->sessionId, $page);
+        $this->connection->set($this->sessionKey(), $page);
 
         $this->inRequest(Request::create('https://localhost/t/SHOP-1/thread'), function () use ($page): void {
             self::assertSame($page, $this->handler->read($this->sessionId));
@@ -91,7 +91,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function theLaterWriteKeepsItsOwnValueOfATokenBothStored(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'first']));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'first']));
 
         $this->inRequest(Request::create('https://localhost/t/SHOP-1/rounds'), function (): void {
             self::assertTrue($this->handler->write($this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'second'])));
@@ -103,7 +103,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function aTokenThisRequestRemovedIsNotBroughtBack(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']));
         $request = Request::create('https://localhost/t/SHOP-1/thread', 'POST');
         $session = new Session(new MockArraySessionStorage());
         $session->set(self::THREAD_TOKEN_KEY, 'thread-token');
@@ -120,7 +120,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function noTokenComesBackAfterThisRequestClearedThemAll(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']));
         $request = Request::create('https://localhost/logout');
         $request->setSession(new Session(new MockArraySessionStorage()));
 
@@ -135,7 +135,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function noTokenOfAnotherLoginIsTakenOver(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded([
+        $this->connection->set($this->sessionKey(), self::encoded([
             '_security_main' => 'O:8:"stdClass":1:{s:4:"user";s:4:"lena";}',
             self::THREAD_TOKEN_KEY => 'lena-token',
         ]));
@@ -150,7 +150,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function noTokenIsTakenOverIntoALoggedOutCopy(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']));
 
         $this->inRequest(Request::create('https://localhost/login'), function (): void {
             self::assertTrue($this->handler->write($this->sessionId, self::encoded(['_csrf/https-authenticate' => 'login-token'])));
@@ -162,7 +162,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function noTokenIsAddedToAWrittenCopyWithReferences(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']));
         $object = new \stdClass();
         $written = self::encoded(['_security_main' => self::LOGIN], ['toast' => []]).'shared|'.serialize([$object, $object]);
 
@@ -170,26 +170,26 @@ final class MergingSessionHandlerTest extends KernelTestCase
             self::assertTrue($this->handler->write($this->sessionId, $written));
         });
 
-        self::assertSame($written, $this->connection->get('session:'.$this->sessionId));
+        self::assertSame($written, $this->connection->get($this->sessionKey()));
     }
 
     #[Test]
     public function anUnreadableStoredCopyIsWrittenOver(): void
     {
-        $this->connection->set('session:'.$this->sessionId, 'not a session');
+        $this->connection->set($this->sessionKey(), 'not a session');
         $written = self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'draft-token']);
 
         $this->inRequest(Request::create('https://localhost/t/SHOP-1/rounds'), function () use ($written): void {
             self::assertTrue($this->handler->write($this->sessionId, $written));
         });
 
-        self::assertSame($written, $this->connection->get('session:'.$this->sessionId));
+        self::assertSame($written, $this->connection->get($this->sessionKey()));
     }
 
     #[Test]
     public function onlyATokenThatIsAStringIsTakenOver(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded([
+        $this->connection->set($this->sessionKey(), self::encoded([
             '_security_main' => self::LOGIN,
             self::THREAD_TOKEN_KEY => ['not', 'a', 'token'],
             self::LOGOUT_TOKEN_KEY => 'logout-token',
@@ -205,7 +205,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function anAttributeThatIsNoTokenIsNotTakenOver(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN, '_csrf_note' => 'kept out', 'organization' => 'acme']));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN, '_csrf_note' => 'kept out', 'organization' => 'acme']));
 
         $this->inRequest(Request::create('https://localhost/org/choose'), function (): void {
             self::assertTrue($this->handler->write($this->sessionId, self::encoded(['_security_main' => self::LOGIN])));
@@ -217,15 +217,15 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function aSessionDestroyedAfterThisRequestReadItIsNotWrittenBack(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN]));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN]));
 
         $this->inRequest(Request::create('https://localhost/t/SHOP-1/rounds'), function (): void {
             self::assertNotSame('', $this->handler->read($this->sessionId));
-            $this->connection->del('session:'.$this->sessionId);
+            $this->connection->del($this->sessionKey());
             self::assertTrue($this->handler->write($this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'draft-token'])));
         });
 
-        self::assertSame(0, $this->connection->exists('session:'.$this->sessionId));
+        self::assertSame(0, $this->connection->exists($this->sessionKey()));
     }
 
     #[Test]
@@ -237,17 +237,17 @@ final class MergingSessionHandlerTest extends KernelTestCase
         });
 
         self::assertSame(['_csrf/https-authenticate' => 'login-token'], $this->storedAttributes());
-        self::assertSame(28800, $this->connection->ttl('session:'.$this->sessionId));
+        self::assertSame(28800, $this->connection->ttl($this->sessionKey()));
     }
 
     #[Test]
     public function theNextRequestInTheSameWorkerMayWriteASessionAnEarlierOneRead(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN]));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN]));
         $this->inRequest(Request::create('https://localhost/t/SHOP-1'), function (): void {
             self::assertNotSame('', $this->handler->read($this->sessionId));
         });
-        $this->connection->del('session:'.$this->sessionId);
+        $this->connection->del($this->sessionKey());
         self::getContainer()->get('services_resetter')->reset();
 
         $this->inRequest(Request::create('https://localhost/login'), function (): void {
@@ -260,7 +260,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function aWriteThatRacedAnotherOneIsMadeAgainOverTheNewCopy(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN]));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN]));
         $racingCopy = self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']);
         $handler = $this->handlerRacedBy([$racingCopy]);
 
@@ -278,7 +278,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function aWriteRacedEveryTimeFailsAndLeavesTheOtherCopy(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN]));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN]));
         $racingCopy = self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']);
         $handler = $this->handlerRacedBy(array_fill(0, MergingSessionHandler::MAX_WRITE_ATTEMPTS, $racingCopy));
 
@@ -297,7 +297,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
     public function aWriteTheValkeyHandlerThrowsOnLeavesTheStoredCopyAndEndsTheTransaction(): void
     {
         $storedCopy = self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']);
-        $this->connection->set('session:'.$this->sessionId, $storedCopy);
+        $this->connection->set($this->sessionKey(), $storedCopy);
         $lostConnection = new \RedisException('read error on connection');
         $handler = $this->handlerWritingThrough(static function (RedisSessionHandler $valkeyHandler, string $id, string $data) use ($lostConnection): bool {
             $valkeyHandler->write($id, $data);
@@ -315,16 +315,16 @@ final class MergingSessionHandlerTest extends KernelTestCase
         });
 
         self::assertSame($lostConnection, $thrown);
-        self::assertSame($storedCopy, $this->connection->get('session:'.$this->sessionId));
-        self::assertTrue($this->connection->set('session:'.$this->sessionId, 'later request'));
-        self::assertSame('later request', $this->connection->get('session:'.$this->sessionId));
+        self::assertSame($storedCopy, $this->connection->get($this->sessionKey()));
+        self::assertTrue($this->connection->set($this->sessionKey(), 'later request'));
+        self::assertSame('later request', $this->connection->get($this->sessionKey()));
     }
 
     #[Test]
     public function aWriteValkeyRefusesFailsAndLeavesTheStoredCopy(): void
     {
         $storedCopy = self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']);
-        $this->connection->set('session:'.$this->sessionId, $storedCopy);
+        $this->connection->set($this->sessionKey(), $storedCopy);
         $handler = $this->handlerWritingThrough(
             static fn (RedisSessionHandler $valkeyHandler, string $id, string $data): bool => $valkeyHandler->write($id, $data),
             ttlSeconds: 0,
@@ -334,7 +334,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
             self::assertFalse($handler->write($this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'draft-token'])));
         });
 
-        self::assertSame($storedCopy, $this->connection->get('session:'.$this->sessionId));
+        self::assertSame($storedCopy, $this->connection->get($this->sessionKey()));
     }
 
     /**
@@ -343,17 +343,17 @@ final class MergingSessionHandlerTest extends KernelTestCase
     #[Test]
     public function aSessionNotWrittenBackLeavesNoKeyWatched(): void
     {
-        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN]));
+        $this->connection->set($this->sessionKey(), self::encoded(['_security_main' => self::LOGIN]));
         $this->inRequest(Request::create('https://localhost/t/SHOP-1/rounds'), function (): void {
             self::assertNotSame('', $this->handler->read($this->sessionId));
-            $this->connection->del('session:'.$this->sessionId);
+            $this->connection->del($this->sessionKey());
             self::assertTrue($this->handler->write($this->sessionId, self::encoded(['_security_main' => self::LOGIN])));
         });
-        self::assertSame(0, $this->connection->exists('session:'.$this->sessionId));
+        self::assertSame(0, $this->connection->exists($this->sessionKey()));
 
-        self::assertTrue($this->otherConnection()->set('session:'.$this->sessionId, 'logged in again elsewhere'));
+        self::assertTrue($this->otherConnection()->set($this->sessionKey(), 'logged in again elsewhere'));
         $this->connection->multi();
-        $this->connection->get('session:'.$this->sessionId);
+        $this->connection->get($this->sessionKey());
 
         self::assertSame(['logged in again elsewhere'], $this->connection->exec());
     }
@@ -472,6 +472,11 @@ final class MergingSessionHandlerTest extends KernelTestCase
         return self::getContainer()->getParameter('app.session_key_prefix');
     }
 
+    private function sessionKey(): string
+    {
+        return $this->keyPrefix().$this->sessionId;
+    }
+
     private function csrfTokenStorage(): RecordingCsrfTokenStorage
     {
         return self::getContainer()->get('security.csrf.token_storage');
@@ -511,7 +516,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
      */
     private function storedSegment(string $name, string $nextName): array
     {
-        $stored = $this->connection->get('session:'.$this->sessionId);
+        $stored = $this->connection->get($this->sessionKey());
         self::assertIsString($stored);
         $start = strpos($stored, $name);
         $end = strpos($stored, $nextName);

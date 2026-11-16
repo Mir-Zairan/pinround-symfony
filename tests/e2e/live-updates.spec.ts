@@ -1026,7 +1026,7 @@ async function streamReconnected(page: Page): Promise<void> {
 test.describe('a page with no live parts', () => {
   test("a title Lena is typing stays when her stream reconnects; the page loads again once she clears it", async ({ browser }) => {
     const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
-    const title = lena.page.getByLabel('Title');
+    const title = lena.page.getByLabel('Title', { exact: true });
     const typed = `Receipt footer cuts off the address ${randomUUID().slice(0, 8)}`;
     await title.fill(typed);
     await lena.page.getByRole('heading', { level: 1 }).click();
@@ -1046,7 +1046,7 @@ test.describe('a page with no live parts', () => {
   test('a changed select or a ticked checkbox holds the visit until each is put back', async ({ browser }) => {
     const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
     // The form has no checkbox and no select with an option marked selected of its own, so the test adds one of each.
-    await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title') }).evaluate((form) => {
+    await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title', { exact: true }) }).evaluate((form) => {
       form.insertAdjacentHTML(
         'beforeend',
         '<label>Notify the team <input type="checkbox" name="e2e_notify"></label>' +
@@ -1071,7 +1071,7 @@ test.describe('a page with no live parts', () => {
     /** Moves focus away and back, which may end the hold, then proves the visit is still held. */
     const expectVisitHeld = async (): Promise<void> => {
       await pageHeading.click();
-      await lena.page.getByLabel('Title').focus();
+      await lena.page.getByLabel('Title', { exact: true }).focus();
       await pageHeading.click();
       await nextTaskOf(lena.page);
       await nextTaskOf(lena.page);
@@ -1098,7 +1098,7 @@ test.describe('a page with no live parts', () => {
   test('an open details box with an untouched text field holds the visit until it is closed', async ({ browser }) => {
     const { lena, requests } = await openNewTicketWhoseStreamDrops(browser);
     // The form has no disclosure of its own, so the test adds one, open, whose field Lena never types in.
-    await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title') }).evaluate((form) => {
+    await lena.page.locator('form').filter({ has: lena.page.getByLabel('Title', { exact: true }) }).evaluate((form) => {
       form.insertAdjacentHTML('beforeend', '<details open><summary>Add a note</summary><label>Note <input type="text" name="e2e_note"></label></details>');
     });
     const note = lena.page.getByLabel('Note');

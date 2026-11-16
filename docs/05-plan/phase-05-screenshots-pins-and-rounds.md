@@ -180,7 +180,7 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 **Acceptance criteria:**
 - [x] The lead, the tester and an admin cannot see an unshared draft (HTML, queries and direct URLs; voter + isolation tests). Browser proof: `tests/e2e/draft-round.spec.ts` as Lena, Mia and Sara (ticket page, rounds frame, editor component, share and delete POSTs).
 - [x] "Share with the team now" turns it into "Round N · self-check by Omar", read-only (`draft-round.spec.ts`, runs on any stack).
-- [ ] `roundNotes` returns exactly what the editor shows.
+- [x] `roundNotes` returns exactly what the editor shows (`tests/Functional/Review/RoundNotesMatchDraftEditorTest.php`: the rendered editor and `roundNotes` of one draft agree on the pictures, their order, title, summary, verdict and each pin's number and note; another person's draft, a shared round and a removed picture are in neither). `ScreenshotNotes` carries pin notes by number only, no pin position (x, y), so positions are checked on the editor alone.
 **Tests:** voter matrix rows (owner-only), functional, Playwright draft journey, unit test of the notes DTO.
 **Prototype check:** draft round card in [Ticket page: rounds](../04-prototype/screens/ticket-page.md#rounds) (texts, buttons, status line, the Claude Code box).
 **Size:** L
