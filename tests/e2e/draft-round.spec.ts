@@ -1,39 +1,37 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import path from 'node:path';
 import { demoPassword, LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE, SARA_EMAIL } from './auth';
+import { seedDraftWithPicture } from './draft-picture';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // The private draft round (P05.T8, ADR-0017) in a real browser. Omar is the assignee and the owner; Lena, Mia and Sara
 // must not see it. What the server refuses for each role is proven in tests/Functional/Review; here it is proven again
 // through the page and the direct URLs.
 //
-// Steps with a picture need the processing worker and a bucket (an upload stays pending without them), so they run only
-// with E2E_MEDIA_PIPELINE=1 on a full stack, as in new-ticket-screenshot.spec.ts.
+// A picture upload needs the processing worker and a bucket, so the cases with a picture seed it already ready through the
+// dev-only console command (draft-picture.ts) and run on any stack.
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
 const DRAFT_HEADLINE = 'Draft round · only you can see this';
 const SHARED_HEADLINE = /^Round \d+ · self-check by Omar$/;
-const PICTURE = path.join(__dirname, 'fixtures', 'checkout-page.png');
-const needsPipeline = () => test.skip(!process.env.E2E_MEDIA_PIPELINE, 'needs MinIO, a worker on async_media and vips: set E2E_MEDIA_PIPELINE on a full stack');
 
-async function startDraftAsOmar(browser: Browser): Promise<{ context: BrowserContext; page: Page; key: string; roundId: string }> {
+async function startDraftAsOmar(browser: Browser, withPicture = false): Promise<{ context: BrowserContext; page: Page; key: string; roundId: string }> {
   const key = await makeTicketForOmar(browser, 'Draft round check on the checkout banner');
+  if (withPicture) {
+    seedDraftWithPicture(key);
+  }
   const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
   // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
   await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Start a draft round' }).click();
+  if (!withPicture) {
+    await page.getByRole('button', { name: 'Start a draft round' }).click();
+  }
   await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
   await page.waitForLoadState('networkidle');
   const shareAction = await page.locator('form.round-card__form', { has: page.locator('.round-card__share') }).getAttribute('action');
   const roundId = /\/rounds\/([^/]+)\/share$/.exec(shareAction ?? '')?.[1];
   expect(roundId, 'the share form of the draft').toBeTruthy();
   return { context, page, key, roundId: roundId ?? '' };
-}
-
-async function addPicture(page: Page): Promise<void> {
-  await page.locator('.draft-round-editor__upload input[type="file"]').setInputFiles(PICTURE);
-  await expect(page.locator('section.draft-shot')).toHaveCount(1, { timeout: 30_000 });
 }
 
 function savedBy(page: Page, action: string) {
@@ -153,10 +151,9 @@ test.describe('Draft round', () => {
   });
 
   test('a title, a pin with its note and a verdict survive a reload and the status line follows', async ({ browser }) => {
-    needsPipeline();
     test.setTimeout(90_000);
-    const { context, page } = await startDraftAsOmar(browser);
-    await addPicture(page);
+    const { context, page } = await startDraftAsOmar(browser, true);
+    await expect(page.locator('section.draft-shot')).toHaveCount(1);
     const shot = page.locator('section.draft-shot');
     const status = page.locator('[data-draft-status]');
 
@@ -195,10 +192,9 @@ test.describe('Draft round', () => {
   });
 
   test('a double click on Share while a pin save waits sends one share request, with the pin saved first', async ({ browser }) => {
-    needsPipeline();
     test.setTimeout(90_000);
-    const { context, page, key, roundId } = await startDraftAsOmar(browser);
-    await addPicture(page);
+    const { context, page, key, roundId } = await startDraftAsOmar(browser, true);
+    await expect(page.locator('section.draft-shot')).toHaveCount(1);
     const events = recordRoundRequests(page, key, roundId);
     const shot = page.locator('section.draft-shot');
     const frame = shot.locator('.screenshot__frame');
@@ -212,15 +208,14 @@ test.describe('Draft round', () => {
 
     await expect(page.getByRole('heading', { name: SHARED_HEADLINE, level: 3 })).toBeVisible();
     expect(events).toEqual(['setPins', 'share']);
-    await expect(page.getByText('Shared with the pin')).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Pins' }).getByText('Shared with the pin')).toBeVisible();
     await context.close();
   });
 
   test('a refused delete keeps the draft and the pin still waiting to be saved', async ({ browser }) => {
-    needsPipeline();
     test.setTimeout(90_000);
-    const { context, page, key, roundId } = await startDraftAsOmar(browser);
-    await addPicture(page);
+    const { context, page, key, roundId } = await startDraftAsOmar(browser, true);
+    await expect(page.locator('section.draft-shot')).toHaveCount(1);
     const events = recordRoundRequests(page, key, roundId);
     page.on('dialog', (dialog) => dialog.accept());
     const shot = page.locator('section.draft-shot');

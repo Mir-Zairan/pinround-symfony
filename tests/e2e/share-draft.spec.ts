@@ -1,33 +1,44 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import path from 'node:path';
-import { OMAR_STORAGE_STATE } from './auth';
+import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { seedDraftWithPicture } from './draft-picture';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // "Share your draft round?" (P05.T9, ADR-0017): the dialog a move shows to the owner of an undecided draft round with a
 // screenshot. What the server answers for every choice and refusal is proven in
 // tests/Functional/Ticketing/TicketMoveDraftQuestionTest.php; here it is proven through the page.
 //
-// A picture needs the processing worker and a bucket (an upload stays pending without them), so the cases with one run
-// only with E2E_MEDIA_PIPELINE=1 on a full stack, as in draft-round.spec.ts; the case with an empty draft runs anywhere.
+// A picture upload needs the processing worker and a bucket, so the draft's one picture is seeded already ready through
+// the dev-only console command (draft-picture.ts) and every case runs on any stack.
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
-const PICTURE = path.join(__dirname, 'fixtures', 'checkout-page.png');
-const needsPipeline = () => test.skip(!process.env.E2E_MEDIA_PIPELINE, 'needs MinIO, a worker on async_media and vips: set E2E_MEDIA_PIPELINE on a full stack');
-const DIALOG_TEXT = 'Your draft round has 1 screenshot. Share it with the team as round 2, or keep it private. Private notes stay readable for you and Claude Code.';
+const DIALOG_TEXT = 'Your draft round has 1 screenshot. Share it with the team as round 1, or keep it private. Private notes stay readable for you and Claude Code.';
 
 async function startDraft(browser: Browser, title: string, withPicture: boolean) {
   const key = await makeTicketForOmar(browser, title);
+  if (withPicture) {
+    seedDraftWithPicture(key);
+  }
   const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
   await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Start a draft round' }).click();
+  if (!withPicture) {
+    await page.getByRole('button', { name: 'Start a draft round' }).click();
+  }
   await expect(page.getByRole('heading', { name: 'Draft round · only you can see this', level: 3 })).toBeVisible();
   await page.waitForLoadState('networkidle');
   if (withPicture) {
-    await page.locator('.draft-round-editor__upload input[type="file"]').setInputFiles(PICTURE);
-    await expect(page.locator('section.draft-shot')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.locator('section.draft-shot')).toHaveCount(1);
   }
   return { context, page, key };
+}
+
+/** How many shared rounds the ticket page shows to Lena, who is not the draft's owner. */
+async function sharedRoundsSeenByLena(browser: Browser, key: string): Promise<number> {
+  const { context, page } = await openAs(browser, LENA_STORAGE_STATE);
+  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+  const count = await page.getByRole('heading', { name: /^Round \d+ · /, level: 3 }).count();
+  await context.close();
+  return count;
 }
 
 function startWork(page: Page) {
@@ -40,9 +51,8 @@ function moveAnswer(page: Page) {
 
 test.describe('the Share draft dialog', () => {
   test('Cancel moves nothing, Keep private and move moves and keeps the draft private, and the second move asks nothing', async ({ browser }) => {
-    needsPipeline();
     test.setTimeout(120_000);
-    const { context, page } = await startDraft(browser, 'Share draft dialog check on the cart badge', true);
+    const { context, page, key } = await startDraft(browser, 'Share draft dialog check on the cart badge', true);
     const dialog = page.getByRole('dialog', { name: 'Share your draft round?' });
 
     let answer = moveAnswer(page);
@@ -57,17 +67,19 @@ test.describe('the Share draft dialog', () => {
     await expect(page.locator('#ticket-state')).not.toContainText('In progress');
     await expect(startWork(page)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Draft round · only you can see this', level: 3 })).toBeVisible();
+    expect(await sharedRoundsSeenByLena(browser, key)).toBe(0);
 
     answer = moveAnswer(page);
     await startWork(page).click();
     expect((await answer).status()).toBe(409);
     answer = moveAnswer(page);
     await dialog.getByRole('button', { name: 'Keep private and move' }).click();
-    expect((await answer).status()).toBe(200);
+    expect((await answer).status()).toBe(303);
     await expect(dialog).toHaveCount(0);
     await expect(page.locator(TOAST_REGION)).toContainText('Moved to In progress. Your draft stays private.');
     await expect(page.locator('#ticket-state')).toContainText('In progress');
     await expect(page.getByRole('heading', { name: 'Draft round · only you can see this', level: 3 })).toBeVisible();
+    expect(await sharedRoundsSeenByLena(browser, key)).toBe(0);
 
     answer = moveAnswer(page);
     await page.locator('#ticket-next-step .next-step-box__verbs').getByRole('button', { name: 'Send to code review' }).click();
@@ -77,17 +89,17 @@ test.describe('the Share draft dialog', () => {
   });
 
   test('Share and move shares the draft as the next round and says so in the toast', async ({ browser }) => {
-    needsPipeline();
     test.setTimeout(120_000);
-    const { context, page } = await startDraft(browser, 'Share draft dialog check on the order total', true);
+    const { context, page, key } = await startDraft(browser, 'Share draft dialog check on the order total', true);
     const dialog = page.getByRole('dialog', { name: 'Share your draft round?' });
 
     await startWork(page).click();
     await expect(dialog).toBeVisible();
     const answer = moveAnswer(page);
     await dialog.getByRole('button', { name: 'Share and move to In progress' }).click();
-    expect((await answer).status()).toBe(200);
-    await expect(page.locator(TOAST_REGION)).toContainText(/^Moved to In progress\. Your draft is now round \d+ for the team\.$/);
+    expect((await answer).status()).toBe(303);
+    await expect(page.locator(TOAST_REGION)).toContainText('Moved to In progress. Your draft is now round 1 for the team.');
+    expect(await sharedRoundsSeenByLena(browser, key)).toBe(1);
     await context.close();
   });
 
