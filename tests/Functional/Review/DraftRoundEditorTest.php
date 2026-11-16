@@ -590,7 +590,7 @@ final class DraftRoundEditorTest extends WebTestCase
         $screenshots = [];
         $pins = [];
         foreach (array_column($rounds, 'id') as $roundId) {
-            $roundId = (string) $roundId;
+            self::assertIsString($roundId);
             $screenshots[$roundId] = $this->screenshotRowsOf($roundId);
             $pins[$roundId] = $this->pinRowsOf($roundId);
         }
