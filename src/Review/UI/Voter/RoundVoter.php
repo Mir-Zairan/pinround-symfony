@@ -83,20 +83,7 @@ final class RoundVoter extends DenyByDefaultVoter
         } catch (\LogicException) {
             return null;
         }
-        if (null === $ticket) {
-            return null;
-        }
 
-        return new TicketVisibilityFacts(
-            $round->organizationId,
-            $ticket->visibility,
-            $ticket->teamId,
-            $ticket->reporterId,
-            $ticket->assigneeId,
-            $ticket->pendingAssigneeId,
-            $ticket->reviewerId,
-            $ticket->testerId,
-            $ticket->waitingOnUserId,
-        );
+        return null === $ticket ? null : TicketVisibilityFacts::ofSnapshot($round->organizationId, $ticket);
     }
 }

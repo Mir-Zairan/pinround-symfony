@@ -6,6 +6,7 @@ namespace App\Ticketing\Api;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 
 /**
@@ -37,6 +38,26 @@ final readonly class TicketVisibilityFacts
         if (!\in_array($visibility, [self::FOR_EVERYONE, self::TEAM_ONLY], true)) {
             throw new \InvalidArgumentException('A ticket visibility must be all or team.');
         }
+    }
+
+    /**
+     * The facts of a ticket as TicketTurnQueries::factsOf read it, which does not carry its organization.
+     *
+     * @param OrganizationId $organizationId the tenant factsOf read the ticket under
+     */
+    public static function ofSnapshot(OrganizationId $organizationId, TicketTurnSnapshot $ticket): self
+    {
+        return new self(
+            $organizationId,
+            $ticket->visibility,
+            $ticket->teamId,
+            $ticket->reporterId,
+            $ticket->assigneeId,
+            $ticket->pendingAssigneeId,
+            $ticket->reviewerId,
+            $ticket->testerId,
+            $ticket->waitingOnUserId,
+        );
     }
 
     /**

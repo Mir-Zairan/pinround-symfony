@@ -63,16 +63,26 @@ final class RoundVoterTest extends TestCase
     /** A ticket whose facts the queries cannot read, as when its step is not the organization's. */
     private const string BROKEN_TICKET = '0197a3c0-0000-7000-8000-0000000018e3';
     private const string NO_TICKET = '0197a3c0-0000-7000-8000-0000000018e4';
+    /** Team-only Shop tickets that each hold Raj in one column of the people on it. */
+    private const array SHOP_2_WITH_RAJ_AS = [
+        'reporter' => '0197a3c0-0000-7000-8000-0000000018e5',
+        'assignee' => '0197a3c0-0000-7000-8000-0000000018e6',
+        'pending assignee' => '0197a3c0-0000-7000-8000-0000000018e7',
+        'reviewer' => '0197a3c0-0000-7000-8000-0000000018e8',
+        'tester' => '0197a3c0-0000-7000-8000-0000000018e9',
+        'waiting-on person' => '0197a3c0-0000-7000-8000-0000000018ea',
+    ];
     private const string ROUND = '0197a3c0-0000-7000-8000-0000000018f1';
 
     private InMemoryTicketTurnQueries $ticketTurnQueries;
 
     protected function setUp(): void
     {
-        $this->ticketTurnQueries = new InMemoryTicketTurnQueries(
-            [self::snapshotOf(self::SHOP_1, TicketVisibilityFacts::FOR_EVERYONE), self::snapshotOf(self::SHOP_2, TicketVisibilityFacts::TEAM_ONLY)],
-            new TicketId(self::BROKEN_TICKET),
-        );
+        $snapshots = [self::snapshotOf(self::SHOP_1, TicketVisibilityFacts::FOR_EVERYONE), self::snapshotOf(self::SHOP_2, TicketVisibilityFacts::TEAM_ONLY)];
+        foreach (self::SHOP_2_WITH_RAJ_AS as $column => $ticketId) {
+            $snapshots[] = self::snapshotOf($ticketId, TicketVisibilityFacts::TEAM_ONLY, $column);
+        }
+        $this->ticketTurnQueries = new InMemoryTicketTurnQueries($snapshots, new TicketId(self::BROKEN_TICKET));
     }
 
     /**
@@ -149,6 +159,9 @@ final class RoundVoterTest extends TestCase
         yield 'the Shop viewer on the team-only SHOP-2' => [self::SHOP_VIEWER, self::SHOP_2, true, false];
         yield 'Raj, a Manager with no team role, on SHOP-1' => [self::RAJ, self::SHOP_1, true, false];
         yield 'Raj on the team-only SHOP-2' => [self::RAJ, self::SHOP_2, false, false];
+        foreach (self::SHOP_2_WITH_RAJ_AS as $column => $ticketId) {
+            yield 'Raj as the '.$column.' of a team-only Shop ticket, who may see but not edit it' => [self::RAJ, $ticketId, true, false];
+        }
         yield 'the Beta Bakery admin on SHOP-1' => [self::BETA_ADMIN, self::SHOP_1, false, false];
     }
 
@@ -301,8 +314,15 @@ final class RoundVoterTest extends TestCase
         ]);
     }
 
-    private static function snapshotOf(string $ticketId, string $visibility): TicketTurnSnapshot
+    /**
+     * Lena reported the ticket and Omar is its assignee, unless $rajsColumn puts Raj in that column or another.
+     *
+     * @param key-of<self::SHOP_2_WITH_RAJ_AS>|null $rajsColumn
+     */
+    private static function snapshotOf(string $ticketId, string $visibility, ?string $rajsColumn = null): TicketTurnSnapshot
     {
+        $raj = new UserId(self::RAJ);
+
         return new TicketTurnSnapshot(
             new TicketId($ticketId),
             '0197a3c0-0000-7000-8000-0000000018c1',
@@ -317,8 +337,12 @@ final class RoundVoterTest extends TestCase
             $visibility,
             'major',
             null,
-            new UserId(self::LENA),
-            new UserId(self::OMAR),
+            'reporter' === $rajsColumn ? $raj : new UserId(self::LENA),
+            'assignee' === $rajsColumn ? $raj : new UserId(self::OMAR),
+            'pending assignee' === $rajsColumn ? $raj : null,
+            'reviewer' === $rajsColumn ? $raj : null,
+            'tester' === $rajsColumn ? $raj : null,
+            'waiting-on person' === $rajsColumn ? $raj : null,
         );
     }
 
