@@ -202,6 +202,52 @@ final class UseCaseVerdictCommandsTest extends KernelTestCase
     }
 
     /**
+     * A pin verdict and an area verdict in the same round at once: the area verdict waits on the round until the pin
+     * verdict commits, writes nothing while it waits, and is then saved.
+     */
+    #[Test]
+    public function anAreaVerdictWaitsForAPinVerdictInTheSameRound(): void
+    {
+        $secondSession = SecondSession::besideTheApp($this->entityManager(), $this->tenantContext());
+        $this->otherSessions[] = $secondSession->entityManager;
+        $secondSessionEvents = new RecordingReviewEvents();
+        $secondSessionCommands = new UseCaseVerdictCommands(new DbalAreas($secondSession->entityManager->getConnection(), $this->tenantContext()), $secondSessionEvents, $this->tenantContext());
+        $omarsAreaVerdict = static fn () => $secondSessionCommands->saveAreaVerdict(self::REVIEW, self::AREA, new UserId(self::OMAR), VerdictCommands::AREA_QUESTION, null, new \DateTimeImmutable(self::NOW));
+        $connection = $this->connection();
+
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $connection->beginTransaction();
+            $this->commands()->setPinVerdict(self::REVIEW, self::PIN, new UserId(self::MIA), VerdictCommands::PIN_FIXED, new \DateTimeImmutable(self::NOW));
+            $sqlStateWhileThePinVerdictRuns = $secondSession->sqlStateOfFailedAttempt($omarsAreaVerdict);
+            $connection->commit();
+            $eventsWhileThePinVerdictRan = $secondSessionEvents->published();
+        } finally {
+            if ($connection->isTransactionActive()) {
+                $connection->rollBack();
+            }
+            $this->entityManager()->clear();
+            $this->tenantContext()->clear();
+        }
+        $areaAfterTheWait = $this->rowsAs('SELECT verdict, decided_by FROM rvw_area WHERE id = ?', [self::AREA], all: true)[0] ?? null;
+
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $secondSession->entityManager->wrapInTransaction($omarsAreaVerdict);
+        } finally {
+            $secondSession->entityManager->clear();
+            $this->tenantContext()->clear();
+        }
+
+        self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $sqlStateWhileThePinVerdictRuns, 'The area verdict ran while the pin verdict held the round.');
+        self::assertSame([], $eventsWhileThePinVerdictRan, 'The waiting area verdict published.');
+        self::assertSame([null, null], $areaAfterTheWait);
+        self::assertSame(['question', self::OMAR], $this->rowsAs('SELECT verdict, decided_by FROM rvw_area WHERE id = ?', [self::AREA], all: true)[0] ?? null);
+        self::assertSame(['fixed'], $this->rowsAs('SELECT verdict FROM rvw_pin WHERE id = ?', [self::PIN]));
+        self::assertCount(1, $secondSessionEvents->published());
+    }
+
+    /**
      * @return array{mixed, mixed, mixed} the ticket's step and version, and the review round's version
      */
     private function ticketStepAndVersionAndRoundVersion(): array
