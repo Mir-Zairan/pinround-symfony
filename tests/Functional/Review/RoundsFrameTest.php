@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Review;
 
 use App\Identity\Domain\User;
+use App\Review\UI\Component\DraftRoundEditor;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\RoundCards;
 use App\Review\UI\RoundsController;
@@ -206,6 +207,8 @@ final class RoundsFrameTest extends WebTestCase
         self::assertSame(['1 of 2 look right', '0 of 1 look right'], $cards->filter('.round-card__status')->each(static fn (Crawler $status): string => $status->text()));
         self::assertSame(['PRIVATE'], $cards->filter('.round-card__private')->each(static fn (Crawler $tag): string => $tag->text()));
         self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private'));
+        self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private .draft-round-editor'), 'The editor is in the private card only.');
+        self::assertCount(1, $page->filter(self::ROUNDS.' .draft-round-editor'));
         self::assertStringNotContainsString(self::LENA_DRAFT_TITLE, (string) $this->client->getResponse()->getContent());
 
         foreach (['Mia', 'Sara'] as $person) {
@@ -213,7 +216,7 @@ final class RoundsFrameTest extends WebTestCase
             $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
             self::assertResponseStatusCodeSame(200);
             self::assertSame(['Round 3 · self-check by Omar'], $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person);
-            self::assertCount(0, $page->filter(self::ROUNDS.' .round-card--private'), $person);
+            self::assertCount(0, $page->filter(self::ROUNDS.' .round-card--private, '.self::ROUNDS.' .draft-round-editor'), $person);
             self::assertStringNotContainsString('Omar own draft shot', (string) $this->client->getResponse()->getContent(), $person);
             self::assertStringNotContainsString(self::LENA_DRAFT_TITLE, (string) $this->client->getResponse()->getContent(), $person);
         }
@@ -334,7 +337,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertCount(2, $page->filter(self::ROUNDS.' .round-card'));
         self::assertCount(0, $page->filter(self::ROUNDS.' .round-card__status'));
         self::assertStringNotContainsString('0 of 0', (string) $this->client->getResponse()->getContent());
-        self::assertSame(['No screenshots yet.'], $page->filter(self::ROUNDS.' .round-card__empty')->each(static fn (Crawler $note): string => $note->text()), 'The report has none.');
+        self::assertSame([DraftRoundEditor::EMPTY_NOTE], $page->filter(self::ROUNDS.' .round-card__empty')->each(static fn (Crawler $note): string => $note->text()), 'The report has none.');
     }
 
     #[Test]

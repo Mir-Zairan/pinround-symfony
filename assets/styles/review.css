@@ -491,6 +491,52 @@ textarea.screenshot-report__input {
   margin: 0;
 }
 
+/* The owner's draft editor (DraftRoundEditor, draft-round-editor controller). */
+.draft-round-editor__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.draft-round-editor__refusal {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-input);
+  background: var(--error-container);
+  color: var(--on-error-container);
+  overflow-wrap: anywhere;
+}
+
+.draft-round-editor__upload {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+.draft-round-editor__preview {
+  max-width: 160px;
+  border-radius: var(--radius-input);
+}
+
+.draft-shot {
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--outline);
+}
+
+.draft-shot__verdict,
+.draft-shot__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.draft-shot__verdict-chip[aria-pressed="true"] {
+  background: var(--s-highest);
+  border-color: var(--primary);
+  font-weight: 700;
+}
+
 .claude-code-box {
   display: flex;
   flex-direction: column;
