@@ -551,9 +551,9 @@ final class DraftRoundEditorTest extends WebTestCase
             $ids[] = $id;
             $pressed[$id] = $shot->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed'));
         }
-        preg_match('/\d+ of \d+ look right/', $response->text(), $status);
+        $status = $response->filter('.round-card__header [data-draft-status]');
 
-        return ['ids' => $ids, 'pressed' => $pressed, 'status' => $status[0] ?? null];
+        return ['ids' => $ids, 'pressed' => $pressed, 'status' => 0 === \count($status) ? null : $status->text()];
     }
 
     /**

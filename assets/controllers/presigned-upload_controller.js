@@ -15,7 +15,7 @@ import { readUploadStatus, REJECTED_MESSAGE, sleep, statusUrlFor, waitForProcess
 // 404, 429) shows nothing and counts as pending. Refusals and failures of the upload itself show the server's own
 // message in the `status` live region, remove data-media-state and fire presigned-upload:failed (no detail). The clear()
 // action drops the picture: it stops the upload or the polling, empties the field, data-media-state and the preview, and
-// fires nothing. The markup and the values
+// fires nothing. resumeProcessing() polls a kept, still pending picture for another 15 s. The markup and the values
 // come from the UploadField component, or from ScreenshotReportField.
 export default class extends Controller {
   static targets = ['input', 'status', 'progress', 'preview', 'mediaId'];
@@ -126,6 +126,23 @@ export default class extends Controller {
     this.progressTarget.hidden = true;
     this.clearPreview();
     this.say('');
+  }
+
+  // Polls the kept picture again for another 15 s, after presigned-upload:still-processing; fires the same events as the
+  // first wait. Does nothing when no picture is kept or the upload was cleared.
+  async resumeProcessing() {
+    const mediaId = this.mediaIdTarget.value;
+    const signal = this.abortController?.signal;
+    if (!mediaId || !signal || signal.aborted) {
+      return;
+    }
+    try {
+      await this.awaitProcessing(mediaId, signal);
+    } catch (failure) {
+      if (!signal.aborted) {
+        throw failure;
+      }
+    }
   }
 
   async awaitProcessing(mediaId, signal) {

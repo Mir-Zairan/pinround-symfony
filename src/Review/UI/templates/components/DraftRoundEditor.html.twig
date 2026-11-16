@@ -1,4 +1,4 @@
-{#- The owner's private draft inside its card (DraftRoundEditor, a live component): the status line, the screenshots with
+{#- The owner's private draft inside its card (DraftRoundEditor, a live component): the card header with the status line, the screenshots with
     their verdict, texts and pins, and "Add screenshot". Each change is one live action. The upload block and the pins of a
     ready picture are data-live-ignore: the browser owns them, so a re-render never wipes an upload's progress or a pin
     being moved. -#}
@@ -6,6 +6,12 @@
 <div{{ attributes.defaults({class: 'draft-round-editor'}) }}>
     {% if card is not null %}
         {% set editorId = card.domId ~ '-editor' %}
+        <header class="round-card__header">
+            <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>
+            <twig:Tag class="round-card__private">PRIVATE</twig:Tag>
+            {% if card.status is not null %}<p class="round-card__status" data-draft-status>{{ card.status }}</p>{% endif %}
+        </header>
+        {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
         <div class="draft-round-editor__body" id="{{ editorId }}"
             data-controller="draft-round-editor presigned-upload"
             data-draft-round-editor-presigned-upload-outlet="#{{ editorId }}"
@@ -14,9 +20,8 @@
             data-presigned-upload-csrf-token-value="{{ csrf_token('media_upload') }}"
             data-presigned-upload-target-kind-value="{{ this.uploadTargetKind }}"
             data-presigned-upload-target-id-value="{{ card.roundId }}"
-            data-action="paste->presigned-upload#paste dragover->presigned-upload#dragOver drop->presigned-upload#drop presigned-upload:ready->draft-round-editor#addUploaded presigned-upload:still-processing->draft-round-editor#addUploaded pin-placer:change->draft-round-editor#schedulePinSave"
+            data-action="paste->presigned-upload#paste dragover->presigned-upload#dragOver drop->presigned-upload#drop presigned-upload:ready->draft-round-editor#addUploaded presigned-upload:still-processing->draft-round-editor#keepWaiting presigned-upload:started->draft-round-editor#resetWaiting pin-placer:change->draft-round-editor#schedulePinSave"
         >
-            {% if card.status is not null %}<p class="round-card__status">{{ card.status }}</p>{% endif %}
             {% if this.refusal is not null %}
                 <p class="draft-round-editor__refusal" role="alert">{{ this.refusal }}</p>
             {% endif %}
@@ -33,10 +38,8 @@
                     <div class="draft-shot__verdict" role="group" aria-label="Verdict for {{ item.label }}">
                         {% set looksRight = constant('App\\Review\\Api\\RoundCommands::VERDICT_LOOKS_RIGHT') %}
                         {% set notRightYet = constant('App\\Review\\Api\\RoundCommands::VERDICT_NOT_RIGHT_YET') %}
-                        <button type="button" class="btn btn-outline btn-sm draft-shot__verdict-chip" aria-pressed="{{ item.looksRight ? 'true' : 'false' }}"
-                            data-action="live#action" data-live-action-param="setVerdict" data-live-screenshot-id-param="{{ item.screenshotId }}" data-live-verdict-param="{{ item.looksRight ? '' : looksRight }}">Looks right</button>
-                        <button type="button" class="btn btn-outline btn-sm draft-shot__verdict-chip" aria-pressed="{{ item.isNotRightYet ? 'true' : 'false' }}"
-                            data-action="live#action" data-live-action-param="setVerdict" data-live-screenshot-id-param="{{ item.screenshotId }}" data-live-verdict-param="{{ item.isNotRightYet ? '' : notRightYet }}">Not right yet</button>
+                        <twig:Chip :pressed="item.looksRight" data-action="live#action" data-live-action-param="setVerdict" data-live-screenshot-id-param="{{ item.screenshotId }}" data-live-verdict-param="{{ item.looksRight ? '' : looksRight }}">Looks right</twig:Chip>
+                        <twig:Chip :pressed="item.isNotRightYet" data-action="live#action" data-live-action-param="setVerdict" data-live-screenshot-id-param="{{ item.screenshotId }}" data-live-verdict-param="{{ item.isNotRightYet ? '' : notRightYet }}">Not right yet</twig:Chip>
                     </div>
 
                     <div class="pin-placer" id="{{ item.view.domId }}-placer"{% if item.view.isReady %} data-live-ignore{% endif %}

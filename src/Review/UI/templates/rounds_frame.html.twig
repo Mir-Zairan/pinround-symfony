@@ -7,20 +7,19 @@
     {% else %}
         {% for card in section.cards %}
             <twig:Card tag="article" :class="'round-card' ~ (card.isPrivateDraft ? ' round-card--private' : '')" id="{{ card.domId }}" aria-labelledby="{{ card.domId }}-heading">
+                {% if card.isPrivateDraft %}
+                    {#- The editor shows the header (with the status line), the description, the screenshots, the empty note and the "more" note itself, so they follow each change. -#}
+                    <twig:DraftRoundEditor :ticketKey="ticketKey" :roundId="card.roundId" :card="card" />
+                {% else %}
                 <header class="round-card__header">
                     <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>
-                    {% if card.isPrivateDraft %}<twig:Tag class="round-card__private">PRIVATE</twig:Tag>{% endif %}
-                    {% if card.status is not null and not card.isPrivateDraft %}<p class="round-card__status">{{ card.status }}</p>{% endif %}
+                    {% if card.status is not null %}<p class="round-card__status">{{ card.status }}</p>{% endif %}
                     {% if card.hasOpenRound %}
                         {#- No round page exists yet, so the button is shown as the prototype has it, and cannot be used. -#}
                         <twig:Button variant="outline" size="sm" :disabled="true" class="round-card__open">Open round</twig:Button>
                     {% endif %}
                 </header>
                 {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
-                {% if card.isPrivateDraft %}
-                    {#- The editor shows the status line, the screenshots, the empty note and the "more" note itself, so they follow each change. -#}
-                    <twig:DraftRoundEditor :ticketKey="ticketKey" :roundId="card.roundId" :card="card" />
-                {% else %}
                 {% if card.emptyNote is not null %}<p class="round-card__empty">{{ card.emptyNote }}</p>{% endif %}
                 {% for item in card.screenshots %}
                     <div class="round-card__screenshot">

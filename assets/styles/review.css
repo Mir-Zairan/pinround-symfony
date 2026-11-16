@@ -531,12 +531,6 @@ textarea.screenshot-report__input {
   gap: var(--space-8);
 }
 
-.draft-shot__verdict-chip[aria-pressed="true"] {
-  background: var(--s-highest);
-  border-color: var(--primary);
-  font-weight: 700;
-}
-
 .claude-code-box {
   display: flex;
   flex-direction: column;
