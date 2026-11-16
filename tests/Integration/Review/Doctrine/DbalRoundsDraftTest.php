@@ -8,6 +8,8 @@ use App\Media\Api\MediaImageStatus;
 use App\Review\Api\RoundRefused;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
+use App\Review\Domain\DraftDecision;
+use App\Review\Domain\DraftFacts;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\Round;
@@ -34,9 +36,10 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * The read and write side of draft rounds in DbalRounds (get, openUnsharedDraftOf, nextFreeNumberOf, save) on the real
- * tables as pinround_app, under row-level security. Each test commits its rows, so a refusal is proven against rows
- * another transaction wrote, and removes them through the migrator. Every time is a fixed one in March 2027.
+ * The read and write side of draft rounds in DbalRounds (get, openUnsharedDraftOf, openUnsharedDraftFactsOf,
+ * nextFreeNumberOf, save) on the real tables as pinround_app, under row-level security. Each test commits its rows, so
+ * a refusal is proven against rows another transaction wrote, and removes them through the migrator. Every time is a
+ * fixed one in March 2027.
  *
  * Besides the draft the tests change, every test seeds rows a wrong filter or a wrong WHERE would touch: another
  * person's draft, another ticket's draft, a report, a shared draft, a deleted draft and another organization's rounds
@@ -194,6 +197,31 @@ final class DbalRoundsDraftTest extends KernelTestCase
         );
     }
 
+    /**
+     * Each count is of that draft's own screenshots: Omar's, Mia's, the report's and the other organization's are on the
+     * same ticket id.
+     */
+    #[Test]
+    public function theOpenDraftsFactsAreItsIdDecisionAndOwnScreenshotCountAndFoundAsTheOpenDraftIs(): void
+    {
+        self::assertEquals(new DraftFacts(new RoundId(self::DRAFT), null, 2), $this->draftFacts(self::ACME_FOODS, self::TICKET, self::LENA));
+        self::assertEquals(new DraftFacts(new RoundId(self::OMARS_DRAFT), null, 1), $this->draftFacts(self::ACME_FOODS, self::TICKET, self::OMAR));
+        self::assertEquals(new DraftFacts(new RoundId(self::OTHER_ORGANIZATION_OPEN_DRAFT), null, 1), $this->draftFacts(self::OTHER_ORGANIZATION, self::TICKET, self::LENA));
+        foreach (self::owners() as [$organizationId, $ticketId, $ownerId]) {
+            self::assertNull($this->draftFacts($organizationId, $ticketId, $ownerId), \sprintf('Owner %s on ticket %s.', $ownerId, $ticketId));
+        }
+
+        $this->addCommitted(self::draftOf(self::LENAS_NEW_DRAFT, self::ACME_FOODS, self::EMPTY_TICKET, self::LENA));
+        self::assertEquals(new DraftFacts(new RoundId(self::LENAS_NEW_DRAFT), null, 0), $this->draftFacts(self::ACME_FOODS, self::EMPTY_TICKET, self::LENA));
+
+        $this->committed(self::ACME_FOODS, function (): void {
+            $draft = $this->storedDraft();
+            $draft->decide(new UserId(self::LENA), DraftDecision::KeptPrivate, self::savedAt());
+            $this->rounds()->save($draft, self::savedAt());
+        });
+        self::assertEquals(new DraftFacts(new RoundId(self::DRAFT), DraftDecision::KeptPrivate, 2), $this->draftFacts(self::ACME_FOODS, self::TICKET, self::LENA));
+    }
+
     #[Test]
     public function theNextNumberIsOneAboveTheTicketsHighestAndCountsNoOtherTicketOrOrganization(): void
     {
@@ -215,6 +243,7 @@ final class DbalRoundsDraftTest extends KernelTestCase
         $calls = [
             'get' => fn () => $this->rounds()->get(new RoundId(self::DRAFT)),
             'openUnsharedDraftOf' => fn () => $this->rounds()->openUnsharedDraftOf(new TicketId(self::TICKET), new UserId(self::LENA)),
+            'openUnsharedDraftFactsOf' => fn () => $this->rounds()->openUnsharedDraftFactsOf(new TicketId(self::TICKET), new UserId(self::LENA)),
             'nextFreeNumberOf' => fn () => $this->rounds()->nextFreeNumberOf(new TicketId(self::TICKET)),
             'save' => fn () => $this->rounds()->save($draft, self::savedAt()),
         ];
@@ -695,6 +724,11 @@ final class DbalRoundsDraftTest extends KernelTestCase
         } finally {
             $connection->rollBack();
         }
+    }
+
+    private function draftFacts(string $organizationId, string $ticketId, string $ownerId): ?DraftFacts
+    {
+        return $this->committed($organizationId, fn (): ?DraftFacts => $this->rounds()->openUnsharedDraftFactsOf(new TicketId($ticketId), new UserId($ownerId)));
     }
 
     private function nextNumber(string $organizationId, string $ticketId): int

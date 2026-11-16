@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Review\Application;
 
+use App\Review\Domain\DraftFacts;
 use App\Review\Domain\PinId;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
@@ -35,6 +36,10 @@ final class InMemoryRounds implements Rounds
 
     /** @var list<string> the ticket ids nextFreeNumberOf was asked for, in order: each stands for the lock DbalRounds takes */
     public array $numberedTicketIds = [];
+
+    /** Rounds read whole, with their screenshots and pins (get, openUnsharedDraftOf), and saves that were stored. */
+    public int $loadedRounds = 0;
+    public int $savedRounds = 0;
 
     private int $issuedIds = 0;
 
@@ -87,6 +92,8 @@ final class InMemoryRounds implements Rounds
         $organizationId = $this->requireTenant();
         foreach ($this->stored as $existing) {
             if ($existing->organizationId()->equals($organizationId) && $existing->id()->equals($id)) {
+                ++$this->loadedRounds;
+
                 return self::copyOf($existing);
             }
         }
@@ -96,15 +103,20 @@ final class InMemoryRounds implements Rounds
 
     public function openUnsharedDraftOf(TicketId $ticketId, UserId $ownerId): ?Round
     {
-        $organizationId = $this->requireTenant();
-        foreach ($this->stored as $existing) {
-            if ($existing->organizationId()->equals($organizationId) && $existing->ticketId()->equals($ticketId)
-                && $existing->ownerId()->equals($ownerId) && self::isOpenUnsharedDraft($existing)) {
-                return self::copyOf($existing);
-            }
+        $draft = $this->storedOpenUnsharedDraftOf($ticketId, $ownerId);
+        if (null === $draft) {
+            return null;
         }
+        ++$this->loadedRounds;
 
-        return null;
+        return self::copyOf($draft);
+    }
+
+    public function openUnsharedDraftFactsOf(TicketId $ticketId, UserId $ownerId): ?DraftFacts
+    {
+        $draft = $this->storedOpenUnsharedDraftOf($ticketId, $ownerId);
+
+        return null === $draft ? null : new DraftFacts($draft->id(), $draft->decision(), \count($draft->screenshots()));
     }
 
     public function nextFreeNumberOf(TicketId $ticketId): int
@@ -153,6 +165,7 @@ final class InMemoryRounds implements Rounds
         $stored = $this->stored;
         $stored[$storedIndex] = self::copyOf($round);
         $this->stored = array_values($stored);
+        ++$this->savedRounds;
     }
 
     private function requireTenant(): OrganizationId
@@ -162,6 +175,19 @@ final class InMemoryRounds implements Rounds
         }
 
         return $this->tenantContext->require();
+    }
+
+    private function storedOpenUnsharedDraftOf(TicketId $ticketId, UserId $ownerId): ?Round
+    {
+        $organizationId = $this->requireTenant();
+        foreach ($this->stored as $existing) {
+            if ($existing->organizationId()->equals($organizationId) && $existing->ticketId()->equals($ticketId)
+                && $existing->ownerId()->equals($ownerId) && self::isOpenUnsharedDraft($existing)) {
+                return $existing;
+            }
+        }
+
+        return null;
     }
 
     private static function isOpenUnsharedDraft(Round $round): bool

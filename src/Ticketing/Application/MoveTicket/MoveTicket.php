@@ -345,9 +345,14 @@ final readonly class MoveTicket
         if ($target->id() === $fromStepId) {
             throw new MoveRefused(null);
         }
-        $draft = $this->shareDraftQuestion->undecidedDraftOf($ticket->id(), $actor);
-        if (null !== $draft && null === $draftChoice) {
-            throw new DraftDecisionNeeded($draft);
+        if (null === $draftChoice) {
+            $draft = $this->shareDraftQuestion->undecidedDraftOf($ticket->id(), $actor);
+            if (null !== $draft) {
+                throw new DraftDecisionNeeded($draft);
+            }
+            $draftId = null;
+        } else {
+            $draftId = $this->shareDraftQuestion->undecidedDraftIdOf($ticket->id(), $actor);
         }
         $ticket->move(
             $target->id(),
@@ -360,13 +365,13 @@ final readonly class MoveTicket
         );
 
         $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
-        if (null === $draft) {
+        if (null === $draftId) {
             return new MoveResult($clearedPingCount);
         }
         if (DraftChoice::Share === $draftChoice) {
-            return new MoveResult($clearedPingCount, DraftChoice::Share, $this->shareDraftQuestion->share($draft, $actor, $at));
+            return new MoveResult($clearedPingCount, DraftChoice::Share, $this->shareDraftQuestion->share($draftId, $actor, $at));
         }
-        $this->shareDraftQuestion->keepPrivate($draft, $actor, $at);
+        $this->shareDraftQuestion->keepPrivate($draftId, $actor, $at);
 
         return new MoveResult($clearedPingCount, DraftChoice::Keep);
     }

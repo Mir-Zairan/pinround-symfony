@@ -74,6 +74,7 @@ final class RoundShareDraftQuestionTest extends TestCase
 
         self::assertEquals(new UndecidedDraft(self::OMARS_DRAFT, 2, 2), $draft, 'Mia\'s round 1 makes Omar\'s the second.');
         self::assertSame([self::TICKET], $this->rounds->numberedTicketIds, 'The number is read under the lock sharing takes.');
+        self::assertSame(0, $this->rounds->loadedRounds, 'Only the draft\'s facts are read, not its screenshots and pins.');
     }
 
     /**
@@ -91,7 +92,17 @@ final class RoundShareDraftQuestionTest extends TestCase
     public function thereIsNoQuestionWithoutAnUndecidedDraftWithAScreenshot(string $owner, string $ticketId): void
     {
         self::assertNull($this->question->undecidedDraftOf(new TicketId($ticketId), new UserId($owner)));
+        self::assertNull($this->question->undecidedDraftIdOf(new TicketId($ticketId), new UserId($owner)));
         self::assertSame([], $this->rounds->numberedTicketIds, 'No number is locked when nothing is asked.');
+        self::assertSame(0, $this->rounds->loadedRounds, 'Only the draft\'s facts are read, not its screenshots and pins.');
+    }
+
+    #[Test]
+    public function aMoveWithItsAnswerGetsTheDraftIdWithoutReadingOrLockingANumber(): void
+    {
+        self::assertSame(self::OMARS_DRAFT, $this->question->undecidedDraftIdOf(new TicketId(self::TICKET), new UserId(self::OMAR)));
+        self::assertSame([], $this->rounds->numberedTicketIds);
+        self::assertSame(0, $this->rounds->loadedRounds, 'Only the draft\'s facts are read, not its screenshots and pins.');
     }
 
     #[Test]
@@ -100,9 +111,12 @@ final class RoundShareDraftQuestionTest extends TestCase
         $omar = new UserId(self::OMAR);
         $draft = $this->question->undecidedDraftOf(new TicketId(self::TICKET), $omar);
         self::assertNotNull($draft);
-        $this->question->keepPrivate($draft, $omar, self::at());
+        $this->question->keepPrivate($draft->roundId, $omar, self::at());
+        $this->rounds->numberedTicketIds = [];
 
         self::assertNull($this->question->undecidedDraftOf(new TicketId(self::TICKET), $omar));
+        self::assertNull($this->question->undecidedDraftIdOf(new TicketId(self::TICKET), $omar));
+        self::assertSame([], $this->rounds->numberedTicketIds, 'No number is locked for a decided draft.');
     }
 
     #[Test]
@@ -110,10 +124,13 @@ final class RoundShareDraftQuestionTest extends TestCase
     {
         $before = $this->snapshot();
         $draft = $this->undecidedDraftOfOmar();
+        $this->rounds->loadedRounds = 0;
+        $this->rounds->savedRounds = 0;
 
-        $number = $this->question->share($draft, new UserId(self::OMAR), self::at());
+        $number = $this->question->share($draft->roundId, new UserId(self::OMAR), self::at());
 
         self::assertSame(2, $number);
+        self::assertSame([1, 1], [$this->rounds->loadedRounds, $this->rounds->savedRounds], 'The draft is read and saved once, shared and decided together.');
         $after = $this->snapshot();
         self::assertSame(
             [...$before[self::OMARS_DRAFT], 'number' => 2, 'sharedAt' => self::at()->format('c'), 'version' => $before[self::OMARS_DRAFT]['version'] + 2, 'decision' => 'shared', 'decidedAt' => self::at()->format('c')],
@@ -128,7 +145,7 @@ final class RoundShareDraftQuestionTest extends TestCase
         $before = $this->snapshot();
         $draft = $this->undecidedDraftOfOmar();
 
-        $this->question->keepPrivate($draft, new UserId(self::OMAR), self::at());
+        $this->question->keepPrivate($draft->roundId, new UserId(self::OMAR), self::at());
 
         $after = $this->snapshot();
         self::assertSame(
@@ -145,8 +162,8 @@ final class RoundShareDraftQuestionTest extends TestCase
         $draft = $this->undecidedDraftOfOmar();
         $before = $this->snapshot();
 
-        $this->assertChangedMeanwhile(fn () => $this->question->share($draft, new UserId(self::LENA), self::at()), RoundRefused::class);
-        $this->assertChangedMeanwhile(fn () => $this->question->keepPrivate($draft, new UserId(self::LENA), self::at()), \DomainException::class);
+        $this->assertChangedMeanwhile(fn () => $this->question->share($draft->roundId, new UserId(self::LENA), self::at()), RoundRefused::class);
+        $this->assertChangedMeanwhile(fn () => $this->question->keepPrivate($draft->roundId, new UserId(self::LENA), self::at()), \DomainException::class);
 
         self::assertSame($before, $this->snapshot());
     }
@@ -156,10 +173,10 @@ final class RoundShareDraftQuestionTest extends TestCase
     {
         $omar = new UserId(self::OMAR);
         $draft = $this->undecidedDraftOfOmar();
-        $this->question->keepPrivate($draft, $omar, self::at());
+        $this->question->keepPrivate($draft->roundId, $omar, self::at());
         $before = $this->snapshot();
 
-        $this->assertChangedMeanwhile(fn () => $this->question->keepPrivate($draft, $omar, self::at()), \DomainException::class);
+        $this->assertChangedMeanwhile(fn () => $this->question->keepPrivate($draft->roundId, $omar, self::at()), \DomainException::class);
 
         self::assertSame($before, $this->snapshot());
     }
@@ -169,12 +186,84 @@ final class RoundShareDraftQuestionTest extends TestCase
     {
         $omar = new UserId(self::OMAR);
         $draft = $this->undecidedDraftOfOmar();
-        $this->question->share($draft, $omar, self::at());
+        $this->question->share($draft->roundId, $omar, self::at());
         $before = $this->snapshot();
 
-        $this->assertChangedMeanwhile(fn () => $this->question->share($draft, $omar, self::at()), RoundRefused::class);
+        $this->assertChangedMeanwhile(fn () => $this->question->share($draft->roundId, $omar, self::at()), RoundRefused::class);
 
         self::assertSame($before, $this->snapshot());
+    }
+
+    #[Test]
+    public function sharingADraftKeptPrivateSinceItWasReadIsRefusedAndNeitherSharesNorNumbersIt(): void
+    {
+        $omar = new UserId(self::OMAR);
+        $draft = $this->undecidedDraftOfOmar();
+        $this->question->keepPrivate($draft->roundId, $omar, self::at());
+        $before = $this->snapshot();
+
+        $this->assertChangedMeanwhile(fn () => $this->question->share($draft->roundId, $omar, self::at()), RoundRefused::class);
+
+        self::assertSame($before, $this->snapshot());
+        self::assertNull($this->snapshot()[self::OMARS_DRAFT]['sharedAt']);
+    }
+
+    #[Test]
+    public function sharingADraftSavedByAnotherRequestBetweenItsReadAndItsSaveIsRefused(): void
+    {
+        $omar = new UserId(self::OMAR);
+        $draft = $this->undecidedDraftOfOmar();
+        $interfering = new InterferingRounds($this->rounds);
+        $interfering->afterNextGet = self::editOmarsDraftMeanwhile(...);
+        $question = $this->questionOver($interfering);
+        $before = $this->snapshot();
+
+        $this->assertChangedMeanwhile(static fn () => $question->share($draft->roundId, $omar, self::at()), RoundRefused::class);
+
+        $after = $this->snapshot()[self::OMARS_DRAFT];
+        self::assertSame([null, null, null], [$after['number'], $after['sharedAt'], $after['decision']]);
+        self::assertSame($before[self::OMARS_DRAFT]['version'] + 1, $after['version'], 'Only the other request\'s edit is saved.');
+    }
+
+    /**
+     * @return iterable<string, array{string, class-string<\Throwable>|null}> the round id, and the refusal's cause
+     */
+    public static function draftIdsThatAreGone(): iterable
+    {
+        yield 'a malformed id' => ['not-a-round', \InvalidArgumentException::class];
+        yield 'an id no round has' => ['0197a3c0-0000-7000-8000-000000002e99', null];
+    }
+
+    /**
+     * @param class-string<\Throwable>|null $expectedCause
+     */
+    #[Test]
+    #[DataProvider('draftIdsThatAreGone')]
+    public function keepingPrivateADraftThatIsGoneIsRefusedAndChangesNothing(string $roundId, ?string $expectedCause): void
+    {
+        $before = $this->snapshot();
+
+        try {
+            $this->question->keepPrivate($roundId, new UserId(self::OMAR), self::at());
+            self::fail('Keeping a gone draft private was not refused.');
+        } catch (TicketChangedMeanwhile $refused) {
+            self::assertSame('The draft round is gone.', $refused->getMessage());
+            self::assertSame($expectedCause, null === $refused->getPrevious() ? null : $refused->getPrevious()::class);
+        }
+
+        self::assertSame($before, $this->snapshot());
+        self::assertSame(0, $this->rounds->savedRounds);
+    }
+
+    #[Test]
+    public function sharingADraftThatIsGoneIsRefusedAndChangesNothing(): void
+    {
+        $before = $this->snapshot();
+
+        $this->assertChangedMeanwhile(fn () => $this->question->share('not-a-round', new UserId(self::OMAR), self::at()), RoundRefused::class);
+
+        self::assertSame($before, $this->snapshot());
+        self::assertSame(0, $this->rounds->savedRounds);
     }
 
     #[Test]
@@ -183,23 +272,31 @@ final class RoundShareDraftQuestionTest extends TestCase
         $omar = new UserId(self::OMAR);
         $draft = $this->undecidedDraftOfOmar();
         $interfering = new InterferingRounds($this->rounds);
-        $interfering->afterNextGet = static function (Rounds $rounds) use ($omar): void {
-            $stored = $rounds->get(new RoundId(self::OMARS_DRAFT)) ?? throw new \LogicException('Omar\'s draft is seeded.');
-            $stored->editScreenshotText($omar, new ScreenshotId('0197a3c0-0000-7000-8000-000000002a01'), 'Edited meanwhile', null);
-            $rounds->save($stored, self::at());
-        };
-        $question = new RoundShareDraftQuestion($interfering, new UseCaseRoundCommands(
-            $interfering,
+        $interfering->afterNextGet = self::editOmarsDraftMeanwhile(...);
+        $question = $this->questionOver($interfering);
+        $before = $this->snapshot();
+
+        $this->assertChangedMeanwhile(static fn () => $question->keepPrivate($draft->roundId, $omar, self::at()), RoundChanged::class);
+
+        self::assertNull($this->snapshot()[self::OMARS_DRAFT]['decision']);
+        self::assertSame($before[self::OMARS_DRAFT]['version'] + 1, $this->snapshot()[self::OMARS_DRAFT]['version'], 'Only the other request\'s edit is saved.');
+    }
+
+    private static function editOmarsDraftMeanwhile(Rounds $rounds): void
+    {
+        $stored = $rounds->get(new RoundId(self::OMARS_DRAFT)) ?? throw new \LogicException('Omar\'s draft is seeded.');
+        $stored->editScreenshotText(new UserId(self::OMAR), new ScreenshotId('0197a3c0-0000-7000-8000-000000002a01'), 'Edited meanwhile', null);
+        $rounds->save($stored, self::at());
+    }
+
+    private function questionOver(Rounds $rounds): RoundShareDraftQuestion
+    {
+        return new RoundShareDraftQuestion($rounds, new UseCaseRoundCommands(
+            $rounds,
             new InMemoryTicketTurnQueries([], new TicketId(self::BROKEN_TICKET)),
             $this->tenantContext,
             new ReportPictures(new InMemoryUploadedMedia($this->tenantContext, [])),
         ));
-        $before = $this->snapshot();
-
-        $this->assertChangedMeanwhile(static fn () => $question->keepPrivate($draft, $omar, self::at()), RoundChanged::class);
-
-        self::assertNull($this->snapshot()[self::OMARS_DRAFT]['decision']);
-        self::assertSame($before[self::OMARS_DRAFT]['version'] + 1, $this->snapshot()[self::OMARS_DRAFT]['version'], 'Only the other request\'s edit is saved.');
     }
 
     private function undecidedDraftOfOmar(): UndecidedDraft

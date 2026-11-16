@@ -11,39 +11,48 @@ use App\SharedKernel\Domain\UserId;
  * "Share your draft round?", asked when the owner of a private draft round moves its ticket to another step
  * (ADR-0017, hand-off; P05.T9). Review implements it, so the move asks without Ticketing depending on Review. Each
  * method runs in the caller's open transaction, whose tenant is the ticket's organization, and touches only the
- * owner's own draft.
+ * owner's own draft. An undecided draft is the owner's open, unshared draft with no decision yet and at least one
+ * screenshot.
  */
 interface ShareDraftQuestion
 {
     /**
-     * The owner's draft round the move asks about: open, unshared, not decided yet and holding at least one screenshot.
-     * Reading the number it would get holds the ticket's round numbers until the caller's transaction ends, as sharing
-     * does.
+     * The undecided draft to ask about, with the number it would get. Reading that number holds the ticket's round
+     * numbers until the caller's transaction ends, as sharing does; nothing is held when there is no such draft.
      *
-     * @return UndecidedDraft|null null when there is no such draft, so the move asks nothing
+     * @return UndecidedDraft|null null when there is no undecided draft, so the move asks nothing
      *
      * @throws \LogicException when no transaction is open or no tenant is set
      */
     public function undecidedDraftOf(TicketId $ticketId, UserId $ownerId): ?UndecidedDraft;
 
     /**
-     * Shares the draft as the ticket's next round number and records the decision "shared", in one go.
+     * The id of the undecided draft a move that has its answer already shares or keeps private; reads no number and
+     * holds nothing.
+     *
+     * @return string|null null when there is no undecided draft, so the move decides nothing
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function undecidedDraftIdOf(TicketId $ticketId, UserId $ownerId): ?string;
+
+    /**
+     * Shares the draft as the ticket's next round number and records the decision "shared", in one save.
      *
      * @return int the round's number, from 1
      *
-     * @throws TicketChangedMeanwhile when the draft was shared, decided, deleted or saved by another request since
-     *                                undecidedDraftOf read it; part of it may be written by then, so the caller rolls
-     *                                back its whole transaction
+     * @throws TicketChangedMeanwhile when the draft was shared, decided, deleted or saved by another request since it
+     *                                was read; nothing is saved
      * @throws \LogicException        when no transaction is open or no tenant is set
      */
-    public function share(UndecidedDraft $draft, UserId $ownerId, \DateTimeImmutable $at): int;
+    public function share(string $roundId, UserId $ownerId, \DateTimeImmutable $at): int;
 
     /**
      * Records the decision "kept private"; the draft stays unshared and the question is not asked again.
      *
-     * @throws TicketChangedMeanwhile when the draft was shared, decided, deleted or saved by another request since
-     *                                undecidedDraftOf read it; nothing is saved
+     * @throws TicketChangedMeanwhile when the draft was shared, decided, deleted or saved by another request since it
+     *                                was read; nothing is saved
      * @throws \LogicException        when no transaction is open or no tenant is set
      */
-    public function keepPrivate(UndecidedDraft $draft, UserId $ownerId, \DateTimeImmutable $at): void;
+    public function keepPrivate(string $roundId, UserId $ownerId, \DateTimeImmutable $at): void;
 }

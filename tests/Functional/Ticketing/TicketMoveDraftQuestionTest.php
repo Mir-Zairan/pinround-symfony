@@ -5,8 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
+use App\Review\Api\RoundCommands;
+use App\Review\Application\RoundShareDraftQuestion;
+use App\Review\Domain\Rounds;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Review\SeedsTicketRounds;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -14,7 +19,10 @@ use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\MoveResult;
+use App\Ticketing\Api\ShareDraftQuestion;
+use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Api\UndecidedDraft;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
 use App\Ticketing\UI\TicketMoveController;
@@ -175,6 +183,40 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         self::assertSame(array_diff_key($before['rounds'], [$this->omarsDraft => true]), array_diff_key($after['rounds'], [$this->omarsDraft => true]));
 
         $this->assertASecondMoveAsksNothing($after);
+    }
+
+    /**
+     * @return iterable<string, array{string}> the choice the form sends
+     */
+    public static function choices(): iterable
+    {
+        yield 'share' => ['share'];
+        yield 'keep' => ['keep'];
+    }
+
+    /**
+     * The draft is decided after the ticket is saved, its history written and Omar's pings cleared; a refusal there
+     * rolls all of it back, the draft's own write too.
+     */
+    #[Test]
+    #[DataProvider('choices')]
+    public function aDraftAnswerRefusedAfterTheMoveRollsBackTheMoveThePingsAndTheDraft(string $choice): void
+    {
+        $this->addOmarsScreenshots(2);
+        $omarsPing = $this->addPingToOmar();
+        $before = $this->stateOf();
+        $pingBefore = $this->stateOfPing($omarsPing);
+        self::assertSame(['cleared_reason' => null, 'done' => false], $pingBefore);
+        $this->answerTheDraftQuestionThenRefuse();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::START_WORK, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => $choice]), [], ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html']);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertStringContainsString('data-toast-message-value="'.MoveToasts::CHANGED_MEANWHILE.'"', (string) $this->client->getResponse()->getContent());
+        self::assertSame($before, $this->stateOf());
+        self::assertSame($this->stepId, $this->stateOf()['ticket']['step_id']);
+        self::assertSame($pingBefore, $this->stateOfPing($omarsPing));
     }
 
     #[Test]
@@ -502,6 +544,102 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         for ($position = 0; $position < $count; ++$position) {
             $this->addScreenshot($this->omarsDraft, $this->addMedia('ready', 'Omar'), $position, null, null);
         }
+    }
+
+    /**
+     * Review's answer as the real one gives it, which then refuses as Review would on a draft changed meanwhile: the
+     * share or keep is written before the refusal, so only the rollback can undo it.
+     */
+    private function answerTheDraftQuestionThenRefuse(): void
+    {
+        $realQuestion = new RoundShareDraftQuestion(self::getContainer()->get(Rounds::class), self::getContainer()->get(RoundCommands::class));
+        self::getContainer()->set(RoundShareDraftQuestion::class, new readonly class($realQuestion) implements ShareDraftQuestion {
+            public function __construct(private ShareDraftQuestion $realQuestion)
+            {
+            }
+
+            public function undecidedDraftOf(TicketId $ticketId, UserId $ownerId): ?UndecidedDraft
+            {
+                return $this->realQuestion->undecidedDraftOf($ticketId, $ownerId);
+            }
+
+            public function undecidedDraftIdOf(TicketId $ticketId, UserId $ownerId): ?string
+            {
+                return $this->realQuestion->undecidedDraftIdOf($ticketId, $ownerId);
+            }
+
+            public function share(string $roundId, UserId $ownerId, \DateTimeImmutable $at): int
+            {
+                $this->realQuestion->share($roundId, $ownerId, $at);
+
+                throw new TicketChangedMeanwhile('The draft round was changed after it was read.');
+            }
+
+            public function keepPrivate(string $roundId, UserId $ownerId, \DateTimeImmutable $at): void
+            {
+                $this->realQuestion->keepPrivate($roundId, $ownerId, $at);
+
+                throw new TicketChangedMeanwhile('The draft round was changed after it was read.');
+            }
+        });
+    }
+
+    /**
+     * An open ping from Lena to Omar on SHOP-1, with its bell row, which Omar's move clears.
+     *
+     * @return string the ping's id
+     */
+    private function addPingToOmar(): string
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $pingId = Uuid::v7()->toRfc4122();
+        $ping = [
+            'organization_id' => $organizationId,
+            'id' => $pingId,
+            'ticket_id' => $this->ticketId,
+            'from_id' => $this->people['Lena']->id()->toString(),
+            'to_id' => $this->people['Omar']->id()->toString(),
+            'body' => 'Any news on this one?',
+            'created_at' => '2026-11-06 11:00:00+00',
+        ];
+        $notification = [
+            'organization_id' => $organizationId,
+            'id' => Uuid::v7()->toRfc4122(),
+            'user_id' => $this->people['Omar']->id()->toString(),
+            'kind' => 'ping',
+            'actor_id' => $this->people['Lena']->id()->toString(),
+            'ticket_id' => $this->ticketId,
+            'data' => json_encode(['actorName' => 'Lena', 'ticketKey' => self::KEY, 'pingId' => $pingId], \JSON_THROW_ON_ERROR),
+            'created_at' => '2026-11-06 11:00:00+00',
+        ];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($ping, $notification): int|string {
+            $migrator->insert('ntf_ping', $ping);
+
+            return $migrator->insert('ntf_notification', $notification);
+        });
+
+        return $pingId;
+    }
+
+    /**
+     * @return array{cleared_reason: mixed, done: mixed}
+     */
+    private function stateOfPing(string $pingId): array
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $row = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $pingId, &$row): int {
+            $row = $migrator->fetchAssociative(
+                "SELECT p.cleared_reason, n.done_at IS NOT NULL AS done FROM ntf_ping p JOIN ntf_notification n ON n.organization_id = p.organization_id AND n.data->>'pingId' = p.id::text
+                 WHERE p.organization_id = ? AND p.id = ?",
+                [$organizationId, $pingId],
+            );
+
+            return 0;
+        });
+        self::assertIsArray($row);
+
+        return ['cleared_reason' => $row['cleared_reason'], 'done' => $row['done']];
     }
 
     private function removeLenasScreenshots(): void
