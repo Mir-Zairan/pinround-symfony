@@ -152,7 +152,7 @@ final readonly class RoundCards
     {
         $view = $this->screenshotViewOf($round, $screenshot, $image, $pins);
         if (RoundView::DRAFT !== $round->kind) {
-            return new RoundCardScreenshot($view);
+            return new RoundCardScreenshot($screenshot->id, $view);
         }
         [$verdictLabel, $verdictClass] = match ($screenshot->verdict) {
             self::LOOKS_RIGHT => [RoundCardScreenshot::LOOKS_RIGHT, 'verdict-tag--looks-right'],
@@ -160,7 +160,7 @@ final readonly class RoundCards
             default => [RoundCardScreenshot::NO_VERDICT, 'verdict-tag--none'],
         };
 
-        return new RoundCardScreenshot($view, \sprintf('Screenshot %d', $screenshot->position + 1), $verdictLabel, $verdictClass);
+        return new RoundCardScreenshot($screenshot->id, $view, \sprintf('Screenshot %d', $screenshot->position + 1), $verdictLabel, $verdictClass);
     }
 
     /**
