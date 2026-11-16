@@ -1,4 +1,5 @@
-{#- VerdictController's answer to a Turbo form: the area tabs and the side panel as they are now, then the toast. -#}
+{#- VerdictController's answer to a Turbo form: the area tabs and the side panel as they are now, then the toast. The panel's
+    focusedControlId control has autofocus, which Turbo focuses after the swap, as the clicked button went with the old panel. -#}
 <turbo-stream action="replace" target="round-area-tabs"><template>{{ include('@Review/_area_tabs.html.twig') }}</template></turbo-stream>
 <turbo-stream action="replace" target="round-panel"><template>{{ include('@Review/_round_panel.html.twig') }}</template></turbo-stream>
 {{ include('@Web/_toast_stream.html.twig', {message: toast}) }}

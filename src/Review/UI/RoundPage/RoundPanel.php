@@ -17,6 +17,14 @@ final readonly class RoundPanel
     public const string TICKET_NEXT_STEP_ID = 'ticket-next-step';
     public const string THREAD_ROUTE = 'conversation_thread';
     public const string QUESTION_COMPOSER_ID_PREFIX = 'thread-composer-';
+    /** The thread page's query parameter, with a user id, that thread-composer reads to start a question to them. */
+    public const string ASK_PARAMETER = 'ask';
+
+    /** With the pin's id; the ids of the controls a verdict's stream gives focus to, in place of the one clicked. */
+    public const string UNDO_BUTTON_ID_PREFIX = 'round-panel-undo-';
+    /** With the pin's id. */
+    public const string FIXED_BUTTON_ID_PREFIX = 'round-panel-fixed-';
+    public const string SAVE_BUTTON_ID = 'round-panel-save';
 
     /**
      * @param int                 $areaPosition       from 0, the area's tab
@@ -29,7 +37,8 @@ final readonly class RoundPanel
      * @param bool                $mayGiveVerdicts    true shows the forms: VerdictPermission SET is granted on an open round
      *                                                of a ticket with a team lead
      * @param string|null         $leadName           the team lead, who sees the verdict next; never null when $mayGiveVerdicts
-     * @param NextVerbOffer|null  $nextVerb           only for a person who may give verdicts, once every area has one
+     * @param NextVerbOffer|null  $nextVerb           only for the ticket's tester while they may give verdicts, once every
+     *                                                area has one
      */
     public function __construct(
         public string $areaId,

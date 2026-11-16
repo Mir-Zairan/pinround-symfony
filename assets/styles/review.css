@@ -589,13 +589,18 @@ textarea.screenshot-report__input {
   font-size: 20px;
 }
 
-.round-page__tools,
-.round-compare-control {
+.round-page__detail {
+  color: var(--on-surface-var);
+  font-weight: 400;
+}
+
+.round-page__tools {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-8);
 }
 
+/* .seg-group shows it as inline-flex, which would win over the hidden attribute. */
 .round-compare-control[hidden] {
   display: none;
 }

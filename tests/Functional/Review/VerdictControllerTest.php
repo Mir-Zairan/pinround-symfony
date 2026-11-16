@@ -115,6 +115,7 @@ final class VerdictControllerTest extends WebTestCase
     {
         $this->logIn($this->client, $this->people[$person]);
         $page = $this->client->request('GET', self::ROUND_PAGE);
+        self::assertCount(0, $page->filter('[autofocus]'), 'Only the stream of a verdict moves the focus.');
         $firstPin = $page->filter('.round-panel__pin')->first();
         self::assertSame(['Fixed', 'Still wrong'], $firstPin->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
         self::assertSame('/t/SHOP-1/rounds/2/pins/'.$this->pins[1].'/verdict', $firstPin->filter('form')->attr('action'));
@@ -130,11 +131,13 @@ final class VerdictControllerTest extends WebTestCase
         $stream = $this->streamedPanel();
         self::assertSame('Fixed', $stream->filter('.round-panel__pin')->first()->filter('.tag')->text());
         self::assertSame(['Undo'], $stream->filter('.round-panel__pin')->first()->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame(['round-panel-undo-'.$this->pins[1]], $this->autofocusedIdsOf($stream), 'Focus goes to the Undo that replaced the button clicked.');
         self::assertSame([1 => 'fixed', 2 => null, 3 => null, 4 => null], $this->pinVerdicts());
 
-        $this->postAsTurbo('/t/SHOP-1/rounds/2/pins/'.$this->pins[1].'/undo', []);
+        $this->postAsTurbo('/t/SHOP-1/rounds/2/pins/'.strtoupper($this->pins[1]).'/undo', []);
 
         self::assertSame('Verdict on pin 1 undone.', $this->toastOfTheStream(200));
+        self::assertSame(['round-panel-fixed-'.$this->pins[1]], $this->autofocusedIdsOf($this->streamedPanel()), 'Focus goes back to Fixed.');
         self::assertSame([1 => null, 2 => null, 3 => null, 4 => null], $this->pinVerdicts());
 
         $this->client->request('POST', $this->pinUrl(1), [VerdictController::CSRF_FIELD => $this->verdictToken(), VerdictController::VERDICT_FIELD => 'still_wrong']);
@@ -170,6 +173,7 @@ final class VerdictControllerTest extends WebTestCase
         self::assertSame('Needs fix', $panel->filter('.round-panel__verdict .tag')->text());
         self::assertSame('Saved by '.$person, $panel->filter('.round-panel__author')->text());
         self::assertSame('needs_fix', $panel->filter('input[type=radio][checked]')->attr('value'));
+        self::assertSame(['round-panel-save'], $this->autofocusedIdsOf($panel));
         self::assertSame(
             [$this->perProduct => [null, null, null], $this->totals => ['needs_fix', 'Sum is off by a cent', $this->people[$person]->id()->toString()]],
             $this->areaVerdicts(),
@@ -224,7 +228,7 @@ final class VerdictControllerTest extends WebTestCase
         $this->postAsTurbo($this->pinUrl(1), [VerdictController::VERDICT_FIELD => 'maybe']);
         self::assertSame(VerdictRefused::UNKNOWN_PIN_VERDICT, $this->toastOfTheStream(422));
         $this->postAsTurbo('/t/SHOP-1/rounds/2/pins/'.$this->pins[1].'/undo', []);
-        self::assertSame(422, $this->client->getResponse()->getStatusCode(), 'A pin with no verdict has nothing to undo.');
+        self::assertSame('This pin has no verdict to undo.', $this->toastOfTheStream(422));
 
         self::assertSame($before, $this->storedState());
     }
@@ -352,17 +356,27 @@ final class VerdictControllerTest extends WebTestCase
         $offer = $this->streamedPanel()->filter('.round-panel__next');
         self::assertSame('An area has a question for Lena.', $offer->filter('.round-panel__next-sentence')->text());
         self::assertSame('Ask Lena', $offer->filter('a')->text());
-        self::assertSame('/t/SHOP-1/thread#thread-composer-SHOP-1', $offer->filter('a')->attr('href'));
-        $thread = $this->client->request('GET', '/t/SHOP-1/thread');
+        $leadId = $this->people['Lena']->id()->toString();
+        self::assertSame('/t/SHOP-1/thread?ask='.$leadId.'#thread-composer-SHOP-1', $offer->filter('a')->attr('href'));
+        $thread = $this->client->request('GET', '/t/SHOP-1/thread?ask='.$leadId);
         self::assertResponseStatusCodeSame(200);
-        self::assertCount(1, $thread->filter('form#thread-composer-SHOP-1'), 'The link lands on the question composer.');
-        self::assertContains('Lena', $thread->filter('form#thread-composer-SHOP-1 .thread__people button')->each(static fn (Crawler $person): string => trim($person->text())));
+        $composer = $thread->filter('form#thread-composer-SHOP-1');
+        self::assertCount(1, $composer, 'The link lands on the question composer.');
+        self::assertStringContainsString('thread-composer', (string) $thread->filter('.thread__content')->attr('data-controller'));
+        self::assertNull($composer->filter('[data-thread-composer-target="askChip"]')->attr('disabled'), 'Mia may ask, so thread-composer can start the question.');
+        self::assertSame(['Lena'], $composer->filter('[data-thread-composer-target="person"][data-user-id="'.$leadId.'"]')->each(static fn (Crawler $person): string => trim($person->text())), 'The ask parameter names a person the composer offers.');
 
         $page = $this->client->request('GET', self::ROUND_PAGE);
         self::assertSame('Ask Lena', $page->filter('.round-panel__next a')->text(), 'The page offers it too.');
         $this->logIn($this->client, $this->people['Omar']);
         $page = $this->client->request('GET', self::ROUND_PAGE);
         self::assertCount(0, $page->filter('.round-panel__next'), 'Only someone who may give verdicts is offered the verb.');
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', self::ROUND_PAGE);
+        self::assertCount(1, $page->filter('form.round-panel__verdict-form'), 'The lead may still give verdicts.');
+        self::assertCount(0, $page->filter('.round-panel__next'), 'The lead is not offered a question to themself.');
+        $this->postAsTurbo($this->areaUrl($this->totals), [VerdictController::VERDICT_FIELD => 'pass']);
+        self::assertCount(0, $this->streamedPanel()->filter('.round-panel__next'), 'Nor after a verdict of their own.');
         self::assertSame($ticketBefore, $this->ticketRow());
     }
 
@@ -383,7 +397,49 @@ final class VerdictControllerTest extends WebTestCase
         self::assertCount(0, $page->filter('.round-panel form'));
 
         $this->postAsTurbo($this->areaUrl($this->perProduct), [VerdictController::VERDICT_FIELD => 'pass']);
-        self::assertResponseStatusCodeSame(422);
+        self::assertSame('This round is closed, so its verdicts no longer change.', $this->toastOfTheStream(422));
+        $this->postAsTurbo($this->pinUrl(1), [VerdictController::VERDICT_FIELD => 'fixed']);
+        self::assertSame('This round is closed, so its verdicts no longer change.', $this->toastOfTheStream(422));
+        self::assertSame($before, $this->storedState());
+    }
+
+    #[Test]
+    public function aPlainFormWithoutAVerdictComesBackToTheAreaWithThePrototypesToastAndSavesNothing(): void
+    {
+        $before = $this->storedState();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->client->request('POST', $this->areaUrl($this->totals), [VerdictController::CSRF_FIELD => $this->verdictToken(), VerdictController::NOTE_FIELD => 'Looks fine']);
+
+        self::assertSame('Pick Pass, Needs fix or Question first.', $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2?area=1'));
+        self::assertSame($before, $this->storedState());
+    }
+
+    /**
+     * A ticket no team owns has no team lead to see a verdict, so the page shows no forms, and VerdictVoter refuses a
+     * posted one before VerdictController would name the lead in its toast.
+     */
+    #[Test]
+    public function aTicketWithNoTeamLeadShowsNoVerdictFormsAndRefusesAPostedVerdict(): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $ticketId = $this->ticketId;
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET team_id = NULL WHERE organization_id = ? AND id = ?',
+            [$organizationId, $ticketId],
+        ));
+        $before = $this->storedState();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::ROUND_PAGE);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Verdict on Per product', $page->filter('#round-panel-verdict')->text());
+        self::assertCount(0, $page->filter('.round-panel form, .round-panel__next'));
+
+        $this->postAsTurbo($this->areaUrl($this->perProduct), [VerdictController::VERDICT_FIELD => 'pass']);
+        self::assertSame(VerdictController::ONLY_TESTER_OR_LEAD, $this->toastOfTheStream(403));
+        $this->postAsTurbo($this->pinUrl(1), [VerdictController::VERDICT_FIELD => 'fixed']);
+        self::assertSame(VerdictController::ONLY_TESTER_OR_LEAD, $this->toastOfTheStream(403));
         self::assertSame($before, $this->storedState());
     }
 
@@ -476,6 +532,14 @@ final class VerdictControllerTest extends WebTestCase
         self::assertSame(1, $matched);
 
         return new Crawler($panel[1]);
+    }
+
+    /**
+     * @return list<string> the ids of the controls with autofocus, which Turbo focuses after the stream
+     */
+    private function autofocusedIdsOf(Crawler $panel): array
+    {
+        return $panel->filter('[autofocus]')->each(static fn (Crawler $control): string => (string) $control->attr('id'));
     }
 
     private function toastAfterTheRedirect(string $location): string

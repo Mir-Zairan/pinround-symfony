@@ -6,6 +6,9 @@
 {% set verdictField = constant(verdictController ~ '::VERDICT_FIELD') %}
 {% set saveFailedToast = constant(verdictController ~ '::SAVE_FAILED') %}
 {% set csrfToken = panel.mayGiveVerdicts ? csrf_token(verdictCsrfId) : null %}
+{% set panelClass = 'App\\Review\\UI\\RoundPage\\RoundPanel' %}
+{#- Set by the verdict's stream only: Turbo focuses the [autofocus] control once the panel holding the clicked one is gone. -#}
+{% set focusedControlId = focusedControlId|default(null) %}
 <aside id="round-panel" class="round-panel" aria-label="Review of {{ panel.areaName }}">
     {% if panel.earlierPinsHeading is not null %}
         <section class="round-panel__section" aria-labelledby="round-panel-pins">
@@ -26,12 +29,14 @@
                                 {% if row.isChecked %}
                                     <form method="post" action="{{ path(constant(verdictController ~ '::PIN_UNDO_ROUTE'), {key: ticketKey, number: roundNumber, pinId: row.id}) }}" class="round-panel__pin-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
                                         <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                        <twig:Button type="submit" variant="text" size="sm" aria-describedby="round-panel-pin-{{ row.id }}">Undo</twig:Button>
+                                        {% set undoId = constant(panelClass ~ '::UNDO_BUTTON_ID_PREFIX') ~ row.id %}
+                                        <twig:Button type="submit" variant="text" size="sm" id="{{ undoId }}" :autofocus="undoId is same as(focusedControlId)" aria-describedby="round-panel-pin-{{ row.id }}">Undo</twig:Button>
                                     </form>
                                 {% else %}
                                     <form method="post" action="{{ path(constant(verdictController ~ '::PIN_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, pinId: row.id}) }}" class="round-panel__pin-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
                                         <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                        <twig:Button type="submit" variant="tonal" size="sm" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') }}" aria-describedby="round-panel-pin-{{ row.id }}">Fixed</twig:Button>
+                                        {% set fixedId = constant(panelClass ~ '::FIXED_BUTTON_ID_PREFIX') ~ row.id %}
+                                        <twig:Button type="submit" variant="tonal" size="sm" id="{{ fixedId }}" :autofocus="fixedId is same as(focusedControlId)" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') }}" aria-describedby="round-panel-pin-{{ row.id }}">Fixed</twig:Button>
                                         <twig:Button type="submit" variant="outline" size="sm" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') }}" aria-describedby="round-panel-pin-{{ row.id }}">Still wrong</twig:Button>
                                     </form>
                                 {% endif %}
@@ -72,19 +77,19 @@
                 <label class="round-panel__label" for="round-panel-note">Note (optional)</label>
                 <textarea id="round-panel-note" class="text-field round-panel__note-field" name="{{ constant(verdictController ~ '::NOTE_FIELD') }}" placeholder="What should {{ panel.leadName }} know?" maxlength="{{ constant(verdictController ~ '::NOTE_MAX_LENGTH') }}" rows="3">{{ panel.note }}</textarea>
                 <p class="round-panel__then">Then: {{ panel.leadName }}, team lead</p>
-                <twig:Button type="submit" class="round-panel__save">Save verdict</twig:Button>
+                {% set saveId = constant(panelClass ~ '::SAVE_BUTTON_ID') %}
+                <twig:Button type="submit" class="round-panel__save" id="{{ saveId }}" :autofocus="saveId is same as(focusedControlId)">Save verdict</twig:Button>
             </form>
         {% endif %}
     </section>
 
     {% if panel.nextVerb is not null %}
         {% set offer = panel.nextVerb %}
-        {% set panelClass = 'App\\Review\\UI\\RoundPage\\RoundPanel' %}
         <section class="round-panel__next" aria-labelledby="round-panel-next">
             <h2 id="round-panel-next" class="round-panel__title">Next step</h2>
             <p class="round-panel__next-sentence">{{ offer.sentence }}</p>
-            {% if offer.asksTheLead %}
-                <twig:Button variant="filled" href="{{ path(constant(panelClass ~ '::THREAD_ROUTE'), {key: ticketKey}) }}#{{ constant(panelClass ~ '::QUESTION_COMPOSER_ID_PREFIX') }}{{ ticketKey }}" class="round-panel__next-link">{{ offer.linkLabel }}</twig:Button>
+            {% if offer.askedLeadId is not null %}
+                <twig:Button variant="filled" href="{{ path(constant(panelClass ~ '::THREAD_ROUTE'), {key: ticketKey, (constant(panelClass ~ '::ASK_PARAMETER')): offer.askedLeadId}) }}#{{ constant(panelClass ~ '::QUESTION_COMPOSER_ID_PREFIX') }}{{ ticketKey }}" class="round-panel__next-link">{{ offer.linkLabel }}</twig:Button>
             {% else %}
                 <twig:Button variant="filled" href="{{ path(ticketRoute, {key: ticketKey}) }}#{{ constant(panelClass ~ '::TICKET_NEXT_STEP_ID') }}" class="round-panel__next-link">{{ offer.linkLabel }}</twig:Button>
             {% endif %}

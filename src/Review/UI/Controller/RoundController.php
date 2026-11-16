@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Review\UI\Controller;
 
+use App\Identity\Api\CurrentTimeZone;
 use App\Review\Api\ReviewRoundQueries;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundPermission;
@@ -40,6 +41,7 @@ final class RoundController extends AbstractController
         private readonly ReviewRoundQueries $reviewRoundQueries,
         private readonly RoundPages $roundPages,
         private readonly ClockInterface $clock,
+        private readonly CurrentTimeZone $currentTimeZone,
     ) {
     }
 
@@ -60,7 +62,15 @@ final class RoundController extends AbstractController
         $selectedPosition = \is_string($area) && 1 === preg_match('/\A\d{1,9}\z/', $area) ? (int) $area : 0;
 
         return $this->render('@Review/round.html.twig', [
-            'page' => $this->roundPages->pageOf($ticket, $round, $selectedPosition, $this->isGranted(VerdictPermission::SET, $facts), $this->clock->now()),
+            'page' => $this->roundPages->pageOf(
+                $ticket,
+                $round,
+                $selectedPosition,
+                $this->isGranted(VerdictPermission::SET, $facts),
+                $visible->actor->userId(),
+                $this->clock->now(),
+                $this->currentTimeZone->zone(),
+            ),
             'ticketRoute' => RoundsController::TICKET_ROUTE,
             'ticketKey' => $ticket->key,
             'verdictCsrfId' => VerdictController::csrfIdOf($ticket->key),

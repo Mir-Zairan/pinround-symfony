@@ -16,14 +16,10 @@
         <header class="round-page__header">
             <twig:Button variant="text" href="{{ path(ticketRoute, {key: page.ticketKey}) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Back to {{ page.ticketKey }}</twig:Button>
             <p class="round-page__ticket"><span class="round-page__key">{{ page.ticketKey }}</span> · <a href="{{ path(ticketRoute, {key: page.ticketKey}) }}">{{ page.ticketTitle }}</a></p>
-            <h1 class="round-page__title">{{ page.header }}</h1>
+            <h1 class="round-page__title">{{ page.title }}<span class="round-page__detail"> · {{ page.detail }}</span></h1>
             {% if selected is not null %}
                 <div class="round-page__tools">
-                    <div class="round-compare-control" role="group" aria-label="Compare" hidden data-compare-target="control">
-                        <twig:Chip data-compare-target="choice" data-mode="both" data-action="compare#choose">Side by side</twig:Chip>
-                        <twig:Chip data-compare-target="choice" data-mode="before" data-action="compare#choose">Before</twig:Chip>
-                        <twig:Chip data-compare-target="choice" data-mode="after" data-action="compare#choose">After</twig:Chip>
-                    </div>
+                    <twig:SegmentedControl label="Compare" :options="{both: 'Side by side', before: 'Before', after: 'After'}" selected="both" class="round-compare-control" hidden data-compare-target="control" data-action="click->compare#choose" />
                     {#- The focus route is built with the full-screen review; until then the button is shown as the prototype has it. -#}
                     <twig:Button variant="outline" size="sm" :disabled="true" class="round-page__full-screen">Full screen</twig:Button>
                 </div>

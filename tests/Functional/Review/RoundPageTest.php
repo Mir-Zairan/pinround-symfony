@@ -21,8 +21,8 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The review round page of Acme Foods' ticket SHOP-1, GET /t/SHOP-1/rounds/{number}, through the real firewall, voters,
- * Media signing and database. The clock is fixed on 6 Nov 2026, before today. Mia is the Shop team's tester, Lena its
- * lead and Omar a member; Raj is a manager in no team.
+ * Media signing and database. The clock is fixed on 6 Nov 2026, before today, and the test users' zone is Europe/Berlin,
+ * an hour ahead of UTC then. Mia is the Shop team's tester, Lena its lead and Omar a member; Raj is a manager in no team.
  */
 final class RoundPageTest extends WebTestCase
 {
@@ -104,14 +104,20 @@ final class RoundPageTest extends WebTestCase
         $page = $this->client->request('GET', self::ROUND_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Round 2 · shot today, 09:12 · Ready for Mia', $page->filter('h1.round-page__title')->text());
+        self::assertSame('Round 2 · shot today, 10:12 · Ready for Mia', $page->filter('h1.round-page__title')->text());
+        self::assertSame('· shot today, 10:12 · Ready for Mia', $page->filter('h1.round-page__title .round-page__detail')->text(), 'The rest of the header is muted.');
         self::assertSame(
             ['Per order Passed', 'Per product 3 pins', 'Combined Needs fix', 'Totals Question', 'Footer Not reviewed'],
             $page->filter('nav.area-tabs a.area-tab')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text()))),
         );
         self::assertSame('Per order', $page->filter('nav.area-tabs a[aria-current="page"] .area-tab__name')->text());
         self::assertSame('Cart total shows the wrong sum', $page->filter('.round-page__ticket a')->text());
-        self::assertSame(['Side by side', 'Before', 'After'], $page->filter('.round-compare-control button.chip')->each(static fn (Crawler $chip): string => $chip->text()));
+        $compare = $page->filter('.round-compare-control[role="group"][aria-label="Compare"][hidden]');
+        self::assertSame(
+            [['Side by side', 'both', 'true'], ['Before', 'before', 'false'], ['After', 'after', 'false']],
+            $compare->filter('button.seg')->each(static fn (Crawler $option): array => [$option->text(), $option->attr('value'), $option->attr('aria-pressed')]),
+        );
+        self::assertSame('click->compare#choose', $compare->attr('data-action'));
         self::assertCount(1, $page->filter('button.round-page__full-screen[disabled]'));
         self::assertSame('Full screen', $page->filter('button.round-page__full-screen')->text());
     }
@@ -194,7 +200,7 @@ final class RoundPageTest extends WebTestCase
         $page = $this->client->request('GET', self::ROUND_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Round 2 · shot today, 09:12', $page->filter('h1.round-page__title')->text());
+        self::assertSame('Round 2 · shot today, 10:12', $page->filter('h1.round-page__title')->text());
     }
 
     #[Test]
@@ -207,13 +213,40 @@ final class RoundPageTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/1');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Round 1 · shot yesterday, 09:00 · Ready for Mia', $page->filter('h1.round-page__title')->text());
+        self::assertSame('Round 1 · shot yesterday, 10:00 · Ready for Mia', $page->filter('h1.round-page__title')->text());
         self::assertSame('This round has no screen areas.', $page->filter('.empty-state')->text());
         self::assertCount(0, $page->filter('nav.area-tabs, .round-compare-control'));
 
         $this->addRound($ticketId, 2, 'review', 'Omar', '2026-10-30 18:05:00+00');
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');
-        self::assertSame('Round 2 · shot 30 Oct, 18:05 · Ready for Mia', $page->filter('h1.round-page__title')->text());
+        self::assertSame('Round 2 · shot 30 Oct, 19:05 · Ready for Mia', $page->filter('h1.round-page__title')->text());
+
+        $this->addRound($ticketId, 3, 'review', 'Omar', '2025-12-31 23:30:00+00');
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/3');
+        self::assertSame('Round 3 · shot 1 Jan, 00:30 · Ready for Mia', $page->filter('h1.round-page__title')->text(), 'Berlin is in 2026 already.');
+
+        $this->addRound($ticketId, 4, 'review', 'Omar', '2025-10-30 18:05:00+00');
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/4');
+        self::assertSame('Round 4 · shot 30 Oct 2025, 19:05 · Ready for Mia', $page->filter('h1.round-page__title')->text(), 'Another year is named.');
+    }
+
+    /**
+     * At 12:00 UTC on 6 Nov it is already 01:00 on 7 Nov in Auckland, so a round shot that morning in UTC was shot
+     * yesterday there, and one shot the day before is two days back.
+     */
+    #[Test]
+    public function theDayAndTimeAreTheViewersOwnWhereTheDayHasFlipped(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addRound($ticketId, 1, 'review', 'Omar', self::SHARED_EARLIER);
+        $this->addRound($ticketId, 2, 'review', 'Omar', self::SHARED_TODAY);
+        $this->migrator()->executeStatement("UPDATE idn_user SET time_zone = 'Pacific/Auckland' WHERE id = ?", [$this->people['Omar']->id()->toString()]);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');
+        self::assertSame('Round 2 · shot yesterday, 22:12 · Ready for Mia', $page->filter('h1.round-page__title')->text());
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1');
+        self::assertSame('Round 1 · shot 5 Nov, 22:00 · Ready for Mia', $page->filter('h1.round-page__title')->text());
     }
 
     /**

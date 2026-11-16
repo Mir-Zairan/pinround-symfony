@@ -11,15 +11,15 @@ namespace App\Review\UI\RoundPage;
 final readonly class NextVerbOffer
 {
     /**
-     * @param string $sentence    for example "Every area passed."
-     * @param string $linkLabel   for example "Pass it on SHOP-1" or "Ask Lena"
-     * @param bool   $asksTheLead true when the link opens the question composer, false when it opens the ticket's Your
-     *                            next step box
+     * @param string      $sentence    for example "Every area passed."
+     * @param string      $linkLabel   for example "Pass it on SHOP-1" or "Ask Lena"
+     * @param string|null $askedLeadId the team lead's user id when the link opens the question composer asking them;
+     *                                 null when it opens the ticket's Your next step box
      */
     public function __construct(
         public string $sentence,
         public string $linkLabel,
-        public bool $asksTheLead,
+        public ?string $askedLeadId,
     ) {
     }
 }

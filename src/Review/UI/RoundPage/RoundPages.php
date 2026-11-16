@@ -15,8 +15,10 @@ use App\Review\Api\VerdictCommands;
 use App\Review\UI\PinView;
 use App\Review\UI\RoundCards;
 use App\Review\UI\ScreenshotView;
+use App\Review\UI\Voter\TicketTesterRule;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\UI\RelativeTime;
 use App\Ticketing\Api\TicketPageView;
 
 /**
@@ -43,14 +45,16 @@ final readonly class RoundPages
     /**
      * Runs inside the request transaction whose tenant is the viewer's organization.
      *
-     * @param int  $selectedPosition the area to show; the first one when the round has no area at that position
-     * @param bool $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
+     * @param int           $selectedPosition the area to show; the first one when the round has no area at that position
+     * @param bool          $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
+     * @param \DateTimeZone $viewerTimeZone   the header's day and time are in it
      */
-    public function pageOf(TicketPageView $ticket, ReviewRoundView $round, int $selectedPosition, bool $isVerdictGranted, \DateTimeImmutable $now): RoundPage
+    public function pageOf(TicketPageView $ticket, ReviewRoundView $round, int $selectedPosition, bool $isVerdictGranted, UserId $viewerId, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): RoundPage
     {
-        $header = self::headerOf($ticket, $round, $now);
+        $title = \sprintf('Round %d', $round->number);
+        $detail = self::detailOf($ticket, $round, $now, $viewerTimeZone);
         if ([] === $round->areas) {
-            return new RoundPage($ticket->key, $ticket->title, $header, [], null, null);
+            return new RoundPage($ticket->key, $ticket->title, $title, $detail, [], null, null);
         }
         $selected = $round->areas[0];
         foreach ($round->areas as $area) {
@@ -62,10 +66,11 @@ final readonly class RoundPages
         return new RoundPage(
             $ticket->key,
             $ticket->title,
-            $header,
+            $title,
+            $detail,
             self::tabsOf($round, $selected),
             $this->selectedAreaOf($ticket, $round, $selected, $now),
-            self::panelOf($ticket, $round, $selected, $isVerdictGranted),
+            self::panelOf($ticket, $round, $selected, $isVerdictGranted, $viewerId),
         );
     }
 
@@ -92,11 +97,13 @@ final readonly class RoundPages
      * @param AreaView $area             one of the round's areas
      * @param bool     $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
      */
-    public static function panelOf(TicketPageView $ticket, ReviewRoundView $round, AreaView $area, bool $isVerdictGranted): RoundPanel
+    public static function panelOf(TicketPageView $ticket, ReviewRoundView $round, AreaView $area, bool $isVerdictGranted, UserId $viewerId): RoundPanel
     {
         $snapshot = $ticket->turnSnapshot;
         $leadName = $snapshot->leadDisplayName;
         $mayGiveVerdicts = $isVerdictGranted && self::OPEN_ROUND === $round->state && null !== $leadName;
+        // The verbs are the tester's to make; the lead would be offered a question to themself.
+        $isOfferedTheNextVerb = $mayGiveVerdicts && TicketTesterRule::isTesterOf($snapshot, $viewerId);
         $earlierPins = null === $area->before ? [] : array_map(
             static fn (RoundPinView $pin): EarlierPinRow => self::earlierPinRowOf($pin, $ticket),
             $area->before->pins,
@@ -114,7 +121,7 @@ final readonly class RoundPages
             null === $area->decidedBy ? null : ($ticket->displayNames[$area->decidedBy->toString()] ?? null),
             $mayGiveVerdicts,
             $leadName,
-            $mayGiveVerdicts ? self::nextVerbOf($ticket, $round, $leadName) : null,
+            $isOfferedTheNextVerb ? self::nextVerbOf($ticket, $round) : null,
         );
     }
 
@@ -122,20 +129,26 @@ final readonly class RoundPages
      * The verb that matches the round's verdicts once every area has one (phase 5 design notes): a question to the
      * lead first, as its answer may change the others; else Needs changes for any Needs fix; else Pass it.
      */
-    private static function nextVerbOf(TicketPageView $ticket, ReviewRoundView $round, ?string $leadName): ?NextVerbOffer
+    private static function nextVerbOf(TicketPageView $ticket, ReviewRoundView $round): ?NextVerbOffer
     {
         $verdicts = array_map(static fn (AreaView $area): ?string => $area->verdict, $round->areas);
         if (\in_array(null, $verdicts, true)) {
             return null;
         }
         if (\in_array(VerdictCommands::AREA_QUESTION, $verdicts, true)) {
-            return new NextVerbOffer(\sprintf('An area has a question for %s.', $leadName), 'Ask '.$leadName, true);
+            $snapshot = $ticket->turnSnapshot;
+
+            return new NextVerbOffer(
+                \sprintf('An area has a question for %s.', $snapshot->leadDisplayName),
+                'Ask '.$snapshot->leadDisplayName,
+                $snapshot->leadId?->toString(),
+            );
         }
         if (\in_array(VerdictCommands::AREA_NEEDS_FIX, $verdicts, true)) {
-            return new NextVerbOffer('At least one area needs a fix.', 'Needs changes on '.$ticket->key, false);
+            return new NextVerbOffer('At least one area needs a fix.', 'Needs changes on '.$ticket->key, null);
         }
 
-        return new NextVerbOffer('Every area passed.', 'Pass it on '.$ticket->key, false);
+        return new NextVerbOffer('Every area passed.', 'Pass it on '.$ticket->key, null);
     }
 
     private function selectedAreaOf(TicketPageView $ticket, ReviewRoundView $round, AreaView $area, \DateTimeImmutable $now): SelectedArea
@@ -235,9 +248,9 @@ final readonly class RoundPages
         };
     }
 
-    private static function headerOf(TicketPageView $ticket, ReviewRoundView $round, \DateTimeImmutable $now): string
+    private static function detailOf(TicketPageView $ticket, ReviewRoundView $round, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
-        $parts = [\sprintf('Round %d', $round->number), 'shot '.self::whenOf($round->sharedAt, $now)];
+        $parts = ['shot '.self::whenOf($round->sharedAt, $now, $viewerTimeZone)];
         $readyFor = self::readyForOf($ticket);
         if (null !== $readyFor) {
             $parts[] = 'Ready for '.$readyFor;
@@ -258,21 +271,20 @@ final readonly class RoundPages
         return null === $testerId ? null : ($ticket->displayNames[$testerId->toString()] ?? null);
     }
 
-    /** "today, 09:12", "yesterday, 09:12" or "5 Nov, 09:12", in UTC. */
-    private static function whenOf(\DateTimeImmutable $sharedAt, \DateTimeImmutable $now): string
+    /** "today, 09:12", "yesterday, 09:12", "5 Nov, 09:12" or, in another year, "5 Nov 2025, 09:12", in the viewer's zone. */
+    private static function whenOf(\DateTimeImmutable $sharedAt, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
-        $utc = new \DateTimeZone('UTC');
-        $shared = $sharedAt->setTimezone($utc);
-        $today = $now->setTimezone($utc)->format('Y-m-d');
+        $shared = $sharedAt->setTimezone($viewerTimeZone);
+        $nowInZone = $now->setTimezone($viewerTimeZone);
         $time = $shared->format('H:i');
         $day = $shared->format('Y-m-d');
-        if ($day === $today) {
+        if ($day === $nowInZone->format('Y-m-d')) {
             return 'today, '.$time;
         }
-        if ($day === $now->setTimezone($utc)->modify('-1 day')->format('Y-m-d')) {
+        if ($day === $nowInZone->modify('-1 day')->format('Y-m-d')) {
             return 'yesterday, '.$time;
         }
 
-        return $shared->format('j M').', '.$time;
+        return RelativeTime::dateOf($sharedAt, $now, $viewerTimeZone).', '.$time;
     }
 }

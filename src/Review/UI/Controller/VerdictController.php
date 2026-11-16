@@ -9,6 +9,7 @@ use App\Review\Api\ReviewRoundQueries;
 use App\Review\Api\ReviewRoundView;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundPermission;
+use App\Review\Api\RoundPinView;
 use App\Review\Api\VerdictCommands;
 use App\Review\Api\VerdictPermission;
 use App\Review\Api\VerdictRefused;
@@ -101,16 +102,14 @@ final class VerdictController extends AbstractController
             $request,
             $key,
             $number,
-            static fn (ReviewRoundView $round): ?AreaView => self::areaWithPin($round, $pinId),
+            static fn (ReviewRoundView $round): ?array => self::pinWithItsAreaOf($round, $pinId),
             VerdictRefused::PIN_NOT_FOUND,
-            function (VisibleTicket $visible, ReviewRoundView $round, AreaView $area) use ($pinId, $verdict, $now): string {
-                $this->verdictCommands->setPinVerdict($round->id, $pinId, $visible->actor->userId(), $verdict, $now);
+            function (VisibleTicket $visible, ReviewRoundView $round, RoundPinView $pin) use ($verdict, $now): string {
+                $this->verdictCommands->setPinVerdict($round->id, $pin->id, $visible->actor->userId(), $verdict, $now);
 
-                return \sprintf(
-                    VerdictCommands::PIN_FIXED === $verdict ? self::PIN_MARKED_FIXED : self::PIN_MARKED_STILL_WRONG,
-                    self::pinNumberOf($area, $pinId),
-                );
+                return \sprintf(VerdictCommands::PIN_FIXED === $verdict ? self::PIN_MARKED_FIXED : self::PIN_MARKED_STILL_WRONG, $pin->number);
             },
+            RoundPanel::UNDO_BUTTON_ID_PREFIX.strtolower($pinId),
         );
     }
 
@@ -123,13 +122,14 @@ final class VerdictController extends AbstractController
             $request,
             $key,
             $number,
-            static fn (ReviewRoundView $round): ?AreaView => self::areaWithPin($round, $pinId),
+            static fn (ReviewRoundView $round): ?array => self::pinWithItsAreaOf($round, $pinId),
             VerdictRefused::PIN_NOT_FOUND,
-            function (VisibleTicket $visible, ReviewRoundView $round, AreaView $area) use ($pinId, $now): string {
-                $this->verdictCommands->undoPinVerdict($round->id, $pinId, $visible->actor->userId(), $now);
+            function (VisibleTicket $visible, ReviewRoundView $round, RoundPinView $pin) use ($now): string {
+                $this->verdictCommands->undoPinVerdict($round->id, $pin->id, $visible->actor->userId(), $now);
 
-                return \sprintf(self::PIN_VERDICT_UNDONE, self::pinNumberOf($area, $pinId));
+                return \sprintf(self::PIN_VERDICT_UNDONE, $pin->number);
             },
+            RoundPanel::FIXED_BUTTON_ID_PREFIX.strtolower($pinId),
         );
     }
 
@@ -144,30 +144,36 @@ final class VerdictController extends AbstractController
             $request,
             $key,
             $number,
-            static function (ReviewRoundView $round) use ($areaId): ?AreaView {
-                foreach ($round->areas as $area) {
-                    if ($area->id === strtolower($areaId)) {
-                        return $area;
-                    }
-                }
+            static function (ReviewRoundView $round) use ($areaId): ?array {
+                $area = self::areaById($round, $areaId);
 
-                return null;
+                return null === $area ? null : [$area, $area];
             },
             VerdictRefused::AREA_NOT_FOUND,
             function (VisibleTicket $visible, ReviewRoundView $round, AreaView $area) use ($verdict, $note, $now): string {
                 $this->verdictCommands->saveAreaVerdict($round->id, $area->id, $visible->actor->userId(), '' === $verdict ? null : $verdict, $note, $now);
 
-                return \sprintf(self::VERDICT_SAVED, $visible->ticket->turnSnapshot->leadDisplayName ?? 'The team lead');
+                return \sprintf(
+                    self::VERDICT_SAVED,
+                    $visible->ticket->turnSnapshot->leadDisplayName
+                        ?? throw new \LogicException('VerdictVoter grants verdicts only on a ticket with a team, and a team has a lead.'),
+                );
             },
+            RoundPanel::SAVE_BUTTON_ID,
         );
     }
 
     /**
-     * @param \Closure(ReviewRoundView): ?AreaView                       $targetOf the area the action changes; null for an id the round has not
-     * @param string                                                     $notFound the 404's message when $targetOf finds none
-     * @param \Closure(VisibleTicket, ReviewRoundView, AreaView): string $change   the verdict, returning its toast
+     * @template TTarget of AreaView|RoundPinView
+     *
+     * @param \Closure(ReviewRoundView): (array{AreaView, TTarget}|null) $targetOf         the area the action changes and the pin or the area
+     *                                                                                     itself; null for an id the round has not
+     * @param string                                                     $notFound         the 404's message when $targetOf finds none
+     * @param \Closure(VisibleTicket, ReviewRoundView, TTarget): string  $change           the verdict, returning its toast
+     * @param string                                                     $focusedControlId the side panel's control a Turbo form's stream gives
+     *                                                                                     focus, as the panel it replaces held the one clicked
      */
-    private function respondToVerdict(Request $request, string $key, int $number, \Closure $targetOf, string $notFound, \Closure $change): Response
+    private function respondToVerdict(Request $request, string $key, int $number, \Closure $targetOf, string $notFound, \Closure $change, string $focusedControlId): Response
     {
         if (null === $this->tenantContext->get()) {
             // Anonymous requests have no tenant, and the firewall sends the AccessDeniedException to the login page.
@@ -191,11 +197,11 @@ final class VerdictController extends AbstractController
                 if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
                     throw new VerdictRefusedWithToast(self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
                 }
-                $area = $targetOf($round) ?? throw new NotFoundHttpException($notFound);
+                [$area, $target] = $targetOf($round) ?? throw new NotFoundHttpException($notFound);
                 $areaPosition = $area->position;
 
                 try {
-                    $toast = $change($visible, $round, $area);
+                    $toast = $change($visible, $round, $target);
                 } catch (VerdictRefused $refused) {
                     if ($refused->isNotFound()) {
                         throw new NotFoundHttpException($refused->getMessage(), $refused);
@@ -205,13 +211,14 @@ final class VerdictController extends AbstractController
 
                 $changed = $this->reviewRoundQueries->roundOf($visible->ticket->id, $number, $visible->actor->userId())
                     ?? throw new \LogicException('The round of a saved verdict could not be read again.');
-                $changedArea = self::areaById($changed, $area->id);
+                $changedArea = self::areaById($changed, $area->id)
+                    ?? throw new \LogicException('The area of a saved verdict could not be read again.');
 
                 return [
                     'toast' => $toast,
                     'position' => $changedArea->position,
                     'tabs' => RoundPages::tabsOf($changed, $changedArea),
-                    'panel' => RoundPages::panelOf($visible->ticket, $changed, $changedArea, true),
+                    'panel' => RoundPages::panelOf($visible->ticket, $changed, $changedArea, true, $visible->actor->userId()),
                 ];
             });
         } catch (TicketNotFound) {
@@ -220,13 +227,13 @@ final class VerdictController extends AbstractController
             return $this->respondToRefusal($request, $key, $number, $areaPosition, $refused);
         }
 
-        return $this->respondToSaved($request, $key, $number, $answer);
+        return $this->respondToSaved($request, $key, $number, $answer, $focusedControlId);
     }
 
     /**
      * @param array{toast: string, position: int, tabs: list<AreaTab>, panel: RoundPanel} $answer
      */
-    private function respondToSaved(Request $request, string $key, int $number, array $answer): Response
+    private function respondToSaved(Request $request, string $key, int $number, array $answer, string $focusedControlId): Response
     {
         if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
             return $this->redirectToArea($key, $number, $answer['position'], $answer['toast']);
@@ -238,6 +245,7 @@ final class VerdictController extends AbstractController
                 'toast' => $answer['toast'],
                 'tabs' => $answer['tabs'],
                 'panel' => $answer['panel'],
+                'focusedControlId' => $focusedControlId,
                 'ticketKey' => $key,
                 'verdictCsrfId' => self::csrfIdOf($key),
                 'roundNumber' => $number,
@@ -279,15 +287,17 @@ final class VerdictController extends AbstractController
     }
 
     /**
-     * The area whose "before" picture has the pin; ReviewRoundQueries lists only pins that count, so an AI suggestion
-     * nobody kept is no pin to check either.
+     * The pin to check and the area whose "before" picture has it; ReviewRoundQueries lists only pins that count, so an
+     * AI suggestion nobody kept is no pin to check either.
+     *
+     * @return array{AreaView, RoundPinView}|null null for a pin no area of the round has to check
      */
-    private static function areaWithPin(ReviewRoundView $round, string $pinId): ?AreaView
+    private static function pinWithItsAreaOf(ReviewRoundView $round, string $pinId): ?array
     {
         foreach ($round->areas as $area) {
             foreach ($area->before->pins ?? [] as $pin) {
                 if ($pin->id === strtolower($pinId)) {
-                    return $area;
+                    return [$area, $pin];
                 }
             }
         }
@@ -295,25 +305,14 @@ final class VerdictController extends AbstractController
         return null;
     }
 
-    private static function pinNumberOf(AreaView $area, string $pinId): int
-    {
-        foreach ($area->before->pins ?? [] as $pin) {
-            if ($pin->id === strtolower($pinId)) {
-                return $pin->number;
-            }
-        }
-
-        throw new \LogicException('The pin is not on the area it was found on.');
-    }
-
-    private static function areaById(ReviewRoundView $round, string $areaId): AreaView
+    private static function areaById(ReviewRoundView $round, string $areaId): ?AreaView
     {
         foreach ($round->areas as $area) {
-            if ($area->id === $areaId) {
+            if ($area->id === strtolower($areaId)) {
                 return $area;
             }
         }
 
-        throw new \LogicException('The area of a saved verdict could not be read again.');
+        return null;
     }
 }
