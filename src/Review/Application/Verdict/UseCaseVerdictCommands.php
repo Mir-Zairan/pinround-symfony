@@ -73,7 +73,7 @@ final readonly class UseCaseVerdictCommands implements VerdictCommands
             $round->id->toString(),
             $pin->id()->toString(),
             // undo() refuses a pin with no verdict, so the one read has one.
-            $pin->verdict()?->value ?? throw new \LogicException('An undone pin verdict was none.'),
+            $pin->verdict()->value ?? throw new \LogicException('An undone pin verdict was none.'),
             $actor->toString(),
             $at,
         ));
