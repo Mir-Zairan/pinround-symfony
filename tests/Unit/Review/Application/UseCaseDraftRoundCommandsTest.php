@@ -400,6 +400,12 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     }
 
     #[Test]
+    public function anUnknownVerdictOnARoundThatIsNotTheCallersOpenDraftAnswersNotFoundAndStoresNothing(): void
+    {
+        $this->assertRefusedAndNothingSaved(RoundRefused::NOT_FOUND, fn () => $this->commands->setDraftVerdict(self::OMARS_DRAFT, new UserId(self::LENA), self::FIRST_SCREENSHOT, 'maybe', self::at()));
+    }
+
+    #[Test]
     public function sharingGivesTheDraftTheTicketsNextRoundNumberUnderTheNumberLock(): void
     {
         $before = $this->snapshot();

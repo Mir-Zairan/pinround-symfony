@@ -148,13 +148,13 @@ final readonly class UseCaseRoundCommands implements RoundCommands
 
     public function setDraftVerdict(string $roundId, UserId $ownerId, string $screenshotId, ?string $verdict, \DateTimeImmutable $at): void
     {
+        $draft = $this->ownDraft($roundId, $ownerId);
         $screenshotVerdict = match ($verdict) {
             null => null,
             self::VERDICT_LOOKS_RIGHT => ScreenshotVerdict::LooksRight,
             self::VERDICT_NOT_RIGHT_YET => ScreenshotVerdict::NotRight,
             default => throw new RoundRefused(RoundRefused::UNKNOWN_VERDICT),
         };
-        $draft = $this->ownDraft($roundId, $ownerId);
         $id = self::screenshotIdOf($screenshotId);
 
         $this->changeAndSave($draft, $at, static fn (Round $round) => $round->setVerdict($ownerId, $id, $screenshotVerdict));

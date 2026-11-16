@@ -197,7 +197,7 @@ final class DbalRoundsDraftTest extends KernelTestCase
     #[Test]
     public function theNextNumberIsOneAboveTheTicketsHighestAndCountsNoOtherTicketOrOrganization(): void
     {
-        // Acme Foods' ticket: the report 0 and Mia's number 1 (Beta Bakery's 9 on the same ticket id is not its own).
+        // Acme Foods' ticket: the report 0 and Mia's number 1 (the other organization's 9 on the same ticket id is not its own).
         self::assertSame(2, $this->nextNumber(self::ACME_FOODS, self::TICKET));
         self::assertSame(10, $this->nextNumber(self::OTHER_ORGANIZATION, self::TICKET));
         self::assertSame(1, $this->nextNumber(self::ACME_FOODS, self::EMPTY_TICKET));
@@ -391,7 +391,7 @@ final class DbalRoundsDraftTest extends KernelTestCase
 
         self::assertInstanceOf(RoundChanged::class, $refusal);
         self::assertSame($rowsBefore, $this->rowsOfRound(self::DRAFT));
-        self::assertSame($rowsBefore['screenshots'][0]['title'], 'Checkout');
+        self::assertSame('Checkout', $rowsBefore['screenshots'][0]['title']);
     }
 
     /**
@@ -546,15 +546,22 @@ final class DbalRoundsDraftTest extends KernelTestCase
         $readBySecond = $this->readIn($secondSession->entityManager->getConnection(), $otherRounds);
 
         $this->connection()->beginTransaction();
-        $draftOfFirst = $this->storedDraft();
-        $firstNumber = $this->rounds()->nextFreeNumberOf($draftOfFirst->ticketId());
-        $draftOfFirst->share(new UserId(self::LENA), $firstNumber, new \DateTimeImmutable(self::SHARED_AT_UTC.'+00:00'));
-        $this->rounds()->save($draftOfFirst, self::savedAt());
+        try {
+            $draftOfFirst = $this->storedDraft();
+            $firstNumber = $this->rounds()->nextFreeNumberOf($draftOfFirst->ticketId());
+            $draftOfFirst->share(new UserId(self::LENA), $firstNumber, new \DateTimeImmutable(self::SHARED_AT_UTC.'+00:00'));
+            $this->rounds()->save($draftOfFirst, self::savedAt());
 
-        $waitedAtTheLock = $secondSession->sqlStateOfFailedAttempt(static function () use ($otherRounds): void {
-            $otherRounds->nextFreeNumberOf(new TicketId(self::TICKET));
-        });
-        $this->connection()->commit();
+            $waitedAtTheLock = $secondSession->sqlStateOfFailedAttempt(static function () use ($otherRounds): void {
+                $otherRounds->nextFreeNumberOf(new TicketId(self::TICKET));
+            });
+            $this->connection()->commit();
+        } finally {
+            // Releases the row and number locks if anything above threw, so tearDown's DELETE does not wait on them.
+            if ($this->connection()->isTransactionActive()) {
+                $this->connection()->rollBack();
+            }
+        }
 
         $secondConnection = $secondSession->entityManager->getConnection();
         $secondConnection->beginTransaction();
