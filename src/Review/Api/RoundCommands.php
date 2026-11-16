@@ -13,7 +13,8 @@ use App\SharedKernel\Domain\UserId;
  *
  * The draft commands (ADR-0017) work on the owner's own draft only: an unknown or malformed round id, another
  * organization's round, another person's draft, a round that is not a draft and a deleted draft are all refused with
- * RoundRefused::NOT_FOUND, before anything else is checked. Who may start a draft at all (the current assignee of an
+ * RoundRefused::NOT_FOUND, before anything else is checked except setDraftPins' pin cap, which comes first so an
+ * oversized list is refused before any read. Who may start a draft at all (the current assignee of an
  * open ticket) is the caller's voter's to decide. Each one either saves the whole change or nothing.
  */
 interface RoundCommands
