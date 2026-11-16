@@ -94,11 +94,11 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 4. Marker look ([FR-RND-02](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds), product owner's decision 2026-11-14; differs from the prototype's filled marker on purpose): a hollow ring with a dark outer and a white inner outline (visible on any background, WCAG 1.4.11), no fill, the number in a small tab at the ring's edge, and the note in a bubble beside the spot on hover, focus or select. AI pins stay dashed in AI colours; the selected ring stays `--primary`. Still x/y percent only, no width or height.
 **Files:** `src/Review/UI/Component/{Screenshot,PinLayer,PinList}.php`, `assets/controllers/pin-placer_controller.js`.
 **Acceptance criteria:**
-- [ ] Pins stay on the same spot when the window is resized.
-- [ ] A keyboard-only user can add, move, describe and remove a pin.
-- [ ] Each marker has an accessible name "Pin 2: header is cut off".
-- [ ] The field under a pin stays readable (the ring has no fill).
-- [ ] The note bubble shows on hover, on keyboard focus and when the pin is selected.
+- [x] Pins stay on the same spot when the window is resized. (`tests/e2e/pin-placer.spec.ts`, `a click adds pin 1 at the clicked percent and it keeps its spot when the window resizes`.)
+- [x] A keyboard-only user can add, move, describe and remove a pin. (`pin-placer.spec.ts`, `the keyboard alone adds, moves, describes and removes pins and numbers stay stable`.)
+- [x] Each marker has an accessible name "Pin 2: header is cut off". (`tests/Functional/Review/ScreenshotComponentsTest.php`, `everyMarkerSitsAtItsPercentAndCarriesItsAccessibleName`; live in `pin-placer.spec.ts`, the keyboard test.)
+- [x] The field under a pin stays readable (the ring has no fill). (`pin-placer.spec.ts`, `a pin ring has no fill, so the field under it stays readable`.)
+- [x] The note bubble shows on hover, on keyboard focus and when the pin is selected. (`pin-placer.spec.ts`, `the note bubble shows while the mouse is over a pin that is not selected`, `the note bubble shows on focus and while the pin is selected`.)
 **Tests:** unit (coordinate maths), Playwright (mouse and keyboard), axe.
 **Prototype check:** the pin list in [Review round: screenshots and pins](../04-prototype/screens/review-round.md#screenshots-and-pins) and the report form pin list; the marker look is not checked against the prototype (ring pins differ on purpose).
 **Size:** M
@@ -114,7 +114,7 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 **Files:** `src/Review/**`, ticket page partial.
 **Acceptance criteria:**
 - [x] Rounds list in order (0, 1, then by number). (`tests/Integration/Review/Queries/DbalRoundQueriesTest.php`, `roundsComeByNumberThenTheViewersOwnUnsharedDraftWithScreenshotsByPositionAndPinsByNumber`, `anotherPersonsUnsharedDraftIsLeftOutForEveryone`.)
-- [ ] A title over 120 or a summary over 600 characters is refused with a plain message and nothing is saved.
+- [x] A title over 120 or a summary over 600 characters is refused with a plain message and nothing is saved. (`tests/Functional/Ticketing/NewTicketScreenshotTest.php`, `aRefusedScreenshotShowsItsMessageKeepsTheTicketTextAndMakesNoTicketNoRoundAndUsesUpNoNumber`, cases "a title of 121 characters" and "a summary of 601 characters".)
 - [x] A round of a team-only ticket is invisible to people outside the team (isolation + voter tests; case added to the visibility leak suite). (`tests/Integration/Visibility/RoundListLeakTest.php`: `theRoundsOfATeamOnlyTicketReachOnlyAViewerWhoMaySeeIt`, `aRoundOfATeamOnlyTicketIsInvisibleOutsideTheTeamAndToAnotherOrganization`; `DbalRoundQueriesTest`, `aTicketTheViewerMayNotSeeHasNoRoundsAndCostsNoRoundQuery`.)
 **Tests:** domain unit tests; integration (queries, draft filter); functional render.
 **Prototype check:** [Ticket page: rounds](../04-prototype/screens/ticket-page.md#rounds).

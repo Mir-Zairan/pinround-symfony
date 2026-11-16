@@ -333,6 +333,45 @@ test('the note bubble shows on focus and while the pin is selected', async ({ pa
   await expect(marker(1)).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('the note bubble shows while the mouse is over a pin that is not selected', async ({ page }) => {
+  const { form, frame, note, marker } = await openEditableExample(page);
+  const picture = (await frame.boundingBox())!;
+  await frame.click({ position: { x: picture.width * 0.2, y: picture.height * 0.3 } });
+  await note(1).fill('Check this');
+  await frame.click({ position: { x: picture.width * 0.7, y: picture.height * 0.7 } });
+  const bubble = form.locator('.pin[data-pin-number="1"] .pin__bubble');
+
+  await expect(marker(2)).toHaveAttribute('aria-pressed', 'true');
+  await expect(marker(1)).toHaveAttribute('aria-pressed', 'false');
+  await expect(bubble).toBeHidden();
+  await marker(1).hover();
+
+  await expect(bubble).toBeVisible();
+  await expect(bubble).toHaveText('Check this');
+  await page.mouse.move(0, 0);
+  await expect(bubble).toBeHidden();
+});
+
+test('a pin ring has no fill, so the field under it stays readable', async ({ page }) => {
+  const { form, addPin, frame } = await openEditableExample(page);
+  await addPin.click();
+  await addPin.click();
+
+  const pins = frame.locator('.pin');
+  await expect(pins).toHaveCount(2);
+  const backgrounds = await pins.evaluateAll((elements) =>
+    elements.map((element) => {
+      const style = getComputedStyle(element);
+      return { color: style.backgroundColor, image: style.backgroundImage, radius: style.borderRadius };
+    }),
+  );
+  expect(backgrounds).toEqual([
+    { color: 'rgba(0, 0, 0, 0)', image: 'none', radius: '50%' },
+    { color: 'rgba(0, 0, 0, 0)', image: 'none', radius: '50%' },
+  ]);
+  await expect(form.locator('.pin--selected')).toHaveCount(1);
+});
+
 test('the editable screenshot has no serious or critical accessibility violations', async ({ page }) => {
   const { form, addPin, note } = await openEditableExample(page);
   await addPin.click();
