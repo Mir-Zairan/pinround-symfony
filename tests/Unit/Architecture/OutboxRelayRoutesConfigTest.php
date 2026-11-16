@@ -16,6 +16,7 @@ use App\Notification\Infrastructure\Mercure\RefreshTicketPages;
 use App\Notification\Infrastructure\Scheduler\ReleaseDueNotifications;
 use App\Organization\Api\Event\OrganizationEvent;
 use App\Organization\Application\EmailInvitationLink;
+use App\Review\Api\Event\ReviewEvent;
 use App\Ticketing\Api\Event\TicketEvent;
 use App\Workflow\Api\Event\WorkflowEvent;
 use PHPUnit\Framework\Attributes\Test;
@@ -37,6 +38,7 @@ final class OutboxRelayRoutesConfigTest extends TestCase
         NotificationEvent::class,
         IdentityEvent::class,
         MediaEvent::class,
+        ReviewEvent::class,
     ];
 
     #[Test]
