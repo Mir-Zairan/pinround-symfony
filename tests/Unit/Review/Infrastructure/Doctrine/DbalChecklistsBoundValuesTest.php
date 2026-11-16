@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Review\Infrastructure;
+namespace App\Tests\Unit\Review\Infrastructure\Doctrine;
 
 use App\Review\Domain\Round;
 use App\Review\Domain\Screenshot;

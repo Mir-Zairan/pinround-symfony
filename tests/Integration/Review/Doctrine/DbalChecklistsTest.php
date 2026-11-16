@@ -172,16 +172,16 @@ final class DbalChecklistsTest extends KernelTestCase
     public function deletingRound0FirstTakesTheChecklistItemsOfItsPinsAndNothingElse(): void
     {
         $this->addCommitted(self::checklist(self::CHECKLIST, 1));
-        $itemsBefore = $this->migratorRowsAs(self::ACME_FOODS, 'SELECT id FROM rvw_check_item');
+        $itemsBefore = $this->roundRows()->runAs(self::ACME_FOODS, 'SELECT id FROM rvw_check_item');
         self::assertCount(3, $itemsBefore, 'No items to delete, so nothing below is proven.');
 
-        $deleted = $this->migratorRowsAs(self::ACME_FOODS, 'DELETE FROM rvw_round WHERE id = ? RETURNING id', [self::REPORT]);
+        $deleted = $this->roundRows()->runAs(self::ACME_FOODS, 'DELETE FROM rvw_round WHERE id = ? RETURNING id', [self::REPORT]);
 
         self::assertSame([[self::REPORT]], $deleted);
-        self::assertSame([], $this->migratorRowsAs(self::ACME_FOODS, 'SELECT id FROM rvw_check_item'));
-        self::assertSame([], $this->migratorRowsAs(self::ACME_FOODS, 'SELECT id FROM rvw_pin'));
-        self::assertSame([[self::CHECKLIST]], $this->migratorRowsAs(self::ACME_FOODS, 'SELECT id FROM rvw_round'), 'The checklist round must stay; only its items go.');
-        self::assertCount(1, $this->migratorRowsAs(self::OTHER_ORGANIZATION, 'SELECT id FROM rvw_pin'), 'Another organization lost a pin.');
+        self::assertSame([], $this->roundRows()->runAs(self::ACME_FOODS, 'SELECT id FROM rvw_check_item'));
+        self::assertSame([], $this->roundRows()->runAs(self::ACME_FOODS, 'SELECT id FROM rvw_pin'));
+        self::assertSame([[self::CHECKLIST]], $this->roundRows()->runAs(self::ACME_FOODS, 'SELECT id FROM rvw_round'), 'The checklist round must stay; only its items go.');
+        self::assertCount(1, $this->roundRows()->runAs(self::OTHER_ORGANIZATION, 'SELECT id FROM rvw_pin'), 'Another organization lost a pin.');
     }
 
     #[Test]
@@ -447,24 +447,6 @@ final class DbalChecklistsTest extends KernelTestCase
     private function numericRowsAs(string $organizationId, string $sql, array $parameters = []): array
     {
         return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->connection()->fetchAllNumeric($sql, $parameters));
-    }
-
-    /**
-     * @param list<mixed> $parameters
-     *
-     * @return list<list<mixed>>
-     */
-    private function migratorRowsAs(string $organizationId, string $sql, array $parameters = []): array
-    {
-        $tenantContext = self::getContainer()->get(TenantContext::class);
-        $tenantContext->set(new OrganizationId($organizationId));
-        try {
-            return self::getContainer()->get('doctrine.dbal.migrator_connection')->transactional(
-                static fn (Connection $migrator): array => $migrator->fetchAllNumeric($sql, $parameters),
-            );
-        } finally {
-            $tenantContext->clear();
-        }
     }
 
     private function checklists(): DbalChecklists

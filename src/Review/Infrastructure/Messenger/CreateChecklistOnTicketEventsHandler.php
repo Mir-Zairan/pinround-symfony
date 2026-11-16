@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Review\Infrastructure\Messenger;
 
 use App\Review\Api\ChecklistCommands;
+use App\Review\Application\Checklist\TodoStep;
 use App\SharedKernel\Domain\TicketId;
 use App\Ticketing\Api\Event\TicketCreated;
 use App\Ticketing\Api\Event\TicketMoved;
@@ -51,7 +52,7 @@ final readonly class CreateChecklistOnTicketEventsHandler
     private function createWhenInToDo(TicketId $ticketId): void
     {
         $ticket = $this->ticketTurnQueries->factsOf($ticketId);
-        if (ChecklistCommands::TODO_CORE_CODE === $ticket?->coreCode) {
+        if (TodoStep::CORE_CODE === $ticket?->coreCode) {
             $this->checklistCommands->createFromReport($ticketId, $this->clock->now());
         }
     }

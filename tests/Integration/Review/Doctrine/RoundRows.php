@@ -40,6 +40,26 @@ final readonly class RoundRows
         }
     }
 
+    /**
+     * Runs one statement as the migrator under the organization and returns its rows, committed: the way to read or
+     * delete what the app role may not.
+     *
+     * @param list<mixed> $parameters
+     *
+     * @return list<list<mixed>>
+     */
+    public function runAs(string $organizationId, string $sql, array $parameters = []): array
+    {
+        $this->tenantContext->set(new OrganizationId($organizationId));
+        try {
+            return $this->migrator->transactional(
+                static fn (Connection $migrator): array => $migrator->fetchAllNumeric($sql, $parameters),
+            );
+        } finally {
+            $this->tenantContext->clear();
+        }
+    }
+
     public function removeAllOf(string ...$organizationIds): void
     {
         foreach ($organizationIds as $organizationId) {

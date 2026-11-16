@@ -10,6 +10,7 @@ use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\Checklist\TodoStep;
 use App\Review\Domain\Pin;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
@@ -77,7 +78,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
             throw new RoundRefused('This ticket has a report already.', 0, $taken);
         }
         // CreateChecklistOnTicketEventsHandler saw no Round 0 when the ticket reached To do, and no event follows this one.
-        if (ChecklistCommands::TODO_CORE_CODE === $ticket->coreCode) {
+        if (TodoStep::CORE_CODE === $ticket->coreCode) {
             $this->checklistCommands->createFromReport($ticketId, $reportedAt);
         }
 

@@ -498,8 +498,10 @@ final class VerdictControllerTest extends WebTestCase
         $verdicts = [];
         $screenshotId = $this->beforeShot;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($screenshotId, &$verdicts): int {
-            foreach ($migrator->fetchAllAssociative('SELECT number, verdict FROM rvw_pin WHERE screenshot_id = ? ORDER BY number', [$screenshotId]) as $row) {
-                $verdicts[(int) $row['number']] = null === $row['verdict'] ? null : (string) $row['verdict'];
+            /** @var list<array{number: int, verdict: string|null}> $rows */
+            $rows = $migrator->fetchAllAssociative('SELECT number, verdict FROM rvw_pin WHERE screenshot_id = ? ORDER BY number', [$screenshotId]);
+            foreach ($rows as $row) {
+                $verdicts[$row['number']] = $row['verdict'];
             }
 
             return 0;
@@ -517,12 +519,10 @@ final class VerdictControllerTest extends WebTestCase
         $verdicts = [];
         $roundId = $this->roundTwo;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($roundId, &$verdicts): int {
-            foreach ($migrator->fetchAllAssociative('SELECT id, verdict, note, decided_by FROM rvw_area WHERE round_id = ? ORDER BY position', [$roundId]) as $row) {
-                $verdicts[(string) $row['id']] = [
-                    null === $row['verdict'] ? null : (string) $row['verdict'],
-                    null === $row['note'] ? null : (string) $row['note'],
-                    null === $row['decided_by'] ? null : (string) $row['decided_by'],
-                ];
+            /** @var list<array{id: string, verdict: string|null, note: string|null, decided_by: string|null}> $rows */
+            $rows = $migrator->fetchAllAssociative('SELECT id, verdict, note, decided_by FROM rvw_area WHERE round_id = ? ORDER BY position', [$roundId]);
+            foreach ($rows as $row) {
+                $verdicts[$row['id']] = [$row['verdict'], $row['note'], $row['decided_by']];
             }
 
             return 0;
@@ -540,7 +540,8 @@ final class VerdictControllerTest extends WebTestCase
         $row = [];
         $ticketId = $this->ticketId;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($ticketId, &$row): int {
-            $row = $migrator->fetchAssociative('SELECT step_id, version, updated_at FROM tkt_ticket WHERE id = ?', [$ticketId]) ?: [];
+            $row = $migrator->fetchAssociative('SELECT step_id, version, updated_at FROM tkt_ticket WHERE id = ?', [$ticketId]);
+            $row = false === $row ? [] : $row;
 
             return 0;
         });
