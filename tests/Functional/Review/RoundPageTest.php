@@ -241,6 +241,7 @@ final class RoundPageTest extends WebTestCase
         $this->addRound($ticketId, 1, 'review', 'Omar', self::SHARED_EARLIER);
         $this->addRound($ticketId, 2, 'review', 'Omar', self::SHARED_TODAY);
         $this->migrator()->executeStatement("UPDATE idn_user SET time_zone = 'Pacific/Auckland' WHERE id = ?", [$this->people['Omar']->id()->toString()]);
+        self::getContainer()->get('doctrine.orm.default_entity_manager')->clear();
         $this->logIn($this->client, $this->people['Omar']);
 
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');
