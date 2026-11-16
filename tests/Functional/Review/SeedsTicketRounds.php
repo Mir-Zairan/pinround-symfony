@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Review;
 
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\DBAL\Connection;
+use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -98,15 +99,83 @@ trait SeedsTicketRounds
     }
 
     /**
+     * Posts one DraftRoundEditor live action with the props of the owner's rendered editor (data-live-props-value), so
+     * only the round's voter stands between the logged-in person and the draft.
+     *
+     * @param array<string, mixed> $args
+     */
+    private function postLiveAction(KernelBrowser $client, string $props, string $action, array $args): void
+    {
+        $client->request(
+            'POST',
+            '/_components/DraftRoundEditor/'.$action,
+            ['data' => json_encode(['props' => json_decode($props, true), 'updated' => [], 'args' => $args], \JSON_THROW_ON_ERROR)],
+            [],
+            ['HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest', 'HTTP_ACCEPT' => 'application/vnd.live-component+html'],
+        );
+    }
+
+    /**
+     * @return list<array<string, mixed>> the round's screenshots as stored
+     */
+    private function screenshotRowsOf(string $roundId): array
+    {
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($roundId, &$rows): int {
+            $rows = $migrator->fetchAllAssociative('SELECT id, position, verdict, title, summary FROM rvw_screenshot WHERE round_id = ? ORDER BY position', [$roundId]);
+
+            return \count($rows);
+        });
+
+        return $rows;
+    }
+
+    /**
+     * @return list<array<string, mixed>> the round's pins as stored, by screenshot position then number
+     */
+    private function pinRowsOf(string $roundId): array
+    {
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($roundId, &$rows): int {
+            $rows = $migrator->fetchAllAssociative(
+                'SELECT p.screenshot_id, p.number, p.x_pct, p.y_pct, p.note FROM rvw_pin p JOIN rvw_screenshot s ON s.organization_id = p.organization_id AND s.id = p.screenshot_id WHERE s.round_id = ? ORDER BY s.position, p.number',
+                [$roundId],
+            );
+
+            return \count($rows);
+        });
+
+        return $rows;
+    }
+
+    /**
+     * @return list<array<string, mixed>> the ticket's rounds as stored, oldest first
+     */
+    private function roundRowsOf(string $ticketId): array
+    {
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($ticketId, &$rows): int {
+            $rows = $migrator->fetchAllAssociative(
+                'SELECT id, kind, owner_id, number, shared_at, state, version, decision, decided_at, deleted_at FROM rvw_round WHERE ticket_id = ? ORDER BY created_at, id',
+                [$ticketId],
+            );
+
+            return \count($rows);
+        });
+
+        return $rows;
+    }
+
+    /**
      * @param 'ready'|'pending'|'rejected' $status
      *
      * @return string the media id
      */
-    private function addMedia(string $status): string
+    private function addMedia(string $status, string $uploader = 'Mia'): string
     {
         $mediaId = Uuid::v7()->toRfc4122();
         $parameters = [
-            $this->acmeFoods->toString(), $mediaId, 'uploads/'.$mediaId, $this->people['Mia']->id()->toString(), $status,
+            $this->acmeFoods->toString(), $mediaId, 'uploads/'.$mediaId, $this->people[$uploader]->id()->toString(), $status,
             'rejected' === $status ? 'The file is not a picture.' : null,
             'ready' === $status ? hash('sha256', $mediaId) : null,
             'ready' === $status ? 1280 : null,

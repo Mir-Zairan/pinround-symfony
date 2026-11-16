@@ -178,7 +178,7 @@ final class DraftRoundControllerTest extends WebTestCase
     {
         $ticketId = $this->addTicket('SHOP-1');
         $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
-        $shot = $this->addScreenshot($draft, $this->addMedia('ready'), 0, 'Omar own draft shot', null, 'looks_right');
+        $shot = $this->addScreenshot($draft, $this->addMedia('ready'), 0, self::OMAR_DRAFT_SHOT, null, 'looks_right');
         $before = $this->screenshotRowsOf($draft);
         self::assertCount(1, $before);
         $this->logIn($this->client, $this->people['Omar']);
@@ -191,16 +191,10 @@ final class DraftRoundControllerTest extends WebTestCase
         foreach (['Lena', 'Mia', 'Sara', 'Raj'] as $person) {
             $this->logIn($this->client, $this->people[$person]);
             // The props and their checksum are the owner's own, so only the round's voter stands between the person and the draft.
-            $this->client->request(
-                'POST',
-                '/_components/DraftRoundEditor/setVerdict',
-                ['data' => json_encode(['props' => json_decode($props, true), 'updated' => [], 'args' => ['screenshotId' => $shot, 'verdict' => 'not_right']], \JSON_THROW_ON_ERROR)],
-                [],
-                ['HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest', 'HTTP_ACCEPT' => 'application/vnd.live-component+html'],
-            );
+            $this->postLiveAction($this->client, $props, 'setVerdict', ['screenshotId' => $shot, 'verdict' => 'not_right']);
 
             self::assertResponseStatusCodeSame(404, $person);
-            self::assertStringNotContainsString('Omar own draft shot', (string) $this->client->getResponse()->getContent(), $person);
+            self::assertStringNotContainsString(self::OMAR_DRAFT_SHOT, (string) $this->client->getResponse()->getContent(), $person);
             self::assertSame($before, $this->screenshotRowsOf($draft), $person.': the verdict stays.');
         }
     }
@@ -538,39 +532,6 @@ final class DraftRoundControllerTest extends WebTestCase
         $this->setOrgRoles($ben, $betaBakery, '{admin}');
 
         return $ben;
-    }
-
-    /**
-     * @return list<array<string, mixed>> the round's screenshots as stored
-     */
-    private function screenshotRowsOf(string $roundId): array
-    {
-        $rows = [];
-        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($roundId, &$rows): int {
-            $rows = $migrator->fetchAllAssociative('SELECT id, position, verdict, title, summary FROM rvw_screenshot WHERE round_id = ? ORDER BY position', [$roundId]);
-
-            return \count($rows);
-        });
-
-        return $rows;
-    }
-
-    /**
-     * @return list<array<string, mixed>> the ticket's rounds as stored, oldest first
-     */
-    private function roundRowsOf(string $ticketId): array
-    {
-        $rows = [];
-        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($ticketId, &$rows): int {
-            $rows = $migrator->fetchAllAssociative(
-                'SELECT id, kind, owner_id, number, shared_at, state, version, decision, decided_at, deleted_at FROM rvw_round WHERE ticket_id = ? ORDER BY created_at, id',
-                [$ticketId],
-            );
-
-            return \count($rows);
-        });
-
-        return $rows;
     }
 
     /**
