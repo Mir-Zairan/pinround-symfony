@@ -33,7 +33,10 @@ final readonly class RoundCards
      * and the tools it will use (served in P09).
      */
     public const string CLAUDE_CODE_PROMPT = 'Read my pinround notes for %s and fix what is marked “Not right yet”.';
-    public const string CLAUDE_CODE_TOOLS_NOTE = 'Planned: pinround’s tool connection lets Claude Code read these notes and verdicts, and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict. Not built yet.';
+    public const string CLAUDE_CODE_TOOLS_NOTE = 'Planned: pinround’s tool connection (built with mcp/sdk) lets Claude Code read these notes and verdicts, and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict. Not built yet.';
+
+    /** Asked by the browser before the owner's draft is deleted; the delete form carries it as data-turbo-confirm. */
+    public const string DELETE_DRAFT_CONFIRM = 'Delete this draft round? Its screenshots, pins and notes go too.';
 
     /** The pictures one card shows; a round may hold 50 screenshots, and the card says how many more it left out. */
     public const int MAX_PICTURES_PER_CARD = 10;
@@ -46,7 +49,7 @@ final readonly class RoundCards
     private const string NOT_RIGHT = 'not_right';
 
     private const string PRIVATE_DRAFT_DESCRIPTION = 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.';
-    private const string EMPTY_DRAFT_NOTE = 'No screenshots yet. Add one here, or let Claude Code add them.';
+    private const string EMPTY_DRAFT_NOTE = 'No screenshots yet.';
 
     public function __construct(
         private RoundsVisibleTo $roundsVisibleTo,

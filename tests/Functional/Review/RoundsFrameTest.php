@@ -321,7 +321,7 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     #[Test]
-    public function aDraftWithNoScreenshotsShowsNoStatusAndSaysHowToAddOne(): void
+    public function aDraftWithNoScreenshotsShowsNoStatusAndSaysItIsEmpty(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $this->addRound($ticketId, null, 'draft', 'Omar', null);
@@ -334,7 +334,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertCount(2, $page->filter(self::ROUNDS.' .round-card'));
         self::assertCount(0, $page->filter(self::ROUNDS.' .round-card__status'));
         self::assertStringNotContainsString('0 of 0', (string) $this->client->getResponse()->getContent());
-        self::assertSame(['No screenshots yet. Add one here, or let Claude Code add them.'], $page->filter(self::ROUNDS.' .round-card__empty')->each(static fn (Crawler $note): string => $note->text()), 'The report has none.');
+        self::assertSame(['No screenshots yet.'], $page->filter(self::ROUNDS.' .round-card__empty')->each(static fn (Crawler $note): string => $note->text()), 'The report has none.');
     }
 
     #[Test]

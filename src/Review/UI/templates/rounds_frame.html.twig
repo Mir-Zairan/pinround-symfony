@@ -35,13 +35,11 @@
                 {% endif %}
                 {% if card.isPrivateDraft %}
                     <div class="round-card__actions">
-                        {#- The draft editor (P05.T8 step 2) adds pictures; until then the button is shown and cannot be used. -#}
-                        <twig:Button variant="outline" size="sm" :disabled="true" class="round-card__add">Add screenshot</twig:Button>
                         <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::SHARE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top">
                             <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
                             <twig:Button type="submit" size="sm" class="round-card__share">Share with the team now</twig:Button>
                         </form>
-                        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::DELETE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top">
+                        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::DELETE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top" data-turbo-confirm="{{ constant('App\\Review\\UI\\RoundCards::DELETE_DRAFT_CONFIRM') }}">
                             <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
                             <twig:Button type="submit" variant="text" size="sm" class="round-card__delete">Delete draft</twig:Button>
                         </form>

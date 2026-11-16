@@ -114,7 +114,7 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertCount(0, $frame->filter(self::ROUNDS.' form.rounds__start'), 'No second start beside the own draft.');
         self::assertSame([self::PRIVATE_HEADLINE], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()));
         self::assertCount(0, $frame->filter(self::ROUNDS.' .round-card__status'), 'An empty draft has no "0 of 0".');
-        self::assertSame('No screenshots yet. Add one here, or let Claude Code add them.', $frame->filter(self::ROUNDS.' .round-card__empty')->text());
+        self::assertSame('No screenshots yet.', $frame->filter(self::ROUNDS.' .round-card__empty')->text());
     }
 
     #[Test]
@@ -264,7 +264,7 @@ final class DraftRoundControllerTest extends WebTestCase
         $card = $frame->filter('#round-'.$draft);
         self::assertSame('Round 1 · self-check by Omar', $card->filter('.round-card__headline')->text());
         self::assertSame('1 of 1 look right', $card->filter('.round-card__status')->text());
-        self::assertCount(0, $card->filter('form, .round-card__add, .claude-code-box, .round-card__private'), 'A shared round is read-only.');
+        self::assertCount(0, $card->filter('form, .claude-code-box, .round-card__private'), 'A shared round is read-only.');
         self::assertCount(1, $frame->filter(self::ROUNDS.' form.rounds__start'), 'Omar has no unshared draft any more, so he may start one.');
 
         $this->logIn($this->client, $this->people['Lena']);
@@ -384,11 +384,13 @@ final class DraftRoundControllerTest extends WebTestCase
             self::assertStringContainsString($tool, $tools);
         }
         self::assertSame(
-            ['Add screenshot', 'Share with the team now', 'Delete draft'],
+            ['Share with the team now', 'Delete draft'],
             $frame->filter(self::ROUNDS.' button')->each(static fn (Crawler $button): string => $button->text()),
             'Only the private draft has buttons; the start button is gone beside it.',
         );
-        self::assertNotNull($frame->filter('#round-'.$draft.' .round-card__add')->attr('disabled'), 'The draft editor adds pictures; until then the button cannot be used.');
+        self::assertSame('Delete this draft round? Its screenshots, pins and notes go too.', $frame->filter('#round-'.$draft.' form.round-card__form:has(.round-card__delete)')->attr('data-turbo-confirm'), 'Deleting asks first.');
+        self::assertNull($frame->filter('#round-'.$draft.' form:has(.round-card__share)')->attr('data-turbo-confirm'), 'Sharing does not ask.');
+        self::assertStringContainsString('(built with mcp/sdk)', $tools);
 
         $this->logIn($this->client, $this->people['Lena']);
         $frame = $this->frame();
