@@ -1,0 +1,13 @@
+/* The "Share your draft round?" page a move form sent without script gets (src/Ticketing/UI/templates/draft_question.html.twig). */
+
+.draft-question {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 560px;
+}
+
+.draft-question__title {
+  font-size: 28px;
+  font-weight: 700;
+}

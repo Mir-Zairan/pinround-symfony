@@ -11,6 +11,8 @@ import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 // dev-only console command (draft-picture.ts) and run on any stack.
 
 test.use({ viewport: { width: 1280, height: 900 } });
+// Both draft specs read and decide the same people's drafts; playwright.config.ts runs them one after the other.
+test.describe.configure({ mode: 'serial' });
 
 const DRAFT_HEADLINE = 'Draft round · only you can see this';
 const SHARED_HEADLINE = /^Round \d+ · self-check by Omar$/;

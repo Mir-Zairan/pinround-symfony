@@ -11,6 +11,8 @@ import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 // the dev-only console command (draft-picture.ts) and every case runs on any stack.
 
 test.use({ viewport: { width: 1280, height: 900 } });
+// Both draft specs read and decide the same people's drafts; playwright.config.ts runs them one after the other.
+test.describe.configure({ mode: 'serial' });
 
 const DIALOG_TEXT = 'Your draft round has 1 screenshot. Share it with the team as round 1, or keep it private. Private notes stay readable for you and Claude Code.';
 
@@ -36,6 +38,9 @@ async function startDraft(browser: Browser, title: string, withPicture: boolean)
 async function sharedRoundsSeenByLena(browser: Browser, key: string): Promise<number> {
   const { context, page } = await openAs(browser, LENA_STORAGE_STATE);
   await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+  const rounds = page.locator('turbo-frame#ticket-rounds');
+  await rounds.scrollIntoViewIfNeeded();
+  await expect(rounds).toHaveAttribute('complete', '');
   const count = await page.getByRole('heading', { name: /^Round \d+ · /, level: 3 }).count();
   await context.close();
   return count;
@@ -64,6 +69,7 @@ test.describe('the Share draft dialog', () => {
 
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toHaveCount(0);
+    await expect(startWork(page)).toBeFocused();
     await expect(page.locator('#ticket-state')).not.toContainText('In progress');
     await expect(startWork(page)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Draft round · only you can see this', level: 3 })).toBeVisible();
@@ -72,9 +78,17 @@ test.describe('the Share draft dialog', () => {
     answer = moveAnswer(page);
     await startWork(page).click();
     expect((await answer).status()).toBe(409);
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(startWork(page)).toBeFocused();
+
+    answer = moveAnswer(page);
+    await startWork(page).click();
+    expect((await answer).status()).toBe(409);
     answer = moveAnswer(page);
     await dialog.getByRole('button', { name: 'Keep private and move' }).click();
-    expect((await answer).status()).toBe(303);
+    expect((await answer).status()).toBe(200);
     await expect(dialog).toHaveCount(0);
     await expect(page.locator(TOAST_REGION)).toContainText('Moved to In progress. Your draft stays private.');
     await expect(page.locator('#ticket-state')).toContainText('In progress');
@@ -97,7 +111,7 @@ test.describe('the Share draft dialog', () => {
     await expect(dialog).toBeVisible();
     const answer = moveAnswer(page);
     await dialog.getByRole('button', { name: 'Share and move to In progress' }).click();
-    expect((await answer).status()).toBe(303);
+    expect((await answer).status()).toBe(200);
     await expect(page.locator(TOAST_REGION)).toContainText('Moved to In progress. Your draft is now round 1 for the team.');
     expect(await sharedRoundsSeenByLena(browser, key)).toBe(1);
     await context.close();

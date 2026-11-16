@@ -1,12 +1,13 @@
 import { Controller } from '@hotwired/stimulus';
 
-// The Share draft dialog arrives in a Turbo Stream with no button that opens it: open it on connect, and take it off
-// the page again once it is closed, by Cancel, Escape or the answer to the move.
+// The Share draft dialog arrives in a Turbo Stream with no button that opens it: the dialog controller opens it on
+// connect (and hands focus back to the move button), and this controller takes it off the page again once it is
+// closed, by Cancel, Escape or the answer to the move.
 export default class extends Controller {
   connect() {
-    const dialog = this.element.querySelector('dialog');
-    dialog.addEventListener('close', () => this.element.remove(), { once: true });
-    dialog.showModal();
+    // This element connects before the dialog controller inside it, which reads its values when it connects.
+    this.element.querySelector('[data-controller~="dialog"]').dataset.dialogOpenOnConnectValue = 'true';
+    this.element.querySelector('dialog').addEventListener('close', () => this.element.remove(), { once: true });
   }
 
   close() {

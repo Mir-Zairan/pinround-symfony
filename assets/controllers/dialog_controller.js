@@ -1,9 +1,18 @@
 import { Controller } from '@hotwired/stimulus';
 
+// The button that last sent a Turbo form: the opener of a dialog that arrives in the answer to that form and so has no
+// button of its own to open it.
+let lastSubmitter = null;
+document.addEventListener('turbo:submit-start', (event) => {
+  lastSubmitter = event.detail.formSubmission.submitter ?? null;
+});
+
 // Opens the <dialog> in this controller's element as a modal. The browser makes the rest of the page inert,
 // keeps Tab inside and closes on Escape; this controller adds the backdrop click and the focus hand-back.
+// With the open-on-connect value it opens as soon as it connects, handing focus back to the button that sent the form.
 export default class extends Controller {
   static targets = ['dialog'];
+  static values = { openOnConnect: Boolean };
 
   opener = null;
   dialogElement = null;
@@ -17,14 +26,21 @@ export default class extends Controller {
     if (this.dialogTarget.open && !this.dialogTarget.matches(':modal')) {
       this.dialogTarget.close();
     }
+    if (this.openOnConnectValue) {
+      this.#show(lastSubmitter);
+    }
   }
 
   open(event) {
+    // Not document.activeElement: Safari does not focus a button on click.
+    this.#show(event.currentTarget);
+  }
+
+  #show(opener) {
     if (this.dialogTarget.open) {
       return;
     }
-    // Not document.activeElement: Safari does not focus a button on click.
-    this.opener = event.currentTarget;
+    this.opener = opener;
     this.dialogTarget.addEventListener('close', () => this.#restoreFocus(), { once: true });
     this.dialogTarget.showModal();
   }
