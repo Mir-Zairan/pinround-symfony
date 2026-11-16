@@ -13,7 +13,7 @@ use Doctrine\Migrations\AbstractMigration;
  * earlier round's picture of the same place ("before", none when there is no earlier one) and holds the reviewer's
  * verdict on it. A tenant table with row-level security, like the other Review tables (Version20261115180000), hidden
  * by the schema_filter as DbalAreas writes it. The CHECKs repeat Area's rules. A verdict on a pin of the earlier round
- * is rvw_pin.verdict, which the app may update already.
+ * is rvw_pin.verdict, which the app may update already. rvw_screenshot gets a key with its round for the "after" FK.
  */
 final class Version20261116130000 extends AbstractMigration
 {
@@ -24,6 +24,8 @@ final class Version20261116130000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
+        // The primary key with round_id: rvw_area_after_screenshot_fkey names it so an "after" picture is of the area's round.
+        $this->addSql('CREATE UNIQUE INDEX rvw_screenshot_round_id_id_key ON rvw_screenshot (organization_id, round_id, id)');
         $this->addSql(
             'CREATE TABLE rvw_area (organization_id UUID NOT NULL, id UUID NOT NULL, round_id UUID NOT NULL, name TEXT NOT NULL,'
             .' position INT NOT NULL, before_screenshot_id UUID DEFAULT NULL, after_screenshot_id UUID NOT NULL,'
@@ -39,7 +41,7 @@ final class Version20261116130000 extends AbstractMigration
             .' CONSTRAINT rvw_area_decided_check CHECK ((verdict IS NULL) = (decided_by IS NULL) AND (verdict IS NULL) = (decided_at IS NULL) AND (note IS NULL OR verdict IS NOT NULL)),'
             .' CONSTRAINT rvw_area_screenshots_check CHECK (before_screenshot_id IS DISTINCT FROM after_screenshot_id),'
             .' CONSTRAINT rvw_area_round_fkey FOREIGN KEY (organization_id, round_id) REFERENCES rvw_round (organization_id, id) ON DELETE CASCADE,'
-            .' CONSTRAINT rvw_area_after_screenshot_fkey FOREIGN KEY (organization_id, after_screenshot_id) REFERENCES rvw_screenshot (organization_id, id) ON DELETE CASCADE,'
+            .' CONSTRAINT rvw_area_after_screenshot_fkey FOREIGN KEY (organization_id, round_id, after_screenshot_id) REFERENCES rvw_screenshot (organization_id, round_id, id) ON DELETE CASCADE,'
             // An earlier round is shared, and a shared round's pictures are never removed, so a "before" is never cascaded away.
             .' CONSTRAINT rvw_area_before_screenshot_fkey FOREIGN KEY (organization_id, before_screenshot_id) REFERENCES rvw_screenshot (organization_id, id))',
         );
@@ -58,5 +60,6 @@ final class Version20261116130000 extends AbstractMigration
     public function down(Schema $schema): void
     {
         $this->addSql('DROP TABLE rvw_area');
+        $this->addSql('DROP INDEX rvw_screenshot_round_id_id_key');
     }
 }

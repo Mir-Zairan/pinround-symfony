@@ -13,7 +13,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * What rvw_round, rvw_screenshot, rvw_pin and rvw_check_item keep on their own (Version20261115180000,
- * Version20261116100000, Version20261116120000), whatever writes them: the
+ * Version20261116100000, Version20261116120000, Version20261116130000), whatever writes them: the
  * CHECKs and keys refuse a row the domain could not make, written as the app past the domain, and the rows next to it
  * are still accepted; the indexes and foreign keys are as the migration made them. Grants, ownership and the schema
  * filter are pinned with every other module's in DatabaseRolesTest, row-level security in CatalogTest.
@@ -41,7 +41,9 @@ final class RoundTablesTest extends KernelTestCase
 
     /**
      * Every CHECK, foreign key and unique index but the primary keys (DbalRoundsTest clashes those) has a case below
-     * that breaks it, and every case breaks one the tables have.
+     * that breaks it, and every case breaks one the tables have. rvw_screenshot_round_id_id_key is the primary key with
+     * round_id, which no row breaks without clashing the primary key; it is there for rvw_area_after_screenshot_fkey,
+     * which AreaTablesTest breaks.
      */
     #[Test]
     public function theCasesCoverEveryCheckForeignKeyAndUniqueIndexOfTheRoundTables(): void
@@ -50,6 +52,7 @@ final class RoundTablesTest extends KernelTestCase
             static fn (array $case): string => $case[1],
             iterator_to_array(self::rowsTheDatabaseRefuses(), false),
         )));
+        $constraintsTheCasesBreak[] = 'rvw_screenshot_round_id_id_key';
 
         self::assertEqualsCanonicalizing(
             $this->connection()->fetchFirstColumn(
@@ -193,6 +196,7 @@ final class RoundTablesTest extends KernelTestCase
                 'CREATE INDEX rvw_check_item_round_id_idx ON public.rvw_check_item USING btree (organization_id, round_id)',
                 'CREATE UNIQUE INDEX rvw_screenshot_pkey ON public.rvw_screenshot USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_screenshot_round_id_position_key ON public.rvw_screenshot USING btree (organization_id, round_id, "position")',
+                'CREATE UNIQUE INDEX rvw_screenshot_round_id_id_key ON public.rvw_screenshot USING btree (organization_id, round_id, id)',
                 'CREATE UNIQUE INDEX rvw_pin_pkey ON public.rvw_pin USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_pin_screenshot_id_number_key ON public.rvw_pin USING btree (organization_id, screenshot_id, number)',
             ],

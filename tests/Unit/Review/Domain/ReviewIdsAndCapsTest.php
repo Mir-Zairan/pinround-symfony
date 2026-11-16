@@ -6,6 +6,11 @@ namespace App\Tests\Unit\Review\Domain;
 
 use App\Review\Api\RoundCommands;
 use App\Review\Domain\AiPinState;
+use App\Review\Domain\AreaId;
+use App\Review\Domain\AreaVerdict;
+use App\Review\Domain\CheckItemId;
+use App\Review\Domain\CheckItemState;
+use App\Review\Domain\DraftDecision;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\PinSource;
@@ -28,17 +33,19 @@ final class ReviewIdsAndCapsTest extends TestCase
     private const string VALID = '0197A3C0-0000-7000-8000-000000000E01';
 
     /**
-     * @return iterable<string, array{class-string<RoundId|ScreenshotId|PinId>, string}>
+     * @return iterable<string, array{class-string<RoundId|ScreenshotId|PinId|AreaId|CheckItemId>, string}>
      */
     public static function idClasses(): iterable
     {
         yield 'round' => [RoundId::class, 'A round id must be a canonical UUIDv7.'];
         yield 'screenshot' => [ScreenshotId::class, 'A screenshot id must be a canonical UUIDv7.'];
         yield 'pin' => [PinId::class, 'A pin id must be a canonical UUIDv7.'];
+        yield 'area' => [AreaId::class, 'An area id must be a canonical UUIDv7.'];
+        yield 'check item' => [CheckItemId::class, 'A check item id must be a canonical UUIDv7.'];
     }
 
     /**
-     * @return iterable<string, array{class-string<RoundId|ScreenshotId|PinId>}>
+     * @return iterable<string, array{class-string<RoundId|ScreenshotId|PinId|AreaId|CheckItemId>}>
      */
     public static function idClassNames(): iterable
     {
@@ -61,7 +68,7 @@ final class ReviewIdsAndCapsTest extends TestCase
     }
 
     /**
-     * @param class-string<RoundId|ScreenshotId|PinId> $idClass
+     * @param class-string<RoundId|ScreenshotId|PinId|AreaId|CheckItemId> $idClass
      */
     #[Test]
     #[DataProvider('idClassNames')]
@@ -75,7 +82,7 @@ final class ReviewIdsAndCapsTest extends TestCase
     }
 
     /**
-     * @param class-string<RoundId|ScreenshotId|PinId> $idClass
+     * @param class-string<RoundId|ScreenshotId|PinId|AreaId|CheckItemId> $idClass
      */
     #[Test]
     #[DataProvider('idClasses')]
@@ -123,6 +130,9 @@ final class ReviewIdsAndCapsTest extends TestCase
         self::assertSame(['fixed', 'still_wrong'], self::valuesOf(PinVerdict::cases()));
         self::assertSame(['looks_right', 'not_right'], self::valuesOf(ScreenshotVerdict::cases()));
         self::assertSame(['before', 'after'], self::valuesOf(VariantLabel::cases()));
+        self::assertSame(['pass', 'needs_fix', 'question'], self::valuesOf(AreaVerdict::cases()));
+        self::assertSame(['open', 'fixed', 'ok', 'not_fixed'], self::valuesOf(CheckItemState::cases()));
+        self::assertSame(['shared', 'kept_private'], self::valuesOf(DraftDecision::cases()));
     }
 
     /**

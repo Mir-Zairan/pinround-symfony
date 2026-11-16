@@ -90,6 +90,7 @@ final class AreaTablesTest extends KernelTestCase
         yield 'one picture as before and after' => [[...self::rounds(), self::area(['before_screenshot_id' => self::AFTER])], 'rvw_area_screenshots_check', self::CHECK_VIOLATION];
         yield 'an area of a round that does not exist' => [[...self::rounds(), self::area(['round_id' => self::MISSING_ROUND])], 'rvw_area_round_fkey', self::FOREIGN_KEY_VIOLATION];
         yield 'an after picture that does not exist' => [[...self::rounds(), self::area(['after_screenshot_id' => self::MISSING_SCREENSHOT])], 'rvw_area_after_screenshot_fkey', self::FOREIGN_KEY_VIOLATION];
+        yield 'an after picture of another round' => [[...self::rounds(), self::area(['after_screenshot_id' => self::BEFORE, 'before_screenshot_id' => null])], 'rvw_area_after_screenshot_fkey', self::FOREIGN_KEY_VIOLATION];
         yield 'a before picture that does not exist' => [[...self::rounds(), self::area(['before_screenshot_id' => self::MISSING_SCREENSHOT])], 'rvw_area_before_screenshot_fkey', self::FOREIGN_KEY_VIOLATION];
         yield 'a second area at one position' => [[...self::rounds(), self::area([]), self::area(['id' => self::SECOND_AREA, 'after_screenshot_id' => self::SECOND_AFTER])], 'rvw_area_round_id_position_key', self::UNIQUE_VIOLATION];
         yield 'a second area of one after picture' => [[...self::rounds(), self::area([]), self::area(['id' => self::SECOND_AREA, 'position' => 1])], 'rvw_area_after_screenshot_id_key', self::UNIQUE_VIOLATION];
@@ -157,7 +158,7 @@ final class AreaTablesTest extends KernelTestCase
         self::assertEqualsCanonicalizing(
             [
                 'rvw_area (organization_id, round_id) -> rvw_round',
-                'rvw_area (organization_id, after_screenshot_id) -> rvw_screenshot',
+                'rvw_area (organization_id, round_id, after_screenshot_id) -> rvw_screenshot',
                 'rvw_area (organization_id, before_screenshot_id) -> rvw_screenshot',
             ],
             $this->connection()->fetchFirstColumn(

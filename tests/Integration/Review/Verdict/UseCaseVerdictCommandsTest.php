@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Review\Verdict;
 
 use App\Review\Api\Event\AreaVerdictSaved;
 use App\Review\Api\Event\PinVerdictSet;
+use App\Review\Api\Event\PinVerdictUndone;
 use App\Review\Api\VerdictCommands;
 use App\Review\Api\VerdictRefused;
 use App\Review\Application\Verdict\UseCaseVerdictCommands;
@@ -53,6 +54,7 @@ final class UseCaseVerdictCommandsTest extends KernelTestCase
     private const string MEDIA = '0197a3c0-0000-7000-8000-0000000f7c51';
     private const string NOTE = 'The total still shows the old price.';
     private const string NOW = '2027-03-16 09:30:00+00:00';
+    private const string UNDONE_AT = '2027-03-16 09:45:00+00:00';
 
     /** @var list<EntityManagerInterface> */
     private array $otherSessions = [];
@@ -136,6 +138,41 @@ final class UseCaseVerdictCommandsTest extends KernelTestCase
         ));
         self::assertEquals(
             [new PinVerdictSet(self::ACME_FOODS, self::TICKET, self::REVIEW, self::PIN, 'still_wrong', self::MIA, new \DateTimeImmutable(self::NOW))],
+            $relayed,
+        );
+    }
+
+    #[Test]
+    public function anUndoClearsTheVerdictWithOnePinVerdictUndoneInTheOutboxAfterThePinVerdictSet(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->setPinVerdict(self::REVIEW, self::PIN, new UserId(self::MIA), VerdictCommands::PIN_FIXED, new \DateTimeImmutable(self::NOW)));
+        $ticketAndRoundBefore = $this->ticketStepAndVersionAndRoundVersion();
+
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->undoPinVerdict(self::REVIEW, self::PIN, new UserId(self::MIA), new \DateTimeImmutable(self::UNDONE_AT)));
+
+        self::assertSame([null], $this->rowsAs('SELECT verdict FROM rvw_pin WHERE id = ?', [self::PIN]));
+        $outboxBodies = array_map(static fn (string $body): string => str_replace('\\', '', $body), $this->outboxBodiesNaming(self::TICKET));
+        self::assertCount(2, $outboxBodies);
+        self::assertStringContainsString(str_replace('\\', '', PinVerdictSet::class), $outboxBodies[0]);
+        self::assertStringContainsString(str_replace('\\', '', PinVerdictUndone::class), $outboxBodies[1]);
+        self::assertStringNotContainsString(str_replace('\\', '', PinVerdictUndone::class), $outboxBodies[0]);
+        self::assertSame($ticketAndRoundBefore, $this->ticketStepAndVersionAndRoundVersion());
+    }
+
+    #[Test]
+    public function theRelayHandsTheUndoneVerdictEventToAsyncNotify(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->setPinVerdict(self::REVIEW, self::PIN, new UserId(self::MIA), VerdictCommands::PIN_STILL_WRONG, new \DateTimeImmutable(self::NOW)));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->commands()->undoPinVerdict(self::REVIEW, self::PIN, new UserId(self::OMAR), new \DateTimeImmutable(self::UNDONE_AT)));
+
+        self::runTheWorkerUntilIdle('outbox');
+
+        $relayed = array_values(array_filter(
+            array_map(static fn (Envelope $envelope): object => $envelope->getMessage(), $this->asyncNotify()->getSent()),
+            static fn (object $message): bool => $message instanceof PinVerdictUndone && self::REVIEW === $message->roundId,
+        ));
+        self::assertEquals(
+            [new PinVerdictUndone(self::ACME_FOODS, self::TICKET, self::REVIEW, self::PIN, 'still_wrong', self::OMAR, new \DateTimeImmutable(self::UNDONE_AT))],
             $relayed,
         );
     }
