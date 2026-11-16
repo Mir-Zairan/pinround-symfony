@@ -11,6 +11,7 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\Checklist\TodoStep;
+use App\Review\Domain\DraftDecision;
 use App\Review\Domain\Pin;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
@@ -169,16 +170,12 @@ final readonly class UseCaseRoundCommands implements RoundCommands
 
     public function shareDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int
     {
-        $draft = $this->ownDraft($roundId, $ownerId);
-        $number = $this->rounds->nextFreeNumberOf($draft->ticketId());
+        return $this->shareOwnDraft($roundId, $ownerId, $sharedAt, false);
+    }
 
-        try {
-            $this->changeAndSave($draft, $sharedAt, static fn (Round $round) => $round->share($ownerId, $number, $sharedAt));
-        } catch (RoundSlotTaken $taken) {
-            throw new RoundRefused(RoundRefused::NUMBER_TAKEN, 0, $taken);
-        }
-
-        return $number;
+    public function shareDraftAtHandOff(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int
+    {
+        return $this->shareOwnDraft($roundId, $ownerId, $sharedAt, true);
     }
 
     public function deleteDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $deletedAt): void
@@ -186,6 +183,28 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         $draft = $this->ownDraft($roundId, $ownerId);
 
         $this->changeAndSave($draft, $deletedAt, static fn (Round $round) => $round->delete($ownerId, $deletedAt));
+    }
+
+    /**
+     * @throws RoundRefused as shareDraft and shareDraftAtHandOff say; nothing is saved
+     */
+    private function shareOwnDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt, bool $isHandOffChoice): int
+    {
+        $draft = $this->ownDraft($roundId, $ownerId);
+        $number = $this->rounds->nextFreeNumberOf($draft->ticketId());
+
+        try {
+            $this->changeAndSave($draft, $sharedAt, static function (Round $round) use ($ownerId, $number, $sharedAt, $isHandOffChoice): void {
+                $round->share($ownerId, $number, $sharedAt);
+                if ($isHandOffChoice) {
+                    $round->decide($ownerId, DraftDecision::Shared, $sharedAt);
+                }
+            });
+        } catch (RoundSlotTaken $taken) {
+            throw new RoundRefused(RoundRefused::NUMBER_TAKEN, 0, $taken);
+        }
+
+        return $number;
     }
 
     /**

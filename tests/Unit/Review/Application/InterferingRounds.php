@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Review\Application;
 
+use App\Review\Domain\DraftFacts;
 use App\Review\Domain\PinId;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundId;
@@ -24,7 +25,7 @@ final class InterferingRounds implements Rounds
     /** Answers nextFreeNumberOf with this number whatever the ticket holds, as a read made before another share committed. */
     public ?int $staleNextNumber = null;
 
-    /** Answers openUnsharedDraftOf with none, as a read made before another request started its draft. */
+    /** Answers openUnsharedDraftOf and openUnsharedDraftFactsOf with none, as a read made before another request started its draft. */
     public bool $hidesOpenDrafts = false;
 
     public function __construct(private readonly Rounds $inner)
@@ -66,6 +67,11 @@ final class InterferingRounds implements Rounds
     public function openUnsharedDraftOf(TicketId $ticketId, UserId $ownerId): ?Round
     {
         return $this->hidesOpenDrafts ? null : $this->inner->openUnsharedDraftOf($ticketId, $ownerId);
+    }
+
+    public function openUnsharedDraftFactsOf(TicketId $ticketId, UserId $ownerId): ?DraftFacts
+    {
+        return $this->hidesOpenDrafts ? null : $this->inner->openUnsharedDraftFactsOf($ticketId, $ownerId);
     }
 
     public function nextFreeNumberOf(TicketId $ticketId): int

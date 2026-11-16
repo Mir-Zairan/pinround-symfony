@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Review\Application;
 
+use App\Review\Domain\DraftDecision;
+use App\Review\Domain\DraftFacts;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
 use App\Review\Domain\RoundId;
@@ -155,6 +157,7 @@ final class InMemoryRoundsTest extends TestCase
         foreach ([
             static fn () => $rounds->get($draft->id()),
             static fn () => $rounds->openUnsharedDraftOf($draft->ticketId(), $draft->ownerId()),
+            static fn () => $rounds->openUnsharedDraftFactsOf($draft->ticketId(), $draft->ownerId()),
             static fn () => $rounds->nextFreeNumberOf($draft->ticketId()),
             static fn () => $rounds->save($draft, new \DateTimeImmutable('2026-03-05 08:00:00+00:00')),
         ] as $call) {
@@ -185,6 +188,28 @@ final class InMemoryRoundsTest extends TestCase
         $otherTenant = new InMemoryRounds(self::tenant(self::BETA_BAKERY));
         $otherTenant->stored = $rounds->stored;
         self::assertNull($otherTenant->openUnsharedDraftOf($ticket, new UserId(self::OMAR)));
+    }
+
+    #[Test]
+    public function theOpenDraftsFactsAreItsIdDecisionAndScreenshotCountAndFoundAsTheOpenDraftIs(): void
+    {
+        $rounds = self::roundsOf(self::ACME_FOODS);
+        $omar = new UserId(self::OMAR);
+        $omarsDraft = self::draft($rounds, self::OMAR);
+        $omarsDraft->addScreenshot($omar, $rounds->nextScreenshotIdentity(), self::MEDIA);
+        $omarsDraft->addScreenshot($omar, $rounds->nextScreenshotIdentity(), self::MEDIA);
+        $omarsDraft->decide($omar, DraftDecision::KeptPrivate, new \DateTimeImmutable('2026-03-05 08:00:00+00:00'));
+        $rounds->add($omarsDraft);
+        $rounds->add(self::draft($rounds, self::LENA));
+        $ticket = new TicketId(self::TICKET);
+
+        self::assertEquals(new DraftFacts($omarsDraft->id(), DraftDecision::KeptPrivate, 2), $rounds->openUnsharedDraftFactsOf($ticket, $omar));
+        self::assertNull($rounds->openUnsharedDraftFactsOf(new TicketId(self::OTHER_TICKET), $omar));
+        self::assertNull($rounds->openUnsharedDraftFactsOf($ticket, new UserId(self::MIA)));
+        $otherTenant = new InMemoryRounds(self::tenant(self::BETA_BAKERY));
+        $otherTenant->stored = $rounds->stored;
+        self::assertNull($otherTenant->openUnsharedDraftFactsOf($ticket, $omar));
+        self::assertSame(0, $rounds->loadedRounds, 'Facts are no read of the whole round.');
     }
 
     #[Test]

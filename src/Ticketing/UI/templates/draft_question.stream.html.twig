@@ -1,0 +1,18 @@
+{#- TicketMoveController's answer to a Turbo move form that must first ask "Share your draft round?": the Share draft dialog, opened as soon as it is on the page. -#}
+<turbo-stream action="append" targets="body"><template>
+    {#- With Drive off, Turbo posts a form only when its submitter, too, sits in a data-turbo="true" element. -#}
+    <div data-controller="share-draft" data-turbo="true">
+        <twig:Dialog id="share-draft-dialog" title="Share your draft round?">
+            <twig:block name="content">
+                {{ include('@Ticketing/_draft_question_text.html.twig') }}
+                <form id="share-draft-form" method="post" action="{{ moveUrl }}" data-turbo="true" data-failed-toast="{{ failedToast }}" data-action="turbo:submit-end->share-draft#close">
+                    {{ include('@Ticketing/_draft_question_fields.html.twig') }}
+                </form>
+            </twig:block>
+            <twig:block name="actions">
+                <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+                {{ include('@Ticketing/_draft_question_choices.html.twig') }}
+            </twig:block>
+        </twig:Dialog>
+    </div>
+</template></turbo-stream>

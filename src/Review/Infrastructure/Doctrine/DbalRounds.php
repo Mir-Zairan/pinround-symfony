@@ -6,6 +6,7 @@ namespace App\Review\Infrastructure\Doctrine;
 
 use App\Review\Domain\AiPinState;
 use App\Review\Domain\DraftDecision;
+use App\Review\Domain\DraftFacts;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\PinSource;
@@ -137,6 +138,25 @@ final readonly class DbalRounds implements Rounds
         );
 
         return false === $roundRow ? null : $this->roundOf($organizationId, $roundRow);
+    }
+
+    public function openUnsharedDraftFactsOf(TicketId $ticketId, UserId $ownerId): ?DraftFacts
+    {
+        $organizationId = $this->requireTransactionAndTenant()->toString();
+        // openUnsharedDraftOf's predicate; the count is served by rvw_screenshot_round_id_position_key.
+        $draftRow = $this->connection->fetchAssociative(
+            'SELECT draft.id, draft.decision,'
+            .' (SELECT CAST(COUNT(*) AS integer) FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = draft.organization_id AND screenshot.round_id = draft.id) AS screenshot_count'
+            .' FROM rvw_round AS draft WHERE draft.organization_id = ? AND draft.ticket_id = ? AND draft.owner_id = ?'
+            ." AND draft.kind = 'draft' AND draft.shared_at IS NULL AND draft.state = 'open'",
+            [$organizationId, $ticketId->toString(), $ownerId->toString()],
+        );
+
+        return false === $draftRow ? null : new DraftFacts(
+            new RoundId(self::text($draftRow['id'], 'id')),
+            self::enumOrNull(DraftDecision::class, $draftRow['decision'], 'decision'),
+            self::integer($draftRow['screenshot_count'], 'screenshot_count'),
+        );
     }
 
     public function nextFreeNumberOf(TicketId $ticketId): int

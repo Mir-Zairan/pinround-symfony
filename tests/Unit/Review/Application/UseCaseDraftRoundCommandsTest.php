@@ -10,6 +10,7 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
+use App\Review\Domain\DraftDecision;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\Round;
@@ -423,6 +424,43 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     }
 
     #[Test]
+    public function sharingAtHandOffSharesAndRecordsSharedInOneSave(): void
+    {
+        $before = $this->snapshot();
+        $savesBefore = $this->rounds->savedRounds;
+        $versionBefore = $before[self::DRAFT]['version'];
+        self::assertIsInt($versionBefore);
+
+        $number = $this->commands->shareDraftAtHandOff(self::DRAFT, new UserId(self::LENA), self::at());
+
+        self::assertSame(2, $number);
+        self::assertSame(
+            [...$before[self::DRAFT], 'number' => 2, 'sharedAt' => self::at()->format('c'), 'version' => $versionBefore + 2, 'decision' => 'shared', 'decidedAt' => self::at()->format('c')],
+            $this->snapshot()[self::DRAFT],
+        );
+        self::assertSame($savesBefore + 1, $this->rounds->savedRounds);
+        self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
+        self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
+    }
+
+    /**
+     * The hand-off choice is made once; the draft page's share does not record one, so it still shares a kept draft.
+     */
+    #[Test]
+    public function sharingAtHandOffADraftKeptPrivateIsRefusedAndNeitherSharesNorNumbersIt(): void
+    {
+        $lena = new UserId(self::LENA);
+        $kept = $this->rounds->get(new RoundId(self::DRAFT)) ?? throw new \LogicException('The seeded draft is missing.');
+        $kept->decide($lena, DraftDecision::KeptPrivate, self::at());
+        $this->rounds->save($kept, self::at());
+
+        $this->assertRefusedAndNothingSaved('You decided about this draft round already.', fn () => $this->commands->shareDraftAtHandOff(self::DRAFT, $lena, self::at()));
+
+        self::assertSame(2, $this->commands->shareDraft(self::DRAFT, $lena, self::at()));
+        self::assertSame(DraftDecision::KeptPrivate, $this->storedRound(self::DRAFT)->decision());
+    }
+
+    #[Test]
     public function twoSharesOnOneTicketGetTwoNumbers(): void
     {
         $first = $this->commands->shareDraft(self::DRAFT, new UserId(self::LENA), self::at());
@@ -494,6 +532,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     {
         yield 'addDraftScreenshot' => [static fn (RoundCommands $commands, string $roundId, string $ownerId, string $screenshotId): mixed => $commands->addDraftScreenshot($roundId, new UserId($ownerId), self::MEDIA, self::at())];
         yield 'shareDraft' => [static fn (RoundCommands $commands, string $roundId, string $ownerId, string $screenshotId): mixed => $commands->shareDraft($roundId, new UserId($ownerId), self::at())];
+        yield 'shareDraftAtHandOff' => [static fn (RoundCommands $commands, string $roundId, string $ownerId, string $screenshotId): mixed => $commands->shareDraftAtHandOff($roundId, new UserId($ownerId), self::at())];
         yield 'deleteDraft' => [static fn (RoundCommands $commands, string $roundId, string $ownerId, string $screenshotId) => $commands->deleteDraft($roundId, new UserId($ownerId), self::at())];
         yield from self::screenshotChanges();
     }
@@ -551,7 +590,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     public static function changesOfASharedDraft(): iterable
     {
         foreach (self::draftChanges() as $command => [$change]) {
-            yield $command => [$change, 'shareDraft' === $command ? 'This draft round is shared already.' : 'This draft round is shared, so it no longer changes.'];
+            yield $command => [$change, str_starts_with($command, 'shareDraft') ? 'This draft round is shared already.' : 'This draft round is shared, so it no longer changes.'];
         }
     }
 
@@ -695,6 +734,8 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
                 'state' => $round->state()->value,
                 'version' => $round->version(),
                 'deletedAt' => $round->deletedAt()?->format('c'),
+                'decision' => $round->decision()?->value,
+                'decidedAt' => $round->decidedAt()?->format('c'),
                 'screenshots' => array_map(static fn (Screenshot $screenshot): array => [
                     $screenshot->id()->toString(),
                     $screenshot->mediaId(),

@@ -123,6 +123,18 @@ interface RoundCommands
     public function shareDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int;
 
     /**
+     * Shares the draft as shareDraft does and records the owner's hand-off choice "shared" (ADR-0017, P05.T9) in the
+     * same save.
+     *
+     * @return int the round's number, from 1
+     *
+     * @throws RoundRefused    NOT_FOUND, DRAFT_CHANGED, NUMBER_TAKEN, or when the draft is shared or decided already;
+     *                         nothing is saved
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function shareDraftAtHandOff(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int;
+
+    /**
      * Deletes the unshared draft: it closes for good, no one sees it any more, and its owner may start a new one on
      * the ticket. Its pictures are left for retention to remove.
      *

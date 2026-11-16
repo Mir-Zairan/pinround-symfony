@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const NODE_SPECS = ['pin-count.spec.ts', 'pin-position.spec.ts', 'submit-hold.spec.ts', 'upload-checks.spec.ts', 'upload-status.spec.ts'];
+const DRAFT_SPECS = ['share-draft.spec.ts', 'draft-round.spec.ts'];
 
 export default defineConfig({
   testDir: '.',
@@ -19,9 +20,23 @@ export default defineConfig({
     {
       name: 'chromium',
       testMatch: '*.spec.ts',
-      testIgnore: NODE_SPECS,
+      testIgnore: [...NODE_SPECS, ...DRAFT_SPECS],
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
+    },
+    // The draft specs fail when they run beside each other, so each is a project of its own, chained: a project starts
+    // only when its dependencies are done, while the other specs keep running in parallel.
+    {
+      name: 'chromium-share-draft',
+      testMatch: 'share-draft.spec.ts',
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'chromium-draft-round',
+      testMatch: 'draft-round.spec.ts',
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup', 'chromium-share-draft'],
     },
   ],
 });

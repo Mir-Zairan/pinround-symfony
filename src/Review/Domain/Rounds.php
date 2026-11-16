@@ -43,6 +43,14 @@ interface Rounds
     public function openUnsharedDraftOf(TicketId $ticketId, UserId $ownerId): ?Round;
 
     /**
+     * The id, decision and screenshot count of the draft openUnsharedDraftOf gives, in one read; it neither loads the
+     * draft's screenshots and pins nor holds anything.
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function openUnsharedDraftFactsOf(TicketId $ticketId, UserId $ownerId): ?DraftFacts;
+
+    /**
      * The number the ticket's next shared round gets: one above its highest, so 1 when it has only its report or
      * none. Holds the ticket's round numbers until the transaction ends, so a second caller waits here and then reads
      * past the number this one saves.

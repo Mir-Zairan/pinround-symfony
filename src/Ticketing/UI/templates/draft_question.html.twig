@@ -1,0 +1,22 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}Share your draft round? · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/draft-question.css') }}">
+{% endblock %}
+
+{#- The answer to a move form sent without script: the same question as the dialog, on a page of its own. -#}
+{% block main %}
+    <div class="draft-question">
+        <h1 class="draft-question__title">Share your draft round?</h1>
+        <twig:Card>
+            {{ include('@Ticketing/_draft_question_text.html.twig') }}
+            <form id="share-draft-form" method="post" action="{{ moveUrl }}">
+                {{ include('@Ticketing/_draft_question_fields.html.twig') }}
+                <twig:Button variant="text" href="{{ path('ticket_show', {key: ticketKey}) }}">Cancel</twig:Button>
+                {{ include('@Ticketing/_draft_question_choices.html.twig') }}
+            </form>
+        </twig:Card>
+    </div>
+{% endblock %}

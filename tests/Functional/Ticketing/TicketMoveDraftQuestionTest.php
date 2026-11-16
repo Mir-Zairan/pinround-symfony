@@ -5,15 +5,24 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
+use App\Review\Api\RoundCommands;
+use App\Review\Application\RoundShareDraftQuestion;
+use App\Review\Domain\Rounds;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Review\SeedsTicketRounds;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Ticketing\Api\MoveResult;
+use App\Ticketing\Api\ShareDraftQuestion;
+use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Api\UndecidedDraft;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
 use App\Ticketing\UI\TicketMoveController;
@@ -58,7 +67,8 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
     /** @var array<string, User> */
     private array $people;
 
-    private string $shopProject;
+    /** Read by SeedsTicketRounds. */
+    protected string $shopProject;
     /** To do, where SHOP-1 starts. */
     private string $stepId;
 
@@ -128,10 +138,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         $this->client->request('POST', self::START_WORK, $this->moveFields(null === $choice ? [] : [TicketMoveController::DRAFT_CHOICE_FIELD => $choice]));
 
         self::assertResponseStatusCodeSame(409);
-        self::assertSame(
-            [TicketMoveController::DRAFT_DECISION_NEEDED => true, 'screenshotCount' => 2, 'roundNumber' => 2],
-            json_decode((string) $this->client->getResponse()->getContent(), true, 512, \JSON_THROW_ON_ERROR),
-        );
+        $this->assertTheQuestionPage(2, 2, 'In progress', self::START_WORK);
         self::assertSame($before, $this->stateOf());
     }
 
@@ -144,7 +151,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->client->request('POST', self::START_WORK, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']));
 
-        self::assertSame('Started. Status is In progress.', $this->toastAfterTheRedirect());
+        self::assertSame('Moved to In progress. Your draft is now round 2 for the team.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
         self::assertSame(
@@ -165,7 +172,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->client->request('POST', self::START_WORK, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'keep']));
 
-        self::assertSame('Started. Status is In progress.', $this->toastAfterTheRedirect());
+        self::assertSame('Moved to In progress. Your draft stays private.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
         self::assertSame(
@@ -177,6 +184,41 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         self::assertSame(array_diff_key($before['rounds'], [$this->omarsDraft => true]), array_diff_key($after['rounds'], [$this->omarsDraft => true]));
 
         $this->assertASecondMoveAsksNothing($after);
+    }
+
+    /**
+     * @return iterable<string, array{string}> the choice the form sends
+     */
+    public static function choices(): iterable
+    {
+        yield 'share' => ['share'];
+        yield 'keep' => ['keep'];
+    }
+
+    /**
+     * The draft is decided after the ticket is saved, its history written and Omar's pings cleared; a refusal there
+     * rolls all of it back, the draft's own write too.
+     */
+    #[Test]
+    #[DataProvider('choices')]
+    public function aDraftAnswerRefusedAfterTheMoveRollsBackTheMoveThePingsAndTheDraft(string $choice): void
+    {
+        $this->addOmarsScreenshots(2);
+        $omarsPing = $this->addPingToOmar();
+        $before = $this->stateOf();
+        $pingBefore = $this->stateOfPing($omarsPing);
+        self::assertSame(['cleared_reason' => null, 'done' => false], $pingBefore);
+        $written = $this->answerTheDraftQuestionThenRefuse();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::START_WORK, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => $choice]), [], ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html']);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertStringContainsString('data-toast-message-value="'.MoveToasts::CHANGED_MEANWHILE.'"', (string) $this->client->getResponse()->getContent());
+        self::assertSame('share' === $choice ? ['roundNumber' => 2] : ['kept' => true], $written->getArrayCopy(), 'The real share or keep wrote before the refusal.');
+        self::assertSame($before, $this->stateOf());
+        self::assertSame($this->stepId, $this->stateOf()['ticket']['step_id']);
+        self::assertSame($pingBefore, $this->stateOfPing($omarsPing));
     }
 
     #[Test]
@@ -270,7 +312,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->tenantTransactions()->committedAs(
             $organizationId->toString(),
-            static fn (): int => $ticketCommands->move($organizationId, $omar, self::KEY, 'start_work', self::VERSION, new \DateTimeImmutable(self::NOW)),
+            static fn (): MoveResult => $ticketCommands->move($organizationId, $omar, self::KEY, 'start_work', self::VERSION, new \DateTimeImmutable(self::NOW)),
         );
 
         $after = $this->stateOf();
@@ -296,10 +338,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields(null === $choice ? [] : [TicketMoveController::DRAFT_CHOICE_FIELD => $choice]));
 
         self::assertResponseStatusCodeSame(409);
-        self::assertSame(
-            [TicketMoveController::DRAFT_DECISION_NEEDED => true, 'screenshotCount' => 1, 'roundNumber' => 2],
-            json_decode((string) $this->client->getResponse()->getContent(), true, 512, \JSON_THROW_ON_ERROR),
-        );
+        $this->assertTheQuestionPage(1, 2, 'In progress', $this->moveToPath('progress'));
         self::assertSame($before, $this->stateOf());
         self::assertSame($this->steps['todo'], $before['ticket']['step_id']);
         self::assertNull($before['rounds'][$this->lenasDraft]['decision']);
@@ -314,7 +353,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']));
 
-        self::assertSame('Moved to In progress.', $this->toastAfterTheRedirect());
+        self::assertSame('Moved to In progress. Your draft is now round 2 for the team.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
         self::assertSame(
@@ -333,7 +372,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'keep']));
 
-        self::assertSame('Moved to In progress.', $this->toastAfterTheRedirect());
+        self::assertSame('Moved to In progress. Your draft stays private.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
         self::assertSame(
@@ -412,7 +451,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->tenantTransactions()->committedAs(
             $organizationId->toString(),
-            static fn (): int => $ticketCommands->moveTo($organizationId, $lena, self::KEY, $progress, self::VERSION, null, null, new \DateTimeImmutable(self::NOW)),
+            static fn (): MoveResult => $ticketCommands->moveTo($organizationId, $lena, self::KEY, $progress, self::VERSION, null, null, new \DateTimeImmutable(self::NOW)),
         );
 
         $after = $this->stateOf();
@@ -422,6 +461,138 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
             $after['rounds'][$this->lenasDraft],
         );
         self::assertSame(array_diff_key($before['rounds'], [$this->lenasDraft => true]), array_diff_key($after['rounds'], [$this->lenasDraft => true]));
+    }
+
+    /**
+     * @return iterable<string, array{string, string|null}> the field the form sends, and the person it names, if any
+     */
+    public static function waitingOnFields(): iterable
+    {
+        yield 'a label' => [TicketMoveController::WAITING_ON_LABEL_FIELD, null];
+        yield 'a person' => [TicketMoveController::WAITING_ON_USER_FIELD, 'Raj'];
+    }
+
+    #[Test]
+    #[DataProvider('waitingOnFields')]
+    public function aMoveToANeedsInputStepRepeatsWhoItWaitsOnAndKeepsItWhenSentAgainWithAChoice(string $field, ?string $person): void
+    {
+        $value = null === $person ? 'Customer' : $this->people[$person]->id()->toString();
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->client->request('POST', $this->moveToPath('input'), $this->moveFields([$field => $value]));
+
+        self::assertResponseStatusCodeSame(409);
+        $page = $this->client->getCrawler();
+        $sent = $page->filter('input[type=hidden][name="'.$field.'"]')->extract(['value']);
+        self::assertSame([$value], $sent);
+        $other = TicketMoveController::WAITING_ON_LABEL_FIELD === $field ? TicketMoveController::WAITING_ON_USER_FIELD : TicketMoveController::WAITING_ON_LABEL_FIELD;
+        self::assertSame([''], $page->filter('input[type=hidden][name="'.$other.'"]')->extract(['value']));
+        self::assertSame(['user' => null, 'label' => null], $this->waitingOn());
+
+        $this->client->request('POST', $this->moveToPath('input'), $this->moveFields([$field => $value, TicketMoveController::DRAFT_CHOICE_FIELD => 'keep']));
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame(
+            ['user' => null === $person ? null : $value, 'label' => null === $person ? $value : null],
+            $this->waitingOn(),
+        );
+    }
+
+    /**
+     * TicketMoveController passes no step name when the verb is not among the box's transitions; the HTTP path to that
+     * is closed (the policy refuses such a verb first), so the answer is rendered as the controller would.
+     */
+    #[Test]
+    public function theShareButtonNamesNoStepWhenTheMoveLeadsToNoNamedStep(): void
+    {
+        $content = self::getContainer()->get('twig')->render('@Ticketing/draft_question.stream.html.twig', [
+            'ticketKey' => self::KEY,
+            'moveUrl' => self::START_WORK,
+            'draft' => new UndecidedDraft($this->omarsDraft, 2, 2),
+            'stepName' => null,
+            'fields' => [],
+            'choiceField' => TicketMoveController::DRAFT_CHOICE_FIELD,
+            'failedToast' => MoveToasts::MOVE_FAILED,
+        ]);
+
+        self::assertMatchesRegularExpression('/value="share"[^>]*>\s*Share and move\s*<\/button>/', $content);
+        self::assertStringNotContainsString('Share and move to', $content);
+    }
+
+    /**
+     * @return array{user: mixed, label: mixed} who SHOP-1 waits on
+     */
+    private function waitingOn(): array
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $row = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$row): int {
+            $row = $migrator->fetchAssociative('SELECT waiting_on_user_id AS user, waiting_on_label AS label FROM tkt_ticket WHERE organization_id = ? AND key = ?', [$organizationId, self::KEY]);
+
+            return 0;
+        });
+        self::assertIsArray($row);
+
+        return ['user' => $row['user'], 'label' => $row['label']];
+    }
+
+    #[Test]
+    public function aTurboFormGetsTheDialogAsATurboStreamThatOpensItAndMovesNothing(): void
+    {
+        $this->addOmarsScreenshots(2);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::START_WORK, $this->moveFields(), [], ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html']);
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertStringStartsWith('text/vnd.turbo-stream.html', (string) $this->client->getResponse()->headers->get('Content-Type'));
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('<turbo-stream action="append" targets="body">', $content);
+        self::assertStringContainsString('data-controller="share-draft"', $content);
+        self::assertStringContainsString('<dialog id="share-draft-dialog"', $content);
+        $this->assertTheQuestion($content, 2, 2, 'In progress', self::START_WORK);
+        self::assertSame($before, $this->stateOf());
+    }
+
+    #[Test]
+    public function aFormWithoutScriptGetsAPageWithTheQuestionAndNoDialogToOpen(): void
+    {
+        $this->addOmarsScreenshots(1);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::START_WORK, $this->moveFields());
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertStringStartsWith('text/html', (string) $this->client->getResponse()->headers->get('Content-Type'));
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('<h1 class="draft-question__title">Share your draft round?</h1>', $content);
+        self::assertStringNotContainsString('<dialog', $content);
+        self::assertStringContainsString('href="'.self::TICKET_PAGE.'"', $content);
+        $this->assertTheQuestion($content, 1, 2, 'In progress', self::START_WORK);
+        self::assertSame($before, $this->stateOf());
+    }
+
+    private function assertTheQuestionPage(int $screenshotCount, int $roundNumber, string $stepName, string $moveUrl): void
+    {
+        self::assertStringStartsWith('text/html', (string) $this->client->getResponse()->headers->get('Content-Type'));
+        $this->assertTheQuestion((string) $this->client->getResponse()->getContent(), $screenshotCount, $roundNumber, $stepName, $moveUrl);
+    }
+
+    /**
+     * The text, the buttons and the form's own fields that send the move again with a choice.
+     */
+    private function assertTheQuestion(string $content, int $screenshotCount, int $roundNumber, string $stepName, string $moveUrl): void
+    {
+        $noun = 1 === $screenshotCount ? 'screenshot' : 'screenshots';
+        self::assertStringContainsString(\sprintf('Your draft round has %d %s. Share it with the team as round %d, or keep it private. Private notes stay readable for you and Claude Code.', $screenshotCount, $noun, $roundNumber), $content);
+        self::assertStringContainsString('Keep private and move', $content);
+        self::assertStringContainsString('Share and move to '.$stepName, $content);
+        self::assertStringContainsString('name="draft_choice" value="keep"', $content);
+        self::assertStringContainsString('name="draft_choice" value="share"', $content);
+        self::assertStringContainsString('action="'.$moveUrl.'"', $content);
+        self::assertStringContainsString('name="version" value="'.self::VERSION.'"', $content);
+        self::assertStringContainsString('name="_csrf_token"', $content);
     }
 
     private function moveToPath(string $coreCode): string
@@ -447,6 +618,112 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         for ($position = 0; $position < $count; ++$position) {
             $this->addScreenshot($this->omarsDraft, $this->addMedia('ready', 'Omar'), $position, null, null);
         }
+    }
+
+    /**
+     * Review's answer as the real one gives it, which then refuses as Review would on a draft changed meanwhile: the
+     * share or keep is written before the refusal, so only the rollback can undo it.
+     *
+     * @return \ArrayObject<string, int|bool> what the real share or keep returned or did before the refusal
+     */
+    private function answerTheDraftQuestionThenRefuse(): \ArrayObject
+    {
+        $realQuestion = new RoundShareDraftQuestion(self::getContainer()->get(Rounds::class), self::getContainer()->get(RoundCommands::class));
+        /** @var \ArrayObject<string, int|bool> $written what the real share or keep returned or did, before the refusal */
+        $written = new \ArrayObject();
+        self::getContainer()->set(RoundShareDraftQuestion::class, new readonly class($realQuestion, $written) implements ShareDraftQuestion {
+            /**
+             * @param \ArrayObject<string, int|bool> $written
+             */
+            public function __construct(private ShareDraftQuestion $realQuestion, private \ArrayObject $written)
+            {
+            }
+
+            public function undecidedDraftOf(TicketId $ticketId, UserId $ownerId): ?UndecidedDraft
+            {
+                return $this->realQuestion->undecidedDraftOf($ticketId, $ownerId);
+            }
+
+            public function undecidedDraftIdOf(TicketId $ticketId, UserId $ownerId): ?string
+            {
+                return $this->realQuestion->undecidedDraftIdOf($ticketId, $ownerId);
+            }
+
+            public function share(string $roundId, UserId $ownerId, \DateTimeImmutable $at): int
+            {
+                $this->written['roundNumber'] = $this->realQuestion->share($roundId, $ownerId, $at);
+
+                throw new TicketChangedMeanwhile('The draft round was changed after it was read.');
+            }
+
+            public function keepPrivate(string $roundId, UserId $ownerId, \DateTimeImmutable $at): void
+            {
+                $this->realQuestion->keepPrivate($roundId, $ownerId, $at);
+                $this->written['kept'] = true;
+
+                throw new TicketChangedMeanwhile('The draft round was changed after it was read.');
+            }
+        });
+
+        return $written;
+    }
+
+    /**
+     * An open ping from Lena to Omar on SHOP-1, with its bell row, which Omar's move clears.
+     *
+     * @return string the ping's id
+     */
+    private function addPingToOmar(): string
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $pingId = Uuid::v7()->toRfc4122();
+        $ping = [
+            'organization_id' => $organizationId,
+            'id' => $pingId,
+            'ticket_id' => $this->ticketId,
+            'from_id' => $this->people['Lena']->id()->toString(),
+            'to_id' => $this->people['Omar']->id()->toString(),
+            'body' => 'Any news on this one?',
+            'created_at' => '2026-11-06 11:00:00+00',
+        ];
+        $notification = [
+            'organization_id' => $organizationId,
+            'id' => Uuid::v7()->toRfc4122(),
+            'user_id' => $this->people['Omar']->id()->toString(),
+            'kind' => 'ping',
+            'actor_id' => $this->people['Lena']->id()->toString(),
+            'ticket_id' => $this->ticketId,
+            'data' => json_encode(['actorName' => 'Lena', 'ticketKey' => self::KEY, 'pingId' => $pingId], \JSON_THROW_ON_ERROR),
+            'created_at' => '2026-11-06 11:00:00+00',
+        ];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($ping, $notification): int|string {
+            $migrator->insert('ntf_ping', $ping);
+
+            return $migrator->insert('ntf_notification', $notification);
+        });
+
+        return $pingId;
+    }
+
+    /**
+     * @return array{cleared_reason: mixed, done: mixed}
+     */
+    private function stateOfPing(string $pingId): array
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $row = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $pingId, &$row): int {
+            $row = $migrator->fetchAssociative(
+                "SELECT p.cleared_reason, n.done_at IS NOT NULL AS done FROM ntf_ping p JOIN ntf_notification n ON n.organization_id = p.organization_id AND n.data->>'pingId' = p.id::text
+                 WHERE p.organization_id = ? AND p.id = ?",
+                [$organizationId, $pingId],
+            );
+
+            return 0;
+        });
+        self::assertIsArray($row);
+
+        return ['cleared_reason' => $row['cleared_reason'], 'done' => $row['done']];
     }
 
     private function removeLenasScreenshots(): void
