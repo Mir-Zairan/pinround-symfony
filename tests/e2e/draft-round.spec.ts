@@ -21,13 +21,9 @@ async function startDraftAsOmar(browser: Browser): Promise<{ context: BrowserCon
   const key = await makeTicketForOmar(browser, 'Draft round check on the checkout banner');
   const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
   // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
-  // The page and its lazy Rounds frame load at once and both write the session, so now and then the form's token is the
-  // one the session lost and the start is refused as "open too long". Opening the page again gives a token that holds.
-  await expect(async () => {
-    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-    await page.getByRole('button', { name: 'Start a draft round' }).click({ timeout: 5_000 });
-    await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible({ timeout: 5_000 });
-  }).toPass({ timeout: 30_000 });
+  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Start a draft round' }).click();
+  await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
   await page.waitForLoadState('networkidle');
   const shareAction = await page.locator('form.round-card__form', { has: page.locator('.round-card__share') }).getAttribute('action');
   const roundId = /\/rounds\/([^/]+)\/share$/.exec(shareAction ?? '')?.[1];

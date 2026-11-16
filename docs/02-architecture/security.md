@@ -110,7 +110,7 @@ ASVS 5.0 Level 2 is our baseline for every release. The chapter names below are 
 | ASVS area | pinround control |
 |---|---|
 | Authentication | argon2id password hashes; minimum length 12, no forced complexity rules; optional breached-password check; TOTP MFA (required for admins); OIDC SSO with Authorization Code + PKCE; login throttling per account and per IP. |
-| Session management | Server-side sessions in Valkey; rotation on login, MFA and role change; idle timeout 8 h, absolute 30 days (configurable); logout kills the session server-side; "sign out everywhere". |
+| Session management | Server-side sessions in Valkey; rotation on login, MFA and role change; idle timeout 8 h, absolute 30 days (configurable); logout kills the session server-side; "sign out everywhere". Sessions take no lock, so each write takes over, in a Valkey WATCH transaction, the CSRF tokens a parallel request stored meanwhile (never after a logout, a cleared or removed token, or another login), and never writes back a session destroyed meanwhile (`MergingSessionHandler`). |
 | Access control | Voters per aggregate and action; deny by default; tenant check in code **and** RLS; visibility levels; owner-only drafts and explanations; access-control tests per route. |
 | Validation and encoding | Symfony Forms/Validator on every input; Twig auto-escaping on; no `|raw` on user or AI content; Markdown rendered with a safe renderer and an allow-list sanitizer. |
 | Cryptography | Only vetted primitives (libsodium, PHP password API); no home-made crypto; key ids for rotation. |
