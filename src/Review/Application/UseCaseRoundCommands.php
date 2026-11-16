@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Review\Application;
 
 use App\Media\Api\UploadedMedia;
+use App\Review\Api\ChecklistCommands;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
@@ -36,6 +37,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         private TicketTurnQueries $ticketTurnQueries,
         private TenantContext $tenantContext,
         private ReportPictures $reportPictures,
+        private ChecklistCommands $checklistCommands,
     ) {
     }
 
@@ -73,6 +75,10 @@ final readonly class UseCaseRoundCommands implements RoundCommands
             $this->rounds->add($round);
         } catch (RoundSlotTaken $taken) {
             throw new RoundRefused('This ticket has a report already.', 0, $taken);
+        }
+        // CreateChecklistOnTicketEventsHandler saw no Round 0 when the ticket reached To do, and no event follows this one.
+        if ('todo' === $ticket->coreCode) {
+            $this->checklistCommands->createFromReport($ticketId, $reportedAt);
         }
 
         return $round->id()->toString();

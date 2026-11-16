@@ -26,6 +26,7 @@ use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Unit\Review\Application\InMemoryUploadedMedia;
+use App\Tests\Unit\Review\Application\RecordingChecklistCommands;
 use App\Tests\Unit\Review\UI\Media\InMemoryTicketTurnQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
@@ -509,6 +510,7 @@ final class DbalRoundsDraftTest extends KernelTestCase
             new InMemoryTicketTurnQueries([], new TicketId(self::EMPTY_TICKET)),
             $tenantContext,
             new ReportPictures(new InMemoryUploadedMedia($tenantContext, [[self::ACME_FOODS, self::FIRST_MEDIA, self::LENA, MediaImageStatus::Ready]])),
+            new RecordingChecklistCommands(),
         );
         $rowsBefore = [$this->rowsOfRound(self::LENAS_DELETED_DRAFT), $this->rowsOfRound(self::OTHER_ORGANIZATION_OPEN_DRAFT), $this->rowsOfRound(self::OMARS_DRAFT)];
 
