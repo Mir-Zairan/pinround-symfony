@@ -106,7 +106,7 @@ final readonly class RoundCards
         if (!$this->showsPictures($round)) {
             $title = self::CHECKLIST === $round->kind ? 'Checklist from the report' : 'Review';
 
-            return new RoundCard($round->id, $domId, \sprintf('Round %d · %s · by %s', $round->number ?? 0, $title, $ownerName), null, false, [], true);
+            return new RoundCard($round->id, $domId, \sprintf('Round %d · %s · by %s', $round->number ?? 0, $title, $ownerName), null, false, [], true, number: $round->number);
         }
 
         $pictureLimit = self::pictureLimitOf($round);
@@ -187,15 +187,25 @@ final readonly class RoundCards
      */
     private function screenshotViewOf(RoundView $round, RoundScreenshotView $screenshot, ?MediaImage $image, array $pins): ScreenshotView
     {
-        $domId = 'screenshot-'.$screenshot->id;
         $altText = $screenshot->title ?? \sprintf('Screenshot %d of %s', $screenshot->position + 1, $round->isUnsharedDraft() ? 'your draft round' : 'round '.($round->number ?? 0));
-        // A picture Media does not know is shown as refused rather than left out, so a round never loses a screenshot silently.
+
+        return self::viewOfPicture('screenshot-'.$screenshot->id, $altText, $screenshot->title, $screenshot->summary, $image, $pins);
+    }
+
+    /**
+     * The picture of one screenshot as the components draw it. A picture Media does not know is shown as refused rather
+     * than left out, so a round never loses a screenshot silently.
+     *
+     * @param list<PinView> $pins
+     */
+    public static function viewOfPicture(string $domId, string $altText, ?string $title, ?string $summary, ?MediaImage $image, array $pins): ScreenshotView
+    {
         $status = $image->status ?? MediaImageStatus::Rejected;
         if (MediaImageStatus::Ready === $status && null !== $image && null !== $image->url && null !== $image->width && null !== $image->height) {
-            return new ScreenshotView($domId, $image->url, $image->width, $image->height, $altText, $screenshot->title, $screenshot->summary, $pins);
+            return new ScreenshotView($domId, $image->url, $image->width, $image->height, $altText, $title, $summary, $pins);
         }
 
-        return new ScreenshotView($domId, null, null, null, $altText, $screenshot->title, $screenshot->summary, $pins, MediaImageStatus::Pending === $status ? MediaImageStatus::Pending : MediaImageStatus::Rejected);
+        return new ScreenshotView($domId, null, null, null, $altText, $title, $summary, $pins, MediaImageStatus::Pending === $status ? MediaImageStatus::Pending : MediaImageStatus::Rejected);
     }
 
     private static function pinViewOf(RoundPinView $pin): PinView

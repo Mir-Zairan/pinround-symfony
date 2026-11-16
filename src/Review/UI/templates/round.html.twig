@@ -1,0 +1,100 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- One round of a ticket, read-only (RoundController). The tabs are links ("?area=N"), so a tab works without JavaScript;
+    only the compare control needs the compare Stimulus controller, and it stays hidden without it. -#}
+
+{% block title %}Round {{ roundNumber }} · {{ page.ticketKey }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+{% endblock %}
+
+{% block main %}
+    {% set selected = page.selected %}
+    <article class="ticket round-page" data-controller="compare" data-compare-mode="both">
+        <header class="round-page__header">
+            <twig:Button variant="text" href="{{ path(ticketRoute, {key: page.ticketKey}) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Back to {{ page.ticketKey }}</twig:Button>
+            <p class="round-page__ticket"><span class="round-page__key">{{ page.ticketKey }}</span> · <a href="{{ path(ticketRoute, {key: page.ticketKey}) }}">{{ page.ticketTitle }}</a></p>
+            <h1 class="round-page__title">{{ page.header }}</h1>
+            {% if selected is not null %}
+                <div class="round-page__tools">
+                    <div class="round-compare-control" role="group" aria-label="Compare" hidden data-compare-target="control">
+                        <twig:Chip data-compare-target="choice" data-mode="both" data-action="compare#choose">Side by side</twig:Chip>
+                        <twig:Chip data-compare-target="choice" data-mode="before" data-action="compare#choose">Before</twig:Chip>
+                        <twig:Chip data-compare-target="choice" data-mode="after" data-action="compare#choose">After</twig:Chip>
+                    </div>
+                    {#- The focus route is built with the full-screen review; until then the button is shown as the prototype has it. -#}
+                    <twig:Button variant="outline" size="sm" :disabled="true" class="round-page__full-screen">Full screen</twig:Button>
+                </div>
+            {% endif %}
+        </header>
+
+        {% if selected is null %}
+            <twig:EmptyState message="This round has no screen areas." />
+        {% else %}
+            <nav class="area-tabs" aria-label="Screen areas">
+                {% for tab in page.tabs %}
+                    <a class="chip area-tab" href="{{ path(constant('App\\Review\\UI\\Controller\\RoundController::ROUND_ROUTE'), {key: page.ticketKey, number: roundNumber}) }}?{{ areaParameter }}={{ tab.position }}"{% if tab.isSelected %} aria-current="page"{% endif %}>
+                        <span class="area-tab__name">{{ tab.name }}</span>
+                        <twig:Tag class="area-chip {{ tab.stateClass }}">{{ tab.stateLabel }}</twig:Tag>
+                    </a>
+                {% endfor %}
+            </nav>
+
+            <div class="round-page__body">
+                <section class="round-compare" aria-label="Pictures of {{ selected.name }}">
+                    {% if selected.before is not null %}
+                        <figure class="round-compare__side round-compare__side--before">
+                            <figcaption class="round-compare__caption">{{ selected.beforeCaption }}</figcaption>
+                            <twig:Screenshot :view="selected.before" :headingLevel="3" />
+                            <twig:PinList :view="selected.before" />
+                        </figure>
+                    {% else %}
+                        <p class="round-compare__side round-compare__side--before round-compare__none">There is no earlier picture of this place.</p>
+                    {% endif %}
+                    <figure class="round-compare__side round-compare__side--after">
+                        <figcaption class="round-compare__caption">{{ selected.afterCaption }}</figcaption>
+                        <twig:Screenshot :view="selected.after" :headingLevel="3" />
+                        <twig:PinList :view="selected.after" />
+                    </figure>
+                </section>
+
+                <aside class="round-panel" aria-label="Review of {{ selected.name }}">
+                    {% if selected.earlierPinsHeading is not null %}
+                        <section class="round-panel__section" aria-labelledby="round-panel-pins">
+                            <h2 id="round-panel-pins" class="round-panel__title">{{ selected.earlierPinsHeading }}</h2>
+                            {% if selected.earlierPins is empty %}
+                                <p class="round-panel__empty">That round left no pins here.</p>
+                            {% else %}
+                                <ol class="round-panel__pins">
+                                    {% for row in selected.earlierPins %}
+                                        <li class="round-panel__pin" value="{{ row.number }}">
+                                            <span class="pin-list__number">{{ row.number }}</span>
+                                            <p class="round-panel__note">{% if row.note|trim is same as('') %}(no note){% else %}{{ row.note }}{% endif %}</p>
+                                            <twig:Tag class="verdict-tag {{ row.verdictClass }}">{{ row.verdictLabel }}</twig:Tag>
+                                            {#- The per-pin buttons (Fixed, Still wrong, Undo) come with the verdict task. -#}
+                                        </li>
+                                    {% endfor %}
+                                </ol>
+                            {% endif %}
+                        </section>
+                    {% endif %}
+
+                    <section class="round-panel__section" aria-labelledby="round-panel-verdict">
+                        <h2 id="round-panel-verdict" class="round-panel__title">Verdict on {{ selected.name }}</h2>
+                        {% if selected.verdictLabel is null %}
+                            <p class="round-panel__empty">No verdict yet.</p>
+                        {% else %}
+                            <p class="round-panel__verdict"><twig:Tag>{{ selected.verdictLabel }}</twig:Tag></p>
+                            {% if selected.note is not null and selected.note|trim is not same as('') %}
+                                <p class="round-panel__note">{{ selected.note }}</p>
+                            {% endif %}
+                        {% endif %}
+                        {#- The area verdict form (Pass, Needs fix, Question, note, Save verdict) comes with the verdict task. -#}
+                    </section>
+                </aside>
+            </div>
+        {% endif %}
+    </article>
+{% endblock %}

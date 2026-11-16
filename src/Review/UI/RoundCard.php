@@ -20,6 +20,7 @@ final readonly class RoundCard
      * @param string|null               $moreScreenshotsNote for example "2 more screenshots are not shown."; null when all are shown
      * @param string|null               $description         the muted line under a draft's header; null for the other rounds
      * @param string|null               $emptyNote           what a draft with no screenshot says; null for the other rounds
+     * @param int|null                  $number              the round's number, which "Open round" links to; set with $hasOpenRound
      * @param string                    $roundId             the round's id, which the private draft's Share and Delete forms post to
      */
     public function __construct(
@@ -33,6 +34,7 @@ final readonly class RoundCard
         public ?string $moreScreenshotsNote = null,
         public ?string $description = null,
         public ?string $emptyNote = null,
+        public ?int $number = null,
     ) {
     }
 }

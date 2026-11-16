@@ -163,7 +163,7 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     #[Test]
-    public function reviewAndChecklistRoundsAreRowsWithAnOpenRoundButtonThatDoesNothingYetAndShowNoPicture(): void
+    public function reviewAndChecklistRoundsAreRowsWithAnOpenRoundLinkAndShowNoPicture(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $checklist = $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
@@ -179,7 +179,8 @@ final class RoundsFrameTest extends WebTestCase
             ['Round 1 · Checklist from the report · by Omar', 'Round 2 · Review · by Lena'],
             $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
-        self::assertSame(['Open round', 'Open round'], $page->filter(self::ROUNDS.' button.round-card__open[disabled]')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame(['Open round', 'Open round'], $page->filter(self::ROUNDS.' a.round-card__open')->each(static fn (Crawler $link): string => $link->text()));
+        self::assertSame(['/t/SHOP-1/rounds/1', '/t/SHOP-1/rounds/2'], $page->filter(self::ROUNDS.' a.round-card__open')->each(static fn (Crawler $link): string => (string) $link->attr('href')));
         self::assertCount(0, $page->filter(self::ROUNDS.' img, '.self::ROUNDS.' figure'));
         self::assertStringNotContainsString('Hidden in a row', (string) $this->client->getResponse()->getContent());
     }

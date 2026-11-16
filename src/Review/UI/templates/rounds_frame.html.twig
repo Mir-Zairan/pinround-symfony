@@ -14,9 +14,8 @@
                 <header class="round-card__header">
                     <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>
                     {% if card.status is not null %}<p class="round-card__status">{{ card.status }}</p>{% endif %}
-                    {% if card.hasOpenRound %}
-                        {#- No round page exists yet, so the button is shown as the prototype has it, and cannot be used. -#}
-                        <twig:Button variant="outline" size="sm" :disabled="true" class="round-card__open">Open round</twig:Button>
+                    {% if card.hasOpenRound and card.number is not null %}
+                        <twig:Button variant="outline" size="sm" href="{{ path(constant('App\\Review\\UI\\Controller\\RoundController::ROUND_ROUTE'), {key: ticketKey, number: card.number}) }}" class="round-card__open">Open round</twig:Button>
                     {% endif %}
                 </header>
                 {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
