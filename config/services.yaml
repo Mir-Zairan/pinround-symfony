@@ -388,6 +388,11 @@ when@test:
         test.review_round_queries:
             alias: App\Review\Api\RoundQueries
             public: true
+        # No route gives a verdict before the round page's controllers (P05.T7); UseCaseVerdictCommandsTest gets the Api
+        # as a controller will.
+        test.review_verdict_commands:
+            alias: App\Review\Api\VerdictCommands
+            public: true
         # No page saves a report before the new ticket form takes a screenshot; ScreenshotReportOnNewTicketTest gets
         # Ticketing's port as that form will.
         test.ticketing_new_ticket_report:
