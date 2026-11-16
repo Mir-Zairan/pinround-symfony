@@ -40,6 +40,24 @@ function savedBy(page: Page, action: string) {
   return page.waitForResponse((response) => response.url().includes(`/_components/DraftRoundEditor/${action}`) && 200 === response.status());
 }
 
+function recordRoundRequests(page: Page, key: string, roundId: string): string[] {
+  const events: string[] = [];
+  page.on('request', (request) => {
+    if ('POST' !== request.method()) {
+      return;
+    }
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === `/t/${key}/rounds/${roundId}/share`) {
+      events.push('share');
+    } else if (pathname === `/t/${key}/rounds/${roundId}/delete`) {
+      events.push('delete');
+    } else if (pathname.endsWith('/setPins')) {
+      events.push('setPins');
+    }
+  });
+  return events;
+}
+
 test.describe('Draft round', () => {
   test('Omar starts a draft, sees the PRIVATE card and the Claude Code box, and sharing makes it read-only', async ({ browser }) => {
     const { context, page, key } = await startDraftAsOmar(browser);
@@ -72,10 +90,9 @@ test.describe('Draft round', () => {
   test('Lena, Mia and Sara see no unshared draft on the ticket page nor through its direct URLs', async ({ browser }) => {
     const { context: omarContext, page: omar, key, roundId } = await startDraftAsOmar(browser);
     const liveRoot = omar.locator('.draft-round-editor[data-controller~="live"]');
-    const live = liveRoot;
     const liveUrl = await liveRoot.getAttribute('data-live-url-value');
     const liveProps = await liveRoot.getAttribute('data-live-props-value');
-    await expect(live).toBeVisible();
+    await expect(liveRoot).toBeVisible();
     expect(liveUrl, 'the editor is a live component').toContain('/_components/DraftRoundEditor');
     const componentRequest = () => ({
       headers: { 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/vnd.live-component+html' },
@@ -117,7 +134,7 @@ test.describe('Draft round', () => {
       expect(frameHtml).not.toContain(roundId);
 
       const editor = await context.request.post(`${liveUrl}/get`, componentRequest());
-      expect(editor.status(), `${name}: editor component`).not.toBe(200);
+      expect(editor.status(), `${name}: editor component`).toBe(404);
       expect(await editor.text()).not.toContain(DRAFT_HEADLINE);
 
       for (const action of ['share', 'delete']) {
@@ -182,23 +199,14 @@ test.describe('Draft round', () => {
     test.setTimeout(90_000);
     const { context, page, key, roundId } = await startDraftAsOmar(browser);
     await addPicture(page);
-    const events: string[] = [];
-    page.on('request', (request) => {
-      const url = new URL(request.url());
-      if ('POST' !== request.method()) {
-        return;
-      }
-      if (url.pathname === `/t/${key}/rounds/${roundId}/share`) {
-        events.push('share');
-      } else if (url.pathname.endsWith('/setPins')) {
-        events.push('setPins');
-      }
-    });
+    const events = recordRoundRequests(page, key, roundId);
     const shot = page.locator('section.draft-shot');
     const frame = shot.locator('.screenshot__frame');
     const box = (await frame.boundingBox())!;
     await frame.click({ position: { x: box.width * 0.5, y: box.height * 0.5 } });
     await shot.getByLabel('Note for pin 1').fill('Shared with the pin');
+    // The editor sends the pin by itself after 600 ms; the hold-and-flush code is only proven while it still waits.
+    expect(events, 'the pin save must still be waiting when Share is clicked').toEqual([]);
 
     await page.getByRole('button', { name: 'Share with the team now' }).dblclick();
 
@@ -211,8 +219,9 @@ test.describe('Draft round', () => {
   test('a refused delete keeps the draft and the pin still waiting to be saved', async ({ browser }) => {
     needsPipeline();
     test.setTimeout(90_000);
-    const { context, page } = await startDraftAsOmar(browser);
+    const { context, page, key, roundId } = await startDraftAsOmar(browser);
     await addPicture(page);
+    const events = recordRoundRequests(page, key, roundId);
     page.on('dialog', (dialog) => dialog.accept());
     const shot = page.locator('section.draft-shot');
     const frame = shot.locator('.screenshot__frame');
@@ -222,15 +231,17 @@ test.describe('Draft round', () => {
     await page.locator('form.round-card__form', { has: page.locator('.round-card__delete') }).locator('input[name="_csrf_token"]').evaluate((field: HTMLInputElement) => {
       field.value = 'expired';
     });
+    // The editor sends the pin by itself after 600 ms; the hold while deleting is only proven while it still waits.
+    expect(events, 'the pin save must still be waiting when Delete is clicked').toEqual([]);
 
     await page.getByRole('button', { name: 'Delete draft' }).click();
 
     await expect(page.locator(TOAST_REGION)).toHaveText('This page was open too long. Reload it and try again.');
-    await expect.poll(async () => {
-      await page.reload({ waitUntil: 'networkidle' });
-      return page.getByLabel('Note for pin 1').inputValue().catch(() => '');
-    }).toBe('Kept after a refused delete');
+    await expect.poll(() => events.join(',')).toBe('delete,setPins');
     await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await page.reload({ waitUntil: 'networkidle' });
+    await expect(page.getByLabel('Note for pin 1')).toHaveValue('Kept after a refused delete');
+    expect(events, 'one pin save after the refusal, none more').toEqual(['delete', 'setPins']);
     await context.close();
   });
 });

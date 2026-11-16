@@ -28,7 +28,7 @@ use Zenstruck\Foundry\Test\Factories;
 /**
  * P05.T8: "roundNotes returns exactly what the editor shows". Omar's draft of SHOP-1 is rendered by the real Rounds
  * frame (the DraftRoundEditor card), then read through RoundQueries::roundNotes, and the two are compared field by
- * field: the screenshots and their order, title, summary, verdict and each pin's number and note. Around the draft are
+ * field: the screenshots and their order, title, summary, verdict and each pin's number, x, y and note. Around the draft are
  * the rows neither may show: Mia's draft of the same ticket, Omar's shared round, and a screenshot Omar removed through
  * the editor's own action. The clock is fixed on 6 Nov 2026, before today.
  */
