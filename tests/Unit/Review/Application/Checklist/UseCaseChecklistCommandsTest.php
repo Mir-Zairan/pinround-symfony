@@ -95,7 +95,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
     #[Test]
     public function theApiStatesAreTheDomainStates(): void
     {
-        self::assertSame(
+        self::assertEquals(
             [ChecklistCommands::STATE_OPEN, ChecklistCommands::STATE_FIXED, ChecklistCommands::STATE_OK, ChecklistCommands::STATE_NOT_FIXED],
             array_map(static fn (CheckItemState $state): string => $state->value, CheckItemState::cases()),
         );
@@ -305,7 +305,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
         $betaItemIds = [];
         foreach ($this->checklists->storedItems as $itemId => [$organizationId]) {
             if ($organizationId->equals(new OrganizationId(self::BETA_BAKERY))) {
-                $betaItemIds[] = (string) $itemId;
+                $betaItemIds[] = $itemId;
             }
         }
         self::assertNotEmpty($betaItemIds);

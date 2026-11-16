@@ -9,7 +9,6 @@ use App\Review\Api\CheckItemAccessFacts;
 use App\Review\Api\ChecklistPermission;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
-use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\UI\Voter\DenyByDefaultVoter;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketTurnQueries;
@@ -66,7 +65,7 @@ final class CheckItemVoter extends DenyByDefaultVoter
         }
         $hasTheRole = ChecklistPermission::MARK_FIXED === $attribute
             ? null !== $ticket->assigneeId && $ticket->assigneeId->equals($actor->userId())
-            : self::isTesterOf($ticket, $actor->userId());
+            : TicketTesterRule::isTesterOf($ticket, $actor->userId());
         if (!$hasTheRole) {
             return false;
         }
@@ -74,23 +73,6 @@ final class CheckItemVoter extends DenyByDefaultVoter
 
         return $this->accessDecisionManager->decide($token, [TicketPermission::VIEW], $visibilityFacts)
             && $this->accessDecisionManager->decide($token, [TicketPermission::EDIT], $visibilityFacts);
-    }
-
-    /**
-     * The tester rule of VerdictVoter: the stored tester, else any tester of the ticket's team.
-     */
-    private static function isTesterOf(TicketTurnSnapshot $ticket, UserId $userId): bool
-    {
-        if (null !== $ticket->testerId) {
-            return $ticket->testerId->equals($userId);
-        }
-        foreach ($ticket->testerIds as $teamTesterId) {
-            if ($teamTesterId->equals($userId)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private function ticketOf(CheckItemAccessFacts $item): ?TicketTurnSnapshot
