@@ -31,8 +31,9 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  * Shop team: Lena leads it, Omar develops, Mia tests; Noor is a member in no team. On the ticket, Round 0 (the report)
  * has two pictures, Round 1 compares its two "after" pictures with them, and Round 2 compares its three with Round 1's
  * two and nothing. Round 3 is Omar's shared draft with no area, and Omar has an unshared draft with an area of its own.
- * Every picture also holds AI pins nobody kept or that were dismissed. Another ticket has a Round 2 with an area, a
- * team-only ticket a Round 1 whose only pin was dismissed, and Beta Bakery a Round 2 and a Round 5 on the ticket's id.
+ * Every picture also holds AI pins nobody kept or that were dismissed. Another ticket has a Round 1 and a Round 2 with
+ * two areas, a team-only ticket a Round 1 whose only pin was dismissed, and Beta Bakery a Round 2 and a Round 5 on the
+ * ticket's id.
  * Areas and pins go in out of their position and number order. Every time is fixed in April 2027; nothing reads the
  * clock.
  */
@@ -64,6 +65,7 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
     private const string TEAM_ONLY_ROUND_ONE = '0197a3c0-0000-7000-8000-0000000fb047';
     private const string BAKERY_ROUND_TWO = '0197a3c0-0000-7000-8000-0000000fb048';
     private const string BAKERY_ROUND_FIVE = '0197a3c0-0000-7000-8000-0000000fb049';
+    private const string OTHER_ROUND_ONE = '0197a3c0-0000-7000-8000-0000000fb04a';
     private const string REPORT_FIRST = '0197a3c0-0000-7000-8000-0000000fb051';
     private const string REPORT_SECOND = '0197a3c0-0000-7000-8000-0000000fb052';
     private const string ROUND_ONE_FIRST_AFTER = '0197a3c0-0000-7000-8000-0000000fb053';
@@ -76,6 +78,8 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
     private const string TEAM_ONLY_SHOT = '0197a3c0-0000-7000-8000-0000000fb05a';
     private const string BAKERY_SHOT = '0197a3c0-0000-7000-8000-0000000fb05b';
     private const string BAKERY_SECOND_SHOT = '0197a3c0-0000-7000-8000-0000000fb05c';
+    private const string OTHER_ROUND_ONE_SHOT = '0197a3c0-0000-7000-8000-0000000fb05d';
+    private const string OTHER_SECOND_SHOT = '0197a3c0-0000-7000-8000-0000000fb05e';
     private const string ROUND_ONE_FIRST_AREA = '0197a3c0-0000-7000-8000-0000000fb061';
     private const string ROUND_ONE_SECOND_AREA = '0197a3c0-0000-7000-8000-0000000fb062';
     private const string ORDER_AREA = '0197a3c0-0000-7000-8000-0000000fb063';
@@ -85,6 +89,7 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
     private const string OTHER_AREA = '0197a3c0-0000-7000-8000-0000000fb067';
     private const string TEAM_ONLY_AREA = '0197a3c0-0000-7000-8000-0000000fb068';
     private const string BAKERY_AREA = '0197a3c0-0000-7000-8000-0000000fb069';
+    private const string OTHER_SECOND_AREA = '0197a3c0-0000-7000-8000-0000000fb06a';
     private const string REPORT_PIN_ONE = '0197a3c0-0000-7000-8000-0000000fb071';
     private const string REPORT_KEPT_PIN_TWO = '0197a3c0-0000-7000-8000-0000000fb072';
     private const string REPORT_PIN_THREE = '0197a3c0-0000-7000-8000-0000000fb073';
@@ -102,6 +107,7 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
     private const string OTHER_PIN = '0197a3c0-0000-7000-8000-0000000fb07f';
     private const string TEAM_ONLY_DISMISSED_PIN = '0197a3c0-0000-7000-8000-0000000fb080';
     private const string BAKERY_PIN = '0197a3c0-0000-7000-8000-0000000fb081';
+    private const string OTHER_ROUND_ONE_PIN = '0197a3c0-0000-7000-8000-0000000fb082';
     private const string FIRST_MEDIA = '0197a3c0-0000-7000-8000-0000000fb091';
     private const string SECOND_MEDIA = '0197a3c0-0000-7000-8000-0000000fb092';
     private const string REPORTED_AT = '2027-04-01 09:00:00+00';
@@ -147,6 +153,7 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
             [self::SHARED_DRAFT, self::TICKET, 3, 'draft', self::OMAR, self::DRAFT_SHARED_AT, 'open'],
             [self::ROUND_ONE, self::TICKET, 1, 'review', self::OMAR, self::ROUND_ONE_SHARED_AT, 'closed'],
             [self::OTHER_ROUND_TWO, self::OTHER_TICKET, 2, 'review', self::OMAR, self::ROUND_TWO_SHARED_AT, 'open'],
+            [self::OTHER_ROUND_ONE, self::OTHER_TICKET, 1, 'review', self::OMAR, self::ROUND_ONE_SHARED_AT, 'closed'],
             [self::TEAM_ONLY_ROUND_ONE, self::TEAM_ONLY_TICKET, 1, 'review', self::OMAR, self::ROUND_ONE_SHARED_AT, 'open'],
         ], [
             [self::REPORT_SECOND, self::REPORT, self::SECOND_MEDIA, 1, null, 'not_right', null, 'The button sits under the footer.'],
@@ -158,6 +165,8 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
             [self::PRODUCT_AFTER, self::ROUND_TWO, self::FIRST_MEDIA, 1, 'after', null, 'Per product', null],
             [self::DRAFT_SHOT, self::OMAR_DRAFT, self::FIRST_MEDIA, 0, null, null, null, null],
             [self::OTHER_SHOT, self::OTHER_ROUND_TWO, self::FIRST_MEDIA, 0, 'after', null, null, null],
+            [self::OTHER_SECOND_SHOT, self::OTHER_ROUND_TWO, self::SECOND_MEDIA, 1, 'after', null, null, null],
+            [self::OTHER_ROUND_ONE_SHOT, self::OTHER_ROUND_ONE, self::SECOND_MEDIA, 0, 'after', null, null, null],
             [self::TEAM_ONLY_SHOT, self::TEAM_ONLY_ROUND_ONE, self::FIRST_MEDIA, 0, 'after', null, null, null],
         ], [
             [self::REPORT_PIN_THREE, self::REPORT_FIRST, 3, '12.35', '7.10', 'The total is off', null, 'human', null, self::LENA],
@@ -175,6 +184,7 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
             [self::PRODUCT_AFTER_SUGGESTED_PIN, self::PRODUCT_AFTER, 1, '60.00', '40.00', 'AI after', null, 'ai', 'suggested', self::OMAR],
             [self::DRAFT_PIN, self::DRAFT_SHOT, 1, '40.00', '60.00', 'Mine only', null, 'human', null, self::OMAR],
             [self::OTHER_PIN, self::OTHER_SHOT, 1, '40.00', '60.00', 'Other ticket', null, 'human', null, self::LENA],
+            [self::OTHER_ROUND_ONE_PIN, self::OTHER_ROUND_ONE_SHOT, 1, '40.00', '60.00', 'Other ticket earlier', null, 'human', null, self::MIA],
             [self::TEAM_ONLY_DISMISSED_PIN, self::TEAM_ONLY_SHOT, 1, '40.00', '60.00', 'Dismissed', null, 'ai', 'dismissed', self::LENA],
         ], [
             [self::COMBINED_AREA, self::ROUND_TWO, 'Combined view', 2, null, self::COMBINED_AFTER, null, null, null, null],
@@ -183,8 +193,9 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
             [self::ROUND_ONE_SECOND_AREA, self::ROUND_ONE, 'Per product', 1, self::REPORT_SECOND, self::ROUND_ONE_SECOND_AFTER, 'needs_fix', 'Still off.', self::MIA, self::ROUND_ONE_DECIDED_AT],
             [self::ROUND_ONE_FIRST_AREA, self::ROUND_ONE, 'Per order', 0, self::REPORT_FIRST, self::ROUND_ONE_FIRST_AFTER, null, null, null, null],
             [self::DRAFT_AREA, self::OMAR_DRAFT, 'Draft area', 0, self::ORDER_AFTER, self::DRAFT_SHOT, null, null, null, null],
-            [self::OTHER_AREA, self::OTHER_ROUND_TWO, 'Elsewhere', 0, null, self::OTHER_SHOT, null, null, null, null],
-            [self::TEAM_ONLY_AREA, self::TEAM_ONLY_ROUND_ONE, 'Team only', 0, null, self::TEAM_ONLY_SHOT, null, null, null, null],
+            [self::OTHER_SECOND_AREA, self::OTHER_ROUND_TWO, 'Elsewhere too', 1, self::OTHER_ROUND_ONE_SHOT, self::OTHER_SECOND_SHOT, 'needs_fix', null, self::MIA, self::ORDER_DECIDED_AT],
+            [self::OTHER_AREA, self::OTHER_ROUND_TWO, 'Elsewhere', 0, null, self::OTHER_SHOT, 'question', null, self::LENA, self::PRODUCT_DECIDED_AT],
+            [self::TEAM_ONLY_AREA, self::TEAM_ONLY_ROUND_ONE, 'Team only', 0, null, self::TEAM_ONLY_SHOT, 'pass', null, self::LENA, self::ROUND_ONE_DECIDED_AT],
         ]);
         // rvw_round.ticket_id has no foreign key, so Beta Bakery may hold rounds on Acme Foods' ticket id.
         self::addRows(self::BETA_BAKERY, [
@@ -273,25 +284,37 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
     }
 
     /**
-     * Passed for the pass verdict even with a pin to check; "N pins" counts only the "before" picture's pins that count;
-     * Not reviewed when there is none, whatever other verdict the area has.
+     * Passed for the pass verdict with or without a pin to check; "N pins" counts only the "before" picture's pins that
+     * count, with no verdict, needs fix or question; with no pin, the needs fix or question verdict shows, and only an
+     * area with no verdict is Not reviewed.
      */
     #[Test]
     public function eachAreaStateFollowsItsVerdictAndTheCountedPinsOnItsBeforePicture(): void
     {
-        $roundTwo = $this->roundFor(self::TICKET, 2, 'Mia');
-        $roundOne = $this->roundFor(self::TICKET, 1, 'Mia');
-        self::assertNotNull($roundTwo);
-        self::assertNotNull($roundOne);
+        $statesByRound = [];
+        foreach ([[self::TICKET, 2], [self::TICKET, 1], [self::OTHER_TICKET, 2], [self::TEAM_ONLY_TICKET, 1]] as [$ticketId, $number]) {
+            $round = $this->roundFor($ticketId, $number, 'Lena');
+            self::assertNotNull($round);
+            $statesByRound[] = array_map(static fn (AreaView $area): array => [$area->verdict, $area->state(), $area->pinCount()], $round->areas);
+        }
 
-        self::assertSame(
-            [[AreaState::Passed, 1], [AreaState::Pins, 2], [AreaState::NotReviewed, 0]],
-            array_map(static fn (AreaView $area): array => [$area->state(), $area->pinCount()], $roundTwo->areas),
-        );
-        self::assertSame(
-            [[AreaState::Pins, 3], [AreaState::NotReviewed, 0]],
-            array_map(static fn (AreaView $area): array => [$area->state(), $area->pinCount()], $roundOne->areas),
-        );
+        self::assertSame([
+            [['pass', AreaState::Passed, 1], ['question', AreaState::Pins, 2], [null, AreaState::NotReviewed, 0]],
+            [[null, AreaState::Pins, 3], ['needs_fix', AreaState::NeedsFix, 0]],
+            [['question', AreaState::Question, 0], ['needs_fix', AreaState::Pins, 1]],
+            [['pass', AreaState::Passed, 0]],
+        ], $statesByRound);
+    }
+
+    #[Test]
+    public function anAreaWithAVerdictOfNoKnownKindHasNoState(): void
+    {
+        $after = new RoundScreenshotView(self::ORDER_AFTER, self::SECOND_MEDIA, 0, 'after', null, null, null, []);
+        $area = new AreaView(self::ORDER_AREA, 'Per order', 0, null, null, $after, 'done', null, new UserId(self::MIA), new \DateTimeImmutable(self::ORDER_DECIDED_AT));
+
+        $this->expectExceptionObject(new \UnexpectedValueException('The area has the unknown verdict "done".'));
+
+        $area->state();
     }
 
     /**
@@ -341,7 +364,7 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
         }
 
         self::assertNotSame([], $ids);
-        foreach ([self::DRAFT_AREA, self::DRAFT_SHOT, self::DRAFT_PIN, self::OTHER_AREA, self::OTHER_SHOT, self::OTHER_PIN, self::BAKERY_AREA, self::BAKERY_SHOT, self::BAKERY_PIN, self::ROUND_ONE_FIRST_AREA, self::ROUND_ONE_SECOND_AREA] as $excludedId) {
+        foreach ([self::DRAFT_AREA, self::DRAFT_SHOT, self::DRAFT_PIN, self::OTHER_AREA, self::OTHER_SHOT, self::OTHER_PIN, self::OTHER_SECOND_AREA, self::OTHER_SECOND_SHOT, self::OTHER_ROUND_ONE_SHOT, self::OTHER_ROUND_ONE_PIN, self::BAKERY_AREA, self::BAKERY_SHOT, self::BAKERY_PIN, self::ROUND_ONE_FIRST_AREA, self::ROUND_ONE_SECOND_AREA] as $excludedId) {
             self::assertNotContains($excludedId, $ids);
         }
         foreach ([self::REPORT_SUGGESTED_PIN, self::REPORT_DISMISSED_PIN, self::PRODUCT_BEFORE_SUGGESTED_PIN, self::PRODUCT_BEFORE_DISMISSED_PIN, self::PRODUCT_AFTER_SUGGESTED_PIN] as $uncountedPinId) {

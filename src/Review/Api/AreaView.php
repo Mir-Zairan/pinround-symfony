@@ -45,14 +45,21 @@ final readonly class AreaView
     }
 
     /**
-     * Passed once the verdict is pass; otherwise "N pins" while the "before" picture has pins to check, else Not reviewed.
+     * Passed once the verdict is pass; otherwise "N pins" while the "before" picture has pins to check; with none, the
+     * needs fix or question verdict given, else Not reviewed. An area with a verdict is never Not reviewed.
+     *
+     * @throws \UnexpectedValueException for a verdict that is none of VerdictCommands' AREA_ values
      */
     public function state(): AreaState
     {
-        if (VerdictCommands::AREA_PASS === $this->verdict) {
-            return AreaState::Passed;
-        }
+        $withNoPins = match ($this->verdict) {
+            VerdictCommands::AREA_PASS => AreaState::Passed,
+            VerdictCommands::AREA_NEEDS_FIX => AreaState::NeedsFix,
+            VerdictCommands::AREA_QUESTION => AreaState::Question,
+            null => AreaState::NotReviewed,
+            default => throw new \UnexpectedValueException(\sprintf('The area has the unknown verdict "%s".', $this->verdict)),
+        };
 
-        return $this->pinCount() > 0 ? AreaState::Pins : AreaState::NotReviewed;
+        return AreaState::Passed !== $withNoPins && $this->pinCount() > 0 ? AreaState::Pins : $withNoPins;
     }
 }
