@@ -7,6 +7,7 @@ namespace App\Review\UI\Controller;
 use App\Review\Api\ReviewRoundQueries;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundPermission;
+use App\Review\Api\VerdictPermission;
 use App\Review\UI\RoundPage\RoundPages;
 use App\Review\UI\RoundsController;
 use App\Review\UI\VisibleTicketLookup;
@@ -18,9 +19,10 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * One shared round of a ticket as a page of its own (P05.T7, review-round.md), read-only for now: the header, a tab per
- * screen area, the earlier and this round's pictures with their pins, and the earlier pins with their verdicts. The
- * viewer is only ever the logged-in person; "?area=N" picks the tab by its position.
+ * One shared round of a ticket as a page of its own (P05.T7, review-round.md): the header, a tab per screen area, the
+ * earlier and this round's pictures with their pins, and the side panel, with the verdict forms VerdictController
+ * answers for a person VerdictPermission SET grants. The viewer is only ever the logged-in person; "?area=N" picks the
+ * tab by its position.
  *
  * Runs in the request transaction. An unknown or malformed key or number, another organization's ticket, a ticket the
  * viewer may not see and a round RoundPermission VIEW denies all answer the same 404, so no answer tells that a hidden
@@ -31,7 +33,7 @@ final class RoundController extends AbstractController
     public const string ROUND_ROUTE = 'review_round';
     public const string AREA_PARAMETER = 'area';
 
-    private const string NOT_FOUND = 'No round you may see has that number.';
+    public const string NOT_FOUND = 'No round you may see has that number.';
 
     public function __construct(
         private readonly VisibleTicketLookup $visibleTicketLookup,
@@ -58,8 +60,10 @@ final class RoundController extends AbstractController
         $selectedPosition = \is_string($area) && 1 === preg_match('/\A\d{1,9}\z/', $area) ? (int) $area : 0;
 
         return $this->render('@Review/round.html.twig', [
-            'page' => $this->roundPages->pageOf($ticket, $round, $selectedPosition, $this->clock->now()),
+            'page' => $this->roundPages->pageOf($ticket, $round, $selectedPosition, $this->isGranted(VerdictPermission::SET, $facts), $this->clock->now()),
             'ticketRoute' => RoundsController::TICKET_ROUTE,
+            'ticketKey' => $ticket->key,
+            'verdictCsrfId' => VerdictController::csrfIdOf($ticket->key),
             'roundNumber' => $round->number,
             'areaParameter' => self::AREA_PARAMETER,
         ]);

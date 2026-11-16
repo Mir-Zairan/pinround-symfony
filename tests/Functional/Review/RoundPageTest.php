@@ -40,9 +40,9 @@ final class RoundPageTest extends WebTestCase
     private const string ROUND_PAGE = '/t/SHOP-1/rounds/2';
     /**
      * The session's user and password change, the organizations, the tenant, the viewer's roles and teams, the settings, the
-     * ticket, the names, the visibility checks, the round, its areas, the pins, the round voter's ticket facts and the signing.
+     * ticket, the names, the visibility checks, the round, its areas, the pins, the round and verdict voters' ticket facts and the signing.
      */
-    private const int PAGE_QUERIES = 21;
+    private const int PAGE_QUERIES = 22;
     private const string PRIVATE_TITLE = 'Lena private draft picture';
 
     private KernelBrowser $client;
@@ -139,14 +139,14 @@ final class RoundPageTest extends WebTestCase
             $page->filter('.round-panel__title')->each(static fn (Crawler $title): string => $title->text()),
         );
         self::assertSame(
-            ['1 Planted wrong Fixed', '2 Header cut Still wrong', '3 Kept AI idea Not checked yet'],
+            ['1 Planted wrong Mia · tester Fixed', '2 Header cut Mia · tester Still wrong', '3 Kept AI idea Mia · tester Not checked yet'],
             $page->filter('.round-panel__pin')->each(static fn (Crawler $row): string => (string) preg_replace('/\s+/', ' ', trim($row->text()))),
         );
         self::assertSame('No verdict yet.', $page->filter('.round-panel__section')->last()->filter('.round-panel__empty')->text());
         $content = (string) $this->client->getResponse()->getContent();
         self::assertStringNotContainsString('Suggested guess', $content, 'An AI pin nobody kept is not drawn.');
         self::assertStringNotContainsString('Dismissed guess', $content);
-        self::assertCount(0, $page->filter('.round-panel form, .round-panel button'), 'The verdict buttons come in the next task.');
+        self::assertCount(0, $page->filter('.round-panel form, .round-panel button'), 'Omar may not give verdicts, so the panel is read-only.');
     }
 
     #[Test]
@@ -159,9 +159,10 @@ final class RoundPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         $verdict = $page->filter('.round-panel__section')->last();
-        self::assertSame('Verdict on Combined', $verdict->filter('.round-panel__title')->text());
+        self::assertSame('Your verdict on Combined', $verdict->filter('.round-panel__title')->text());
         self::assertSame('Needs fix', $verdict->filter('.tag')->text());
         self::assertSame('Totals differ by a cent', $verdict->filter('.round-panel__note')->text());
+        self::assertSame('Saved by Mia', $verdict->filter('.round-panel__author')->text());
         self::assertSame('That round left no pins here.', $page->filter('.round-panel__section')->first()->filter('.round-panel__empty')->text());
     }
 
@@ -421,25 +422,5 @@ final class RoundPageTest extends WebTestCase
                 $this->addArea($roundId, $names[$position], $position, $this->screenshots[$ticketId.'-r1-'.$position], $screenshotId, $verdict, $note);
             }
         }
-    }
-
-    private function setPinVerdict(string $screenshotId, int $number, string $verdict): void
-    {
-        $organizationId = $this->acmeFoods->toString();
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            'UPDATE rvw_pin SET verdict = ? WHERE organization_id = ? AND screenshot_id = ? AND number = ?',
-            [$verdict, $organizationId, $screenshotId, $number],
-        ));
-    }
-
-    private function addArea(string $roundId, string $name, int $position, string $beforeId, string $afterId, ?string $verdict, ?string $note): void
-    {
-        $decidedBy = null === $verdict ? null : $this->people['Mia']->id()->toString();
-        $parameters = [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $roundId, $name, $position, $beforeId, $afterId, $verdict, $note, $decidedBy, null === $verdict ? null : '2026-11-06 10:00:00+00'];
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO rvw_area (organization_id, id, round_id, name, position, before_screenshot_id, after_screenshot_id, verdict, note, decided_by, decided_at, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-11-05 08:00:00+00')",
-            $parameters,
-        ));
     }
 }

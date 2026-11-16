@@ -88,14 +88,48 @@ trait SeedsTicketRounds
         return $screenshotId;
     }
 
-    private function addPin(string $screenshotId, int $number, string $x, string $y, string $note, string $author, string $source = 'human', ?string $aiState = null): void
+    /**
+     * @return string the pin's id
+     */
+    private function addPin(string $screenshotId, int $number, string $x, string $y, string $note, string $author, string $source = 'human', ?string $aiState = null): string
     {
-        $parameters = [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $screenshotId, $number, $x, $y, $note, $source, $aiState, $this->people[$author]->id()->toString()];
+        $pinId = Uuid::v7()->toRfc4122();
+        $parameters = [$this->acmeFoods->toString(), $pinId, $screenshotId, $number, $x, $y, $note, $source, $aiState, $this->people[$author]->id()->toString()];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO rvw_pin (organization_id, id, screenshot_id, number, x_pct, y_pct, note, source, ai_state, author_id, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-11-05 08:00:00+00')",
             $parameters,
         ));
+
+        return $pinId;
+    }
+
+    private function setPinVerdict(string $screenshotId, int $number, string $verdict): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE rvw_pin SET verdict = ? WHERE organization_id = ? AND screenshot_id = ? AND number = ?',
+            [$verdict, $organizationId, $screenshotId, $number],
+        ));
+    }
+
+    /**
+     * A screen area of a review round; a verdict given is Mia's.
+     *
+     * @return string the area's id
+     */
+    private function addArea(string $roundId, string $name, int $position, string $beforeId, string $afterId, ?string $verdict, ?string $note): string
+    {
+        $areaId = Uuid::v7()->toRfc4122();
+        $decidedBy = null === $verdict ? null : $this->people['Mia']->id()->toString();
+        $parameters = [$this->acmeFoods->toString(), $areaId, $roundId, $name, $position, $beforeId, $afterId, $verdict, $note, $decidedBy, null === $verdict ? null : '2026-11-06 10:00:00+00'];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO rvw_area (organization_id, id, round_id, name, position, before_screenshot_id, after_screenshot_id, verdict, note, decided_by, decided_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-11-05 08:00:00+00')",
+            $parameters,
+        ));
+
+        return $areaId;
     }
 
     /**

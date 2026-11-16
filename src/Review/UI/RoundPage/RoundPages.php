@@ -15,22 +15,25 @@ use App\Review\Api\VerdictCommands;
 use App\Review\UI\PinView;
 use App\Review\UI\RoundCards;
 use App\Review\UI\ScreenshotView;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
+use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketPageView;
 
 /**
  * Builds the review round page for one viewer: the header, a tab per screen area and, of the selected area only, both
- * pictures (signed in one call, whatever the number of areas) with their pins, and the earlier pins to check.
+ * pictures (signed in one call, whatever the number of areas) with their pins, and its side panel.
  */
 final readonly class RoundPages
 {
-    private const string FIXED = 'fixed';
-    private const string STILL_WRONG = 'still_wrong';
-
-    private const array AREA_VERDICT_LABELS = [
+    /** The area verdicts in the order of their chips, by the value the form posts. */
+    public const array AREA_VERDICT_LABELS = [
         VerdictCommands::AREA_PASS => 'Pass',
         VerdictCommands::AREA_NEEDS_FIX => 'Needs fix',
         VerdictCommands::AREA_QUESTION => 'Question',
     ];
+
+    /** ReviewRoundView's state of a round that still takes verdicts. */
+    private const string OPEN_ROUND = 'open';
 
     public function __construct(
         private SignedUrls $signedUrls,
@@ -40,13 +43,14 @@ final readonly class RoundPages
     /**
      * Runs inside the request transaction whose tenant is the viewer's organization.
      *
-     * @param int $selectedPosition the area to show; the first one when the round has no area at that position
+     * @param int  $selectedPosition the area to show; the first one when the round has no area at that position
+     * @param bool $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
      */
-    public function pageOf(TicketPageView $ticket, ReviewRoundView $round, int $selectedPosition, \DateTimeImmutable $now): RoundPage
+    public function pageOf(TicketPageView $ticket, ReviewRoundView $round, int $selectedPosition, bool $isVerdictGranted, \DateTimeImmutable $now): RoundPage
     {
         $header = self::headerOf($ticket, $round, $now);
         if ([] === $round->areas) {
-            return new RoundPage($ticket->key, $ticket->title, $header, [], null);
+            return new RoundPage($ticket->key, $ticket->title, $header, [], null, null);
         }
         $selected = $round->areas[0];
         foreach ($round->areas as $area) {
@@ -54,16 +58,84 @@ final readonly class RoundPages
                 $selected = $area;
             }
         }
-        $tabs = array_map(
+
+        return new RoundPage(
+            $ticket->key,
+            $ticket->title,
+            $header,
+            self::tabsOf($round, $selected),
+            $this->selectedAreaOf($ticket, $round, $selected, $now),
+            self::panelOf($ticket, $round, $selected, $isVerdictGranted),
+        );
+    }
+
+    /**
+     * @param AreaView $selected one of the round's areas
+     *
+     * @return list<AreaTab>
+     */
+    public static function tabsOf(ReviewRoundView $round, AreaView $selected): array
+    {
+        return array_map(
             static function (AreaView $area) use ($selected): AreaTab {
                 $chip = self::chipOf($area->state(), $area->pinCount());
 
-                return new AreaTab($area->position, $area->name, $chip['stateLabel'], $chip['stateClass'], $area === $selected);
+                return new AreaTab($area->position, $area->name, $chip['stateLabel'], $chip['stateClass'], $area->id === $selected->id);
             },
             $round->areas,
         );
+    }
 
-        return new RoundPage($ticket->key, $ticket->title, $header, $tabs, $this->selectedAreaOf($ticket, $round, $selected, $now));
+    /**
+     * Reads nothing: the names come with the ticket.
+     *
+     * @param AreaView $area             one of the round's areas
+     * @param bool     $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
+     */
+    public static function panelOf(TicketPageView $ticket, ReviewRoundView $round, AreaView $area, bool $isVerdictGranted): RoundPanel
+    {
+        $snapshot = $ticket->turnSnapshot;
+        $leadName = $snapshot->leadDisplayName;
+        $mayGiveVerdicts = $isVerdictGranted && self::OPEN_ROUND === $round->state && null !== $leadName;
+        $earlierPins = null === $area->before ? [] : array_map(
+            static fn (RoundPinView $pin): EarlierPinRow => self::earlierPinRowOf($pin, $ticket),
+            $area->before->pins,
+        );
+
+        return new RoundPanel(
+            $area->id,
+            $area->position,
+            $area->name,
+            null === $area->beforeRoundNumber ? null : \sprintf('Pins from round %d', $area->beforeRoundNumber),
+            $earlierPins,
+            $area->verdict,
+            null === $area->verdict ? null : (self::AREA_VERDICT_LABELS[$area->verdict] ?? null),
+            $area->note,
+            null === $area->decidedBy ? null : ($ticket->displayNames[$area->decidedBy->toString()] ?? null),
+            $mayGiveVerdicts,
+            $leadName,
+            $mayGiveVerdicts ? self::nextVerbOf($ticket, $round, $leadName) : null,
+        );
+    }
+
+    /**
+     * The verb that matches the round's verdicts once every area has one (phase 5 design notes): a question to the
+     * lead first, as its answer may change the others; else Needs changes for any Needs fix; else Pass it.
+     */
+    private static function nextVerbOf(TicketPageView $ticket, ReviewRoundView $round, ?string $leadName): ?NextVerbOffer
+    {
+        $verdicts = array_map(static fn (AreaView $area): ?string => $area->verdict, $round->areas);
+        if (\in_array(null, $verdicts, true)) {
+            return null;
+        }
+        if (\in_array(VerdictCommands::AREA_QUESTION, $verdicts, true)) {
+            return new NextVerbOffer(\sprintf('An area has a question for %s.', $leadName), 'Ask '.$leadName, true);
+        }
+        if (\in_array(VerdictCommands::AREA_NEEDS_FIX, $verdicts, true)) {
+            return new NextVerbOffer('At least one area needs a fix.', 'Needs changes on '.$ticket->key, false);
+        }
+
+        return new NextVerbOffer('Every area passed.', 'Pass it on '.$ticket->key, false);
     }
 
     private function selectedAreaOf(TicketPageView $ticket, ReviewRoundView $round, AreaView $area, \DateTimeImmutable $now): SelectedArea
@@ -76,11 +148,9 @@ final readonly class RoundPages
 
         $before = null;
         $beforeCaption = null;
-        $earlierPins = [];
         if (null !== $area->before) {
             $before = self::viewOf($area, $area->before, 'before', \sprintf('Before, round %d: %s', $area->beforeRoundNumber, $area->name), $images);
             $beforeCaption = \sprintf('Before · round %d', $area->beforeRoundNumber);
-            $earlierPins = array_map(self::earlierPinRowOf(...), $area->before->pins);
         }
 
         return new SelectedArea(
@@ -89,10 +159,6 @@ final readonly class RoundPages
             $beforeCaption,
             self::viewOf($area, $area->after, 'after', \sprintf('After, round %d: %s', $round->number, $area->name), $images),
             \sprintf('After · round %d', $round->number),
-            null === $area->beforeRoundNumber ? null : \sprintf('Pins from round %d', $area->beforeRoundNumber),
-            $earlierPins,
-            null === $area->verdict ? null : (self::AREA_VERDICT_LABELS[$area->verdict] ?? null),
-            $area->note,
         );
     }
 
@@ -109,15 +175,50 @@ final readonly class RoundPages
         return RoundCards::viewOfPicture('area-'.$area->id.'-'.$side, $altText, $screenshot->title, $screenshot->summary, $images[$screenshot->mediaId] ?? null, $pins);
     }
 
-    private static function earlierPinRowOf(RoundPinView $pin): EarlierPinRow
+    private static function earlierPinRowOf(RoundPinView $pin, TicketPageView $ticket): EarlierPinRow
     {
         [$label, $class] = match ($pin->verdict) {
-            self::FIXED => ['Fixed', 'verdict-tag--looks-right'],
-            self::STILL_WRONG => ['Still wrong', 'verdict-tag--not-right'],
+            VerdictCommands::PIN_FIXED => ['Fixed', 'verdict-tag--looks-right'],
+            VerdictCommands::PIN_STILL_WRONG => ['Still wrong', 'verdict-tag--not-right'],
             default => ['Not checked yet', 'verdict-tag--none'],
         };
 
-        return new EarlierPinRow($pin->number, $pin->note, $label, $class);
+        return new EarlierPinRow($pin->id, $pin->number, $pin->note, self::authorLineOf($pin->authorId, $ticket), $label, $class, null !== $pin->verdict);
+    }
+
+    /**
+     * "Mia · tester", "Lena · team lead", or the name alone for anyone else on the ticket; null when Identity does not
+     * know the name.
+     */
+    private static function authorLineOf(UserId $authorId, TicketPageView $ticket): ?string
+    {
+        $name = $ticket->displayNames[$authorId->toString()] ?? null;
+        if (null === $name) {
+            return null;
+        }
+        $snapshot = $ticket->turnSnapshot;
+        if (self::isTesterOf($snapshot, $authorId)) {
+            return $name.' · tester';
+        }
+        if (null !== $snapshot->leadId && $snapshot->leadId->equals($authorId)) {
+            return $name.' · team lead';
+        }
+
+        return $name;
+    }
+
+    private static function isTesterOf(TicketTurnSnapshot $snapshot, UserId $userId): bool
+    {
+        if (null !== $snapshot->testerId && $snapshot->testerId->equals($userId)) {
+            return true;
+        }
+        foreach ($snapshot->testerIds as $testerId) {
+            if ($testerId->equals($userId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

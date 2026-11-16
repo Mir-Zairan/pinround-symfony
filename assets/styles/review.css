@@ -727,3 +727,73 @@ textarea.screenshot-report__input {
   flex: 1 1 8rem;
   overflow-wrap: anywhere;
 }
+
+.round-panel__author {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* The verdict forms of a person who may give them (VerdictController). */
+.round-panel__pin-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.round-panel__verdict-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+  margin: var(--space-12) 0 0;
+}
+
+.round-panel__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.round-panel__choice {
+  cursor: pointer;
+}
+
+.round-panel__choice:has(input:checked) {
+  background: var(--secondary-container);
+  border-color: transparent;
+  color: var(--on-secondary-container);
+}
+
+.round-panel__choice:has(input:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.round-panel__label {
+  font-weight: 600;
+}
+
+.round-panel__note-field {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.round-panel__then,
+.round-panel__next-sentence {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
+.round-panel__next {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}

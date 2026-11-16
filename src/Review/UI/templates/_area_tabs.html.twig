@@ -1,0 +1,9 @@
+{#- The round's area tabs, from RoundPages::tabsOf: the page renders them, and a verdict's Turbo Stream replaces them. -#}
+<nav id="round-area-tabs" class="area-tabs" aria-label="Screen areas">
+    {% for tab in tabs %}
+        <a class="chip area-tab" href="{{ path(constant('App\\Review\\UI\\Controller\\RoundController::ROUND_ROUTE'), {key: ticketKey, number: roundNumber}) }}?{{ areaParameter }}={{ tab.position }}"{% if tab.isSelected %} aria-current="page"{% endif %}>
+            <span class="area-tab__name">{{ tab.name }}</span>
+            <twig:Tag class="area-chip {{ tab.stateClass }}">{{ tab.stateLabel }}</twig:Tag>
+        </a>
+    {% endfor %}
+</nav>

@@ -7,16 +7,14 @@ namespace App\Review\UI\RoundPage;
 use App\Review\UI\ScreenshotView;
 
 /**
- * The screen area the round page shows: both pictures with their pins, the earlier pins to check and the verdict given.
+ * The screen area the round page shows: both pictures with their pins. Its side panel is a RoundPanel of its own, so a
+ * verdict's answer can show it again without signing the pictures.
  */
 final readonly class SelectedArea
 {
     /**
      * @param ScreenshotView|null $before        null when the round has no earlier picture of this place
      * @param string|null         $beforeCaption for example "Before · round 1"; null exactly when $before is
-     * @param list<EarlierPinRow> $earlierPins   the pins on the "before" picture, by number
-     * @param string|null         $verdictLabel  Pass, Needs fix or Question; null before a reviewer decides
-     * @param string|null         $note          the reviewer's note with the verdict
      */
     public function __construct(
         public string $name,
@@ -24,10 +22,6 @@ final readonly class SelectedArea
         public ?string $beforeCaption,
         public ScreenshotView $after,
         public string $afterCaption,
-        public ?string $earlierPinsHeading,
-        public array $earlierPins,
-        public ?string $verdictLabel,
-        public ?string $note,
     ) {
     }
 }
