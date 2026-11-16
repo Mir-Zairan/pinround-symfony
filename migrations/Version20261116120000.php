@@ -33,9 +33,9 @@ final class Version20261116120000 extends AbstractMigration
             // Who changed the state and when come together (CheckItem::markFixed and the others).
             .' CONSTRAINT rvw_check_item_changed_check CHECK ((changed_by IS NULL) = (changed_at IS NULL)),'
             .' CONSTRAINT rvw_check_item_round_fkey FOREIGN KEY (organization_id, round_id) REFERENCES rvw_round (organization_id, id) ON DELETE CASCADE,'
-            // NO ACTION, checked at the end of the statement, so deleting a ticket's rounds at once takes the report's
-            // pins and the checklist's items together; a pin alone is never removed from a shared report.
-            .' CONSTRAINT rvw_check_item_pin_fkey FOREIGN KEY (organization_id, pin_id) REFERENCES rvw_pin (organization_id, id))',
+            // CASCADE, so deleting Round 0 first takes its pins and then their items; the pin's own round, screenshot
+            // and pin deletes already cascade, and a pin alone is never removed from a shared report.
+            .' CONSTRAINT rvw_check_item_pin_fkey FOREIGN KEY (organization_id, pin_id) REFERENCES rvw_pin (organization_id, id) ON DELETE CASCADE)',
         );
         $this->addSql('CREATE UNIQUE INDEX rvw_check_item_pin_id_key ON rvw_check_item (organization_id, pin_id)');
         $this->addSql('CREATE INDEX rvw_check_item_round_id_idx ON rvw_check_item (organization_id, round_id)');

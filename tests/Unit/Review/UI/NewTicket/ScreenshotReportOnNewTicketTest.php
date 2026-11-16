@@ -20,6 +20,7 @@ use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Review\Application\InMemoryRounds;
 use App\Tests\Unit\Review\Application\InMemoryUploadedMedia;
+use App\Tests\Unit\Review\Application\RecordingChecklistCommands;
 use App\Tests\Unit\Review\UI\Media\InMemoryTicketTurnQueries;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
 use App\Ticketing\Api\NewTicketReportRefused;
@@ -70,6 +71,7 @@ final class ScreenshotReportOnNewTicketTest extends TestCase
             new InMemoryTicketTurnQueries([self::snapshot()], new TicketId(self::BROKEN_TICKET)),
             $this->tenantContext,
             $reportPictures,
+            new RecordingChecklistCommands(),
         );
         $this->report = new ScreenshotReportOnNewTicket($roundCommands, $reportPictures, $this->tenantContext);
         $this->reportedAt = new \DateTimeImmutable('2026-03-04 09:30:00+00:00');

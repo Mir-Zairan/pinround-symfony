@@ -396,6 +396,14 @@ when@test:
         test.review_verdict_commands:
             alias: App\Review\Api\VerdictCommands
             public: true
+        # No route changes a checklist item before the checklist card ships;
+        # UseCaseChecklistCommandsTest gets the Api as they will.
+        test.review_checklist_commands:
+            alias: App\Review\Api\ChecklistCommands
+            public: true
+        test.review_checklist_queries:
+            alias: App\Review\Api\ChecklistQueries
+            public: true
         # No page saves a report before the new ticket form takes a screenshot; ScreenshotReportOnNewTicketTest gets
         # Ticketing's port as that form will.
         test.ticketing_new_ticket_report:

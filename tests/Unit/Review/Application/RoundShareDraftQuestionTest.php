@@ -62,6 +62,7 @@ final class RoundShareDraftQuestionTest extends TestCase
             new InMemoryTicketTurnQueries([], new TicketId(self::BROKEN_TICKET)),
             $this->tenantContext,
             new ReportPictures(new InMemoryUploadedMedia($this->tenantContext, [])),
+            new RecordingChecklistCommands(),
         );
         $this->question = new RoundShareDraftQuestion($this->rounds, $commands);
         $this->seedRounds();
@@ -193,6 +194,7 @@ final class RoundShareDraftQuestionTest extends TestCase
             new InMemoryTicketTurnQueries([], new TicketId(self::BROKEN_TICKET)),
             $this->tenantContext,
             new ReportPictures(new InMemoryUploadedMedia($this->tenantContext, [])),
+            new RecordingChecklistCommands(),
         ));
         $before = $this->snapshot();
 

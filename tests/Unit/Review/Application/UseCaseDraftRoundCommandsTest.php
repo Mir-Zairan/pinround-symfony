@@ -171,7 +171,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     #[Test]
     public function startingADraftWithNoOrganizationSetFailsAndStoresNothing(): void
     {
-        $commands = new UseCaseRoundCommands($this->rounds, $this->tickets, new TenantContext(new RecordingTenantSwitchGuard()), new ReportPictures($this->uploadedMedia));
+        $commands = new UseCaseRoundCommands($this->rounds, $this->tickets, new TenantContext(new RecordingTenantSwitchGuard()), new ReportPictures($this->uploadedMedia), new RecordingChecklistCommands());
         $before = $this->snapshot();
 
         try {
@@ -627,7 +627,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
 
     private function commandsOver(Rounds $rounds): UseCaseRoundCommands
     {
-        return new UseCaseRoundCommands($rounds, $this->tickets, $this->tenantContext, new ReportPictures($this->uploadedMedia));
+        return new UseCaseRoundCommands($rounds, $this->tickets, $this->tenantContext, new ReportPictures($this->uploadedMedia), new RecordingChecklistCommands());
     }
 
     private function seedRounds(): void
