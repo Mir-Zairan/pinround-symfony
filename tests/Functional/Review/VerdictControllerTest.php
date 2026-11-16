@@ -424,9 +424,11 @@ final class VerdictControllerTest extends WebTestCase
     {
         $organizationId = $this->acmeFoods->toString();
         $ticketId = $this->ticketId;
+        // Mia stays the ticket's own tester, so only the missing team (and its lead) can be why she is refused.
+        $miaId = $this->people['Mia']->id()->toString();
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            'UPDATE tkt_ticket SET team_id = NULL WHERE organization_id = ? AND id = ?',
-            [$organizationId, $ticketId],
+            'UPDATE tkt_ticket SET team_id = NULL, tester_id = ? WHERE organization_id = ? AND id = ?',
+            [$miaId, $organizationId, $ticketId],
         ));
         $before = $this->storedState();
         $this->logIn($this->client, $this->people['Mia']);
