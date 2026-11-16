@@ -491,12 +491,6 @@ textarea.screenshot-report__input {
   margin: 0;
 }
 
-/* Share waits for the pending saves (draft-round-editor controller): shown like a disabled button. */
-.round-card__share[aria-busy="true"] {
-  opacity: .38;
-  cursor: progress;
-}
-
 /* The owner's draft editor (DraftRoundEditor, draft-round-editor controller). */
 .draft-round-editor,
 .draft-round-editor__body {

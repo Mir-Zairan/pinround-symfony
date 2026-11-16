@@ -79,7 +79,7 @@ The gallery at `/_gallery` shows every built component. It exists in dev and tes
 
 | Component | Prototype source | Notes |
 |---|---|---|
-| `Button` (filled, tonal, outline, text; sizes md/sm) | `.btn-*` | Always a `<button>` or `<a>`; never a `div` |
+| `Button` (filled, tonal, outline, text; sizes md/sm) | `.btn-*` | Always a `<button>` or `<a>`; never a `div`. `:disabled`, `[aria-disabled="true"]` and `[aria-busy="true"]` look disabled and skip hover (busy shows the progress cursor) |
 | `Chip` (toggle, with `aria-pressed`) | `.chip` | Filters, focus chips, verdict chips |
 | `SegmentedControl` | `.seg` | List / Whose turn?; After / Before |
 | `Tag` | `.tag` | Short UPPERCASE labels: PRIVATE, EXAMPLE, ONLY THE TEAM AND ADMINS SEE THIS |

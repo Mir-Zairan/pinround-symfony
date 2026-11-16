@@ -30,7 +30,7 @@ final class RoundNotesTest extends TestCase
 
         self::assertSame(
             '{"roundId":"round-1","screenshots":['
-            .'{"screenshotId":"shot-1","position":1,"title":"Banner","summary":null,"verdict":"'.RoundCommands::VERDICT_NOT_RIGHT_YET.'","pins":['
+            .'{"screenshotId":"shot-1","position":1,"title":"Banner","summary":null,"verdict":"not_right","pins":['
             .'{"number":1,"xPercent":10,"yPercent":33.33,"note":"Covers the total"},'
             .'{"number":3,"xPercent":99.5,"yPercent":0,"note":""}]},'
             .'{"screenshotId":"shot-2","position":2,"title":null,"summary":"Second view","verdict":null,"pins":[]}]}',
