@@ -69,6 +69,13 @@ final class RoundTablesTest extends KernelTestCase
         yield 'a shared draft as Round 0' => [[self::draftRound(['number' => 0, 'shared_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_number_check', self::CHECK_VIOLATION];
         yield 'a round number below 0' => [[self::draftRound(['number' => -1, 'shared_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_number_check', self::CHECK_VIOLATION];
         yield 'a round at version 0' => [[self::round(['version' => 0])], 'rvw_round_version_check', self::CHECK_VIOLATION];
+        yield 'a draft decision of an unknown kind' => [[self::draftRound(['decision' => 'later', 'decided_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_decision_check', self::CHECK_VIOLATION];
+        yield 'a decision on a report' => [[self::round(['decision' => 'kept_private', 'decided_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_decision_check', self::CHECK_VIOLATION];
+        yield 'a decision with no time' => [[self::draftRound(['decision' => 'kept_private'])], 'rvw_round_decided_check', self::CHECK_VIOLATION];
+        yield 'a decision time with no decision' => [[self::draftRound(['decided_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_decided_check', self::CHECK_VIOLATION];
+        yield 'a deleted draft still open' => [[self::draftRound(['deleted_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_deleted_check', self::CHECK_VIOLATION];
+        yield 'a deleted shared draft' => [[self::draftRound(['number' => 1, 'shared_at' => '2027-03-16 09:00:00+00', 'state' => 'closed', 'deleted_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_deleted_check', self::CHECK_VIOLATION];
+        yield 'a deleted report' => [[self::round(['state' => 'closed', 'deleted_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_deleted_check', self::CHECK_VIOLATION];
         yield 'a second Round 0 of the ticket' => [[self::round([]), self::round(['id' => self::MISSING_ROUND])], 'rvw_round_ticket_id_number_key', self::UNIQUE_VIOLATION];
         yield 'a second open draft of the owner on the ticket' => [[self::draftRound([]), self::draftRound(['id' => self::MISSING_ROUND])], 'rvw_round_ticket_id_owner_id_open_draft_key', self::UNIQUE_VIOLATION];
         yield 'a screenshot of a round that does not exist' => [[self::screenshot(['round_id' => self::MISSING_ROUND])], 'rvw_screenshot_round_fkey', self::FOREIGN_KEY_VIOLATION];
@@ -123,6 +130,14 @@ final class RoundTablesTest extends KernelTestCase
             self::draftRound([]),
             self::draftRound(['id' => self::MISSING_ROUND, 'number' => 1, 'shared_at' => '2027-03-16 09:00:00+00']),
         ]];
+        yield 'a deleted draft and a new open one of one owner on the ticket' => [[
+            self::draftRound(['state' => 'closed', 'deleted_at' => '2027-03-16 09:00:00+00']),
+            self::draftRound(['id' => self::MISSING_ROUND]),
+        ]];
+        yield 'a draft kept private and a shared one decided as shared' => [[
+            self::draftRound(['decision' => 'kept_private', 'decided_at' => '2027-03-16 09:00:00+00']),
+            self::draftRound(['id' => self::MISSING_ROUND, 'number' => 1, 'shared_at' => '2027-03-16 09:00:00+00', 'decision' => 'shared', 'decided_at' => '2027-03-16 09:00:00+00']),
+        ]];
         yield 'an AI pin kept' => [[self::round([]), self::screenshot([]), self::pin(['source' => 'ai', 'ai_state' => 'kept'])]];
         yield 'two screenshots at two positions with a pin 1 each' => [[
             self::round([]),
@@ -150,7 +165,7 @@ final class RoundTablesTest extends KernelTestCase
             [
                 'CREATE UNIQUE INDEX rvw_round_pkey ON public.rvw_round USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_round_ticket_id_number_key ON public.rvw_round USING btree (organization_id, ticket_id, number)',
-                "CREATE UNIQUE INDEX rvw_round_ticket_id_owner_id_open_draft_key ON public.rvw_round USING btree (organization_id, ticket_id, owner_id) WHERE ((kind = 'draft'::text) AND (shared_at IS NULL))",
+                "CREATE UNIQUE INDEX rvw_round_ticket_id_owner_id_open_draft_key ON public.rvw_round USING btree (organization_id, ticket_id, owner_id) WHERE ((kind = 'draft'::text) AND (shared_at IS NULL) AND (state = 'open'::text))",
                 'CREATE UNIQUE INDEX rvw_screenshot_pkey ON public.rvw_screenshot USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_screenshot_round_id_position_key ON public.rvw_screenshot USING btree (organization_id, round_id, "position")',
                 'CREATE UNIQUE INDEX rvw_pin_pkey ON public.rvw_pin USING btree (organization_id, id)',

@@ -79,6 +79,52 @@ final readonly class Screenshot
         return new self($id, $lowercaseMediaId, $position, $trimmedTitle, $trimmedSummary, $pins, null, null);
     }
 
+    /**
+     * A stored screenshot as Rounds reads it back, under the rules of of().
+     *
+     * @param list<Pin> $pins
+     *
+     * @throws \InvalidArgumentException when of() would refuse it
+     */
+    public static function restored(ScreenshotId $id, string $mediaId, int $position, ?string $title, ?string $summary, array $pins, ?VariantLabel $variantLabel, ?ScreenshotVerdict $verdict): self
+    {
+        $checked = self::of($id, $mediaId, $position, $title, $summary, $pins);
+
+        return new self($id, $checked->mediaId, $position, $checked->title, $checked->summary, $checked->pins, $variantLabel, $verdict);
+    }
+
+    /**
+     * This screenshot with another title and summary, trimmed as of() trims them.
+     *
+     * @throws \InvalidArgumentException when the title is longer than TITLE_MAX_LENGTH or the summary than
+     *                                   SUMMARY_MAX_LENGTH characters
+     */
+    public function withText(?string $title, ?string $summary): self
+    {
+        $checked = self::of($this->id, $this->mediaId, $this->position, $title, $summary, $this->pins);
+
+        return new self($this->id, $this->mediaId, $this->position, $checked->title, $checked->summary, $this->pins, $this->variantLabel, $this->verdict);
+    }
+
+    /**
+     * This screenshot with $pins in place of its pins.
+     *
+     * @param list<Pin> $pins in any order; kept in the order of their numbers
+     *
+     * @throws \InvalidArgumentException when a pin number appears twice or there are more than MAX_PINS pins
+     */
+    public function withPins(array $pins): self
+    {
+        $checked = self::of($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $pins);
+
+        return new self($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $checked->pins, $this->variantLabel, $this->verdict);
+    }
+
+    public function withVerdict(?ScreenshotVerdict $verdict): self
+    {
+        return new self($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $this->pins, $this->variantLabel, $verdict);
+    }
+
     public function id(): ScreenshotId
     {
         return $this->id;

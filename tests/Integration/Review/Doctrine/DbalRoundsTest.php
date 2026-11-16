@@ -412,7 +412,7 @@ final class DbalRoundsTest extends KernelTestCase
 
     private function rounds(): DbalRounds
     {
-        return new DbalRounds($this->connection());
+        return new DbalRounds($this->connection(), self::getContainer()->get(TenantContext::class));
     }
 
     private function connection(): Connection

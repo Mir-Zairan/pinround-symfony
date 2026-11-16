@@ -564,17 +564,18 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
-     * The round, picture and pin tables (Version20261115180000): the app reads, adds and changes them and removes none
-     * yet; support reads under the tenant policy.
+     * The round, picture and pin tables (Version20261115180000, Version20261116100000): the app reads, adds and changes
+     * them, removes the pictures and pins a draft drops and never a round; support reads under the tenant policy.
      */
     #[Test]
-    public function theRoundTablesGrantTheAppNoDeleteAndSupportOnlyRead(): void
+    public function theRoundTablesGrantTheAppDeleteOnlyOnScreenshotsAndPinsAndSupportOnlyRead(): void
     {
         $connection = $this->connection();
+        $readAddChange = ['pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE', 'pinround_readonly SELECT'];
 
-        foreach (['rvw_round', 'rvw_screenshot', 'rvw_pin'] as $table) {
+        foreach (['rvw_round' => $readAddChange, 'rvw_screenshot' => [...$readAddChange, 'pinround_app DELETE'], 'rvw_pin' => [...$readAddChange, 'pinround_app DELETE']] as $table => $grants) {
             self::assertEqualsCanonicalizing(
-                ['pinround_app SELECT', 'pinround_app INSERT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+                $grants,
                 $this->grantsToOthersThanTheOwner($connection, $table),
                 $table,
             );

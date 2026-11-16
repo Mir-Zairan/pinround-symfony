@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Review\Domain;
 
+use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\UserId;
+
 /**
- * The rounds of tickets with their screenshots and pins. Each method that writes needs an open transaction under the
- * round's organization.
+ * The rounds of tickets with their screenshots and pins. Each method needs an open transaction under the round's
+ * organization as tenant, and reads or writes that organization's rounds only.
  */
 interface Rounds
 {
@@ -24,4 +27,41 @@ interface Rounds
      *                         message, not a slot)
      */
     public function add(Round $round): void;
+
+    /**
+     * The tenant's round with that id, of any kind and state, deleted drafts too, with its screenshots and pins.
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function get(RoundId $id): ?Round;
+
+    /**
+     * The owner's open unshared draft on the ticket, of which there is at most one.
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function openUnsharedDraftOf(TicketId $ticketId, UserId $ownerId): ?Round;
+
+    /**
+     * The number the ticket's next shared round gets: one above its highest, so 1 when it has only its report or
+     * none. Holds the ticket's round numbers until the transaction ends, so a second caller waits here and then reads
+     * past the number this one saves.
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function nextFreeNumberOf(TicketId $ticketId): int;
+
+    /**
+     * Writes the changes of a round read with get() or added, over the version it was read at, all or nothing: the
+     * round's number, share time, state, version, decision and deletion, and its screenshots and pins (new ones added,
+     * changed ones updated, missing ones removed). A screenshot keeps its position and a pin its number; new ones
+     * and their pins are stamped $savedAt. Afterwards the stored round is at the round's version, so a further change
+     * of this object cannot be saved: read the round again first.
+     *
+     * @throws RoundChanged    when the stored round is not at $round->savedVersion() any more, or is not the tenant's;
+     *                         nothing is written
+     * @throws RoundSlotTaken  when the ticket has another round with the number the round now has; nothing is written
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function save(Round $round, \DateTimeImmutable $savedAt): void;
 }

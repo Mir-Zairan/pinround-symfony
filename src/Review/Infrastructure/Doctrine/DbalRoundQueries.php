@@ -82,7 +82,7 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
             .' COUNT(*) OVER (PARTITION BY (round.number >= 1)) AS group_size'
             .' FROM rvw_round AS round'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
-            .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid))'
+            .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid)) AND round.deleted_at IS NULL'
             .') AS listed'
             .' WHERE listed.number IS NULL OR listed.number = 0 OR listed.newest_rank <= :cap'
             .' ORDER BY listed.number NULLS LAST, listed.id',

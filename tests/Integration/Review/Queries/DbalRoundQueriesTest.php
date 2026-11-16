@@ -23,7 +23,6 @@ use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketVisibility;
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -440,27 +439,22 @@ final class DbalRoundQueriesTest extends KernelTestCase
     }
 
     /**
-     * The list puts the viewer's unshared draft last, after the numbered rounds, and orders no two of them: the open
-     * draft slot holds every unshared draft of an owner on a ticket, closed ones too, so a second one is refused.
+     * A deleted draft frees its owner's draft slot (Version20261116100000), so Omar may hold one beside his open
+     * draft; it is left out of his rounds, and his open draft is still listed.
      */
     #[Test]
-    public function aViewerHasAtMostOneUnsharedDraftOfATicketEvenWhenTheSecondIsClosed(): void
+    public function theViewersDeletedDraftIsLeftOut(): void
     {
-        $refusal = self::transactions()->rolledBackAs(self::ACME_FOODS, static function (): ?UniqueConstraintViolationException {
-            try {
-                self::connection()->executeStatement(
-                    "INSERT INTO rvw_round (organization_id, id, ticket_id, number, kind, owner_id, shared_at, state, version, created_at) VALUES (?, ?, ?, NULL, 'draft', ?, NULL, 'closed', 1, '2027-03-15 10:00:00+00')",
-                    [self::ACME_FOODS, self::OMAR_SECOND_DRAFT, self::TICKET, self::OMAR],
-                );
-            } catch (UniqueConstraintViolationException $refusal) {
-                return $refusal;
-            }
+        $roundIds = self::transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            self::connection()->executeStatement(
+                "INSERT INTO rvw_round (organization_id, id, ticket_id, number, kind, owner_id, shared_at, state, version, created_at, deleted_at) VALUES (?, ?, ?, NULL, 'draft', ?, NULL, 'closed', 2, '2027-03-15 10:00:00+00', '2027-03-15 11:00:00+00')",
+                [self::ACME_FOODS, self::OMAR_SECOND_DRAFT, self::TICKET, self::OMAR],
+            );
 
-            return null;
+            return self::idsOf($this->roundQueries()->forTicket(new TicketId(self::TICKET), new UserId(self::OMAR))->rounds);
         });
 
-        self::assertNotNull($refusal, 'A second unshared draft of Omar on the ticket was written.');
-        self::assertStringContainsString('rvw_round_ticket_id_owner_id_open_draft_key', $refusal->getMessage());
+        self::assertSame([self::REPORT, self::ROUND_ONE, self::ROUND_TWO, self::OMAR_SHARED_DRAFT, self::OMAR_DRAFT], $roundIds);
     }
 
     #[Test]

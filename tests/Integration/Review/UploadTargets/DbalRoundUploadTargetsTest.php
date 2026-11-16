@@ -69,7 +69,7 @@ final class DbalRoundUploadTargetsTest extends KernelTestCase
             self::report(self::OTHER_ORGANIZATION_REPORT, self::OTHER_ORGANIZATION, self::TICKET, self::OMAR, self::OTHER_ORGANIZATION_SCREENSHOT),
         ] as $round) {
             $this->transactions()->committedAs($round->organizationId()->toString(), function () use ($round): void {
-                new DbalRounds($this->connection())->add($round);
+                new DbalRounds($this->connection(), self::getContainer()->get(TenantContext::class))->add($round);
             });
         }
         $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(

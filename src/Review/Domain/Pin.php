@@ -51,6 +51,21 @@ final readonly class Pin
         return new self($id, $number, round($xPercent, 2), round($yPercent, 2), $trimmedNote, $authorId, PinSource::Human, null, null);
     }
 
+    /**
+     * A stored pin as Rounds reads it back, under the rules of placedBy.
+     *
+     * @throws \InvalidArgumentException when placedBy would refuse it, or an AI pin has no AI state or a person's pin has one
+     */
+    public static function restored(PinId $id, int $number, float $xPercent, float $yPercent, string $note, UserId $authorId, PinSource $source, ?AiPinState $aiState, ?PinVerdict $verdict): self
+    {
+        if ((PinSource::Ai === $source) !== (null !== $aiState)) {
+            throw new \InvalidArgumentException('Only an AI pin has an AI state, and every AI pin has one.');
+        }
+        $placed = self::placedBy($id, $number, $xPercent, $yPercent, $note, $authorId);
+
+        return new self($id, $number, $placed->xPercent, $placed->yPercent, $placed->note, $authorId, $source, $aiState, $verdict);
+    }
+
     public function id(): PinId
     {
         return $this->id;
