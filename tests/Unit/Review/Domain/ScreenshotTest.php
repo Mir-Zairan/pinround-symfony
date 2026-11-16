@@ -8,6 +8,8 @@ use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
+use App\Review\Domain\ScreenshotVerdict;
+use App\Review\Domain\VariantLabel;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -160,6 +162,113 @@ final class ScreenshotTest extends TestCase
         self::assertNull($screenshot->verdict());
         self::assertSame(self::SCREENSHOT, $screenshot->id()->toString());
         self::assertSame(4, $screenshot->position());
+    }
+
+    #[Test]
+    public function withTextTrimsAndReplacesTheTextAndKeepsPinsVerdictAndLabel(): void
+    {
+        $original = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 3, 'Old', 'Old summary', [self::pin(2)], VariantLabel::After, ScreenshotVerdict::NotRight);
+
+        $changed = $original->withText("  New title\n", ' New summary ');
+
+        self::assertSame('New title', $changed->title());
+        self::assertSame('New summary', $changed->summary());
+        self::assertSame(3, $changed->position());
+        self::assertSame(self::MEDIA, $changed->mediaId());
+        self::assertSame([2], array_map(static fn (Pin $pin): int => $pin->number(), $changed->pins()));
+        self::assertSame(VariantLabel::After, $changed->variantLabel());
+        self::assertSame(ScreenshotVerdict::NotRight, $changed->verdict());
+        self::assertSame('Old', $original->title());
+    }
+
+    #[Test]
+    public function withTextRefusesATitleOrSummaryOverTheCapAndAcceptsOneAtTheCap(): void
+    {
+        $screenshot = self::screenshot(0);
+        self::assertSame(120, mb_strlen((string) $screenshot->withText(str_repeat('é', 120), null)->title()));
+
+        try {
+            $screenshot->withText(str_repeat('é', 121), null);
+            self::fail('A title over the cap was accepted.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame('A picture title holds at most 120 characters.', $refused->getMessage());
+        }
+
+        try {
+            $screenshot->withText(null, str_repeat('é', 601));
+            self::fail('A summary over the cap was accepted.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame('A picture summary holds at most 600 characters.', $refused->getMessage());
+        }
+    }
+
+    #[Test]
+    public function withPinsReplacesThePinsInNumberOrderAndKeepsTextAndVerdict(): void
+    {
+        $original = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 0, 'Title', 'Summary', [self::pin(1)], null, ScreenshotVerdict::LooksRight);
+
+        $changed = $original->withPins([self::pin(4), self::pin(2)]);
+
+        self::assertSame([2, 4], array_map(static fn (Pin $pin): int => $pin->number(), $changed->pins()));
+        self::assertSame('Title', $changed->title());
+        self::assertSame('Summary', $changed->summary());
+        self::assertSame(ScreenshotVerdict::LooksRight, $changed->verdict());
+        self::assertSame([1], array_map(static fn (Pin $pin): int => $pin->number(), $original->pins()));
+        self::assertSame([], $original->withPins([])->pins());
+    }
+
+    #[Test]
+    public function withPinsRefusesTwoPinsWithOneNumberAndMoreThanTheCap(): void
+    {
+        $screenshot = self::screenshot(0);
+
+        try {
+            $screenshot->withPins([self::pin(1), self::pin(1)]);
+            self::fail('Two pins with one number were accepted.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame('Pin 1 appears twice on one screenshot.', $refused->getMessage());
+        }
+
+        $tooMany = [];
+        for ($number = 1; $number <= Screenshot::MAX_PINS + 1; ++$number) {
+            $tooMany[] = self::pin($number);
+        }
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A picture holds at most 100 pins.');
+
+        $screenshot->withPins($tooMany);
+    }
+
+    #[Test]
+    public function withVerdictSetsAndClearsTheVerdictAndKeepsTheRest(): void
+    {
+        $original = Screenshot::of(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 2, 'Title', 'Summary', [self::pin(1)]);
+
+        $judged = $original->withVerdict(ScreenshotVerdict::NotRight);
+
+        self::assertSame(ScreenshotVerdict::NotRight, $judged->verdict());
+        self::assertSame('Title', $judged->title());
+        self::assertCount(1, $judged->pins());
+        self::assertSame(2, $judged->position());
+        self::assertNull($original->verdict());
+        self::assertNull($judged->withVerdict(null)->verdict());
+    }
+
+    #[Test]
+    public function aRestoredScreenshotKeepsItsLabelAndVerdictAndStillObeysTheRulesOfOf(): void
+    {
+        $restored = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), strtoupper(self::MEDIA), 1, ' Title ', null, [self::pin(2), self::pin(1)], VariantLabel::Before, ScreenshotVerdict::LooksRight);
+
+        self::assertSame(VariantLabel::Before, $restored->variantLabel());
+        self::assertSame(ScreenshotVerdict::LooksRight, $restored->verdict());
+        self::assertSame(self::MEDIA, $restored->mediaId());
+        self::assertSame('Title', $restored->title());
+        self::assertSame([1, 2], array_map(static fn (Pin $pin): int => $pin->number(), $restored->pins()));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A screenshot needs the id of an uploaded picture.');
+
+        Screenshot::restored(new ScreenshotId(self::SCREENSHOT), 'screenshot.png', 1, null, null, [], null, null);
     }
 
     /**
