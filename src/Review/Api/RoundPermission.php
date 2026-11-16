@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Review\Api;
 
 /**
- * The voter attributes for rounds (ADR-0013, ADR-0017); RoundVoter decides all three.
+ * The voter attributes for rounds (ADR-0013, ADR-0017); RoundVoter decides VIEW and EDIT, DraftRoundCreationVoter
+ * DRAFT_CREATE.
  *
  * A caller answers a denied VIEW or EDIT with 404, the same as a round id RoundQueries::accessFactsOf does not know, so
  * another person's unshared draft cannot be told from a missing round.
