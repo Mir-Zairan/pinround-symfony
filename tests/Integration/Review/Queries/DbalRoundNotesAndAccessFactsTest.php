@@ -6,7 +6,10 @@ namespace App\Tests\Integration\Review\Queries;
 
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundNotes;
+use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundQueries;
+use App\Review\Api\RoundScreenshotView;
+use App\Review\Api\RoundView;
 use App\Review\Api\ScreenshotNotes;
 use App\Review\Infrastructure\Doctrine\DbalRoundQueries;
 use App\SharedKernel\Application\TenantContext;
@@ -355,6 +358,72 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
             ['pinround_app', [self::BAKERY_DRAFT], [self::BAKERY_DRAFT], [self::BAKERY_SCREENSHOT], ['0197a3c0-0000-7000-8000-0000000f5669']],
             $rowIdsAs(self::BETA_BAKERY),
         );
+    }
+
+    #[Test]
+    public function anOwnersDraftComesWithAllItsScreenshotsByPositionAndItsPinsByNumberWhateverTheIdsCase(): void
+    {
+        $draft = $this->draftAs(self::ACME_FOODS, strtoupper(self::OMAR_DRAFT), self::OMAR);
+
+        self::assertNotNull($draft);
+        self::assertSame(self::OMAR_DRAFT, $draft->id);
+        self::assertNull($draft->sharedAt);
+        self::assertSame([self::FIRST_SCREENSHOT, self::SECOND_SCREENSHOT, self::THIRD_SCREENSHOT], array_map(static fn (RoundScreenshotView $screenshot): string => $screenshot->id, $draft->screenshots));
+        self::assertSame(
+            [[1, 'Button hidden'], [2, 'Wrong colour'], [3, 'Prix affiché en €']],
+            array_map(static fn (RoundPinView $pin): array => [$pin->number, $pin->note], $draft->screenshots[0]->pins),
+        );
+        self::assertSame([], $draft->screenshots[1]->pins);
+    }
+
+    #[Test]
+    public function anOwnersDraftSharedSinceIsStillTheirsToRead(): void
+    {
+        $round = $this->draftAs(self::ACME_FOODS, self::OMAR_SHARED_ROUND, self::OMAR);
+
+        self::assertNotNull($round);
+        self::assertNotNull($round->sharedAt);
+        self::assertSame([self::SHARED_SCREENSHOT], array_map(static fn (RoundScreenshotView $screenshot): string => $screenshot->id, $round->screenshots));
+    }
+
+    #[Test]
+    public function aDraftWithNoScreenshotComesWithNone(): void
+    {
+        $draft = $this->draftAs(self::ACME_FOODS, self::OMAR_EMPTY_DRAFT, self::OMAR);
+
+        self::assertNotNull($draft);
+        self::assertSame([], $draft->screenshots);
+    }
+
+    #[Test]
+    public function aDraftOfAnotherPersonADeletedOneAnotherOrganizationsAndAnUnknownOrMalformedIdAreNull(): void
+    {
+        $cases = [
+            'the draft of Lena asked by Omar' => [self::ACME_FOODS, self::LENA_DRAFT, self::OMAR],
+            'the draft of Omar asked by Lena' => [self::ACME_FOODS, self::OMAR_DRAFT, self::LENA],
+            'a deleted draft of Omar' => [self::ACME_FOODS, self::OMAR_DELETED_DRAFT, self::OMAR],
+            'a Beta Bakery draft asked under Acme Foods' => [self::ACME_FOODS, self::BAKERY_DRAFT, self::OMAR],
+            'an Acme Foods draft asked under Beta Bakery' => [self::BETA_BAKERY, self::OMAR_DRAFT, self::OMAR],
+            'an unknown id' => [self::ACME_FOODS, self::UNKNOWN_ROUND, self::OMAR],
+            'a malformed id' => [self::ACME_FOODS, 'not-a-uuid', self::OMAR],
+        ];
+
+        foreach ($cases as $name => [$organizationId, $roundId, $owner]) {
+            self::assertNull($this->draftAs($organizationId, $roundId, $owner), $name);
+        }
+    }
+
+    #[Test]
+    public function readingADraftOutsideATransactionIsALogicError(): void
+    {
+        $this->expectException(\LogicException::class);
+
+        $this->roundQueries()->draftOf(self::OMAR_DRAFT, new UserId(self::OMAR));
+    }
+
+    private function draftAs(string $organizationId, string $roundId, string $owner): ?RoundView
+    {
+        return self::transactions()->rolledBackAs($organizationId, fn (): ?RoundView => $this->roundQueries()->draftOf($roundId, new UserId($owner)));
     }
 
     private function accessFactsAs(string $organizationId, string $roundId): ?RoundAccessFacts

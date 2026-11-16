@@ -21,7 +21,8 @@ use App\Ticketing\Api\TicketVisibility;
  * Builds the cards of the Rounds section for one viewer. Besides RoundQueries' own queries it reads the owners'
  * names in one batch and signs the pictures shown in one query per SignedUrls::MAX_MEDIA_IDS pictures, whatever the
  * number of rounds. Only the report and drafts show their pictures, at most MAX_PICTURES_PER_CARD each; a checklist or
- * review round is a row that opens its own page.
+ * review round is a row that opens its own page. The viewer's own unshared draft is the exception: its card shows every
+ * picture (the domain caps them), so its editor can reach each one. forDraft builds that one card alone.
  */
 final readonly class RoundCards
 {
@@ -80,6 +81,23 @@ final readonly class RoundCards
     }
 
     /**
+     * The card of one draft round of its owner, reading and signing nothing of any other round: every picture of an
+     * unshared draft, and the owner's name in one query only once the draft was shared (its headline names them). Runs
+     * inside the request transaction like forTicket.
+     */
+    public function forDraft(OrganizationId $organizationId, RoundView $draft, \DateTimeImmutable $now): RoundCard
+    {
+        if (RoundView::DRAFT !== $draft->kind) {
+            throw new \InvalidArgumentException('Only a draft round has a card of its own.');
+        }
+        $ownerName = $draft->isUnsharedDraft()
+            ? self::UNKNOWN_OWNER
+            : ($this->memberNameQueries->displayNamesOf($organizationId, [$draft->ownerId])[$draft->ownerId->toString()] ?? self::UNKNOWN_OWNER);
+
+        return $this->cardOf($draft, $ownerName, $this->imagesOf($organizationId, [$draft], $now));
+    }
+
+    /**
      * @param array<string, MediaImage> $images by media id
      */
     private function cardOf(RoundView $round, string $ownerName, array $images): RoundCard
@@ -91,6 +109,7 @@ final readonly class RoundCards
             return new RoundCard($round->id, $domId, \sprintf('Round %d · %s · by %s', $round->number ?? 0, $title, $ownerName), null, false, [], true);
         }
 
+        $pictureLimit = self::pictureLimitOf($round);
         $screenshots = [];
         $pinCount = 0;
         $looksRightCount = 0;
@@ -100,7 +119,7 @@ final readonly class RoundCards
             if (self::LOOKS_RIGHT === $screenshot->verdict) {
                 ++$looksRightCount;
             }
-            if (\count($screenshots) < self::MAX_PICTURES_PER_CARD) {
+            if (null === $pictureLimit || \count($screenshots) < $pictureLimit) {
                 $screenshots[] = $this->cardScreenshotOf($round, $screenshot, $images[$screenshot->mediaId] ?? null, $shownPins);
             }
         }
@@ -184,6 +203,14 @@ final readonly class RoundCards
         return new PinView($pin->number, $pin->xPercent, $pin->yPercent, $pin->note, self::AI === $pin->source);
     }
 
+    /**
+     * @return int|null null for the viewer's own unshared draft, whose editor must reach every picture it holds
+     */
+    private static function pictureLimitOf(RoundView $round): ?int
+    {
+        return $round->isUnsharedDraft() ? null : self::MAX_PICTURES_PER_CARD;
+    }
+
     private function showsPictures(RoundView $round): bool
     {
         return self::REPORT === $round->kind || RoundView::DRAFT === $round->kind;
@@ -216,7 +243,8 @@ final readonly class RoundCards
             if (!$this->showsPictures($round)) {
                 continue;
             }
-            foreach (\array_slice($round->screenshots, 0, self::MAX_PICTURES_PER_CARD) as $screenshot) {
+            $pictureLimit = self::pictureLimitOf($round);
+            foreach (null === $pictureLimit ? $round->screenshots : \array_slice($round->screenshots, 0, $pictureLimit) as $screenshot) {
                 $mediaIds[$screenshot->mediaId] = true;
             }
         }

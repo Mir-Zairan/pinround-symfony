@@ -28,7 +28,8 @@ use Doctrine\DBAL\Connection;
  * check of the ticket. Each level reads the next one's index ((organization_id, ticket_id, number), (organization_id,
  * round_id, position), (organization_id, screenshot_id, number)) and says whether it has rows below it, so a round with
  * no screenshot or a screenshot with no pin costs no query. accessFactsOf and roundNotes send one query each and need no
- * visibility check: the first leaves the decision to RoundVoter, the second reads only the owner's own draft.
+ * visibility check: the first leaves the decision to RoundVoter, the second reads only the owner's own draft. draftOf
+ * reads one draft of its owner with its screenshots and pins, and needs none either.
  */
 final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
 {
@@ -83,6 +84,38 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
             new UserId(self::text($roundRow['owner_id'], 'owner_id')),
             self::boolean($roundRow['is_unshared_draft'], 'is_unshared_draft'),
             self::boolean($roundRow['is_deleted'], 'is_deleted'),
+        );
+    }
+
+    public function draftOf(string $roundId, UserId $owner): ?RoundView
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        try {
+            $id = new RoundId($roundId);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+
+        $roundRow = $this->connection->fetchAssociative(
+            'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state FROM rvw_round AS round'
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.id = CAST(:round AS uuid)'
+            ." AND round.owner_id = CAST(:owner AS uuid) AND round.kind = 'draft' AND round.deleted_at IS NULL",
+            ['organization' => $organizationId->toString(), 'round' => $id->toString(), 'owner' => $owner->toString()],
+        );
+        if (false === $roundRow) {
+            return null;
+        }
+        $draftId = self::text($roundRow['id'], 'id');
+        $sharedAt = self::textOrNull($roundRow['shared_at'], 'shared_at');
+
+        return new RoundView(
+            $draftId,
+            self::integerOrNull($roundRow['number'], 'number'),
+            self::text($roundRow['kind'], 'kind'),
+            new UserId(self::text($roundRow['owner_id'], 'owner_id')),
+            null === $sharedAt ? null : new \DateTimeImmutable($sharedAt),
+            self::text($roundRow['state'], 'state'),
+            $this->screenshotsOf($organizationId->toString(), [$draftId])[$draftId] ?? [],
         );
     }
 

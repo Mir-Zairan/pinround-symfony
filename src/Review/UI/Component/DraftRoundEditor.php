@@ -152,11 +152,9 @@ final class DraftRoundEditor
     {
         if (!$this->isCardRead && null === $this->card) {
             $visibleTicket = $this->visibleTicket ??= $this->visibleTicketLookup->visibleTicketOf($this->ticketKey);
-            $section = $this->roundCards->forTicket($visibleTicket->ticket->id, $visibleTicket->visibility, $this->clock->now());
-            foreach ($section->cards as $card) {
-                if (strtolower($this->roundId) === $card->roundId) {
-                    $this->card = $card;
-                }
+            $draft = $this->roundQueries->draftOf($this->roundId, $visibleTicket->actor->userId());
+            if (null !== $draft) {
+                $this->card = $this->roundCards->forDraft($visibleTicket->visibility->organizationId(), $draft, $this->clock->now());
             }
         }
         $this->isCardRead = true;

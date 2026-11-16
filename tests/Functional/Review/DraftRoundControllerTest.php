@@ -174,32 +174,6 @@ final class DraftRoundControllerTest extends WebTestCase
     }
 
     #[Test]
-    public function aLiveActionOfAPersonWhoMayNotEditTheDraftIsNotFoundAndChangesNothing(): void
-    {
-        $ticketId = $this->addTicket('SHOP-1');
-        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
-        $shot = $this->addScreenshot($draft, $this->addMedia('ready'), 0, self::OMAR_DRAFT_SHOT, null, 'looks_right');
-        $before = $this->screenshotRowsOf($draft);
-        self::assertCount(1, $before);
-        $this->logIn($this->client, $this->people['Omar']);
-        $editor = $this->frame()->filter('#round-'.$draft.' .draft-round-editor');
-        $props = (string) $editor->attr('data-live-props-value');
-        $url = (string) $editor->attr('data-live-url-value');
-        self::assertNotSame('', $props);
-        self::assertStringContainsString('/_components/DraftRoundEditor', $url);
-
-        foreach (['Lena', 'Mia', 'Sara', 'Raj'] as $person) {
-            $this->logIn($this->client, $this->people[$person]);
-            // The props and their checksum are the owner's own, so only the round's voter stands between the person and the draft.
-            $this->postLiveAction($this->client, $props, 'setVerdict', ['screenshotId' => $shot, 'verdict' => 'not_right']);
-
-            self::assertResponseStatusCodeSame(404, $person);
-            self::assertStringNotContainsString(self::OMAR_DRAFT_SHOT, (string) $this->client->getResponse()->getContent(), $person);
-            self::assertSame($before, $this->screenshotRowsOf($draft), $person.': the verdict stays.');
-        }
-    }
-
-    #[Test]
     public function noOneButTheAssigneeSeesTheStartButtonOrMayStartADraft(): void
     {
         $ticketId = $this->addTicket('SHOP-1');

@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Review;
 use App\Identity\Domain\User;
 use App\Review\Api\RoundRefused;
 use App\Review\Domain\Round;
+use App\Review\UI\RoundCards;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -18,6 +19,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Uid\Uuid;
+use Symfony\UX\LiveComponent\Test\InteractsWithLiveComponents;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -32,6 +34,7 @@ final class DraftRoundEditorTest extends WebTestCase
     use CreatesAcmeFoodsTeams;
     use CreatesTeams;
     use Factories;
+    use InteractsWithLiveComponents;
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
@@ -41,6 +44,8 @@ final class DraftRoundEditorTest extends WebTestCase
     private const string FRAME = '/t/SHOP-1/rounds';
     private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => 'ticket-rounds'];
     private const string OMAR_SHOT_TITLE = 'Omar first shot';
+    private const string SHARED_AT = '2026-11-05 09:00:00+00';
+    private const int LIVE_ACTION_QUERIES = 27;
     private const array STRANGERS = ['Lena', 'Mia', 'Sara', 'Raj', 'Ben'];
 
     private KernelBrowser $client;
@@ -332,7 +337,33 @@ final class DraftRoundEditorTest extends WebTestCase
         $this->act('setVerdict', ['screenshotId' => $this->firstShot, 'verdict' => 'not_right']);
 
         self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(RoundRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent());
         self::assertSame($before, $this->stored());
+    }
+
+    #[Test]
+    public function aRoundOfAnotherTicketOrAnUnknownOrMalformedRoundIdIsNotFoundForTheOwnerAndChangesNothing(): void
+    {
+        $this->seedWorld();
+        $before = $this->stored();
+        self::assertNotSame([], $before['screenshots'][$this->otherTicketsDraft], 'Omar owns the draft of the other ticket, so only the ticket check refuses it.');
+        $cases = [
+            'a draft of the owner on another ticket' => $this->otherTicketsDraft,
+            'an unknown round' => Uuid::v7()->toRfc4122(),
+            'a malformed id' => 'not-a-uuid',
+        ];
+
+        foreach ($cases as $name => $roundId) {
+            $editor = $this->createLiveComponent('DraftRoundEditor', ['ticketKey' => 'SHOP-1', 'roundId' => $roundId], $this->client);
+            // The guard runs on every live request, the first one that mounts the component with these props included.
+            $this->client->catchExceptions(true);
+
+            $response = $editor->response();
+
+            self::assertSame(404, $response->getStatusCode(), $name);
+            self::assertStringContainsString(RoundRefused::NOT_FOUND, (string) $response->getContent(), $name);
+            self::assertSame($before, $this->stored(), $name.': nothing changes.');
+        }
     }
 
     #[Test]
@@ -380,6 +411,90 @@ final class DraftRoundEditorTest extends WebTestCase
         }
     }
 
+    #[Test]
+    public function theResponseCardShowsTheDraftAsStoredAfterAnAcceptedAndAfterARefusedChange(): void
+    {
+        $this->seedWorld();
+        self::assertSame(
+            ['looks_right', null],
+            array_column($this->screenshotRowsOf($this->draft), 'verdict'),
+            'The first picture starts as looks right, the second with none.',
+        );
+
+        $this->act('setVerdict', ['screenshotId' => $this->secondShot, 'verdict' => 'not_right']);
+
+        self::assertResponseStatusCodeSame(200);
+        $accepted = $this->cardShown();
+        self::assertSame([$this->firstShot, $this->secondShot], $accepted['ids']);
+        self::assertSame([$this->firstShot => ['true', 'false'], $this->secondShot => ['false', 'true']], $accepted['pressed']);
+        self::assertSame('1 of 2 look right', $accepted['status']);
+
+        $this->act('setVerdict', ['screenshotId' => $this->secondShot, 'verdict' => 'fine']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(RoundRefused::UNKNOWN_VERDICT, $this->refusalShown());
+        self::assertSame($accepted, $this->cardShown(), 'A refused change leaves the card as stored.');
+
+        $this->act('setVerdict', ['screenshotId' => $this->secondShot, 'verdict' => 'looks_right']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('2 of 2 look right', $this->cardShown()['status']);
+    }
+
+    #[Test]
+    public function theEditorOfADraftWithTheMostScreenshotsShowsEachOneWithItsControlsAndCountsAllOfThem(): void
+    {
+        $this->seedWorld();
+        $shotIds = [$this->firstShot, $this->secondShot];
+        for ($position = 2; $position < Round::MAX_SCREENSHOTS; ++$position) {
+            $shotIds[] = $this->addScreenshot($this->draft, $this->addMedia('ready', 'Omar'), $position, null, null);
+        }
+        self::assertGreaterThan(RoundCards::MAX_PICTURES_PER_CARD + 1, \count($shotIds));
+        $this->props = $this->propsOf($this->draft);
+
+        $firstRender = $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS);
+        $this->assertEveryShotHasItsControls($firstRender, $shotIds);
+
+        $eleventh = $shotIds[RoundCards::MAX_PICTURES_PER_CARD];
+        $this->act('setVerdict', ['screenshotId' => $eleventh, 'verdict' => 'looks_right']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('looks_right', $this->screenshotRowsOf($this->draft)[RoundCards::MAX_PICTURES_PER_CARD]['verdict']);
+        $card = $this->cardShown();
+        self::assertSame($shotIds, $card['ids']);
+        self::assertSame(['true', 'false'], $card['pressed'][$eleventh]);
+        self::assertSame(\sprintf('2 of %d look right', Round::MAX_SCREENSHOTS), $card['status']);
+        $this->assertEveryShotHasItsControls(new Crawler((string) $this->client->getResponse()->getContent()), $shotIds);
+
+        $this->act('removeScreenshot', ['screenshotId' => $shotIds[Round::MAX_SCREENSHOTS - 1]]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertNull($this->refusalShown());
+        self::assertCount(Round::MAX_SCREENSHOTS - 1, $this->cardShown()['ids']);
+    }
+
+    #[Test]
+    public function aLiveActionReadsOnlyTheDraftNotTheWholeRoundsSection(): void
+    {
+        $this->seedWorld();
+        $report = $this->addRound($this->ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addScreenshot($report, $this->addMedia('ready', 'Mia'), 0, 'Report shot', null);
+        $this->addRound($this->ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $this->addRound($this->ticketId, 2, 'review', 'Lena', self::SHARED_AT);
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+
+        $this->act('setVerdict', ['screenshotId' => $this->secondShot, 'verdict' => 'not_right']);
+
+        self::assertResponseStatusCodeSame(200);
+        $queryCount = 0;
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            $queryCount += \count($queriesOfOneConnection);
+        }
+        // Measured with two other rounds seeded: reading the whole section instead would add their queries, the names and the signing.
+        self::assertSame(self::LIVE_ACTION_QUERIES, $queryCount);
+    }
+
     private function seedWorld(): void
     {
         $this->ticketId = $this->addTicket('SHOP-1');
@@ -416,6 +531,44 @@ final class DraftRoundEditorTest extends WebTestCase
     private function act(string $action, array $args): void
     {
         $this->postLiveAction($this->client, $this->props, $action, $args);
+    }
+
+    /**
+     * The card of the last response, by data attributes and aria only.
+     *
+     * @return array{ids: list<string>, pressed: array<string, list<string>>, status: ?string}
+     */
+    private function cardShown(): array
+    {
+        $response = new Crawler((string) $this->client->getResponse()->getContent());
+        $sections = $response->filter('section[data-screenshot-id]');
+        self::assertGreaterThan(0, \count($sections), 'The response holds the draft\'s card.');
+        $ids = [];
+        $pressed = [];
+        foreach ($sections as $section) {
+            $shot = new Crawler($section);
+            $id = (string) $shot->attr('data-screenshot-id');
+            $ids[] = $id;
+            $pressed[$id] = $shot->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed'));
+        }
+        preg_match('/\d+ of \d+ look right/', $response->text(), $status);
+
+        return ['ids' => $ids, 'pressed' => $pressed, 'status' => $status[0] ?? null];
+    }
+
+    /**
+     * @param list<string> $shotIds
+     */
+    private function assertEveryShotHasItsControls(Crawler $page, array $shotIds): void
+    {
+        $sections = $page->filter('section[data-screenshot-id]');
+        self::assertSame($shotIds, $sections->each(static fn (Crawler $section): ?string => $section->attr('data-screenshot-id')));
+        foreach ($sections as $section) {
+            $shot = new Crawler($section);
+            $id = (string) $shot->attr('data-screenshot-id');
+            self::assertCount(2, $shot->filter('[role="group"] button[aria-pressed]'), $id.' has both verdict toggles.');
+            self::assertCount(1, $shot->filter('button[data-live-action-param="removeScreenshot"]'), $id.' has Remove.');
+        }
     }
 
     private function refusalShown(): ?string

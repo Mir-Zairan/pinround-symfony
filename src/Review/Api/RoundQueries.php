@@ -50,6 +50,18 @@ interface RoundQueries
     public function accessFactsOf(string $roundId): ?RoundAccessFacts;
 
     /**
+     * The one draft round $roundId with all its screenshots and pins, in at most three queries (the round, its
+     * screenshots, their pins) and none of any other round. Only $owner's own undeleted draft, shared since or not, is
+     * read: another person's draft, a round that is no draft, a deleted one, another organization's round and an
+     * unknown or malformed id are all null. Pass the person asking as $owner: this method does not check who asks.
+     *
+     * @param string $roundId the id as the request carried it, in any case
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set, before any query
+     */
+    public function draftOf(string $roundId, UserId $owner): ?RoundView;
+
+    /**
      * What $owner wrote in their open unshared draft round of the ticket, in one query whatever the number of pictures
      * and pins. Only that person's own draft is read: another person's draft, a shared or deleted one and another
      * organization's round never are. Pass the person asking as $owner: this method does not check who asks.
