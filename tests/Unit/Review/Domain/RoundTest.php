@@ -797,24 +797,27 @@ final class RoundTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{int, ?int, ?\DateTimeImmutable, ?DraftDecision, ?\DateTimeImmutable}>
+     * @return iterable<string, array{string, int, ?int, ?\DateTimeImmutable, ?DraftDecision, ?\DateTimeImmutable}>
      */
     public static function storedRoundsThatBreakARule(): iterable
     {
         $time = new \DateTimeImmutable('2026-03-05 11:15:00+00:00');
-        yield 'version 0' => [0, null, null, null, null];
-        yield 'negative version' => [-3, null, null, null, null];
-        yield 'number without share time' => [1, 1, null, null, null];
-        yield 'share time without number' => [1, null, $time, null, null];
-        yield 'decision without time' => [1, null, null, DraftDecision::KeptPrivate, null];
-        yield 'decision time without decision' => [1, null, null, null, $time];
+        $versionMessage = 'A round version starts at 1.';
+        $pairMessage = 'A round has a number exactly when it is shared, and a decision exactly when it has its time.';
+        yield 'version 0' => [$versionMessage, 0, null, null, null, null];
+        yield 'negative version' => [$versionMessage, -3, null, null, null, null];
+        yield 'number without share time' => [$pairMessage, 1, 1, null, null, null];
+        yield 'share time without number' => [$pairMessage, 1, null, $time, null, null];
+        yield 'decision without time' => [$pairMessage, 1, null, null, DraftDecision::KeptPrivate, null];
+        yield 'decision time without decision' => [$pairMessage, 1, null, null, null, $time];
     }
 
     #[Test]
     #[DataProvider('storedRoundsThatBreakARule')]
-    public function aStoredRoundThatBreaksARuleIsRefused(int $version, ?int $number, ?\DateTimeImmutable $sharedAt, ?DraftDecision $decision, ?\DateTimeImmutable $decidedAt): void
+    public function aStoredRoundThatBreaksARuleIsRefused(string $message, int $version, ?int $number, ?\DateTimeImmutable $sharedAt, ?DraftDecision $decision, ?\DateTimeImmutable $decidedAt): void
     {
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
 
         Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Draft, new UserId(self::OMAR), $number, $sharedAt, RoundState::Open, $version, [], new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, $decision, $decidedAt);
     }

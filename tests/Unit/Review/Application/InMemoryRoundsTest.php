@@ -14,6 +14,7 @@ use App\SharedKernel\Application\TenantSwitchGuard;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -337,13 +338,23 @@ final class InMemoryRoundsTest extends TestCase
         }
     }
 
+    /**
+     * @return iterable<string, array{string, int}>
+     */
+    public static function movesOfAStoredPicture(): iterable
+    {
+        yield 'another position' => [self::MEDIA, 5];
+        yield 'another media' => ['0197a3c0-0000-7000-8000-000000000d02', 0];
+    }
+
     #[Test]
-    public function aSaveThatMovesAStoredPictureToAnotherMediaOrPositionIsALogicException(): void
+    #[DataProvider('movesOfAStoredPicture')]
+    public function aSaveThatMovesAStoredPictureToAnotherMediaOrPositionIsALogicException(string $mediaId, int $position): void
     {
         $rounds = self::roundsOf(self::ACME_FOODS);
         $report = self::report($rounds, self::TICKET);
         $rounds->add($report);
-        $moved = Round::restored($report->id(), $report->organizationId(), $report->ticketId(), $report->kind(), $report->ownerId(), $report->number(), $report->sharedAt(), $report->state(), 1, [Screenshot::of($report->screenshots()[0]->id(), self::MEDIA, 5, null, null, [])], $report->createdAt(), null, null, null);
+        $moved = Round::restored($report->id(), $report->organizationId(), $report->ticketId(), $report->kind(), $report->ownerId(), $report->number(), $report->sharedAt(), $report->state(), 1, [Screenshot::of($report->screenshots()[0]->id(), $mediaId, $position, null, null, [])], $report->createdAt(), null, null, null);
 
         try {
             $rounds->save($moved, new \DateTimeImmutable('2026-03-05 08:00:00+00:00'));
