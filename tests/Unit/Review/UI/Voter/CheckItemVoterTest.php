@@ -64,6 +64,7 @@ final class CheckItemVoterTest extends TestCase
     private const string SHOP_2_NO_TESTER = '0197a3c0-0000-7000-8000-000000001be2';
     private const string SHOP_3_OF_OTHERS = '0197a3c0-0000-7000-8000-000000001be3';
     private const string SHOP_4_RAJS = '0197a3c0-0000-7000-8000-000000001be4';
+    private const string SHOP_5_NO_ASSIGNEE = '0197a3c0-0000-7000-8000-000000001be5';
     /** A ticket whose facts the queries cannot read, as when its step is not the organization's. */
     private const string BROKEN_TICKET = '0197a3c0-0000-7000-8000-000000001be6';
     private const string NO_TICKET = '0197a3c0-0000-7000-8000-000000001be7';
@@ -79,6 +80,7 @@ final class CheckItemVoterTest extends TestCase
             self::snapshotOf(self::SHOP_2_NO_TESTER, TicketVisibilityFacts::FOR_EVERYONE, self::OMAR, null),
             self::snapshotOf(self::SHOP_3_OF_OTHERS, TicketVisibilityFacts::FOR_EVERYONE, self::ANOTHER_DEVELOPER, self::ANOTHER_TESTER),
             self::snapshotOf(self::SHOP_4_RAJS, TicketVisibilityFacts::TEAM_ONLY, self::RAJ, self::RAJ),
+            self::snapshotOf(self::SHOP_5_NO_ASSIGNEE, TicketVisibilityFacts::FOR_EVERYONE, null, null),
         ], new TicketId(self::BROKEN_TICKET));
     }
 
@@ -103,6 +105,8 @@ final class CheckItemVoterTest extends TestCase
         yield 'Mia when another tester is the ticket\'s' => [self::MIA, self::SHOP_3_OF_OTHERS, false, false];
         // TicketVoter lets Raj see the team-only ticket he has but not edit it, so only the edit rule denies him.
         yield 'Raj as assignee and tester, who may see but not edit the ticket' => [self::RAJ, self::SHOP_4_RAJS, false, false];
+        yield 'Omar, a developer of the team, on a ticket with no assignee' => [self::OMAR, self::SHOP_5_NO_ASSIGNEE, false, false];
+        yield 'Mia, a tester of the team, on a ticket with no assignee' => [self::MIA, self::SHOP_5_NO_ASSIGNEE, false, true];
         yield 'the Beta Bakery admin, who holds Shop\'s id' => [self::BETA_ADMIN, self::SHOP_1, false, false];
     }
 
@@ -258,7 +262,7 @@ final class CheckItemVoterTest extends TestCase
         ]);
     }
 
-    private static function snapshotOf(string $ticketId, string $visibility, string $assigneeId, ?string $testerId): TicketTurnSnapshot
+    private static function snapshotOf(string $ticketId, string $visibility, ?string $assigneeId, ?string $testerId): TicketTurnSnapshot
     {
         return new TicketTurnSnapshot(
             new TicketId($ticketId),
@@ -275,7 +279,7 @@ final class CheckItemVoterTest extends TestCase
             'major',
             null,
             new UserId(self::LENA),
-            new UserId($assigneeId),
+            null === $assigneeId ? null : new UserId($assigneeId),
             testerId: null === $testerId ? null : new UserId($testerId),
         );
     }

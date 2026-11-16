@@ -290,22 +290,57 @@ final class UseCaseRoundCommandsTest extends TestCase
     }
 
     #[Test]
-    public function aReportOnATicketOutsideToDoMakesNoChecklistAndARefusedOneNeither(): void
+    public function aReportOnATicketOutsideToDoMakesNoChecklist(): void
     {
         $this->commands->createReport(new TicketId(self::TICKET), [self::screenshotOf(self::MEDIA)], new UserId(self::LENA), $this->reportedAt);
         self::assertCount(1, $this->rounds->stored);
         self::assertSame([], $this->checklistCommands->created);
+    }
 
+    #[Test]
+    public function aSecondReportOnATicketInToDoIsRefusedAndMakesNoChecklist(): void
+    {
+        $rounds = new InMemoryRounds();
+        $rounds->add(Round::report(
+            $rounds->nextIdentity(),
+            new OrganizationId(self::ACME_FOODS),
+            new TicketId(self::TICKET),
+            new UserId(self::LENA),
+            [Screenshot::of($rounds->nextScreenshotIdentity(), self::MEDIA, 0, null, null, [])],
+            $this->reportedAt,
+        ));
+        $todoTickets = new InMemoryTicketTurnQueries([self::snapshot('todo')], new TicketId(self::BROKEN_TICKET));
+        $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $commands = new UseCaseRoundCommands($rounds, $todoTickets, $tenantContext, new ReportPictures($this->uploadedMedia), $this->checklistCommands);
+
+        try {
+            $commands->createReport(new TicketId(self::TICKET), [self::screenshotOf(self::OTHER_MEDIA)], new UserId(self::LENA), $this->reportedAt);
+            self::fail('A second report was stored.');
+        } catch (RoundRefused $refused) {
+            self::assertSame('This ticket has a report already.', $refused->getMessage());
+        }
+
+        self::assertCount(1, $rounds->stored);
+        self::assertSame([], $this->checklistCommands->created);
+    }
+
+    #[Test]
+    public function aReportFromSomeoneElseOnATicketInToDoIsRefusedAndMakesNoChecklist(): void
+    {
         $todoTickets = new InMemoryTicketTurnQueries([self::snapshot('todo')], new TicketId(self::BROKEN_TICKET));
         $tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
         $tenantContext->set(new OrganizationId(self::ACME_FOODS));
         $commands = new UseCaseRoundCommands(new InMemoryRounds(), $todoTickets, $tenantContext, new ReportPictures($this->uploadedMedia), $this->checklistCommands);
+
         try {
             $commands->createReport(new TicketId(self::TICKET), [self::screenshotOf(self::MEDIA)], new UserId(self::OMAR), $this->reportedAt);
             self::fail('Omar added Lena\'s report.');
-        } catch (RoundRefused) {
-            self::assertSame([], $this->checklistCommands->created);
+        } catch (RoundRefused $refused) {
+            self::assertSame('Only the person who reported the ticket can add its report.', $refused->getMessage());
         }
+
+        self::assertSame([], $this->checklistCommands->created);
     }
 
     #[Test]

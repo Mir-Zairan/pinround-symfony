@@ -16,6 +16,9 @@ use App\SharedKernel\Domain\UserId;
  */
 interface ChecklistCommands
 {
+    /** The core step code of To do: a ticket in it gets its checklist round (FR-RND-04). */
+    public const string TODO_CORE_CODE = 'todo';
+
     public const string STATE_OPEN = 'open';
     public const string STATE_FIXED = 'fixed';
     public const string STATE_OK = 'ok';

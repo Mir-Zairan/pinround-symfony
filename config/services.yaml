@@ -396,7 +396,7 @@ when@test:
         test.review_verdict_commands:
             alias: App\Review\Api\VerdictCommands
             public: true
-        # No route or handler changes or makes a checklist before the checklist card and the Start work trigger;
+        # No route changes a checklist item before the checklist card ships;
         # UseCaseChecklistCommandsTest gets the Api as they will.
         test.review_checklist_commands:
             alias: App\Review\Api\ChecklistCommands

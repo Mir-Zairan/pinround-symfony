@@ -22,7 +22,6 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 final readonly class CreateChecklistOnTicketEventsHandler
 {
     private const string START_WORK_VERB = 'start_work';
-    private const string TODO_CORE_CODE = 'todo';
 
     public function __construct(
         private ChecklistCommands $checklistCommands,
@@ -52,7 +51,7 @@ final readonly class CreateChecklistOnTicketEventsHandler
     private function createWhenInToDo(TicketId $ticketId): void
     {
         $ticket = $this->ticketTurnQueries->factsOf($ticketId);
-        if (self::TODO_CORE_CODE === $ticket?->coreCode) {
+        if (ChecklistCommands::TODO_CORE_CODE === $ticket?->coreCode) {
             $this->checklistCommands->createFromReport($ticketId, $this->clock->now());
         }
     }
