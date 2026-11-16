@@ -52,7 +52,7 @@ use App\Workflow\Api\WorkflowPermission;
  *
  * Or a round (RoundPermission VIEW, EDIT): "Unshared draft round of Omar" or "Deleted draft round of Omar" on a Shop ticket,
  *            "Shared round of Omar on a team-only Shop ticket" or "… Support ticket", "… on a ticket nobody has", or
- *            "Shared round of another organization". Or a ticket for DRAFT_CREATE: "Unassigned Shop ticket", "Shop ticket
+ *            "Shared round of another organization" or "Unshared draft round of Omar in another organization". Or a ticket for DRAFT_CREATE: "Unassigned Shop ticket", "Shop ticket
  *            assigned to Omar", "Done Shop ticket assigned to Omar", "Ticket nobody has, for a draft round".
  *
  * The roles doc has no mute row: whoever may see a ticket may mute it for themselves (MuteVoter), so the
@@ -401,6 +401,8 @@ return [
     ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Shared round of Omar on a ticket nobody has', 'expected' => 'denied'],
     ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Shared round of another organization', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Shared round of another organization', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar in another organization', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar in another organization', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'granted'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Lena', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Mia', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],

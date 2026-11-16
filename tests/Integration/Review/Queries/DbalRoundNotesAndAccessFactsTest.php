@@ -304,6 +304,59 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
         self::assertSame(0, self::queryCountOf($this->debugData()));
     }
 
+    #[Test]
+    public function accessFactsReadOutsideATransactionAreRefusedBeforeAnyQuery(): void
+    {
+        self::tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $this->debugData()->reset();
+        try {
+            $this->roundQueries()->accessFactsOf(self::OMAR_DRAFT);
+            self::fail('Access facts were read outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('Rounds are read in a transaction under the organization as tenant; none is open.', $refusal->getMessage());
+        } finally {
+            self::tenantContext()->clear();
+        }
+
+        self::assertSame(0, self::queryCountOf($this->debugData()));
+    }
+
+    /**
+     * The round, screenshot and pin reads of accessFactsOf and roundNotes with their organization condition taken out,
+     * run as pinround_app: under Acme Foods as tenant, row-level security alone hides Beta Bakery's draft, picture and
+     * pin, which Beta's own tenant gets.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsDraftPictureAndPin(): void
+    {
+        $rowIdsAs = static fn (string $organizationId): array => self::transactions()->rolledBackAs($organizationId, static fn (): array => [
+            self::connection()->fetchOne('SELECT current_user'),
+            self::connection()->fetchFirstColumn(
+                'SELECT round.id FROM rvw_round AS round WHERE round.id = CAST(:round AS uuid)',
+                ['round' => self::BAKERY_DRAFT],
+            ),
+            self::connection()->fetchFirstColumn(
+                'SELECT round.id FROM rvw_round AS round WHERE round.ticket_id = CAST(:ticket AS uuid) AND round.owner_id = CAST(:owner AS uuid)'
+                ." AND round.kind = 'draft' AND round.shared_at IS NULL AND round.state = 'open' AND round.deleted_at IS NULL AND round.id = CAST(:round AS uuid)",
+                ['ticket' => self::TICKET, 'owner' => self::OMAR, 'round' => self::BAKERY_DRAFT],
+            ),
+            self::connection()->fetchFirstColumn(
+                'SELECT screenshot.id FROM rvw_screenshot AS screenshot WHERE screenshot.round_id = CAST(:round AS uuid)',
+                ['round' => self::BAKERY_DRAFT],
+            ),
+            self::connection()->fetchFirstColumn(
+                'SELECT pin.id FROM rvw_pin AS pin WHERE pin.screenshot_id = CAST(:screenshot AS uuid)',
+                ['screenshot' => self::BAKERY_SCREENSHOT],
+            ),
+        ]);
+
+        self::assertSame(['pinround_app', [], [], [], []], $rowIdsAs(self::ACME_FOODS));
+        self::assertSame(
+            ['pinround_app', [self::BAKERY_DRAFT], [self::BAKERY_DRAFT], [self::BAKERY_SCREENSHOT], ['0197a3c0-0000-7000-8000-0000000f5669']],
+            $rowIdsAs(self::BETA_BAKERY),
+        );
+    }
+
     private function accessFactsAs(string $organizationId, string $roundId): ?RoundAccessFacts
     {
         return self::transactions()->rolledBackAs($organizationId, fn (): ?RoundAccessFacts => $this->roundQueries()->accessFactsOf($roundId));

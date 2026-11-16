@@ -146,6 +146,7 @@ final class VoterMatrixTest extends KernelTestCase
         'Shared round of Omar on a team-only Shop ticket' => [self::ACME_FOODS, self::SHOP_TICKET, false, false],
         'Shared round of Omar on a team-only Support ticket' => [self::ACME_FOODS, self::SUPPORT_TICKET, false, false],
         'Shared round of Omar on a ticket nobody has' => [self::ACME_FOODS, self::NO_TICKET, false, false],
+        'Unshared draft round of Omar in another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, true, false],
         'Shared round of another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, false, false],
     ];
 
@@ -452,8 +453,9 @@ final class VoterMatrixTest extends KernelTestCase
     }
 
     /**
-     * Through the migrator, which owns the tables: a To do step, a project with no team and two team-only tickets, one
-     * of Shop and one of Support, reported by someone who is no actor here.
+     * Through the migrator, which owns the tables: a To do step and a Done step, a project with no team and four team-only
+     * tickets reported by someone who is no actor here: one of Shop and one of Support, and two of Shop assigned to Omar,
+     * one of them moved to Done.
      */
     private static function addTicketsOfAcmeFoods(): void
     {
