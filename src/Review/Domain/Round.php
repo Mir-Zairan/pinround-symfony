@@ -151,7 +151,7 @@ final class Round
         // After the highest position, never in a gap a removed picture left, so no stored picture has to move.
         $position = [] === $this->screenshots ? 0 : $this->screenshots[array_key_last($this->screenshots)]->position() + 1;
 
-        $this->screenshots[] = Screenshot::of($screenshotId, $mediaId, $position, null, null, []);
+        $this->screenshots = [...$this->screenshots, Screenshot::of($screenshotId, $mediaId, $position, null, null, [])];
         ++$this->version;
     }
 
@@ -166,8 +166,9 @@ final class Round
         $this->requireEditableDraft($actorId);
         $index = $this->indexOf($screenshotId);
 
-        unset($this->screenshots[$index]);
-        $this->screenshots = array_values($this->screenshots);
+        $remaining = $this->screenshots;
+        unset($remaining[$index]);
+        $this->screenshots = array_values($remaining);
         ++$this->version;
     }
 
@@ -184,7 +185,7 @@ final class Round
         $this->requireEditableDraft($actorId);
         $index = $this->indexOf($screenshotId);
 
-        $this->screenshots[$index] = $this->screenshots[$index]->withText($title, $summary);
+        $this->replaceScreenshotAt($index, $this->screenshots[$index]->withText($title, $summary));
         ++$this->version;
     }
 
@@ -203,7 +204,7 @@ final class Round
         $this->requireEditableDraft($actorId);
         $index = $this->indexOf($screenshotId);
 
-        $this->screenshots[$index] = $this->screenshots[$index]->withPins($pins);
+        $this->replaceScreenshotAt($index, $this->screenshots[$index]->withPins($pins));
         ++$this->version;
     }
 
@@ -218,7 +219,7 @@ final class Round
         $this->requireEditableDraft($actorId);
         $index = $this->indexOf($screenshotId);
 
-        $this->screenshots[$index] = $this->screenshots[$index]->withVerdict($verdict);
+        $this->replaceScreenshotAt($index, $this->screenshots[$index]->withVerdict($verdict));
         ++$this->version;
     }
 
@@ -406,6 +407,13 @@ final class Round
         }
 
         throw new \DomainException('This draft round has no such screenshot.');
+    }
+
+    private function replaceScreenshotAt(int $index, Screenshot $screenshot): void
+    {
+        $screenshots = $this->screenshots;
+        $screenshots[$index] = $screenshot;
+        $this->screenshots = array_values($screenshots);
     }
 
     /**

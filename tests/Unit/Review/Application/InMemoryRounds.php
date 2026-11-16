@@ -150,7 +150,9 @@ final class InMemoryRounds implements Rounds
             }
         }
 
-        $this->stored[$storedIndex] = self::copyOf($round);
+        $stored = $this->stored;
+        $stored[$storedIndex] = self::copyOf($round);
+        $this->stored = array_values($stored);
     }
 
     private function requireTenant(): OrganizationId

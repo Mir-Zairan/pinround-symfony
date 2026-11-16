@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Review\Domain;
 
+use App\Review\Domain\AiPinState;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\PinSource;
+use App\Review\Domain\PinVerdict;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -121,6 +123,48 @@ final class PinTest extends TestCase
         self::assertSame(self::PIN, $pin->id()->toString());
         self::assertSame(self::MIA, $pin->authorId()->toString());
         self::assertSame(2, $pin->number());
+    }
+
+    #[Test]
+    public function aRestoredHumanPinKeepsItsVerdictAndHasNoAiState(): void
+    {
+        $pin = Pin::restored(new PinId(self::PIN), 3, 12.5, 40.0, ' Note ', new UserId(self::MIA), PinSource::Human, null, PinVerdict::Fixed);
+
+        self::assertSame(PinVerdict::Fixed, $pin->verdict());
+        self::assertSame(PinSource::Human, $pin->source());
+        self::assertNull($pin->aiState());
+        self::assertSame('Note', $pin->note());
+    }
+
+    #[Test]
+    public function aRestoredAiPinKeepsItsAiState(): void
+    {
+        $pin = Pin::restored(new PinId(self::PIN), 1, 5.0, 6.0, '', new UserId(self::MIA), PinSource::Ai, AiPinState::Suggested, null);
+
+        self::assertSame(PinSource::Ai, $pin->source());
+        self::assertSame(AiPinState::Suggested, $pin->aiState());
+    }
+
+    #[Test]
+    public function aRestoredPinWithAnAiStateOnAPersonsPinOrNoneOnAnAiPinIsRefused(): void
+    {
+        foreach ([[PinSource::Human, AiPinState::Kept], [PinSource::Ai, null]] as [$source, $aiState]) {
+            try {
+                Pin::restored(new PinId(self::PIN), 1, 5.0, 6.0, '', new UserId(self::MIA), $source, $aiState, null);
+                self::fail('A pin with a mismatched AI state was restored.');
+            } catch (\InvalidArgumentException $refused) {
+                self::assertSame('Only an AI pin has an AI state, and every AI pin has one.', $refused->getMessage());
+            }
+        }
+    }
+
+    #[Test]
+    public function aRestoredPinStillObeysTheRulesOfPlacedBy(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A pin number starts at 1.');
+
+        Pin::restored(new PinId(self::PIN), 0, 5.0, 6.0, '', new UserId(self::MIA), PinSource::Human, null, null);
     }
 
     private static function pin(int $number, float $x, float $y, string $note): Pin
