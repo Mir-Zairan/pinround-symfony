@@ -40,6 +40,8 @@ final class DraftRoundControllerTest extends WebTestCase
     use SeedsTicketRounds;
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
+    /** NOW as DBAL reads a timestamptz column back. */
+    private const string NOW_AS_STORED = '2026-11-06 12:00:00+00';
     private const string SHARED_AT = '2026-11-05 09:00:00+00';
     private const string FRAME = '/t/SHOP-1/rounds';
     private const string START = '/t/SHOP-1/rounds/draft';
@@ -127,7 +129,12 @@ final class DraftRoundControllerTest extends WebTestCase
 
             $this->client->request('POST', self::START, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
 
-            self::assertResponseStatusCodeSame(403, $person.' may see the ticket, so the denial is a 403, not a 404.');
+            self::assertSame("Only the ticket's assignee can start a draft round.", $this->toastAfterTheRedirect(), $person.' may see the ticket, so the denial is a toast, not a 404.');
+            self::assertSame([], $this->roundRowsOf($ticketId), $person);
+
+            $this->client->request('POST', self::START, [], [], self::TURBO_FORM_HEADERS);
+
+            self::assertSame("Only the ticket's assignee can start a draft round.", $this->toastOfTheRefusal(), $person.': the voter runs before the form token is read.');
             self::assertSame([], $this->roundRowsOf($ticketId), $person);
         }
 
@@ -190,6 +197,51 @@ final class DraftRoundControllerTest extends WebTestCase
     }
 
     #[Test]
+    public function aViewerWhoOwnsASharedRoundGetsNotFoundOnShareAndDeleteBecauseTheRoundVoterDeniesEdit(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        // Without the voter, the command would answer its "shared already" refusal here, not NOT_FOUND.
+        $rajsRound = $this->addRound($ticketId, 1, 'draft', 'Raj', self::SHARED_AT);
+        $before = $this->roundRowsOf($ticketId);
+        self::assertCount(1, $before);
+        $this->logIn($this->client, $this->people['Raj']);
+
+        foreach ([$this->shareUrl($rajsRound), $this->deleteUrl($rajsRound)] as $url) {
+            $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))], [], self::TURBO_FORM_HEADERS);
+
+            self::assertResponseStatusCodeSame(404, $url);
+            self::assertStringContainsString(RoundRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent(), $url);
+            self::assertSame($before, $this->roundRowsOf($ticketId), $url);
+        }
+    }
+
+    #[Test]
+    public function anotherPersonsDraftOrAnUnknownRoundIsNotFoundBeforeTheFormTokenIsRead(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $before = $this->roundRowsOf($ticketId);
+        self::assertCount(1, $before);
+
+        foreach (self::OTHERS as $person) {
+            $this->logIn($this->client, $this->people[$person]);
+            foreach ([$draft, Uuid::v7()->toRfc4122()] as $roundId) {
+                foreach ([$this->shareUrl($roundId), $this->deleteUrl($roundId)] as $url) {
+                    foreach ([[], [DraftRoundController::CSRF_FIELD => 'not-the-token']] as $form) {
+                        $this->client->request('POST', $url, $form, [], self::TURBO_FORM_HEADERS);
+
+                        $content = (string) $this->client->getResponse()->getContent();
+                        self::assertResponseStatusCodeSame(404, $person.' '.$url);
+                        self::assertStringContainsString(RoundRefused::NOT_FOUND, $content, $person.' '.$url);
+                        self::assertStringNotContainsString(DraftRoundController::FORM_EXPIRED, $content, $person.' '.$url);
+                        self::assertSame($before, $this->roundRowsOf($ticketId), $person.' '.$url);
+                    }
+                }
+            }
+        }
+    }
+
+    #[Test]
     public function sharingTurnsTheDraftIntoTheNextNumberedRoundReadOnlyForItsOwnerAndSeenByTheLead(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
@@ -205,7 +257,7 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertSame('Shared with the team as round 1.', $this->toastAfterTheRedirect());
         $shared = $this->roundRow($ticketId, $draft);
         self::assertSame(1, $shared['number']);
-        self::assertNotNull($shared['shared_at']);
+        self::assertSame(self::NOW_AS_STORED, $shared['shared_at']);
         self::assertSame(2, $shared['version'], 'The seeded draft is at version 1.');
 
         $frame = $this->frame();
@@ -238,7 +290,7 @@ final class DraftRoundControllerTest extends WebTestCase
 
         self::assertSame(DraftRoundController::DRAFT_DELETED, $this->toastAfterTheRedirect());
         $deleted = $this->roundRow($ticketId, $draft);
-        self::assertNotNull($deleted['deleted_at']);
+        self::assertSame(self::NOW_AS_STORED, $deleted['deleted_at']);
         self::assertSame('closed', $deleted['state']);
         self::assertNull($deleted['shared_at']);
         $frame = $this->frame();
