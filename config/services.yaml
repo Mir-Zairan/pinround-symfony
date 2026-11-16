@@ -205,6 +205,8 @@ services:
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
     App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
     App\Ticketing\Api\AssigneeTicketCounts: '@App\Ticketing\Infrastructure\Doctrine\DbalAssigneeTicketCounts'
+    # Ticketing's port that Review implements, so a move asks about the mover's draft round without depending on Review.
+    App\Ticketing\Api\ShareDraftQuestion: '@App\Review\Application\RoundShareDraftQuestion'
     App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
     App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
     App\Insight\Api\TeamLoadQueries: '@App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries'
@@ -390,6 +392,10 @@ when@test:
         # Ticketing's port as that form will.
         test.ticketing_new_ticket_report:
             alias: App\Ticketing\Api\NewTicketReport
+            public: true
+        # Only MoveTicket takes the port, which would inline it; MoveTicketTest builds MoveTicket with the real one.
+        test.ticketing_share_draft_question:
+            alias: App\Ticketing\Api\ShareDraftQuestion
             public: true
         # Tests do not need the vips tool (CI has none), so ProcessUploadHandlerTest runs the worker with an encoder that
         # follows the same port; tests/Integration/Media/Processing/VipsImageEncoderTest.php runs the real one.

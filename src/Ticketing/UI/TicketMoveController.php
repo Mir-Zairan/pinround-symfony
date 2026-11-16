@@ -15,6 +15,8 @@ use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\SharedKernel\UI\PingsClearedToast;
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\DraftDecisionNeeded;
 use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
@@ -23,6 +25,7 @@ use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\UndecidedDraft;
 use App\Ticketing\Api\WaitingOnRefused;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\RoleTicketVisibilities;
@@ -30,6 +33,7 @@ use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\StepQueries;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -48,6 +52,8 @@ use Symfony\UX\Turbo\TurboBundle;
  * order: a ticket the person may not see is not found, as on its page; someone who may not move tickets of its team
  * (a Viewer, or a Manager or Admin with no team role) is denied; a form token that is not valid, or a version that is
  * no number, changes nothing. Who may make which move is then the team's transition policy, whose refusal is a toast.
+ * A verb move the policy allows, by the owner of an undecided draft round with a screenshot, moves nothing until the
+ * form says share or keep (ADR-0017, hand-off): until then it answers 409 with what the Share draft dialog asks.
  */
 final class TicketMoveController extends AbstractController
 {
@@ -64,6 +70,10 @@ final class TicketMoveController extends AbstractController
     public const string WAITING_ON_USER_FIELD = 'waiting_on_user_id';
     public const string WAITING_ON_LABEL_FIELD = 'waiting_on_label';
     public const string ASSIGNEE_FIELD = 'assignee';
+    /** A verb move's answer to "Share your draft round?": a DraftChoice value, share or keep. */
+    public const string DRAFT_CHOICE_FIELD = 'draft_choice';
+    /** The key of the 409 answer that asks the question instead of moving. */
+    public const string DRAFT_DECISION_NEEDED = 'draftDecisionNeeded';
 
     /** In characters after trimming, as TicketCommands::moveTo counts them. */
     public const int WAITING_ON_LABEL_MAX_LENGTH = 100;
@@ -111,14 +121,16 @@ final class TicketMoveController extends AbstractController
         $this->requestTenant();
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
         $expectedVersion = self::versionOf($request);
+        // Absent or unknown asks first, so only a posted share or keep decides about the draft.
+        $draftChoice = DraftChoice::tryFrom($request->request->getString(self::DRAFT_CHOICE_FIELD));
         $now = $this->clock->now();
 
         try {
-            $toast = $this->transactions->run(function () use ($key, $verb, $csrfToken, $expectedVersion, $now): string {
+            $toast = $this->transactions->run(function () use ($key, $verb, $csrfToken, $expectedVersion, $draftChoice, $now): string {
                 [$actor, $ticket] = $this->movableTicketOf($key);
                 $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 try {
-                    $clearedPingCount = $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now);
+                    $clearedPingCount = $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now, $draftChoice);
                 } catch (MoveRefused $refused) {
                     throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
                 }
@@ -135,6 +147,8 @@ final class TicketMoveController extends AbstractController
             return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MoveRefusedWithToast $refused) {
             return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (DraftDecisionNeeded $needed) {
+            return self::answerWithDraftQuestion($needed->draft);
         }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
@@ -231,6 +245,18 @@ final class TicketMoveController extends AbstractController
         }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
+    }
+
+    /**
+     * What the Share draft dialog needs to ask (dialogs-and-popovers.md): nothing was moved, and the form is to be sent
+     * again with DRAFT_CHOICE_FIELD.
+     */
+    private static function answerWithDraftQuestion(UndecidedDraft $draft): JsonResponse
+    {
+        return new JsonResponse(
+            [self::DRAFT_DECISION_NEEDED => true, 'screenshotCount' => $draft->screenshotCount, 'roundNumber' => $draft->roundNumber],
+            Response::HTTP_CONFLICT,
+        );
     }
 
     /**

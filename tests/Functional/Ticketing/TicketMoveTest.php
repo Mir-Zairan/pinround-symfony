@@ -13,6 +13,7 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\ReadsSentSql;
+use App\Ticketing\Api\DraftChoice;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\UseCaseTicketCommands;
@@ -1309,7 +1310,7 @@ final class TicketMoveTest extends WebTestCase
                 throw new \LogicException('The move routes create no ticket.');
             }
 
-            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int
+            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): int
             {
                 throw new \LogicException('Only moveTo is replaced.');
             }

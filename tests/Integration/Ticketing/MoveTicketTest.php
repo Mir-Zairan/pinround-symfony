@@ -20,6 +20,7 @@ use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\Event\TicketMoved;
 use App\Ticketing\Api\MoveRefused;
+use App\Ticketing\Api\ShareDraftQuestion;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketNotFound;
@@ -121,6 +122,8 @@ final class MoveTicketTest extends KernelTestCase
     private const string TICKET_BY_KEY = 'SELECT t0.project_id AS project_id_1, t0.number AS number_2, t0.key AS key_3,';
     private const string WAITING_TURNS = 'SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn';
     private const string SAVED = 'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?,';
+    /** Review's read of the mover's open draft round, which a verb move asks about (ShareDraftQuestion). */
+    private const string OPEN_DRAFT = 'SELECT id, organization_id, ticket_id, kind, owner_id, number, shared_at, state, version,';
     // Auto-clear's lock of the actor's open pings on the ticket (the auto_clear switch comes with the settings already
     // read), the turn projector's writes, the history row, then the event bus's doctrine_transaction savepoint around
     // the outbox's own.
@@ -902,12 +905,12 @@ final class MoveTicketTest extends KernelTestCase
     }
 
     /**
-     * The team's steps, people and rules come from the caches the first move filled, so a verb move reads the ticket
-     * and the team's waiting reviews and tests, then saves, locks the actor's open pings on the ticket, projects and
-     * publishes.
+     * The team's steps, people and rules come from the caches the first move filled, so a verb move reads the ticket,
+     * the team's waiting reviews and tests and the mover's open draft round (P05.T9), then saves, locks the actor's
+     * open pings on the ticket, projects and publishes.
      */
     #[Test]
-    public function aWarmVerbMoveRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveRunsTenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -916,8 +919,8 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P04.T6: a move uses at most 9 queries');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P04.T6\'s 9 queries of a move, plus P05.T9\'s read of the mover\'s draft');
     }
 
     #[Test]
@@ -1581,6 +1584,8 @@ final class MoveTicketTest extends KernelTestCase
         self::assertInstanceOf(TicketTurnSnapshots::class, $snapshots);
         $pingClearing = $container->get('test.shared_kernel_ping_clearing');
         \assert($pingClearing instanceof PingClearing);
+        $shareDraftQuestion = $container->get('test.ticketing_share_draft_question');
+        \assert($shareDraftQuestion instanceof ShareDraftQuestion);
 
         return new MoveTicket(
             $tickets,
@@ -1596,6 +1601,7 @@ final class MoveTicketTest extends KernelTestCase
             new MessengerTicketEvents($container->get('event.bus'), $this->connection()),
             $container->get(TurnPeopleChoice::class),
             $pingClearing,
+            $shareDraftQuestion,
         );
     }
 
