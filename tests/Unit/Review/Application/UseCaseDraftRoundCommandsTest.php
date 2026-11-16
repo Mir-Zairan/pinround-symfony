@@ -428,12 +428,14 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     {
         $before = $this->snapshot();
         $savesBefore = $this->rounds->savedRounds;
+        $versionBefore = $before[self::DRAFT]['version'];
+        self::assertIsInt($versionBefore);
 
         $number = $this->commands->shareDraftAtHandOff(self::DRAFT, new UserId(self::LENA), self::at());
 
         self::assertSame(2, $number);
         self::assertSame(
-            [...$before[self::DRAFT], 'number' => 2, 'sharedAt' => self::at()->format('c'), 'version' => $before[self::DRAFT]['version'] + 2, 'decision' => 'shared', 'decidedAt' => self::at()->format('c')],
+            [...$before[self::DRAFT], 'number' => 2, 'sharedAt' => self::at()->format('c'), 'version' => $versionBefore + 2, 'decision' => 'shared', 'decidedAt' => self::at()->format('c')],
             $this->snapshot()[self::DRAFT],
         );
         self::assertSame($savesBefore + 1, $this->rounds->savedRounds);

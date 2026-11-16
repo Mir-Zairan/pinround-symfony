@@ -124,13 +124,13 @@ final class RoundShareDraftQuestionTest extends TestCase
     {
         $before = $this->snapshot();
         $draft = $this->undecidedDraftOfOmar();
-        $this->rounds->loadedRounds = 0;
-        $this->rounds->savedRounds = 0;
+        $loadsBefore = $this->rounds->loadedRounds;
+        $savesBefore = $this->rounds->savedRounds;
 
         $number = $this->question->share($draft->roundId, new UserId(self::OMAR), self::at());
 
         self::assertSame(2, $number);
-        self::assertSame([1, 1], [$this->rounds->loadedRounds, $this->rounds->savedRounds], 'The draft is read and saved once, shared and decided together.');
+        self::assertSame([1, 1], [$this->rounds->loadedRounds - $loadsBefore, $this->rounds->savedRounds - $savesBefore], 'The draft is read and saved once, shared and decided together.');
         $after = $this->snapshot();
         self::assertSame(
             [...$before[self::OMARS_DRAFT], 'number' => 2, 'sharedAt' => self::at()->format('c'), 'version' => $before[self::OMARS_DRAFT]['version'] + 2, 'decision' => 'shared', 'decidedAt' => self::at()->format('c')],

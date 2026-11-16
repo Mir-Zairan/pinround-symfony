@@ -67,7 +67,8 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
     /** @var array<string, User> */
     private array $people;
 
-    private string $shopProject;
+    /** Read by SeedsTicketRounds. */
+    protected string $shopProject;
     /** To do, where SHOP-1 starts. */
     private string $stepId;
 
