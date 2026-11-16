@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Review\Queries;
 
+use App\Review\Api\PinNote;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundNotes;
 use App\Review\Api\RoundPinView;
@@ -210,11 +211,11 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
         self::assertSame(self::OMAR_DRAFT, $notes->roundId);
         self::assertNotSame([], $notes->screenshots);
         self::assertEquals([
-            new ScreenshotNotes(self::FIRST_SCREENSHOT, 0, 'Checkout', 'The total is off.', 'not_right', [1 => 'Button hidden', 2 => 'Wrong colour', 3 => 'Prix affiché en €']),
+            new ScreenshotNotes(self::FIRST_SCREENSHOT, 0, 'Checkout', 'The total is off.', 'not_right', [new PinNote(1, 10.25, 7.5, 'Button hidden'), new PinNote(2, 20.25, 14.5, 'Wrong colour'), new PinNote(3, 30.25, 21.5, 'Prix affiché en €')]),
             new ScreenshotNotes(self::SECOND_SCREENSHOT, 1, null, null, null, []),
-            new ScreenshotNotes(self::THIRD_SCREENSHOT, 2, 'Cart', 'All fine.', 'looks_right', [1 => 'Fine here']),
+            new ScreenshotNotes(self::THIRD_SCREENSHOT, 2, 'Cart', 'All fine.', 'looks_right', [new PinNote(1, 10.25, 7.5, 'Fine here')]),
         ], $notes->screenshots);
-        self::assertSame([1, 2, 3], array_keys($notes->screenshots[0]->pinNotes));
+        self::assertSame([1, 2, 3], array_map(static fn (PinNote $pin): int => $pin->number, $notes->screenshots[0]->pins));
     }
 
     #[Test]
@@ -237,7 +238,7 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
 
         self::assertNotNull($notes);
         self::assertSame(self::LENA_DRAFT, $notes->roundId);
-        self::assertEquals([new ScreenshotNotes(self::LENA_SCREENSHOT, 0, 'Lena only', null, null, [1 => 'Lena pin'])], $notes->screenshots);
+        self::assertEquals([new ScreenshotNotes(self::LENA_SCREENSHOT, 0, 'Lena only', null, null, [new PinNote(1, 10.25, 7.5, 'Lena pin')])], $notes->screenshots);
     }
 
     #[Test]
@@ -461,8 +462,8 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
             }
             foreach ($pins as [$id, $screenshotId, $number, $note]) {
                 self::connection()->executeStatement(
-                    "INSERT INTO rvw_pin (organization_id, id, screenshot_id, number, x_pct, y_pct, note, verdict, source, ai_state, author_id, created_at) VALUES (?, ?, ?, ?, '10.00', '20.00', ?, NULL, 'human', NULL, ?, '".self::BEFORE_ANY_ROW."')",
-                    [$organizationId, $id, $screenshotId, $number, $note, self::OMAR],
+                    "INSERT INTO rvw_pin (organization_id, id, screenshot_id, number, x_pct, y_pct, note, verdict, source, ai_state, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'human', NULL, ?, '".self::BEFORE_ANY_ROW."')",
+                    [$organizationId, $id, $screenshotId, $number, \sprintf('%.2f', $number * 10 + 0.25), \sprintf('%.2f', $number * 7 + 0.5), $note, self::OMAR],
                 );
             }
         });

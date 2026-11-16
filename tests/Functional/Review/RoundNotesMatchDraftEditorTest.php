@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Review;
 
 use App\Identity\Domain\User;
+use App\Review\Api\PinNote;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundNotes;
 use App\Review\Api\RoundQueries;
@@ -81,7 +82,7 @@ final class RoundNotesMatchDraftEditorTest extends WebTestCase
     }
 
     #[Test]
-    public function roundNotesHoldTheScreenshotsTitlesSummariesVerdictsAndPinNotesInTheOrderTheEditorShowsThem(): void
+    public function roundNotesHoldTheScreenshotsTextsVerdictsAndPinsWithPositionsInTheOrderTheEditorShowsThem(): void
     {
         $removedShot = $this->seedWorld();
         $this->logIn($this->client, $this->people['Omar']);
@@ -99,23 +100,22 @@ final class RoundNotesMatchDraftEditorTest extends WebTestCase
                 'title' => $screenshot->title,
                 'summary' => $screenshot->summary,
                 'verdict' => $screenshot->verdict,
-                'pinNotes' => $screenshot->pinNotes,
+                'pins' => array_map(static fn (PinNote $pin): array => ['number' => $pin->number, 'x' => $pin->xPercent, 'y' => $pin->yPercent, 'note' => $pin->note], $screenshot->pins),
             ];
         }
         $fromEditor = array_map(static fn (array $picture): array => [
             'title' => $picture['title'],
             'summary' => $picture['summary'],
             'verdict' => $picture['verdict'],
-            'pinNotes' => array_map(static fn (array $pin): string => $pin['note'], $picture['pins']),
+            'pins' => array_map(static fn (int $number, array $pin): array => ['number' => $number, 'x' => (float) $pin['x'], 'y' => (float) $pin['y'], 'note' => $pin['note']], array_keys($picture['pins']), $picture['pins']),
         ], $shown);
 
-        self::assertSame($fromEditor, $fromNotes, 'The same pictures in the same order with the same texts, verdicts and pin notes.');
+        self::assertSame($fromEditor, $fromNotes, 'The same pictures in the same order with the same texts, verdicts and pins (number, x, y, note).');
         self::assertNotContains($removedShot, array_keys($fromNotes));
-        self::assertSame([1, 2, 3], array_keys($fromNotes[array_key_first($fromNotes)]['pinNotes']));
-        // RoundNotes carries no pin position (ScreenshotNotes::$pinNotes is note by number), so x and y are checked on the editor only.
         self::assertSame(
-            [1 => ['10.00', '20.00'], 2 => ['55.50', '60.25'], 3 => ['90.00', '5.00']],
-            array_map(static fn (array $pin): array => [$pin['x'], $pin['y']], $shown[array_key_first($shown)]['pins']),
+            [['number' => 1, 'x' => 10.0, 'y' => 20.0, 'note' => 'Button hidden'], ['number' => 2, 'x' => 55.5, 'y' => 60.25, 'note' => 'Wrong colour'], ['number' => 3, 'x' => 90.0, 'y' => 5.0, 'note' => 'Prix affiché en €']],
+            $fromNotes[array_key_first($fromNotes)]['pins'],
+            'The first picture\'s pins were inserted as 3, 1, 2 and come back by number with their positions.',
         );
     }
 

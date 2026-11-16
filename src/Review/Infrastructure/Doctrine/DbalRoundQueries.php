@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Review\Infrastructure\Doctrine;
 
+use App\Review\Api\PinNote;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundNotes;
 use App\Review\Api\RoundPinView;
@@ -126,7 +127,7 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
         // those of rvw_round_ticket_id_owner_id_open_draft_key, which holds at most one such draft.
         $noteRows = $this->connection->fetchAllAssociative(
             'SELECT round.id AS round_id, screenshot.id AS screenshot_id, screenshot.position, screenshot.title, screenshot.summary,'
-            .' screenshot.verdict, pin.number AS pin_number, pin.note'
+            .' screenshot.verdict, pin.number AS pin_number, pin.x_pct, pin.y_pct, pin.note'
             .' FROM rvw_round AS round'
             .' LEFT JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id'
             .' LEFT JOIN rvw_pin AS pin ON pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id'
@@ -140,7 +141,7 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
             return null;
         }
 
-        /** @var array<string, array{int, ?string, ?string, ?string, array<int, string>}> $screenshotFields by screenshot id */
+        /** @var array<string, array{int, ?string, ?string, ?string, list<PinNote>}> $screenshotFields by screenshot id */
         $screenshotFields = [];
         foreach ($noteRows as $noteRow) {
             $screenshotId = self::textOrNull($noteRow['screenshot_id'], 'screenshot_id');
@@ -156,13 +157,18 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
             ];
             $pinNumber = self::integerOrNull($noteRow['pin_number'], 'pin_number');
             if (null !== $pinNumber) {
-                $screenshotFields[$screenshotId][4][$pinNumber] = self::text($noteRow['note'], 'note');
+                $screenshotFields[$screenshotId][4][] = new PinNote(
+                    $pinNumber,
+                    (float) self::text($noteRow['x_pct'], 'x_pct'),
+                    (float) self::text($noteRow['y_pct'], 'y_pct'),
+                    self::text($noteRow['note'], 'note'),
+                );
             }
         }
 
         $screenshots = [];
-        foreach ($screenshotFields as $screenshotId => [$position, $title, $summary, $verdict, $pinNotes]) {
-            $screenshots[] = new ScreenshotNotes($screenshotId, $position, $title, $summary, $verdict, $pinNotes);
+        foreach ($screenshotFields as $screenshotId => [$position, $title, $summary, $verdict, $pins]) {
+            $screenshots[] = new ScreenshotNotes($screenshotId, $position, $title, $summary, $verdict, $pins);
         }
 
         return new RoundNotes(self::text($noteRows[0]['round_id'], 'round_id'), $screenshots);

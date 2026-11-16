@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace App\Review\Api;
 
 /**
- * One picture of a draft round as RoundNotes carries it: its text, its verdict and its pins' notes.
+ * One picture of a draft round as RoundNotes carries it: its text, its verdict and its pins.
  */
 final readonly class ScreenshotNotes
 {
     /**
-     * @param string|null        $title    null when the picture has none
-     * @param string|null        $summary  null when the picture has none
-     * @param string|null        $verdict  RoundCommands::VERDICT_LOOKS_RIGHT, VERDICT_NOT_RIGHT_YET, or null when none is set
-     * @param array<int, string> $pinNotes each pin's note by its number, from 1, in number order
+     * @param string|null   $title   null when the picture has none
+     * @param string|null   $summary null when the picture has none
+     * @param string|null   $verdict RoundCommands::VERDICT_LOOKS_RIGHT, VERDICT_NOT_RIGHT_YET, or null when none is set
+     * @param list<PinNote> $pins    in number order
      */
     public function __construct(
         public string $screenshotId,
@@ -21,7 +21,7 @@ final readonly class ScreenshotNotes
         public ?string $title,
         public ?string $summary,
         public ?string $verdict,
-        public array $pinNotes,
+        public array $pins,
     ) {
     }
 }
