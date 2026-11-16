@@ -153,10 +153,10 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertSame('What the total shows', $one->filter('textarea[data-field=summary]')->text());
         self::assertSame('600', $one->filter('textarea[data-field=summary]')->attr('maxlength'));
         self::assertStringNotContainsString('First <b>shot</b>', (string) $this->client->getResponse()->getContent(), 'A title is text, never markup.');
-        self::assertSame(['true', 'false'], $one->filter('.draft-shot__verdict-chip')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed')));
-        self::assertSame(['', 'not_right'], $one->filter('.draft-shot__verdict-chip')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-verdict-param')), 'The pressed chip sends an empty verdict, which clears it.');
-        self::assertSame(['setVerdict', 'setVerdict'], $one->filter('.draft-shot__verdict-chip')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-action-param')));
-        self::assertSame([$first, $first], $one->filter('.draft-shot__verdict-chip')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-screenshot-id-param')));
+        self::assertSame(['true', 'false'], $one->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed')));
+        self::assertSame(['', 'not_right'], $one->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-verdict-param')), 'The pressed chip sends an empty verdict, which clears it.');
+        self::assertSame(['setVerdict', 'setVerdict'], $one->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-action-param')));
+        self::assertSame([$first, $first], $one->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-screenshot-id-param')));
         self::assertSame('Remove screenshot', $one->filter('.draft-shot__remove')->text());
         self::assertSame('removeScreenshot', $one->filter('.draft-shot__remove')->attr('data-live-action-param'));
         self::assertSame($first, $one->filter('.draft-shot__remove')->attr('data-live-screenshot-id-param'));
@@ -166,8 +166,8 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertSame(DraftRoundEditor::NOTE_PLACEHOLDER, $one->filter('textarea.pin-list__note')->attr('placeholder'));
 
         $two = $sections->eq(1);
-        self::assertSame(['false', 'false'], $two->filter('.draft-shot__verdict-chip')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed')));
-        self::assertSame(['looks_right', 'not_right'], $two->filter('.draft-shot__verdict-chip')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-verdict-param')));
+        self::assertSame(['false', 'false'], $two->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed')));
+        self::assertSame(['looks_right', 'not_right'], $two->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-verdict-param')));
         self::assertSame('', $two->filter('input[data-field=title]')->attr('value'));
         self::assertCount(0, $two->filter('textarea.pin-list__note'));
         self::assertSame(['Share with the team now', 'Delete draft'], $frame->filter('#round-'.$draft.' form button')->each(static fn (Crawler $button): string => $button->text()), 'Share and Delete stay.');
