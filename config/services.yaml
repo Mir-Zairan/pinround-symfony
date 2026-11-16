@@ -9,6 +9,8 @@
 parameters:
     # The session cookie (framework.yaml); the test env's mock session storage uses the same name.
     app.session_cookie_name: '__Host-pinround'
+    # The state Valkey key of each session is this and its id, for RedisSessionHandler and MergingSessionHandler alike.
+    app.session_key_prefix: 'session:'
     # Session limits of ADR-0012 (idle 8 hours, absolute 30 days), read by EndExpiredSession. The idle one is in
     # seconds because it is also the Valkey key's TTL, which every request renews (RedisSessionHandler below).
     identity.session_idle_seconds: 28800
@@ -91,14 +93,14 @@ services:
         factory: [Symfony\Component\Cache\Adapter\RedisAdapter, createConnection]
         arguments: ['%env(STATE_VALKEY_DSN)%', { lazy: true }]
     Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler:
-        arguments: ['@state_valkey.connection', { prefix: 'session:', ttl: '%identity.session_idle_seconds%' }]
+        arguments: ['@state_valkey.connection', { prefix: '%app.session_key_prefix%', ttl: '%identity.session_idle_seconds%' }]
     # It takes no lock, so a page's lazy frames, which load at once, each kept only their own new CSRF token: every write
     # now takes over the tokens stored meanwhile (MergingSessionHandler). Priority 1 puts it next to the Valkey handler,
     # whose connection and key prefix it shares, inside BackgroundReadOnlySessionHandler.
     App\SharedKernel\Infrastructure\Http\MergingSessionHandler:
         decorates: Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler
         decoration_priority: 1
-        arguments: { $sessionHandler: '@.inner', $connection: '@state_valkey.connection', $keyPrefix: 'session:' }
+        arguments: { $sessionHandler: '@.inner', $connection: '@state_valkey.connection', $keyPrefix: '%app.session_key_prefix%' }
     # A background request (live refresh, realtime token) writes the session only to keep a new CSRF token: else it
     # could write back an older copy over the person's own POST (BackgroundReadOnlySessionHandler).
     App\SharedKernel\Infrastructure\Http\BackgroundReadOnlySessionHandler:

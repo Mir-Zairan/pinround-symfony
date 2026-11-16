@@ -290,6 +290,75 @@ final class MergingSessionHandlerTest extends KernelTestCase
     }
 
     /**
+     * The connection is the worker's, shared by every later request: one left inside the transaction would only queue
+     * their commands.
+     */
+    #[Test]
+    public function aWriteTheValkeyHandlerThrowsOnLeavesTheStoredCopyAndEndsTheTransaction(): void
+    {
+        $storedCopy = self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']);
+        $this->connection->set('session:'.$this->sessionId, $storedCopy);
+        $lostConnection = new \RedisException('read error on connection');
+        $handler = $this->handlerWritingThrough(static function (RedisSessionHandler $valkeyHandler, string $id, string $data) use ($lostConnection): bool {
+            $valkeyHandler->write($id, $data);
+
+            throw $lostConnection;
+        });
+
+        $thrown = null;
+        $this->inRequest(Request::create('https://localhost/t/SHOP-1/rounds'), function () use ($handler, &$thrown): void {
+            try {
+                $handler->write($this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'draft-token']));
+            } catch (\RedisException $exception) {
+                $thrown = $exception;
+            }
+        });
+
+        self::assertSame($lostConnection, $thrown);
+        self::assertSame($storedCopy, $this->connection->get('session:'.$this->sessionId));
+        self::assertTrue($this->connection->set('session:'.$this->sessionId, 'later request'));
+        self::assertSame('later request', $this->connection->get('session:'.$this->sessionId));
+    }
+
+    #[Test]
+    public function aWriteValkeyRefusesFailsAndLeavesTheStoredCopy(): void
+    {
+        $storedCopy = self::encoded(['_security_main' => self::LOGIN, self::THREAD_TOKEN_KEY => 'thread-token']);
+        $this->connection->set('session:'.$this->sessionId, $storedCopy);
+        $handler = $this->handlerWritingThrough(
+            static fn (RedisSessionHandler $valkeyHandler, string $id, string $data): bool => $valkeyHandler->write($id, $data),
+            ttlSeconds: 0,
+        );
+
+        $this->inRequest(Request::create('https://localhost/t/SHOP-1/rounds'), function () use ($handler): void {
+            self::assertFalse($handler->write($this->sessionId, self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'draft-token'])));
+        });
+
+        self::assertSame($storedCopy, $this->connection->get('session:'.$this->sessionId));
+    }
+
+    /**
+     * A key left watched would make the next transaction on the worker's connection fail once that key changes.
+     */
+    #[Test]
+    public function aSessionNotWrittenBackLeavesNoKeyWatched(): void
+    {
+        $this->connection->set('session:'.$this->sessionId, self::encoded(['_security_main' => self::LOGIN]));
+        $this->inRequest(Request::create('https://localhost/t/SHOP-1/rounds'), function (): void {
+            self::assertNotSame('', $this->handler->read($this->sessionId));
+            $this->connection->del('session:'.$this->sessionId);
+            self::assertTrue($this->handler->write($this->sessionId, self::encoded(['_security_main' => self::LOGIN])));
+        });
+        self::assertSame(0, $this->connection->exists('session:'.$this->sessionId));
+
+        self::assertTrue($this->otherConnection()->set('session:'.$this->sessionId, 'logged in again elsewhere'));
+        $this->connection->multi();
+        $this->connection->get('session:'.$this->sessionId);
+
+        self::assertSame(['logged in again elsewhere'], $this->connection->exec());
+    }
+
+    /**
      * @param array<string, mixed>        $attributes
      * @param array<string, list<string>> $flashes
      */
@@ -306,20 +375,38 @@ final class MergingSessionHandlerTest extends KernelTestCase
      */
     private function handlerRacedBy(array $racingCopies): MergingSessionHandler
     {
-        $dsn = $_SERVER['TEST_STATE_VALKEY_DSN'] ?? null;
-        self::assertIsString($dsn);
-        $otherConnection = RedisAdapter::createConnection($dsn);
-        self::assertInstanceOf(\Redis::class, $otherConnection);
-        $valkeyHandler = new RedisSessionHandler($this->connection, ['prefix' => 'session:', 'ttl' => 28800]);
-        $racedHandler = new class($valkeyHandler, $otherConnection, 'session:', $racingCopies) implements \SessionHandlerInterface, \SessionUpdateTimestampHandlerInterface {
+        $otherConnection = $this->otherConnection();
+        $keyPrefix = $this->keyPrefix();
+
+        return $this->handlerWritingThrough(static function (RedisSessionHandler $valkeyHandler, string $id, string $data) use ($otherConnection, $keyPrefix, &$racingCopies): bool {
+            $racingCopy = array_shift($racingCopies);
+            if (null !== $racingCopy) {
+                $otherConnection->set($keyPrefix.$id, $racingCopy);
+            }
+
+            return $valkeyHandler->write($id, $data);
+        });
+    }
+
+    /**
+     * The handler over the real Valkey one, as the services wire it, with each write of the Valkey handler made by
+     * $write instead.
+     *
+     * @param \Closure(RedisSessionHandler, string, string): bool $write
+     */
+    private function handlerWritingThrough(\Closure $write, ?int $ttlSeconds = null): MergingSessionHandler
+    {
+        $valkeyHandler = new RedisSessionHandler($this->connection, [
+            'prefix' => $this->keyPrefix(),
+            'ttl' => $ttlSeconds ?? self::getContainer()->getParameter('identity.session_idle_seconds'),
+        ]);
+        $innerHandler = new class($valkeyHandler, $write) implements \SessionHandlerInterface, \SessionUpdateTimestampHandlerInterface {
             /**
-             * @param list<string> $racingCopies
+             * @param \Closure(RedisSessionHandler, string, string): bool $write
              */
             public function __construct(
                 private readonly RedisSessionHandler $valkeyHandler,
-                private readonly \Redis $otherConnection,
-                private readonly string $keyPrefix,
-                private array $racingCopies,
+                private readonly \Closure $write,
             ) {
             }
 
@@ -340,12 +427,7 @@ final class MergingSessionHandlerTest extends KernelTestCase
 
             public function write(string $id, string $data): bool
             {
-                $racingCopy = array_shift($this->racingCopies);
-                if (null !== $racingCopy) {
-                    $this->otherConnection->set($this->keyPrefix.$id, $racingCopy);
-                }
-
-                return $this->valkeyHandler->write($id, $data);
+                return ($this->write)($this->valkeyHandler, $id, $data);
             }
 
             public function destroy(string $id): bool
@@ -369,7 +451,25 @@ final class MergingSessionHandlerTest extends KernelTestCase
             }
         };
 
-        return new MergingSessionHandler($racedHandler, $this->connection, 'session:', $this->csrfTokenStorage());
+        return new MergingSessionHandler($innerHandler, $this->connection, $this->keyPrefix(), $this->csrfTokenStorage());
+    }
+
+    /**
+     * A connection of its own, as another request in another worker has.
+     */
+    private function otherConnection(): \Redis
+    {
+        $dsn = $_SERVER['TEST_STATE_VALKEY_DSN'] ?? null;
+        self::assertIsString($dsn);
+        $otherConnection = RedisAdapter::createConnection($dsn);
+        self::assertInstanceOf(\Redis::class, $otherConnection);
+
+        return $otherConnection;
+    }
+
+    private function keyPrefix(): string
+    {
+        return self::getContainer()->getParameter('app.session_key_prefix');
     }
 
     private function csrfTokenStorage(): RecordingCsrfTokenStorage

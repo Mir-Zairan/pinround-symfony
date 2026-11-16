@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Identity;
 
 use App\Identity\Infrastructure\Security\ConsumeFirstLoginRateLimiter;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
+use App\SharedKernel\Infrastructure\Http\MergingSessionHandler;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler;
@@ -83,9 +84,18 @@ final class LoginConfigTest extends TestCase
             ],
             self::at($framework, 'framework', 'session'),
         );
+        self::assertSame('session:', self::at($services, 'parameters', 'app.session_key_prefix'));
         self::assertSame(
-            ['arguments' => ['@state_valkey.connection', ['prefix' => 'session:', 'ttl' => '%identity.session_idle_seconds%']]],
+            ['arguments' => ['@state_valkey.connection', ['prefix' => '%app.session_key_prefix%', 'ttl' => '%identity.session_idle_seconds%']]],
             self::at($services, 'services', RedisSessionHandler::class),
+        );
+        self::assertSame(
+            [
+                'decorates' => RedisSessionHandler::class,
+                'decoration_priority' => 1,
+                'arguments' => ['$sessionHandler' => '@.inner', '$connection' => '@state_valkey.connection', '$keyPrefix' => '%app.session_key_prefix%'],
+            ],
+            self::at($services, 'services', MergingSessionHandler::class),
         );
         self::assertSame(
             [
@@ -117,6 +127,8 @@ final class LoginConfigTest extends TestCase
         self::assertSame(['%env(TEST_STATE_VALKEY_DSN)%', ['lazy' => true]], self::at($services, 'when@test', 'services', 'state_valkey.connection', 'arguments'));
         self::assertSame(['when@test'], self::environmentsRedefining($services, 'services', 'state_valkey.connection'));
         self::assertSame([], self::environmentsRedefining($services, 'services', RedisSessionHandler::class));
+        self::assertSame([], self::environmentsRedefining($services, 'services', MergingSessionHandler::class));
+        self::assertSame([], self::environmentsRedefining($services, 'parameters', 'app.session_key_prefix'));
         self::assertSame(['storage_factory_id' => 'test.session.storage.factory.mock_file'], self::at($framework, 'when@test', 'framework', 'session'));
         self::assertSame(['when@test'], self::environmentsRedefining($framework, 'framework', 'session'));
     }
