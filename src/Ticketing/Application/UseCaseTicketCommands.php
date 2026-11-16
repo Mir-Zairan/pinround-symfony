@@ -53,7 +53,8 @@ final readonly class UseCaseTicketCommands implements TicketCommands
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
+        ?DraftChoice $draftChoice = DraftChoice::Keep,
     ): int {
-        return $this->moveTicket->moveTo($organizationId, $actor, $key, $stepId, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $at);
+        return $this->moveTicket->moveTo($organizationId, $actor, $key, $stepId, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $at, $draftChoice);
     }
 }

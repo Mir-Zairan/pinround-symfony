@@ -122,7 +122,7 @@ final class MoveTicketTest extends KernelTestCase
     private const string TICKET_BY_KEY = 'SELECT t0.project_id AS project_id_1, t0.number AS number_2, t0.key AS key_3,';
     private const string WAITING_TURNS = 'SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn';
     private const string SAVED = 'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?,';
-    /** Review's read of the mover's open draft round, which a verb move asks about (ShareDraftQuestion). */
+    /** Review's read of the mover's open draft round, which a move to another step asks about (ShareDraftQuestion). */
     private const string OPEN_DRAFT = 'SELECT id, organization_id, ticket_id, kind, owner_id, number, shared_at, state, version,';
     // Auto-clear's lock of the actor's open pings on the ticket (the auto_clear switch comes with the settings already
     // read), the turn projector's writes, the history row, then the event bus's doctrine_transaction savepoint around
@@ -923,8 +923,11 @@ final class MoveTicketTest extends KernelTestCase
         self::assertCount(10, self::queriesBesideSavepoints($statements), 'P04.T6\'s 9 queries of a move, plus P05.T9\'s read of the mover\'s draft');
     }
 
+    /**
+     * A move to a chosen step reads the mover's open draft round as a verb move does (P05.T9).
+     */
     #[Test]
-    public function aWarmMoveToAPlainStepRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToAPlainStepRunsTenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -933,15 +936,15 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::ON_HOLD_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P04.T6: a move uses at most 9 queries');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P04.T6\'s 9 queries of a move, plus P05.T9\'s read of the mover\'s draft');
     }
 
     /**
      * Raj is in the team, but who a ticket waits on may be any member of the organization, so his membership is read.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsElevenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -950,16 +953,16 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, new UserId(self::RAJ), null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        // Ten, not nine: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
-        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        // Eleven, not ten: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
+        self::assertCount(11, self::queriesBesideSavepoints($statements), 'P03.T7: the move with its draft read plus the waited-on person\'s membership check');
     }
 
     /**
      * With nobody named the ticket waits on Mia, its reporter, whose membership is read as a named person's is.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsElevenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -968,8 +971,8 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the reporter\'s membership check');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(11, self::queriesBesideSavepoints($statements), 'P03.T7: the move with its draft read plus the reporter\'s membership check');
     }
 
     /**

@@ -98,20 +98,8 @@ final readonly class MoveTicket
         $team = $this->teamOf($teamId);
         $allowed = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, $verb);
         $waitingOn = self::NEEDS_INPUT === $allowed->target->coreCode() ? $this->waitingOnReporter($ticket) : null;
-        // A move that would stay in its step is refused by moveAndRecord, which no question may come before.
-        $draft = $allowed->target->id() === $ticket->stepId() ? null : $this->shareDraftQuestion->undecidedDraftOf($ticket->id(), $actor);
-        if (null !== $draft && null === $draftChoice) {
-            throw new DraftDecisionNeeded($draft);
-        }
 
-        $clearedPingCount = $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts);
-        if (DraftChoice::Share === $draftChoice && null !== $draft) {
-            $this->shareDraftQuestion->share($draft, $actor, $at);
-        } elseif (null !== $draft) {
-            $this->shareDraftQuestion->keepPrivate($draft, $actor, $at);
-        }
-
-        return $clearedPingCount;
+        return $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts, $draftChoice);
     }
 
     /**
@@ -189,13 +177,16 @@ final readonly class MoveTicket
      * @return int how many of the actor's pings on the ticket the move cleared
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
-     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
+     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first,
+     *                                or the actor's draft first; in that last case the move is written, so the caller
+     *                                rolls back
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team, is its step now,
      *                                the policy refuses it, a waiting-on is given for a step other than Needs input,
      *                                or the person to wait on (the reporter when nobody is named) is no member of the
      *                                organization
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is not one line of at
      *                                most 100 characters
+     * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft on the ticket
      */
     public function moveTo(
         OrganizationId $organizationId,
@@ -206,6 +197,7 @@ final readonly class MoveTicket
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
+        ?DraftChoice $draftChoice = DraftChoice::Keep,
     ): int {
         if (null !== $waitingOnUserId && null !== $waitingOnLabel) {
             throw new WaitingOnRefused('A ticket waits on a person or a label, not both.');
@@ -238,7 +230,7 @@ final readonly class MoveTicket
         };
         $waitingTurns = $this->waitingTurnsOf($before);
 
-        return $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns));
+        return $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns), $draftChoice);
     }
 
     /**
@@ -324,12 +316,16 @@ final readonly class MoveTicket
 
     /**
      * The reviewer or tester is stored on entering Code review or Testing (FR-WF-14), chosen from the same loads the
-     * turn refresh gets, so the stored person, the turn row and who may approve are one person.
+     * turn refresh gets, so the stored person, the turn row and who may approve are one person. Both moves change the
+     * step, so both ask about the actor's undecided draft here, after every check of the move but the save, and decide
+     * it after the save (ADR-0017, hand-off); a give keeps its step or only leaves Backlog, and does not ask.
      *
      * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
      * @param TeamFacts                         $teamFacts    the team facts built from $before and $waitingTurns
      *
      * @return int how many of the actor's pings on the ticket the move cleared
+     *
+     * @throws DraftDecisionNeeded when $draftChoice is null and the actor has an undecided draft on the ticket
      */
     private function moveAndRecord(
         Ticket $ticket,
@@ -342,10 +338,15 @@ final readonly class MoveTicket
         \DateTimeImmutable $at,
         array $waitingTurns,
         TeamFacts $teamFacts,
+        ?DraftChoice $draftChoice,
     ): int {
         $fromStepId = $ticket->stepId();
         if ($target->id() === $fromStepId) {
             throw new MoveRefused(null);
+        }
+        $draft = $this->shareDraftQuestion->undecidedDraftOf($ticket->id(), $actor);
+        if (null !== $draft && null === $draftChoice) {
+            throw new DraftDecisionNeeded($draft);
         }
         $ticket->move(
             $target->id(),
@@ -357,7 +358,14 @@ final readonly class MoveTicket
             self::TEST === $target->coreCode() ? $this->turnPeopleChoice->testerToStore($teamFacts) : null,
         );
 
-        return $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
+        $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
+        if (DraftChoice::Share === $draftChoice && null !== $draft) {
+            $this->shareDraftQuestion->share($draft, $actor, $at);
+        } elseif (null !== $draft) {
+            $this->shareDraftQuestion->keepPrivate($draft, $actor, $at);
+        }
+
+        return $clearedPingCount;
     }
 
     /**

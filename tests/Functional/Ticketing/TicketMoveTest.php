@@ -1320,7 +1320,7 @@ final class TicketMoveTest extends WebTestCase
                 throw new \LogicException('Only moveTo is replaced.');
             }
 
-            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): int
+            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): int
             {
                 throw $this->fault;
             }

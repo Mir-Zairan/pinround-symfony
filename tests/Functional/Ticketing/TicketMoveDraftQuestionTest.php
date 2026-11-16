@@ -27,7 +27,7 @@ use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
- * "Share your draft round?" on a verb move of Acme Foods' SHOP-1 (P05.T9, ADR-0017, hand-off), through the real
+ * "Share your draft round?" on a verb move and a move to a chosen step of Acme Foods' SHOP-1 (P05.T9, ADR-0017, hand-off), through the real
  * firewall, voters, policy and database. Omar is the assignee and owns the draft with two screenshots; Lena leads Shop
  * and has a draft of her own, Mia is a member, Raj a manager and Sara an admin of no team. Mia's round 1 is shared, so
  * Omar's draft would be round 2. The clock is fixed on 6 Nov 2026, before today: a clock ahead of the login would end
@@ -280,6 +280,153 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
             $after['rounds'][$this->omarsDraft],
         );
         self::assertSame(array_diff_key($before['rounds'], [$this->omarsDraft => true]), array_diff_key($after['rounds'], [$this->omarsDraft => true]));
+    }
+
+    /**
+     * Lena's "Move to another step…" asks about her own draft (one screenshot) as a verb move does.
+     */
+    #[Test]
+    #[DataProvider('formsWithNoChoice')]
+    public function aMoveToWithNoChoiceAsksAboutTheMoversDraftAndMovesNothing(?string $choice): void
+    {
+        $this->addOmarsScreenshots(2);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields(null === $choice ? [] : [TicketMoveController::DRAFT_CHOICE_FIELD => $choice]));
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame(
+            [TicketMoveController::DRAFT_DECISION_NEEDED => true, 'screenshotCount' => 1, 'roundNumber' => 2],
+            json_decode((string) $this->client->getResponse()->getContent(), true, 512, \JSON_THROW_ON_ERROR),
+        );
+        self::assertSame($before, $this->stateOf());
+        self::assertSame($this->steps['todo'], $before['ticket']['step_id']);
+        self::assertNull($before['rounds'][$this->lenasDraft]['decision']);
+    }
+
+    #[Test]
+    public function shareOnAMoveToMovesTheTicketThenSharesOnlyTheMoversDraft(): void
+    {
+        $this->addOmarsScreenshots(2);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']));
+
+        self::assertSame('Moved to In progress.', $this->toastAfterTheRedirect());
+        $after = $this->stateOf();
+        self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
+        self::assertSame(
+            [...$before['rounds'][$this->lenasDraft], 'number' => 2, 'shared_at' => self::NOW_AS_STORED, 'version' => 3, 'decision' => 'shared', 'decided_at' => self::NOW_AS_STORED],
+            $after['rounds'][$this->lenasDraft],
+        );
+        self::assertSame(array_diff_key($before['rounds'], [$this->lenasDraft => true]), array_diff_key($after['rounds'], [$this->lenasDraft => true]), 'Omar\'s draft and Mia\'s round stay as they were.');
+    }
+
+    #[Test]
+    public function keepOnAMoveToMovesTheTicketAndKeepsOnlyTheMoversDraftPrivate(): void
+    {
+        $this->addOmarsScreenshots(2);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'keep']));
+
+        self::assertSame('Moved to In progress.', $this->toastAfterTheRedirect());
+        $after = $this->stateOf();
+        self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
+        self::assertSame(
+            [...$before['rounds'][$this->lenasDraft], 'version' => 2, 'decision' => 'kept_private', 'decided_at' => self::NOW_AS_STORED],
+            $after['rounds'][$this->lenasDraft],
+        );
+        self::assertNull($after['rounds'][$this->lenasDraft]['shared_at']);
+        self::assertSame(array_diff_key($before['rounds'], [$this->lenasDraft => true]), array_diff_key($after['rounds'], [$this->lenasDraft => true]));
+    }
+
+    /**
+     * @return iterable<string, array{string, string, array<string, string>, string}> who posts, the target step's core
+     *                                                                                code, the fields over the form's,
+     *                                                                                and the toast
+     */
+    public static function refusedMoveTosWithAChoice(): iterable
+    {
+        foreach (['share', 'keep', null] as $choice) {
+            $choiceFields = null === $choice ? [] : [TicketMoveController::DRAFT_CHOICE_FIELD => $choice];
+            $label = $choice ?? 'no choice';
+            yield 'the step it is in, with '.$label => ['Lena', 'todo', $choiceFields, MoveToasts::MOVE_REFUSED];
+            yield 'a stale version, with '.$label => ['Lena', 'progress', [TicketMoveController::VERSION_FIELD => '2', ...$choiceFields], MoveToasts::CHANGED_MEANWHILE];
+            yield 'Omar, the assignee, who may not move to a chosen step, with '.$label => ['Omar', 'progress', $choiceFields, MoveToasts::MOVE_REFUSED];
+        }
+    }
+
+    /**
+     * Only a move to another step asks, after the move's own checks; a choice never shares or decides without the move.
+     *
+     * @param array<string, string> $fields
+     */
+    #[Test]
+    #[DataProvider('refusedMoveTosWithAChoice')]
+    public function aRefusedMoveToSaysWhyAndNeitherMovesNorSharesNorDecides(string $person, string $step, array $fields, string $expectedToast): void
+    {
+        $this->addOmarsScreenshots(2);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people[$person]);
+
+        $this->client->request('POST', $this->moveToPath($step), $this->moveFields($fields));
+
+        self::assertSame($expectedToast, $this->toastAfterTheRedirect());
+        self::assertSame($before, $this->stateOf());
+        self::assertNull($before['rounds'][$this->lenasDraft]['decision']);
+        self::assertNull($before['rounds'][$this->omarsDraft]['decision']);
+    }
+
+    /**
+     * A give changes who has the ticket, not who sees the draft, so it asks nothing (P05.T9 step 1, ADR-0017).
+     */
+    #[Test]
+    public function aGiveAsksNothingAndLeavesTheGiversDraftUndecided(): void
+    {
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', '/t/SHOP-1/assign', $this->moveFields([TicketMoveController::ASSIGNEE_FIELD => $this->people['Mia']->id()->toString()]));
+
+        self::assertSame('Given to Mia.', $this->toastAfterTheRedirect());
+        $after = $this->stateOf();
+        self::assertSame(self::VERSION + 1, $after['ticket']['version']);
+        self::assertSame($this->steps['todo'], $after['ticket']['step_id']);
+        self::assertSame($before['rounds'], $after['rounds']);
+        self::assertNull($after['rounds'][$this->lenasDraft]['decision']);
+    }
+
+    #[Test]
+    public function aMoveToThroughTicketCommandsWithNoChoiceKeepsTheDraftPrivate(): void
+    {
+        $before = $this->stateOf();
+        $ticketCommands = self::getContainer()->get('test.ticketing_ticket_commands');
+        self::assertInstanceOf(TicketCommands::class, $ticketCommands);
+        $lena = $this->people['Lena']->id();
+        $organizationId = $this->acmeFoods;
+        $progress = $this->steps['progress'];
+
+        $this->tenantTransactions()->committedAs(
+            $organizationId->toString(),
+            static fn (): int => $ticketCommands->moveTo($organizationId, $lena, self::KEY, $progress, self::VERSION, null, null, new \DateTimeImmutable(self::NOW)),
+        );
+
+        $after = $this->stateOf();
+        self::assertSame($this->steps['progress'], $after['ticket']['step_id']);
+        self::assertSame(
+            [...$before['rounds'][$this->lenasDraft], 'version' => 2, 'decision' => 'kept_private', 'decided_at' => self::NOW_AS_STORED],
+            $after['rounds'][$this->lenasDraft],
+        );
+        self::assertSame(array_diff_key($before['rounds'], [$this->lenasDraft => true]), array_diff_key($after['rounds'], [$this->lenasDraft => true]));
+    }
+
+    private function moveToPath(string $coreCode): string
+    {
+        return '/t/SHOP-1/move-to/'.$this->steps[$coreCode];
     }
 
     /**

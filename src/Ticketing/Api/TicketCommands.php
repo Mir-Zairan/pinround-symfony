@@ -83,7 +83,8 @@ interface TicketCommands
      * the same save (a ticket in To do stays there), and writes the "moved" history row with the payload
      * {"verb": "give_it_to", "assignee_id": <the person>}, the turn row, TicketMoved (only for a ticket that left
      * Backlog) and TicketAssigned. A new assignee clears the stored reviewer, and the stored tester when it is the new
-     * assignee. In To do only the lead gives an assigned ticket to someone else (Workflow's policy).
+     * assignee. In To do only the lead gives an assigned ticket to someone else (Workflow's policy). It never asks about
+     * or decides the actor's draft round: that question belongs to moves on to another step (ADR-0017, P05.T9).
      *
      * @param UserId $assignee the person to give it to: the lead or a member of the ticket's team, not a viewer
      *
@@ -102,19 +103,22 @@ interface TicketCommands
     /**
      * The lead's "Move to another step…": moves the ticket to a step of its team without a verb, and writes the same rows
      * and event as move, with no verb. In Needs input the ticket waits on the person or label given, else its reporter.
+     * It shares or keeps private the actor's undecided draft round as move does.
      *
-     * @param string $stepId the uuid of the step to move to
+     * @param string           $stepId      the uuid of the step to move to
+     * @param DraftChoice|null $draftChoice as move takes it
      *
      * @return int how many of the actor's open pings on the ticket the move cleared, as move does
      *
      * @throws TicketNotFound         as move does
-     * @throws TicketChangedMeanwhile as move does
+     * @throws TicketChangedMeanwhile as move does, also for the actor's draft
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team or is its step now, the
      *                                policy refuses the move (with the rule's note when one explains it), someone to
      *                                wait on is given for a step other than Needs input, or the person to wait on (the
      *                                reporter when nobody is named) is no member of the organization; nothing is saved
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is blank, over 100
      *                                characters or not one line; nothing is saved
+     * @throws DraftDecisionNeeded    as move does, after every check above but the save; nothing is saved
      * @throws \LogicException        when no transaction is open
      */
     public function moveTo(
@@ -126,5 +130,6 @@ interface TicketCommands
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
+        ?DraftChoice $draftChoice = DraftChoice::Keep,
     ): int;
 }

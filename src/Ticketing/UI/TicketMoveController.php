@@ -52,8 +52,9 @@ use Symfony\UX\Turbo\TurboBundle;
  * order: a ticket the person may not see is not found, as on its page; someone who may not move tickets of its team
  * (a Viewer, or a Manager or Admin with no team role) is denied; a form token that is not valid, or a version that is
  * no number, changes nothing. Who may make which move is then the team's transition policy, whose refusal is a toast.
- * A verb move the policy allows, by the owner of an undecided draft round with a screenshot, moves nothing until the
- * form says share or keep (ADR-0017, hand-off): until then it answers 409 with what the Share draft dialog asks.
+ * A verb move or move to a step the policy allows, by the owner of an undecided draft round with a screenshot, moves
+ * nothing until the form says share or keep (ADR-0017, hand-off): until then it answers 409 with what the Share draft
+ * dialog asks. A give does not ask.
  */
 final class TicketMoveController extends AbstractController
 {
@@ -70,7 +71,7 @@ final class TicketMoveController extends AbstractController
     public const string WAITING_ON_USER_FIELD = 'waiting_on_user_id';
     public const string WAITING_ON_LABEL_FIELD = 'waiting_on_label';
     public const string ASSIGNEE_FIELD = 'assignee';
-    /** A verb move's answer to "Share your draft round?": a DraftChoice value, share or keep. */
+    /** A verb move's or move-to's answer to "Share your draft round?": a DraftChoice value, share or keep. */
     public const string DRAFT_CHOICE_FIELD = 'draft_choice';
     /** The key of the 409 answer that asks the question instead of moving. */
     public const string DRAFT_DECISION_NEEDED = 'draftDecisionNeeded';
@@ -166,10 +167,11 @@ final class TicketMoveController extends AbstractController
         $expectedVersion = self::versionOf($request);
         $waitingOnUserId = $request->request->getString(self::WAITING_ON_USER_FIELD);
         $waitingOnLabel = $request->request->getString(self::WAITING_ON_LABEL_FIELD);
+        $draftChoice = DraftChoice::tryFrom($request->request->getString(self::DRAFT_CHOICE_FIELD));
         $now = $this->clock->now();
 
         try {
-            $toast = $this->transactions->run(function () use ($key, $stepId, $csrfToken, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $now): string {
+            $toast = $this->transactions->run(function () use ($key, $stepId, $csrfToken, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $draftChoice, $now): string {
                 [$actor, $ticket] = $this->movableTicketOf($key);
                 $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 if (self::isWaitingOnMalformed($waitingOnUserId, $waitingOnLabel)) {
@@ -185,6 +187,7 @@ final class TicketMoveController extends AbstractController
                         '' === $waitingOnUserId ? null : new UserId(strtolower($waitingOnUserId)),
                         '' === $waitingOnLabel ? null : $waitingOnLabel,
                         $now,
+                        $draftChoice,
                     );
                 } catch (MoveRefused $refused) {
                     throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
@@ -200,6 +203,8 @@ final class TicketMoveController extends AbstractController
             return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MoveRefusedWithToast $refused) {
             return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (DraftDecisionNeeded $needed) {
+            return self::answerWithDraftQuestion($needed->draft);
         }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
