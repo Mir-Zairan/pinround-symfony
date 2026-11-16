@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Ticketing\UI;
 
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\MoveResult;
+
 /**
  * The toasts that answer a move on the ticket page (ticket-page.md, Your next step box): one for each verb the page
  * offers, "Moved to <step>." for the lead's Move to another step, and the refusals. {person} is the first name of whose
@@ -32,6 +35,8 @@ final class MoveToasts
     ];
 
     public const string MOVED_TO = 'Moved to {step}.';
+    public const string DRAFT_SHARED = 'Your draft is now round {round} for the team.';
+    public const string DRAFT_KEPT_PRIVATE = 'Your draft stays private.';
     public const string GIVEN_TO = 'Given to {person}.';
     public const string CHANGED_MEANWHILE = 'Someone changed this ticket. The page is updated.';
     public const string FORM_EXPIRED = 'The page was open too long. Try again.';
@@ -80,6 +85,22 @@ final class MoveToasts
     public static function movedTo(string $stepName): string
     {
         return strtr(self::MOVED_TO, [self::STEP => $stepName]);
+    }
+
+    /**
+     * "Moved to <step>." and what the move did with the mover's draft round, with the number the shared round got.
+     *
+     * @throws \LogicException for a move that did nothing with a draft
+     */
+    public static function movedToWithDraft(string $stepName, MoveResult $result): string
+    {
+        $draftSentence = match ($result->draftOutcome) {
+            DraftChoice::Share => strtr(self::DRAFT_SHARED, ['{round}' => (string) $result->sharedRoundNumber]),
+            DraftChoice::Keep => self::DRAFT_KEPT_PRIVATE,
+            null => throw new \LogicException('The move decided no draft round.'),
+        };
+
+        return self::movedTo($stepName).' '.$draftSentence;
     }
 
     /**

@@ -13,6 +13,7 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Ticketing\Api\MoveResult;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
@@ -128,10 +129,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         $this->client->request('POST', self::START_WORK, $this->moveFields(null === $choice ? [] : [TicketMoveController::DRAFT_CHOICE_FIELD => $choice]));
 
         self::assertResponseStatusCodeSame(409);
-        self::assertSame(
-            [TicketMoveController::DRAFT_DECISION_NEEDED => true, 'screenshotCount' => 2, 'roundNumber' => 2],
-            json_decode((string) $this->client->getResponse()->getContent(), true, 512, \JSON_THROW_ON_ERROR),
-        );
+        $this->assertTheQuestionPage(2, 2, 'In progress', self::START_WORK);
         self::assertSame($before, $this->stateOf());
     }
 
@@ -144,7 +142,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->client->request('POST', self::START_WORK, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']));
 
-        self::assertSame('Started. Status is In progress.', $this->toastAfterTheRedirect());
+        self::assertSame('Moved to In progress. Your draft is now round 2 for the team.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
         self::assertSame(
@@ -165,7 +163,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->client->request('POST', self::START_WORK, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'keep']));
 
-        self::assertSame('Started. Status is In progress.', $this->toastAfterTheRedirect());
+        self::assertSame('Moved to In progress. Your draft stays private.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
         self::assertSame(
@@ -270,7 +268,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->tenantTransactions()->committedAs(
             $organizationId->toString(),
-            static fn (): int => $ticketCommands->move($organizationId, $omar, self::KEY, 'start_work', self::VERSION, new \DateTimeImmutable(self::NOW)),
+            static fn (): MoveResult => $ticketCommands->move($organizationId, $omar, self::KEY, 'start_work', self::VERSION, new \DateTimeImmutable(self::NOW)),
         );
 
         $after = $this->stateOf();
@@ -296,10 +294,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields(null === $choice ? [] : [TicketMoveController::DRAFT_CHOICE_FIELD => $choice]));
 
         self::assertResponseStatusCodeSame(409);
-        self::assertSame(
-            [TicketMoveController::DRAFT_DECISION_NEEDED => true, 'screenshotCount' => 1, 'roundNumber' => 2],
-            json_decode((string) $this->client->getResponse()->getContent(), true, 512, \JSON_THROW_ON_ERROR),
-        );
+        $this->assertTheQuestionPage(1, 2, 'In progress', $this->moveToPath('progress'));
         self::assertSame($before, $this->stateOf());
         self::assertSame($this->steps['todo'], $before['ticket']['step_id']);
         self::assertNull($before['rounds'][$this->lenasDraft]['decision']);
@@ -314,7 +309,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']));
 
-        self::assertSame('Moved to In progress.', $this->toastAfterTheRedirect());
+        self::assertSame('Moved to In progress. Your draft is now round 2 for the team.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
         self::assertSame(
@@ -333,7 +328,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'keep']));
 
-        self::assertSame('Moved to In progress.', $this->toastAfterTheRedirect());
+        self::assertSame('Moved to In progress. Your draft stays private.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame([...$before['ticket'], 'step_id' => $this->steps['progress'], 'version' => self::VERSION + 1, 'events' => $before['ticket']['events'] + 1], $after['ticket']);
         self::assertSame(
@@ -412,7 +407,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         $this->tenantTransactions()->committedAs(
             $organizationId->toString(),
-            static fn (): int => $ticketCommands->moveTo($organizationId, $lena, self::KEY, $progress, self::VERSION, null, null, new \DateTimeImmutable(self::NOW)),
+            static fn (): MoveResult => $ticketCommands->moveTo($organizationId, $lena, self::KEY, $progress, self::VERSION, null, null, new \DateTimeImmutable(self::NOW)),
         );
 
         $after = $this->stateOf();
@@ -422,6 +417,66 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
             $after['rounds'][$this->lenasDraft],
         );
         self::assertSame(array_diff_key($before['rounds'], [$this->lenasDraft => true]), array_diff_key($after['rounds'], [$this->lenasDraft => true]));
+    }
+
+    #[Test]
+    public function aTurboFormGetsTheDialogAsATurboStreamThatOpensItAndMovesNothing(): void
+    {
+        $this->addOmarsScreenshots(2);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::START_WORK, $this->moveFields(), [], ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html']);
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertStringStartsWith('text/vnd.turbo-stream.html', (string) $this->client->getResponse()->headers->get('Content-Type'));
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('<turbo-stream action="append" targets="body">', $content);
+        self::assertStringContainsString('data-controller="share-draft"', $content);
+        self::assertStringContainsString('<dialog id="share-draft-dialog"', $content);
+        $this->assertTheQuestion($content, 2, 2, 'In progress', self::START_WORK);
+        self::assertSame($before, $this->stateOf());
+    }
+
+    #[Test]
+    public function aFormWithoutScriptGetsAPageWithTheQuestionAndNoDialogToOpen(): void
+    {
+        $this->addOmarsScreenshots(1);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', self::START_WORK, $this->moveFields());
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertStringStartsWith('text/html', (string) $this->client->getResponse()->headers->get('Content-Type'));
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('<h1 class="profile__title">Share your draft round?</h1>', $content);
+        self::assertStringNotContainsString('<dialog', $content);
+        self::assertStringContainsString('href="'.self::TICKET_PAGE.'"', $content);
+        $this->assertTheQuestion($content, 1, 2, 'In progress', self::START_WORK);
+        self::assertSame($before, $this->stateOf());
+    }
+
+    private function assertTheQuestionPage(int $screenshotCount, int $roundNumber, string $stepName, string $moveUrl): void
+    {
+        self::assertStringStartsWith('text/html', (string) $this->client->getResponse()->headers->get('Content-Type'));
+        $this->assertTheQuestion((string) $this->client->getResponse()->getContent(), $screenshotCount, $roundNumber, $stepName, $moveUrl);
+    }
+
+    /**
+     * The text, the buttons and the form's own fields that send the move again with a choice.
+     */
+    private function assertTheQuestion(string $content, int $screenshotCount, int $roundNumber, string $stepName, string $moveUrl): void
+    {
+        $noun = 1 === $screenshotCount ? 'screenshot' : 'screenshots';
+        self::assertStringContainsString(\sprintf('Your draft round has %d %s. Share it with the team as round %d, or keep it private. Private notes stay readable for you and Claude Code.', $screenshotCount, $noun, $roundNumber), $content);
+        self::assertStringContainsString('Keep private and move', $content);
+        self::assertStringContainsString('Share and move to '.$stepName, $content);
+        self::assertStringContainsString('name="draft_choice" value="keep"', $content);
+        self::assertStringContainsString('name="draft_choice" value="share"', $content);
+        self::assertStringContainsString('action="'.$moveUrl.'"', $content);
+        self::assertStringContainsString('name="version" value="'.self::VERSION.'"', $content);
+        self::assertStringContainsString('name="_csrf_token"', $content);
     }
 
     private function moveToPath(string $coreCode): string

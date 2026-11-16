@@ -33,7 +33,6 @@ use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\StepQueries;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -73,8 +72,6 @@ final class TicketMoveController extends AbstractController
     public const string ASSIGNEE_FIELD = 'assignee';
     /** A verb move's or move-to's answer to "Share your draft round?": a DraftChoice value, share or keep. */
     public const string DRAFT_CHOICE_FIELD = 'draft_choice';
-    /** The key of the 409 answer that asks the question instead of moving. */
-    public const string DRAFT_DECISION_NEEDED = 'draftDecisionNeeded';
 
     /** In characters after trimming, as TicketCommands::moveTo counts them. */
     public const int WAITING_ON_LABEL_MAX_LENGTH = 100;
@@ -131,16 +128,19 @@ final class TicketMoveController extends AbstractController
                 [$actor, $ticket] = $this->movableTicketOf($key);
                 $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 try {
-                    $clearedPingCount = $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now, $draftChoice);
+                    $moveResult = $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now, $draftChoice);
                 } catch (MoveRefused $refused) {
                     throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
+                }
+                if (null !== $moveResult->draftOutcome) {
+                    return PingsClearedToast::withClearedPings(MoveToasts::movedToWithDraft($this->stepNameAfterMoveOf($ticket), $moveResult), $moveResult->clearedPingCount);
                 }
 
                 return PingsClearedToast::withClearedPings(MoveToasts::ofVerb(
                     $verb,
                     MoveToasts::namesPerson($verb) ? $this->turnFirstNameOf($ticket) : null,
                     MoveToasts::namesStep($verb) ? $this->stepNameAfterMoveOf($ticket) : null,
-                ), $clearedPingCount);
+                ), $moveResult->clearedPingCount);
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -149,7 +149,7 @@ final class TicketMoveController extends AbstractController
         } catch (MoveRefusedWithToast $refused) {
             return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (DraftDecisionNeeded $needed) {
-            return self::answerWithDraftQuestion($needed->draft);
+            return $this->answerWithDraftQuestion($request, $key, $needed->draft, $this->generateUrl(self::MOVE_ROUTE, ['key' => $key, 'verb' => $verb]), fn (TicketPageView $ticket, ActorContext $actor): ?string => $this->verbTargetStepNameOf($verb, $ticket, $actor));
         }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
@@ -178,7 +178,7 @@ final class TicketMoveController extends AbstractController
                     throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
                 try {
-                    $clearedPingCount = $this->ticketCommands->moveTo(
+                    $moveResult = $this->ticketCommands->moveTo(
                         $actor->organizationId(),
                         $actor->userId(),
                         $key,
@@ -195,7 +195,12 @@ final class TicketMoveController extends AbstractController
                     throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
 
-                return PingsClearedToast::withClearedPings(MoveToasts::movedTo($this->listedStepNameOf($stepId)), $clearedPingCount);
+                $stepName = $this->listedStepNameOf($stepId);
+
+                return PingsClearedToast::withClearedPings(
+                    null === $moveResult->draftOutcome ? MoveToasts::movedTo($stepName) : MoveToasts::movedToWithDraft($stepName, $moveResult),
+                    $moveResult->clearedPingCount,
+                );
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -204,7 +209,7 @@ final class TicketMoveController extends AbstractController
         } catch (MoveRefusedWithToast $refused) {
             return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (DraftDecisionNeeded $needed) {
-            return self::answerWithDraftQuestion($needed->draft);
+            return $this->answerWithDraftQuestion($request, $key, $needed->draft, $this->generateUrl(self::MOVE_TO_ROUTE, ['key' => $key, 'stepId' => $stepId]), fn (): string => $this->listedStepNameOf($stepId));
         }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
@@ -253,15 +258,67 @@ final class TicketMoveController extends AbstractController
     }
 
     /**
-     * What the Share draft dialog needs to ask (dialogs-and-popovers.md): nothing was moved, and the form is to be sent
-     * again with DRAFT_CHOICE_FIELD.
+     * "Share your draft round?" in place of the move, which nothing made: the Share draft dialog as a Turbo Stream for a
+     * Turbo form, whose buttons send the same form again with DRAFT_CHOICE_FIELD; for any other form a page with the
+     * same question and buttons, which needs no script. Both answer 409, and both repeat the form's own fields.
+     *
+     * @param string                                                $moveUrl        where the buttons send the form again
+     * @param \Closure(TicketPageView, ActorContext): (string|null) $targetStepName the step the move leads to, read in a transaction of its own
      */
-    private static function answerWithDraftQuestion(UndecidedDraft $draft): JsonResponse
+    private function answerWithDraftQuestion(Request $request, string $key, UndecidedDraft $draft, string $moveUrl, \Closure $targetStepName): Response
     {
-        return new JsonResponse(
-            [self::DRAFT_DECISION_NEEDED => true, 'screenshotCount' => $draft->screenshotCount, 'roundNumber' => $draft->roundNumber],
-            Response::HTTP_CONFLICT,
-        );
+        $stepName = $this->transactions->run(function () use ($key, $targetStepName): ?string {
+            [$actor, $ticket] = $this->movableTicketOf($key);
+
+            return $targetStepName($ticket, $actor);
+        });
+        $parameters = [
+            'ticketKey' => $key,
+            'moveUrl' => $moveUrl,
+            'draft' => $draft,
+            'stepName' => $stepName,
+            'fields' => [
+                self::CSRF_FIELD => $request->request->getString(self::CSRF_FIELD),
+                self::VERSION_FIELD => $request->request->getString(self::VERSION_FIELD),
+                self::WAITING_ON_USER_FIELD => $request->request->getString(self::WAITING_ON_USER_FIELD),
+                self::WAITING_ON_LABEL_FIELD => $request->request->getString(self::WAITING_ON_LABEL_FIELD),
+            ],
+            'choiceField' => self::DRAFT_CHOICE_FIELD,
+            'failedToast' => MoveToasts::MOVE_FAILED,
+        ];
+        if (TurboBundle::STREAM_FORMAT === $request->getPreferredFormat()) {
+            return $this->render('@Ticketing/draft_question.stream.html.twig', $parameters, new Response(null, Response::HTTP_CONFLICT, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]));
+        }
+
+        return $this->render('@Ticketing/draft_question.html.twig', $parameters, new Response(null, Response::HTTP_CONFLICT));
+    }
+
+    /**
+     * The name of the step the verb leads to for this actor, from the same transitions the Your next step box offers.
+     *
+     * @return string|null null when the verb is not among them, so the dialog's button names no step
+     */
+    private function verbTargetStepNameOf(string $verb, TicketPageView $ticket, ActorContext $actor): ?string
+    {
+        $transitions = $this->ticketPageParts->of($ticket, $actor)['nextStep']->transitions ?? [];
+        foreach ($transitions as $transition) {
+            if ($transition->verb !== $verb) {
+                continue;
+            }
+            $target = $transition->moveTarget;
+            if (null !== $target->stepId) {
+                return $this->listedStepNameOf($target->stepId);
+            }
+            if (null !== $ticket->visibilityFacts->teamId) {
+                foreach ($this->stepQueries->stepsFor($ticket->visibilityFacts->teamId) as $step) {
+                    if ($step->coreCode() === $target->coreCode) {
+                        return $step->name();
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

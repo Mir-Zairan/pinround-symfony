@@ -1,0 +1,4 @@
+{#- The move form's own fields again, so the button that answers the question sends the same move with its choice. -#}
+{% for name, value in fields %}
+    <input type="hidden" name="{{ name }}" value="{{ value }}">
+{% endfor %}

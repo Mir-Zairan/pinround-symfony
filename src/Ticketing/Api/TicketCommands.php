@@ -60,8 +60,9 @@ interface TicketCommands
      * @param DraftChoice|null $draftChoice     null when the person has not chosen yet, so an undecided draft stops
      *                                          the move with DraftDecisionNeeded
      *
-     * @return int how many of the actor's open pings on the ticket the move cleared, in the same transaction (FR-PNG-05):
-     *             0 when the organization's auto-clear is off or none were open
+     * @return MoveResult the actor's open pings on the ticket the move cleared in the same transaction (FR-PNG-05; 0 when
+     *                    the organization's auto-clear is off or none were open), and the draft round's outcome: shared
+     *                    with the number it got, kept private, or none when there was no undecided draft
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it; nothing is saved
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first;
@@ -76,7 +77,7 @@ interface TicketCommands
      *                                the ticket, after every check above but the save; nothing is saved
      * @throws \LogicException        when no transaction is open
      */
-    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): int;
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult;
 
     /**
      * "Give it to…", the give_it_to verb with its person: makes them the assignee, moving a Backlog ticket to To do in
@@ -108,7 +109,7 @@ interface TicketCommands
      * @param string           $stepId      the uuid of the step to move to
      * @param DraftChoice|null $draftChoice as move takes it
      *
-     * @return int how many of the actor's open pings on the ticket the move cleared, as move does
+     * @return MoveResult as move returns it
      *
      * @throws TicketNotFound         as move does
      * @throws TicketChangedMeanwhile as move does, also for the actor's draft
@@ -131,5 +132,5 @@ interface TicketCommands
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
         ?DraftChoice $draftChoice = DraftChoice::Keep,
-    ): int;
+    ): MoveResult;
 }

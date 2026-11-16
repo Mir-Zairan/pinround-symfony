@@ -18,6 +18,7 @@ use App\Ticketing\Api\DraftDecisionNeeded;
 use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\Event\TicketMoved;
 use App\Ticketing\Api\MoveRefused;
+use App\Ticketing\Api\MoveResult;
 use App\Ticketing\Api\ShareDraftQuestion;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
@@ -77,7 +78,7 @@ final readonly class MoveTicket
     }
 
     /**
-     * @return int how many of the actor's pings on the ticket the move cleared
+     * @return MoveResult the pings the move cleared and what it did with the actor's draft round
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first,
@@ -88,7 +89,7 @@ final readonly class MoveTicket
      *                                member of the organization
      * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft on the ticket
      */
-    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): int
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
     {
         $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
         $teamId = $ticket->team() ?? throw new MoveRefused(null);
@@ -174,7 +175,7 @@ final readonly class MoveTicket
     }
 
     /**
-     * @return int how many of the actor's pings on the ticket the move cleared
+     * @return MoveResult the pings the move cleared and what it did with the actor's draft round
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first,
@@ -198,7 +199,7 @@ final readonly class MoveTicket
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
         ?DraftChoice $draftChoice = DraftChoice::Keep,
-    ): int {
+    ): MoveResult {
         if (null !== $waitingOnUserId && null !== $waitingOnLabel) {
             throw new WaitingOnRefused('A ticket waits on a person or a label, not both.');
         }
@@ -323,7 +324,7 @@ final readonly class MoveTicket
      * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
      * @param TeamFacts                         $teamFacts    the team facts built from $before and $waitingTurns
      *
-     * @return int how many of the actor's pings on the ticket the move cleared
+     * @return MoveResult the pings the move cleared and what it did with the actor's draft round
      *
      * @throws DraftDecisionNeeded when $draftChoice is null and the actor has an undecided draft on the ticket
      */
@@ -339,7 +340,7 @@ final readonly class MoveTicket
         array $waitingTurns,
         TeamFacts $teamFacts,
         ?DraftChoice $draftChoice,
-    ): int {
+    ): MoveResult {
         $fromStepId = $ticket->stepId();
         if ($target->id() === $fromStepId) {
             throw new MoveRefused(null);
@@ -359,13 +360,15 @@ final readonly class MoveTicket
         );
 
         $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
-        if (DraftChoice::Share === $draftChoice && null !== $draft) {
-            $this->shareDraftQuestion->share($draft, $actor, $at);
-        } elseif (null !== $draft) {
-            $this->shareDraftQuestion->keepPrivate($draft, $actor, $at);
+        if (null === $draft) {
+            return new MoveResult($clearedPingCount);
         }
+        if (DraftChoice::Share === $draftChoice) {
+            return new MoveResult($clearedPingCount, DraftChoice::Share, $this->shareDraftQuestion->share($draft, $actor, $at));
+        }
+        $this->shareDraftQuestion->keepPrivate($draft, $actor, $at);
 
-        return $clearedPingCount;
+        return new MoveResult($clearedPingCount, DraftChoice::Keep);
     }
 
     /**

@@ -1,0 +1,18 @@
+{#- TicketMoveController's answer to a Turbo move form that must first ask "Share your draft round?": the Share draft dialog, opened as soon as it is on the page. -#}
+<turbo-stream action="append" targets="body"><template>
+    <div data-controller="share-draft">
+        <twig:Dialog id="share-draft-dialog" title="Share your draft round?">
+            <twig:block name="content">
+                <p>Your draft round has {{ draft.screenshotCount }} {{ 1 == draft.screenshotCount ? 'screenshot' : 'screenshots' }}. Share it with the team as round {{ draft.roundNumber }}, or keep it private. Private notes stay readable for you and Claude Code.</p>
+                <form id="share-draft-form" method="post" action="{{ moveUrl }}" data-turbo="true" data-failed-toast="{{ failedToast }}" data-action="turbo:submit-end->share-draft#close">
+                    {{ include('@Ticketing/_draft_question_fields.html.twig') }}
+                </form>
+            </twig:block>
+            <twig:block name="actions">
+                <twig:Button variant="text" data-action="dialog#close">Cancel</twig:Button>
+                <twig:Button type="submit" variant="outline" form="share-draft-form" name="{{ choiceField }}" value="keep">Keep private and move</twig:Button>
+                <twig:Button type="submit" form="share-draft-form" name="{{ choiceField }}" value="share">{{ null == stepName ? 'Share and move' : 'Share and move to ' ~ stepName }}</twig:Button>
+            </twig:block>
+        </twig:Dialog>
+    </div>
+</template></turbo-stream>
