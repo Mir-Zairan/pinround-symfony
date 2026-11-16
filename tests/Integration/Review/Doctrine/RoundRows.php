@@ -10,7 +10,7 @@ use Doctrine\DBAL\Connection;
 
 /**
  * Adds committed Review rows of a test organization, and removes its rvw_round rows and with them their screenshots,
- * pins and areas (ON DELETE CASCADE), through the migrator, which owns the tables and so may delete from them (the app
+ * pins, check items and areas (ON DELETE CASCADE), through the migrator, which owns the tables and so may delete from them (the app
  * may not), under each organization as tenant, as FORCE ROW LEVEL SECURITY applies to the owner too. The caller makes
  * sure no transaction is open.
  */
