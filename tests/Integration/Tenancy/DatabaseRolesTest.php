@@ -615,6 +615,98 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * The laptop AI prompt packages (Version20261118120000): the app reads, adds and changes them (a package takes its
+     * one result by UPDATE) and never removes one; support reads under the tenant policy; resolve_laptop_package reads
+     * only the three columns it matches on or returns. Every index starts with the organization but the id key: the
+     * resolver looks a package up by id before its organization is known, and the primary key, led by
+     * organization_id, cannot serve that.
+     */
+    #[Test]
+    public function theLocalPackageTableGrantsTheAppNoDeleteAndTheResolverOnlyTheIdsItReads(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'ast_local_package'),
+        );
+        self::assertSame(
+            ['pinround_migrator', true, true],
+            $connection->fetchNumeric("SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass('public.ast_local_package')"),
+        );
+        self::assertEqualsCanonicalizing(
+            ['pinround_resolver SELECT id', 'pinround_resolver SELECT organization_id', 'pinround_resolver SELECT user_id'],
+            $connection->fetchFirstColumn(
+                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
+                 FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = 'public.ast_local_package'::regclass",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            ['tenant_isolation {public} ALL', 'resolver_read {pinround_resolver} SELECT'],
+            $connection->fetchFirstColumn(
+                "SELECT policyname || ' ' || roles::text || ' ' || cmd FROM pg_policies WHERE schemaname = 'public' AND tablename = 'ast_local_package'",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX ast_local_package_pkey ON public.ast_local_package USING btree (organization_id, id)',
+                'CREATE INDEX ast_local_package_user_id_expires_at_idx ON public.ast_local_package USING btree (organization_id, user_id, expires_at)',
+                'CREATE UNIQUE INDEX ast_local_package_id_key ON public.ast_local_package USING btree (id)',
+            ],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'ast_local_package'"),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                "ast_local_package_purpose_check CHECK ((purpose = ANY (ARRAY['summary'::text, 'intake'::text])))",
+                'ast_local_package_prompt_version_check CHECK (((char_length(prompt_version) >= 1) AND (char_length(prompt_version) <= 200)))',
+                'ast_local_package_expires_at_check CHECK ((expires_at > created_at))',
+                'ast_local_package_result_text_check CHECK (((char_length(result_text) >= 1) AND (char_length(result_text) <= 10000)))',
+                "ast_local_package_model_check CHECK ((model ~ '^[a-z0-9:._-]{1,64}$'::text))",
+                'ast_local_package_result_check CHECK ((((used_at IS NULL) = (result_text IS NULL)) AND ((used_at IS NULL) = (model IS NULL))))',
+                'ast_local_package_pkey PRIMARY KEY (organization_id, id)',
+            ],
+            $connection->fetchFirstColumn(
+                "SELECT conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
+                 WHERE conrelid = 'public.ast_local_package'::regclass AND contype IN ('c', 'p', 'u', 'f')",
+            ),
+        );
+    }
+
+    /**
+     * resolve_laptop_package runs as its owner pinround_resolver, which roles.sql gives no login, with a fixed
+     * search_path; besides that owner only the app may call it, and it returns a package's organization and user.
+     */
+    #[Test]
+    public function theLaptopPackageResolverReturnsOnlyTheOrganizationAndUserOfOnePackage(): void
+    {
+        $connection = $this->connection();
+
+        self::assertSame(
+            [
+                'owner' => 'pinround_resolver',
+                'is_security_definer' => true,
+                'config' => '{"search_path=pg_catalog, public, pg_temp"}',
+                'arguments' => 'p_package_id uuid',
+                'result' => 'TABLE(organization_id uuid, user_id uuid)',
+                'body' => 'SELECT p.organization_id, p.user_id FROM public.ast_local_package p WHERE p.id = p_package_id',
+            ],
+            $connection->fetchAssociative(
+                "SELECT p.proowner::regrole::text AS owner, p.prosecdef AS is_security_definer, p.proconfig::text AS config,
+                        pg_get_function_arguments(p.oid) AS arguments, pg_get_function_result(p.oid) AS result, btrim(p.prosrc) AS body
+                 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'resolve_laptop_package'",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            ['pinround_app', 'pinround_resolver'],
+            $connection->fetchFirstColumn(
+                "SELECT CASE acl.grantee WHEN 0 THEN 'PUBLIC' ELSE acl.grantee::regrole::text END
+                 FROM pg_proc p, aclexplode(p.proacl) acl
+                 WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'resolve_laptop_package' AND acl.privilege_type = 'EXECUTE'",
+            ),
+        );
+    }
+
+    /**
      * The upload slot and picture tables (Version20261115120000): the app reads, adds and changes them and removes
      * neither, as a used slot and a rejected picture keep their rows; support reads under the tenant policy.
      */
@@ -732,8 +824,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin', 'rvw_area', 'public.rvw_area', 'rvw_check_item', 'public.rvw_check_item', 'ast_usage', 'public.ast_usage', 'ast_usage_202611', 'ast_usage_209912', 'ast_suggestion', 'public.ast_suggestion'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_draft', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation', 'ast_suggestions', 'ast_suggestion_note', 'ast_suggestion_202611'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin', 'rvw_area', 'public.rvw_area', 'rvw_check_item', 'public.rvw_check_item', 'ast_usage', 'public.ast_usage', 'ast_usage_202611', 'ast_usage_209912', 'ast_suggestion', 'public.ast_suggestion', 'ast_local_package', 'public.ast_local_package'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_draft', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation', 'ast_suggestions', 'ast_suggestion_note', 'ast_suggestion_202611', 'ast_local_packages', 'ast_local_package_note', 'ast_local_package_202611', 'ast_local', 'public.ast_local_packages'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);
