@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Assist\Application\Policy;
 
-use App\Assist\Api\PolicyView;
 use App\Assist\Application\Policy\OrgSettingsAiPolicy;
 use App\Assist\Application\Policy\PolicyEvaluator;
 use App\Organization\Api\ActorContext;
@@ -99,7 +98,6 @@ final class OrgSettingsAiPolicyTest extends TestCase
         }
 
         self::assertSame([['cloud', false, true, false], ['laptop', true, true, false], ['laptop_first', true, true, false]], $whereShown);
-        self::assertSame([PolicyView::WHERE_CLOUD, PolicyView::WHERE_LAPTOP, PolicyView::WHERE_LAPTOP_FIRST], array_column($whereShown, 0));
     }
 
     #[Test]

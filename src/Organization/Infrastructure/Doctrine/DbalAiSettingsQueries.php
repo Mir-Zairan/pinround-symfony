@@ -32,9 +32,10 @@ final readonly class DbalAiSettingsQueries implements AiSettingsQueries
 
     public function aiSettingsOf(OrganizationId $organizationId): AiSettings
     {
-        // false: no row; null: no ai key. The key fields stay in the database: a page never needs them.
+        // false: no row; null: no ai key. The key fields stay in the database: a page never needs them. The parentheses
+        // are needed: PostgreSQL binds - tighter than ->.
         $storedJson = $this->connection->fetchOne(
-            "SELECT CASE WHEN jsonb_typeof(data->'ai') = 'object' THEN data->'ai' - 'secret_enc' - 'key_id' ELSE data->'ai' END"
+            "SELECT CASE WHEN jsonb_typeof(data->'ai') = 'object' THEN (data->'ai') - 'secret_enc' - 'key_id' ELSE data->'ai' END"
             .' FROM org_settings WHERE organization_id = ?',
             [$organizationId->toString()],
         );
