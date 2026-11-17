@@ -14,6 +14,7 @@
     it stands for, not "toggle", so a second click of the same button changes nothing.
 #}
 {% block main %}
+    {% import _self as ai_settings %}
     {% set where_notes = {
         cloud: 'Every AI request goes to the company’s cloud AI. It costs money per use.',
         laptop: 'Free. Ticket text never leaves the laptop. People without Ollama get no AI features.',
@@ -27,19 +28,19 @@
         {% endif %}
 
         <twig:Card tag="section" class="admin-ai__card" aria-label="AI help">
-            {{ _self.switch_row('on', 'AI help (summaries, “Explain it to me”, checking new tickets)', chosen.on) }}
-            {{ _self.chip_group('who', 'Who may use it', {everyone: 'Everyone', leads_only: 'Leads only'}, chosen.who) }}
-            {{ _self.chip_group('send', 'What goes to the AI', {title_and_text: 'Title and ticket text', title_only: 'Title only'}, chosen.send) }}
-            {{ _self.switch_row('sync', 'Write a summary for every ticket when it syncs from Jira', chosen.sync) }}
-            {{ _self.chip_group('where', 'Where the AI runs', {cloud: 'Company cloud AI', laptop: 'Each person’s laptop (Ollama)', laptop_first: 'Laptop first, cloud when it is off'}, chosen.where) }}
+            {{ ai_settings.switch_row('on', 'AI help (summaries, “Explain it to me”, checking new tickets)', chosen.on) }}
+            {{ ai_settings.chip_group('who', 'Who may use it', {everyone: 'Everyone', leads_only: 'Leads only'}, chosen.who) }}
+            {{ ai_settings.chip_group('send', 'What goes to the AI', {title_and_text: 'Title and ticket text', title_only: 'Title only'}, chosen.send) }}
+            {{ ai_settings.switch_row('sync', 'Write a summary for every ticket when it syncs from Jira', chosen.sync) }}
+            {{ ai_settings.chip_group('where', 'Where the AI runs', {cloud: 'Company cloud AI', laptop: 'Each person’s laptop (Ollama)', laptop_first: 'Laptop first, cloud when it is off'}, chosen.where) }}
             <p class="admin-ai__note admin-ai__where-note">{{ where_notes[chosen.where] }}</p>
-            {{ _self.switch_row('restricted_to_cloud', 'Send team-only tickets to the cloud AI too', chosen.restricted_to_cloud) }}
+            {{ ai_settings.switch_row('restricted_to_cloud', 'Send team-only tickets to the cloud AI too', chosen.restricted_to_cloud) }}
             <p class="admin-ai__note">When this is off, tickets that only their team can see never go to the cloud AI.</p>
         </twig:Card>
 
         <twig:Card tag="section" class="admin-ai__card" aria-labelledby="admin-ai-provider-title">
             <h2 class="admin-ai__heading" id="admin-ai-provider-title">Cloud AI</h2>
-            {{ _self.chip_group('provider', 'Provider', {huggingface: 'Hugging Face', anthropic: 'Anthropic (Claude)', ollama: 'Ollama server'}, chosen.provider) }}
+            {{ ai_settings.chip_group('provider', 'Provider', {huggingface: 'Hugging Face', anthropic: 'Anthropic (Claude)', ollama: 'Ollama server'}, chosen.provider) }}
             <form class="admin-ai__key" method="post" action="{{ path('organization_admin_ai_provider_key') }}">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_ai_provider_key') }}">
                 <div class="profile__field admin-ai__key-field">

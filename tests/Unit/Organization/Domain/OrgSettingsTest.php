@@ -70,13 +70,11 @@ final class OrgSettingsTest extends TestCase
     {
         $settings = $this->newSettings();
         $expected = $settings->data();
-        $expected['ai']['where'] = 'laptop_first';
-        $expected['ai']['on'] = false;
+        $expected['ai'] = ['on' => false, 'who' => 'everyone', 'send' => 'title_and_text', 'sync' => true, 'where' => 'laptop_first', 'model' => 'qwen3:4b', 'restricted_to_cloud' => true];
 
         self::assertSame('cloud', $settings->changeAiSetting('where', 'laptop_first'));
         self::assertTrue($settings->changeAiSetting('on', 'off'));
         self::assertNull($settings->changeAiSetting('restricted_to_cloud', 'on'));
-        $expected['ai']['restricted_to_cloud'] = true;
 
         self::assertSame($expected, $settings->data());
     }
@@ -139,8 +137,7 @@ final class OrgSettingsTest extends TestCase
         self::assertFalse($settings->hasAiProviderKey());
         $expected = $settings->data();
         $encrypted = "\x04k-26".str_repeat("\xAB", 40);
-        $expected['ai']['secret_enc'] = base64_encode($encrypted);
-        $expected['ai']['key_id'] = 'k-26';
+        $expected['ai'] = ['on' => true, 'who' => 'everyone', 'send' => 'title_and_text', 'sync' => true, 'where' => 'cloud', 'model' => 'qwen3:4b', 'secret_enc' => base64_encode($encrypted), 'key_id' => 'k-26'];
 
         $settings->changeAiProviderKey($encrypted);
 
@@ -175,6 +172,24 @@ final class OrgSettingsTest extends TestCase
 
         self::assertSame($before, $settings->data());
         self::assertFalse($settings->hasAiProviderKey());
+    }
+
+    /**
+     * After a key rotation the new key id goes with the new value, so the old id never names it.
+     */
+    #[Test]
+    public function aSecondProviderKeyReplacesTheFirstWithItsOwnKeyId(): void
+    {
+        $settings = $this->newSettings();
+        $settings->changeAiProviderKey("\x04k-26".str_repeat("\xAB", 40));
+        $rotated = "\x04k-27".str_repeat("\xCD", 40);
+
+        $settings->changeAiProviderKey($rotated);
+
+        $ai = $settings->data()['ai'];
+        self::assertIsArray($ai);
+        self::assertSame([base64_encode($rotated), 'k-27'], [$ai['secret_enc'], $ai['key_id']]);
+        self::assertSame(['on', 'who', 'send', 'sync', 'where', 'model', 'secret_enc', 'key_id'], array_keys($ai));
     }
 
     #[Test]
