@@ -52,13 +52,11 @@ final readonly class ChangeAiSettings
      */
     public function changeSetting(OrganizationId $organizationId, string $setting, string $choice, UserId $actor, \DateTimeImmutable $at): void
     {
-        if (!\array_key_exists($choice, OrgSettings::AI_CHOICES[$setting] ?? [])) {
-            throw new ChangeAiSettingsRefused(self::UNKNOWN_CHOICE);
-        }
+        // No stored value is null, so ?? only refuses what the tab does not offer.
+        $after = OrgSettings::AI_CHOICES[$setting][$choice] ?? throw new ChangeAiSettingsRefused(self::UNKNOWN_CHOICE);
 
         $settings = $this->settingsOf($organizationId);
         $before = $settings->changeAiSetting($setting, $choice);
-        $after = OrgSettings::AI_CHOICES[$setting][$choice];
         if ($before === $after) {
             return;
         }
