@@ -144,8 +144,8 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 3. Summary "1 of 2 checked OK"; every change is a ticket event and clears the actor's pings.
 **Files:** `src/Review/Application/Checklist/*`.
 **Acceptance criteria:**
-- [ ] Only the assignee can mark fixed; only the tester can mark OK / Not fixed (voter rows).
-- [ ] State chip colours and texts match the prototype.
+- [x] Only the assignee can mark fixed; only the tester can mark OK / Not fixed (voter rows).
+- [x] State chip colours and texts match the prototype.
 **Tests:** unit (state machine), functional per role.
 **Prototype check:** checklist card in [Ticket page: rounds](../04-prototype/screens/ticket-page.md#rounds).
 **Size:** S
@@ -275,3 +275,10 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
   - **2026-11-16, P05.T9 UI (17b):** the 409 answer is now the dialog, not JSON: a Turbo Stream that appends the `Dialog` and opens it (`share-draft` controller), or, for a form without script, a page with the same question (`draft_question*.html.twig` in Ticketing UI, so Ticketing needs no Review class; the plan's `Review/UI/Component/ShareDraftDialog` is not built). `move`/`moveTo` return `MoveResult` (pings cleared and the draft outcome with the real round number) for the toast. The dialog and Cancel were not run in a browser here (no media worker): run `share-draft.spec.ts` with E2E_MEDIA_PIPELINE=1 on a full stack.
   - **2026-11-16, P05.T9 port change (17c):** `ShareDraftQuestion` now has `undecidedDraftIdOf` (the id only, one facts read) beside `undecidedDraftOf`, and `share`/`keepPrivate` take the round id; `share` is one save through `RoundCommands::shareDraftAtHandOff`. Query budgets of a move that asks and answers: share 18, keep 16.
 - **2026-11-17, P05.T7 review round page (19f):** the pin toasts `Pin N marked fixed.`, `Pin N marked still wrong.` and `Verdict on pin N undone.` are not in the prototype; they are kept on purpose as the status announcement after the side panel is swapped, with focus moved to the control that replaced the one clicked (`autofocus`, which Turbo 8 focuses in stream content). The header's day and time are in the viewer's saved zone (Identity's `CurrentTimeZone`, so Review now depends on the Identity Api). "Ask <lead>" opens the thread with `?ask=<lead id>`, which `thread-composer` reads on connect; the browser checks of the focus, the compare control and the question mode are for 19d.
+- **2026-11-17, P05.T6 checklist card (18c):** the checklist round shows its rows in the Rounds section (`_checklist_card.html.twig`, `ChecklistController` at `/t/{key}/checklist/{itemId}/{fixed|ok|not-fixed}`). Differences from [ticket-page.md](../04-prototype/screens/ticket-page.md#rounds), on purpose:
+  - (a) The headline is `Round N · Checklist from the report` without the other rounds' `· by <owner>`: the checklist is made from the report, not written by a person.
+  - (b) No `Open round` on the checklist card: its rows are the whole round, so it has no page of its own (a review round keeps its link).
+  - (c) A ticket with no tester stored, which any tester of its team may check, gets the toast `Pin N marked fixed. A tester checks it.` in place of `<tester> checks it.`
+  - (d) After a change the card is replaced and focus goes to the changed row's first button, else a later row's, else the card's first, else its heading (`tabindex="-1"`). The card adds three queries to the Rounds frame, the same for any number of items (`RoundsFrameTest::CHECKLIST_QUERIES`): the items, and the ticket's facts once for `MARK_FIXED` and once for `CHECK`.
+  - (e) The checklist forms sit in the Rounds frame and post to `_top`, which `assets/app.js`'s `turbo:before-fetch-response` guard skips, so an answer with no Turbo Stream (a 404 or a 500) is rendered by Turbo as a page visit, with no `data-failed-toast` and no reload. The verdict forms, outside any frame, get the toast and reload. Widen that guard to `_top` forms if a browser check shows the error page.
+  - Still to do in 18d: the Playwright spec and its seed command (see Open in that task).

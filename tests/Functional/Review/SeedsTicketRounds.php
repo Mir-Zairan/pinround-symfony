@@ -104,6 +104,31 @@ trait SeedsTicketRounds
         return $pinId;
     }
 
+    /**
+     * An item of a checklist round for a pin of the ticket's report; an item past "open" was last changed by Omar.
+     *
+     * @param 'open'|'fixed'|'ok'|'not_fixed' $state
+     *
+     * @return string the item's id
+     */
+    private function addCheckItem(string $checklistRoundId, string $pinId, string $state): string
+    {
+        $itemId = Uuid::v7()->toRfc4122();
+        $isChanged = 'open' !== $state;
+        $parameters = [
+            $this->acmeFoods->toString(), $itemId, $checklistRoundId, $pinId, $state,
+            $isChanged ? $this->people['Omar']->id()->toString() : null,
+            $isChanged ? '2026-11-05 10:00:00+00' : null,
+        ];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO rvw_check_item (organization_id, id, round_id, pin_id, state, changed_by, changed_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, '2026-11-05 09:00:00+00')",
+            $parameters,
+        ));
+
+        return $itemId;
+    }
+
     private function setPinVerdict(string $screenshotId, int $number, string $verdict): void
     {
         $organizationId = $this->acmeFoods->toString();

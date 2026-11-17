@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Review\UI;
 
 use App\Review\Api\RoundPermission;
+use App\Review\UI\Controller\ChecklistController;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -58,6 +59,7 @@ final class RoundsController extends AbstractController
                 'section' => $section,
                 'canStartDraft' => $mayStartDraft && !$section->hasPrivateDraft(),
                 'draftCsrfId' => DraftRoundController::csrfIdOf($ticket->key),
+                'checklistCsrfId' => ChecklistController::csrfIdOf($ticket->key),
             ],
         );
         $response->setVary(self::TURBO_FRAME_HEADER);

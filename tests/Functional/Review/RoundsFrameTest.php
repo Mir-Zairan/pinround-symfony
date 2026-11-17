@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Review;
 
 use App\Identity\Domain\User;
+use App\Review\UI\Checklist\ChecklistCard;
 use App\Review\UI\Component\DraftRoundEditor;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\RoundCards;
@@ -52,6 +53,8 @@ final class RoundsFrameTest extends WebTestCase
      * ticket's facts for RoundPermission DRAFT_CREATE ("Start a draft round"), the visibility check and the rounds.
      */
     private const int EMPTY_FRAME_QUERIES = 16;
+    /** The checklist's items, then the ticket's facts for ChecklistPermission MARK_FIXED and for CHECK. */
+    private const int CHECKLIST_QUERIES = 3;
     private const string ROUNDS_PAGE = '/t/SHOP-1/rounds';
     private const string ROUNDS = 'turbo-frame#ticket-rounds';
     /** What Turbo sends when it loads the Rounds section's frame. */
@@ -162,27 +165,68 @@ final class RoundsFrameTest extends WebTestCase
         self::assertSame('Round 0 · Report · by Mia · 0 pins', $page->filter(self::ROUNDS.' .round-card__headline')->text());
     }
 
+    /**
+     * The checklist card drops the prototype's "· by owner" and "Open round": its rows are the round, so it has no page.
+     */
     #[Test]
-    public function reviewAndChecklistRoundsAreRowsWithAnOpenRoundLinkAndShowNoPicture(): void
+    public function aReviewRoundIsARowWithAnOpenRoundLinkAndTheChecklistShowsItsPinsAndNeitherShowsAPicture(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $reportShot = $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Cart', null);
         $checklist = $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
         $review = $this->addRound($ticketId, 2, 'review', 'Lena', self::SHARED_AT);
-        $this->addScreenshot($checklist, $this->addMedia('ready'), 0, 'Hidden in a row', null);
-        $this->addScreenshot($review, $this->addMedia('ready'), 0, 'Hidden in a row too', null);
-        $this->logIn($this->client, $this->people['Mia']);
+        $this->addCheckItem($checklist, $this->addPin($reportShot, 2, '20.00', '20.00', '', 'Mia'), 'fixed');
+        $openItem = $this->addCheckItem($checklist, $this->addPin($reportShot, 1, '10.00', '10.00', 'Total is <b>wrong</b>', 'Mia'), 'open');
+        $this->addCheckItem($checklist, $this->addPin($reportShot, 3, '30.00', '30.00', 'Coupon field cut', 'Mia'), 'ok');
+        $this->addScreenshot($review, $this->addMedia('ready'), 0, 'Hidden in a row', null);
+        $this->logIn($this->client, $this->people['Omar']);
 
         $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['Round 1 · Checklist from the report · by Omar', 'Round 2 · Review · by Lena'],
+            ['Round 0 · Report · by Mia · 3 pins', 'Round 1 · Checklist from the report', 'Round 2 · Review · by Lena'],
             $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
-        self::assertSame(['Open round', 'Open round'], $page->filter(self::ROUNDS.' a.round-card__open')->each(static fn (Crawler $link): string => $link->text()));
-        self::assertSame(['/t/SHOP-1/rounds/1', '/t/SHOP-1/rounds/2'], $page->filter(self::ROUNDS.' a.round-card__open')->each(static fn (Crawler $link): string => (string) $link->attr('href')));
-        self::assertCount(0, $page->filter(self::ROUNDS.' img, '.self::ROUNDS.' figure'));
+        self::assertSame(['Open round'], $page->filter(self::ROUNDS.' a.round-card__open')->each(static fn (Crawler $link): string => $link->text()));
+        self::assertSame(['/t/SHOP-1/rounds/2'], $page->filter(self::ROUNDS.' a.round-card__open')->each(static fn (Crawler $link): string => (string) $link->attr('href')));
+        $card = $page->filter(self::ROUNDS.' article#round-'.$checklist);
+        self::assertSame('round-'.$checklist.'-heading', $card->attr('aria-labelledby'));
+        self::assertSame('1 of 3 checked OK', $card->filter('.round-card__status')->text());
+        self::assertSame(ChecklistCard::DESCRIPTION, $card->filter('.round-card__description')->text());
+        self::assertSame(
+            [['1', 'Total is <b>wrong</b>', 'Open'], ['2', '(no note)', 'Fixed · to check'], ['3', 'Coupon field cut', 'Checked OK']],
+            $card->filter('.checklist__row')->each(static fn (Crawler $row): array => [$row->filter('.checklist__number')->text(), $row->filter('.checklist__note')->text(), $row->filter('.check-state')->text()]),
+        );
+        self::assertSame(
+            ['check-state--open', 'check-state--fixed', 'check-state--ok'],
+            $card->filter('.check-state')->each(static fn (Crawler $chip): string => (string) preg_replace('/^.*(check-state--[a-z-]+).*$/', '$1', (string) $chip->attr('class'))),
+        );
+        self::assertSame(['Mark fixed'], $card->filter('form button')->each(static fn (Crawler $button): string => $button->text()), 'The assignee marks the open pin fixed and checks none.');
+        self::assertSame('/t/SHOP-1/checklist/'.$openItem.'/fixed', $card->filter('form')->attr('action'));
+        self::assertSame('_top', $card->filter('form')->attr('data-turbo-frame'));
+        self::assertCount(0, $page->filter(self::ROUNDS.' [autofocus]'), 'Only the stream of a change moves the focus.');
+        self::assertCount(1, $page->filter(self::ROUNDS.' article#round-'.$review.' a.round-card__open'));
+        self::assertCount(1, $page->filter(self::ROUNDS.' figure'), "Only the report's picture.");
         self::assertStringNotContainsString('Hidden in a row', (string) $this->client->getResponse()->getContent());
+    }
+
+    #[Test]
+    public function aViewerWhoMayChangeNoPinSeesTheChecklistWithNoForm(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $reportShot = $this->addScreenshot($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT), $this->addMedia('ready'), 0, 'Cart', null);
+        $checklist = $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $this->addCheckItem($checklist, $this->addPin($reportShot, 1, '10.00', '10.00', 'A note', 'Mia'), 'open');
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $card = $page->filter(self::ROUNDS.' article#round-'.$checklist);
+        self::assertSame(['Open'], $card->filter('.check-state')->each(static fn (Crawler $chip): string => $chip->text()));
+        self::assertCount(0, $card->filter('form, button, input'));
     }
 
     #[Test]
@@ -637,6 +681,36 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertSame(self::EMPTY_FRAME_QUERIES, $noRoundQueryCount);
         self::assertSame(self::EMPTY_FRAME_QUERIES + 5, $oneRoundQueryCount, 'The rounds, screenshots, pins, the owners\' names and the signing.');
+    }
+
+    /**
+     * The checklist card adds a pinned number of queries, the same for one item and five: its items in one, and
+     * ChecklistPermission MARK_FIXED and CHECK decided once each, on the ticket's facts.
+     */
+    #[Test]
+    public function aChecklistAddsTheSameQueriesForOneItemAndForFive(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $reportShot = $this->addScreenshot($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT), $this->addMedia('ready'), 0, 'Cart', null);
+        $pinIds = array_map(fn (int $number): string => $this->addPin($reportShot, $number, '10.00', '10.00', 'Note '.$number, 'Mia'), [1, 2, 3, 4, 5]);
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->queryCountOf(self::ROUNDS_PAGE);
+        $noChecklistQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+
+        $checklist = $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $this->addCheckItem($checklist, $pinIds[0], 'open');
+        $oneItemQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+        self::assertCount(1, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist__row'));
+
+        foreach (\array_slice($pinIds, 1) as $pinId) {
+            $this->addCheckItem($checklist, $pinId, 'open');
+        }
+        $fiveItemsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+
+        self::assertCount(5, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist__row'));
+        self::assertCount(5, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist__row button'), 'Each row shows Omar its Mark fixed.');
+        self::assertSame($noChecklistQueryCount + self::CHECKLIST_QUERIES, $oneItemQueryCount);
+        self::assertSame($oneItemQueryCount, $fiveItemsQueryCount);
     }
 
     /**
