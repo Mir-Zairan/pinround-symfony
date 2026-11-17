@@ -50,6 +50,9 @@ final class DbalLocalPackagesTest extends KernelTestCase
     private const string MODEL = 'qwen3:4b';
     private const string INSERT = 'INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at, used_at, result_text, model)'
         .' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    /** The key DbalLocalPackages::issue() locks on: organization, then the person. */
+    private const string LOCK_KEY_FORMAT = 'ast_local_package:open:%s:%s';
+    private const string LOCK_TIMEOUT = '200ms';
 
     protected function setUp(): void
     {
@@ -195,6 +198,45 @@ final class DbalLocalPackagesTest extends KernelTestCase
             self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 2, 3)),
             'Three a hour let a third through, so the refusal above counted two.',
         );
+    }
+
+    /**
+     * Two requests of one person must not both count before either inserts, so issue() waits on that person's lock;
+     * here a second connection holds it, and lock_timeout ends the wait instead of the test hanging.
+     */
+    #[Test]
+    public function issuingWaitsWhileAnotherRequestOfThePersonHoldsTheirLockAndStoresNothing(): void
+    {
+        $idsBefore = $this->idsAs(self::ACME_FOODS);
+        self::assertNotSame([], $idsBefore);
+
+        $this->holdingLockOf(self::ACME_FOODS, self::OMAR, function (): void {
+            try {
+                self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackageWithLockTimeout());
+                self::fail('issue() did not wait for the lock another request of Omar holds.');
+            } catch (DriverException $timeout) {
+                self::assertSame('55P03', $timeout->getSQLState());
+                self::assertStringContainsString('canceling statement due to lock timeout', $timeout->getMessage());
+            }
+        });
+
+        self::assertSame($idsBefore, $this->idsAs(self::ACME_FOODS));
+    }
+
+    /** The lock is per person and organization: Mia's, or Omar's in Beta Bakery, does not hold up Omar in Acme Foods. */
+    #[Test]
+    public function anotherPersonsOrOrganizationsLockDoesNotHoldUpTheIssue(): void
+    {
+        $this->holdingLockOf(self::ACME_FOODS, self::MIA, function (): void {
+            $this->holdingLockOf(self::BETA_BAKERY, self::OMAR, function (): void {
+                self::assertInstanceOf(
+                    \DateTimeImmutable::class,
+                    self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackageWithLockTimeout()),
+                );
+            });
+        });
+
+        self::assertSame([self::ACME_PACKAGE, self::NEW_PACKAGE], $this->idsAs(self::ACME_FOODS));
     }
 
     /** Both packages were created at 10:00:00.250; an hour later to the millisecond they no longer count. */
@@ -412,6 +454,33 @@ final class DbalLocalPackagesTest extends KernelTestCase
             $maxOpenPackages,
             $maxPackagesPerHour,
         );
+    }
+
+    /**
+     * Issues Omar's new package in Acme Foods in the open transaction, giving up on a lock after LOCK_TIMEOUT.
+     */
+    private function issueNewPackageWithLockTimeout(): \DateTimeImmutable|LocalPackageLimit
+    {
+        self::connection()->executeStatement(\sprintf("SET LOCAL lock_timeout = '%s'", self::LOCK_TIMEOUT));
+
+        return $this->issueNewPackage(self::ACME_FOODS, 10);
+    }
+
+    /**
+     * Runs $work while the migrator's own connection holds the advisory lock issue() takes for $userId in
+     * $organizationId, as another request of that person would.
+     *
+     * @param \Closure(): void $work
+     */
+    private function holdingLockOf(string $organizationId, string $userId, \Closure $work): void
+    {
+        $lockKey = \sprintf(self::LOCK_KEY_FORMAT, $organizationId, $userId);
+        self::assertTrue(self::migrator()->fetchOne('SELECT pg_try_advisory_lock(hashtextextended(?, 0))', [$lockKey]), 'The lock was already held.');
+        try {
+            $work();
+        } finally {
+            self::migrator()->fetchOne('SELECT pg_advisory_unlock(hashtextextended(?, 0))', [$lockKey]);
+        }
     }
 
     private function issuedAs(string $organizationId, string $packageId, string $userId): ?IssuedLocalPackage
