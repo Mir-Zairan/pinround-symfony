@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Assist\Infrastructure\Prompt;
 
 use App\Assist\Application\AiPrompt;
+use App\Assist\Application\PromptRenderer;
 use App\Assist\Application\PromptTicket;
 use App\Assist\Application\PromptVersion;
 use App\Assist\Application\UnknownPromptTemplate;
@@ -19,7 +20,7 @@ use Twig\Loader\FilesystemLoader;
  * The templates have their own Twig environment, apart from the app's: a prompt is plain text, so auto-escaping is off
  * here and nowhere else.
  */
-final readonly class PromptBuilder
+final readonly class PromptBuilder implements PromptRenderer
 {
     /** The template version each feature uses now; a feature missing here has no server prompt yet. */
     private const array CURRENT_VERSIONS = [
@@ -38,9 +39,6 @@ final readonly class PromptBuilder
         ]);
     }
 
-    /**
-     * @throws UnknownPromptTemplate when the feature has no template yet
-     */
     public function currentVersion(AiFeature $feature): PromptVersion
     {
         $number = self::CURRENT_VERSIONS[$feature->value] ?? throw UnknownPromptTemplate::noCurrentVersion($feature);
@@ -48,14 +46,6 @@ final readonly class PromptBuilder
         return new PromptVersion($feature, $number);
     }
 
-    /**
-     * @param bool                  $isTitleOnly         the policy sends the title only, so the text is dropped
-     * @param array<string, string> $duplicateCandidates titles by ticket key, at most 80, for the intake template
-     *
-     * @throws UnknownPromptTemplate     when the template file is missing, or renders blank instructions, blank content
-     *                                   or content without the ticket
-     * @throws \InvalidArgumentException when there are more than 80 candidates or a candidate key is not like SHOP-12
-     */
     public function build(PromptVersion $version, PromptTicket $ticket, bool $isTitleOnly, array $duplicateCandidates = []): AiPrompt
     {
         $templateName = $version->name().'.md.twig';

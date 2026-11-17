@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Assist\Infrastructure\Prompt;
 
+use App\Assist\Application\AiAnswerCheck;
 use App\Assist\Application\AiAnswerRejected;
 use App\Assist\Application\PromptVersion;
 use App\Assist\Application\UnknownPromptTemplate;
@@ -12,14 +13,16 @@ use JsonSchema\Constraints\Constraint;
 use JsonSchema\Validator;
 
 /**
- * The one check on every AI answer, from a server provider or a laptop (ADR-0020): text answers must fit the size
- * limits of FR-AI-18, data answers must match the template's `{feature}.v{n}.schema.json`. Every string that passes is
- * HTML-escaped, so it can never become markup.
+ * Checks AI answers against the template they answer: text answers must fit the size limits of FR-AI-18, data answers
+ * must match the template's `{feature}.v{n}.schema.json`. Every string that passes is cleaned as UntrustedText.
+ *
+ * Twig escapes at render; the checker never escapes. An answer that is stored and shown later is still plain text, so
+ * escaping here would show "&quot;" to people and save it into tickets.
  *
  * A data answer that is exactly one Markdown code fence (```json … ```) is read without the fence, because small
  * models add one even when told not to; anything else around the JSON rejects it.
  */
-final readonly class OutputValidator
+final readonly class OutputValidator implements AiAnswerCheck
 {
     /** Longer than any answer that fits the limits; a bigger one is refused before it is parsed. */
     public const int MAX_ANSWER_BYTES = 20000;
@@ -28,30 +31,19 @@ final readonly class OutputValidator
     public const int EXPLANATION_MAX_WORDS = 160;
 
     private const int JSON_MAX_DEPTH = 8;
-    private const string FENCE_PATTERN = '/\A```(?:json)?[ \t]*\R(?<json>.*)\R[ \t]*```\z/si';
-    /** Every control character but tab and newline, the Unicode line and paragraph separators, and byte order marks. */
-    private const string CONTROL_CHARACTERS_PATTERN = '/[\x00-\x08\x0B-\x1F\x7F\x{2028}\x{2029}\x{FEFF}]/u';
+    private const string FENCE_PATTERN = '/\A```(?:json)?[ \t]*+\R(?<json>.*)\R[ \t]*+```\z/si';
+    /** A run of stops starts only after a non-stop, so a long run of dots is matched once, never from each dot again. */
+    private const string SENTENCE_STOP_PATTERN = '/(?<![.!?])[.!?]++(?=\s|\z)/u';
 
-    public function __construct(private string $schemaDirectory = __DIR__.'/templates')
+    public function __construct(private string $templateDirectory = __DIR__.'/templates')
     {
     }
 
-    /**
-     * The message to add to the prompt for the one second try after a rejection that allows it.
-     */
     public function retryInstruction(): string
     {
         return 'Your last answer was not valid. Return only valid JSON that matches the format above, with no other text.';
     }
 
-    /**
-     * Checks a summary or explanation. A text answer that fails is not retried.
-     *
-     * @return string the answer, trimmed, with "\n" line ends and HTML-escaped
-     *
-     * @throws AiAnswerRejected when the answer is blank, too big, or has too many words or sentences
-     * @throws \LogicException  when the feature answers with data, not text
-     */
     public function checkText(PromptVersion $version, string $answer): string
     {
         [$maxWords, $maxSentences] = match ($version->feature) {
@@ -59,30 +51,21 @@ final readonly class OutputValidator
             AiFeature::Explain => [self::EXPLANATION_MAX_WORDS, null],
             AiFeature::Intake => throw new \LogicException('The intake feature answers with data; check it with checkData().'),
         };
+        if (!is_file(\sprintf('%s/%s.md.twig', $this->templateDirectory, $version->name()))) {
+            throw UnknownPromptTemplate::noTemplate($version);
+        }
 
         $text = $this->normalise($answer, false);
-        if ((int) preg_match_all('/\S+/u', $text) > $maxWords) {
+        if (self::countMatches('/\S++/u', $text) > $maxWords) {
             throw AiAnswerRejected::tooManyWords($version, $maxWords);
         }
         if (null !== $maxSentences && self::countSentences($text) > $maxSentences) {
             throw AiAnswerRejected::tooManySentences($version, $maxSentences);
         }
 
-        return self::escape($text);
+        return $text;
     }
 
-    /**
-     * Checks an intake answer against its schema, then keeps only the duplicate keys that were sent as candidates.
-     *
-     * @param list<string> $candidateKeys the duplicate candidate keys that went into the prompt
-     * @param bool         $isRetry       true for the answer to the second try; a rejection then allows no more tries
-     *
-     * @return array<string, mixed> the answer with every string HTML-escaped
-     *
-     * @throws AiAnswerRejected      when the answer is blank, too big, not JSON or does not match the schema
-     * @throws UnknownPromptTemplate when the template has no schema file
-     * @throws \LogicException       when the feature answers with text, not data
-     */
     public function checkData(PromptVersion $version, string $answer, array $candidateKeys, bool $isRetry): array
     {
         if (AiFeature::Intake !== $version->feature) {
@@ -117,12 +100,12 @@ final readonly class OutputValidator
             )));
         }
 
-        return self::escapeStrings($answerFields);
+        return self::cleanStrings($answerFields);
     }
 
     private function loadSchema(PromptVersion $version): object
     {
-        $path = \sprintf('%s/%s.schema.json', $this->schemaDirectory, $version->name());
+        $path = \sprintf('%s/%s.schema.json', $this->templateDirectory, $version->name());
         if (!is_file($path)) {
             throw UnknownPromptTemplate::noSchema($version);
         }
@@ -144,8 +127,7 @@ final readonly class OutputValidator
             throw AiAnswerRejected::oversized($isRetryAllowed, self::MAX_ANSWER_BYTES);
         }
 
-        $unixLines = str_replace(["\r\n", "\r"], "\n", mb_scrub($answer, 'UTF-8'));
-        $text = trim(self::stripControlCharacters($unixLines));
+        $text = trim(UntrustedText::normalise($answer));
         if ('' === $text) {
             throw AiAnswerRejected::blank($isRetryAllowed);
         }
@@ -158,10 +140,22 @@ final readonly class OutputValidator
      */
     private static function countSentences(string $text): int
     {
-        $stops = preg_match_all('/[.!?]+(?=\s|\z)/u', $text);
         $endsWithStop = 1 === preg_match('/[.!?]\z/u', $text);
 
-        return (int) $stops + ($endsWithStop ? 0 : 1);
+        return self::countMatches(self::SENTENCE_STOP_PATTERN, $text) + ($endsWithStop ? 0 : 1);
+    }
+
+    /**
+     * @throws \RuntimeException when the pattern fails, so a failed count never passes as zero
+     */
+    private static function countMatches(string $pattern, string $text): int
+    {
+        $count = preg_match_all($pattern, $text);
+        if (false === $count) {
+            throw new \RuntimeException('The AI answer could not be measured.');
+        }
+
+        return $count;
     }
 
     /**
@@ -171,26 +165,15 @@ final readonly class OutputValidator
      *
      * @return array<TKey, mixed>
      */
-    private static function escapeStrings(array $values): array
+    private static function cleanStrings(array $values): array
     {
         return array_map(
             static fn (mixed $value): mixed => match (true) {
-                \is_string($value) => self::escape(self::stripControlCharacters($value)),
-                \is_array($value) => self::escapeStrings($value),
+                \is_string($value) => UntrustedText::normalise($value),
+                \is_array($value) => self::cleanStrings($value),
                 default => $value,
             },
             $values,
         );
-    }
-
-    private static function stripControlCharacters(string $text): string
-    {
-        return preg_replace(self::CONTROL_CHARACTERS_PATTERN, '', $text)
-            ?? throw new \RuntimeException('The AI answer could not be cleaned.');
-    }
-
-    private static function escape(string $text): string
-    {
-        return htmlspecialchars($text, \ENT_QUOTES | \ENT_SUBSTITUTE | \ENT_HTML5, 'UTF-8');
     }
 }

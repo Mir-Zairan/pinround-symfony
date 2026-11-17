@@ -150,31 +150,51 @@ final class OutputValidatorTest extends TestCase
     }
 
     #[Test]
-    public function everyStringInADataAnswerIsHtmlEscaped(): void
+    public function everyStringInADataAnswerIsCleanedButNotHtmlEscaped(): void
     {
-        $summaryAsJson = json_encode("<script>alert(1)</script> & 'Pay' \u{1B}[31m\u{2028}\u{FEFF}done", \JSON_THROW_ON_ERROR);
+        $summaryAsJson = json_encode("<b>Pay</b> & 'card' \"fails\" \u{1B}[31m\u{200B}\u{FEFF}now\u{2028}today", \JSON_THROW_ON_ERROR);
         self::assertStringContainsString('\u001b[31m', $summaryAsJson);
         $answer = str_replace('"The pay button does nothing."', $summaryAsJson, self::VALID_INTAKE);
 
         $data = $this->validator->checkData($this->intakeV1(), $answer, self::CANDIDATE_KEYS, false);
 
-        self::assertSame('&lt;script&gt;alert(1)&lt;/script&gt; &amp; &apos;Pay&apos; [31mdone', $data['summary']);
+        self::assertSame("<b>Pay</b> & 'card' \"fails\" [31mnow\ntoday", $data['summary']);
     }
 
     #[Test]
-    public function aSummaryIsHtmlEscapedAndTrimmed(): void
+    public function aSummaryIsTrimmedWithUnixLineEndsAndNotHtmlEscaped(): void
     {
-        $text = $this->validator->checkText($this->summaryV1(), "\u{FEFF}  <script>alert(1)</script> Checkout fails.\r\nLena sees \"Error\".  \n");
+        $text = $this->validator->checkText($this->summaryV1(), "\u{FEFF}  <script>alert(1)</script> Checkout fails.\r\nLena sees \"Error\" & 'Retry'.  \n");
 
-        self::assertSame('&lt;script&gt;alert(1)&lt;/script&gt; Checkout fails.'."\n".'Lena sees &quot;Error&quot;.', $text);
+        self::assertSame("<script>alert(1)</script> Checkout fails.\nLena sees \"Error\" & 'Retry'.", $text);
     }
 
     #[Test]
-    public function controlCharactersAreRemovedFromText(): void
+    public function controlAndZeroWidthCharactersAreRemovedAndLineSeparatorsBecomeNewlines(): void
     {
-        $text = $this->validator->checkText($this->summaryV1(), "Checkout\u{1B}[31m fails.\u{2028}Omar\ttests it.");
+        $text = $this->validator->checkText(
+            $this->summaryV1(),
+            "Check\u{00AD}out\u{1B}[31m fails.\u{2028}Omar\ttests\u{200D} it.\u{2029}Mia\u{2060} signs off.",
+        );
 
-        self::assertSame("Checkout[31m fails.Omar\ttests it.", $text);
+        self::assertSame("Checkout[31m fails.\nOmar\ttests it.\nMia signs off.", $text);
+    }
+
+    #[Test]
+    public function aLongRunOfStopsIsCountedOnceAndQuickly(): void
+    {
+        $summary = 'Checkout fails'.str_repeat('.', 19000).'x';
+
+        self::assertSame($summary, $this->validator->checkText($this->summaryV1(), $summary));
+    }
+
+    #[Test]
+    public function aVersionWithNoShippedTemplateIsRefusedForText(): void
+    {
+        $this->expectException(UnknownPromptTemplate::class);
+        $this->expectExceptionMessageIs('There is no prompt template summary.v999.');
+
+        $this->validator->checkText(new PromptVersion(AiFeature::Summary, 999), 'Checkout fails.');
     }
 
     #[Test]
@@ -224,10 +244,11 @@ final class OutputValidatorTest extends TestCase
     #[Test]
     public function anExplanationOf160WordsPassesAndOf161IsRefused(): void
     {
+        $validator = new OutputValidator(__DIR__.'/Fixtures/templates');
         $explanation = $this->sentences(array_fill(0, 16, 10));
-        self::assertSame($explanation, $this->validator->checkText(new PromptVersion(AiFeature::Explain, 1), $explanation));
+        self::assertSame($explanation, $validator->checkText(new PromptVersion(AiFeature::Explain, 1), $explanation));
 
-        $rejection = $this->rejectionOf(fn (): string => $this->validator->checkText(new PromptVersion(AiFeature::Explain, 1), $explanation.' More'));
+        $rejection = $this->rejectionOf(static fn (): string => $validator->checkText(new PromptVersion(AiFeature::Explain, 1), $explanation.' More'));
 
         self::assertSame('The AI answer to explain.v1 has more than 160 words.', $rejection->getMessage());
         self::assertFalse($rejection->isRetryAllowed);
