@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "type", "priority", "duplicates", "missing", "risky"],
+  "properties": {
+    "summary":   { "type": "string", "maxLength": 300 },
+    "type":      { "enum": ["Bug", "Story", "Task"] },
+    "priority":  { "enum": ["Critical", "Major", "Normal", "Minor"] },
+    "duplicates":{ "type": "array", "maxItems": 3, "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9]+-[0-9]+$" } },
+    "missing":   { "type": "boolean" },
+    "risky":     { "type": "boolean" }
+  }
+}
