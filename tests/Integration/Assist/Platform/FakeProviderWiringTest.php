@@ -34,7 +34,6 @@ final class FakeProviderWiringTest extends KernelTestCase
     public function aKernelResetForgetsTheCalls(): void
     {
         $provider = self::getContainer()->get(FakeProvider::class);
-        self::assertInstanceOf(FakeProvider::class, $provider);
         $provider->complete(new AiPrompt(AiFeature::Explain, 'Explain.', 'Why?'), ProviderChoice::fromSettings(null));
 
         self::getContainer()->get('services_resetter')->reset();

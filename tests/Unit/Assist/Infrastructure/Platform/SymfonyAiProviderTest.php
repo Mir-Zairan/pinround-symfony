@@ -269,9 +269,10 @@ final class SymfonyAiProviderTest extends TestCase
     {
         return static function (string $method, string $url, array $options) use (&$sent, $response): MockResponse {
             $body = $options['body'] ?? '';
+            $headers = $options['headers'] ?? [];
             $sent[] = [
                 'request' => $method.' '.$url,
-                'headers' => array_values(array_filter($options['headers'] ?? [], is_string(...))),
+                'headers' => \is_array($headers) ? array_values(array_filter($headers, is_string(...))) : [],
                 'body' => \is_string($body) ? $body : '',
                 'maxRedirects' => $options['max_redirects'] ?? null,
             ];
