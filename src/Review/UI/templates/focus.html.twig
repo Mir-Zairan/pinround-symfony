@@ -1,0 +1,84 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- The full-screen review of one area (RoundController::focus, full-screen-review.md). The server shows the bar of the
+    "?pin=" pin and hides the others; Previous, Next and After/Before are links and the verdicts plain forms, so the walk
+    works without JavaScript. pin-walker switches bars in place, moves the selected ring, and adds the arrow keys and
+    Escape. -#}
+
+{% block title %}Full screen · Round {{ roundNumber }} · {{ ticketKey }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+{% endblock %}
+
+{% block site_header %}{% endblock %}
+
+{% block main %}
+    {% set roundController = 'App\\Review\\UI\\Controller\\RoundController' %}
+    {% set verdictController = 'App\\Review\\UI\\Controller\\VerdictController' %}
+    {% set focusRoute = constant(roundController ~ '::FOCUS_ROUTE') %}
+    {% set exitHref = path(constant(roundController ~ '::ROUND_ROUTE'), {key: ticketKey, number: roundNumber}|merge(page.areaPosition is null ? {} : {(areaParameter): page.areaPosition})) %}
+    <article class="focus-review" data-controller="pin-walker" data-pin-walker-parameter-value="{{ pinParameter }}" data-action="keydown@document->pin-walker#walk click->pin-walker#selectPin">
+        <header class="focus-review__header">
+            <twig:Button variant="outline" size="sm" href="{{ exitHref }}" class="focus-review__exit" data-pin-walker-target="exit">Exit full screen</twig:Button>
+            <h1 class="focus-review__line">{{ page.line }}</h1>
+            {% if page.hasBefore %}
+                {% set sideQuery = {key: ticketKey, number: roundNumber, (areaParameter): page.areaPosition} %}
+                <twig:SegmentedControl label="Picture" class="focus-review__sides" :links="[
+                    {label: 'After', href: path(focusRoute, sideQuery|merge({(sideParameter): 'after'})), isCurrent: page.side == 'after'},
+                    {label: 'Before', href: path(focusRoute, sideQuery|merge({(sideParameter): 'before'})), isCurrent: page.side == 'before'},
+                ]" />
+            {% endif %}
+        </header>
+
+        {% if page.picture is null %}
+            <twig:EmptyState message="This round has no screen areas." />
+        {% else %}
+            <twig:Screenshot :view="page.picture" :selectedNumber="page.current.number ?? null" :headingLevel="2" class="focus-review__picture" />
+
+            {% if page.current is null %}
+                <p class="focus-review__none">There are no earlier pins to check here.</p>
+            {% else %}
+                {% set csrfField = constant(verdictController ~ '::CSRF_FIELD') %}
+                {% set verdictField = constant(verdictController ~ '::VERDICT_FIELD') %}
+                {% set focusSideField = constant(verdictController ~ '::FOCUS_SIDE_FIELD') %}
+                {% set csrfToken = page.mayGiveVerdicts ? csrf_token(verdictCsrfId) : null %}
+                <div class="focus-bar" aria-live="polite">
+                    {% for stop in page.stops %}
+                        {% set isCurrent = stop.position == page.current.position %}
+                        {% set stopQuery = {key: ticketKey, number: roundNumber, (areaParameter): page.areaPosition, (sideParameter): page.side} %}
+                        <section class="focus-bar__stop" id="focus-pin-{{ stop.position }}" aria-labelledby="focus-pin-{{ stop.position }}-label" data-pin-walker-target="stop" data-pin-number="{{ stop.number }}" data-pin-position="{{ stop.position }}"{% if not isCurrent %} hidden{% endif %}>
+                            <a class="icon-btn focus-bar__step" href="{{ path(focusRoute, stopQuery|merge({(pinParameter): stop.previousPosition})) }}" aria-label="Previous pin" data-pin-walker-control="previous" data-action="pin-walker#previous">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+                            </a>
+                            <div class="focus-bar__text">
+                                <h2 class="focus-bar__label" id="focus-pin-{{ stop.position }}-label">{{ stop.label }}</h2>
+                                <p class="focus-bar__note">{% if stop.note|trim is same as('') %}(no note){% else %}{{ stop.note }}{% endif %}</p>
+                            </div>
+                            <twig:Tag class="verdict-tag {{ stop.verdictClass }}">{{ stop.verdictLabel }}</twig:Tag>
+                            {% if page.mayGiveVerdicts %}
+                                {% if stop.isChecked %}
+                                    <form method="post" action="{{ path(constant(verdictController ~ '::PIN_UNDO_ROUTE'), {key: ticketKey, number: roundNumber, pinId: stop.id}) }}" class="focus-bar__choices">
+                                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                        <input type="hidden" name="{{ focusSideField }}" value="{{ page.side }}">
+                                        <twig:Button type="submit" variant="text" :autofocus="isCurrent" data-pin-walker-control="undo">Undo</twig:Button>
+                                    </form>
+                                {% else %}
+                                    <form method="post" action="{{ path(constant(verdictController ~ '::PIN_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, pinId: stop.id}) }}" class="focus-bar__choices">
+                                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                        <input type="hidden" name="{{ focusSideField }}" value="{{ page.side }}">
+                                        <twig:Button type="submit" variant="tonal" :autofocus="isCurrent" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') }}" data-pin-walker-control="fixed">Fixed</twig:Button>
+                                        <twig:Button type="submit" variant="text" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') }}" data-pin-walker-control="still-wrong">Still wrong</twig:Button>
+                                    </form>
+                                {% endif %}
+                            {% endif %}
+                            <a class="icon-btn focus-bar__step" href="{{ path(focusRoute, stopQuery|merge({(pinParameter): stop.nextPosition})) }}" aria-label="Next pin" data-pin-walker-control="next" data-action="pin-walker#next">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                            </a>
+                        </section>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endif %}
+    </article>
+{% endblock %}

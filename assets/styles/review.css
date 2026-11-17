@@ -802,3 +802,88 @@ textarea.screenshot-report__input {
   align-items: flex-start;
   gap: var(--space-8);
 }
+
+/* The full-screen review (focus.html.twig): always dark (RoundController passes the dark theme), no site header. */
+.focus-review {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-16);
+}
+
+.focus-review__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+  width: 100%;
+}
+
+.focus-review__line {
+  flex: 1 1 16rem;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.focus-review__picture {
+  width: 100%;
+  max-width: 1200px;
+}
+
+.focus-review__picture .screenshot__frame {
+  border-radius: var(--radius-input);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 50%);
+}
+
+.focus-review__none {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
+.focus-bar {
+  width: 100%;
+  max-width: 720px;
+}
+
+.focus-bar__stop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  border-radius: 18px;
+  background: var(--s-high);
+}
+
+.focus-bar__stop[hidden] {
+  display: none;
+}
+
+.focus-bar__text {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.focus-bar__label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.focus-bar__note {
+  margin: var(--space-4) 0 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.focus-bar__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+}

@@ -53,14 +53,9 @@ final readonly class RoundPages
     {
         $title = \sprintf('Round %d', $round->number);
         $detail = self::detailOf($ticket, $round, $now, $viewerTimeZone);
-        if ([] === $round->areas) {
+        $selected = self::areaAt($round, $selectedPosition);
+        if (null === $selected) {
             return new RoundPage($ticket->key, $ticket->title, $title, $detail, [], null, null);
-        }
-        $selected = $round->areas[0];
-        foreach ($round->areas as $area) {
-            if ($area->position === $selectedPosition) {
-                $selected = $area;
-            }
         }
 
         return new RoundPage(
@@ -72,6 +67,43 @@ final readonly class RoundPages
             $this->selectedAreaOf($ticket, $round, $selected, $now),
             self::panelOf($ticket, $round, $selected, $isVerdictGranted, $viewerId),
         );
+    }
+
+    /**
+     * The area at that position, the first one when the round has none there, and null for a round with no areas.
+     */
+    public static function areaAt(ReviewRoundView $round, int $position): ?AreaView
+    {
+        foreach ($round->areas as $area) {
+            if ($area->position === $position) {
+                return $area;
+            }
+        }
+
+        return $round->areas[0] ?? null;
+    }
+
+    /**
+     * Whether the verdict forms show: VerdictPermission SET is granted on an open round of a ticket with a team lead,
+     * who sees the verdicts next.
+     */
+    public static function mayGiveVerdictsOn(TicketPageView $ticket, ReviewRoundView $round, bool $isVerdictGranted): bool
+    {
+        return $isVerdictGranted && self::OPEN_ROUND === $round->state && null !== $ticket->turnSnapshot->leadDisplayName;
+    }
+
+    /**
+     * The tag of a pin's verdict: "Fixed", "Still wrong" or "Not checked yet", and its modifier class.
+     *
+     * @return array{string, string}
+     */
+    public static function pinVerdictTagOf(?string $verdict): array
+    {
+        return match ($verdict) {
+            VerdictCommands::PIN_FIXED => ['Fixed', 'verdict-tag--looks-right'],
+            VerdictCommands::PIN_STILL_WRONG => ['Still wrong', 'verdict-tag--not-right'],
+            default => ['Not checked yet', 'verdict-tag--none'],
+        };
     }
 
     /**
@@ -101,7 +133,7 @@ final readonly class RoundPages
     {
         $snapshot = $ticket->turnSnapshot;
         $leadName = $snapshot->leadDisplayName;
-        $mayGiveVerdicts = $isVerdictGranted && self::OPEN_ROUND === $round->state && null !== $leadName;
+        $mayGiveVerdicts = self::mayGiveVerdictsOn($ticket, $round, $isVerdictGranted);
         // The verbs are the tester's to make; the lead would be offered a question to themself.
         $isOfferedTheNextVerb = $mayGiveVerdicts && TicketTesterRule::isTesterOf($snapshot, $viewerId);
         $earlierPins = null === $area->before ? [] : array_map(
@@ -190,11 +222,7 @@ final readonly class RoundPages
 
     private static function earlierPinRowOf(RoundPinView $pin, TicketPageView $ticket): EarlierPinRow
     {
-        [$label, $class] = match ($pin->verdict) {
-            VerdictCommands::PIN_FIXED => ['Fixed', 'verdict-tag--looks-right'],
-            VerdictCommands::PIN_STILL_WRONG => ['Still wrong', 'verdict-tag--not-right'],
-            default => ['Not checked yet', 'verdict-tag--none'],
-        };
+        [$label, $class] = self::pinVerdictTagOf($pin->verdict);
 
         return new EarlierPinRow($pin->id, $pin->number, $pin->note, self::authorLineOf($pin->authorId, $ticket), $label, $class, null !== $pin->verdict);
     }
