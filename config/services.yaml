@@ -223,6 +223,10 @@ services:
     App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\SymfonyAiProvider'
     # The one door to server-side AI; nothing else calls AiProvider.
     App\Assist\Application\AiGateway: '@App\Assist\Application\Gateway\GuardedAiGateway'
+    # "Summarize with AI": the request state on the state Valkey, the job on async_ai.
+    App\Assist\Api\Summaries: '@App\Assist\Application\Summaries\QueuedSummaries'
+    App\Assist\Application\Summaries\SummaryRequests: '@App\Assist\Infrastructure\Messenger\ValkeySummaryRequests'
+    App\Assist\Application\Summaries\SummaryJobQueue: '@App\Assist\Infrastructure\Messenger\MessengerSummaryJobQueue'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -450,9 +454,17 @@ when@test:
         test.assist_ai_call_limit:
             alias: App\Assist\Application\AiCallLimit
             public: true
-        # No Messenger handler runs the gateway before the AI features (P08.T4); the gateway tests call it as one will.
+        # GenerateSummaryHandler inlines the gateway; the gateway tests call it as that handler does.
         test.assist_ai_gateway:
             alias: App\Assist\Application\AiGateway
+            public: true
+        # No page queues a summary before the ticket page's button (P08.T4); the summary tests get the Api as it will,
+        # and read the request state through its port.
+        test.assist_summaries:
+            alias: App\Assist\Api\Summaries
+            public: true
+        test.assist_summary_requests:
+            alias: App\Assist\Application\Summaries\SummaryRequests
             public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.

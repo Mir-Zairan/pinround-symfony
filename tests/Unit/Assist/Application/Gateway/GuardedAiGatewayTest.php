@@ -9,6 +9,7 @@ use App\Assist\Application\AiNotAllowed;
 use App\Assist\Application\AiRateLimited;
 use App\Assist\Application\AiTask;
 use App\Assist\Application\AiUnavailable;
+use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\Gateway\AskedTicket;
 use App\Assist\Application\Gateway\GuardedAiGateway;
 use App\Assist\Application\Policy\PolicyEvaluator;
@@ -354,7 +355,7 @@ final class GuardedAiGatewayTest extends TestCase
 
     private function gateway(): GuardedAiGateway
     {
-        return new GuardedAiGateway($this->aiSettings, new PolicyEvaluator(), $this->tickets, new PromptBuilder(), $this->limit, $this->provider, new OutputValidator(), $this->metering);
+        return new GuardedAiGateway($this->aiSettings, new AiTaskAdmission($this->aiSettings, new PolicyEvaluator(), $this->tickets), new PromptBuilder(), $this->limit, $this->provider, new OutputValidator(), $this->metering);
     }
 
     /**
