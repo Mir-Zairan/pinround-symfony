@@ -14,14 +14,20 @@ use App\SharedKernel\Domain\UserId;
  * The state of each "Check with AI" until its suggestion is stored: queued with its draft while its job waits or runs,
  * failed with its line after the job gave up, and none once the suggestion is stored. Each check has its own state and
  * belongs to the person who asked. A queued state ends on its own after an hour and a failed one after a day, so a
- * lost job leaves no draft behind for long.
+ * lost job leaves no draft behind for long. A person has at most MAX_OPEN_CHECKS_PER_PERSON checks open at once in an
+ * organization: a check is open from open() until its release, its failure or its expiry.
  */
 interface IntakeRequests
 {
+    public const int MAX_OPEN_CHECKS_PER_PERSON = 3;
+
     /**
-     * Keeps the check queued for the requester with their draft, as of now; the check and the write are one step.
+     * Keeps the check queued for the requester with their draft, as of now; counting the requester's open checks and
+     * the write are one step, so two opens at once never pass the cap together.
      *
-     * @throws \RuntimeException when the state cannot be reached or the check already has one
+     * @throws TooManyOpenIntakeChecks when the requester has MAX_OPEN_CHECKS_PER_PERSON checks open already; nothing
+     *                                 was written then
+     * @throws \RuntimeException       when the state cannot be reached or the check already has one
      */
     public function open(OrganizationId $organizationId, IntakeCheckId $checkId, UserId $requesterId, DraftReport $draft): void;
 
@@ -39,18 +45,20 @@ interface IntakeRequests
     public function markAiMayBeAsked(OrganizationId $organizationId, IntakeCheckId $checkId, UserId $requesterId): ?DraftReport;
 
     /**
-     * Replaces the check's state with failed, as of now, with the line to show; its draft is gone then.
+     * Replaces the check's state with failed, as of now, with the line to show; its draft is gone then, and the check
+     * is no longer open for the requester.
      *
      * @throws \RuntimeException when the state cannot be reached
      */
     public function recordFailure(OrganizationId $organizationId, IntakeCheckId $checkId, UserId $requesterId, string $sentence): void;
 
     /**
-     * Forgets the check's state: its suggestion was stored, or its job could not be queued.
+     * Forgets the check's state and draft, and that it is open for the requester: its suggestion was stored, or its job
+     * could not be queued.
      *
      * @throws \RuntimeException when the state cannot be reached
      */
-    public function release(OrganizationId $organizationId, IntakeCheckId $checkId): void;
+    public function release(OrganizationId $organizationId, IntakeCheckId $checkId, UserId $requesterId): void;
 
     /**
      * @return IntakeCheckView|null queued or failed; null when the check has no state or another person asked for it

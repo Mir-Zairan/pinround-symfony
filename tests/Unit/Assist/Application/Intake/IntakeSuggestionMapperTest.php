@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Assist\Api;
+namespace App\Tests\Unit\Assist\Application\Intake;
 
-use App\Assist\Api\IntakeSuggestion;
+use App\Assist\Application\Intake\IntakeSuggestionMapper;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
-final class IntakeSuggestionTest extends TestCase
+final class IntakeSuggestionMapperTest extends TestCase
 {
     private const array CHECKED_DATA = [
         'summary' => 'Pay does nothing on the last step.',
@@ -23,37 +23,37 @@ final class IntakeSuggestionTest extends TestCase
     #[Test]
     public function itKeepsTheSixFieldsOfTheIntakeSchemaWithItsModelAndPromptVersion(): void
     {
-        $suggestion = IntakeSuggestion::fromCheckedData(self::CHECKED_DATA, 'meta-llama/Llama-3.1-8B-Instruct', 'intake.v1');
+        $suggestion = IntakeSuggestionMapper::fromCheckedData(self::CHECKED_DATA, 'meta-llama/Llama-3.1-8B-Instruct', 'intake.v1');
 
         self::assertSame(
             ['Pay does nothing on the last step.', 'Bug', 'Major', ['SHOP-7', 'SHOP-12'], true, false, 'meta-llama/Llama-3.1-8B-Instruct', 'intake.v1'],
             [$suggestion->summary, $suggestion->type, $suggestion->priority, $suggestion->duplicateKeys, $suggestion->isMissingDetails, $suggestion->isRisky, $suggestion->model, $suggestion->promptVersion],
         );
-        self::assertSame(self::CHECKED_DATA, $suggestion->result());
+        self::assertSame(self::CHECKED_DATA, IntakeSuggestionMapper::resultOf($suggestion));
     }
 
     /** The AI never sets a visibility (ADR-0020), whatever else a stored result or an answer carries. */
     #[Test]
     public function itDropsAVisibilityAndAnyOtherFieldTheSchemaDoesNotName(): void
     {
-        $suggestion = IntakeSuggestion::fromCheckedData([...self::CHECKED_DATA, 'visibility' => 'team', 'assignee' => 'Lena'], 'm', 'intake.v1');
+        $suggestion = IntakeSuggestionMapper::fromCheckedData([...self::CHECKED_DATA, 'visibility' => 'team', 'assignee' => 'Lena'], 'm', 'intake.v1');
 
-        self::assertSame(self::CHECKED_DATA, $suggestion->result());
-        self::assertArrayNotHasKey('visibility', $suggestion->result());
+        self::assertSame(self::CHECKED_DATA, IntakeSuggestionMapper::resultOf($suggestion));
+        self::assertArrayNotHasKey('visibility', IntakeSuggestionMapper::resultOf($suggestion));
     }
 
     #[Test]
     public function itReadsBackWhatItsResultHolds(): void
     {
-        $suggestion = IntakeSuggestion::fromCheckedData(self::CHECKED_DATA, 'm', 'intake.v1');
+        $suggestion = IntakeSuggestionMapper::fromCheckedData(self::CHECKED_DATA, 'm', 'intake.v1');
 
-        self::assertEquals($suggestion, IntakeSuggestion::fromCheckedData($suggestion->result(), 'm', 'intake.v1'));
+        self::assertEquals($suggestion, IntakeSuggestionMapper::fromCheckedData(IntakeSuggestionMapper::resultOf($suggestion), 'm', 'intake.v1'));
     }
 
     #[Test]
     public function itKeepsAnEmptyListOfDuplicates(): void
     {
-        self::assertSame([], IntakeSuggestion::fromCheckedData([...self::CHECKED_DATA, 'duplicates' => []], 'm', 'intake.v1')->duplicateKeys);
+        self::assertSame([], IntakeSuggestionMapper::fromCheckedData([...self::CHECKED_DATA, 'duplicates' => []], 'm', 'intake.v1')->duplicateKeys);
     }
 
     /**
@@ -94,6 +94,6 @@ final class IntakeSuggestionTest extends TestCase
         $this->expectException(\UnexpectedValueException::class);
         $this->expectExceptionMessage($expectedMessage);
 
-        IntakeSuggestion::fromCheckedData($data, 'm', 'intake.v1');
+        IntakeSuggestionMapper::fromCheckedData($data, 'm', 'intake.v1');
     }
 }

@@ -11,13 +11,14 @@ use App\Assist\Api\IntakeCheckRefused;
 use App\Assist\Api\IntakeCheckView;
 use App\Assist\Api\IntakeSuggestion;
 use App\Assist\Application\AiCallLimit;
+use App\Assist\Application\AiRequesters;
 use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\Intake\GenerateIntakeSuggestion;
 use App\Assist\Application\Intake\IntakeJobQueue;
 use App\Assist\Application\Intake\IntakeRequests;
+use App\Assist\Application\Intake\IntakeSuggestionMapper;
 use App\Assist\Application\IntakeAssistService;
 use App\Assist\Application\Suggestions;
-use App\Assist\Application\Summaries\SummaryRequesters;
 use App\Assist\Infrastructure\Platform\FakeProvider;
 use App\Assist\Infrastructure\Uid\UuidV7IntakeCheckIds;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
@@ -172,6 +173,8 @@ final class IntakeAssistServiceTest extends KernelTestCase
         yield 'a title one character over its cap' => [self::OMAR, self::AI_ON_IN_THE_CLOUD, new DraftReport(self::SHOP_PROJECT, str_repeat('é', 201), ''), $tooLong, 'The title is too long for AI help: 200 characters at most.'];
         yield 'details one character over their cap' => [self::OMAR, self::AI_ON_IN_THE_CLOUD, new DraftReport(self::SHOP_PROJECT, 'Pay', str_repeat('d', 50_001)), $tooLong, 'The details are too long for AI help: 50,000 characters at most.'];
         yield 'one pin too many' => [self::OMAR, self::AI_ON_IN_THE_CLOUD, new DraftReport(self::SHOP_PROJECT, 'Pay', '', array_fill(0, 101, 'n')), $tooLong, 'Too many pins for AI help: 100 at most.'];
+        yield 'one pin too many, the last not UTF-8, refused before the notes are read' => [self::OMAR, self::AI_ON_IN_THE_CLOUD, new DraftReport(self::SHOP_PROJECT, "\xC3\x28", '', [...array_fill(0, 100, 'n'), "\xC3\x28"]), $tooLong, 'Too many pins for AI help: 100 at most.'];
+        yield 'details over their cap and not UTF-8' => [self::OMAR, self::AI_ON_IN_THE_CLOUD, new DraftReport(self::SHOP_PROJECT, 'Pay', str_repeat('d', 50_000)."\xC3\x28"), $tooLong, 'The details are too long for AI help: 50,000 characters at most.'];
         yield 'a pin note one character over its cap' => [self::OMAR, self::AI_ON_IN_THE_CLOUD, new DraftReport(self::SHOP_PROJECT, 'Pay', '', ['ok', str_repeat('n', 1_001)]), $tooLong, 'A pin note is too long for AI help: 1,000 characters at most.'];
         yield 'a pin note that is not UTF-8' => [self::OMAR, self::AI_ON_IN_THE_CLOUD, new DraftReport(self::SHOP_PROJECT, 'Pay', '', ["\xC3\x28"]), 'unreadable_draft', 'This report has text AI help cannot read.'];
         yield 'a project id in upper case' => [self::OMAR, self::AI_ON_IN_THE_CLOUD, new DraftReport(strtoupper(self::SHOP_PROJECT), 'Pay', ''), 'unknown_project', 'Choose a project first.'];
@@ -213,6 +216,38 @@ final class IntakeAssistServiceTest extends KernelTestCase
         self::assertSame([], $this->asyncAi()->getSent());
         self::assertSame([], $this->checkStateKeys());
         self::assertSame(self::CALL_LIMIT, $this->countedCallsOf(self::OMAR));
+    }
+
+    /**
+     * Each open check keeps its draft on the state Valkey for up to an hour, so a person may have three at once.
+     */
+    #[Test]
+    public function aFourthOpenCheckIsRefusedWithTheLimitLineAndQueuesAndKeepsNothingUntilOneEnds(): void
+    {
+        $checkIds = [];
+        for ($check = 1; $check <= 3; ++$check) {
+            $checkIds[] = $this->checkAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::draft());
+        }
+        $statesBefore = $this->checkStates();
+        self::assertCount(7, $statesBefore, 'Three states, three drafts and Omar\'s open checks.');
+
+        try {
+            $this->checkAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::draft());
+            self::fail('A fourth open check was queued.');
+        } catch (IntakeCheckRefused $refusal) {
+            self::assertSame(
+                [IntakeCheckRefused::TOO_MANY_AI_REQUESTS, 'You have 3 AI checks running. Wait for one to finish.'],
+                [$refusal->refusalCode, $refusal->getMessage()],
+            );
+        }
+
+        self::assertSame($statesBefore, $this->checkStates());
+        self::assertCount(3, $this->asyncAi()->getSent());
+        $this->checkAs(self::LENA, self::AI_ON_IN_THE_CLOUD, self::draft());
+        $this->requests()->release(new OrganizationId(self::ACME_FOODS), $checkIds[0], new UserId(self::OMAR));
+        $fourthId = $this->checkAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::draft());
+        self::assertEquals(IntakeCheckView::queued(), $this->requests()->stateOf(new OrganizationId(self::ACME_FOODS), $fourthId, new UserId(self::OMAR)));
+        self::assertCount(5, $this->asyncAi()->getSent());
     }
 
     #[Test]
@@ -288,7 +323,7 @@ final class IntakeAssistServiceTest extends KernelTestCase
         $this->storeOmarsSuggestion();
         $statesBefore = $this->checkStates();
         $rowsBefore = $this->suggestionRows();
-        self::assertCount(2, $statesBefore);
+        self::assertCount(4, $statesBefore, 'Two states, the queued one\'s draft and Omar\'s open checks.');
         self::assertCount(1, $rowsBefore);
 
         foreach ([$queuedId, $failedId, self::storedCheck()] as $checkId) {
@@ -363,7 +398,7 @@ final class IntakeAssistServiceTest extends KernelTestCase
 
     private static function suggestion(): IntakeSuggestion
     {
-        return IntakeSuggestion::fromCheckedData(
+        return IntakeSuggestionMapper::fromCheckedData(
             ['summary' => 'Pay does nothing.', 'type' => 'Bug', 'priority' => 'Major', 'duplicates' => ['SHOP-7'], 'missing' => false, 'risky' => true],
             'meta-llama/Llama-3.1-8B-Instruct',
             'intake.v1',
@@ -396,8 +431,8 @@ final class IntakeAssistServiceTest extends KernelTestCase
 
     private function intakeAssistWith(IntakeJobQueue $intakeJobQueue): IntakeAssistService
     {
-        $requesters = self::getContainer()->get('test.assist_summary_requesters');
-        \assert($requesters instanceof SummaryRequesters);
+        $requesters = self::getContainer()->get('test.assist_ai_requesters');
+        \assert($requesters instanceof AiRequesters);
         $aiTaskAdmission = self::getContainer()->get('test.assist_ai_task_admission');
         \assert($aiTaskAdmission instanceof AiTaskAdmission);
         $suggestions = self::getContainer()->get('test.assist_suggestions');
@@ -442,15 +477,17 @@ final class IntakeAssistServiceTest extends KernelTestCase
     }
 
     /**
-     * @return list<string> the check state keys of both organizations, sorted
+     * @return list<string> the check state, draft and open-check keys of both organizations, sorted
      */
     private function checkStateKeys(): array
     {
         $stateValkey = self::getContainer()->get('state_valkey.connection');
         $keys = [];
         foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
-            $found = $stateValkey->keys('intake_request:'.$organizationId.':*');
-            $keys = [...$keys, ...(\is_array($found) ? $found : [])];
+            foreach (['intake_request', 'intake_draft', 'intake_open'] as $prefix) {
+                $found = $stateValkey->keys($prefix.':'.$organizationId.':*');
+                $keys = [...$keys, ...(\is_array($found) ? $found : [])];
+            }
         }
         sort($keys);
 
@@ -458,14 +495,14 @@ final class IntakeAssistServiceTest extends KernelTestCase
     }
 
     /**
-     * @return array<string, mixed> each check state's raw value by key
+     * @return array<string, mixed> each key's raw value (an open-check set's members with their scores) by key
      */
     private function checkStates(): array
     {
         $stateValkey = self::getContainer()->get('state_valkey.connection');
         $states = [];
         foreach ($this->checkStateKeys() as $key) {
-            $states[$key] = $stateValkey->get($key);
+            $states[$key] = \Redis::REDIS_ZSET === $stateValkey->type($key) ? $stateValkey->zRange($key, 0, -1, ['withscores' => true]) : $stateValkey->get($key);
         }
 
         return $states;

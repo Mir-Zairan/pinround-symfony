@@ -25,7 +25,7 @@ final readonly class EndIntakeRequestHandler
     {
         try {
             if (null === $endIntakeRequest->failedSentence) {
-                $this->intakeRequests->release($endIntakeRequest->organizationId, $endIntakeRequest->checkId);
+                $this->intakeRequests->release($endIntakeRequest->organizationId, $endIntakeRequest->checkId, $endIntakeRequest->requesterId);
 
                 return;
             }

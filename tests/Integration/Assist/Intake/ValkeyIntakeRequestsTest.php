@@ -8,6 +8,7 @@ use App\Assist\Api\DraftReport;
 use App\Assist\Api\IntakeCheckId;
 use App\Assist\Api\IntakeCheckView;
 use App\Assist\Application\Intake\IntakeRequests;
+use App\Assist\Application\Intake\TooManyOpenIntakeChecks;
 use App\Assist\Infrastructure\Valkey\ValkeyIntakeRequests;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -19,7 +20,7 @@ use Symfony\Component\Clock\MockClock;
 /**
  * The check states on the test's state Valkey, with the clock frozen in March 2027. Beta Bakery has a check with the
  * same id as Acme Foods' one, so a key without the organization would mix their states up. The draft carries a marker
- * that must be gone from the state once the job took it.
+ * that must never be in the state key the page polls, and must be gone from Valkey once the job took it.
  */
 final class ValkeyIntakeRequestsTest extends KernelTestCase
 {
@@ -27,6 +28,9 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000c9b02';
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000c9b41';
     private const string CHECK = '0197a3c0-0000-7000-8000-0000000c9b31';
+    private const string SECOND_CHECK = '0197a3c0-0000-7000-8000-0000000c9b32';
+    private const string THIRD_CHECK = '0197a3c0-0000-7000-8000-0000000c9b33';
+    private const string FOURTH_CHECK = '0197a3c0-0000-7000-8000-0000000c9b34';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000c9b11';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000c9b12';
     private const string NOW = '2027-03-15 10:00:00 UTC';
@@ -55,7 +59,7 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
 
         $port->open(self::acmeFoods(), self::check(), self::omar(), self::draft());
 
-        self::assertSame(1, $this->connection()->exists(self::keyOf(self::ACME_FOODS)));
+        self::assertSame(1, $this->connection()->exists(self::stateKeyOf(self::ACME_FOODS)));
     }
 
     #[Test]
@@ -66,14 +70,49 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
         self::assertEquals(IntakeCheckView::queued(), $this->requests()->stateOf(self::acmeFoods(), self::check(), self::omar()));
         self::assertNull($this->requests()->stateOf(self::acmeFoods(), self::check(), new UserId(self::LENA)));
         self::assertNull($this->requests()->stateOf(new OrganizationId(self::BETA_BAKERY), self::check(), self::omar()));
-        $this->assertTimeToLiveIsAbout(3600, self::keyOf(self::ACME_FOODS));
+        $this->assertTimeToLiveIsAbout(3600, self::stateKeyOf(self::ACME_FOODS));
+    }
+
+    /**
+     * The poll reads the small state alone: the draft waits under its own key with the same expiry, its multibyte text
+     * kept as it is rather than escaped to \uXXXX.
+     */
+    #[Test]
+    public function anOpenedCheckKeepsItsDraftUnderItsOwnKeyWithTheSameExpiryAndUnescaped(): void
+    {
+        $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), new DraftReport(self::SHOP_PROJECT, "Bezahlen geht nicht \u{2014} ".self::MARKER, "Pin \u{00E9}"));
+
+        $state = $this->connection()->get(self::stateKeyOf(self::ACME_FOODS));
+        $draft = $this->connection()->get(self::draftKeyOf(self::ACME_FOODS));
+        self::assertIsString($state);
+        self::assertIsString($draft);
+        self::assertStringNotContainsString(self::MARKER, $state);
+        self::assertStringNotContainsString('draft', $state);
+        self::assertStringContainsString("Bezahlen geht nicht \u{2014} ".self::MARKER, $draft);
+        self::assertStringContainsString("Pin \u{00E9}", $draft);
+        self::assertStringNotContainsString('\u', $draft);
+        $this->assertTimeToLiveIsAbout(3600, self::draftKeyOf(self::ACME_FOODS));
+    }
+
+    /**
+     * The draft key holds a list, which a GET would answer with WRONGTYPE; the poll still answers, so it never asks for
+     * the draft.
+     */
+    #[Test]
+    public function thePollDoesNotReadTheDraftKey(): void
+    {
+        $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), self::draft());
+        $this->connection()->del(self::draftKeyOf(self::ACME_FOODS));
+        $this->connection()->rPush(self::draftKeyOf(self::ACME_FOODS), 'not a string');
+
+        self::assertEquals(IntakeCheckView::queued(), $this->requests()->stateOf(self::acmeFoods(), self::check(), self::omar()));
     }
 
     #[Test]
     public function aSecondOpenOfTheSameCheckIsRefusedAndKeepsTheFirst(): void
     {
         $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), self::draft());
-        $before = $this->connection()->get(self::keyOf(self::ACME_FOODS));
+        $before = $this->everyValue();
 
         try {
             $this->requests()->open(self::acmeFoods(), self::check(), new UserId(self::LENA), new DraftReport(self::SHOP_PROJECT, 'Other', 'Other.'));
@@ -82,29 +121,138 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
             self::assertSame('The intake check state could not be opened.', $refusal->getMessage());
         }
 
-        self::assertSame($before, $this->connection()->get(self::keyOf(self::ACME_FOODS)));
+        self::assertSame($before, $this->everyValue());
+    }
+
+    /**
+     * Omar has three checks open, so a fourth is refused and writes nothing; Lena, and Omar at Beta Bakery, each count
+     * on their own.
+     */
+    #[Test]
+    public function aFourthOpenCheckOfOnePersonIsRefusedAndWritesNothing(): void
+    {
+        $this->openOmarsFirstThreeChecks();
+        $before = $this->everyValue();
+        self::assertCount(7, $before, 'Three states, three drafts and the open set.');
+
+        try {
+            $this->requests()->open(self::acmeFoods(), new IntakeCheckId(self::FOURTH_CHECK), self::omar(), self::draft());
+            self::fail('A fourth check was opened.');
+        } catch (TooManyOpenIntakeChecks $refusal) {
+            self::assertSame('At most 3 intake checks may be open per person.', $refusal->getMessage());
+        }
+
+        self::assertSame($before, $this->everyValue());
+        $this->requests()->open(self::acmeFoods(), new IntakeCheckId(self::FOURTH_CHECK), new UserId(self::LENA), self::draft());
+        $this->requests()->open(new OrganizationId(self::BETA_BAKERY), new IntakeCheckId(self::FOURTH_CHECK), self::omar(), self::draft());
+        $this->assertTimeToLiveIsAbout(3600, self::openChecksKeyOf(self::ACME_FOODS, self::OMAR));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function ends(): iterable
+    {
+        yield 'a release' => ['release'];
+        yield 'a failure' => ['failure'];
+    }
+
+    #[Test]
+    #[DataProvider('ends')]
+    public function aCheckThatEndedNoLongerCountsAgainstTheCap(string $end): void
+    {
+        $this->openOmarsFirstThreeChecks();
+
+        match ($end) {
+            'release' => $this->requests()->release(self::acmeFoods(), self::check(), self::omar()),
+            'failure' => $this->requests()->recordFailure(self::acmeFoods(), self::check(), self::omar(), self::FAILED_SENTENCE),
+            default => throw new \LogicException('No end is called '.$end.'.'),
+        };
+        $this->requests()->open(self::acmeFoods(), new IntakeCheckId(self::FOURTH_CHECK), self::omar(), self::draft());
+
+        self::assertEquals(IntakeCheckView::queued(), $this->requests()->stateOf(self::acmeFoods(), new IntakeCheckId(self::FOURTH_CHECK), self::omar()));
+        self::assertEqualsCanonicalizing(
+            [self::SECOND_CHECK, self::THIRD_CHECK, self::FOURTH_CHECK],
+            $this->connection()->zRange(self::openChecksKeyOf(self::ACME_FOODS, self::OMAR), 0, -1),
+        );
+    }
+
+    /**
+     * The open-check key holds a plain string, which the scripts' sorted-set calls refuse with WRONGTYPE.
+     *
+     * @return iterable<string, array{string, string}>
+     */
+    public static function writes(): iterable
+    {
+        yield 'an open' => ['open', 'The intake check state could not be opened.'];
+        yield 'a release' => ['release', 'The intake check could not be released.'];
+        yield 'a failure' => ['failure', 'The failed intake check could not be stored.'];
+    }
+
+    #[Test]
+    #[DataProvider('writes')]
+    public function aWriteOverAnOpenCheckKeyThisClassDidNotWriteFailsAndChangesNothing(string $write, string $expectedMessage): void
+    {
+        if ('open' !== $write) {
+            $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), self::draft());
+        }
+        $this->connection()->set(self::openChecksKeyOf(self::ACME_FOODS, self::OMAR), 'not a sorted set');
+        $before = $this->everyValue();
+
+        try {
+            match ($write) {
+                'open' => $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), self::draft()),
+                'release' => $this->requests()->release(self::acmeFoods(), self::check(), self::omar()),
+                'failure' => $this->requests()->recordFailure(self::acmeFoods(), self::check(), self::omar(), self::FAILED_SENTENCE),
+                default => throw new \LogicException('No write is called '.$write.'.'),
+            };
+            self::fail('A write went through over an open-check key of another type.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame($expectedMessage, $failure->getMessage());
+        }
+
+        self::assertSame($before, $this->everyValue());
+        self::assertNull($this->connection()->getLastError(), 'The script error stayed on the connection for the next caller.');
+    }
+
+    /**
+     * A check whose queued state would have expired by now counts no more, though no end reached it.
+     */
+    #[Test]
+    public function aCheckOpenForAnHourNoLongerCountsAgainstTheCap(): void
+    {
+        $this->openOmarsFirstThreeChecks();
+        $this->clock->sleep(3599);
+
+        try {
+            $this->requests()->open(self::acmeFoods(), new IntakeCheckId(self::FOURTH_CHECK), self::omar(), self::draft());
+            self::fail('A fourth check was opened before the first three expired.');
+        } catch (TooManyOpenIntakeChecks $refusal) {
+            self::assertSame('At most 3 intake checks may be open per person.', $refusal->getMessage());
+        }
+        $this->clock->sleep(1);
+        $this->requests()->open(self::acmeFoods(), new IntakeCheckId(self::FOURTH_CHECK), self::omar(), self::draft());
+
+        self::assertSame([self::FOURTH_CHECK], $this->connection()->zRange(self::openChecksKeyOf(self::ACME_FOODS, self::OMAR), 0, -1));
     }
 
     /**
      * The mark hands the draft over exactly as it was kept, multibyte text, CRLF and a BOM included, and forgets it,
-     * so the draft lives in the state at most until the job takes it.
+     * so the draft lives at most until the job takes it.
      */
     #[Test]
     public function theMarkHandsOverTheDraftOnceForgetsItAndKeepsTheStateAndItsExpiry(): void
     {
         $draft = new DraftReport(self::SHOP_PROJECT, "\u{FEFF}Bezahlen geht nicht \u{2014} ".self::MARKER, "Line one\r\nLine two \u{1F600}", ['', "Pin \u{00E9}\r\n"]);
         $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), $draft);
-        $this->connection()->expire(self::keyOf(self::ACME_FOODS), 1800);
+        $this->connection()->expire(self::stateKeyOf(self::ACME_FOODS), 1800);
 
         self::assertEquals($draft, $this->requests()->markAiMayBeAsked(self::acmeFoods(), self::check(), self::omar()));
         self::assertNull($this->requests()->markAiMayBeAsked(self::acmeFoods(), self::check(), self::omar()));
 
-        $held = $this->connection()->get(self::keyOf(self::ACME_FOODS));
-        self::assertIsString($held);
-        self::assertStringNotContainsString(self::MARKER, $held);
-        self::assertStringNotContainsString('"draft"', $held);
+        self::assertSame(0, $this->connection()->exists(self::draftKeyOf(self::ACME_FOODS)));
         self::assertEquals(IntakeCheckView::queued(), $this->requests()->stateOf(self::acmeFoods(), self::check(), self::omar()));
-        $this->assertTimeToLiveIsAbout(1800, self::keyOf(self::ACME_FOODS));
+        $this->assertTimeToLiveIsAbout(1800, self::stateKeyOf(self::ACME_FOODS));
     }
 
     #[Test]
@@ -124,6 +272,7 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
         yield 'a failed check' => ['failed'];
         yield 'a check Lena opened' => ['opened by Lena'];
         yield 'another organization\'s check' => ['opened at Beta Bakery'];
+        yield 'a queued check whose draft is gone' => ['queued without its draft'];
     }
 
     #[Test]
@@ -135,19 +284,20 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
             'failed' => $this->requests()->recordFailure(self::acmeFoods(), self::check(), self::omar(), self::FAILED_SENTENCE),
             'opened by Lena' => $this->requests()->open(self::acmeFoods(), self::check(), new UserId(self::LENA), self::draft()),
             'opened at Beta Bakery' => $this->requests()->open(new OrganizationId(self::BETA_BAKERY), self::check(), self::omar(), self::draft()),
+            'queued without its draft' => $this->openWithoutItsDraft(),
             default => throw new \LogicException('No state is called '.$state.'.'),
         };
-        $before = [$this->connection()->get(self::keyOf(self::ACME_FOODS)), $this->connection()->get(self::keyOf(self::BETA_BAKERY))];
+        $before = $this->everyValue();
 
         self::assertNull($this->requests()->markAiMayBeAsked(self::acmeFoods(), self::check(), self::omar()));
 
-        self::assertSame($before, [$this->connection()->get(self::keyOf(self::ACME_FOODS)), $this->connection()->get(self::keyOf(self::BETA_BAKERY))]);
+        self::assertSame($before, $this->everyValue());
     }
 
     #[Test]
     public function aMarkOverAValueTheScriptCannotDecodeFailsAndLeavesTheValue(): void
     {
-        $this->connection()->set(self::keyOf(self::ACME_FOODS), 'not json');
+        $this->connection()->set(self::stateKeyOf(self::ACME_FOODS), 'not json');
 
         try {
             $this->requests()->markAiMayBeAsked(self::acmeFoods(), self::check(), self::omar());
@@ -156,15 +306,15 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
             self::assertSame('The intake check could not be marked as one that may have asked the AI.', $failure->getMessage());
         }
 
-        self::assertSame('not json', $this->connection()->get(self::keyOf(self::ACME_FOODS)));
+        self::assertSame('not json', $this->connection()->get(self::stateKeyOf(self::ACME_FOODS)));
         self::assertNull($this->connection()->getLastError(), 'The script error stayed on the connection for the next caller.');
     }
 
     #[Test]
-    public function aMarkOfAQueuedStateWithAnUnreadableDraftFailsAndLeavesTheValue(): void
+    public function aMarkOfAQueuedStateWithAnUnreadableDraftFails(): void
     {
-        $unreadable = '{"status": "queued", "requesterId": "'.self::OMAR.'", "at": 1805104800, "sentence": null, "draft": "{\"title\": 7}"}';
-        $this->connection()->set(self::keyOf(self::ACME_FOODS), $unreadable);
+        $this->connection()->set(self::stateKeyOf(self::ACME_FOODS), '{"status": "queued", "requesterId": "'.self::OMAR.'", "at": 1805104800, "sentence": null}');
+        $this->connection()->set(self::draftKeyOf(self::ACME_FOODS), '{"title": 7}');
 
         try {
             $this->requests()->markAiMayBeAsked(self::acmeFoods(), self::check(), self::omar());
@@ -175,32 +325,36 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
     }
 
     #[Test]
-    public function aFailureReplacesTheQueuedStateAndItsDraftWithItsSentenceForADay(): void
+    public function aFailureReplacesTheQueuedStateDropsItsDraftAndClosesItForADay(): void
     {
         $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), self::draft());
+        $this->requests()->open(self::acmeFoods(), new IntakeCheckId(self::SECOND_CHECK), self::omar(), self::draft());
 
         $this->requests()->recordFailure(self::acmeFoods(), self::check(), self::omar(), self::FAILED_SENTENCE);
 
         self::assertEquals(IntakeCheckView::failed(self::FAILED_SENTENCE), $this->requests()->stateOf(self::acmeFoods(), self::check(), self::omar()));
         self::assertNull($this->requests()->stateOf(self::acmeFoods(), self::check(), new UserId(self::LENA)));
-        $held = $this->connection()->get(self::keyOf(self::ACME_FOODS));
-        self::assertIsString($held);
-        self::assertStringNotContainsString(self::MARKER, $held);
+        self::assertSame(0, $this->connection()->exists(self::draftKeyOf(self::ACME_FOODS)));
+        self::assertSame([self::SECOND_CHECK], $this->connection()->zRange(self::openChecksKeyOf(self::ACME_FOODS, self::OMAR), 0, -1));
         self::assertNull($this->requests()->markAiMayBeAsked(self::acmeFoods(), self::check(), self::omar()));
-        $this->assertTimeToLiveIsAbout(86400, self::keyOf(self::ACME_FOODS));
+        $this->assertTimeToLiveIsAbout(86400, self::stateKeyOf(self::ACME_FOODS));
     }
 
     #[Test]
-    public function aReleasedCheckHasNoStateLeft(): void
+    public function aReleasedCheckHasNoStateDraftOrOpenEntryLeft(): void
     {
         $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), self::draft());
         $this->requests()->open(new OrganizationId(self::BETA_BAKERY), self::check(), self::omar(), self::draft());
 
-        $this->requests()->release(self::acmeFoods(), self::check());
+        $this->requests()->release(self::acmeFoods(), self::check(), self::omar());
 
         self::assertNull($this->requests()->stateOf(self::acmeFoods(), self::check(), self::omar()));
-        self::assertSame(0, $this->connection()->exists(self::keyOf(self::ACME_FOODS)));
-        self::assertSame(1, $this->connection()->exists(self::keyOf(self::BETA_BAKERY)), 'The release reached another organization\'s check.');
+        self::assertSame(0, $this->connection()->exists(self::stateKeyOf(self::ACME_FOODS), self::draftKeyOf(self::ACME_FOODS), self::openChecksKeyOf(self::ACME_FOODS, self::OMAR)));
+        self::assertSame(
+            3,
+            $this->connection()->exists(self::stateKeyOf(self::BETA_BAKERY), self::draftKeyOf(self::BETA_BAKERY), self::openChecksKeyOf(self::BETA_BAKERY, self::OMAR)),
+            'The release reached another organization\'s check.',
+        );
     }
 
     #[Test]
@@ -227,7 +381,7 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
     #[DataProvider('unreadableValues')]
     public function aValueThisClassDidNotWriteIsRefusedOnRead(string $unreadableValue): void
     {
-        $this->connection()->set(self::keyOf(self::ACME_FOODS), $unreadableValue);
+        $this->connection()->set(self::stateKeyOf(self::ACME_FOODS), $unreadableValue);
 
         try {
             $this->requests()->stateOf(self::acmeFoods(), self::check(), self::omar());
@@ -242,6 +396,19 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
         return new ValkeyIntakeRequests($this->connection(), $this->clock);
     }
 
+    private function openOmarsFirstThreeChecks(): void
+    {
+        foreach ([self::CHECK, self::SECOND_CHECK, self::THIRD_CHECK] as $checkId) {
+            $this->requests()->open(self::acmeFoods(), new IntakeCheckId($checkId), self::omar(), self::draft());
+        }
+    }
+
+    private function openWithoutItsDraft(): void
+    {
+        $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), self::draft());
+        $this->connection()->del(self::draftKeyOf(self::ACME_FOODS));
+    }
+
     private function assertTimeToLiveIsAbout(int $expectedSeconds, string $key): void
     {
         $milliseconds = $this->connection()->pttl($key);
@@ -250,16 +417,60 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
         self::assertLessThanOrEqual($expectedSeconds * 1000, $milliseconds);
     }
 
+    /**
+     * @return array<string, mixed> every intake key of both organizations with its value (a sorted set with its
+     *                              members and scores), by key, sorted
+     */
+    private function everyValue(): array
+    {
+        $values = [];
+        foreach ($this->intakeKeys() as $key) {
+            $values[$key] = \Redis::REDIS_ZSET === $this->connection()->type($key)
+                ? $this->connection()->zRange($key, 0, -1, ['withscores' => true])
+                : $this->connection()->get($key);
+        }
+        ksort($values);
+
+        return $values;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function intakeKeys(): array
+    {
+        $keys = [];
+        foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
+            foreach (['intake_request', 'intake_draft', 'intake_open'] as $prefix) {
+                $found = $this->connection()->keys($prefix.':'.$organizationId.':*');
+                $keys = [...$keys, ...(\is_array($found) ? $found : [])];
+            }
+        }
+
+        return $keys;
+    }
+
     private function forgetStates(): void
     {
-        foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
-            $this->connection()->del(self::keyOf($organizationId));
+        $keys = $this->intakeKeys();
+        if ([] !== $keys) {
+            $this->connection()->del($keys);
         }
     }
 
-    private static function keyOf(string $organizationId): string
+    private static function stateKeyOf(string $organizationId): string
     {
         return 'intake_request:'.$organizationId.':'.self::CHECK;
+    }
+
+    private static function draftKeyOf(string $organizationId): string
+    {
+        return 'intake_draft:'.$organizationId.':'.self::CHECK;
+    }
+
+    private static function openChecksKeyOf(string $organizationId, string $requesterId): string
+    {
+        return 'intake_open:'.$organizationId.':'.$requesterId;
     }
 
     private static function draft(): DraftReport

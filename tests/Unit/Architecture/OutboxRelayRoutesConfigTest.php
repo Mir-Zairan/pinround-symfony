@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Architecture;
 
+use App\Assist\Application\Intake\GenerateIntakeSuggestion;
 use App\Assist\Application\Summaries\GenerateSummary;
 use App\Conversation\Api\Event\ConversationEvent;
 use App\Identity\Api\Event\IdentityEvent;
@@ -63,10 +64,10 @@ final class OutboxRelayRoutesConfigTest extends TestCase
 
     /**
      * Each of these is sent straight to its worker's transport, never through the outbox: the notify commands and mail
-     * to async_notify (compose.yaml's worker), the summary job to async_ai (worker-heavy).
+     * to async_notify (compose.yaml's worker), the AI jobs (summary and intake check) to async_ai (worker-heavy).
      */
     #[Test]
-    public function exactlyTheNotifyCommandsMailAndTheSummaryJobAreRoutedStraightToTheirTransports(): void
+    public function exactlyTheNotifyCommandsMailAndTheAiJobsAreRoutedStraightToTheirTransports(): void
     {
         self::assertEqualsCanonicalizing(
             array_fill_keys([
@@ -77,7 +78,7 @@ final class OutboxRelayRoutesConfigTest extends TestCase
                 RefreshBell::class,
                 ReleaseDueNotifications::class,
                 SendDigest::class,
-            ], 'async_notify') + [GenerateSummary::class => 'async_ai'],
+            ], 'async_notify') + [GenerateSummary::class => 'async_ai', GenerateIntakeSuggestion::class => 'async_ai'],
             array_filter(self::routing(self::messengerConfig()), static fn (mixed $transport): bool => 'outbox' !== $transport),
         );
     }

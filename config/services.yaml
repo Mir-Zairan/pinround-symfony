@@ -487,8 +487,8 @@ when@test:
             alias: App\Assist\Application\Summaries\SummaryRequests
             public: true
         # QueuedSummaries inlines both; QueuedSummariesTest builds it by hand with a queue that fails.
-        test.assist_summary_requesters:
-            alias: App\Assist\Application\Summaries\SummaryRequesters
+        test.assist_ai_requesters:
+            alias: App\Assist\Application\AiRequesters
             public: true
         test.assist_ai_task_admission:
             alias: App\Assist\Application\Gateway\AiTaskAdmission

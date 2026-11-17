@@ -8,13 +8,13 @@ use App\Assist\Api\DraftReport;
 use App\Assist\Api\IntakeAssist;
 use App\Assist\Api\IntakeCheckId;
 use App\Assist\Api\IntakeCheckView;
-use App\Assist\Api\IntakeSuggestion;
 use App\Assist\Application\AiCallLimit;
 use App\Assist\Application\AiNotAllowed;
 use App\Assist\Application\AiRateLimited;
 use App\Assist\Application\AiUnavailable;
 use App\Assist\Application\Intake\GenerateIntakeSuggestion;
 use App\Assist\Application\Intake\IntakeRequests;
+use App\Assist\Application\Intake\IntakeSuggestionMapper;
 use App\Assist\Application\Suggestions;
 use App\Assist\Infrastructure\Messenger\GenerateIntakeSuggestionHandler;
 use App\Assist\Infrastructure\Platform\FakeProvider;
@@ -148,10 +148,11 @@ final class GenerateIntakeSuggestionHandlerTest extends KernelTestCase
         ]], $this->suggestionRows());
         self::assertCount(1, $this->fakeProvider()->calls());
         self::assertSame([$this->checkoutKey()], self::candidateKeysIn($this->fakeProvider()->calls()[0]['prompt']->content), 'The team-only ticket went out as a candidate.');
-        self::assertNull($this->checkState(), 'The check was not released, or its draft waits on.');
+        self::assertNull($this->checkState(), 'The check was not released.');
+        $this->assertTheDraftIsGoneAndTheCheckClosed();
         $done = $this->checkOfAsOmar();
         self::assertNotNull($done);
-        self::assertEquals(IntakeCheckView::done(IntakeSuggestion::fromCheckedData(self::intakeResult([$this->checkoutKey()]), self::MODEL, 'intake.v1')), $done);
+        self::assertEquals(IntakeCheckView::done(IntakeSuggestionMapper::fromCheckedData(self::intakeResult([$this->checkoutKey()]), self::MODEL, 'intake.v1')), $done);
         self::assertSame(['answered'], $this->usageStatuses());
         self::assertSame(1, $this->processedMessageCount());
         self::assertSame([], $this->warnings());
@@ -361,7 +362,7 @@ final class GenerateIntakeSuggestionHandlerTest extends KernelTestCase
     {
         $this->fakeProvider()->answerNextCallsWith(self::intakeJson([$this->checkoutKey()]));
         $this->checkAsOmar();
-        $takenBy = IntakeSuggestion::fromCheckedData(self::intakeResult([]), 'another-model', 'intake.v1');
+        $takenBy = IntakeSuggestionMapper::fromCheckedData(self::intakeResult([]), 'another-model', 'intake.v1');
         $suggestions = self::getContainer()->get('test.assist_suggestions');
         \assert($suggestions instanceof Suggestions);
         $checkId = $this->checkId();
@@ -401,9 +402,10 @@ final class GenerateIntakeSuggestionHandlerTest extends KernelTestCase
         self::assertEquals(IntakeCheckView::queued(), $this->checkState(), 'The check ended although Valkey refused it.');
         $held = $this->stateValkey()->get($this->checkStateKey());
         self::assertIsString($held);
-        self::assertStringNotContainsString('"draft"', $held, 'The check that may have asked the AI keeps its draft.');
+        self::assertSame(0, $this->stateValkey()->exists($this->checkDraftKey()), 'The check that may have asked the AI keeps its draft.');
+        self::assertSame([$this->checkId()->toString()], $this->stateValkey()->zRange($this->openChecksKey(), 0, -1), 'A check Valkey could not end was closed.');
         self::assertEquals(
-            IntakeCheckView::done(IntakeSuggestion::fromCheckedData(self::intakeResult([$this->checkoutKey()]), self::MODEL, 'intake.v1')),
+            IntakeCheckView::done(IntakeSuggestionMapper::fromCheckedData(self::intakeResult([$this->checkoutKey()]), self::MODEL, 'intake.v1')),
             $this->checkOfAsOmar(),
             'The poll does not show the stored suggestion while the check stays queued.',
         );
@@ -490,6 +492,7 @@ final class GenerateIntakeSuggestionHandlerTest extends KernelTestCase
         $ttlMilliseconds = $this->stateValkey()->pttl($this->checkStateKey());
         self::assertIsInt($ttlMilliseconds);
         self::assertGreaterThan(0, $ttlMilliseconds, 'The failed check never expires.');
+        $this->assertTheDraftIsGoneAndTheCheckClosed();
         self::assertSame([], $this->suggestionRows());
         self::assertCount($expectedDeliveries, $this->asyncAi()->getSent(), 'The job was delivered another number of times.');
     }
@@ -525,6 +528,25 @@ final class GenerateIntakeSuggestionHandlerTest extends KernelTestCase
     private function checkStateKey(): string
     {
         return 'intake_request:'.self::ACME_FOODS.':'.$this->checkId()->toString();
+    }
+
+    private function checkDraftKey(): string
+    {
+        return 'intake_draft:'.self::ACME_FOODS.':'.$this->checkId()->toString();
+    }
+
+    private function openChecksKey(): string
+    {
+        return 'intake_open:'.self::ACME_FOODS.':'.self::OMAR;
+    }
+
+    /**
+     * No end path leaves the draft behind or counts the check against Omar's open checks any longer.
+     */
+    private function assertTheDraftIsGoneAndTheCheckClosed(): void
+    {
+        self::assertSame(0, $this->stateValkey()->exists($this->checkDraftKey()), 'The ended check keeps its draft.');
+        self::assertSame(0, $this->stateValkey()->exists($this->openChecksKey()), 'The ended check still counts as open.');
     }
 
     private function storeAiSettings(string $aiJson): void
@@ -690,9 +712,11 @@ final class GenerateIntakeSuggestionHandlerTest extends KernelTestCase
 
     private function forgetCheckStatesAndCountedCalls(): void
     {
-        $keys = $this->stateValkey()->keys('intake_request:'.self::ACME_FOODS.':*');
-        if (\is_array($keys) && [] !== $keys) {
-            $this->stateValkey()->del($keys);
+        foreach (['intake_request', 'intake_draft', 'intake_open'] as $prefix) {
+            $keys = $this->stateValkey()->keys($prefix.':'.self::ACME_FOODS.':*');
+            if (\is_array($keys) && [] !== $keys) {
+                $this->stateValkey()->del($keys);
+            }
         }
         self::getContainer()->get(ValkeyLimiterStorage::class)->delete(self::USAGE_LIMITER_PREFIX.self::ACME_FOODS.':'.self::OMAR);
     }

@@ -5,18 +5,18 @@ declare(strict_types=1);
 namespace App\Assist\Infrastructure\Messenger;
 
 use App\Assist\Api\IntakeCheckId;
-use App\Assist\Api\IntakeSuggestion;
 use App\Assist\Application\AiDraft;
 use App\Assist\Application\AiGateway;
 use App\Assist\Application\AiNotAllowed;
 use App\Assist\Application\AiRateLimited;
+use App\Assist\Application\AiRequesters;
 use App\Assist\Application\AiTask;
 use App\Assist\Application\AiUnavailable;
 use App\Assist\Application\Intake\EndIntakeRequest;
 use App\Assist\Application\Intake\GenerateIntakeSuggestion;
 use App\Assist\Application\Intake\IntakeRequests;
+use App\Assist\Application\Intake\IntakeSuggestionMapper;
 use App\Assist\Application\Suggestions;
-use App\Assist\Application\Summaries\SummaryRequesters;
 use App\Assist\Application\UnknownAiProvider;
 use App\Assist\Application\UnknownPromptTemplate;
 use App\Assist\Domain\AiFeature;
@@ -59,7 +59,7 @@ final readonly class GenerateIntakeSuggestionHandler
     public function __construct(
         private TenantContext $tenantContext,
         private OnceOnlyHandling $onceOnlyHandling,
-        private SummaryRequesters $requesters,
+        private AiRequesters $requesters,
         private IntakeRequests $intakeRequests,
         private AiGateway $aiGateway,
         private Suggestions $suggestions,
@@ -127,7 +127,7 @@ final readonly class GenerateIntakeSuggestionHandler
         }
 
         try {
-            $suggestion = IntakeSuggestion::fromCheckedData($gatewayAnswer->data, $gatewayAnswer->model, $gatewayAnswer->promptVersion);
+            $suggestion = IntakeSuggestionMapper::fromCheckedData($gatewayAnswer->data, $gatewayAnswer->model, $gatewayAnswer->promptVersion);
             $this->connection->transactional(function () use ($checkId, $organizationId, $requesterId, $suggestion): void {
                 $this->suggestions->addIntake($checkId, $organizationId, $requesterId, $suggestion, $this->clock->now());
             });

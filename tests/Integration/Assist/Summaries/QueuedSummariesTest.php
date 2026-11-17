@@ -8,11 +8,11 @@ use App\Assist\Api\Summaries;
 use App\Assist\Api\SummaryRequestRefused;
 use App\Assist\Api\SummaryRequestView;
 use App\Assist\Application\AiCallLimit;
+use App\Assist\Application\AiRequesters;
 use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\Summaries\GenerateSummary;
 use App\Assist\Application\Summaries\QueuedSummaries;
 use App\Assist\Application\Summaries\SummaryJobQueue;
-use App\Assist\Application\Summaries\SummaryRequesters;
 use App\Assist\Application\Summaries\SummaryRequests;
 use App\Assist\Infrastructure\Platform\FakeProvider;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
@@ -337,8 +337,8 @@ final class QueuedSummariesTest extends KernelTestCase
 
     private function summariesWith(SummaryJobQueue $summaryJobQueue): QueuedSummaries
     {
-        $summaryRequesters = self::getContainer()->get('test.assist_summary_requesters');
-        \assert($summaryRequesters instanceof SummaryRequesters);
+        $aiRequesters = self::getContainer()->get('test.assist_ai_requesters');
+        \assert($aiRequesters instanceof AiRequesters);
         $aiTaskAdmission = self::getContainer()->get('test.assist_ai_task_admission');
         \assert($aiTaskAdmission instanceof AiTaskAdmission);
         $ticketVisibilities = self::getContainer()->get('test.ticketing_ticket_visibilities');
@@ -346,7 +346,7 @@ final class QueuedSummariesTest extends KernelTestCase
         $ticketQueries = self::getContainer()->get('test.ticketing_ticket_queries');
         \assert($ticketQueries instanceof TicketQueries);
 
-        return new QueuedSummaries($summaryRequesters, $aiTaskAdmission, $this->limit(), $this->requests(), $summaryJobQueue, $ticketVisibilities, $ticketQueries);
+        return new QueuedSummaries($aiRequesters, $aiTaskAdmission, $this->limit(), $this->requests(), $summaryJobQueue, $ticketVisibilities, $ticketQueries);
     }
 
     private function limit(): AiCallLimit

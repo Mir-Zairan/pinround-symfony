@@ -9,6 +9,7 @@ use App\Assist\Api\SummaryRequestRefused;
 use App\Assist\Api\SummaryRequestView;
 use App\Assist\Application\AiCallLimit;
 use App\Assist\Application\AiRateLimited;
+use App\Assist\Application\AiRequesters;
 use App\Assist\Application\AiTask;
 use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\Policy\PolicyRefusal;
@@ -28,7 +29,7 @@ use App\Ticketing\Api\TicketVisibilities;
 final readonly class QueuedSummaries implements Summaries
 {
     public function __construct(
-        private SummaryRequesters $summaryRequesters,
+        private AiRequesters $aiRequesters,
         private AiTaskAdmission $aiTaskAdmission,
         private AiCallLimit $aiCallLimit,
         private SummaryRequests $summaryRequests,
@@ -40,7 +41,7 @@ final readonly class QueuedSummaries implements Summaries
 
     public function request(TicketId $ticketId, UserId $requesterId, OrganizationId $organizationId): void
     {
-        $requester = $this->summaryRequesters->actorOf($requesterId, $organizationId) ?? throw self::refusedFor(PolicyRefusal::CannotSeeTicket);
+        $requester = $this->aiRequesters->actorOf($requesterId, $organizationId) ?? throw self::refusedFor(PolicyRefusal::CannotSeeTicket);
         $refusal = $this->aiTaskAdmission->refusalFor(new AiTask(AiFeature::Summary, $ticketId), $requester);
         if (null !== $refusal) {
             throw self::refusedFor($refusal);
@@ -67,7 +68,7 @@ final readonly class QueuedSummaries implements Summaries
     public function latestRequestOf(TicketId $ticketId, UserId $viewerId, OrganizationId $organizationId): ?SummaryRequestView
     {
         $latest = $this->summaryRequests->latestOf($organizationId, $ticketId);
-        if (null === $latest || null === $this->summaryRequesters->actorOf($viewerId, $organizationId)) {
+        if (null === $latest || null === $this->aiRequesters->actorOf($viewerId, $organizationId)) {
             return null;
         }
         $visibility = $this->ticketVisibilities->of($organizationId, $viewerId);

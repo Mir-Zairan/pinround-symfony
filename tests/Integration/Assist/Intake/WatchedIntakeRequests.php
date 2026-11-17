@@ -62,13 +62,13 @@ final class WatchedIntakeRequests implements IntakeRequests
         $this->realRequests->recordFailure($organizationId, $checkId, $requesterId, $sentence);
     }
 
-    public function release(OrganizationId $organizationId, IntakeCheckId $checkId): void
+    public function release(OrganizationId $organizationId, IntakeCheckId $checkId, UserId $requesterId): void
     {
         $this->endings[] = ['release', ($this->whatAnotherConnectionSees)()];
         if (null !== $this->endFailure) {
             throw $this->endFailure;
         }
-        $this->realRequests->release($organizationId, $checkId);
+        $this->realRequests->release($organizationId, $checkId, $requesterId);
     }
 
     public function stateOf(OrganizationId $organizationId, IntakeCheckId $checkId, UserId $requesterId): ?IntakeCheckView

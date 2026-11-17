@@ -7,11 +7,11 @@ namespace App\Assist\Infrastructure\Messenger;
 use App\Assist\Application\AiGateway;
 use App\Assist\Application\AiNotAllowed;
 use App\Assist\Application\AiRateLimited;
+use App\Assist\Application\AiRequesters;
 use App\Assist\Application\AiTask;
 use App\Assist\Application\AiUnavailable;
 use App\Assist\Application\Summaries\EndSummaryRequest;
 use App\Assist\Application\Summaries\GenerateSummary;
-use App\Assist\Application\Summaries\SummaryRequesters;
 use App\Assist\Application\Summaries\SummaryRequests;
 use App\Assist\Application\UnknownAiProvider;
 use App\Assist\Application\UnknownPromptTemplate;
@@ -58,7 +58,7 @@ final readonly class GenerateSummaryHandler
     public function __construct(
         private TenantContext $tenantContext,
         private OnceOnlyHandling $onceOnlyHandling,
-        private SummaryRequesters $summaryRequesters,
+        private AiRequesters $aiRequesters,
         private SummaryRequests $summaryRequests,
         private AiGateway $aiGateway,
         private TicketSummaryCommands $ticketSummaryCommands,
@@ -107,7 +107,7 @@ final readonly class GenerateSummaryHandler
      */
     private function summarize(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): ?array
     {
-        $requester = $this->summaryRequesters->actorOf($requesterId, $organizationId);
+        $requester = $this->aiRequesters->actorOf($requesterId, $organizationId);
         if (null === $requester) {
             return ['summary_outcome' => 'requester_not_member'];
         }

@@ -6,6 +6,7 @@ namespace App\Assist\Infrastructure\Doctrine;
 
 use App\Assist\Api\IntakeCheckId;
 use App\Assist\Api\IntakeSuggestion;
+use App\Assist\Application\Intake\IntakeSuggestionMapper;
 use App\Assist\Application\Suggestions;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -39,7 +40,7 @@ final readonly class DbalSuggestions implements Suggestions
             $checkId->toString(),
             $requesterId->toString(),
             self::INTAKE,
-            json_encode($suggestion->result(), \JSON_THROW_ON_ERROR),
+            json_encode(IntakeSuggestionMapper::resultOf($suggestion), \JSON_THROW_ON_ERROR),
             $suggestion->model,
             $suggestion->promptVersion,
             $createdAt->format('Y-m-d H:i:s.uP'),
@@ -65,7 +66,7 @@ final readonly class DbalSuggestions implements Suggestions
             throw new \UnexpectedValueException('A stored intake suggestion holds no object.');
         }
 
-        return IntakeSuggestion::fromCheckedData($result, $row['model'], $row['prompt_version']);
+        return IntakeSuggestionMapper::fromCheckedData($result, $row['model'], $row['prompt_version']);
     }
 
     /**
