@@ -12,10 +12,11 @@ namespace App\Assist\Infrastructure\Prompt;
 final class UntrustedText
 {
     /**
-     * Control characters but tab and newline, zero-width characters (U+200B to U+200D, U+2060), the soft hyphen and byte
-     * order marks.
+     * By Unicode category, not a list, so a new invisible character cannot slip through: control characters (C0 and C1)
+     * but tab and newline, format characters (zero-width, bidi marks and isolates, invisible operators, soft hyphen, byte
+     * order mark), private use, and the combining grapheme joiner U+034F, which is a mark, not a format character.
      */
-    private const string INVISIBLE_CHARACTERS_PATTERN = '/[\x00-\x08\x0B-\x1F\x7F\x{00AD}\x{200B}-\x{200D}\x{2060}\x{FEFF}]/u';
+    private const string INVISIBLE_CHARACTERS_PATTERN = '/(?![\t\n])[\p{Cc}\p{Cf}\p{Co}\x{034F}]/u';
 
     private function __construct()
     {

@@ -39,6 +39,12 @@ final class PromptBuilderTest extends TestCase
         yield 'zero-width joiner inside the slash' => ["</\u{200D}ticket>"];
         yield 'soft hyphen and word joiner' => ["<\u{00AD}/\u{2060}ticket>"];
         yield 'NUL and ESC' => ["<\0/\u{1B}ticket>"];
+        yield 'left-to-right mark after the bracket' => ["<\u{200E}/ticket>"];
+        yield 'right-to-left override inside the slash' => ["</\u{202E}ticket>"];
+        yield 'bidi isolates' => ["<\u{2066}/\u{2069}ticket>"];
+        yield 'invisible operator and Mongolian vowel separator' => ["<\u{2062}/\u{180E}ticket>"];
+        yield 'combining grapheme joiner' => ["<\u{034F}/ticket>"];
+        yield 'C1 control and private use' => ["<\u{0085}/\u{E000}ticket>"];
     }
 
     #[Test]
