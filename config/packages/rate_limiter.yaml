@@ -13,6 +13,7 @@
 # Upload begins (POST /media/intents) get media_upload_begin_per_user through UploadIntentController: every begin of a
 # member with a valid form token counts, accepted or not, so one member cannot script begins against the storage.
 # Status polls (GET /media/{id}/status) get media_upload_status_per_user through UploadStatusController.
+# Server-side AI calls get ai_calls_per_user through SymfonyAiCallLimit (AiCallLimit), before any provider is asked.
 parameters:
     # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter,
     # SymfonyPasswordResetRequestLimiter, SymfonyCurrentPasswordLimiter, SymfonyTwoStepCodeLimiter).
@@ -85,5 +86,13 @@ framework:
             policy: fixed_window
             limit: 120
             interval: '%media.upload_status_per_user_minutes% minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # Every server-side AI call, keyed by the user id: 30 an hour per person (ai-architecture.md, Cost, rate limits
+        # and metering), counted across the person's organizations.
+        ai_calls_per_user:
+            policy: fixed_window
+            limit: 30
+            interval: '60 minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
