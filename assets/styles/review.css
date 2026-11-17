@@ -843,6 +843,11 @@ textarea.screenshot-report__input {
   box-shadow: var(--shadow-deep);
 }
 
+/* A picture still processing or refused has no image to size it, so its placeholder keeps the column's full width. */
+.focus-review__picture .screenshot__frame--placeholder {
+  align-self: stretch;
+}
+
 /* A tall picture fits the screen's height; the frame shrinks to the image, so the pin layer over it still matches. */
 .focus-review__picture .screenshot__image {
   width: auto;
