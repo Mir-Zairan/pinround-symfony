@@ -83,6 +83,9 @@ final class AdminAiTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('AI', $page->filter('main h1')->text());
+        // admin-tab.css styles every card heading; a heading with another class is left unstyled.
+        self::assertSame(['Cloud AI', 'Model for laptops'], $page->filter('main h2')->each(static fn (Crawler $heading): string => $heading->text()));
+        self::assertCount(2, $page->filter('main h2.admin-tab__heading'));
         self::assertSame(['Everyone', 'Title and ticket text', 'Laptop first, cloud when it is off', 'Anthropic (Claude)'], $page->filter('main button.chip[aria-pressed="true"]')->each(static fn (Crawler $chip): string => $chip->text()));
         self::assertSame(['on' => 'true', 'sync' => 'true', 'restricted_to_cloud' => 'false'], $this->switchesOn($page));
         self::assertSame('Free when Ollama runs. Otherwise pinround uses the cloud AI, so nobody is left without AI.', $page->filter('main .admin-ai__where-note')->text());
@@ -94,8 +97,9 @@ final class AdminAiTest extends WebTestCase
         self::assertSame('admin-ai-key-status', $keyField->attr('aria-describedby'));
         self::assertCount(0, $page->filter('main #admin-ai-key-error'));
         self::assertCount(0, $page->filter('main [role="alert"]'));
-        // RequiresRecentAuth asks only when the last code is over 10 minutes old, so the note says no more than that.
-        self::assertContains('If your last code is over 10 minutes old, you confirm it’s you before the key is saved.', $page->filter('main .admin-ai__note')->each(static fn (Crawler $note): string => $note->text()));
+        // RequiresRecentAuth asks for both a password and a code of the last 10 minutes, and turning on two-step login
+        // records only a code, so the note names both and promises no time.
+        self::assertContains('Before the key is saved, you may need to confirm it’s you with your password and a code.', $page->filter('main .admin-ai__note')->each(static fn (Crawler $note): string => $note->text()));
     }
 
     /**

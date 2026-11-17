@@ -96,10 +96,10 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
   2. `PolicyEvaluator` implements the decision flow in [Org AI policy](../02-architecture/ai-architecture.md#org-ai-policy); returns allow or a reason code with a plain sentence ("Your admin turned AI help off.", "Your admin allows AI help for leads only.").
   3. Admin › AI tab exactly as the prototype: switches, chips, the note under "Where the AI runs", "Model for laptops" card, footnote.
   4. Every change writes an audit event (old/new value).
-- **Files:** `src/Assist/Application/Policy/PolicyEvaluator.php`, `src/Organization/UI/Admin/AiSettingsController.php`, `templates/admin/ai.html.twig`.
+- **Files:** `src/Assist/Application/Policy/PolicyEvaluator.php`, `src/Organization/UI/Admin/AiSettingsController.php`, `src/Organization/UI/templates/admin/ai.html.twig`.
 - **Acceptance:**
   - [ ] When AI is not allowed for the viewer, AI buttons are hidden and one line says why.
-  - [ ] Only admins can change the policy (voter `ADMIN_AI`), MFA re-check for credential changes. The page asks `ADMIN_AREA`, which needs two-step login and a code of the last hour (P01.T6); mark the credential actions `RequiresRecentAuth`.
+  - [x] Only admins can change the policy (voter `ADMIN_AI`), MFA re-check for credential changes. The page asks `ADMIN_AREA`, which needs two-step login and a code of the last hour (P01.T6); mark the credential actions `RequiresRecentAuth` (`AiSettingsVoterTest`, the `ADMIN_AI` rows of `voter_matrix_rows.php`, and `AdminAiTest`: a person below Admin is refused the page, the changes and the key; a code over 10 minutes old is sent to "Confirm it's you" before the key is saved).
 - **Tests:** table test for the policy matrix (on/off × who × where × restricted × laptop ready); voter test; functional tab test.
 - **Prototype check:** [admin.md › AI](../04-prototype/screens/admin.md#ai) texts and notes.
 - **Size:** M
@@ -246,3 +246,4 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
   - The cloud model is stored under the new `provider_model` key; `ai.model` stays the laptop model.
   - New organizations start with AI on (`OrgSettings`), while a settings row without an `ai` key reads as AI off.
   - The gateway must call `AiSettingsQueries::providerKeyOf` and refuse the cloud call when it throws `UndecryptableField`; it must never fall back to the operator's key then. Only a null key (none stored) means the operator's key. Met: `GuardedAiGateway` throws `AiUnavailable` then, proven by `anUnreadableOrganizationKeyRefusesTheCallAndNeverFallsBackToTheOperatorsKey` (unit) and `anUndecryptableOrganizationKeyRefusesTheCallWithoutAskingTheProvider` (integration).
+- 2026-11-17 (P08.T3 Admin › AI tab): `AiSettingsVoter` had been looser than `ADMIN_AREA` (it let in a token or a stale code); it now asks `ADMIN_AREA` through the AccessDecisionManager, so `AdminAreaVoter` alone owns the admin login rule. The admin tab layout is shared in `assets/styles/admin-tab.css` (`admin-tab`, `__title`, `__heading`, `__inline-form`, `__field`), so the People page is now 760 px wide like the AI tab.
