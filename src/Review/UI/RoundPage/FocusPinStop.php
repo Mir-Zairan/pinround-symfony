@@ -14,8 +14,6 @@ final readonly class FocusPinStop
      * @param int    $position         from 1, its place in the walk, the page's "?pin=" value
      * @param int    $number           the number on its ring; a removed pin leaves a gap, so it may differ from $position
      * @param string $label            for example "Pin 2 of 5 · Mia"; without the name when it is not known
-     * @param string $verdictLabel     for example "Fixed" or "Not checked yet"
-     * @param string $verdictClass     the tag's modifier class, so the verdict is also coloured
      * @param bool   $isChecked        true once the pin has a verdict, which Undo clears
      * @param int    $previousPosition the stop before it, the last one from the first
      * @param int    $nextPosition     the stop after it, the first one from the last
@@ -26,8 +24,6 @@ final readonly class FocusPinStop
         public int $number,
         public string $note,
         public string $label,
-        public string $verdictLabel,
-        public string $verdictClass,
         public bool $isChecked,
         public int $previousPosition,
         public int $nextPosition,

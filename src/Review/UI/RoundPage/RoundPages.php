@@ -97,7 +97,7 @@ final readonly class RoundPages
      *
      * @return array{string, string}
      */
-    public static function pinVerdictTagOf(?string $verdict): array
+    private static function pinVerdictTagOf(?string $verdict): array
     {
         return match ($verdict) {
             VerdictCommands::PIN_FIXED => ['Fixed', 'verdict-tag--looks-right'],

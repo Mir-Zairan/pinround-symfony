@@ -49,6 +49,11 @@ final class FocusPageTest extends WebTestCase
      * verdict voters' ticket facts and the signing of the one picture shown.
      */
     private const int PAGE_QUERIES = 22;
+    /**
+     * VerdictControllerTest's ONE_VERDICT_QUERIES (38) without the second read of the round and its names for the round
+     * page's tab and panel: the redirect reads the full-screen review again.
+     */
+    private const int FOCUS_VERDICT_QUERIES = 32;
 
     private KernelBrowser $client;
 
@@ -59,6 +64,7 @@ final class FocusPageTest extends WebTestCase
     private string $stepId;
     private string $ticketId;
     private string $beforeShot;
+    private string $roundTwo;
 
     /** @var array<int, string> round 1's pins to check on "Per product", by number */
     private array $pins = [];
@@ -105,12 +111,14 @@ final class FocusPageTest extends WebTestCase
         self::assertSame('SHOP-1 · Round 2 · Per product · section 1 of 2', $page->filter('h1.focus-review__line')->text());
         self::assertSame('/t/SHOP-1/rounds/2?area=0', $page->filter('a.focus-review__exit')->attr('href'));
         self::assertSame('Exit full screen', $page->filter('a.focus-review__exit')->text());
+        self::assertCount(1, $page->filter('a.focus-review__exit svg[aria-hidden="true"]'), 'The collapse icon is decoration only.');
         self::assertSame(
             [['After', '/t/SHOP-1/rounds/2/focus?area=0&side=after', 'page'], ['Before', '/t/SHOP-1/rounds/2/focus?area=0&side=before', null]],
             $page->filter('.focus-review__sides a.seg')->each(static fn (Crawler $link): array => [$link->text(), $link->attr('href'), $link->attr('aria-current')]),
         );
         self::assertSame('After, round 2: Per product', $page->filter('img.screenshot__image')->attr('alt'));
-        self::assertSame('After product', $page->filter('.screenshot__title')->text());
+        self::assertCount(0, $page->filter('.screenshot__text'), 'No title or summary above the picture, as in the prototype.');
+        self::assertStringNotContainsString('After product', (string) $this->client->getResponse()->getContent());
         self::assertSame(
             [['Pin 1: Planted wrong', 'true'], ['Pin 2: Header cut', 'false'], ['Pin 3', 'false']],
             $page->filter('button.pin')->each(static fn (Crawler $pin): array => [(string) $pin->attr('aria-label'), (string) $pin->attr('aria-pressed')]),
@@ -133,6 +141,15 @@ final class FocusPageTest extends WebTestCase
         self::assertSame('/t/SHOP-1/rounds/2/pins/'.$this->pins[1].'/verdict', $first->filter('form')->attr('action'));
         self::assertNull($first->filter('form')->attr('data-turbo'), 'A plain form, so its answer is the redirect back here.');
         self::assertSame('after', $first->filter('input[name="'.VerdictController::FOCUS_SIDE_FIELD.'"]')->attr('value'));
+        self::assertSame(
+            [['0', '1'], ['0', '2'], ['0', '3']],
+            $page->filter('.focus-bar__stop')->each(static fn (Crawler $stop): array => [
+                (string) $stop->filter('input[name="'.VerdictController::FOCUS_AREA_FIELD.'"]')->attr('value'),
+                (string) $stop->filter('input[name="'.VerdictController::FOCUS_PIN_FIELD.'"]')->attr('value'),
+            ]),
+            'Each form posts where it was, for a refusal to come back to.',
+        );
+        self::assertCount(0, $page->filter('.focus-bar .tag'), 'No verdict tag in the bar, as in the prototype.');
         self::assertSame(['Fixed'], $page->filter('[autofocus]')->each(static fn (Crawler $button): string => $button->text()), 'Focus starts on the shown pin\'s first choice.');
         self::assertStringNotContainsString('Suggested guess', (string) $this->client->getResponse()->getContent(), 'An AI suggestion nobody kept is not walked.');
     }
@@ -186,7 +203,6 @@ final class FocusPageTest extends WebTestCase
 
         $page = $this->client->getCrawler();
         $shown = $page->filter('.focus-bar__stop:not([hidden])');
-        self::assertSame('Fixed', $shown->filter('.tag')->text());
         self::assertSame(['Undo'], $shown->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
         $this->client->submit($shown->selectButton('Undo')->form());
         self::assertSame('Verdict on pin 1 undone.', $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?area=0&side=after&pin=1'), 'Undo stays on its pin.');
@@ -202,42 +218,164 @@ final class FocusPageTest extends WebTestCase
     }
 
     #[Test]
-    public function aRefusedChoiceComesBackToTheSamePinWithItsToastAndSavesNothing(): void
+    public function aRefusedChoiceComesBackToTheSameAreaAndPinWithItsToastAndSavesNothing(): void
     {
         $this->seedRoundTwo();
         $before = $this->pinVerdicts();
 
         $this->logIn($this->client, $this->people['Omar']);
-        $this->client->request('POST', '/t/SHOP-1/rounds/2/pins/'.$this->pins[2].'/verdict', [
-            VerdictController::CSRF_FIELD => $this->csrfTokenFor($this->client, VerdictController::csrfIdOf('SHOP-1')),
-            VerdictController::VERDICT_FIELD => 'fixed',
-            VerdictController::FOCUS_SIDE_FIELD => 'before',
-        ]);
-        self::assertSame(VerdictController::ONLY_TESTER_OR_LEAD, $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?side=before'));
+        $this->postFocusVerdict($this->pins[2], 'before', '0', '2');
+        self::assertSame(VerdictController::ONLY_TESTER_OR_LEAD, $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?area=0&side=before&pin=2'));
+        self::assertSame('Pin 2 of 3 · Lena', $this->client->getCrawler()->filter('.focus-bar__stop:not([hidden]) .focus-bar__label')->text());
 
         $this->logIn($this->client, $this->people['Mia']);
-        $this->client->request('POST', '/t/SHOP-1/rounds/2/pins/'.$this->pins[2].'/verdict', [
+        $this->client->request('POST', '/t/SHOP-1/rounds/2/pins/'.$this->pins[3].'/verdict', [
             VerdictController::VERDICT_FIELD => 'fixed',
             VerdictController::FOCUS_SIDE_FIELD => 'after',
+            VerdictController::FOCUS_AREA_FIELD => '0',
+            VerdictController::FOCUS_PIN_FIELD => '3',
         ]);
-        self::assertSame(VerdictController::FORM_EXPIRED, $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?side=after'));
+        self::assertSame(VerdictController::FORM_EXPIRED, $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?area=0&side=after&pin=3'));
+        self::assertSame('Pin 3 of 3 · Omar', $this->client->getCrawler()->filter('.focus-bar__stop:not([hidden]) .focus-bar__label')->text());
 
         $this->client->request('POST', '/t/SHOP-1/rounds/2/pins/'.$this->pins[2].'/undo', [
             VerdictController::CSRF_FIELD => $this->csrfTokenFor($this->client, VerdictController::csrfIdOf('SHOP-1')),
             VerdictController::FOCUS_SIDE_FIELD => 'after',
+            VerdictController::FOCUS_AREA_FIELD => '0',
+            VerdictController::FOCUS_PIN_FIELD => '2',
         ]);
         self::assertSame('This pin has no verdict to undo.', $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?area=0&side=after&pin=2'));
         self::assertSame('Pin 2 of 3 · Lena', $this->client->getCrawler()->filter('.focus-bar__stop:not([hidden]) .focus-bar__label')->text());
 
-        $this->client->request('POST', '/t/SHOP-1/rounds/2/pins/'.$this->pins[2].'/verdict', [
-            VerdictController::CSRF_FIELD => $this->csrfTokenFor($this->client, VerdictController::csrfIdOf('SHOP-1')),
-            VerdictController::VERDICT_FIELD => 'fixed',
-            VerdictController::FOCUS_SIDE_FIELD => 'sideways',
-        ]);
+        self::assertSame($before, $this->pinVerdicts());
+    }
+
+    /**
+     * @return iterable<string, array{mixed, mixed}>
+     */
+    public static function malformedFocusPositions(): iterable
+    {
+        yield 'words' => ['abc', 'two'];
+        yield 'negative numbers' => ['-1', '-2'];
+        yield 'too many digits' => ['1234567890', '1234567890'];
+        yield 'decimals' => ['0.5', '2.0'];
+        yield 'lists' => [['0'], ['2']];
+        yield 'empty' => ['', ''];
+    }
+
+    #[Test]
+    #[DataProvider('malformedFocusPositions')]
+    public function aRefusalWithMalformedPositionsComesBackToTheFirstPin(mixed $area, mixed $pin): void
+    {
+        $this->seedRoundTwo();
+        $before = $this->pinVerdicts();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->postFocusVerdict($this->pins[2], 'before', $area, $pin);
+
+        self::assertSame(VerdictController::ONLY_TESTER_OR_LEAD, $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?side=before'));
+        self::assertSame('Pin 1 of 3 · Mia', $this->client->getCrawler()->filter('.focus-bar__stop:not([hidden]) .focus-bar__label')->text());
+        self::assertSame($before, $this->pinVerdicts());
+    }
+
+    #[Test]
+    public function aFormWithAnUnknownSideIsAnsweredByTheRoundPage(): void
+    {
+        $this->seedRoundTwo();
+        $before = $this->pinVerdicts();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->postFocusVerdict($this->pins[2], 'sideways', '0', '2');
+
         self::assertResponseStatusCodeSame(303);
         self::assertSame('/t/SHOP-1/rounds/2?area=0', $this->client->getResponse()->headers->get('Location'), 'An unknown side is no full-screen form: the round page answers.');
         $before[2] = 'fixed';
         self::assertSame($before, $this->pinVerdicts());
+    }
+
+    #[Test]
+    public function aPinsPlaceInTheWalkIsNotItsRingNumber(): void
+    {
+        $this->seedRoundTwo();
+        $this->pins[5] = $this->addPin($this->beforeShot, 5, '60.00', '60.00', 'Price hidden', 'Lena');
+        $this->pins[6] = $this->addPin($this->beforeShot, 6, '70.00', '70.00', 'Button off', 'Omar');
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::FOCUS_PAGE.'?pin=4');
+
+        $shown = $page->filter('.focus-bar__stop:not([hidden])');
+        self::assertSame('Pin 4 of 5 · Lena', $shown->filter('.focus-bar__label')->text(), 'Ring 4 is an AI suggestion nobody kept, so the fourth stop is ring 5.');
+        self::assertSame('Price hidden', $shown->filter('.focus-bar__note')->text());
+        self::assertSame('Pin 5: Price hidden', $page->filter('button.pin.pin--selected')->attr('aria-label'));
+        self::assertSame('4', $shown->filter('input[name="'.VerdictController::FOCUS_PIN_FIELD.'"]')->attr('value'));
+
+        $this->client->submit($shown->selectButton('Fixed')->form());
+
+        self::assertSame('Pin 5 marked fixed.', $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?area=0&side=after&pin=5'));
+        self::assertSame([1 => null, 2 => null, 3 => null, 4 => null, 5 => 'fixed', 6 => null], $this->pinVerdicts());
+        self::assertSame('Pin 5 of 5 · Omar', $this->client->getCrawler()->filter('.focus-bar__stop:not([hidden]) .focus-bar__label')->text());
+        self::assertSame('Pin 6: Button off', $this->client->getCrawler()->filter('button.pin.pin--selected')->attr('aria-label'));
+    }
+
+    /**
+     * @return iterable<string, array{string, bool, bool}>
+     */
+    public static function viewersOfTheVerdictForms(): iterable
+    {
+        yield "the ticket's tester on an open round" => ['Mia', false, true];
+        yield 'the team lead on an open round' => ['Lena', false, true];
+        yield 'a team member' => ['Omar', false, false];
+        yield 'a manager in no team on a ticket everyone sees' => ['Raj', false, false];
+        yield "the ticket's tester on a closed round" => ['Mia', true, false];
+        yield 'the team lead on a closed round' => ['Lena', true, false];
+    }
+
+    #[Test]
+    #[DataProvider('viewersOfTheVerdictForms')]
+    public function onlyTheTesterOrTheLeadOnAnOpenRoundSeesTheVerdictForms(string $viewer, bool $isRoundClosed, bool $hasForms): void
+    {
+        $this->seedRoundTwo();
+        if ($isRoundClosed) {
+            $organizationId = $this->acmeFoods->toString();
+            $roundId = $this->roundTwo;
+            $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "UPDATE rvw_round SET state = 'closed' WHERE organization_id = ? AND id = ?",
+                [$organizationId, $roundId],
+            ));
+        }
+        $this->logIn($this->client, $this->people[$viewer]);
+
+        $page = $this->client->request('GET', self::FOCUS_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(3, $page->filter('.focus-bar__stop'), 'Everyone who may see the round walks its pins.');
+        self::assertCount($hasForms ? 3 : 0, $page->filter('.focus-bar form'));
+        self::assertCount($hasForms ? 1 : 0, $page->filter('[autofocus]'));
+    }
+
+    #[Test]
+    public function aChoiceMadeHereReadsAPinnedNumberOfQueriesBelowTheRoundPagesVerdict(): void
+    {
+        $this->seedRoundTwo();
+        $this->logIn($this->client, $this->people['Lena']);
+        $token = $this->csrfTokenFor($this->client, VerdictController::csrfIdOf('SHOP-1'));
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+
+        $this->client->request('POST', '/t/SHOP-1/rounds/2/pins/'.$this->pins[1].'/verdict', [
+            VerdictController::CSRF_FIELD => $token,
+            VerdictController::VERDICT_FIELD => 'fixed',
+            VerdictController::FOCUS_SIDE_FIELD => 'after',
+            VerdictController::FOCUS_AREA_FIELD => '0',
+            VerdictController::FOCUS_PIN_FIELD => '1',
+        ]);
+
+        self::assertResponseStatusCodeSame(303);
+        $queryCount = 0;
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            $queryCount += \count($queriesOfOneConnection);
+        }
+        self::assertSame(self::FOCUS_VERDICT_QUERIES, $queryCount);
     }
 
     #[Test]
@@ -378,11 +516,8 @@ final class FocusPageTest extends WebTestCase
         self::assertNothingOfTheRoundIn((string) $this->client->getResponse()->getContent());
     }
 
-    /**
-     * The reads do not grow with the areas or the pins: one picture is signed, whatever the number of areas.
-     */
     #[Test]
-    public function thePageReadsAPinnedNumberOfQueriesWhateverTheNumberOfAreasAndPins(): void
+    public function thePageReadsAPinnedNumberOfQueriesWhateverTheNumberOfPins(): void
     {
         $this->seedRoundTwo();
         $this->logIn($this->client, $this->people['Mia']);
@@ -420,6 +555,20 @@ final class FocusPageTest extends WebTestCase
         }
 
         return $queryCount;
+    }
+
+    /**
+     * Fixed on the pin, as a full-screen form posts it, with a valid form token.
+     */
+    private function postFocusVerdict(string $pinId, string $side, mixed $areaPosition, mixed $pinPosition): void
+    {
+        $this->client->request('POST', '/t/SHOP-1/rounds/2/pins/'.$pinId.'/verdict', [
+            VerdictController::CSRF_FIELD => $this->csrfTokenFor($this->client, VerdictController::csrfIdOf('SHOP-1')),
+            VerdictController::VERDICT_FIELD => 'fixed',
+            VerdictController::FOCUS_SIDE_FIELD => $side,
+            VerdictController::FOCUS_AREA_FIELD => $areaPosition,
+            VerdictController::FOCUS_PIN_FIELD => $pinPosition,
+        ]);
     }
 
     private function toastAfterTheRedirect(string $location): string
@@ -470,11 +619,11 @@ final class FocusPageTest extends WebTestCase
         $this->addPin($this->beforeShot, 4, '50.00', '50.00', 'Suggested guess', 'Mia', 'ai', 'suggested');
         $beforeTotals = $this->addScreenshot($roundOne, $this->addMedia('ready'), 1, 'Before totals', null);
 
-        $roundTwo = $this->addRound($this->ticketId, 2, 'review', 'Omar', self::SHARED_TODAY);
-        $afterProduct = $this->addScreenshot($roundTwo, $this->addMedia('ready'), 0, 'After product', null);
+        $this->roundTwo = $this->addRound($this->ticketId, 2, 'review', 'Omar', self::SHARED_TODAY);
+        $afterProduct = $this->addScreenshot($this->roundTwo, $this->addMedia('ready'), 0, 'After product', null);
         $this->addPin($afterProduct, 1, '40.00', '40.00', 'Still cut', 'Mia');
-        $afterTotals = $this->addScreenshot($roundTwo, $this->addMedia('ready'), 1, 'After totals', null);
-        $this->addArea($roundTwo, 'Per product', 0, $this->beforeShot, $afterProduct, null, null);
-        $this->addArea($roundTwo, 'Totals', 1, $beforeTotals, $afterTotals, null, null);
+        $afterTotals = $this->addScreenshot($this->roundTwo, $this->addMedia('ready'), 1, 'After totals', null);
+        $this->addArea($this->roundTwo, 'Per product', 0, $this->beforeShot, $afterProduct, null, null);
+        $this->addArea($this->roundTwo, 'Totals', 1, $beforeTotals, $afterTotals, null, null);
     }
 }

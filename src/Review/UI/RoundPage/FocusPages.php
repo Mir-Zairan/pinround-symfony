@@ -48,8 +48,9 @@ final readonly class FocusPages
         $picture = RoundCards::viewOfPicture(
             'focus-picture',
             $isBefore ? \sprintf('Before, round %d: %s', $area->beforeRoundNumber, $area->name) : \sprintf('After, round %d: %s', $round->number, $area->name),
-            $shown->title,
-            $shown->summary,
+            // No title or summary above the picture, as in full-screen-review.md: the screen is the picture's and the bar's.
+            null,
+            null,
             $image,
             // The walked pins, on either picture: the round's own pins would repeat their numbers.
             array_map(static fn (RoundPinView $pin): PinView => new PinView($pin->number, $pin->xPercent, $pin->yPercent, $pin->note), $pins),
@@ -81,15 +82,12 @@ final readonly class FocusPages
             $position = $index + 1;
             $name = $ticket->displayNames[$pin->authorId->toString()] ?? null;
             $label = \sprintf('Pin %d of %d', $position, $count).(null === $name ? '' : ' · '.$name);
-            [$verdictLabel, $verdictClass] = RoundPages::pinVerdictTagOf($pin->verdict);
             $stops[] = new FocusPinStop(
                 $pin->id,
                 $position,
                 $pin->number,
                 $pin->note,
                 $label,
-                $verdictLabel,
-                $verdictClass,
                 null !== $pin->verdict,
                 FocusPage::previousPositionBefore($position, $count),
                 FocusPage::nextPositionAfter($position, $count),

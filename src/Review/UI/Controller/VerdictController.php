@@ -37,7 +37,8 @@ use Symfony\UX\Turbo\TurboBundle;
  * Undo on an earlier pin, and Save verdict on a screen area. None moves the ticket. A saved verdict answers a Turbo
  * form with a stream that shows the area's tab and side panel again with the toast, and any other form with a redirect
  * to the area's tab with the toast flashed. A refusal changes nothing and answers with its toast the same two ways, as
- * a 403 or 422 stream. A form of the full-screen review (FOCUS_SIDE_FIELD) gets a redirect back to it either way.
+ * a 403 or 422 stream. A form of the full-screen review (FOCUS_SIDE_FIELD) gets a redirect back to it either way, and
+ * a saved one reads nothing more for the round page.
  *
  * Without the request transaction, as DraftRoundController: each action runs in a transaction of its own, so a refused
  * command leaves nothing. In that order: a ticket the person may not see, a round number it has not, and a round
@@ -60,6 +61,12 @@ final class VerdictController extends AbstractController
      * is then a redirect to that page, at the next pin after a Fixed or Still wrong and at the same pin otherwise.
      */
     public const string FOCUS_SIDE_FIELD = 'focus_side';
+    /**
+     * The full-screen review's area and pin position (RoundController's "?area=" and "?pin=") a form was posted from: a
+     * refusal before the pin is read goes back to them. Taken only as whole numbers; anything else shows the first.
+     */
+    public const string FOCUS_AREA_FIELD = 'focus_area';
+    public const string FOCUS_PIN_FIELD = 'focus_pin';
     /** In characters, as the area's note limit the domain enforces; the form only hints it. */
     public const int NOTE_MAX_LENGTH = 1000;
 
@@ -193,12 +200,13 @@ final class VerdictController extends AbstractController
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
         $focusSide = $request->request->getString(self::FOCUS_SIDE_FIELD);
         $isFromFocus = \in_array($focusSide, [FocusPage::SIDE_AFTER, FocusPage::SIDE_BEFORE], true);
-        $areaPosition = null;
-        $pinPosition = null;
+        // What the full-screen form says until the round is read, so a refusal before that still goes back to its pin.
+        $areaPosition = $isFromFocus ? RoundController::positionOf($request->request->all()[self::FOCUS_AREA_FIELD] ?? null) : null;
+        $pinPosition = $isFromFocus ? RoundController::positionOf($request->request->all()[self::FOCUS_PIN_FIELD] ?? null) : null;
         $pinCount = 0;
 
         try {
-            $answer = $this->transactions->run(function () use ($key, $number, $csrfToken, $targetOf, $notFound, $change, &$areaPosition, &$pinPosition, &$pinCount): array {
+            [$toast, $roundPage] = $this->transactions->run(function () use ($key, $number, $csrfToken, $targetOf, $notFound, $change, $isFromFocus, &$areaPosition, &$pinPosition, &$pinCount): array {
                 $visible = $this->visibleTicketLookup->visibleTicketOf($key);
                 $round = $this->reviewRoundQueries->roundOf($visible->ticket->id, $number, $visible->actor->userId())
                     ?? throw new NotFoundHttpException(RoundController::NOT_FOUND);
@@ -230,17 +238,20 @@ final class VerdictController extends AbstractController
                     throw new VerdictRefusedWithToast($refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
                 }
 
+                if ($isFromFocus) {
+                    // The redirect reads the full-screen review again, so the round page's tab and panel are not built.
+                    return [$toast, null];
+                }
                 $changed = $this->reviewRoundQueries->roundOf($visible->ticket->id, $number, $visible->actor->userId())
                     ?? throw new \LogicException('The round of a saved verdict could not be read again.');
                 $changedArea = self::areaById($changed, $area->id)
                     ?? throw new \LogicException('The area of a saved verdict could not be read again.');
 
-                return [
-                    'toast' => $toast,
+                return [$toast, [
                     'position' => $changedArea->position,
                     'tabs' => RoundPages::tabsOf($changed, $changedArea),
                     'panel' => RoundPages::panelOf($visible->ticket, $changed, $changedArea, true, $visible->actor->userId()),
-                ];
+                ]];
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(RoundsController::NOT_FOUND);
@@ -252,20 +263,20 @@ final class VerdictController extends AbstractController
             return $this->respondToRefusal($request, $key, $number, $areaPosition, $refused);
         }
 
-        if ($isFromFocus) {
+        if (null === $roundPage) {
             $nextPosition = $isMovingOn && null !== $pinPosition ? FocusPage::nextPositionAfter($pinPosition, $pinCount) : $pinPosition;
 
-            return $this->redirectToFocus($key, $number, $answer['position'], $focusSide, $nextPosition, $answer['toast']);
+            return $this->redirectToFocus($key, $number, $areaPosition, $focusSide, $nextPosition, $toast);
         }
 
-        return $this->respondToSaved($request, $key, $number, $answer, $focusedControlId);
+        return $this->respondToSaved($request, $key, $number, $toast, $roundPage, $focusedControlId);
     }
 
     /**
      * The full-screen review a form of it was posted from, with the toast flashed.
      *
-     * @param int|null $areaPosition the area to show; the first one when the refusal came before the area was known
-     * @param int|null $pinPosition  from 1, the pin to show; the first one when it is not known
+     * @param int|null $areaPosition the area to show; the first one when neither the round nor the form gave it
+     * @param int|null $pinPosition  from 1, the pin to show; the first one when neither the round nor the form gave it
      */
     private function redirectToFocus(string $key, int $number, ?int $areaPosition, string $side, ?int $pinPosition, string $toast): Response
     {
@@ -283,20 +294,21 @@ final class VerdictController extends AbstractController
     }
 
     /**
-     * @param array{toast: string, position: int, tabs: list<AreaTab>, panel: RoundPanel} $answer
+     * @param array{position: int, tabs: list<AreaTab>, panel: RoundPanel} $roundPage the area's tab and side panel
+     *                                                                                after the change
      */
-    private function respondToSaved(Request $request, string $key, int $number, array $answer, string $focusedControlId): Response
+    private function respondToSaved(Request $request, string $key, int $number, string $toast, array $roundPage, string $focusedControlId): Response
     {
         if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
-            return $this->redirectToArea($key, $number, $answer['position'], $answer['toast']);
+            return $this->redirectToArea($key, $number, $roundPage['position'], $toast);
         }
 
         return $this->render(
             '@Review/round_verdict.stream.html.twig',
             [
-                'toast' => $answer['toast'],
-                'tabs' => $answer['tabs'],
-                'panel' => $answer['panel'],
+                'toast' => $toast,
+                'tabs' => $roundPage['tabs'],
+                'panel' => $roundPage['panel'],
                 'focusedControlId' => $focusedControlId,
                 'ticketKey' => $key,
                 'verdictCsrfId' => self::csrfIdOf($key),

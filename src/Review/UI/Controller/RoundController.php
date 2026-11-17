@@ -136,13 +136,17 @@ final class RoundController extends AbstractController
     }
 
     /**
-     * The query parameter as a whole number; null when it is missing or malformed, which each page reads as its first.
+     * A query or form value as a whole number of at most nine digits; null when it is missing or anything else, which
+     * each page reads as its first area or pin.
      */
+    public static function positionOf(mixed $value): ?int
+    {
+        return \is_string($value) && 1 === preg_match('/\A\d{1,9}\z/', $value) ? (int) $value : null;
+    }
+
     private static function numberParameterOf(Request $request, string $name): ?int
     {
         // all(), not get(): "?area[]=1" is a 400 from get().
-        $value = $request->query->all()[$name] ?? null;
-
-        return \is_string($value) && 1 === preg_match('/\A\d{1,9}\z/', $value) ? (int) $value : null;
+        return self::positionOf($request->query->all()[$name] ?? null);
     }
 }
