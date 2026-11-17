@@ -75,7 +75,7 @@ final class TicketSummaryCommandsTest extends KernelTestCase
     }
 
     #[Test]
-    public function aSummaryForAnotherOrganizationThanTheOneSetIsRefusedBeforeAnyQuery(): void
+    public function aSummaryForAnotherOrganizationThanTheOneSetIsRefusedAndTheCurrentSummaryStays(): void
     {
         try {
             $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn () => $this->storeAiSummary(self::ACME_FOODS));

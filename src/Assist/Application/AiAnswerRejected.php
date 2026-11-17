@@ -6,7 +6,7 @@ namespace App\Assist\Application;
 
 /**
  * The model answered, but the answer failed the output check (ADR-0020), so nothing of it is shown or stored. When
- * `isRetryAllowed` is true the caller may ask once more, with `OutputValidator::retryInstruction()` added; otherwise it
+ * `isRetryAllowed` is true the caller may ask once more, with `AiAnswerCheck::retryInstruction()` added; otherwise it
  * gives up. The message names only the check that failed, never the answer (ADR-0027: no AI content in logs).
  */
 final class AiAnswerRejected extends \RuntimeException
