@@ -8,6 +8,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
+use App\Ticketing\Application\ReviewChange;
 use App\Ticketing\Application\TicketHistory;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Uid\Uuid;
@@ -57,8 +58,14 @@ final readonly class DbalTicketHistory implements TicketHistory
         $this->insertEvent($organizationId, $ticketId, $actor, self::MOVED, $fromStepId, $toStepId, $payload, $at);
     }
 
+    public function recordReviewChange(OrganizationId $organizationId, TicketId $ticketId, UserId $actor, ReviewChange $change, \DateTimeImmutable $at): void
+    {
+        $payload = ['outcome' => $change->outcome, 'pin_number' => $change->pinNumber, 'area_name' => $change->areaName];
+        $this->insertEvent($organizationId, $ticketId, $actor, $change->kind, null, null, $payload, $at);
+    }
+
     /**
-     * @param array<string, string> $payload
+     * @param array<string, string|int|null> $payload
      */
     private function insertEvent(
         OrganizationId $organizationId,
@@ -66,7 +73,7 @@ final readonly class DbalTicketHistory implements TicketHistory
         UserId $actor,
         string $type,
         ?string $fromStepId,
-        string $toStepId,
+        ?string $toStepId,
         array $payload,
         \DateTimeImmutable $at,
     ): void {
