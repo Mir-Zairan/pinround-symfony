@@ -121,13 +121,14 @@ final class DbalReviewChangeLabelsTest extends KernelTestCase
     public function unknownAndMalformedIdsHaveNoLabel(): void
     {
         self::assertSame(
-            [null, null, null, null, null, null],
+            [null, null, null, null, null, null, null],
             $this->asAcmeFoods(fn (): array => [
                 $this->labels()->checkItemPinNumberOf(self::UNKNOWN),
                 $this->labels()->reviewedPinOf(self::REVIEW, self::UNKNOWN),
                 $this->labels()->areaNameOf(self::UNKNOWN),
                 $this->labels()->checkItemPinNumberOf('not-a-uuid'),
                 $this->labels()->reviewedPinOf('not-a-uuid', self::TOTAL_PIN),
+                $this->labels()->reviewedPinOf(self::REVIEW, 'not-a-uuid'),
                 $this->labels()->areaNameOf(''),
             ]),
         );

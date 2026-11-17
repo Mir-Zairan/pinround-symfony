@@ -21,11 +21,16 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 /**
  * Writes one tkt_ticket_event row per checklist or verdict change of a ticket's rounds (P05.T7), once per message
  * however often it is delivered. It runs in worker-notify on event.bus, in the bus's transaction under the event's
- * organization, keeps the event's time, and reads the pin number and area name as they are when it runs.
+ * organization, keeps the event's time, and reads the pin number and area name as they are when it runs. It handles
+ * these four events by name, not ReviewEvent: a Review event it has no line for must pass by, as a throw here would
+ * roll back the other handlers of that delivery.
  */
 final readonly class RecordReviewChangesHandler
 {
-    /** The OnceOnlyHandling name; kept when the class is renamed, or redelivered events would be recorded again. */
+    /**
+     * The OnceOnlyHandling name of all four methods, as a message is only ever one of the events; kept when the class
+     * is renamed, or redelivered events would be recorded again.
+     */
     public const string HANDLER_NAME = 'ticketing.record_review_change';
 
     public function __construct(
@@ -35,43 +40,54 @@ final readonly class RecordReviewChangesHandler
     ) {
     }
 
-    /**
-     * @throws \LogicException for a Review event this class has no kind for, so it is retried and then waits in the
-     *                         failed transport instead of going unrecorded
-     */
     #[AsMessageHandler(bus: 'event.bus')]
-    public function __invoke(ReviewEvent $event): void
+    public function onChecklistItemChanged(ChecklistItemChanged $event): void
     {
-        $this->onceOnlyHandling->runOnce(self::HANDLER_NAME, function () use ($event): void {
+        $this->record($event, fn (): ReviewChange => new ReviewChange(
+            ReviewChange::CHECK_ITEM_CHANGED,
+            $event->state,
+            $this->reviewChangeLabels->checkItemPinNumberOf($event->itemId),
+            null,
+        ));
+    }
+
+    #[AsMessageHandler(bus: 'event.bus')]
+    public function onPinVerdictSet(PinVerdictSet $event): void
+    {
+        $this->record($event, fn (): ReviewChange => $this->pinChange(ReviewChange::PIN_VERDICT_SET, $event->verdict, $event->roundId, $event->pinId));
+    }
+
+    #[AsMessageHandler(bus: 'event.bus')]
+    public function onPinVerdictUndone(PinVerdictUndone $event): void
+    {
+        $this->record($event, fn (): ReviewChange => $this->pinChange(ReviewChange::PIN_VERDICT_UNDONE, $event->undoneVerdict, $event->roundId, $event->pinId));
+    }
+
+    #[AsMessageHandler(bus: 'event.bus')]
+    public function onAreaVerdictSaved(AreaVerdictSaved $event): void
+    {
+        $this->record($event, fn (): ReviewChange => new ReviewChange(
+            ReviewChange::AREA_VERDICT_SAVED,
+            $event->verdict,
+            null,
+            $this->reviewChangeLabels->areaNameOf($event->areaId),
+        ));
+    }
+
+    /**
+     * @param \Closure(): ReviewChange $changeOf reads the labels inside the once-only effect, so a redelivery reads none
+     */
+    private function record(ReviewEvent $event, \Closure $changeOf): void
+    {
+        $this->onceOnlyHandling->runOnce(self::HANDLER_NAME, function () use ($event, $changeOf): void {
             $this->ticketHistory->recordReviewChange(
                 new OrganizationId($event->organizationId),
                 new TicketId($event->ticketId),
                 new UserId($event->actorId),
-                $this->changeOf($event),
+                $changeOf(),
                 $event->occurredAt,
             );
         });
-    }
-
-    private function changeOf(ReviewEvent $event): ReviewChange
-    {
-        return match (true) {
-            $event instanceof ChecklistItemChanged => new ReviewChange(
-                ReviewChange::CHECK_ITEM_CHANGED,
-                $event->state,
-                $this->reviewChangeLabels->checkItemPinNumberOf($event->itemId),
-                null,
-            ),
-            $event instanceof PinVerdictSet => $this->pinChange(ReviewChange::PIN_VERDICT_SET, $event->verdict, $event->roundId, $event->pinId),
-            $event instanceof PinVerdictUndone => $this->pinChange(ReviewChange::PIN_VERDICT_UNDONE, $event->undoneVerdict, $event->roundId, $event->pinId),
-            $event instanceof AreaVerdictSaved => new ReviewChange(
-                ReviewChange::AREA_VERDICT_SAVED,
-                $event->verdict,
-                null,
-                $this->reviewChangeLabels->areaNameOf($event->areaId),
-            ),
-            default => throw new \LogicException(\sprintf('"%s" has no kind of review change.', $event::class)),
-        };
     }
 
     private function pinChange(string $kind, string $verdict, string $roundId, string $pinId): ReviewChange

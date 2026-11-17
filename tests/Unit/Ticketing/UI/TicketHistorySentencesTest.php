@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Ticketing\UI;
 
+use App\Review\Api\ChecklistCommands;
+use App\Review\Api\VerdictCommands;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Application\ReviewChange;
 use App\Ticketing\Application\TicketHistoryEntry;
@@ -108,6 +110,38 @@ final class TicketHistorySentencesTest extends TestCase
         self::assertSame($expectedSentence, self::sentences()->sentenceOf(self::reviewEntry(self::OMAR, $change)));
     }
 
+    /**
+     * Every code a Review event can carry, read from Review's Api, so a code Review adds without words here fails.
+     * STATE_OPEN is left out: no ChecklistItemChanged carries it.
+     *
+     * @return iterable<string, array{string, string}>
+     */
+    public static function reviewCodesOfEachKind(): iterable
+    {
+        $kindsAndCodes = [
+            ReviewChange::CHECK_ITEM_CHANGED => array_diff_key(self::constantsOf(ChecklistCommands::class, 'STATE_'), ['STATE_OPEN' => true]),
+            ReviewChange::PIN_VERDICT_SET => self::constantsOf(VerdictCommands::class, 'PIN_'),
+            ReviewChange::AREA_VERDICT_SAVED => self::constantsOf(VerdictCommands::class, 'AREA_'),
+        ];
+        foreach ($kindsAndCodes as $kind => $codes) {
+            self::assertNotSame([], $codes);
+            foreach ($codes as $name => $code) {
+                self::assertIsString($code);
+
+                yield $kind.' '.$name => [$kind, $code];
+            }
+        }
+    }
+
+    #[Test]
+    #[DataProvider('reviewCodesOfEachKind')]
+    public function everyCodeOfReviewsApiHasItsOwnWordsNeverTheChangedFallback(string $kind, string $code): void
+    {
+        $sentence = self::sentences()->sentenceOf(self::reviewEntry(self::OMAR, new ReviewChange($kind, $code, 2, 'Totals')));
+
+        self::assertStringStartsNotWith('Omar changed ', $sentence);
+    }
+
     #[Test]
     public function aReviewChangeBySomeoneGoneStartsCapitalized(): void
     {
@@ -166,6 +200,20 @@ final class TicketHistorySentencesTest extends TestCase
 
         self::assertSame([self::LENA, self::OMAR, self::GONE], array_map(static fn (UserId $userId): string => $userId->toString(), $people));
         self::assertSame([], TicketHistorySentences::peopleOf([]));
+    }
+
+    /**
+     * @param class-string $apiClass
+     *
+     * @return array<string, mixed> the values by constant name
+     */
+    private static function constantsOf(string $apiClass, string $namePrefix): array
+    {
+        return array_filter(
+            new \ReflectionClass($apiClass)->getConstants(),
+            static fn (string $name): bool => str_starts_with($name, $namePrefix),
+            \ARRAY_FILTER_USE_KEY,
+        );
     }
 
     private static function sentences(): TicketHistorySentences

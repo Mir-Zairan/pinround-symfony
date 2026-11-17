@@ -93,7 +93,9 @@ final readonly class DbalTicketHistory implements TicketHistory
                 $fromStepId,
                 $toStepId,
                 json_encode((object) $payload, \JSON_THROW_ON_ERROR),
-                $at->format(\DateTimeInterface::ATOM),
+                // Microseconds kept: What happened breaks a tie in at by the row id, made when the row is written, and
+                // worker-notify can write a review change after a later one of the same second.
+                $at->format('Y-m-d\TH:i:s.uP'),
             ],
         );
     }

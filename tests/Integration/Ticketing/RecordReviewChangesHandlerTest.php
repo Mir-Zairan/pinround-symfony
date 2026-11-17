@@ -7,13 +7,20 @@ namespace App\Tests\Integration\Ticketing;
 use App\Review\Api\ChecklistCommands;
 use App\Review\Api\Event\AreaVerdictSaved;
 use App\Review\Api\Event\PinVerdictSet;
+use App\Review\Api\Event\PinVerdictUndone;
+use App\Review\Api\Event\ReviewEvent;
 use App\Review\Api\VerdictCommands;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Messenger\MessageIdStamp;
+use App\Tests\Fixtures\Messaging\ReviewProbeRecorded;
 use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Review\Doctrine\RoundRows;
 use App\Ticketing\Application\ReviewChange;
+use App\Ticketing\Application\TicketHistoryEntry;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketHistoryEntries;
 use App\Ticketing\Infrastructure\Messenger\RecordReviewChangesHandler;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -130,15 +137,67 @@ final class RecordReviewChangesHandlerTest extends KernelTestCase
         $verdictsSet = $verdictsSetOf($asyncNotify);
         self::assertCount(1, $verdictsSet);
 
+        $messageId = $verdictsSet[0]->last(MessageIdStamp::class)?->messageId();
+        self::assertNotNull($messageId);
+
         $asyncNotify->send($verdictsSet[0]);
         self::runTheWorkerUntilIdle('async_notify');
 
         // Counted alone: the delivery also queues refreshes of the ticket's pages on async_notify.
         self::assertCount(2, $verdictsSetOf($asyncNotify));
+        self::assertSame([], self::rejectedReviewEventsOf($asyncNotify));
+        self::assertSame(1, $this->processedRowsOf($messageId));
         self::assertSame(
             [ReviewChange::CHECK_ITEM_CHANGED, ReviewChange::PIN_VERDICT_SET, ReviewChange::PIN_VERDICT_UNDONE, ReviewChange::AREA_VERDICT_SAVED],
             array_column($this->historyRowsAs(self::ACME_FOODS), 0),
         );
+    }
+
+    /**
+     * The row id is made when the row is written, so a set handled after the undo of the same second has the higher
+     * id; What happened must still list the undo as the newer.
+     */
+    #[Test]
+    public function twoChangesOfOneSecondHandledInReverseListInTheOrderTheyHappened(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->eventBus()->dispatch(new PinVerdictUndone(self::ACME_FOODS, self::TICKET, self::REVIEW, self::TOTAL_PIN, VerdictCommands::PIN_FIXED, self::MIA, new \DateTimeImmutable('2027-03-16 09:20:00.700000+00:00')));
+            $this->eventBus()->dispatch(new PinVerdictSet(self::ACME_FOODS, self::TICKET, self::REVIEW, self::TOTAL_PIN, VerdictCommands::PIN_FIXED, self::MIA, new \DateTimeImmutable('2027-03-16 09:20:00.300000+00:00')));
+        });
+
+        self::runTheWorkerUntilIdle('outbox');
+        self::runTheWorkerUntilIdle('async_notify');
+
+        $entries = $this->transactions()->rolledBackAs(
+            self::ACME_FOODS,
+            fn (): array => new DbalTicketHistoryEntries($this->connection(), $this->tenantContext())->latestOf(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT)),
+        );
+        self::assertSame(
+            [ReviewChange::PIN_VERDICT_UNDONE, ReviewChange::PIN_VERDICT_SET],
+            array_map(static fn (TicketHistoryEntry $entry): ?string => $entry->reviewChange?->kind, $entries),
+        );
+    }
+
+    /**
+     * A Review event this handler has no line for, as each new one is at first, passes it by: a throw would roll back
+     * the delivery's other handlers and send the event to the failed transport.
+     */
+    #[Test]
+    public function aReviewEventWithNoLineInWhatHappenedPassesWithoutARowOrARejection(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->eventBus()->dispatch(new ReviewProbeRecorded(self::ACME_FOODS, self::TICKET, self::MIA, new \DateTimeImmutable(self::SAVED_AT)));
+        });
+
+        self::runTheWorkerUntilIdle('outbox');
+        self::runTheWorkerUntilIdle('async_notify');
+
+        $asyncNotify = $this->asyncNotify();
+        $handledProbes = array_filter($asyncNotify->getAcknowledged(), static fn (Envelope $envelope): bool => $envelope->getMessage() instanceof ReviewProbeRecorded);
+        self::assertCount(1, $handledProbes);
+        self::assertSame([], self::rejectedReviewEventsOf($asyncNotify));
+        self::assertSame([], $this->historyRowsAs(self::ACME_FOODS));
+        self::assertSame(0, $this->processedRowsOf(null));
     }
 
     #[Test]
@@ -196,6 +255,32 @@ final class RecordReviewChangesHandlerTest extends KernelTestCase
 
             return [$row[0], $row[1], $row[2], $row[3], $payload, $row[5]];
         }, $rows);
+    }
+
+    /**
+     * Only the Review events: the test worker has no Mercure hub, so the page refreshes they queue are rejected.
+     *
+     * @return list<string> their classes
+     */
+    private static function rejectedReviewEventsOf(InMemoryTransport $transport): array
+    {
+        return array_values(array_map(
+            static fn (Envelope $envelope): string => $envelope->getMessage()::class,
+            array_filter($transport->getRejected(), static fn (Envelope $envelope): bool => $envelope->getMessage() instanceof ReviewEvent),
+        ));
+    }
+
+    /**
+     * @param string|null $messageId null for the handler's rows of any message
+     */
+    private function processedRowsOf(?string $messageId): int
+    {
+        $count = null === $messageId
+            ? $this->migrator()->fetchOne('SELECT count(*) FROM processed_message WHERE handler = ?', [RecordReviewChangesHandler::HANDLER_NAME])
+            : $this->migrator()->fetchOne('SELECT count(*) FROM processed_message WHERE handler = ? AND message_id = ?', [RecordReviewChangesHandler::HANDLER_NAME, $messageId]);
+        self::assertIsInt($count);
+
+        return $count;
     }
 
     /**
