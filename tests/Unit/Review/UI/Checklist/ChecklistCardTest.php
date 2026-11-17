@@ -107,7 +107,7 @@ final class ChecklistCardTest extends TestCase
     public function anItemStateTheCommandsDoNotNameIsALogicError(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('A check item has no state "reopened".');
+        $this->expectExceptionMessageIsOrContains('A check item has no state "reopened".');
 
         ChecklistCard::of(self::checklistOf([1 => ChecklistCommands::STATE_OPEN, 2 => 'reopened']), true, true);
     }

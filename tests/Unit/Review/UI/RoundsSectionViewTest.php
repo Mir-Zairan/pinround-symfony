@@ -35,7 +35,7 @@ final class RoundsSectionViewTest extends TestCase
     public function aNegativeCountOfRoundsLeftOutIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A count of rounds left out is not below 0.');
+        $this->expectExceptionMessageIsOrContains('A count of rounds left out is not below 0.');
 
         new RoundsSectionView([], -1);
     }

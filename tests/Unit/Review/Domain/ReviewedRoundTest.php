@@ -29,11 +29,10 @@ final class ReviewedRoundTest extends TestCase
 
     #[Test]
     #[DataProvider('kindsThatTakeVerdicts')]
+    #[\PHPUnit\Framework\Attributes\DoesNotPerformAssertions]
     public function anOpenSharedRoundOfAKindThatTakesVerdictsTakesThem(RoundKind $kind): void
     {
         self::round($kind, isShared: true, state: RoundState::Open, isDeleted: false)->requireOpenForVerdicts();
-
-        $this->addToAssertionCount(1);
     }
 
     /**

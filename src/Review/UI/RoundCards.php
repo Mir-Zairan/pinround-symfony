@@ -239,13 +239,7 @@ final readonly class RoundCards
      */
     private static function hasChecklist(array $rounds): bool
     {
-        foreach ($rounds as $round) {
-            if (self::CHECKLIST === $round->kind) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($rounds, static fn ($round) => self::CHECKLIST === $round->kind);
     }
 
     private function showsPictures(RoundView $round): bool

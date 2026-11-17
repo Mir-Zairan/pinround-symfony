@@ -91,7 +91,7 @@ final class UploaderMediaStatesTest extends TestCase
     public function moreThanFiftyIdsAreRefusedBeforeAnyRead(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('at most 50');
+        $this->expectExceptionMessageIsOrContains('at most 50');
 
         try {
             $this->statesOf(self::MIA, array_fill(0, UploadedMedia::MAX_MEDIA_IDS + 1, self::MIA_READY));

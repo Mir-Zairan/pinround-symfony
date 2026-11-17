@@ -400,13 +400,13 @@ final class MergingSessionHandlerTest extends KernelTestCase
             'prefix' => $this->keyPrefix(),
             'ttl' => $ttlSeconds ?? self::getContainer()->getParameter('identity.session_idle_seconds'),
         ]);
-        $innerHandler = new class($valkeyHandler, $write) implements \SessionHandlerInterface, \SessionUpdateTimestampHandlerInterface {
+        $innerHandler = new readonly class($valkeyHandler, $write) implements \SessionHandlerInterface, \SessionUpdateTimestampHandlerInterface {
             /**
              * @param \Closure(RedisSessionHandler, string, string): bool $write
              */
             public function __construct(
-                private readonly RedisSessionHandler $valkeyHandler,
-                private readonly \Closure $write,
+                private RedisSessionHandler $valkeyHandler,
+                private \Closure $write,
             ) {
             }
 

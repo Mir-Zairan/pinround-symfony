@@ -138,7 +138,7 @@ final class DbalReviewChangeLabelsTest extends KernelTestCase
     public function labelsAreReadOnlyInATransaction(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('none is open');
+        $this->expectExceptionMessageIsOrContains('none is open');
 
         $this->labels()->areaNameOf(self::TOTALS_AREA);
     }

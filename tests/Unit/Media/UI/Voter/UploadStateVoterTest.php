@@ -100,11 +100,11 @@ final class UploadStateVoterTest extends TestCase
 
     private function voter(): UploadStateVoter
     {
-        $uploadedMedia = new class(self::MIA, self::MIA_PICTURE, $this->reads) implements UploadedMedia {
+        $uploadedMedia = new readonly class(self::MIA, self::MIA_PICTURE, $this->reads) implements UploadedMedia {
             /**
              * @param \ArrayObject<int, array{organizationId: string, uploader: string, mediaIds: list<string>}> $reads
              */
-            public function __construct(private readonly string $uploader, private readonly string $pictureId, private readonly \ArrayObject $reads)
+            public function __construct(private string $uploader, private string $pictureId, private \ArrayObject $reads)
             {
             }
 

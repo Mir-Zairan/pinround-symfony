@@ -162,7 +162,7 @@ final class TicketHistorySentencesTest extends TestCase
             self::assertSame('A ticket history entry is either a move into a step or a review change.', $exception->getMessage());
         }
 
-        $this->expectExceptionMessage('A ticket history entry is either a move into a step or a review change.');
+        $this->expectExceptionMessageIsOrContains('A ticket history entry is either a move into a step or a review change.');
         new TicketHistoryEntry(new UserId(self::OMAR), null, self::TO_DO, null, null, new \DateTimeImmutable('2027-03-16 09:00:00 UTC'), $change);
     }
 

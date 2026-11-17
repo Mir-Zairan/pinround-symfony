@@ -203,7 +203,7 @@ final class DbalTicketHistoryEntriesTest extends KernelTestCase
         ]);
 
         $this->expectException(\UnexpectedValueException::class);
-        $this->expectExceptionMessage('A ticket review change row lacks its outcome.');
+        $this->expectExceptionMessageIsOrContains('A ticket review change row lacks its outcome.');
         $this->latestOf(self::ACME_FOODS, $ticketId);
     }
 

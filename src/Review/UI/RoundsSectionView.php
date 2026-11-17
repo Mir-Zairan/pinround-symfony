@@ -24,13 +24,7 @@ final readonly class RoundsSectionView
      */
     public function hasPrivateDraft(): bool
     {
-        foreach ($this->cards as $card) {
-            if ($card->isPrivateDraft) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($this->cards, static fn ($card) => $card->isPrivateDraft);
     }
 
     /**

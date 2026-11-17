@@ -817,7 +817,7 @@ final class RoundTest extends TestCase
     public function aStoredRoundThatBreaksARuleIsRefused(string $message, int $version, ?int $number, ?\DateTimeImmutable $sharedAt, ?DraftDecision $decision, ?\DateTimeImmutable $decidedAt): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage($message);
+        $this->expectExceptionMessageIsOrContains($message);
 
         Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Draft, new UserId(self::OMAR), $number, $sharedAt, RoundState::Open, $version, [], new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, $decision, $decidedAt);
     }

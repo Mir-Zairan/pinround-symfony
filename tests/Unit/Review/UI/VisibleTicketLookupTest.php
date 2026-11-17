@@ -117,11 +117,11 @@ final class VisibleTicketLookupTest extends TestCase
         $ticketQueries = self::createStub(TicketQueries::class);
         $ticketQueries->method('pageOf')->willReturn($page);
 
-        $checker = new class($granted) implements AuthorizationCheckerInterface {
+        $checker = new readonly class($granted) implements AuthorizationCheckerInterface {
             /**
              * @param list<string> $granted
              */
-            public function __construct(private readonly array $granted)
+            public function __construct(private array $granted)
             {
             }
 

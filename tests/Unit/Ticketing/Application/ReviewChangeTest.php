@@ -22,7 +22,7 @@ final class ReviewChangeTest extends TestCase
     public function anUnknownKindIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('"moved" is not a kind of review change.');
+        $this->expectExceptionMessageIsOrContains('"moved" is not a kind of review change.');
 
         new ReviewChange('moved', 'fixed', 2, null);
     }
@@ -31,7 +31,7 @@ final class ReviewChangeTest extends TestCase
     public function anEmptyOutcomeIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A review change has an outcome.');
+        $this->expectExceptionMessageIsOrContains('A review change has an outcome.');
 
         new ReviewChange(ReviewChange::AREA_VERDICT_SAVED, '', null, 'Totals');
     }

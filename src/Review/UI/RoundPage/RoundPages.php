@@ -253,13 +253,8 @@ final readonly class RoundPages
         if (null !== $snapshot->testerId && $snapshot->testerId->equals($userId)) {
             return true;
         }
-        foreach ($snapshot->testerIds as $testerId) {
-            if ($testerId->equals($userId)) {
-                return true;
-            }
-        }
 
-        return false;
+        return array_any($snapshot->testerIds, static fn ($testerId) => $testerId->equals($userId));
     }
 
     /**

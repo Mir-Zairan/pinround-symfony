@@ -17,12 +17,7 @@ final class TicketTesterRule
         if (null !== $ticket->testerId) {
             return $ticket->testerId->equals($userId);
         }
-        foreach ($ticket->testerIds as $teamTesterId) {
-            if ($teamTesterId->equals($userId)) {
-                return true;
-            }
-        }
 
-        return false;
+        return array_any($ticket->testerIds, static fn ($teamTesterId) => $teamTesterId->equals($userId));
     }
 }
