@@ -38,6 +38,7 @@ use App\Tests\Integration\Ticketing\Summary\SummaryRows;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketSummaryCommands;
 use App\Ticketing\Application\CheckedTicketSummaryCommands;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketSummaries;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -47,6 +48,7 @@ use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\Clock;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 use Symfony\Component\Messenger\Envelope;
@@ -80,6 +82,8 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     private const string FAILED_SENTENCE = 'The AI answer failed. Try again.';
     /** One character over ast_usage_model_check, so the usage insert of an answer from this model fails in PostgreSQL. */
     private const int TOO_LONG_MODEL_LENGTH = 201;
+    /** max_retries of async_ai in config/packages/messenger.yaml. */
+    private const int ASYNC_AI_MAX_RETRIES = 5;
     private const array HUMAN_SUMMARY_ROW = [
         'text' => 'Lena: Pay does nothing on the last step.', 'source' => 'human', 'author_id' => null, 'model' => null,
         'prompt_version' => null, 'is_current' => true, 'created_at' => '2027-03-14 09:00:00',
@@ -277,8 +281,8 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     #[Test]
     public function aStoreTheDatabaseRefusesIsUndoneAloneAndKeepsTheUsageRowAndFailsTheRequestWithoutARetry(): void
     {
-        $realStore = self::getContainer()->get('test.ticketing_ticket_summary_commands');
-        \assert($realStore instanceof TicketSummaryCommands);
+        // Built by hand: resolving the container's store would lock its service id against the replacement below.
+        $realStore = new CheckedTicketSummaryCommands($this->tenantContext(), new DbalTicketSummaries($this->connection(), $this->tenantContext()));
         self::getContainer()->set(CheckedTicketSummaryCommands::class, new readonly class($realStore, $this->connection()) implements TicketSummaryCommands {
             public function __construct(private TicketSummaryCommands $realStore, private Connection $connection)
             {
@@ -312,6 +316,11 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         $this->storeAiSettings(json_encode(['on' => true, 'where' => 'cloud', 'provider_model' => str_repeat('m', self::TOO_LONG_MODEL_LENGTH)], \JSON_THROW_ON_ERROR));
 
         self::runTheWorkerUntilIdle('async_ai');
+        $queued = $this->requestState();
+        self::assertNotNull($queued);
+        self::assertTrue($queued->isQueued(), 'The request ended although its job will be retried.');
+        self::assertCount(2, $this->asyncAi()->getSent(), 'The job was not retried, so the usage insert did not fail.');
+        $this->runTheWorkerThroughRetries(1);
 
         self::assertCount(1, $this->fakeProvider()->calls(), 'The retry asked the AI again.');
         $this->assertTheRequestFailedAndTheSummaryStayed(expectedDeliveries: 2);
@@ -331,10 +340,15 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         $this->requestAsOmar();
 
         self::runTheWorkerUntilIdle('async_ai');
+        $this->runTheWorkerThroughRetries(self::ASYNC_AI_MAX_RETRIES - 1);
+        $queued = $this->requestState();
+        self::assertNotNull($queued);
+        self::assertTrue($queued->isQueued(), 'The request ended although its job has a retry left.');
+        $this->runTheWorkerThroughRetries(1);
 
-        self::assertCount(6, $this->asyncAi()->getSent(), 'The job was not delivered once and retried five times.');
+        self::assertCount(1 + self::ASYNC_AI_MAX_RETRIES, $this->asyncAi()->getSent(), 'The job was not delivered once and retried five times.');
         self::assertSame([], $this->fakeProvider()->calls());
-        $this->assertTheRequestFailedAndTheSummaryStayed(expectedDeliveries: 6);
+        $this->assertTheRequestFailedAndTheSummaryStayed(expectedDeliveries: 1 + self::ASYNC_AI_MAX_RETRIES);
         self::assertSame(0, $this->processedMessageCount());
     }
 
@@ -416,6 +430,19 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
             ['An AI summary failed.', ['outcome' => 'failed']],
             ['A summary request could not be ended; it stays queued until it expires.', ['exception_class' => \RedisException::class]],
         ], $this->warnings());
+    }
+
+    /**
+     * The in-memory transport hands out a retry only once the clock is past the time it was sent at, which the frozen
+     * clock never is. A millisecond passes before each run, as the worker's wait would, and the test retry delay is 0,
+     * so each run gets one retry; the request state stores whole seconds, so its time stays 10:00:00.
+     */
+    private function runTheWorkerThroughRetries(int $retryCount): void
+    {
+        for ($retry = 1; $retry <= $retryCount; ++$retry) {
+            Clock::get()->sleep(0.001);
+            self::runTheWorkerUntilIdle('async_ai');
+        }
     }
 
     private function watchSummaryRequests(): WatchedSummaryRequests
