@@ -25,11 +25,20 @@ final readonly class PolicyEvaluator
         if (!$settings->isOn) {
             return PolicyRefusal::AiOff;
         }
-        if ($settings->isForLeadsOnly && !self::isLeadOfAnyTeam($viewer)) {
+        if ($this->needsViewerRoles($settings) && !self::isLeadOfAnyTeam($viewer)) {
             return PolicyRefusal::LeadsOnly;
         }
 
         return null;
+    }
+
+    /**
+     * Whether the viewer's roles change the answer, so a caller that has none at hand reads them only then. When not,
+     * any roles, Roles::none() included, give the same decision.
+     */
+    public function needsViewerRoles(AiSettings $settings): bool
+    {
+        return $settings->isOn && $settings->isForLeadsOnly;
     }
 
     /**

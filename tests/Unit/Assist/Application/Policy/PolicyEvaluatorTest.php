@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Assist\Policy;
+namespace App\Tests\Unit\Assist\Application\Policy;
 
 use App\Assist\Application\Policy\AiRoute;
 use App\Assist\Application\Policy\PolicyDecision;
@@ -98,7 +98,7 @@ final class PolicyEvaluatorTest extends TestCase
         bool $expectedTitleOnly,
     ): void {
         [$isOn, $isForLeadsOnly, $whereAiRuns, $isRestrictedToCloudAllowed, $isTitleOnly] = $settings;
-        $aiSettings = new AiSettings($isOn, $isForLeadsOnly, $isTitleOnly, true, $whereAiRuns, $isRestrictedToCloudAllowed, null, null, null);
+        $aiSettings = new AiSettings($isOn, $isForLeadsOnly, $isTitleOnly, true, $whereAiRuns, $isRestrictedToCloudAllowed, null, null);
 
         $decision = new PolicyEvaluator()->decide($aiSettings, self::viewer($viewer), $canSeeTicket, $isTicketRestricted, $isLaptopReady);
 
@@ -112,11 +112,23 @@ final class PolicyEvaluatorTest extends TestCase
     public function theViewerChecksAloneRefuseAsTheFullFlowDoes(): void
     {
         $evaluator = new PolicyEvaluator();
-        $leadsOnly = new AiSettings(true, true, false, false, 'cloud', false, null, null, null);
+        $leadsOnly = new AiSettings(true, true, false, false, 'cloud', false, null, null);
 
         self::assertSame(PolicyRefusal::AiOff, $evaluator->refusalForViewer(AiSettings::off(), self::viewer('lead')));
         self::assertSame(PolicyRefusal::LeadsOnly, $evaluator->refusalForViewer($leadsOnly, self::viewer('member')));
         self::assertNull($evaluator->refusalForViewer($leadsOnly, self::viewer('lead')));
+    }
+
+    #[Test]
+    public function onlyLeadsOnlyWithAiOnNeedsTheViewersRoles(): void
+    {
+        $evaluator = new PolicyEvaluator();
+        $needs = [];
+        foreach ([[false, false], [false, true], [true, false], [true, true]] as [$isOn, $isForLeadsOnly]) {
+            $needs[] = $evaluator->needsViewerRoles(new AiSettings($isOn, $isForLeadsOnly, false, false, 'cloud', false, null, null));
+        }
+
+        self::assertSame([false, false, false, true], $needs);
     }
 
     #[Test]

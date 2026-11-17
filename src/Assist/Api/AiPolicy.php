@@ -9,14 +9,24 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * The organization's AI policy for one person, for pages that show AI help and for the server's AI door. A request
- * about one ticket is decided again in the gateway, with the ticket's visibility and the laptop's state.
+ * about one ticket is decided again in the gateway, with the ticket's visibility and the laptop's state. Both methods
+ * read under row-level security, uncached, so they need an open transaction whose tenant is the organization; under
+ * any other tenant, or none, AI help reads as off, as does a stored setting the Organization module does not know.
  */
 interface AiPolicy
 {
     /**
-     * Reads the organization's AI settings and the viewer's roles under row-level security, uncached, so it needs an
-     * open transaction whose tenant is $organizationId; under any other tenant, or none, AI help reads as off. A
-     * stored setting the Organization module does not know reads as off too.
+     * For a page: the person and organization of the request, with the roles Organization's CurrentActor already holds
+     * for it, so the roles are read at most once per request.
+     *
+     * @param mixed $tokenUser what the security token's getUser() returned; AI off when it is not a user logged in
+     *                         to an organization
+     */
+    public function forTokenUser(mixed $tokenUser): PolicyView;
+
+    /**
+     * Outside a request, as in a worker. Reads the viewer's roles only when the organization allows AI help for leads
+     * only.
      */
     public function for(UserId $viewerId, OrganizationId $organizationId): PolicyView;
 }

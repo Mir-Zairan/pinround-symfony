@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Organization\Api;
 
+use App\SharedKernel\Application\UndecryptableField;
 use App\SharedKernel\Domain\OrganizationId;
 
 /**
@@ -29,13 +30,25 @@ use App\SharedKernel\Domain\OrganizationId;
 interface AiSettingsQueries
 {
     /**
-     * Reads the settings and decrypts the provider key, uncached. AI off (AiSettings::off) when the organization has no
-     * settings row (or it is not visible under the current tenant), no ai key, or any AI setting this module does not
-     * know (an unknown "where", a "on" that is not a JSON boolean, a provider that is not a string): an unreadable
-     * policy never reads as a permissive one. A secret_enc that cannot be decrypted, has no key_id or names another
-     * key id than the one inside it gives no key and isProviderKeyUnreadable; it never throws.
-     *
-     * @throws \InvalidArgumentException when the field encryption keys are not configured
+     * Reads the settings in one uncached query, never secret_enc or key_id, so a page can ask it on every view. AI off
+     * (AiSettings::off) when the organization has no settings row (or it is not visible under the current tenant), no
+     * ai key, or any AI setting this module does not know (an unknown "where", a "on" that is not a JSON boolean, a
+     * provider that is not a string): an unreadable policy never reads as a permissive one. It never throws.
      */
     public function aiSettingsOf(OrganizationId $organizationId): AiSettings;
+
+    /**
+     * The organization's own provider key, decrypted, for the AI gateway only, in one uncached query. Null when it
+     * stored none (no secret_enc and no key_id, or no settings row visible under the current tenant): the operator's
+     * key applies then.
+     *
+     * @return non-empty-string|null
+     *
+     * @throws UndecryptableField        when a key is stored but cannot be read: secret_enc missing, not base64, altered,
+     *                                   encrypted with a key no longer in the ring or to an empty key, or key_id missing
+     *                                   or naming another key than the one inside secret_enc. The caller must not fall
+     *                                   back to the operator's key.
+     * @throws \InvalidArgumentException when the field encryption keys are not configured
+     */
+    public function providerKeyOf(OrganizationId $organizationId): ?string;
 }
