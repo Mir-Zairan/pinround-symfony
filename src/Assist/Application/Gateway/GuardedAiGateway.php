@@ -9,7 +9,6 @@ use App\Assist\Application\AiAnswerRejected;
 use App\Assist\Application\AiCallLimit;
 use App\Assist\Application\AiCallUsage;
 use App\Assist\Application\AiGateway;
-use App\Assist\Application\AiNotAllowed;
 use App\Assist\Application\AiPrompt;
 use App\Assist\Application\AiProvider;
 use App\Assist\Application\AiRateLimited;
@@ -17,8 +16,6 @@ use App\Assist\Application\AiResult;
 use App\Assist\Application\AiTask;
 use App\Assist\Application\AiUnavailable;
 use App\Assist\Application\Metering;
-use App\Assist\Application\Policy\PolicyEvaluator;
-use App\Assist\Application\Policy\PolicyRefusal;
 use App\Assist\Application\PromptRenderer;
 use App\Assist\Application\PromptVersion;
 use App\Assist\Application\ProviderChoice;
@@ -30,20 +27,16 @@ use App\SharedKernel\Application\UndecryptableField;
 use App\SharedKernel\Domain\OrganizationId;
 
 /**
- * The gateway in the order of ai-architecture.md: the org policy with the ticket as the viewer may see it, the provider
- * and its key, the prompt, pinround's limit per person, then the provider, the answer check and one usage row per
- * provider call. A data answer whose check allows it gets one more call with the retry instruction; that second call is
- * metered too but not counted against the person's limit again.
- *
- * The server never sends to a laptop, so the policy is decided with the laptop not ready: "laptop first" goes to the
- * cloud here, and "laptop" only refuses with the setup sheet's line.
+ * The gateway in the order of ai-architecture.md: the org policy with the ticket as the viewer may see it
+ * (AiTaskAdmission), the provider and its key, the prompt, pinround's limit per person, then the provider, the answer
+ * check and one usage row per provider call. A data answer whose check allows it gets one more call with the retry
+ * instruction; that second call is metered too but not counted against the person's limit again.
  */
 final readonly class GuardedAiGateway implements AiGateway
 {
     public function __construct(
         private AiSettingsQueries $aiSettingsQueries,
-        private PolicyEvaluator $policyEvaluator,
-        private AskedTicketQueries $askedTicketQueries,
+        private AiTaskAdmission $aiTaskAdmission,
         private PromptRenderer $promptRenderer,
         private AiCallLimit $aiCallLimit,
         private AiProvider $aiProvider,
@@ -54,27 +47,11 @@ final readonly class GuardedAiGateway implements AiGateway
 
     public function run(AiTask $task, ActorContext $viewer): AiResult
     {
-        // TODO(P08.T6): a draft report's word check decides whether it may go to cloud AI; until intake brings it, a
-        // task without a ticket is refused instead of sent.
-        $ticketId = $task->ticketId ?? throw new \InvalidArgumentException('A server AI task needs a ticket.');
+        $admitted = $this->aiTaskAdmission->admit($task, $viewer);
 
-        $settings = $this->aiSettingsQueries->aiSettingsOf($viewer->organizationId());
-        $viewerRefusal = $this->policyEvaluator->refusalForViewer($settings, $viewer);
-        if (null !== $viewerRefusal) {
-            throw new AiNotAllowed($viewerRefusal);
-        }
-        $ticket = $this->askedTicketQueries->visibleTicketOf($ticketId, $viewer);
-        if (null === $ticket) {
-            throw new AiNotAllowed(PolicyRefusal::CannotSeeTicket);
-        }
-        $decision = $this->policyEvaluator->decide($settings, $viewer, canSeeTicket: true, isTicketRestricted: $ticket->isTeamOnly, isLaptopReady: false);
-        if (null !== $decision->refusal) {
-            throw new AiNotAllowed($decision->refusal);
-        }
-
-        $choice = $this->providerChoiceOf($settings, $viewer->organizationId());
+        $choice = $this->providerChoiceOf($admitted->settings, $viewer->organizationId());
         $version = $this->promptRenderer->currentVersion($task->feature);
-        $prompt = $this->promptRenderer->build($version, $ticket->promptTicket, $decision->isTitleOnly);
+        $prompt = $this->promptRenderer->build($version, $admitted->ticket->promptTicket, $admitted->decision->isTitleOnly);
         $this->aiCallLimit->consume($viewer);
 
         return $this->ask($prompt, $choice, $version, $viewer, false);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Architecture;
 
+use App\Assist\Application\Summaries\GenerateSummary;
 use App\Conversation\Api\Event\ConversationEvent;
 use App\Identity\Api\Event\IdentityEvent;
 use App\Identity\Application\EmailPasswordResetLink;
@@ -60,9 +61,12 @@ final class OutboxRelayRoutesConfigTest extends TestCase
         }
     }
 
-    /** Each of these is sent straight to async_notify, never through the outbox; worker-notify handles them. */
+    /**
+     * Each of these is sent straight to its worker's transport, never through the outbox: the notify commands and mail
+     * to worker-notify, the summary job to worker-ai.
+     */
     #[Test]
-    public function exactlyTheNotifyCommandsAndMailAreRoutedStraightToAsyncNotify(): void
+    public function exactlyTheNotifyCommandsMailAndTheSummaryJobAreRoutedStraightToTheirTransports(): void
     {
         self::assertEqualsCanonicalizing(
             array_fill_keys([
@@ -73,7 +77,7 @@ final class OutboxRelayRoutesConfigTest extends TestCase
                 RefreshBell::class,
                 ReleaseDueNotifications::class,
                 SendDigest::class,
-            ], 'async_notify'),
+            ], 'async_notify') + [GenerateSummary::class => 'async_ai'],
             array_filter(self::routing(self::messengerConfig()), static fn (mixed $transport): bool => 'outbox' !== $transport),
         );
     }
