@@ -58,7 +58,8 @@
                             </a>
                             <div class="focus-bar__text">
                                 <h2 class="focus-bar__label" id="focus-pin-{{ stop.position }}-label">{{ stop.label }}</h2>
-                                <p class="focus-bar__note">{% if stop.note|trim is same as('') %}(no note){% else %}{{ stop.note }}{% endif %}</p>
+                                {#- tabindex: a long note scrolls inside the bar (review.css), and a keyboard scrolls only what it can focus. -#}
+                                <p class="focus-bar__note" tabindex="0">{% if stop.note|trim is same as('') %}(no note){% else %}{{ stop.note }}{% endif %}</p>
                             </div>
                             {% if page.mayGiveVerdicts %}
                                 {% set focusFields %}

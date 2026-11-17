@@ -24,6 +24,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\Attribute\When;
 use Symfony\Component\Uid\Uuid;
@@ -34,6 +35,8 @@ use Symfony\Component\Uid\Uuid;
  * with two ready pictures, the first with PIN_NOTES. Round 2 is a review round of the assignee with one screen area per
  * AREA_NAMES, in order: each area's "before" is the round 1 picture at its position and its "after" a ready picture of
  * its own. No command makes a review round yet, so round 2 is written as rvw_round, rvw_screenshot and rvw_area rows.
+ * For the full-screen review's layout checks, LONG_NOTE_OPTION gives the first pin a long note and PENDING_AFTER_OPTION
+ * leaves one area's "after" picture pending.
  */
 // Never registered in prod, so no console call there can fake processed pictures or a round.
 #[AsCommand(name: 'app:e2e:seed-review-round', description: 'Give a ticket with no rounds a round 1 with pins and a review round 2 with two screen areas (dev and test only)')]
@@ -46,6 +49,15 @@ final class SeedReviewRoundCommand extends Command
 
     /** The pins of round 1's first picture, by number: the earlier pins of round 2's first area. */
     public const array PIN_NOTES = ['The total shows the old price.', 'The badge covers the basket icon.'];
+
+    public const string PENDING_AFTER_OPTION = 'pending-after';
+    public const string LONG_NOTE_OPTION = 'long-note';
+
+    /** The first pin's note with LONG_NOTE_OPTION: long enough to wrap over many lines on a narrow screen. */
+    public const string LONG_PIN_NOTE = 'The total shows the old price after a coupon is removed. The line under it still lists the discount, '
+        .'so the sum at the bottom does not match the items above it. On a narrow screen the badge also covers the basket icon, '
+        .'and the delivery fee moves below the button, where it is easy to miss before paying. Check the total, the discount line, '
+        .'the badge and the delivery fee together, as one change touches all four.';
 
     public function __construct(
         private readonly DemoOrganizations $demoOrganizations,
@@ -66,7 +78,9 @@ final class SeedReviewRoundCommand extends Command
     {
         $this
             ->addArgument('organization', InputArgument::REQUIRED, 'The slug of the organization, for example acme-foods')
-            ->addArgument('ticket', InputArgument::REQUIRED, 'The ticket key, for example SHOP-12; it must be given to someone and have no rounds');
+            ->addArgument('ticket', InputArgument::REQUIRED, 'The ticket key, for example SHOP-12; it must be given to someone and have no rounds')
+            ->addOption(self::PENDING_AFTER_OPTION, null, InputOption::VALUE_REQUIRED, 'The position of the screen area whose "after" picture stays pending (still processing), from 0')
+            ->addOption(self::LONG_NOTE_OPTION, null, InputOption::VALUE_NONE, 'Give the first pin LONG_PIN_NOTE in place of its short note');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -74,6 +88,17 @@ final class SeedReviewRoundCommand extends Command
         $slug = $input->getArgument('organization');
         $key = $input->getArgument('ticket');
         \assert(\is_string($slug) && \is_string($key));
+        $pendingAfter = $input->getOption(self::PENDING_AFTER_OPTION);
+        $pendingAfterPosition = null;
+        if (null !== $pendingAfter) {
+            if (!\in_array($pendingAfter, array_map(strval(...), array_keys(self::AREA_NAMES)), true)) {
+                $output->writeln(\sprintf('<error>There is no screen area at that position; give 0 to %d.</error>', \count(self::AREA_NAMES) - 1));
+
+                return Command::FAILURE;
+            }
+            $pendingAfterPosition = (int) $pendingAfter;
+        }
+        $pinNotes = true === $input->getOption(self::LONG_NOTE_OPTION) ? [self::LONG_PIN_NOTE, ...\array_slice(self::PIN_NOTES, 1)] : self::PIN_NOTES;
 
         $organizationId = $this->demoOrganizations->idBySlug($slug);
         if (null === $organizationId) {
@@ -86,7 +111,7 @@ final class SeedReviewRoundCommand extends Command
         $this->entityManager->clear();
         $this->tenantContext->set($organizationId);
         try {
-            $reviewNumber = $this->transactions->run(function () use ($organizationId, $key): int {
+            $reviewNumber = $this->transactions->run(function () use ($organizationId, $key, $pinNotes, $pendingAfterPosition): int {
                 $ticketId = $this->ticketKeyQueries->idOf($key) ?? throw new TicketNotFound('That ticket does not exist.');
                 $facts = $this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.');
                 $owner = $facts->assigneeId ?? throw new RoundRefused('That ticket is not given to anyone, so there is no one to own the rounds.');
@@ -94,9 +119,9 @@ final class SeedReviewRoundCommand extends Command
                     throw new RoundRefused('That ticket has rounds already; seed the review round on a new ticket.');
                 }
                 $now = $this->clock->now();
-                [$earlierNumber, $earlierScreenshotIds] = $this->shareRoundWithPins($organizationId, $ticketId, $owner, $now);
+                [$earlierNumber, $earlierScreenshotIds] = $this->shareRoundWithPins($organizationId, $ticketId, $owner, $pinNotes, $now);
                 $reviewNumber = $earlierNumber + 1;
-                $this->addReviewRound($organizationId, $ticketId, $owner, $reviewNumber, $earlierScreenshotIds, $now);
+                $this->addReviewRound($organizationId, $ticketId, $owner, $reviewNumber, $earlierScreenshotIds, $pendingAfterPosition, $now);
 
                 return $reviewNumber;
             });
@@ -111,6 +136,9 @@ final class SeedReviewRoundCommand extends Command
         }
 
         $output->writeln(\sprintf('Round %d on %s has %d screen areas with ready pictures.', $reviewNumber, $key, \count(self::AREA_NAMES)));
+        if (null !== $pendingAfterPosition) {
+            $output->writeln(\sprintf('The "after" picture of %s is still processing.', self::AREA_NAMES[$pendingAfterPosition]));
+        }
 
         return Command::SUCCESS;
     }
@@ -124,9 +152,11 @@ final class SeedReviewRoundCommand extends Command
     }
 
     /**
+     * @param list<string> $pinNotes the pins of the first picture, by number
+     *
      * @return array{int, list<string>} the shared round's number and its screenshot ids, one per area, by position
      */
-    private function shareRoundWithPins(OrganizationId $organizationId, TicketId $ticketId, UserId $owner, \DateTimeImmutable $now): array
+    private function shareRoundWithPins(OrganizationId $organizationId, TicketId $ticketId, UserId $owner, array $pinNotes, \DateTimeImmutable $now): array
     {
         $roundId = $this->roundCommands->startDraft($ticketId, $owner, $now);
         $screenshotIds = [];
@@ -137,8 +167,8 @@ final class SeedReviewRoundCommand extends Command
         }
         $pins = array_map(
             static fn (int $index, string $note): PlacedPin => new PlacedPin(30.0 + 35.0 * $index, 40.0 + 15.0 * $index, $note),
-            array_keys(self::PIN_NOTES),
-            self::PIN_NOTES,
+            array_keys($pinNotes),
+            $pinNotes,
         );
         $this->roundCommands->setDraftPins($roundId, $owner, $screenshotIds[0], $pins, $now);
 
@@ -146,9 +176,10 @@ final class SeedReviewRoundCommand extends Command
     }
 
     /**
-     * @param list<string> $beforeScreenshotIds one per area, by position
+     * @param list<string> $beforeScreenshotIds  one per area, by position
+     * @param int|null     $pendingAfterPosition the area whose after picture stays pending, if any
      */
-    private function addReviewRound(OrganizationId $organizationId, TicketId $ticketId, UserId $owner, int $number, array $beforeScreenshotIds, \DateTimeImmutable $now): void
+    private function addReviewRound(OrganizationId $organizationId, TicketId $ticketId, UserId $owner, int $number, array $beforeScreenshotIds, ?int $pendingAfterPosition, \DateTimeImmutable $now): void
     {
         $organization = $organizationId->toString();
         $at = $now->format(\DATE_ATOM);
@@ -159,9 +190,12 @@ final class SeedReviewRoundCommand extends Command
         );
         foreach (self::AREA_NAMES as $position => $areaName) {
             $afterScreenshotId = Uuid::v7()->toRfc4122();
+            $afterMediaId = $position === $pendingAfterPosition
+                ? $this->readyPictureSeeds->addPending($organizationId, $owner, $now)
+                : $this->readyPictureSeeds->add($organizationId, $owner, $now);
             $this->connection->executeStatement(
                 'INSERT INTO rvw_screenshot (organization_id, id, round_id, media_id, position, title, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [$organization, $afterScreenshotId, $roundId, $this->readyPictureSeeds->add($organizationId, $owner, $now), $position, $areaName, $at],
+                [$organization, $afterScreenshotId, $roundId, $afterMediaId, $position, $areaName, $at],
             );
             $this->connection->executeStatement(
                 'INSERT INTO rvw_area (organization_id, id, round_id, name, position, before_screenshot_id, after_screenshot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
