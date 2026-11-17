@@ -173,11 +173,11 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
      */
     public static function failures(): iterable
     {
-        yield 'the provider failed' => ['provider fails', 1, ['failed'], ['outcome' => 'failed'], self::FAILED_SENTENCE];
+        yield 'the provider failed' => ['provider fails', 1, ['failed'], ['summary_outcome' => 'failed'], self::FAILED_SENTENCE];
         yield 'Omar reached his limit after the request' => ['limit reached', 0, [], ['exception_class' => AiRateLimited::class], 'Too many AI requests. Try again in a minute.'];
         yield 'the organization key cannot be read' => ['unreadable key', 0, [], ['exception_class' => AiUnavailable::class], self::FAILED_SENTENCE];
         yield 'the admin turned AI off after the request' => ['AI turned off', 0, [], ['exception_class' => AiNotAllowed::class], self::FAILED_SENTENCE];
-        yield 'Omar left the organization after the request' => ['Omar left', 0, [], ['outcome' => 'requester_not_member'], self::FAILED_SENTENCE];
+        yield 'Omar left the organization after the request' => ['Omar left', 0, [], ['summary_outcome' => 'requester_not_member'], self::FAILED_SENTENCE];
     }
 
     /**
@@ -208,7 +208,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::runTheWorkerUntilIdle('async_ai');
 
         $this->assertTheRequestFailedAndTheSummaryStayed();
-        self::assertSame([['An AI summary failed.', ['outcome' => 'rejected']]], $this->warnings());
+        self::assertSame([['An AI summary failed.', ['summary_outcome' => 'rejected']]], $this->warnings());
     }
 
     /**
@@ -335,7 +335,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
             'An AI summary failed.',
         ], array_column($warnings, 0), 'The first delivery is retried and the second fails the request, each warning once.');
         self::assertSame([GenerateSummary::class, 1], [$warnings[0][1]['class'] ?? null, $warnings[0][1]['retryCount'] ?? null]);
-        self::assertSame(['outcome' => 'ai_may_have_been_asked_or_not_queued'], $warnings[1][1]);
+        self::assertSame(['summary_outcome' => 'ai_may_have_been_asked_or_not_queued'], $warnings[1][1]);
     }
 
     /**
@@ -436,7 +436,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::assertNotNull($state);
         self::assertTrue($state->isQueued(), 'The request failed although Valkey refused it.');
         self::assertSame([
-            ['An AI summary failed.', ['outcome' => 'failed']],
+            ['An AI summary failed.', ['summary_outcome' => 'failed']],
             ['A summary request could not be ended; it stays queued until it expires.', ['exception_class' => \RedisException::class]],
         ], $this->warnings());
     }

@@ -224,7 +224,7 @@ final class DbalAiSettingsQueriesTest extends KernelTestCase
     {
         self::assertSame(self::AI_OFF, self::shapeOf($this->settingsWithAi(self::ACME_FOODS, $storedJson)));
         self::assertSame(
-            [['org_settings holds an unknown AI setting; AI help is off.', ['organization_id' => self::ACME_FOODS, 'setting' => $expectedKey]]],
+            [['org_settings holds an unknown AI setting; AI help is off.', ['organization_id' => self::ACME_FOODS, 'unknown_ai_setting' => $expectedKey]]],
             $this->warnings,
         );
     }
@@ -235,7 +235,7 @@ final class DbalAiSettingsQueriesTest extends KernelTestCase
         $tooDeep = str_repeat('[', 600).str_repeat(']', 600);
 
         self::assertSame(self::AI_OFF, self::shapeOf($this->settingsWithAi(self::ACME_FOODS, \sprintf('{"on": true, "provider": %s}', $tooDeep))));
-        self::assertSame('ai', $this->warnings[0][1]['setting'] ?? null);
+        self::assertSame('ai', $this->warnings[0][1]['unknown_ai_setting'] ?? null);
     }
 
     #[Test]

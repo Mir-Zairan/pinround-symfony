@@ -14,9 +14,9 @@ use Psr\Log\LoggerInterface;
 
 /**
  * AiSettingsQueries documents the stored shape. The warning names the organization and the setting's key (under
- * `setting`, a key RedactionProcessor keeps), never a stored value: a provider key put in the wrong field must not
- * reach the log (ADR-0027). It is logged on each read of such settings, as the Admin › AI writer stores known values
- * only and the operator must hear of a row it did not.
+ * `unknown_ai_setting`, a key RedactionProcessor keeps), never a stored value: a provider key put in the wrong field
+ * must not reach the log (ADR-0027). It is logged on each read of such settings, as the Admin › AI writer stores known
+ * values only and the operator must hear of a row it did not.
  */
 final readonly class DbalAiSettingsQueries implements AiSettingsQueries
 {
@@ -112,7 +112,7 @@ final readonly class DbalAiSettingsQueries implements AiSettingsQueries
     {
         $this->logger->warning('org_settings holds an unknown AI setting; AI help is off.', [
             'organization_id' => $organizationId->toString(),
-            'setting' => $key,
+            'unknown_ai_setting' => $key,
         ]);
 
         return AiSettings::off();

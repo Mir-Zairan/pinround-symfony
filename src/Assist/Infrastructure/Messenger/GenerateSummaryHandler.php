@@ -98,21 +98,21 @@ final readonly class GenerateSummaryHandler
     }
 
     /**
-     * Answers null when Ticketing stored the summary, else the failure warning's context: what stopped it, as an
-     * `outcome` (an AiResult status or a word for a request that may not ask) or as the `exception_class` of what the
-     * gateway or Ticketing threw, with a database error's SQLSTATE and code, never a message. Each key is one
+     * Answers null when Ticketing stored the summary, else the failure warning's context: what stopped it, as a
+     * `summary_outcome` (an AiResult status or a word for a request that may not ask) or as the `exception_class` of
+     * what the gateway or Ticketing threw, with a database error's SQLSTATE and code, never a message. Each key is one
      * RedactionProcessor keeps.
      *
-     * @return array{outcome: string}|array{exception_class: class-string<\Throwable>, sqlstate?: string|null, code?: int}|null
+     * @return array{summary_outcome: string}|array{exception_class: class-string<\Throwable>, sqlstate?: string|null, code?: int}|null
      */
     private function summarize(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): ?array
     {
         $requester = $this->summaryRequesters->actorOf($requesterId, $organizationId);
         if (null === $requester) {
-            return ['outcome' => 'requester_not_member'];
+            return ['summary_outcome' => 'requester_not_member'];
         }
         if (!$this->summaryRequests->markAiMayBeAsked($organizationId, $ticketId, $requesterId)) {
-            return ['outcome' => 'ai_may_have_been_asked_or_not_queued'];
+            return ['summary_outcome' => 'ai_may_have_been_asked_or_not_queued'];
         }
 
         try {
@@ -121,7 +121,7 @@ final readonly class GenerateSummaryHandler
             return ['exception_class' => $refusal::class];
         }
         if (!$gatewayAnswer->isAnswered() || null === $gatewayAnswer->text) {
-            return ['outcome' => $gatewayAnswer->status->value];
+            return ['summary_outcome' => $gatewayAnswer->status->value];
         }
 
         try {
@@ -151,7 +151,7 @@ final readonly class GenerateSummaryHandler
     }
 
     /**
-     * @param array{outcome?: string, exception_class?: class-string<\Throwable>} $failure
+     * @param array{summary_outcome?: string, exception_class?: class-string<\Throwable>} $failure
      */
     private static function sentenceFor(array $failure): string
     {
