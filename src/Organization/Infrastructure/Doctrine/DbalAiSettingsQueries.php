@@ -13,8 +13,9 @@ use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
 
 /**
- * AiSettingsQueries documents the stored shape. The warnings name the organization and the setting's key, never a
- * stored value: a provider key put in the wrong field must not reach the log (ADR-0027).
+ * AiSettingsQueries documents the stored shape. The warning names the organization and the setting's key, never a
+ * stored value: a provider key put in the wrong field must not reach the log (ADR-0027). It is logged on each read of
+ * such settings, as the Admin › AI writer stores known values only and the operator must hear of a row it did not.
  */
 final readonly class DbalAiSettingsQueries implements AiSettingsQueries
 {
@@ -31,9 +32,11 @@ final readonly class DbalAiSettingsQueries implements AiSettingsQueries
 
     public function aiSettingsOf(OrganizationId $organizationId): AiSettings
     {
-        // false: no row; null: no ai key.
+        // false: no row; null: no ai key. The key fields stay in the database: a page never needs them. The parentheses
+        // are needed: PostgreSQL binds - tighter than ->.
         $storedJson = $this->connection->fetchOne(
-            "SELECT data->'ai' FROM org_settings WHERE organization_id = ?",
+            "SELECT CASE WHEN jsonb_typeof(data->'ai') = 'object' THEN (data->'ai') - 'secret_enc' - 'key_id' ELSE data->'ai' END"
+            .' FROM org_settings WHERE organization_id = ?',
             [$organizationId->toString()],
         );
         if (!\is_string($storedJson)) {
@@ -55,42 +58,39 @@ final readonly class DbalAiSettingsQueries implements AiSettingsQueries
 
         $settings = (array) $stored;
         try {
-            $isOn = self::switchFrom($settings, 'on');
-            $isForLeadsOnly = self::choiceFrom($settings, 'who', self::WHO_VALUES, false);
-            $isTitleOnly = self::choiceFrom($settings, 'send', self::SEND_VALUES, false);
-            $isSummaryOnSyncOn = self::switchFrom($settings, 'sync');
-            $whereAiRuns = self::choiceFrom($settings, 'where', array_combine(AiSettings::WHERE_VALUES, AiSettings::WHERE_VALUES), AiSettings::WHERE_CLOUD);
-            $isRestrictedToCloudAllowed = self::switchFrom($settings, 'restricted_to_cloud');
-            $provider = self::textFrom($settings, 'provider');
-            $providerModel = self::textFrom($settings, 'provider_model');
+            return new AiSettings(
+                self::switchFrom($settings, 'on'),
+                self::choiceFrom($settings, 'who', self::WHO_VALUES, false),
+                self::choiceFrom($settings, 'send', self::SEND_VALUES, false),
+                self::switchFrom($settings, 'sync'),
+                self::choiceFrom($settings, 'where', array_combine(AiSettings::WHERE_VALUES, AiSettings::WHERE_VALUES), AiSettings::WHERE_CLOUD),
+                self::switchFrom($settings, 'restricted_to_cloud'),
+                self::textFrom($settings, 'provider'),
+                self::textFrom($settings, 'provider_model'),
+            );
         } catch (\UnexpectedValueException $unknown) {
             return $this->offForUnknown($organizationId, $unknown->getMessage());
         }
-
-        $providerKey = $this->providerKeyFrom($organizationId, $settings['secret_enc'] ?? null, $settings['key_id'] ?? null);
-
-        return new AiSettings(
-            $isOn,
-            $isForLeadsOnly,
-            $isTitleOnly,
-            $isSummaryOnSyncOn,
-            $whereAiRuns,
-            $isRestrictedToCloudAllowed,
-            $provider,
-            $providerModel,
-            $providerKey,
-            null === $providerKey && (null !== ($settings['secret_enc'] ?? null) || null !== ($settings['key_id'] ?? null)),
-        );
     }
 
-    /**
-     * @param mixed $secret the stored secret_enc
-     * @param mixed $keyId  the stored key_id
-     *
-     * @return non-empty-string|null null when the organization stored no key, or one that cannot be read
-     */
-    private function providerKeyFrom(OrganizationId $organizationId, mixed $secret, mixed $keyId): ?string
+    public function providerKeyOf(OrganizationId $organizationId): ?string
     {
+        // false: no row. Each column is the JSON of the key, or null when it is missing (or ai is no object).
+        $row = $this->connection->fetchNumeric(
+            "SELECT data->'ai'->'secret_enc', data->'ai'->'key_id' FROM org_settings WHERE organization_id = ?",
+            [$organizationId->toString()],
+        );
+        if (false === $row) {
+            return null;
+        }
+
+        // A JSON null reads as a missing key.
+        try {
+            $secret = \is_string($row[0]) ? json_decode($row[0], false, 512, \JSON_THROW_ON_ERROR) : null;
+            $keyId = \is_string($row[1]) ? json_decode($row[1], false, 512, \JSON_THROW_ON_ERROR) : null;
+        } catch (\JsonException) {
+            throw new UndecryptableField('The stored AI provider key is nested too deep to read.');
+        }
         if (null === $secret && null === $keyId) {
             return null;
         }
@@ -99,27 +99,12 @@ final readonly class DbalAiSettingsQueries implements AiSettingsQueries
         // The stored value starts with the key id's length and the key id (FieldEncryption); key_id must name the same
         // key, so a row whose key_id says one key while the bytes use another is never trusted.
         if (false === $encrypted || '' === $encrypted || !\is_string($keyId) || substr($encrypted, 1, \ord($encrypted[0])) !== $keyId) {
-            return $this->noKeyForUnreadable($organizationId, null);
+            throw new UndecryptableField('The stored AI provider key is missing, is not base64, has no key id or names another key id than the one inside it.');
         }
 
-        try {
-            $providerKey = $this->fieldEncryption->decrypt($encrypted);
-        } catch (UndecryptableField $undecryptable) {
-            return $this->noKeyForUnreadable($organizationId, $undecryptable);
-        }
+        $providerKey = $this->fieldEncryption->decrypt($encrypted);
 
-        return '' === $providerKey ? $this->noKeyForUnreadable($organizationId, null) : $providerKey;
-    }
-
-    private function noKeyForUnreadable(OrganizationId $organizationId, ?UndecryptableField $undecryptable): null
-    {
-        // UndecryptableField's message names at most a valid key id, never the stored bytes.
-        $this->logger->warning('org_settings holds an AI provider key that cannot be read; AI calls get no key.', [
-            'organization_id' => $organizationId->toString(),
-            'reason' => $undecryptable?->getMessage() ?? 'secret_enc or key_id is missing, malformed or names another key',
-        ]);
-
-        return null;
+        return '' !== $providerKey ? $providerKey : throw new UndecryptableField('The stored AI provider key is empty.');
     }
 
     private function offForUnknown(OrganizationId $organizationId, string $key): AiSettings

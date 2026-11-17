@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Organization\Api;
 
 /**
- * An organization's AI settings as the Admin › AI tab sets them (ai-architecture.md, "Org AI policy"), read-only. The
- * provider and model are kept as stored; Assist checks them when it picks the provider.
+ * An organization's AI settings as the Admin › AI tab sets them (ai-architecture.md, "Org AI policy"), read-only and
+ * without the provider key, which only AiSettingsQueries::providerKeyOf reads. The provider and model are kept as
+ * stored; Assist checks them when it picks the provider.
  */
 final readonly class AiSettings
 {
@@ -23,10 +24,6 @@ final readonly class AiSettings
      * @param bool        $isRestrictedToCloudAllowed whether team-only tickets may go to cloud AI
      * @param string|null $provider                   null means Hugging Face
      * @param string|null $providerModel              the cloud model; null means the provider's default
-     * @param string|null $providerKey                the organization's own decrypted provider key; null when it has none
-     *                                                or it cannot be read
-     * @param bool        $isProviderKeyUnreadable    the organization stored a key that cannot be decrypted: never call
-     *                                                the provider with another key in its place
      *
      * @throws \InvalidArgumentException when $whereAiRuns is not one of WHERE_VALUES
      */
@@ -39,9 +36,6 @@ final readonly class AiSettings
         public bool $isRestrictedToCloudAllowed,
         public ?string $provider,
         public ?string $providerModel,
-        #[\SensitiveParameter]
-        private ?string $providerKey,
-        public bool $isProviderKeyUnreadable = false,
     ) {
         if (!\in_array($whereAiRuns, self::WHERE_VALUES, true)) {
             throw new \InvalidArgumentException('AI settings need a known place where the AI runs.');
@@ -54,11 +48,6 @@ final readonly class AiSettings
      */
     public static function off(): self
     {
-        return new self(false, false, false, false, self::WHERE_CLOUD, false, null, null, null);
-    }
-
-    public function providerKey(): ?string
-    {
-        return $this->providerKey;
+        return new self(false, false, false, false, self::WHERE_CLOUD, false, null, null);
     }
 }
