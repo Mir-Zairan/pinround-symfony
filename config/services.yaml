@@ -220,6 +220,8 @@ services:
     App\Insight\Application\WhoseTurnRows: '@App\Insight\Infrastructure\Doctrine\DbalWhoseTurnRows'
     # Server-side AI goes through Symfony AI (ADR-0018); the test env binds FakeProvider below.
     App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\SymfonyAiProvider'
+    # The one door to server-side AI; nothing else calls AiProvider.
+    App\Assist\Application\AiGateway: '@App\Assist\Application\Gateway\GuardedAiGateway'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -431,7 +433,7 @@ when@test:
             autoconfigure: true
             public: true
         App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\FakeProvider'
-        # No gateway calls the port before P08.T2; FakeProviderWiringTest gets it as the gateway will.
+        # The gateway inlines the port; FakeProviderWiringTest and the gateway tests read the fake through it.
         test.assist_ai_provider:
             alias: App\Assist\Application\AiProvider
             public: true
@@ -439,9 +441,13 @@ when@test:
         test.assist_symfony_ai_provider:
             alias: App\Assist\Infrastructure\Platform\SymfonyAiProvider
             public: true
-        # No gateway consumes the limit yet; AiCallLimitContainerTest gets it as the gateway will.
+        # The gateway inlines the limit; AiCallLimitContainerTest and the gateway tests count through it.
         test.assist_ai_call_limit:
             alias: App\Assist\Application\AiCallLimit
+            public: true
+        # No Messenger handler runs the gateway before the AI features (P08.T4); the gateway tests call it as one will.
+        test.assist_ai_gateway:
+            alias: App\Assist\Application\AiGateway
             public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.
