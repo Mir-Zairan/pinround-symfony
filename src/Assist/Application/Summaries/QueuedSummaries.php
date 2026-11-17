@@ -68,7 +68,7 @@ final readonly class QueuedSummaries implements Summaries
     public function latestRequestOf(TicketId $ticketId, UserId $viewerId, OrganizationId $organizationId): ?SummaryRequestView
     {
         $latest = $this->summaryRequests->latestOf($organizationId, $ticketId);
-        if (null === $latest || null === $this->aiRequesters->actorOf($viewerId, $organizationId)) {
+        if (null === $latest || !$this->aiRequesters->isMember($viewerId, $organizationId)) {
             return null;
         }
         $visibility = $this->ticketVisibilities->of($organizationId, $viewerId);

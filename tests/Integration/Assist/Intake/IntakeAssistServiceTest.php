@@ -29,6 +29,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -50,6 +51,7 @@ use Symfony\Component\Uid\UuidV7;
 final class IntakeAssistServiceTest extends KernelTestCase
 {
     use ClockSensitiveTrait;
+    use ReadsSentSql;
 
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000c9a01';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000c9a02';
@@ -236,7 +238,7 @@ final class IntakeAssistServiceTest extends KernelTestCase
             self::fail('A fourth open check was queued.');
         } catch (IntakeCheckRefused $refusal) {
             self::assertSame(
-                [IntakeCheckRefused::TOO_MANY_AI_REQUESTS, 'You have 3 AI checks running. Wait for one to finish.'],
+                ['too_many_open_checks', 'You have 3 AI checks running. Wait for one to finish.'],
                 [$refusal->refusalCode, $refusal->getMessage()],
             );
         }
@@ -286,6 +288,27 @@ final class IntakeAssistServiceTest extends KernelTestCase
 
         self::assertEquals(IntakeCheckView::queued(), $this->checkOfAs(self::OMAR, self::ACME_FOODS, $queuedId));
         self::assertEquals(IntakeCheckView::failed(self::FAILED_SENTENCE), $this->checkOfAs(self::OMAR, self::ACME_FOODS, $failedId));
+    }
+
+    /**
+     * The page polls every 3 s: the stored suggestion and the membership without the roles, nothing more.
+     */
+    #[Test]
+    public function aPollOfAQueuedCheckSendsTwoQueries(): void
+    {
+        $queuedId = $this->checkAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::draft());
+        $intakeAssist = $this->intakeAssist();
+        $debugData = $this->debugData();
+
+        [$polled, $sentSql] = self::transactions()->rolledBackAs(self::ACME_FOODS, static function () use ($intakeAssist, $debugData, $queuedId): array {
+            $debugData->reset();
+            $polled = $intakeAssist->checkOf($queuedId, new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS));
+
+            return [$polled, self::sqlOf($debugData)];
+        });
+
+        self::assertEquals(IntakeCheckView::queued(), $polled);
+        self::assertCount(2, $sentSql, implode("\n", $sentSql));
     }
 
     #[Test]

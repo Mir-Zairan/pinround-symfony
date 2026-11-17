@@ -6,8 +6,9 @@ namespace App\Assist\Api;
 
 /**
  * "Check with AI" was refused before anything was queued: the draft report is too long, not UTF-8 or names no project
- * id, the person is no member, the organization's AI policy says no for this person or draft, or the person has used
- * up their AI calls for now. The message is the one line the person is shown.
+ * id, the person is no member, the organization's AI policy says no for this person or draft, the person has used up
+ * their AI calls for now, or the person already has as many checks open as the cap allows. The message is the one line
+ * the person is shown.
  */
 final class IntakeCheckRefused extends \DomainException
 {
@@ -25,6 +26,9 @@ final class IntakeCheckRefused extends \DomainException
 
     /** The code of a refusal because the person made as many AI calls as the limit allows for now. */
     public const string TOO_MANY_AI_REQUESTS = 'too_many_ai_requests';
+
+    /** The code of a refusal because the person already has as many checks open at once as the cap allows. */
+    public const string TOO_MANY_OPEN_CHECKS = 'too_many_open_checks';
 
     /**
      * @param string $refusalCode a PolicyView refusal code (ai_off, leads_only, laptop_not_ready,

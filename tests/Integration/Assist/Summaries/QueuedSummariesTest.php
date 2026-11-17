@@ -25,6 +25,7 @@ use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\Tests\Factory\Ticketing\TicketFactory;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketCommands;
@@ -49,6 +50,7 @@ use Symfony\Component\RateLimiter\Policy\Window;
 final class QueuedSummariesTest extends KernelTestCase
 {
     use ClockSensitiveTrait;
+    use ReadsSentSql;
 
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-0000000c7a01';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000c7a02';
@@ -277,6 +279,29 @@ final class QueuedSummariesTest extends KernelTestCase
             self::assertNotNull($latest, $viewerId);
             self::assertSame([SummaryRequestView::QUEUED, self::OMAR, '2027-03-15 10:00:00', null], self::fieldsOf($latest));
         }
+    }
+
+    /**
+     * The ticket page polls the latest request: the membership without the roles, the viewer's roles and teams for the
+     * visibility, and the ticket's, nothing more.
+     */
+    #[Test]
+    public function aPollOfTheLatestRequestSendsFourQueries(): void
+    {
+        $this->requestAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::checkoutTicketId());
+        $summaries = $this->summaries();
+        $debugData = $this->debugData();
+
+        [$latest, $sentSql] = self::transactions()->rolledBackAs(self::ACME_FOODS, static function () use ($summaries, $debugData): array {
+            $debugData->reset();
+            $latest = $summaries->latestRequestOf(self::checkoutTicketId(), new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS));
+
+            return [$latest, self::sqlOf($debugData)];
+        });
+
+        self::assertNotNull($latest);
+        self::assertSame(SummaryRequestView::QUEUED, $latest->status);
+        self::assertCount(4, $sentSql, implode("\n", $sentSql));
     }
 
     #[Test]

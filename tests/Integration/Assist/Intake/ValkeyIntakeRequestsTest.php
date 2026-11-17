@@ -95,17 +95,35 @@ final class ValkeyIntakeRequestsTest extends KernelTestCase
     }
 
     /**
-     * The draft key holds a list, which a GET would answer with WRONGTYPE; the poll still answers, so it never asks for
-     * the draft.
+     * The poll runs on a connection that answers GET alone and records its keys; any other command fails on it, as it
+     * is never connected, so a poll that reads the draft by any command fails this test.
      */
     #[Test]
-    public function thePollDoesNotReadTheDraftKey(): void
+    public function thePollReadsTheStateKeyAloneAndNeverTheDraftKey(): void
     {
         $this->requests()->open(self::acmeFoods(), self::check(), self::omar(), self::draft());
-        $this->connection()->del(self::draftKeyOf(self::ACME_FOODS));
-        $this->connection()->rPush(self::draftKeyOf(self::ACME_FOODS), 'not a string');
+        self::assertSame(1, $this->connection()->exists(self::draftKeyOf(self::ACME_FOODS)), 'With no draft key the poll could not read it anyway.');
+        $recordingConnection = new class($this->connection()) extends \Redis {
+            /** @var list<string> */
+            public array $keysRead = [];
 
-        self::assertEquals(IntakeCheckView::queued(), $this->requests()->stateOf(self::acmeFoods(), self::check(), self::omar()));
+            public function __construct(private readonly \Redis $stateValkey)
+            {
+                parent::__construct();
+            }
+
+            public function get(string $key): mixed
+            {
+                $this->keysRead[] = $key;
+
+                return $this->stateValkey->get($key);
+            }
+        };
+
+        $polled = new ValkeyIntakeRequests($recordingConnection, $this->clock)->stateOf(self::acmeFoods(), self::check(), self::omar());
+
+        self::assertEquals(IntakeCheckView::queued(), $polled);
+        self::assertSame([self::stateKeyOf(self::ACME_FOODS)], $recordingConnection->keysRead);
     }
 
     #[Test]

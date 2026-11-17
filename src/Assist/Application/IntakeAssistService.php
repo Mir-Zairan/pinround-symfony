@@ -58,7 +58,7 @@ final readonly class IntakeAssistService implements IntakeAssist
         try {
             $this->intakeRequests->open($organizationId, $checkId, $requesterId, $draft);
         } catch (TooManyOpenIntakeChecks) {
-            throw new IntakeCheckRefused(IntakeCheckRefused::TOO_MANY_AI_REQUESTS, self::TOO_MANY_OPEN_CHECKS_SENTENCE);
+            throw new IntakeCheckRefused(IntakeCheckRefused::TOO_MANY_OPEN_CHECKS, self::TOO_MANY_OPEN_CHECKS_SENTENCE);
         }
         try {
             $this->intakeJobQueue->queue(new GenerateIntakeSuggestion($organizationId->toString(), $checkId->toString(), $requesterId->toString()));
