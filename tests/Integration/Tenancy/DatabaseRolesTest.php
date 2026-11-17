@@ -537,6 +537,50 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * AI call metering (Version20261117100000): append-only for the app, read by support under the tenant policy; the
+     * rows hold no content. Grants on the parent only, so no role reads a partition directly and skips the parent's
+     * policy, and every index starts with the organization.
+     */
+    #[Test]
+    public function theUsageParentAloneHasGrantsAndTheAppMayOnlyReadAndAdd(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_readonly SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'ast_usage'),
+        );
+        self::assertSame('pinround_migrator', $connection->fetchOne("SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass('public.ast_usage')"));
+        /** @var list<string> $partitions */
+        $partitions = $connection->fetchFirstColumn("SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'public.ast_usage'::regclass ORDER BY 1");
+        // A database migrated later has more months, so only the months the migration creates are pinned.
+        self::assertSame(
+            [
+                'ast_usage_202611', 'ast_usage_202612', 'ast_usage_202701', 'ast_usage_202702', 'ast_usage_202703', 'ast_usage_202704',
+                'ast_usage_202705', 'ast_usage_202706', 'ast_usage_202707', 'ast_usage_202708', 'ast_usage_202709', 'ast_usage_202710',
+                'ast_usage_202711', 'ast_usage_202712',
+            ],
+            array_values(array_filter($partitions, static fn (string $partition): bool => $partition >= 'ast_usage_202611' && $partition <= 'ast_usage_202712')),
+        );
+        foreach ($partitions as $partition) {
+            self::assertMatchesRegularExpression('/^ast_usage_\d{6}\z/', $partition);
+            self::assertSame([], $this->grantsToOthersThanTheOwner($connection, $partition), $partition);
+            self::assertSame(
+                [true, true],
+                $connection->fetchNumeric('SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass(?)', ['public.'.$partition]),
+                $partition,
+            );
+        }
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX ast_usage_pkey ON ONLY public.ast_usage USING btree (organization_id, id, at)',
+                'CREATE INDEX ast_usage_at_idx ON ONLY public.ast_usage USING btree (organization_id, at)',
+            ],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'ast_usage'"),
+        );
+    }
+
+    /**
      * The upload slot and picture tables (Version20261115120000): the app reads, adds and changes them and removes
      * neither, as a used slot and a rejected picture keep their rows; support reads under the tenant policy.
      */
@@ -654,8 +698,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin', 'rvw_area', 'public.rvw_area', 'rvw_check_item', 'public.rvw_check_item'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_draft'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin', 'rvw_area', 'public.rvw_area', 'rvw_check_item', 'public.rvw_check_item', 'ast_usage', 'public.ast_usage', 'ast_usage_202611', 'ast_usage_209912'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_draft', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);
