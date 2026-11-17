@@ -10,6 +10,7 @@ use App\Assist\Application\AiUnavailable;
 use App\Assist\Application\ProviderChoice;
 use App\Assist\Domain\AiFeature;
 use App\Assist\Infrastructure\Platform\SymfonyAiProvider;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpClient\MockHttpClient;
@@ -25,6 +26,7 @@ final class SymfonyAiProviderTest extends TestCase
     private const string OPERATOR_ANTHROPIC_KEY = 'anthropic-operator-key';
     private const string OLLAMA_URL = 'http://ollama.internal:11434';
     private const string LEAKED_TEXT = 'Acme Foods checkout ticket text';
+    private const int TIMEOUT_SECONDS = 17;
 
     #[Test]
     public function huggingFaceAnswersWithTextTokensAndTheModelItReports(): void
@@ -137,7 +139,7 @@ final class SymfonyAiProviderTest extends TestCase
 
             return new MockResponse('{}');
         });
-        $provider = new SymfonyAiProvider($client, '', self::OPERATOR_ANTHROPIC_KEY, self::OLLAMA_URL);
+        $provider = new SymfonyAiProvider($client, '', self::OPERATOR_ANTHROPIC_KEY, self::OLLAMA_URL, self::TIMEOUT_SECONDS);
 
         try {
             $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings(null));
@@ -163,7 +165,7 @@ final class SymfonyAiProviderTest extends TestCase
     #[Test]
     public function ollamaWithoutAnOperatorUrlIsRefused(): void
     {
-        $provider = new SymfonyAiProvider(new MockHttpClient([]), self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, '');
+        $provider = new SymfonyAiProvider(new MockHttpClient([]), self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, '', self::TIMEOUT_SECONDS);
 
         $this->expectException(AiUnavailable::class);
         $this->expectExceptionMessage('The AI provider ollama has no key or URL set.');
@@ -230,6 +232,134 @@ final class SymfonyAiProviderTest extends TestCase
     }
 
     #[Test]
+    public function everyProviderCallIsBoundedByTheConfiguredTimeoutAndMaxDuration(): void
+    {
+        $sent = [];
+        $provider = $this->provider([
+            $this->recorded($sent, $this->huggingFaceAnswer()),
+            $this->recorded($sent, new JsonMockResponse(['type' => 'message', 'content' => [['type' => 'text', 'text' => 'Short.']]])),
+            $this->recorded($sent, new JsonMockResponse(['capabilities' => ['completion']])),
+            $this->recorded($sent, new JsonMockResponse(['message' => ['role' => 'assistant', 'content' => 'Short.'], 'done' => true])),
+        ]);
+
+        $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings('huggingface'));
+        $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings('anthropic'));
+        $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings('ollama'));
+
+        self::assertCount(4, $sent);
+        foreach ($sent as $request) {
+            self::assertEquals(self::TIMEOUT_SECONDS, $request['timeout'], $request['request']);
+            self::assertEquals(self::TIMEOUT_SECONDS, $request['maxDuration'], $request['request']);
+        }
+    }
+
+    #[Test]
+    public function aProviderThatStopsSendingBecomesUnavailableInsteadOfHanging(): void
+    {
+        $provider = $this->provider([new MockResponse(['', '{"choices":'])]);
+
+        try {
+            $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings(null));
+            self::fail('An idle timeout must become AiUnavailable.');
+        } catch (AiUnavailable $unavailable) {
+            self::assertStringStartsWith('The AI provider huggingface did not answer (', $unavailable->getMessage());
+            self::assertSame('huggingface', $unavailable->provider);
+        }
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function timeoutsOutOfRange(): iterable
+    {
+        yield 'zero' => [0];
+        yield 'negative' => [-5];
+        yield 'past the cap' => [301];
+    }
+
+    #[Test]
+    #[DataProvider('timeoutsOutOfRange')]
+    public function aTimeoutOutsideOneToThreeHundredSecondsIsRefused(int $timeoutSeconds): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('AI_PROVIDER_TIMEOUT_SECONDS must be from 1 to 300 seconds, not '.$timeoutSeconds.'.');
+
+        new SymfonyAiProvider(new MockHttpClient([]), self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, self::OLLAMA_URL, $timeoutSeconds);
+    }
+
+    #[Test]
+    public function theTimeoutRangeIncludesBothEnds(): void
+    {
+        $sent = [];
+        foreach ([1, 300] as $timeoutSeconds) {
+            $provider = new SymfonyAiProvider(new MockHttpClient([$this->recorded($sent, $this->huggingFaceAnswer())]), self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, self::OLLAMA_URL, $timeoutSeconds);
+            $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings(null));
+        }
+
+        self::assertEquals([1, 300], array_column($sent, 'maxDuration'));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function blankAnswers(): iterable
+    {
+        yield 'empty' => [''];
+        yield 'spaces and line breaks' => [" \r\n\t "];
+        yield 'unicode spaces' => ["\u{00A0}\u{2028}\u{3000}\u{FEFF}"];
+    }
+
+    #[Test]
+    #[DataProvider('blankAnswers')]
+    public function aBlankAnswerBecomesUnavailable(string $blankText): void
+    {
+        $provider = $this->provider([new JsonMockResponse([
+            'choices' => [['index' => 0, 'message' => ['role' => 'assistant', 'content' => $blankText], 'finish_reason' => 'stop']],
+        ])]);
+
+        try {
+            $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings(null));
+            self::fail('A blank answer must become AiUnavailable.');
+        } catch (AiUnavailable $unavailable) {
+            self::assertSame('The AI provider huggingface answered with no text.', $unavailable->getMessage());
+            self::assertSame('huggingface', $unavailable->provider);
+        }
+    }
+
+    #[Test]
+    public function anAnswerWithTextAroundSpacesIsKeptAsSent(): void
+    {
+        $provider = $this->provider([new JsonMockResponse([
+            'choices' => [['index' => 0, 'message' => ['role' => 'assistant', 'content' => "\n Paying fails. \n"], 'finish_reason' => 'stop']],
+        ])]);
+
+        $answer = $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings(null));
+
+        self::assertSame("\n Paying fails. \n", $answer->text);
+    }
+
+    #[Test]
+    public function anEmptyOrganizationKeyForOllamaIsRefusedBeforeAnyRequest(): void
+    {
+        $requests = 0;
+        $client = new MockHttpClient(static function () use (&$requests): MockResponse {
+            ++$requests;
+
+            return new MockResponse('{}');
+        });
+        $provider = new SymfonyAiProvider($client, self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, self::OLLAMA_URL, self::TIMEOUT_SECONDS);
+
+        try {
+            $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings('ollama', null, ''));
+            self::fail('An empty organization key must refuse.');
+        } catch (AiUnavailable $refused) {
+            self::assertSame('The AI provider ollama has no key or URL set.', $refused->getMessage());
+            self::assertSame('ollama', $refused->provider);
+        }
+        self::assertSame(0, $requests);
+    }
+
+    #[Test]
     public function aModelTheCatalogDoesNotKnowBecomesUnavailable(): void
     {
         $provider = $this->provider([]);
@@ -245,7 +375,7 @@ final class SymfonyAiProviderTest extends TestCase
      */
     private function provider(array $responses): SymfonyAiProvider
     {
-        return new SymfonyAiProvider(new MockHttpClient($responses), self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, self::OLLAMA_URL);
+        return new SymfonyAiProvider(new MockHttpClient($responses), self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, self::OLLAMA_URL, self::TIMEOUT_SECONDS);
     }
 
     private function summaryPrompt(): AiPrompt
@@ -263,7 +393,7 @@ final class SymfonyAiProviderTest extends TestCase
     /**
      * A response factory that keeps what was sent, for MockHttpClient.
      *
-     * @param list<array{request: string, headers: list<string>, body: string, maxRedirects: mixed}> $sent
+     * @param list<array{request: string, headers: list<string>, body: string, maxRedirects: mixed, timeout: mixed, maxDuration: mixed}> $sent
      */
     private function recorded(array &$sent, MockResponse $response): \Closure
     {
@@ -275,6 +405,8 @@ final class SymfonyAiProviderTest extends TestCase
                 'headers' => \is_array($headers) ? array_values(array_filter($headers, is_string(...))) : [],
                 'body' => \is_string($body) ? $body : '',
                 'maxRedirects' => $options['max_redirects'] ?? null,
+                'timeout' => $options['timeout'] ?? null,
+                'maxDuration' => $options['max_duration'] ?? null,
             ];
 
             return $response;

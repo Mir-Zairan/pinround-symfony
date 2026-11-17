@@ -79,6 +79,31 @@ final class FakeProviderTest extends TestCase
     }
 
     #[Test]
+    public function anEmptyOrganizationKeyIsRefusedLikeTheRealProviderAndNoArmedFailureIsUsedUp(): void
+    {
+        $provider = new FakeProvider();
+        $prompt = new AiPrompt(AiFeature::Summary, 'Summarize.', 'The checkout fails.');
+        $armed = new AiRateLimited('fake', 30);
+        $provider->failNextCallWith($armed);
+
+        try {
+            $provider->complete($prompt, ProviderChoice::fromSettings('anthropic', null, ''));
+            self::fail('An empty organization key must refuse.');
+        } catch (AiUnavailable $refused) {
+            self::assertSame('The AI provider anthropic has no key or URL set.', $refused->getMessage());
+            self::assertSame('anthropic', $refused->provider);
+        }
+
+        try {
+            $provider->complete($prompt, ProviderChoice::fromSettings('anthropic', null, 'acme-own-key'));
+            self::fail('The armed failure must still be thrown.');
+        } catch (AiRateLimited $limited) {
+            self::assertSame($armed, $limited);
+        }
+        self::assertCount(2, $provider->calls());
+    }
+
+    #[Test]
     public function resetForgetsTheCallsAndTheArmedFailures(): void
     {
         $provider = new FakeProvider();

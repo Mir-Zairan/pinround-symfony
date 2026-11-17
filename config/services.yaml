@@ -18,6 +18,9 @@ parameters:
     # What each organization may store when MEDIA_ORG_QUOTA_BYTES is unset or empty: 50 GiB, the SaaS default of
     # media-pipeline.md (Quotas). A self-hosted install sets 0 for no limit.
     media.organization_quota_default_bytes: 53687091200
+    # How long SymfonyAiProvider waits on a provider when AI_PROVIDER_TIMEOUT_SECONDS is unset or empty, both for the
+    # next byte and for the whole answer, so a hung provider cannot hold an async_ai worker.
+    assist.ai_provider_timeout_default_seconds: 30
     # The routes a logged-in user may open before choosing an organization (EnterChosenOrganization); every other one
     # sends a user without a chosen organization to the picker. Deny by default: a new route is not in this list.
     organization.routes_without_organization:
@@ -431,6 +434,10 @@ when@test:
         # No gateway calls the port before P08.T2; FakeProviderWiringTest gets it as the gateway will.
         test.assist_ai_provider:
             alias: App\Assist\Application\AiProvider
+            public: true
+        # Nothing takes the real provider in the test env; AiProviderWiringTest builds it as dev and prod do.
+        test.assist_symfony_ai_provider:
+            alias: App\Assist\Infrastructure\Platform\SymfonyAiProvider
             public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.

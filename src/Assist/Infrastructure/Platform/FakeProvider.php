@@ -15,8 +15,9 @@ use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * The provider of the test env (config/services.yaml, when@test): the same answer for the same feature, and no network.
- * Like SymfonyAiProvider it answers with the chosen model and throws AiRateLimited or AiUnavailable, here when a test
- * arms a failure. It keeps every call, failed ones too, so a test can check what was sent; reset() forgets them.
+ * Like SymfonyAiProvider it answers with the chosen model, refuses an empty organization key with AiUnavailable, and
+ * throws AiRateLimited or AiUnavailable when a test arms a failure. It keeps every call, failed ones too, so a test can
+ * check what was sent; reset() forgets them.
  */
 final class FakeProvider implements AiProvider, ResetInterface
 {
@@ -31,6 +32,10 @@ final class FakeProvider implements AiProvider, ResetInterface
     public function complete(AiPrompt $prompt, ProviderChoice $choice): ProviderAnswer
     {
         $this->calls[] = ['prompt' => $prompt, 'choice' => $choice];
+
+        if ('' === $choice->organizationKey()) {
+            throw AiUnavailable::notConfigured($choice->provider->value);
+        }
 
         $failure = array_shift($this->armedFailures);
         if (null !== $failure) {

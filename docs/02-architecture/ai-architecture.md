@@ -56,7 +56,7 @@ flowchart LR
   APP --> LAP[Laptop package + result intake]
 ```
 
-- **Symfony AI Platform** gives one interface for many providers. We use it for every server-side call. Symfony AI is at 1.0.0-BETA1 (verified 2026-11-06; check again at implementation), so we wrap it in our own `AiGateway` interface. If the beta changes, only the adapter changes.
+- **Symfony AI Platform** gives one interface for many providers. We use it for every server-side call. Symfony AI is at 1.0.0-BETA1 (verified 2026-11-06; check again at implementation), so we wrap it in our own `AiGateway` interface. The gateway calls the `AiProvider` port; its adapter `SymfonyAiProvider` (`src/Assist/Infrastructure/Platform`, the only folder that may use Symfony AI) is the only code that changes when the beta does. Every provider call follows no redirects and gives up after `AI_PROVIDER_TIMEOUT_SECONDS` (30 by default, see [config.md](../operations/config.md#ai)), and a blank answer is a failure (`AiUnavailable`). The test env binds `FakeProvider` instead.
 - **Symfony AI Agent** is used where a feature needs tools (later: vision suggestions that read pins). Simple one-shot features call the Platform directly.
 - **Symfony AI Store** keeps embeddings for semantic duplicates, only when the org enables it. The vector store must be PostgreSQL with pgvector so data stays under RLS. Verify which Store bridge supports pgvector at implementation time.
 - All calls run in Messenger workers (`ai` transport) or stream to the browser through Mercure, so no web request waits on a model.
@@ -64,10 +64,16 @@ flowchart LR
 `AiGateway` contract (pinround code, not a library API):
 
 ```php
+use App\Organization\Api\ActorContext;
+
 interface AiGateway
 {
-    /** @throws AiNotAllowed when the org policy forbids this feature for this user */
-    public function run(AiTask $task, Viewer $viewer): AiResult;
+    /**
+     * @throws AiNotAllowed  when the org policy forbids this feature for this person; nothing is sent
+     * @throws AiRateLimited when the person, the organization or the provider made too many calls
+     * @throws AiUnavailable when the provider is not configured, cannot be reached or fails
+     */
+    public function run(AiTask $task, ActorContext $viewer): AiResult;
 }
 ```
 
