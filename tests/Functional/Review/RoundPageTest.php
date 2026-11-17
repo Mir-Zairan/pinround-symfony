@@ -118,8 +118,8 @@ final class RoundPageTest extends WebTestCase
             $compare->filter('button.seg')->each(static fn (Crawler $option): array => [$option->text(), $option->attr('value'), $option->attr('aria-pressed')]),
         );
         self::assertSame('click->compare#choose', $compare->attr('data-action'));
-        self::assertCount(1, $page->filter('button.round-page__full-screen[disabled]'));
-        self::assertSame('Full screen', $page->filter('button.round-page__full-screen')->text());
+        self::assertSame('/t/SHOP-1/rounds/2/focus?area=0', $page->filter('a.round-page__full-screen')->attr('href'));
+        self::assertSame('Full screen', $page->filter('a.round-page__full-screen')->text());
     }
 
     #[Test]

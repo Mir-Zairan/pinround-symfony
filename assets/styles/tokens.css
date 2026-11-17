@@ -132,6 +132,9 @@
   --radius-button: 20px;
   --radius-dialog: 24px;
 
+  /* Black in both themes, so it is not a colour token of the guide's tables. */
+  --shadow-deep: 0 12px 40px rgb(0 0 0 / 50%);
+
   --space-4: 4px;
   --space-6: 6px;
   --space-8: 8px;
