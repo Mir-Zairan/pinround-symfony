@@ -11,11 +11,13 @@ use App\Notification\Api\Event\PingSent;
 use App\Notification\Infrastructure\Mercure\QueueTicketPagesRefreshHandler;
 use App\Notification\Infrastructure\Mercure\RefreshAttempt;
 use App\Notification\Infrastructure\Mercure\RefreshTicketPages;
+use App\Review\Api\Event\PinVerdictSet;
 use App\Tests\Fixtures\Messaging\RecordingMessageBus;
 use App\Ticketing\Api\Event\TicketMoved;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Stamp\DelayStamp;
+use Symfony\Component\Messenger\Stamp\DispatchAfterCurrentBusStamp;
 
 final class QueueTicketPagesRefreshHandlerTest extends TestCase
 {
@@ -24,6 +26,7 @@ final class QueueTicketPagesRefreshHandlerTest extends TestCase
     private const string ACTOR_ID = '0197a3c0-0000-7000-8000-000000000c01';
     private const string OTHER_USER_ID = '0197a3c0-0000-7000-8000-000000000c02';
     private const string ITEM_ID = '0197a3c0-0000-7000-8000-000000000d01';
+    private const string ROUND_ID = '0197a3c0-0000-7000-8000-000000000e01';
 
     private RecordingMessageBus $commandBus;
 
@@ -62,6 +65,27 @@ final class QueueTicketPagesRefreshHandlerTest extends TestCase
         foreach ($this->commandBus->dispatched() as $envelope) {
             self::assertEquals(new RefreshTicketPages(self::ORGANIZATION_ID, self::TICKET_ID, RefreshAttempt::Leading), $envelope->getMessage());
         }
+    }
+
+    /**
+     * The What happened line of a Review event is written in the same delivery's transaction, so a refresh sent at once
+     * could reach a page before that line commits.
+     */
+    #[Test]
+    public function aReviewEventQueuesALeadingRefreshHeldUntilTheDeliveryCommits(): void
+    {
+        $this->handler->onReviewEvent(new PinVerdictSet(self::ORGANIZATION_ID, self::TICKET_ID, self::ROUND_ID, self::ITEM_ID, 'still_wrong', self::ACTOR_ID, new \DateTimeImmutable('2026-11-06 12:00:00 UTC')));
+
+        $this->assertOneLeadingRefreshWasQueued();
+        self::assertNotNull($this->commandBus->dispatched()[0]->last(DispatchAfterCurrentBusStamp::class));
+    }
+
+    #[Test]
+    public function aTicketEventRefreshIsNotHeldBack(): void
+    {
+        $this->handler->onTicketEvent(new TicketMoved(self::ORGANIZATION_ID, self::TICKET_ID, 'SHOP-12', self::ITEM_ID, self::OTHER_USER_ID, 'start_work', self::ACTOR_ID, new \DateTimeImmutable('2026-11-06 12:00:00 UTC')));
+
+        self::assertNull($this->commandBus->dispatched()[0]->last(DispatchAfterCurrentBusStamp::class));
     }
 
     private function assertOneLeadingRefreshWasQueued(): void

@@ -123,17 +123,18 @@ final class RecordReviewChangesHandlerTest extends KernelTestCase
         self::runTheWorkerUntilIdle('async_notify');
         $asyncNotify = $this->asyncNotify();
 
-        $verdictsSet = array_values(array_filter(
-            $asyncNotify->getSent(),
+        $verdictsSetOf = static fn (InMemoryTransport $transport): array => array_values(array_filter(
+            $transport->getSent(),
             static fn (Envelope $envelope): bool => $envelope->getMessage() instanceof PinVerdictSet && self::TICKET === $envelope->getMessage()->ticketId,
         ));
+        $verdictsSet = $verdictsSetOf($asyncNotify);
         self::assertCount(1, $verdictsSet);
-        $sentBefore = \count($asyncNotify->getSent());
 
         $asyncNotify->send($verdictsSet[0]);
         self::runTheWorkerUntilIdle('async_notify');
 
-        self::assertCount($sentBefore + 1, $asyncNotify->getSent());
+        // Counted alone: the delivery also queues refreshes of the ticket's pages on async_notify.
+        self::assertCount(2, $verdictsSetOf($asyncNotify));
         self::assertSame(
             [ReviewChange::CHECK_ITEM_CHANGED, ReviewChange::PIN_VERDICT_SET, ReviewChange::PIN_VERDICT_UNDONE, ReviewChange::AREA_VERDICT_SAVED],
             array_column($this->historyRowsAs(self::ACME_FOODS), 0),

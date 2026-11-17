@@ -22,7 +22,8 @@ parameters:
         App\Identity\Api\Event\IdentityEvent: async_notify
         # Short jobs for worker-notify too; no module handles MediaReady or MediaRejected yet.
         App\Media\Api\Event\MediaEvent: async_notify
-        # Short jobs for worker-notify too, today the ticket history row of each (RecordReviewChangesHandler).
+        # Short jobs for worker-notify too, today the ticket history row of each (RecordReviewChangesHandler) and
+        # queueing the ticket page refresh (QueueTicketPagesRefreshHandler).
         App\Review\Api\Event\ReviewEvent: async_notify
         # Checking and re-encoding an uploaded picture, for worker-media (ProcessUploadHandler).
         App\Media\Application\ProcessUpload: async_media
