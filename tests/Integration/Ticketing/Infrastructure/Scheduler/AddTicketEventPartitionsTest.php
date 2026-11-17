@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Ticketing\Infrastructure\Scheduler;
 
+use App\Assist\Infrastructure\Scheduler\AddUsagePartitions;
+use App\Assist\Infrastructure\Scheduler\DropExpiredUsagePartitions;
 use App\Notification\Infrastructure\Scheduler\AddNotificationPartitions;
 use App\Notification\Infrastructure\Scheduler\DropExpiredNotificationPartitions;
 use App\Notification\Infrastructure\Scheduler\QueueDigests;
@@ -157,6 +159,8 @@ final class AddTicketEventPartitionsTest extends KernelTestCase
         ksort($nextTwoRunsByJob);
         self::assertSame(
             [
+                AddUsagePartitions::class.'::__invoke' => ['2031-06-16 10:00:00', '2031-06-17 10:00:00'],
+                DropExpiredUsagePartitions::class.'::__invoke' => ['2031-06-16 10:00:00', '2031-06-17 10:00:00'],
                 AddNotificationPartitions::class.'::__invoke' => ['2031-06-16 10:00:00', '2031-06-17 10:00:00'],
                 DropExpiredNotificationPartitions::class.'::__invoke' => ['2031-06-16 10:00:00', '2031-06-17 10:00:00'],
                 QueueDigests::class.'::__invoke' => ['2031-06-15 10:15:00', '2031-06-15 10:30:00'],

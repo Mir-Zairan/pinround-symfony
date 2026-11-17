@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Integration\Assist\Metering;
+namespace App\Tests\Integration\Assist\Infrastructure\Doctrine;
 
 use App\Assist\Application\Metering;
 use App\Assist\Application\ProviderAnswer;

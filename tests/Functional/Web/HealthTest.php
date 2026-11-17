@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
+use App\Assist\Infrastructure\Health\NextUsagePartitionExists;
+use App\Assist\Infrastructure\Scheduler\AddUsagePartitions;
 use App\Audit\Infrastructure\Health\NextAuditPartitionExists;
 use App\Media\Infrastructure\Health\ObjectStorageIsReachable;
 use App\Notification\Infrastructure\Health\NextNotificationPartitionExists;
@@ -47,12 +49,13 @@ final class HealthTest extends WebTestCase
         NextAuditPartitionExists::class => 'next_audit_partition',
         NextTicketEventPartitionExists::class => 'next_ticket_event_partition',
         NextNotificationPartitionExists::class => 'next_notification_partition',
+        NextUsagePartitionExists::class => 'next_usage_partition',
         'health.cache_valkey_answers' => 'cache_valkey',
         'health.state_valkey_answers' => 'state_valkey',
         ObjectStorageIsReachable::class => 'object_storage',
     ];
 
-    // Inside the months the aud_event, tkt_ticket_event and ntf_notification migrations created partitions for (2026-11 to 2027-12), so
+    // Inside the months the aud_event, tkt_ticket_event, ntf_notification and ast_usage migrations created partitions for (2026-11 to 2027-12), so
     // next month always has one.
     private const string NOW = '2027-03-15 10:00:00 UTC';
 
@@ -206,9 +209,10 @@ final class HealthTest extends WebTestCase
     public function readyAnswersFailWhenNextMonthHasNoAuditPartition(): void
     {
         $this->freezeTheClockAt('2027-12-15 10:00:00 UTC');
-        // So only the audit check fails: tkt_ticket_event's and ntf_notification's migrated months end with 2027-12 too.
+        // So only the audit check fails: tkt_ticket_event's, ntf_notification's and ast_usage's migrated months end with 2027-12 too.
         $this->runTheTicketEventPartitionJobAt('2027-12-15 10:00:00 UTC');
         $this->runTheNotificationPartitionJobAt('2027-12-15 10:00:00 UTC');
+        $this->runTheUsagePartitionJobAt('2027-12-15 10:00:00 UTC');
         $capturedLogRecords = $this->capturedLogRecords();
         $capturedLogRecords->clear();
 
@@ -349,6 +353,17 @@ final class HealthTest extends WebTestCase
         $this->addedPartitions = [
             ...$this->addedPartitions,
             ...new AddNotificationPartitions(self::getContainer()->get('doctrine.dbal.migrator_connection'), new MockClock($now))(),
+        ];
+    }
+
+    /**
+     * For a clock past the migration's ast_usage months; tearDown drops what the job added.
+     */
+    private function runTheUsagePartitionJobAt(string $now): void
+    {
+        $this->addedPartitions = [
+            ...$this->addedPartitions,
+            ...new AddUsagePartitions(self::getContainer()->get('doctrine.dbal.migrator_connection'), new MockClock($now))(),
         ];
     }
 
