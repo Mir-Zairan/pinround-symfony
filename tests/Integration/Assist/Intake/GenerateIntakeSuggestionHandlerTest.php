@@ -18,6 +18,7 @@ use App\Assist\Application\Intake\IntakeRequests;
 use App\Assist\Application\Suggestions;
 use App\Assist\Infrastructure\Messenger\GenerateIntakeSuggestionHandler;
 use App\Assist\Infrastructure\Platform\FakeProvider;
+use App\Assist\Infrastructure\Valkey\ValkeyIntakeRequests;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\Roles;
@@ -44,6 +45,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\Clock;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
@@ -376,6 +378,38 @@ final class GenerateIntakeSuggestionHandlerTest extends KernelTestCase
         self::assertSame([['An AI intake check failed.', ['exception_class' => UniqueConstraintViolationException::class, 'sqlstate' => '23505', 'code' => 7]]], $this->warnings());
     }
 
+    /**
+     * Ending the check inside the job's transaction would roll the stored suggestion and the usage row back on a Valkey
+     * failure, and Messenger would deliver the job again, which could not ask the AI a second time.
+     */
+    #[Test]
+    public function aCheckValkeyCannotReleaseKeepsTheStoredSuggestionAndItsUsageRowAndIsNotRetried(): void
+    {
+        $watchedRequests = $this->watchIntakeRequests();
+        $watchedRequests->failEveryEndWith(new \RedisException('read error on connection'));
+        $this->fakeProvider()->answerNextCallsWith(self::intakeJson([$this->checkoutKey()]));
+        $this->checkAsOmar();
+
+        self::runTheWorkerUntilIdle('async_ai');
+
+        self::assertSame([['release', ['suggestion_ids' => [$this->checkId()->toString()], 'usage_statuses' => ['answered']]]], $watchedRequests->endings());
+        self::assertSame([[$this->checkId()->toString(), self::MODEL]], array_map(static fn (array $row): array => [$row['id'], $row['model']], $this->suggestionRows()));
+        self::assertSame(['answered'], $this->usageStatuses());
+        self::assertCount(1, $this->fakeProvider()->calls());
+        self::assertSame(1, $this->processedMessageCount());
+        self::assertCount(1, $this->asyncAi()->getSent(), 'The job was retried.');
+        self::assertEquals(IntakeCheckView::queued(), $this->checkState(), 'The check ended although Valkey refused it.');
+        $held = $this->stateValkey()->get($this->checkStateKey());
+        self::assertIsString($held);
+        self::assertStringNotContainsString('"draft"', $held, 'The check that may have asked the AI keeps its draft.');
+        self::assertEquals(
+            IntakeCheckView::done(IntakeSuggestion::fromCheckedData(self::intakeResult([$this->checkoutKey()]), self::MODEL, 'intake.v1')),
+            $this->checkOfAsOmar(),
+            'The poll does not show the stored suggestion while the check stays queued.',
+        );
+        self::assertSame([['An intake check could not be ended; it stays queued until it expires.', ['exception_class' => \RedisException::class]]], $this->warnings());
+    }
+
     #[Test]
     public function aJobStampedWithAnotherOrganizationThanItNamesIsRefusedBeforeAnythingRuns(): void
     {
@@ -405,6 +439,29 @@ final class GenerateIntakeSuggestionHandlerTest extends KernelTestCase
             Clock::get()->sleep(0.001);
             self::runTheWorkerUntilIdle('async_ai');
         }
+    }
+
+    private function watchIntakeRequests(): WatchedIntakeRequests
+    {
+        $realRequests = new ValkeyIntakeRequests($this->stateValkey(), new MockClock(self::NOW));
+        $watchedRequests = new WatchedIntakeRequests($realRequests, $this->whatAnotherConnectionSees(...));
+        // Before anything builds IntakeAssistService or the handlers, which take the port once.
+        self::getContainer()->set(ValkeyIntakeRequests::class, $watchedRequests);
+
+        return $watchedRequests;
+    }
+
+    /**
+     * Through the migrator's own connection, under the organization the handler runs for, so only committed rows.
+     *
+     * @return array{suggestion_ids: list<mixed>, usage_statuses: list<mixed>}
+     */
+    private function whatAnotherConnectionSees(): array
+    {
+        return $this->migrator()->transactional(static fn (Connection $migrator): array => [
+            'suggestion_ids' => $migrator->fetchFirstColumn('SELECT id FROM ast_suggestion WHERE organization_id = ? ORDER BY id', [self::ACME_FOODS]),
+            'usage_statuses' => $migrator->fetchFirstColumn('SELECT status FROM ast_usage WHERE organization_id = ? ORDER BY at, id', [self::ACME_FOODS]),
+        ]);
     }
 
     private function arrange(string $failure): void

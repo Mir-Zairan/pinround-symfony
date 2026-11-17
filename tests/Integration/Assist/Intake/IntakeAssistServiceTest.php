@@ -19,6 +19,7 @@ use App\Assist\Application\IntakeAssistService;
 use App\Assist\Application\Suggestions;
 use App\Assist\Application\Summaries\SummaryRequesters;
 use App\Assist\Infrastructure\Platform\FakeProvider;
+use App\Assist\Infrastructure\Uid\UuidV7IntakeCheckIds;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\Roles;
@@ -402,7 +403,7 @@ final class IntakeAssistServiceTest extends KernelTestCase
         $suggestions = self::getContainer()->get('test.assist_suggestions');
         \assert($suggestions instanceof Suggestions);
 
-        return new IntakeAssistService($requesters, $aiTaskAdmission, $this->limit(), $this->requests(), $intakeJobQueue, $suggestions, new MockClock(self::NOW));
+        return new IntakeAssistService($requesters, $aiTaskAdmission, $this->limit(), $this->requests(), $intakeJobQueue, $suggestions, new UuidV7IntakeCheckIds(new MockClock(self::NOW)));
     }
 
     private function requests(): IntakeRequests

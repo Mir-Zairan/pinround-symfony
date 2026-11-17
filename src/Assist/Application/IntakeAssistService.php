@@ -11,6 +11,7 @@ use App\Assist\Api\IntakeCheckRefused;
 use App\Assist\Api\IntakeCheckView;
 use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\Intake\GenerateIntakeSuggestion;
+use App\Assist\Application\Intake\IntakeCheckIds;
 use App\Assist\Application\Intake\IntakeJobQueue;
 use App\Assist\Application\Intake\IntakeRequests;
 use App\Assist\Application\Summaries\SummaryRequesters;
@@ -18,8 +19,6 @@ use App\Assist\Domain\AiFeature;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\ListFilter;
-use Psr\Clock\ClockInterface;
-use Symfony\Component\Uid\UuidV7;
 
 /**
  * Refuses a draft over AiDraft's caps first, then asks AiTaskAdmission, the check the job's gateway call makes first,
@@ -35,7 +34,7 @@ final readonly class IntakeAssistService implements IntakeAssist
         private IntakeRequests $intakeRequests,
         private IntakeJobQueue $intakeJobQueue,
         private Suggestions $suggestions,
-        private ClockInterface $clock,
+        private IntakeCheckIds $intakeCheckIds,
     ) {
     }
 
@@ -52,7 +51,7 @@ final readonly class IntakeAssistService implements IntakeAssist
             throw new IntakeCheckRefused(IntakeCheckRefused::TOO_MANY_AI_REQUESTS, AiRateLimited::PER_PERSON_MESSAGE);
         }
 
-        $checkId = new IntakeCheckId(UuidV7::generate($this->clock->now()));
+        $checkId = $this->intakeCheckIds->next();
         $this->intakeRequests->open($organizationId, $checkId, $requesterId, $draft);
         try {
             $this->intakeJobQueue->queue(new GenerateIntakeSuggestion($organizationId->toString(), $checkId->toString(), $requesterId->toString()));

@@ -11,8 +11,13 @@ AI help that only suggests: summaries, explanations, intake suggestions and prom
 - **UI:** `LocalAiChip` (who gets the header's "Local AI" chip and its sheet, and the `connect-src` to Ollama on those pages only) and `Controller\LaptopController` (`POST /ai/laptop/status`, 204, stores nothing).
 - **Tables:** `ast_usage` only.
 
+## Built (phase 08, PR 2)
+
+- **Intake path ("Check with AI", backend only):** the Api `IntakeAssist` with `DraftReport`, `IntakeCheckId`, `IntakeCheckView`, `IntakeSuggestion` and `IntakeCheckRefused`. `Application\IntakeAssistService` refuses an over-cap draft, a non-member, what `AiTaskAdmission` refuses and a person with no call left before anything is kept, then takes a UUIDv7 of now as the check's id (`Intake\IntakeCheckIds`, `Uid\UuidV7IntakeCheckIds`) and opens the check on the state Valkey with its draft (`Intake\IntakeRequests`, `Valkey\ValkeyIntakeRequests`, an hour while queued) and queues `Intake\GenerateIntakeSuggestion` on `async_ai` (`Intake\IntakeJobQueue`, `Messenger\MessengerIntakeJobQueue`). `Messenger\GenerateIntakeSuggestionHandler` marks the check and takes its draft before the one gateway call, stores the checked answer in `ast_suggestion` (`Application\Suggestions`, `Doctrine\DbalSuggestions`), and ends the check after its commit (`Intake\EndIntakeRequest`, `Messenger\EndIntakeRequestHandler`); `Messenger\FailIntakeRequestOfAbandonedJob` fails a check Messenger gave up on. Only the person who asked reads the check (`checkOf`).
+- **Tables:** `ast_suggestion` (`Version20261118100000`).
+
 ## Planned
 
-`Explanations`, `IntakeAssist` and `LocalAi` in the Api; the ticket page's summary UI, "Check with AI", the laptop prompt package and result intake (phase 08's PR 2); explanations, embeddings, budgets; the tables `ast_explanation`, `ast_suggestion`, `ast_embedding` and `ast_local_package`. See the [phase 08 hand-off notes](../../docs/05-plan/phase-08-ai-assist.md#hand-off-notes).
+`Explanations` and `LocalAi` in the Api; the ticket page's summary UI, the "Check with AI" page and controller, the laptop prompt package and result intake (phase 08's PR 2); the 7-day purge of `ast_suggestion`; explanations, embeddings, budgets; the tables `ast_explanation`, `ast_embedding` and `ast_local_package`. See the [phase 08 hand-off notes](../../docs/05-plan/phase-08-ai-assist.md#hand-off-notes).
 
 See the [module catalogue](../../docs/02-architecture/modules.md#assist-ast_) and [ai-architecture.md](../../docs/02-architecture/ai-architecture.md).

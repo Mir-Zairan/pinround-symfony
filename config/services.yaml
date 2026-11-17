@@ -233,6 +233,7 @@ services:
     # "Check with AI": the check's state and its draft on the state Valkey, the job on async_ai, the suggestion in ast_suggestion.
     App\Assist\Api\IntakeAssist: '@App\Assist\Application\IntakeAssistService'
     App\Assist\Application\Intake\IntakeRequests: '@App\Assist\Infrastructure\Valkey\ValkeyIntakeRequests'
+    App\Assist\Application\Intake\IntakeCheckIds: '@App\Assist\Infrastructure\Uid\UuidV7IntakeCheckIds'
     App\Assist\Application\Intake\IntakeJobQueue: '@App\Assist\Infrastructure\Messenger\MessengerIntakeJobQueue'
     App\Assist\Application\Suggestions: '@App\Assist\Infrastructure\Doctrine\DbalSuggestions'
 
