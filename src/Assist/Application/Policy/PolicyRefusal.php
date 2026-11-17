@@ -15,6 +15,8 @@ enum PolicyRefusal: string
     case RestrictedTicketToCloud = 'restricted_ticket_to_cloud';
     case LaptopNotReady = 'laptop_not_ready';
     case SecuritySensitiveDraftToCloud = 'security_sensitive_draft_to_cloud';
+    /** A laptop AI package was asked for, and the organization runs AI in the cloud only. */
+    case CloudOnly = 'cloud_only';
 
     /**
      * The one line shown where the AI buttons would be.
@@ -28,6 +30,7 @@ enum PolicyRefusal: string
             self::RestrictedTicketToCloud => 'Your admin keeps team-only tickets away from cloud AI.',
             self::LaptopNotReady => 'AI help runs on your laptop, and Ollama is not ready there yet.',
             self::SecuritySensitiveDraftToCloud => 'This report mentions security, so it stays out of cloud AI.',
+            self::CloudOnly => 'Your admin runs AI help in the company cloud, not on laptops.',
         };
     }
 }

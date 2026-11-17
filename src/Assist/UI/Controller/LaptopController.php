@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Assist\UI\Controller;
 
+use App\Assist\Api\LocalModelName;
 use App\Assist\UI\LocalAiChip;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
@@ -31,7 +32,7 @@ final class LaptopController extends AbstractController
     public const string CSRF_ID = 'ai_laptop';
 
     /** The model names Ollama's tags may carry and pinround shows or accepts (ai-architecture.md). */
-    public const string MODEL_NAME_PATTERN = '/^[a-z0-9:._-]{1,64}\z/';
+    public const string MODEL_NAME_PATTERN = LocalModelName::PATTERN;
 
     /** A status is about 50 bytes; anything larger is refused before it is parsed. */
     public const int MAX_BODY_BYTES = 1024;

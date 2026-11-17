@@ -65,6 +65,36 @@ final readonly class AiTaskAdmission
     }
 
     /**
+     * The policy for a prompt package the viewer's browser hands to Ollama on the laptop (LocalAi), in admit()'s order
+     * but with the laptop ready: AI on and the viewer allowed, the ticket as the viewer may see it, then the laptop
+     * route, which "laptop" and "laptop first" take. A team-only ticket may go there, as its text stays on the laptop of
+     * someone who may see it; "title only" applies as on the server path. Reads under row-level security, so it needs
+     * an open transaction whose tenant is the viewer's organization.
+     *
+     * @throws AiNotAllowed              when the policy forbids the task for this person or ticket, or runs AI in the
+     *                                   cloud only (CloudOnly)
+     * @throws \InvalidArgumentException when the task is about a draft report: laptop intake is not built yet
+     */
+    public function admitToLaptop(AiTask $task, ActorContext $viewer): AdmittedAiTask
+    {
+        $ticketId = $task->ticketId ?? throw new \InvalidArgumentException('A laptop AI package names a ticket; a draft report cannot go to the laptop yet.');
+        $settings = $this->settingsForAllowedViewer($viewer);
+        $ticket = $this->askedTicketQueries->visibleTicketOf($ticketId, $viewer);
+        if (null === $ticket) {
+            throw new AiNotAllowed(PolicyRefusal::CannotSeeTicket);
+        }
+        $decision = $this->policyEvaluator->decide($settings, $viewer, canSeeTicket: true, isTicketRestricted: $ticket->isTeamOnly, isLaptopReady: true);
+        if (null !== $decision->refusal) {
+            throw new AiNotAllowed($decision->refusal);
+        }
+        if (AiRoute::Laptop !== $decision->route) {
+            throw new AiNotAllowed(PolicyRefusal::CloudOnly);
+        }
+
+        return new AdmittedAiTask($settings, $ticket->promptTicket, $decision);
+    }
+
+    /**
      * The same decision as admit(), as a value: null when the task may be sent. Reads the ticket as admit() does, but
      * never a draft's candidates: nothing in them can refuse the draft.
      */

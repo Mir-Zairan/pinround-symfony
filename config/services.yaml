@@ -236,6 +236,10 @@ services:
     App\Assist\Application\Intake\IntakeCheckIds: '@App\Assist\Infrastructure\Uid\UuidV7IntakeCheckIds'
     App\Assist\Application\Intake\IntakeJobQueue: '@App\Assist\Infrastructure\Messenger\MessengerIntakeJobQueue'
     App\Assist\Application\Suggestions: '@App\Assist\Infrastructure\Doctrine\DbalSuggestions'
+    # Laptop AI: the prompt packages and the laptops' results in ast_local_package; no provider call.
+    App\Assist\Api\LocalAi: '@App\Assist\Application\LocalAiService'
+    App\Assist\Application\LocalAi\LocalPackages: '@App\Assist\Infrastructure\Doctrine\DbalLocalPackages'
+    App\Assist\Application\LocalAi\LocalPackageIds: '@App\Assist\Infrastructure\Uid\UuidV7LocalPackageIds'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -503,6 +507,14 @@ when@test:
             public: true
         test.assist_suggestions:
             alias: App\Assist\Application\Suggestions
+            public: true
+        # No route takes a laptop package or result before LaptopController's two (P08.T9, task 12b); the laptop tests
+        # get the Api as it will, and the store through its port.
+        test.assist_local_ai:
+            alias: App\Assist\Api\LocalAi
+            public: true
+        test.assist_local_packages:
+            alias: App\Assist\Application\LocalAi\LocalPackages
             public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.
