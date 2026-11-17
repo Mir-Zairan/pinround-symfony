@@ -242,10 +242,11 @@ final class RoundsFrameTest extends WebTestCase
         $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
         $this->logIn($this->client, $this->people['Omar']);
 
-        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+        $this->client->catchExceptions(false);
 
-        self::assertResponseStatusCodeSame(500);
-        self::assertCount(0, $page->filter('.round-card, .checklist'));
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageMatches('/\\AChecklist round [0-9a-f-]{36} has no items\.\z/');
+        $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
     }
 
     #[Test]
