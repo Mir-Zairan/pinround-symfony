@@ -22,10 +22,11 @@ use Symfony\Component\Security\Core\Authorization\Voter\Vote;
  * assignee, CHECK the ticket's tester, or any tester of its team while the ticket has none stored, each while
  * TicketPermission VIEW and EDIT both grant them the ticket. The lead, other members, a Manager and an Admin with
  * neither role are denied. Denied with nobody logged in, when the tenant is not the actor's organization, for an item
- * of another organization (the ticket is not read for those), and when the ticket's facts cannot be read.
+ * of another organization (the ticket is not read for those), when the ticket's facts cannot be read, and when the
+ * facts carry a ticket other than the item's.
  *
- * Reads the item's ticket under row-level security, so it needs the request's open transaction under the actor's
- * organization.
+ * Reads the item's ticket under row-level security, unless the facts carry it already, so it needs the request's open
+ * transaction under the actor's organization.
  *
  * @extends DenyByDefaultVoter<CheckItemAccessFacts>
  */
@@ -59,8 +60,8 @@ final class CheckItemVoter extends DenyByDefaultVoter
         if (!$subject->organizationId->equals($actor->organizationId())) {
             return false;
         }
-        $ticket = $this->ticketOf($subject);
-        if (null === $ticket) {
+        $ticket = $subject->ticket ?? $this->ticketOf($subject);
+        if (null === $ticket || !$ticket->ticketId->equals($subject->ticketId)) {
             return false;
         }
         $hasTheRole = ChecklistPermission::MARK_FIXED === $attribute

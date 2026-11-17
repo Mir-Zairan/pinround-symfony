@@ -9,6 +9,8 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
+use App\Review\UI\Controller\RefusalAnswers;
+use App\Review\UI\Controller\RefusedWithToast;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
@@ -18,7 +20,6 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\UX\Turbo\TurboBundle;
 
 /**
  * The buttons of a private draft round in the Rounds section (P05.T8, ADR-0017, ticket-page.md, Draft round): "Start a
@@ -47,7 +48,6 @@ final class DraftRoundController extends AbstractController
     /** With the round's number. */
     public const string DRAFT_SHARED = 'Shared with the team as round %d.';
     public const string DRAFT_DELETED = 'Draft round deleted.';
-    public const string FORM_EXPIRED = 'This page was open too long. Reload it and try again.';
     public const string ONLY_THE_ASSIGNEE_STARTS = "Only the ticket's assignee can start a draft round.";
 
     /** The flash type base.html.twig shows in its toast region. */
@@ -60,6 +60,7 @@ final class DraftRoundController extends AbstractController
         private readonly VisibleTicketLookup $visibleTicketLookup,
         private readonly RoundQueries $roundQueries,
         private readonly RoundCommands $roundCommands,
+        private readonly RefusalAnswers $refusalAnswers,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -81,7 +82,7 @@ final class DraftRoundController extends AbstractController
         return $this->respondToAction($request, $key, function () use ($key, $csrfToken, $now): string {
             $visible = $this->visibleTicketLookup->visibleTicketOf($key);
             if (!$this->isGranted(RoundPermission::DRAFT_CREATE, $visible->ticket->id)) {
-                throw new DraftRefusedWithToast(self::ONLY_THE_ASSIGNEE_STARTS);
+                throw new RefusedWithToast(self::ONLY_THE_ASSIGNEE_STARTS);
             }
             $this->refuseAnExpiredForm($key, $csrfToken);
             $this->roundCommands->startDraft($visible->ticket->id, $visible->actor->userId(), $now);
@@ -132,34 +133,22 @@ final class DraftRoundController extends AbstractController
             $toast = $this->transactions->run($action(...));
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(RoundsController::NOT_FOUND);
-        } catch (DraftRefusedWithToast $refused) {
-            return $this->respondToRefusal($request, $key, $refused->toast());
+        } catch (RefusedWithToast $refused) {
+            return $this->respondToRefusal($request, $key, $refused);
         } catch (RoundRefused $refused) {
             if (RoundRefused::NOT_FOUND === $refused->getMessage()) {
                 throw $this->createNotFoundException(RoundRefused::NOT_FOUND);
             }
 
-            return $this->respondToRefusal($request, $key, $refused->getMessage());
+            return $this->respondToRefusal($request, $key, new RefusedWithToast($refused->getMessage()));
         }
 
         return $this->redirectToTicket($key, $toast);
     }
 
-    /**
-     * A Turbo form gets the toast alone as a stream, which reads nothing; any other form the ticket page with it.
-     * Modelled on Conversation's ThreadController::respondToRefusal, copied as Review's UI may not import it (deptrac).
-     */
-    private function respondToRefusal(Request $request, string $key, string $toast): Response
+    private function respondToRefusal(Request $request, string $key, RefusedWithToast $refused): Response
     {
-        if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
-            return $this->redirectToTicket($key, $toast);
-        }
-
-        return $this->render(
-            '@Web/_toast_stream.html.twig',
-            ['message' => $toast],
-            new Response(null, Response::HTTP_UNPROCESSABLE_ENTITY, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
-        );
+        return $this->refusalAnswers->answer($request, $refused, fn (string $toast): Response => $this->redirectToTicket($key, $toast));
     }
 
     private function redirectToTicket(string $key, string $toast): Response
@@ -188,12 +177,12 @@ final class DraftRoundController extends AbstractController
     }
 
     /**
-     * @throws DraftRefusedWithToast with FORM_EXPIRED for a form token that is not valid
+     * @throws RefusedWithToast with RefusedWithToast::FORM_EXPIRED for a form token that is not valid
      */
     private function refuseAnExpiredForm(string $key, string $csrfToken): void
     {
         if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
-            throw new DraftRefusedWithToast(self::FORM_EXPIRED);
+            throw RefusedWithToast::formExpired();
         }
     }
 }

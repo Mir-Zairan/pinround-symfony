@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Review;
 
 use App\Identity\Domain\User;
 use App\Review\Api\VerdictRefused;
+use App\Review\UI\Controller\RefusedWithToast;
 use App\Review\UI\Controller\VerdictController;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -240,9 +241,9 @@ final class VerdictControllerTest extends WebTestCase
         $this->logIn($this->client, $this->people['Lena']);
 
         $this->client->request('POST', $this->pinUrl(1), [VerdictController::VERDICT_FIELD => 'fixed'], [], self::TURBO_FORM_HEADERS);
-        self::assertSame(VerdictController::FORM_EXPIRED, $this->toastOfTheStream(422));
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheStream(422));
         $this->client->request('POST', $this->areaUrl($this->perProduct), [VerdictController::CSRF_FIELD => $this->csrfTokenFor($this->client, 'another_form'), VerdictController::VERDICT_FIELD => 'pass'], [], self::TURBO_FORM_HEADERS);
-        self::assertSame(VerdictController::FORM_EXPIRED, $this->toastOfTheStream(422));
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheStream(422));
 
         self::assertSame($before, $this->storedState());
     }
@@ -307,7 +308,7 @@ final class VerdictControllerTest extends WebTestCase
 
         $this->client->request('POST', $this->areaUrl($this->perProduct), [VerdictController::VERDICT_FIELD => 'pass']);
 
-        self::assertResponseRedirects();
+        self::assertResponseRedirects('/login', 302);
         self::assertSame($before, $this->storedState());
     }
 

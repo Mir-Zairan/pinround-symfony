@@ -208,6 +208,40 @@ final class CheckItemVoterTest extends TestCase
     }
 
     #[Test]
+    public function factsThatCarryTheTicketAreDecidedOnItWithoutReadingItAgain(): void
+    {
+        $voter = $this->voterUnder(self::ACME_FOODS);
+        $shop1 = self::snapshotOf(self::SHOP_1, TicketVisibilityFacts::FOR_EVERYONE, self::OMAR, self::MIA);
+        $item = new CheckItemAccessFacts(new OrganizationId(self::ACME_FOODS), self::ITEM, self::ROUND, new TicketId(self::SHOP_1), 1, $shop1);
+
+        self::assertSame(
+            [VoterInterface::ACCESS_GRANTED, VoterInterface::ACCESS_DENIED, VoterInterface::ACCESS_DENIED, VoterInterface::ACCESS_GRANTED],
+            [
+                $voter->vote(self::tokenOf(self::OMAR), $item, [ChecklistPermission::MARK_FIXED]),
+                $voter->vote(self::tokenOf(self::OMAR), $item, [ChecklistPermission::CHECK]),
+                $voter->vote(self::tokenOf(self::MIA), $item, [ChecklistPermission::MARK_FIXED]),
+                $voter->vote(self::tokenOf(self::MIA), $item, [ChecklistPermission::CHECK]),
+            ],
+        );
+        self::assertSame([], $this->ticketTurnQueries->askedTicketIds);
+    }
+
+    /**
+     * SHOP-1's facts name Omar its assignee and Mia its tester, who would be granted on an item of SHOP-1; the item is of
+     * SHOP-3, whose assignee and tester are others.
+     */
+    #[Test]
+    public function factsThatCarryAnotherTicketThanTheItemsAreDenied(): void
+    {
+        $voter = $this->voterUnder(self::ACME_FOODS);
+        $shop1 = self::snapshotOf(self::SHOP_1, TicketVisibilityFacts::FOR_EVERYONE, self::OMAR, self::MIA);
+        $item = new CheckItemAccessFacts(new OrganizationId(self::ACME_FOODS), self::ITEM, self::ROUND, new TicketId(self::SHOP_3_OF_OTHERS), 1, $shop1);
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), $item, [ChecklistPermission::MARK_FIXED]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::MIA), $item, [ChecklistPermission::CHECK]));
+    }
+
+    #[Test]
     public function itAbstainsOnOtherAttributesAndOnOtherSubjects(): void
     {
         $voter = $this->voterUnder(self::ACME_FOODS);

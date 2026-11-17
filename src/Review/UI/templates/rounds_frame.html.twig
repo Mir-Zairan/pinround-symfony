@@ -10,6 +10,8 @@
                 {% if card.isPrivateDraft %}
                     {#- The editor shows the header (with the status line), the description, the screenshots, the empty note and the "more" note itself, so they follow each change. -#}
                     <twig:DraftRoundEditor :ticketKey="ticketKey" :roundId="card.roundId" :card="card" />
+                {% elseif card.checklist is not null %}
+                    {{ include('@Review/_checklist_card.html.twig', {checklist: card.checklist}) }}
                 {% else %}
                 <header class="round-card__header">
                     <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>

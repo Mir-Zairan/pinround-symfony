@@ -12,6 +12,8 @@ use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\Review\Application\RoundsVisibleTo;
+use App\Review\UI\Checklist\ChecklistCard;
+use App\Review\UI\Checklist\ChecklistCards;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -20,9 +22,10 @@ use App\Ticketing\Api\TicketVisibility;
 /**
  * Builds the cards of the Rounds section for one viewer. Besides RoundQueries' own queries it reads the owners'
  * names in one batch and signs the pictures shown in one query per SignedUrls::MAX_MEDIA_IDS pictures, whatever the
- * number of rounds. Only the report and drafts show their pictures, at most MAX_PICTURES_PER_CARD each; a checklist or
- * review round is a row that opens its own page. The viewer's own unshared draft is the exception: its card shows every
- * picture (the domain caps them), so its editor can reach each one. forDraft builds that one card alone.
+ * number of rounds. Only the report and drafts show their pictures, at most MAX_PICTURES_PER_CARD each; a review round
+ * is a row that opens its own page, and the checklist round shows its rows through ChecklistCards, read only when the
+ * ticket has one. The viewer's own unshared draft is the exception: its card shows every picture (the domain caps them),
+ * so its editor can reach each one. forDraft builds that one card alone.
  */
 final readonly class RoundCards
 {
@@ -56,6 +59,7 @@ final readonly class RoundCards
         private RoundsVisibleTo $roundsVisibleTo,
         private MemberNameQueries $memberNameQueries,
         private SignedUrls $signedUrls,
+        private ChecklistCards $checklistCards,
     ) {
     }
 
@@ -73,9 +77,10 @@ final readonly class RoundCards
 
         $ownerNames = $this->memberNameQueries->displayNamesOf($organizationId, self::ownersOf($rounds));
         $images = $this->imagesOf($organizationId, $rounds, $now);
+        $checklist = self::hasChecklist($rounds) ? $this->checklistCards->forTicket($organizationId, $ticketId) : null;
 
         return new RoundsSectionView(
-            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $images), $rounds),
+            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $images, $checklist), $rounds),
             $ticketRounds->olderRoundsNotShown,
         );
     }
@@ -98,15 +103,23 @@ final readonly class RoundCards
     }
 
     /**
-     * @param array<string, MediaImage> $images by media id
+     * @param array<string, MediaImage> $images    by media id
+     * @param ChecklistCard|null        $checklist the ticket's checklist card, which its checklist round shows
      */
-    private function cardOf(RoundView $round, string $ownerName, array $images): RoundCard
+    private function cardOf(RoundView $round, string $ownerName, array $images, ?ChecklistCard $checklist = null): RoundCard
     {
         $domId = 'round-'.$round->id;
-        if (!$this->showsPictures($round)) {
-            $title = self::CHECKLIST === $round->kind ? 'Checklist from the report' : 'Review';
+        if (self::CHECKLIST === $round->kind) {
+            // Checklist::fromReport makes none without pins, DbalChecklists stores the round with its items in one
+            // savepoint, and no command removes a report's pins: a round without items is broken data, not an empty card.
+            if (null === $checklist || $checklist->roundId !== $round->id) {
+                throw new \LogicException(\sprintf('Checklist round %s has no items.', $round->id));
+            }
 
-            return new RoundCard($round->id, $domId, \sprintf('Round %d · %s · by %s', $round->number ?? 0, $title, $ownerName), null, false, [], true, number: $round->number);
+            return new RoundCard($round->id, $domId, $checklist->headline, $checklist->status, false, [], false, number: $round->number, checklist: $checklist);
+        }
+        if (!$this->showsPictures($round)) {
+            return new RoundCard($round->id, $domId, \sprintf('Round %d · Review · by %s', $round->number ?? 0, $ownerName), null, false, [], true, number: $round->number);
         }
 
         $pictureLimit = self::pictureLimitOf($round);
@@ -219,6 +232,20 @@ final readonly class RoundCards
     private static function pictureLimitOf(RoundView $round): ?int
     {
         return $round->isUnsharedDraft() ? null : self::MAX_PICTURES_PER_CARD;
+    }
+
+    /**
+     * @param list<RoundView> $rounds
+     */
+    private static function hasChecklist(array $rounds): bool
+    {
+        foreach ($rounds as $round) {
+            if (self::CHECKLIST === $round->kind) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function showsPictures(RoundView $round): bool
