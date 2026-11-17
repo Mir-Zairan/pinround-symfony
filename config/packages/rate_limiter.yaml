@@ -88,8 +88,8 @@ framework:
             interval: '%media.upload_status_per_user_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
-        # Every server-side AI call, keyed by the user id: 30 an hour per person (ai-architecture.md, Cost, rate limits
-        # and metering), counted across the person's organizations.
+        # Every server-side AI call, keyed by the organization and the user id (ADR-0018, Metering): 30 an hour per
+        # person in each organization (ai-architecture.md, Cost, rate limits and metering).
         ai_calls_per_user:
             policy: fixed_window
             limit: 30

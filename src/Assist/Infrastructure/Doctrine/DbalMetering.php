@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Assist\Infrastructure\Doctrine;
 
+use App\Assist\Application\AiCallUsage;
 use App\Assist\Application\Metering;
-use App\Assist\Application\ProviderAnswer;
 use App\Assist\Domain\AiFeature;
 use App\Organization\Api\ActorContext;
 use App\SharedKernel\Application\TenantContext;
@@ -19,8 +19,8 @@ use Symfony\Component\Uid\UuidV7;
  */
 final readonly class DbalMetering implements Metering
 {
-    private const string INSERT = 'INSERT INTO ast_usage (organization_id, id, user_id, feature, provider, model,'
-        .' input_tokens, output_tokens, duration_ms, cost_estimate, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)';
+    private const string INSERT = 'INSERT INTO ast_usage (organization_id, id, user_id, feature, status, provider,'
+        .' model, input_tokens, output_tokens, duration_ms, cost_estimate, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)';
 
     public function __construct(
         private Connection $connection,
@@ -29,7 +29,7 @@ final readonly class DbalMetering implements Metering
     ) {
     }
 
-    public function record(ProviderAnswer $answer, AiFeature $feature, ActorContext $caller): void
+    public function record(AiCallUsage $usage, AiFeature $feature, ActorContext $caller): void
     {
         $organizationId = $this->tenantContext->require();
         if (!$caller->organizationId()->equals($organizationId)) {
@@ -44,11 +44,12 @@ final readonly class DbalMetering implements Metering
             $id->toRfc4122(),
             $caller->userId()->toString(),
             $feature->value,
-            $answer->provider,
-            $answer->model,
-            $answer->inputTokens,
-            $answer->outputTokens,
-            $answer->durationMs,
+            $usage->status->value,
+            $usage->provider,
+            $usage->model,
+            $usage->inputTokens,
+            $usage->outputTokens,
+            $usage->durationMs,
             $id->getDateTime()->format('Y-m-d H:i:s.uP'),
         ]));
     }
