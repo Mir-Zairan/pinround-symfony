@@ -11,8 +11,7 @@ import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 // the dev-only console command (draft-picture.ts) and every case runs on any stack.
 
 test.use({ viewport: { width: 1280, height: 900 } });
-// Both draft specs read and decide the same people's drafts; playwright.config.ts runs them one after the other.
-test.describe.configure({ mode: 'serial' });
+// Both draft specs read and decide the same people's drafts; playwright.config.ts runs them one test at a time.
 
 const DIALOG_TEXT = 'Your draft round has 1 screenshot. Share it with the team as round 1, or keep it private. Private notes stay readable for you and Claude Code.';
 

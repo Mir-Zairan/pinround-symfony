@@ -9,6 +9,7 @@ use App\Kernel;
 use App\Media\Api\ReadyPictureSeeds;
 use App\Media\Infrastructure\Demo\SeedReadyPicture;
 use App\Review\Infrastructure\Console\SeedDraftWithPictureCommand;
+use App\Review\Infrastructure\Console\SeedReviewRoundCommand;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
@@ -20,10 +21,10 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Exception\CommandNotFoundException;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\Attribute\When;
+use Symfony\Component\DependencyInjection\Container;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\HttpKernel\KernelInterface;
-use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 final class SeedDraftWithPictureCommandTest extends KernelTestCase
@@ -34,9 +35,11 @@ final class SeedDraftWithPictureCommandTest extends KernelTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
+    use SeedsAssignedDemoTicket;
     use SeedsTicketRounds;
 
     private const string COMMAND = 'app:e2e:seed-draft-with-picture';
+    private const string REVIEW_ROUND_COMMAND = 'app:e2e:seed-review-round';
 
     /** Read by SeedsTicketRounds. */
     protected string $shopProject;
@@ -105,6 +108,7 @@ final class SeedDraftWithPictureCommandTest extends KernelTestCase
     public static function devOnlyClasses(): iterable
     {
         yield 'the command' => [SeedDraftWithPictureCommand::class];
+        yield 'the review round command' => [SeedReviewRoundCommand::class];
         yield 'the ready picture seed' => [SeedReadyPicture::class];
     }
 
@@ -122,9 +126,16 @@ final class SeedDraftWithPictureCommandTest extends KernelTestCase
         self::assertSame(['dev', 'test'], $environments);
     }
 
+    /** Both e2e seed commands use the ready picture seed, so one prod kernel proves neither reaches prod. */
     public function testItIsFoundInTestAndNotInAProdKernelBuiltInAFreshCacheDirectory(): void
     {
-        self::assertSame(self::COMMAND, new Application($this->testKernel)->find(self::COMMAND)->getName(), 'Found in test.');
+        $commands = [self::COMMAND, self::REVIEW_ROUND_COMMAND];
+        foreach ($commands as $command) {
+            self::assertSame($command, new Application($this->testKernel)->find($command)->getName(), 'Found in test.');
+        }
+        $testContainer = $this->testKernel->getContainer();
+        self::assertInstanceOf(Container::class, $testContainer);
+        self::assertArrayHasKey(ReadyPictureSeeds::class, $testContainer->getRemovedIds(), 'Where the seed is wired, its port alias is among the removed private ids.');
 
         $filesystem = new Filesystem();
         $prodCache = $this->testKernel->getProjectDir().'/var/cache/prod';
@@ -133,15 +144,23 @@ final class SeedDraftWithPictureCommandTest extends KernelTestCase
         try {
             $prodKernel->boot();
 
-            try {
-                new Application($prodKernel)->find(self::COMMAND);
-                self::fail('The command is registered in prod.');
-            } catch (CommandNotFoundException) {
-                $this->addToAssertionCount(1);
+            foreach ($commands as $command) {
+                try {
+                    new Application($prodKernel)->find($command);
+                    self::fail(\sprintf('%s is registered in prod.', $command));
+                } catch (CommandNotFoundException) {
+                    $this->addToAssertionCount(1);
+                }
             }
             $container = $prodKernel->getContainer();
-            self::assertSame([ReadyPictureSeeds::class => false, SeedReadyPicture::class => false], array_combine([ReadyPictureSeeds::class, SeedReadyPicture::class], array_map($container->has(...), [ReadyPictureSeeds::class, SeedReadyPicture::class])), 'The prod container has no ready picture seed.');
+            self::assertInstanceOf(Container::class, $container);
+            self::assertSame([ReadyPictureSeeds::class => false, SeedReadyPicture::class => false], array_combine([ReadyPictureSeeds::class, SeedReadyPicture::class], array_map($container->has(...), [ReadyPictureSeeds::class, SeedReadyPicture::class])), 'The prod container has no public ready picture seed.');
+            // has() misses private services. An excluded class is always a removed id; the port alias is one only once wired.
+            $removedIds = $container->getRemovedIds();
+            self::assertNotSame([], $removedIds, 'The compiled prod container lists the private services it removed.');
+            self::assertArrayNotHasKey(ReadyPictureSeeds::class, $removedIds, 'Prod wires no ready picture seed, not even a private one.');
             $mentions = [];
+            // removed-ids.php names every excluded class, the seed included; any other file naming it uses it.
             foreach (new Finder()->files()->in($prodCache)->name('*.php')->notName('removed-ids.php')->contains('SeedReadyPicture') as $file) {
                 $mentions[] = $file->getRelativePathname();
             }
@@ -155,30 +174,6 @@ final class SeedDraftWithPictureCommandTest extends KernelTestCase
     private function commandTester(): CommandTester
     {
         return new CommandTester(new Application($this->testKernel)->find(self::COMMAND));
-    }
-
-    /**
-     * @return string the ticket's id; SHOP-1 is given to Omar
-     */
-    private function seedAssignedTicket(): string
-    {
-        $this->people = $this->createAcmeFoodsPeople('member');
-        // The command finds an organization only as the demo seed names it: by slug, through its first admin's email.
-        $this->migrator()->executeStatement('UPDATE idn_user SET email = ? WHERE id = ?', ['sara@acme-foods.example', $this->people['Sara']->id()->toString()]);
-        $organizationId = $this->acmeFoods->toString();
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "UPDATE org_organization SET slug = 'acme-foods' WHERE organization_id = ?",
-            [$organizationId],
-        ));
-        $this->shopProject = $this->addProject($this->shop, 'SHOP', 'Shop');
-        $this->stepId = Uuid::v7()->toRfc4122();
-        $stepId = $this->stepId;
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'To do', 'todo', 'todo', 'core', 1)",
-            [$organizationId, $stepId],
-        ));
-
-        return $this->addTicket('SHOP-1');
     }
 
     /**

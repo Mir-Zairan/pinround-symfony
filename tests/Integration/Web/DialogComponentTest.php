@@ -50,6 +50,16 @@ final class DialogComponentTest extends KernelTestCase
     }
 
     #[Test]
+    public function onlyADialogMountedWithOpenOnConnectAsksTheControllerToOpenIt(): void
+    {
+        $plain = $this->render(['id' => 'a', 'title' => 'T']);
+        $selfOpening = $this->render(['id' => 'a', 'title' => 'T', 'openOnConnect' => true]);
+
+        self::assertNull($plain->filter('[data-controller="dialog"]')->attr('data-dialog-open-on-connect-value'));
+        self::assertSame('true', $selfOpening->filter('[data-controller="dialog"]')->attr('data-dialog-open-on-connect-value'));
+    }
+
+    #[Test]
     public function theActionsAreRenderedOnlyWhenGiven(): void
     {
         $without = $this->render(['id' => 'a', 'title' => 'T']);
