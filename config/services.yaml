@@ -439,6 +439,10 @@ when@test:
         test.assist_symfony_ai_provider:
             alias: App\Assist\Infrastructure\Platform\SymfonyAiProvider
             public: true
+        # No gateway consumes the limit yet; AiCallLimitContainerTest gets it as the gateway will.
+        test.assist_ai_call_limit:
+            alias: App\Assist\Application\AiCallLimit
+            public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.
         test.conversation_ask_question:

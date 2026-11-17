@@ -6,6 +6,9 @@ namespace App\Tests\Unit\Assist\Infrastructure\RateLimit;
 
 use App\Assist\Application\AiRateLimited;
 use App\Assist\Infrastructure\RateLimit\SymfonyAiCallLimit;
+use App\Organization\Api\ActorContext;
+use App\Organization\Api\Roles;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -23,6 +26,7 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class SymfonyAiCallLimitTest extends TestCase
 {
+    private const string ACME_FOODS = '019a5f00-0000-7000-8000-00000000a501';
     private const string OMAR = '019a5f00-0000-7000-8000-00000000a521';
     private const string MIA = '019a5f00-0000-7000-8000-00000000a522';
     private const int LIMIT = 30;
@@ -44,13 +48,13 @@ final class SymfonyAiCallLimitTest extends TestCase
     public function thirtyCallsPassAndTheThirtyFirstIsRefusedWithoutBeingCounted(): void
     {
         for ($call = 1; $call <= self::LIMIT; ++$call) {
-            $this->limit->consume(new UserId(self::OMAR));
+            $this->limit->consume(self::caller(self::OMAR));
         }
         self::assertSame(self::LIMIT, $this->hitsOf(self::OMAR));
 
         foreach ([31, 32] as $call) {
             try {
-                $this->limit->consume(new UserId(self::OMAR));
+                $this->limit->consume(self::caller(self::OMAR));
                 self::fail(\sprintf('Call %d was accepted.', $call));
             } catch (AiRateLimited $refusal) {
                 self::assertSame('Too many AI requests. Try again in a minute.', $refusal->getMessage());
@@ -66,29 +70,34 @@ final class SymfonyAiCallLimitTest extends TestCase
     public function anotherPersonIsNotCountedWithTheOneWhoReachedTheLimit(): void
     {
         for ($call = 1; $call <= self::LIMIT; ++$call) {
-            $this->limit->consume(new UserId(self::OMAR));
+            $this->limit->consume(self::caller(self::OMAR));
         }
 
-        $this->limit->consume(new UserId(self::MIA));
+        $this->limit->consume(self::caller(self::MIA));
 
         self::assertSame(1, $this->hitsOf(self::MIA));
         self::assertSame(self::LIMIT, $this->hitsOf(self::OMAR));
     }
 
     #[Test]
-    public function theCounterIsKeyedByTheUserIdAlone(): void
+    public function theCounterIsKeyedByTheOrganizationAndTheUserId(): void
     {
-        $this->limit->consume(new UserId(self::OMAR));
+        $this->limit->consume(self::caller(self::OMAR));
 
-        self::assertNotNull($this->storage->fetch('ai_calls_per_user-'.self::OMAR));
+        self::assertNotNull($this->storage->fetch('ai_calls_per_user-'.self::ACME_FOODS.':'.self::OMAR));
     }
 
     private function hitsOf(string $userId): int
     {
-        $window = $this->storage->fetch('ai_calls_per_user-'.$userId);
+        $window = $this->storage->fetch('ai_calls_per_user-'.self::ACME_FOODS.':'.$userId);
         self::assertInstanceOf(Window::class, $window);
 
         return $window->getHitCount();
+    }
+
+    private static function caller(string $userId): ActorContext
+    {
+        return new ActorContext(new UserId($userId), new OrganizationId(self::ACME_FOODS), Roles::none());
     }
 
     /**

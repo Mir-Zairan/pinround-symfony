@@ -235,8 +235,9 @@ On a review round, a developer or tester can ask "Look for visual problems". A v
 
 ## Cost, rate limits and metering
 
-- Every call writes `ast_usage(org_id, user_id, feature, provider, model, input_tokens, output_tokens, ms, cost_estimate, at)`. No content.
-- Limits (defaults, admin can change): per user 30 AI calls per hour; per org a monthly budget in currency; at 80% admins get a notice; at 100% cloud calls stop (laptop calls still work).
+- Every call the provider was asked writes one `ast_usage(organization_id, id, user_id, feature, status, provider, model, input_tokens, output_tokens, duration_ms, cost_estimate, at)` row through `Metering` ([data-model.md](data-model.md#notification-assist-integration-audit-agentapi)). No content. `status` is `answered`, `rejected` (the answer came back but was refused, for example by the output validator) or `failed` (no usable answer); token counts and cost stay NULL when unknown, never 0, so a failed call has none.
+- The row is written inside the caller's transaction and rolls back with it. So the gateway meters answered, rejected and failed calls alike and must not let an exception roll back the transaction once the provider was called: AI handlers turn such failures into stored outcomes, so a paid call stays metered.
+- Limits (defaults, admin can change): per user 30 AI calls per hour in each organization (`AiCallLimit`, the `ai_calls_per_user` limiter keyed by organization and user, [ADR-0018](../03-adr/0018-ai-provider-abstraction.md)); per org a monthly budget in currency; at 80% admins get a notice; at 100% cloud calls stop (laptop calls still work).
 - Concurrency per org on the `ai` transport is capped so one org cannot fill the queue.
 - Content-hash cache (see summaries) avoids paying twice.
 
