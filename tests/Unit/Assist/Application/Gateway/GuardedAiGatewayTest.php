@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Assist\Application\Gateway;
 
 use App\Assist\Application\AiCallStatus;
+use App\Assist\Application\AiDraft;
 use App\Assist\Application\AiNotAllowed;
 use App\Assist\Application\AiRateLimited;
 use App\Assist\Application\AiTask;
@@ -26,13 +27,17 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\IntakeCandidate;
+use App\Ticketing\Application\Intake\WordListDraftReportChecks;
+use App\Ticketing\Domain\Intake\CheckReasons;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
  * GuardedAiGateway with the real prompt builder, output validator and policy evaluator, and doubles of the ports that
- * behave as the real ones do.
+ * behave as the real ones do. Omar drafts reports in the SHOP project, where he may see SHOP-3 and SHOP-5; SHOP-6 is
+ * team-only and not his, so it is never a candidate.
  */
 final class GuardedAiGatewayTest extends TestCase
 {
@@ -44,19 +49,27 @@ final class GuardedAiGatewayTest extends TestCase
     private const string TEAM_ONLY_TICKET = '0197a3c0-0000-7000-8000-00000000a8d2';
     private const string TICKET_TEXT = 'Pressing Pay on the last checkout step does nothing.';
     private const string SUMMARY = 'The Pay button on the last checkout step does nothing. People cannot finish an order.';
+    private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-00000000a8e1';
     private const string INTAKE_JSON = '{"summary": "Pay does nothing.", "type": "Bug", "priority": "Major", "duplicates": [], "missing": false, "risky": false}';
+    /** Names one sent candidate, one ticket of the organization that was not sent, and one that does not exist. */
+    private const string INTAKE_JSON_WITH_DUPLICATES = '{"summary": "Pay does nothing.", "type": "Bug", "priority": "Major", "duplicates": ["SHOP-6", "SHOP-5", "SHOP-99"], "missing": false, "risky": false}';
 
     private StoredAiSettings $aiSettings;
     private ListedAskedTickets $tickets;
     private CountingAiCallLimit $limit;
     private ScriptedProvider $provider;
     private RecordingMetering $metering;
+    private ListedIntakeCandidates $candidates;
 
     protected function setUp(): void
     {
         $this->tickets = new ListedAskedTickets();
         $this->tickets->add(new TicketId(self::CHECKOUT_TICKET), new AskedTicket(new PromptTicket('Checkout fails', self::TICKET_TEXT), false), [self::LENA, self::OMAR]);
         $this->tickets->add(new TicketId(self::TEAM_ONLY_TICKET), new AskedTicket(new PromptTicket('Card numbers in the log', self::TICKET_TEXT), true), [self::LENA, self::OMAR]);
+        $this->candidates = new ListedIntakeCandidates(new OrganizationId(self::ACME_FOODS));
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-3', 'Basket total is wrong'), false, [self::LENA, self::OMAR]);
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-5', 'Pay button does nothing'), false, [self::LENA, self::OMAR]);
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-6', 'Refunds stay pending'), true, [self::LENA]);
         $this->limit = new CountingAiCallLimit();
         $this->metering = new RecordingMetering(new OrganizationId(self::ACME_FOODS));
         $this->givenSettings(self::settings());
@@ -294,7 +307,7 @@ final class GuardedAiGatewayTest extends TestCase
     {
         $this->givenProviderScript(['Sure! Here is the JSON you asked for.', self::INTAKE_JSON]);
 
-        $result = $this->gateway()->run(new AiTask(AiFeature::Intake, new TicketId(self::CHECKOUT_TICKET)), self::omar());
+        $result = $this->gateway()->run(self::intakeOf(self::draft()), self::omar());
 
         self::assertSame(
             [AiCallStatus::Answered, null, ['summary' => 'Pay does nothing.', 'type' => 'Bug', 'priority' => 'Major', 'duplicates' => [], 'missing' => false, 'risky' => false], 'intake.v1', 'AI suggestion'],
@@ -314,7 +327,7 @@ final class GuardedAiGatewayTest extends TestCase
     {
         $this->givenProviderScript(['{}', '{}', self::INTAKE_JSON]);
 
-        $result = $this->gateway()->run(new AiTask(AiFeature::Intake, new TicketId(self::CHECKOUT_TICKET)), self::omar());
+        $result = $this->gateway()->run(self::intakeOf(self::draft()), self::omar());
 
         self::assertSame(
             [AiCallStatus::Rejected, null, 'The AI answer does not match the intake.v1 schema.'],
@@ -329,7 +342,7 @@ final class GuardedAiGatewayTest extends TestCase
     {
         $this->givenProviderScript(['not json', AiUnavailable::failed('huggingface', \RuntimeException::class), self::INTAKE_JSON]);
 
-        $result = $this->gateway()->run(new AiTask(AiFeature::Intake, new TicketId(self::CHECKOUT_TICKET)), self::omar());
+        $result = $this->gateway()->run(self::intakeOf(self::draft()), self::omar());
 
         self::assertSame(
             [AiCallStatus::Failed, null, 'The AI provider huggingface did not answer (RuntimeException).', 'intake.v1', 'AI suggestion'],
@@ -341,21 +354,86 @@ final class GuardedAiGatewayTest extends TestCase
     }
 
     #[Test]
-    public function aTaskWithoutATicketIsRefusedBeforeAnythingIsRead(): void
+    public function aDraftGoesOutWithTheCandidatesOmarMaySeeAndOnlyTheirKeysSurviveTheAnswer(): void
     {
+        $this->givenProviderScript([self::INTAKE_JSON_WITH_DUPLICATES]);
+
+        $result = $this->gateway()->run(self::intakeOf(self::draft()), self::omar());
+
+        self::assertSame([AiCallStatus::Answered, ['SHOP-5']], [$result->status, $result->data['duplicates'] ?? null]);
+        self::assertCount(1, $this->provider->calls);
+        $content = $this->provider->calls[0]['prompt']->content;
+        self::assertStringContainsString("<candidates>\nSHOP-5: Pay button does nothing\nSHOP-3: Basket total is wrong\n</candidates>", $content);
+        self::assertStringContainsString("Title: Pay does nothing\nText: Pressing Pay on the last step does nothing.\nPin 1: The button.\n</ticket>", $content);
+        self::assertStringNotContainsString('SHOP-6', $content);
+        self::assertSame([[AiCallStatus::Answered, 812, 64, AiFeature::Intake, self::OMAR]], $this->meteredRows());
+    }
+
+    #[Test]
+    public function theRetryOfADraftSendsTheSameCandidatesAndKeepsTheSentKey(): void
+    {
+        $this->givenProviderScript(['Sure! Here is the JSON you asked for.', self::INTAKE_JSON_WITH_DUPLICATES]);
+
+        $result = $this->gateway()->run(self::intakeOf(self::draft()), self::omar());
+
+        self::assertSame([AiCallStatus::Answered, ['SHOP-5']], [$result->status, $result->data['duplicates'] ?? null]);
+        self::assertCount(2, $this->provider->calls);
+        self::assertStringContainsString("<candidates>\nSHOP-5: Pay button does nothing\nSHOP-3: Basket total is wrong\n</candidates>", $this->provider->calls[1]['prompt']->content);
+        self::assertSame([self::ACME_FOODS.':'.self::OMAR => 1], $this->limit->counted);
+    }
+
+    #[Test]
+    public function aTicketTaskGoesOutWithoutACandidatesBlock(): void
+    {
+        $this->gateway()->run(self::summaryOf(self::CHECKOUT_TICKET), self::omar());
+
+        self::assertCount(1, $this->provider->calls);
+        self::assertStringNotContainsString('<candidates>', $this->provider->calls[0]['prompt']->content);
+        self::assertSame([], $this->candidates->reads);
+    }
+
+    /**
+     * @return iterable<string, array{AiSettings}>
+     */
+    public static function cloudSettings(): iterable
+    {
+        yield 'cloud' => [self::settings()];
+        yield 'cloud, team-only tickets allowed to it' => [self::settings(isRestrictedToCloudAllowed: true)];
+        yield 'laptop first' => [self::settings(where: AiSettings::WHERE_LAPTOP_FIRST)];
+    }
+
+    #[Test]
+    #[DataProvider('cloudSettings')]
+    public function aDraftThatMentionsSecurityIsRefusedWithoutAProviderCallAUsageRowOrACountedCall(AiSettings $settings): void
+    {
+        $this->givenSettings($settings);
+        $draft = new AiDraft(self::SHOP_PROJECT, 'Pay does nothing', 'Pressing Pay does nothing.', ['The password field is empty.']);
+
         try {
-            $this->gateway()->run(new AiTask(AiFeature::Intake, null, 'Pay does nothing.'), self::omar());
-            self::fail('A task without a ticket was sent.');
-        } catch (\InvalidArgumentException $refusal) {
-            self::assertSame('A server AI task needs a ticket.', $refusal->getMessage());
+            $this->gateway()->run(self::intakeOf($draft), self::omar());
+            self::fail('A draft that mentions security went to cloud AI.');
+        } catch (AiNotAllowed $refusal) {
+            self::assertSame(
+                [PolicyRefusal::SecuritySensitiveDraftToCloud, 'This report mentions security, so it stays out of cloud AI.'],
+                [$refusal->refusal, $refusal->getMessage()],
+            );
         }
 
-        self::assertSame([[], [], []], [$this->provider->calls, $this->tickets->reads, $this->limit->counted]);
+        self::assertSame([[], [], [], [], []], [$this->provider->calls, $this->metering->rows, $this->limit->counted, $this->aiSettings->keyReads, $this->candidates->reads]);
     }
 
     private function gateway(): GuardedAiGateway
     {
-        return new GuardedAiGateway($this->aiSettings, new AiTaskAdmission($this->aiSettings, new PolicyEvaluator(), $this->tickets), new PromptBuilder(), $this->limit, $this->provider, new OutputValidator(), $this->metering);
+        $admission = new AiTaskAdmission(
+            $this->aiSettings,
+            new PolicyEvaluator(),
+            $this->tickets,
+            new WordListDraftReportChecks(new CheckReasons()),
+            $this->candidates,
+            new MemberTicketVisibilities(),
+        );
+
+        return new GuardedAiGateway($this->aiSettings, $admission, new PromptBuilder(), $this->limit, $this->provider, new OutputValidator(), $this->metering);
     }
 
     /**
@@ -399,6 +477,16 @@ final class GuardedAiGatewayTest extends TestCase
     private static function summaryOf(string $ticketId): AiTask
     {
         return new AiTask(AiFeature::Summary, new TicketId($ticketId));
+    }
+
+    private static function intakeOf(AiDraft $draft): AiTask
+    {
+        return new AiTask(AiFeature::Intake, draft: $draft);
+    }
+
+    private static function draft(): AiDraft
+    {
+        return new AiDraft(self::SHOP_PROJECT, 'Pay does nothing', 'Pressing Pay on the last step does nothing.', ['The button.']);
     }
 
     private static function omar(): ActorContext

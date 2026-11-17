@@ -22,13 +22,14 @@ interface AiGateway
      *
      * @return AiResult answered, or rejected or failed when the provider was asked but gave nothing usable
      *
-     * @throws AiNotAllowed              when the org policy forbids this feature for this person or ticket; nothing is sent
+     * @throws AiNotAllowed              when the org policy forbids this feature for this person, ticket or draft report;
+     *                                   nothing is sent
      * @throws AiRateLimited             when the person made too many calls (AiCallLimit); nothing is sent
      * @throws AiUnavailable             when the organization's own provider key cannot be read; nothing is sent, and the
      *                                   operator's key is never used instead
      * @throws UnknownAiProvider         when the settings name a provider or model pinround cannot use; nothing is sent
      * @throws UnknownPromptTemplate     when the feature has no prompt template yet; nothing is sent
-     * @throws \InvalidArgumentException when the task names no ticket; nothing is sent
+     * @throws \InvalidArgumentException when a duplicate candidate cannot go into the prompt; nothing is sent
      */
     public function run(AiTask $task, ActorContext $viewer): AiResult;
 }

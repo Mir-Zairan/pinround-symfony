@@ -28,6 +28,7 @@ final class PolicyEvaluatorTest extends TestCase
     private const string CANNOT_SEE = 'AI help works only on tickets you can see.';
     private const string RESTRICTED = 'Your admin keeps team-only tickets away from cloud AI.';
     private const string LAPTOP_NOT_READY = 'AI help runs on your laptop, and Ollama is not ready there yet.';
+    private const string SECURITY_SENSITIVE_DRAFT = 'This report mentions security, so it stays out of cloud AI.';
 
     /**
      * Each row: the settings (on, leads only, where, restricted tickets to cloud, title only), the viewer, can see the
@@ -145,7 +146,7 @@ final class PolicyEvaluatorTest extends TestCase
     {
         $sentences = array_map(static fn (PolicyRefusal $refusal): string => $refusal->sentence(), PolicyRefusal::cases());
 
-        self::assertSame([self::AI_OFF, self::LEADS_ONLY, self::CANNOT_SEE, self::RESTRICTED, self::LAPTOP_NOT_READY], $sentences);
+        self::assertSame([self::AI_OFF, self::LEADS_ONLY, self::CANNOT_SEE, self::RESTRICTED, self::LAPTOP_NOT_READY, self::SECURITY_SENSITIVE_DRAFT], $sentences);
     }
 
     private static function viewer(string $who): ActorContext

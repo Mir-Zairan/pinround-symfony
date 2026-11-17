@@ -27,9 +27,10 @@ use App\SharedKernel\Application\UndecryptableField;
 use App\SharedKernel\Domain\OrganizationId;
 
 /**
- * The gateway in the order of ai-architecture.md: the org policy with the ticket as the viewer may see it
- * (AiTaskAdmission), the provider and its key, the prompt, pinround's limit per person, then the provider, the answer
- * check and one usage row per provider call. A data answer whose check allows it gets one more call with the retry
+ * The gateway in the order of ai-architecture.md: the org policy with the ticket as the viewer may see it, or the draft
+ * report with its duplicate candidates (AiTaskAdmission), the provider and its key, the prompt, pinround's limit per
+ * person, then the provider, the answer check, which keeps only duplicate keys that were sent as candidates, and one
+ * usage row per provider call. A data answer whose check allows it gets one more call with the retry
  * instruction; that second call is metered too but not counted against the person's limit again.
  */
 final readonly class GuardedAiGateway implements AiGateway
@@ -51,10 +52,10 @@ final readonly class GuardedAiGateway implements AiGateway
 
         $choice = $this->providerChoiceOf($admitted->settings, $viewer->organizationId());
         $version = $this->promptRenderer->currentVersion($task->feature);
-        $prompt = $this->promptRenderer->build($version, $admitted->ticket->promptTicket, $admitted->decision->isTitleOnly);
+        $prompt = $this->promptRenderer->build($version, $admitted->promptTicket, $admitted->decision->isTitleOnly, $admitted->duplicateCandidates);
         $this->aiCallLimit->consume($viewer);
 
-        return $this->ask($prompt, $choice, $version, $viewer, false);
+        return $this->ask($prompt, $choice, $version, $viewer, array_keys($admitted->duplicateCandidates), false);
     }
 
     /**
@@ -74,7 +75,10 @@ final readonly class GuardedAiGateway implements AiGateway
             : ProviderChoice::fromSettings($settings->provider, $settings->providerModel, $organizationKey);
     }
 
-    private function ask(AiPrompt $prompt, ProviderChoice $choice, PromptVersion $version, ActorContext $viewer, bool $isRetry): AiResult
+    /**
+     * @param list<string> $candidateKeys the duplicate candidate keys in the prompt; the only keys a data answer keeps
+     */
+    private function ask(AiPrompt $prompt, ProviderChoice $choice, PromptVersion $version, ActorContext $viewer, array $candidateKeys, bool $isRetry): AiResult
     {
         $label = self::labelOf($version->feature);
         $startedAt = hrtime(true);
@@ -88,14 +92,14 @@ final readonly class GuardedAiGateway implements AiGateway
 
         try {
             $checkedAnswer = AiFeature::Intake === $version->feature
-                ? AiResult::withData($this->aiAnswerCheck->checkData($version, $answer->text, [], $isRetry), $answer->model, $answer->provider, $version->name(), $label)
+                ? AiResult::withData($this->aiAnswerCheck->checkData($version, $answer->text, $candidateKeys, $isRetry), $answer->model, $answer->provider, $version->name(), $label)
                 : AiResult::withText($this->aiAnswerCheck->checkText($version, $answer->text), $answer->model, $answer->provider, $version->name(), $label);
         } catch (AiAnswerRejected $rejection) {
             $this->metering->record(AiCallUsage::rejected($answer), $version->feature, $viewer);
             if ($rejection->isRetryAllowed && !$isRetry) {
                 $retryPrompt = new AiPrompt($prompt->feature, $prompt->instructions, $prompt->content."\n\n".$this->aiAnswerCheck->retryInstruction());
 
-                return $this->ask($retryPrompt, $choice, $version, $viewer, true);
+                return $this->ask($retryPrompt, $choice, $version, $viewer, $candidateKeys, true);
             }
 
             return AiResult::rejected($rejection->getMessage(), $answer->model, $answer->provider, $version->name(), $label);

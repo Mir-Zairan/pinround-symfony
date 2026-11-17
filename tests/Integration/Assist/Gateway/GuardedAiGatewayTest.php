@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Assist\Gateway;
 
 use App\Assist\Application\AiCallLimit;
 use App\Assist\Application\AiCallStatus;
+use App\Assist\Application\AiDraft;
 use App\Assist\Application\AiGateway;
 use App\Assist\Application\AiNotAllowed;
 use App\Assist\Application\AiRateLimited;
@@ -42,7 +43,8 @@ use Symfony\Component\RateLimiter\Policy\Window;
  * its usage rows are read inside it. Lena leads the Shop team that owns SHOP; Omar is in Acme Foods but in no team, so
  * he sees the checkout ticket for everyone but not the team-only one. Beta Bakery has a ticket for everyone under the
  * key SHOP-7, the checkout ticket's key in Acme Foods, so a leaked id would summarize the wrong ticket. The clock is
- * frozen in March 2027, a month whose usage partition the migrations always create.
+ * frozen in March 2027, a month whose usage partition the migrations always create. A draft report in SHOP has both
+ * open tickets as candidates for Lena, the team-only one only when the admin lets team-only tickets go to cloud AI.
  */
 final class GuardedAiGatewayTest extends KernelTestCase
 {
@@ -60,6 +62,7 @@ final class GuardedAiGatewayTest extends KernelTestCase
     private const string TICKET_TEXT = 'Pressing Pay on the last checkout step does nothing.';
     private const string AI_ON_IN_THE_CLOUD = '{"on": true, "where": "cloud"}';
     private const string USAGE_LIMITER_PREFIX = 'ai_calls_per_user-';
+    private const string AI_ON_IN_THE_CLOUD_WITH_TEAM_ONLY = '{"on": true, "where": "cloud", "restricted_to_cloud": true}';
 
     private static ?TicketId $checkoutTicketId = null;
     private static ?TicketId $teamOnlyTicketId = null;
@@ -268,7 +271,7 @@ final class GuardedAiGatewayTest extends KernelTestCase
     #[Test]
     public function aRejectedAnswerIsReturnedNotThrownAndEachProviderCallKeepsItsRejectedRow(): void
     {
-        [$result, $usageRows] = $this->runAsOmar(self::AI_ON_IN_THE_CLOUD, new AiTask(AiFeature::Intake, self::checkoutTicketId()));
+        [$result, $usageRows] = $this->runAsOmar(self::AI_ON_IN_THE_CLOUD, self::intakeOf(self::draft()));
 
         self::assertInstanceOf(AiResult::class, $result);
         self::assertSame(
@@ -311,6 +314,68 @@ final class GuardedAiGatewayTest extends KernelTestCase
         self::assertSame([], $this->fakeProvider()->calls());
         self::assertSame([], $usageRows);
         self::assertSame(0, $this->countedCallsOf(self::OMAR));
+    }
+
+    #[Test]
+    public function aDraftGoesOutWithTheOpenTicketsLenaMaySeeButNotTheTeamOnlyOneAndOnlyASentKeySurvives(): void
+    {
+        [$checkoutKey, $teamOnlyKey] = [self::keyOf(self::checkoutTicketId()), self::keyOf(self::teamOnlyTicketId())];
+        $this->fakeProvider()->answerNextCallsWith(self::intakeJsonNaming($teamOnlyKey, $checkoutKey, 'SHOP-999'));
+
+        [$result, $usageRows] = $this->runAs(self::lena(), self::AI_ON_IN_THE_CLOUD, self::intakeOf(self::draft()));
+
+        self::assertInstanceOf(AiResult::class, $result);
+        self::assertSame([AiCallStatus::Answered, [$checkoutKey]], [$result->status, $result->data['duplicates'] ?? null]);
+        self::assertCount(1, $this->fakeProvider()->calls());
+        self::assertSame([$checkoutKey], self::candidateKeysIn($this->fakeProvider()->calls()[0]['prompt']->content));
+        self::assertSame([['intake', 'answered']], array_map(static fn (array $row): array => [$row['feature'], $row['status']], $usageRows));
+    }
+
+    #[Test]
+    public function aDraftGoesOutWithTheTeamOnlyTicketLenaMaySeeWhenTheAdminLetsItGoToCloudAi(): void
+    {
+        [$checkoutKey, $teamOnlyKey] = [self::keyOf(self::checkoutTicketId()), self::keyOf(self::teamOnlyTicketId())];
+        $this->fakeProvider()->answerNextCallsWith('not json', self::intakeJsonNaming($teamOnlyKey, 'SHOP-999'));
+
+        [$result] = $this->runAs(self::lena(), self::AI_ON_IN_THE_CLOUD_WITH_TEAM_ONLY, self::intakeOf(self::draft()));
+
+        self::assertInstanceOf(AiResult::class, $result);
+        self::assertSame([AiCallStatus::Answered, [$teamOnlyKey]], [$result->status, $result->data['duplicates'] ?? null]);
+        self::assertCount(2, $this->fakeProvider()->calls());
+        foreach ($this->fakeProvider()->calls() as $call) {
+            self::assertEqualsCanonicalizing([$checkoutKey, $teamOnlyKey], self::candidateKeysIn($call['prompt']->content));
+        }
+    }
+
+    #[Test]
+    public function aDraftThatMentionsSecurityIsRefusedWithoutAProviderCallAUsageRowOrACountedCall(): void
+    {
+        $draft = new AiDraft(self::SHOP_PROJECT, 'Pay does nothing', 'Pressing Pay does nothing.', ['The password field is empty.']);
+
+        [$refusal, $usageRows] = $this->runAs(self::lena(), self::AI_ON_IN_THE_CLOUD_WITH_TEAM_ONLY, self::intakeOf($draft));
+
+        self::assertInstanceOf(AiNotAllowed::class, $refusal);
+        self::assertSame(
+            [PolicyRefusal::SecuritySensitiveDraftToCloud, 'This report mentions security, so it stays out of cloud AI.'],
+            [$refusal->refusal, $refusal->getMessage()],
+        );
+        self::assertSame([], $this->fakeProvider()->calls());
+        self::assertSame([], $usageRows);
+        self::assertSame(0, $this->countedCallsOf(self::LENA));
+    }
+
+    #[Test]
+    public function aDraftThatMentionsSecurityWithAiOffIsRefusedAsAiOff(): void
+    {
+        $draft = new AiDraft(self::SHOP_PROJECT, 'Password reset mail never comes', 'I asked twice.');
+
+        [$refusal, $usageRows] = $this->runAs(self::lena(), '{"on": false}', self::intakeOf($draft));
+
+        self::assertInstanceOf(AiNotAllowed::class, $refusal);
+        self::assertSame(PolicyRefusal::AiOff, $refusal->refusal);
+        self::assertSame([], $this->fakeProvider()->calls());
+        self::assertSame([], $usageRows);
+        self::assertSame(0, $this->countedCallsOf(self::LENA));
     }
 
     /**
@@ -393,6 +458,50 @@ final class GuardedAiGatewayTest extends KernelTestCase
     private static function summaryOf(TicketId $ticketId): AiTask
     {
         return new AiTask(AiFeature::Summary, $ticketId);
+    }
+
+    private static function intakeOf(AiDraft $draft): AiTask
+    {
+        return new AiTask(AiFeature::Intake, draft: $draft);
+    }
+
+    private static function draft(): AiDraft
+    {
+        return new AiDraft(self::SHOP_PROJECT, 'Pay does nothing', 'Pressing Pay on the last step does nothing.', ['The button.']);
+    }
+
+    private static function intakeJsonNaming(string ...$duplicateKeys): string
+    {
+        return json_encode(
+            ['summary' => 'Pay does nothing.', 'type' => 'Bug', 'priority' => 'Major', 'duplicates' => array_values($duplicateKeys), 'missing' => false, 'risky' => false],
+            \JSON_THROW_ON_ERROR,
+        );
+    }
+
+    /**
+     * @return list<string> the keys between <candidates> and </candidates>, in prompt order; none when the block is missing
+     */
+    private static function candidateKeysIn(string $promptContent): array
+    {
+        if (1 !== preg_match('#<candidates>\n(.*?)</candidates>#s', $promptContent, $block)) {
+            return [];
+        }
+        preg_match_all('/^([A-Z][A-Z0-9]+-[0-9]+): /m', $block[1], $keys);
+
+        return $keys[1];
+    }
+
+    private static function keyOf(TicketId $ticketId): string
+    {
+        $key = self::transactions()->rolledBackAs(
+            self::ACME_FOODS,
+            static fn (): mixed => self::connection()->fetchOne('SELECT key FROM tkt_ticket WHERE id = ?', [$ticketId->toString()]),
+        );
+        if (!\is_string($key)) {
+            throw new \LogicException('The tickets are made before each class.');
+        }
+
+        return $key;
     }
 
     private static function omar(): ActorContext

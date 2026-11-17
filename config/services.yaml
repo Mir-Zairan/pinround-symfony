@@ -331,7 +331,7 @@ when@test:
         test.ticketing_ticket_summary_commands:
             alias: App\Ticketing\Api\TicketSummaryCommands
             public: true
-        # Assist's intake check (P08.T7) is not built yet; the intake tests get both as it will.
+        # AiTaskAdmission inlines both for a draft report; the intake tests get them as it does.
         test.ticketing_draft_report_checks:
             alias: App\Ticketing\Api\DraftReportChecks
             public: true

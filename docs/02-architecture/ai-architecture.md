@@ -79,13 +79,14 @@ interface AiGateway
      *
      * @return AiResult answered, or rejected or failed when the provider was asked but gave nothing usable
      *
-     * @throws AiNotAllowed              when the org policy forbids this feature for this person or ticket; nothing is sent
+     * @throws AiNotAllowed              when the org policy forbids this feature for this person, ticket or draft report;
+     *                                   nothing is sent
      * @throws AiRateLimited             when the person made too many calls (AiCallLimit); nothing is sent
      * @throws AiUnavailable             when the organization's own provider key cannot be read; nothing is sent, and the
      *                                   operator's key is never used instead
      * @throws UnknownAiProvider         when the settings name a provider or model pinround cannot use; nothing is sent
      * @throws UnknownPromptTemplate     when the feature has no prompt template yet; nothing is sent
-     * @throws \InvalidArgumentException when the task names no ticket; nothing is sent
+     * @throws \InvalidArgumentException when a duplicate candidate cannot go into the prompt; nothing is sent
      */
     public function run(AiTask $task, ActorContext $viewer): AiResult;
 }
@@ -93,7 +94,9 @@ interface AiGateway
 
 The source of truth is the docblock of `src/Assist/Application/AiGateway.php`; keep this copy in step with it. A provider that fails, times out, answers blank or refuses with 429 does not throw out of `run()`: the gateway meters a `failed` row and returns a failed `AiResult` with the reason. A per-organization budget limit is not built yet.
 
-`AiTask` names the feature (`AiFeature`: `summary`, `explain` or `intake`; duplicates, risk and missing info come from the intake answer), the ticket id, and user input. `GuardedAiGateway` (`src/Assist/Application/Gateway`) is the implementation. In this order it checks the org policy for the viewer, reads the ticket as the viewer may see it, decides where the call goes, picks the provider and key, builds the prompt from a template (the `PromptRenderer` port, `PromptBuilder`), takes one call from the person's limit, calls the provider, checks the answer (the `AiAnswerCheck` port, `OutputValidator`, which throws `AiAnswerRejected`), meters every provider call, and returns a labeled result. A data answer (intake) the check refuses gets one retry with `AiAnswerCheck::retryInstruction()` added to the prompt; the retry is metered but not counted against the limit again. A refused text answer is not retried.
+`AiTask` names the feature (`AiFeature`: `summary`, `explain` or `intake`; duplicates, risk and missing info come from the intake answer), what it is about, and user input: `summary` and `explain` name a ticket id, `intake` names a draft report (`AiDraft`: the project id, title, detail and pin notes, with no ticket yet); any other combination, or a draft over 200 title characters, 50,000 detail characters, 100 pin notes or 1,000 characters in a note, is an `\InvalidArgumentException` before anything is read. `GuardedAiGateway` (`src/Assist/Application/Gateway`) is the implementation. In this order it checks the org policy for the viewer, reads the ticket as the viewer may see it, decides where the call goes, picks the provider and key, builds the prompt from a template (the `PromptRenderer` port, `PromptBuilder`), takes one call from the person's limit, calls the provider, checks the answer (the `AiAnswerCheck` port, `OutputValidator`, which throws `AiAnswerRejected`), meters every provider call, and returns a labeled result. A data answer (intake) the check refuses gets one retry with `AiAnswerCheck::retryInstruction()` added to the prompt; the retry is metered but not counted against the limit again. A refused text answer is not retried.
+
+- **A draft report goes through the same gateway** (`AiTaskAdmission`): AI on and the viewer allowed, then where it runs (the reporter wrote the draft, so it counts as visible and not team-only), then, on the cloud route, Ticketing's `DraftReportChecks::isSecuritySensitive` on the title, detail and pin notes: a match refuses with "This report mentions security, so it stays out of cloud AI." (`SecuritySensitiveDraftToCloud`) before any provider call, usage row or counted call, and the admin's `restricted_to_cloud` opt-in does not lift it (it covers team-only tickets only). Then it loads the duplicate candidates with `IntakeCandidateQueries::openCandidatesIn` under the reporter's `TicketVisibility`, with the team-only tickets only when `restricted_to_cloud` is on. "Title only" sends the draft's title alone. `refusalFor()` gives a page the same answer first.
 
 - **The ticket is read with the viewer's visibility predicate, not a Voter.** The gateway runs in a Messenger worker, which has no security token for a Voter to decide on. `TicketPageAskedTicketQueries` (the `AskedTicketQueries` port) gets the viewer's predicate from `Ticketing\Api\TicketVisibilities`, reads the ticket with `TicketQueries::pageOf` under it, and checks the predicate again on the page's own facts, as the ticket page does. That is the same predicate `TicketVoter` decides VIEW on ([ADR-0013](../03-adr/0013-authorization.md)). An unknown ticket, a hidden one and another organization's one all get the same `CannotSeeTicket` refusal.
 - **"Laptop first" goes to the cloud on the server path.** The server never sends a prompt to a laptop, so the gateway decides with the laptop not ready: "laptop first" falls through to the cloud rules (the team-only check included), and "laptop" refuses with the setup sheet's line (`LaptopNotReady`).
@@ -187,7 +190,7 @@ Intake suggestion schema (v1):
 }
 ```
 
-Duplicate keys returned by the model are checked against the candidate list we sent (`checkData`'s `$candidateKeys`). Unknown keys are dropped. `GuardedAiGateway` passes no candidates yet, so it would drop every key; the intake work (P08.T7) must pass them through.
+Duplicate keys returned by the model are checked against the candidate list we sent (`checkData`'s `$candidateKeys`). Unknown keys are dropped. `GuardedAiGateway` sends the candidates `AiTaskAdmission` loaded for the draft (at most 80, key and title) in the `<candidates>` block and passes their keys to `checkData` on the first call and on the retry, so a key the model names from the list survives and any other key is dropped.
 
 ## Summaries pipeline
 

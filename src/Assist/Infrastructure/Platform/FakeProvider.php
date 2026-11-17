@@ -15,19 +15,26 @@ use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * The provider of the test env (config/services.yaml, when@test): the same answer for the same feature, and no network.
- * Like SymfonyAiProvider it answers with the chosen model, refuses an empty organization key with AiUnavailable, and
- * throws AiRateLimited or AiUnavailable when a test arms a failure. It keeps every call, failed ones too, so a test can
- * check what was sent; reset() forgets them.
+ * A test can script the next answers instead. Like SymfonyAiProvider it answers with the chosen model, refuses an empty
+ * organization key with AiUnavailable, throws AiUnavailable for a blank answer, and throws AiRateLimited or
+ * AiUnavailable when a test arms a failure. It keeps every call, failed ones too, so a test can check what was sent;
+ * reset() forgets them and the script.
  */
 final class FakeProvider implements AiProvider, ResetInterface
 {
     public const string PROVIDER = 'fake';
+
+    /** SymfonyAiProvider's blank answer: only white space, separators and zero-width characters. */
+    private const string BLANK_PATTERN = '/\A[\s\p{Z}\x{200B}\x{FEFF}]*\z/u';
 
     /** @var list<array{prompt: AiPrompt, choice: ProviderChoice}> */
     private array $calls = [];
 
     /** @var list<AiRateLimited|AiUnavailable> */
     private array $armedFailures = [];
+
+    /** @var list<string> */
+    private array $scriptedTexts = [];
 
     public function complete(AiPrompt $prompt, ProviderChoice $choice): ProviderAnswer
     {
@@ -42,7 +49,10 @@ final class FakeProvider implements AiProvider, ResetInterface
             throw $failure;
         }
 
-        $text = self::fixedTextFor($prompt->feature);
+        $text = array_shift($this->scriptedTexts) ?? self::fixedTextFor($prompt->feature);
+        if (1 === preg_match(self::BLANK_PATTERN, $text)) {
+            throw AiUnavailable::emptyAnswer($choice->provider->value);
+        }
 
         return new ProviderAnswer(
             $text,
@@ -63,6 +73,15 @@ final class FakeProvider implements AiProvider, ResetInterface
     }
 
     /**
+     * The next calls that answer get these texts, in order, whatever the feature; after them the fixed text again. A call
+     * that throws an armed failure or refuses the key uses none of them.
+     */
+    public function answerNextCallsWith(string ...$texts): void
+    {
+        $this->scriptedTexts = [...$this->scriptedTexts, ...array_values($texts)];
+    }
+
+    /**
      * @return list<array{prompt: AiPrompt, choice: ProviderChoice}> oldest first
      */
     public function calls(): array
@@ -74,6 +93,7 @@ final class FakeProvider implements AiProvider, ResetInterface
     {
         $this->calls = [];
         $this->armedFailures = [];
+        $this->scriptedTexts = [];
     }
 
     public static function fixedTextFor(AiFeature $feature): string

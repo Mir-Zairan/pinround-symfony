@@ -118,4 +118,78 @@ final class FakeProviderTest extends TestCase
         self::assertSame(FakeProvider::fixedTextFor(AiFeature::Summary), $answer->text);
         self::assertCount(1, $provider->calls());
     }
+
+    #[Test]
+    public function scriptedAnswersComeInOrderWhateverTheFeatureThenTheFixedTextAgain(): void
+    {
+        $provider = new FakeProvider();
+        $choice = ProviderChoice::fromSettings('ollama', 'llama3.2:3b');
+        $intake = new AiPrompt(AiFeature::Intake, 'Suggest fields.', 'The checkout fails.');
+        $provider->answerNextCallsWith('{"first": 1}', 'second answer');
+        $provider->answerNextCallsWith('third answer');
+
+        $texts = array_map(
+            static fn (AiPrompt $prompt): string => $provider->complete($prompt, $choice)->text,
+            [$intake, new AiPrompt(AiFeature::Summary, 'Summarize.', 'The checkout fails.'), $intake, $intake],
+        );
+
+        self::assertSame(['{"first": 1}', 'second answer', 'third answer', FakeProvider::fixedTextFor(AiFeature::Intake)], $texts);
+        self::assertCount(4, $provider->calls());
+    }
+
+    #[Test]
+    public function aScriptedAnswerAnswersLikeTheFixedOneWithTheChosenModelAndTokens(): void
+    {
+        $provider = new FakeProvider();
+        $provider->answerNextCallsWith('Twelve bytes');
+
+        $answer = $provider->complete(new AiPrompt(AiFeature::Summary, 'Summarize.', 'Short.'), ProviderChoice::fromSettings('ollama', 'llama3.2:3b'));
+
+        self::assertSame(['Twelve bytes', 'llama3.2:3b', 'fake', 4, 3], [$answer->text, $answer->model, $answer->provider, $answer->inputTokens, $answer->outputTokens]);
+    }
+
+    #[Test]
+    public function anArmedFailureLeavesTheScriptedAnswerForTheNextCall(): void
+    {
+        $provider = new FakeProvider();
+        $choice = ProviderChoice::fromSettings(null);
+        $prompt = new AiPrompt(AiFeature::Summary, 'Summarize.', 'Text.');
+        $provider->answerNextCallsWith('The scripted summary.');
+        $provider->failNextCallWith(AiUnavailable::notConfigured('fake'));
+
+        try {
+            $provider->complete($prompt, $choice);
+            self::fail('The armed failure must be thrown first.');
+        } catch (AiUnavailable $unavailable) {
+            self::assertSame('The AI provider fake has no key or URL set.', $unavailable->getMessage());
+        }
+
+        self::assertSame('The scripted summary.', $provider->complete($prompt, $choice)->text);
+    }
+
+    #[Test]
+    public function aBlankScriptedAnswerFailsAsTheRealProviderFailsOnABlankAnswer(): void
+    {
+        $provider = new FakeProvider();
+        $provider->answerNextCallsWith(" \u{200B}\n");
+
+        try {
+            $provider->complete(new AiPrompt(AiFeature::Summary, 'Summarize.', 'Text.'), ProviderChoice::fromSettings('anthropic'));
+            self::fail('A blank answer must fail.');
+        } catch (AiUnavailable $unavailable) {
+            self::assertSame(['anthropic', 'The AI provider anthropic answered with no text.'], [$unavailable->provider, $unavailable->getMessage()]);
+        }
+    }
+
+    #[Test]
+    public function resetForgetsTheScriptedAnswers(): void
+    {
+        $provider = new FakeProvider();
+        $provider->answerNextCallsWith('A scripted summary.');
+
+        $provider->reset();
+
+        $answer = $provider->complete(new AiPrompt(AiFeature::Summary, 'Summarize.', 'Text.'), ProviderChoice::fromSettings(null));
+        self::assertSame(FakeProvider::fixedTextFor(AiFeature::Summary), $answer->text);
+    }
 }
