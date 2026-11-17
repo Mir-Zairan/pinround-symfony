@@ -6,9 +6,11 @@ namespace App\Review\Infrastructure\Console;
 
 use App\Media\Api\ReadyPictureSeeds;
 use App\Organization\Api\DemoOrganizations;
+use App\Review\Api\ChecklistCommands;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
+use App\Review\Api\ScreenshotWithPins;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
@@ -36,7 +38,9 @@ use Symfony\Component\Uid\Uuid;
  * AREA_NAMES, in order: each area's "before" is the round 1 picture at its position and its "after" a ready picture of
  * its own. No command makes a review round yet, so round 2 is written as rvw_round, rvw_screenshot and rvw_area rows.
  * For the full-screen review's layout checks, LONG_NOTE_OPTION gives the first pin a long note and PENDING_AFTER_OPTION
- * leaves one area's "after" picture pending.
+ * leaves one area's "after" picture pending. For the checklist card's checks, CHECKLIST_OPTION first gives the ticket the
+ * reporter's Round 0 with one ready picture and REPORT_PIN_NOTES, and the checklist round the app makes from it, so the
+ * draft and review rounds come after it.
  */
 // Never registered in prod, so no console call there can fake processed pictures or a round.
 #[AsCommand(name: 'app:e2e:seed-review-round', description: 'Give a ticket with no rounds a round 1 with pins and a review round 2 with two screen areas (dev and test only)')]
@@ -50,8 +54,12 @@ final class SeedReviewRoundCommand extends Command
     /** The pins of round 1's first picture, by number: the earlier pins of round 2's first area. */
     public const array PIN_NOTES = ['The total shows the old price.', 'The badge covers the basket icon.'];
 
+    /** The pins of Round 0's picture with CHECKLIST_OPTION, by number: the checklist's items. */
+    public const array REPORT_PIN_NOTES = ['The coupon field takes no input.', 'The delivery date shows yesterday.'];
+
     public const string PENDING_AFTER_OPTION = 'pending-after';
     public const string LONG_NOTE_OPTION = 'long-note';
+    public const string CHECKLIST_OPTION = 'checklist';
 
     /** The first pin's note with LONG_NOTE_OPTION: long enough to wrap over many lines on a narrow screen. */
     public const string LONG_PIN_NOTE = 'The total shows the old price after a coupon is removed. The line under it still lists the discount, '
@@ -66,6 +74,7 @@ final class SeedReviewRoundCommand extends Command
         private readonly TicketKeyQueries $ticketKeyQueries,
         private readonly TicketTurnQueries $ticketTurnQueries,
         private readonly RoundCommands $roundCommands,
+        private readonly ChecklistCommands $checklistCommands,
         private readonly ReadyPictureSeeds $readyPictureSeeds,
         private readonly Connection $connection,
         private readonly EntityManagerInterface $entityManager,
@@ -80,7 +89,8 @@ final class SeedReviewRoundCommand extends Command
             ->addArgument('organization', InputArgument::REQUIRED, 'The slug of the organization, for example acme-foods')
             ->addArgument('ticket', InputArgument::REQUIRED, 'The ticket key, for example SHOP-12; it must be given to someone and have no rounds')
             ->addOption(self::PENDING_AFTER_OPTION, null, InputOption::VALUE_REQUIRED, 'The position of the screen area whose "after" picture stays pending (still processing), from 0')
-            ->addOption(self::LONG_NOTE_OPTION, null, InputOption::VALUE_NONE, 'Give the first pin LONG_PIN_NOTE in place of its short note');
+            ->addOption(self::LONG_NOTE_OPTION, null, InputOption::VALUE_NONE, 'Give the first pin LONG_PIN_NOTE in place of its short note')
+            ->addOption(self::CHECKLIST_OPTION, null, InputOption::VALUE_NONE, 'First give the ticket a Round 0 report with two pins and its checklist round, both items open');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -99,6 +109,7 @@ final class SeedReviewRoundCommand extends Command
             $pendingAfterPosition = (int) $pendingAfter;
         }
         $pinNotes = true === $input->getOption(self::LONG_NOTE_OPTION) ? [self::LONG_PIN_NOTE, ...\array_slice(self::PIN_NOTES, 1)] : self::PIN_NOTES;
+        $withChecklist = true === $input->getOption(self::CHECKLIST_OPTION);
 
         $organizationId = $this->demoOrganizations->idBySlug($slug);
         if (null === $organizationId) {
@@ -111,7 +122,7 @@ final class SeedReviewRoundCommand extends Command
         $this->entityManager->clear();
         $this->tenantContext->set($organizationId);
         try {
-            $reviewNumber = $this->transactions->run(function () use ($organizationId, $key, $pinNotes, $pendingAfterPosition): int {
+            [$reviewNumber, $checklistNumber] = $this->transactions->run(function () use ($organizationId, $key, $pinNotes, $pendingAfterPosition, $withChecklist): array {
                 $ticketId = $this->ticketKeyQueries->idOf($key) ?? throw new TicketNotFound('That ticket does not exist.');
                 $facts = $this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.');
                 $owner = $facts->assigneeId ?? throw new RoundRefused('That ticket is not given to anyone, so there is no one to own the rounds.');
@@ -119,11 +130,12 @@ final class SeedReviewRoundCommand extends Command
                     throw new RoundRefused('That ticket has rounds already; seed the review round on a new ticket.');
                 }
                 $now = $this->clock->now();
+                $checklistNumber = $withChecklist ? $this->addReportWithChecklist($organizationId, $ticketId, $facts->reporterId, $now) : null;
                 [$earlierNumber, $earlierScreenshotIds] = $this->shareRoundWithPins($organizationId, $ticketId, $owner, $pinNotes, $now);
                 $reviewNumber = $earlierNumber + 1;
                 $this->addReviewRound($organizationId, $ticketId, $owner, $reviewNumber, $earlierScreenshotIds, $pendingAfterPosition, $now);
 
-                return $reviewNumber;
+                return [$reviewNumber, $checklistNumber];
             });
         } catch (TicketNotFound|RoundRefused $refused) {
             $output->writeln(\sprintf('<error>%s</error>', $refused->getMessage()));
@@ -139,8 +151,32 @@ final class SeedReviewRoundCommand extends Command
         if (null !== $pendingAfterPosition) {
             $output->writeln(\sprintf('The "after" picture of %s is still processing.', self::AREA_NAMES[$pendingAfterPosition]));
         }
+        if (null !== $checklistNumber) {
+            $output->writeln(\sprintf('Checklist round %d on %s has %d open items.', $checklistNumber, $key, \count(self::REPORT_PIN_NOTES)));
+        }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * @return int the checklist round's number
+     */
+    private function addReportWithChecklist(OrganizationId $organizationId, TicketId $ticketId, UserId $reporter, \DateTimeImmutable $now): int
+    {
+        $pins = array_map(
+            static fn (int $index, string $note): PlacedPin => new PlacedPin(25.0 + 40.0 * $index, 30.0 + 20.0 * $index, $note),
+            array_keys(self::REPORT_PIN_NOTES),
+            self::REPORT_PIN_NOTES,
+        );
+        $this->roundCommands->createReport($ticketId, [new ScreenshotWithPins($this->readyPictureSeeds->add($organizationId, $reporter, $now), 'Checkout page', null, $pins)], $reporter, $now);
+        // createReport makes the checklist itself for a ticket in To do; this makes it in any other step, as Start work does.
+        $this->checklistCommands->createFromReport($ticketId, $now);
+        $number = $this->connection->fetchOne(
+            "SELECT number FROM rvw_round WHERE organization_id = ? AND ticket_id = ? AND kind = 'checklist'",
+            [$organizationId->toString(), $ticketId->toString()],
+        );
+
+        return \is_int($number) ? $number : throw new \LogicException('A ticket with a new report and no other rounds gets a checklist round.');
     }
 
     private function hasRounds(OrganizationId $organizationId, TicketId $ticketId): bool

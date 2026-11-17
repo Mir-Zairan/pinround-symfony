@@ -12,6 +12,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketHistory;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -313,19 +314,50 @@ final class VerdictControllerTest extends WebTestCase
     }
 
     #[Test]
-    public function noVerdictChangesTheTicketsStepOrVersion(): void
+    public function noVerdictMovesTheTicketOrGivesItToSomeoneElseAndTheNextStepIsOnlyALink(): void
     {
+        $otherTicketId = $this->addTicket('SHOP-2', number: 2);
+        $this->addMovedEvent($otherTicketId);
+        self::assertSame(1, $this->movedEventCountOf($otherTicketId), 'The count reads the moves of the ticket it is asked about.');
         $ticketBefore = $this->ticketRow();
         $this->logIn($this->client, $this->people['Mia']);
+        $fullScreenAt = static fn (int $pinPosition): array => [
+            VerdictController::FOCUS_SIDE_FIELD => 'after',
+            VerdictController::FOCUS_AREA_FIELD => '0',
+            VerdictController::FOCUS_PIN_FIELD => (string) $pinPosition,
+        ];
+        $undoUrl = fn (int $number): string => '/t/SHOP-1/rounds/2/pins/'.$this->pins[$number].'/undo';
+        $saves = [
+            'Fixed on the round page' => [$this->pinUrl(1), [VerdictController::VERDICT_FIELD => 'fixed'], 200],
+            'Still wrong on the round page' => [$this->pinUrl(2), [VerdictController::VERDICT_FIELD => 'still_wrong'], 200],
+            'Undo on the round page' => [$undoUrl(1), [], 200],
+            'Fixed in full screen' => [$this->pinUrl(1), [VerdictController::VERDICT_FIELD => 'fixed', ...$fullScreenAt(1)], 303],
+            'Still wrong in full screen' => [$this->pinUrl(3), [VerdictController::VERDICT_FIELD => 'still_wrong', ...$fullScreenAt(3)], 303],
+            'Undo in full screen' => [$undoUrl(2), $fullScreenAt(2), 303],
+            'Question on Per product' => [$this->areaUrl($this->perProduct), [VerdictController::VERDICT_FIELD => 'question'], 200],
+            'Needs fix on Per product' => [$this->areaUrl($this->perProduct), [VerdictController::VERDICT_FIELD => 'needs_fix'], 200],
+            'Question on Totals' => [$this->areaUrl($this->totals), [VerdictController::VERDICT_FIELD => 'question'], 200],
+            'Needs fix on Totals' => [$this->areaUrl($this->totals), [VerdictController::VERDICT_FIELD => 'needs_fix'], 200],
+            'Pass on Per product' => [$this->areaUrl($this->perProduct), [VerdictController::VERDICT_FIELD => 'pass'], 200],
+            'Pass on Totals' => [$this->areaUrl($this->totals), [VerdictController::VERDICT_FIELD => 'pass'], 200],
+        ];
 
-        $this->postAsTurbo($this->pinUrl(1), [VerdictController::VERDICT_FIELD => 'fixed']);
-        $this->postAsTurbo($this->pinUrl(2), [VerdictController::VERDICT_FIELD => 'still_wrong']);
-        $this->postAsTurbo('/t/SHOP-1/rounds/2/pins/'.$this->pins[2].'/undo', []);
-        $this->postAsTurbo($this->areaUrl($this->perProduct), [VerdictController::VERDICT_FIELD => 'pass']);
-        $this->postAsTurbo($this->areaUrl($this->totals), [VerdictController::VERDICT_FIELD => 'pass']);
+        foreach ($saves as $save => [$url, $fields, $status]) {
+            $headers = 200 === $status ? self::TURBO_FORM_HEADERS : [];
+            $this->client->request('POST', $url, [VerdictController::CSRF_FIELD => $this->verdictToken(), ...$fields], [], $headers);
 
-        self::assertResponseStatusCodeSame(200);
-        self::assertSame([$this->perProduct => ['pass', null, $this->people['Mia']->id()->toString()], $this->totals => ['pass', null, $this->people['Mia']->id()->toString()]], $this->areaVerdicts());
+            self::assertResponseStatusCodeSame($status, $save.' is saved.');
+            self::assertSame($ticketBefore, $this->ticketRow(), $save.' leaves the ticket\'s step, version and assignee as they were.');
+            self::assertSame(0, $this->movedEventCountOf($this->ticketId), $save.' records no move.');
+        }
+
+        self::assertSame([1 => 'fixed', 2 => null, 3 => 'still_wrong', 4 => null], $this->pinVerdicts());
+        $miaId = $this->people['Mia']->id()->toString();
+        self::assertSame([$this->perProduct => ['pass', null, $miaId], $this->totals => ['pass', null, $miaId]], $this->areaVerdicts());
+        $offer = $this->client->request('GET', self::ROUND_PAGE)->filter('.round-panel__next');
+        self::assertSame('Pass it on SHOP-1', $offer->filter('a')->text());
+        self::assertSame('/t/SHOP-1#ticket-next-step', $offer->filter('a')->attr('href'));
+        self::assertCount(0, $offer->filter('form, button'), 'The offer only leads to the ticket\'s Your next step box, where a person moves it.');
         self::assertSame($ticketBefore, $this->ticketRow());
     }
 
@@ -599,15 +631,36 @@ final class VerdictControllerTest extends WebTestCase
         return $verdicts;
     }
 
+    private function addMovedEvent(string $ticketId): void
+    {
+        $parameters = [Uuid::v7()->toRfc4122(), $this->acmeFoods->toString(), $ticketId, $this->people['Lena']->id()->toString(), DbalTicketHistory::MOVED, $this->stepId, $this->stepId];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_ticket_event (id, organization_id, ticket_id, actor_id, type, from_step, to_step, payload, at) VALUES (?, ?, ?, ?, ?, ?, ?, '{}', TIMESTAMPTZ '2026-11-06 10:00:00+00')",
+            $parameters,
+        ));
+    }
+
+    private function movedEventCountOf(string $ticketId): int
+    {
+        $count = null;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($ticketId, &$count): int {
+            $count = $migrator->fetchOne('SELECT count(*) FROM tkt_ticket_event WHERE ticket_id = ? AND type = ?', [$ticketId, DbalTicketHistory::MOVED]);
+
+            return 0;
+        });
+
+        return \is_int($count) ? $count : throw new \LogicException('A count is a whole number.');
+    }
+
     /**
-     * @return array<string, mixed> the ticket's step and version as stored
+     * @return array<string, mixed> the ticket's step, version and assignee as stored
      */
     private function ticketRow(): array
     {
         $row = [];
         $ticketId = $this->ticketId;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($ticketId, &$row): int {
-            $row = $migrator->fetchAssociative('SELECT step_id, version, updated_at FROM tkt_ticket WHERE id = ?', [$ticketId]);
+            $row = $migrator->fetchAssociative('SELECT step_id, version, assignee_id, updated_at FROM tkt_ticket WHERE id = ?', [$ticketId]);
             $row = false === $row ? [] : $row;
 
             return 0;

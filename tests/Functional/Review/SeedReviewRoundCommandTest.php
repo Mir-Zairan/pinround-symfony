@@ -33,7 +33,7 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
     use SeedsTicketRounds;
 
     private const string COMMAND = 'app:e2e:seed-review-round';
-    private const array NO_ROWS = ['rounds' => 0, 'media' => 0, 'screenshots' => 0, 'pins' => 0, 'areas' => 0];
+    private const array NO_ROWS = ['rounds' => 0, 'media' => 0, 'screenshots' => 0, 'pins' => 0, 'areas' => 0, 'items' => 0];
 
     /** Read by SeedsTicketRounds. */
     protected string $shopProject;
@@ -128,7 +128,7 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
             $this->areaRowsOf(self::idOf($rounds[1])),
         );
         self::assertSame(['ready'], $this->mediaStatuses());
-        self::assertSame(['rounds' => 2, 'media' => 4, 'screenshots' => 4, 'pins' => 2, 'areas' => 2], $this->rowCounts());
+        self::assertSame(['rounds' => 2, 'media' => 4, 'screenshots' => 4, 'pins' => 2, 'areas' => 2, 'items' => 0], $this->rowCounts());
     }
 
     public function testItGivesTheFirstPinTheLongNoteAndLeavesTheNamedAreasAfterPicturePending(): void
@@ -147,7 +147,53 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
             array_column($this->pinRowsOf(self::idOf($rounds[0])), 'note'),
         );
         self::assertSame([[0, 'ready'], [1, 'pending']], $this->afterPictureStatusesOf(self::idOf($rounds[1])));
-        self::assertSame(['rounds' => 2, 'media' => 4, 'screenshots' => 4, 'pins' => 2, 'areas' => 2], $this->rowCounts());
+        self::assertSame(['rounds' => 2, 'media' => 4, 'screenshots' => 4, 'pins' => 2, 'areas' => 2, 'items' => 0], $this->rowCounts());
+    }
+
+    /**
+     * @return iterable<string, array{bool}>
+     */
+    public static function ticketSteps(): iterable
+    {
+        yield 'in To do, where the report makes the checklist' => [false];
+        yield 'in progress, where Start work made it' => [true];
+    }
+
+    #[DataProvider('ticketSteps')]
+    public function testWithTheChecklistOptionItFirstGivesTheTicketTheReportersRoundZeroAndItsChecklistWithEveryItemOpen(bool $isInProgress): void
+    {
+        $ticketId = $this->seedAssignedTicket();
+        if ($isInProgress) {
+            $stepId = $this->stepId;
+            $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "UPDATE wf_step SET name = 'In progress', grp = 'doing', core_code = 'progress' WHERE id = ?",
+                [$stepId],
+            ));
+        }
+        $tester = $this->commandTester();
+
+        $exitCode = $tester->execute(['organization' => 'acme-foods', 'ticket' => 'SHOP-1', '--checklist' => true]);
+
+        self::assertSame(Command::SUCCESS, $exitCode, $tester->getDisplay());
+        self::assertStringContainsString('Round 3 on SHOP-1 has 2 screen areas with ready pictures.', $tester->getDisplay());
+        self::assertStringContainsString('Checklist round 1 on SHOP-1 has 2 open items.', $tester->getDisplay());
+        $rounds = $this->roundRowsOf($ticketId);
+        usort($rounds, static fn (array $one, array $other): int => $one['number'] <=> $other['number']);
+        $omar = $this->people['Omar']->id()->toString();
+        self::assertSame(
+            [['report', 0, $this->people['Mia']->id()->toString()], ['checklist', 1, $this->people['Mia']->id()->toString()], ['draft', 2, $omar], ['review', 3, $omar]],
+            array_map(static fn (array $round): array => [$round['kind'], $round['number'], $round['owner_id']], $rounds),
+            'Mia reported SHOP-1, so she owns Round 0 and the checklist made from it.',
+        );
+        $reportPins = $this->pinRowsOf(self::idOf($rounds[0]));
+        self::assertSame(SeedReviewRoundCommand::REPORT_PIN_NOTES, array_column($reportPins, 'note'));
+        self::assertSame(
+            [['open', 1, SeedReviewRoundCommand::REPORT_PIN_NOTES[0]], ['open', 2, SeedReviewRoundCommand::REPORT_PIN_NOTES[1]]],
+            $this->checkItemsOf(self::idOf($rounds[1])),
+        );
+        self::assertSame(SeedReviewRoundCommand::PIN_NOTES, array_column($this->pinRowsOf(self::idOf($rounds[2])), 'note'), 'The review round still compares the draft round\'s pins.');
+        self::assertSame(['ready'], $this->mediaStatuses());
+        self::assertSame(['rounds' => 4, 'media' => 5, 'screenshots' => 5, 'pins' => 4, 'areas' => 2, 'items' => 2], $this->rowCounts());
     }
 
     /**
@@ -219,6 +265,24 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
     }
 
     /**
+     * @return list<array{mixed, mixed, mixed}> the state of each item of the checklist round, with its pin's number and note, by number
+     */
+    private function checkItemsOf(string $roundId): array
+    {
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($roundId, &$rows): int {
+            $rows = $migrator->fetchAllNumeric(
+                'SELECT i.state, p.number, p.note FROM rvw_check_item i JOIN rvw_pin p ON p.id = i.pin_id WHERE i.round_id = ? ORDER BY p.number',
+                [$roundId],
+            );
+
+            return \count($rows);
+        });
+
+        return array_map(static fn (array $row): array => [$row[0], $row[1], $row[2]], $rows);
+    }
+
+    /**
      * @return list<array{mixed, mixed}> the position of each area of the round and the status of its after picture
      */
     private function afterPictureStatusesOf(string $roundId): array
@@ -252,14 +316,17 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
     }
 
     /**
-     * @return array{rounds: int, media: int, screenshots: int, pins: int, areas: int} the rows of Acme Foods
+     * @return array{rounds: int, media: int, screenshots: int, pins: int, areas: int, items: int} the rows of Acme Foods
      */
     private function rowCounts(): array
     {
         $counts = self::NO_ROWS;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use (&$counts): int {
             $count = static fn (string $table): int => \is_int($rows = $migrator->fetchOne('SELECT count(*) FROM '.$table)) ? $rows : throw new \LogicException('A count is a whole number.');
-            $counts = ['rounds' => $count('rvw_round'), 'media' => $count('med_object'), 'screenshots' => $count('rvw_screenshot'), 'pins' => $count('rvw_pin'), 'areas' => $count('rvw_area')];
+            $counts = [
+                'rounds' => $count('rvw_round'), 'media' => $count('med_object'), 'screenshots' => $count('rvw_screenshot'),
+                'pins' => $count('rvw_pin'), 'areas' => $count('rvw_area'), 'items' => $count('rvw_check_item'),
+            ];
 
             return 0;
         });
