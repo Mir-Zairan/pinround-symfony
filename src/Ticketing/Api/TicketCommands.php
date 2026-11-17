@@ -50,30 +50,42 @@ interface TicketCommands
      * "moved" history row with the verb, its turn row and a TicketMoved event. A ticket moved into Needs input waits on
      * its reporter.
      *
-     * @param string $key             the ticket's key, for example "SHOP-12"
-     * @param string $verb            a Workflow verb's code, for example "start_work"
-     * @param int    $expectedVersion the ticket's version the caller read
+     * When the actor has an undecided draft round on the ticket with a screenshot (ShareDraftQuestion), the move then
+     * shares it or keeps it private as $draftChoice says, in the same transaction; nobody else's draft is touched. A
+     * caller that does not ask the person, such as an API client, keeps the default: private (ADR-0017).
      *
-     * @return int how many of the actor's open pings on the ticket the move cleared, in the same transaction (FR-PNG-05):
-     *             0 when the organization's auto-clear is off or none were open
+     * @param string           $key             the ticket's key, for example "SHOP-12"
+     * @param string           $verb            a Workflow verb's code, for example "start_work"
+     * @param int              $expectedVersion the ticket's version the caller read
+     * @param DraftChoice|null $draftChoice     null when the person has not chosen yet, so an undecided draft stops
+     *                                          the move with DraftDecisionNeeded
+     *
+     * @return MoveResult the actor's open pings on the ticket the move cleared in the same transaction (FR-PNG-05; 0 when
+     *                    the organization's auto-clear is off or none were open), and the draft round's outcome: shared
+     *                    with the number it got, kept private, or none when there was no undecided draft
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it; nothing is saved
      * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first;
-     *                                nothing of the move is saved and the ticket is not reloaded
+     *                                nothing of the move is saved and the ticket is not reloaded. Also when another
+     *                                request changed the actor's draft while the move shared it or kept it private: the
+     *                                move is written by then, so the caller rolls back its whole transaction
      * @throws MoveRefused            when the ticket has no team, the policy refuses the verb to this person (with the
      *                                rule's note when one explains it), the target is not a step of the team, is the
      *                                ticket's step now, the verb is give_it_to (giveTo takes it), or it leads to Needs
      *                                input and the reporter is no member of the organization; nothing is saved
+     * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft with a screenshot on
+     *                                the ticket, after every check above but the save; nothing is saved
      * @throws \LogicException        when no transaction is open
      */
-    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int;
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult;
 
     /**
      * "Give it to…", the give_it_to verb with its person: makes them the assignee, moving a Backlog ticket to To do in
      * the same save (a ticket in To do stays there), and writes the "moved" history row with the payload
      * {"verb": "give_it_to", "assignee_id": <the person>}, the turn row, TicketMoved (only for a ticket that left
      * Backlog) and TicketAssigned. A new assignee clears the stored reviewer, and the stored tester when it is the new
-     * assignee. In To do only the lead gives an assigned ticket to someone else (Workflow's policy).
+     * assignee. In To do only the lead gives an assigned ticket to someone else (Workflow's policy). It never asks about
+     * or decides the actor's draft round: that question belongs to moves on to another step (ADR-0017, P05.T9).
      *
      * @param UserId $assignee the person to give it to: the lead or a member of the ticket's team, not a viewer
      *
@@ -92,19 +104,22 @@ interface TicketCommands
     /**
      * The lead's "Move to another step…": moves the ticket to a step of its team without a verb, and writes the same rows
      * and event as move, with no verb. In Needs input the ticket waits on the person or label given, else its reporter.
+     * It shares or keeps private the actor's undecided draft round as move does.
      *
-     * @param string $stepId the uuid of the step to move to
+     * @param string           $stepId      the uuid of the step to move to
+     * @param DraftChoice|null $draftChoice as move takes it
      *
-     * @return int how many of the actor's open pings on the ticket the move cleared, as move does
+     * @return MoveResult as move returns it
      *
      * @throws TicketNotFound         as move does
-     * @throws TicketChangedMeanwhile as move does
+     * @throws TicketChangedMeanwhile as move does, also for the actor's draft
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team or is its step now, the
      *                                policy refuses the move (with the rule's note when one explains it), someone to
      *                                wait on is given for a step other than Needs input, or the person to wait on (the
      *                                reporter when nobody is named) is no member of the organization; nothing is saved
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is blank, over 100
      *                                characters or not one line; nothing is saved
+     * @throws DraftDecisionNeeded    as move does, after every check above but the save; nothing is saved
      * @throws \LogicException        when no transaction is open
      */
     public function moveTo(
@@ -116,5 +131,6 @@ interface TicketCommands
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
-    ): int;
+        ?DraftChoice $draftChoice = DraftChoice::Keep,
+    ): MoveResult;
 }

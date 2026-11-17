@@ -13,9 +13,13 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\DraftDecisionNeeded;
 use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\Event\TicketMoved;
 use App\Ticketing\Api\MoveRefused;
+use App\Ticketing\Api\MoveResult;
+use App\Ticketing\Api\ShareDraftQuestion;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketNotFound;
@@ -69,19 +73,23 @@ final readonly class MoveTicket
         private TicketEvents $ticketEvents,
         private TurnPeopleChoice $turnPeopleChoice,
         private PingClearing $pingClearing,
+        private ShareDraftQuestion $shareDraftQuestion,
     ) {
     }
 
     /**
-     * @return int how many of the actor's pings on the ticket the move cleared
+     * @return MoveResult the pings the move cleared and what it did with the actor's draft round
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
-     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
+     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first,
+     *                                or the actor's draft first; in that last case the move is written, so the caller
+     *                                rolls back
      * @throws MoveRefused            when the ticket has no team, the policy refuses the verb, the verb is give_it_to
      *                                (which {@see self::giveTo} takes), or it leads to Needs input and the reporter is no
      *                                member of the organization
+     * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft on the ticket
      */
-    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
     {
         $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
         $teamId = $ticket->team() ?? throw new MoveRefused(null);
@@ -92,7 +100,7 @@ final readonly class MoveTicket
         $allowed = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, $verb);
         $waitingOn = self::NEEDS_INPUT === $allowed->target->coreCode() ? $this->waitingOnReporter($ticket) : null;
 
-        return $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts);
+        return $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts, $draftChoice);
     }
 
     /**
@@ -167,16 +175,19 @@ final readonly class MoveTicket
     }
 
     /**
-     * @return int how many of the actor's pings on the ticket the move cleared
+     * @return MoveResult the pings the move cleared and what it did with the actor's draft round
      *
      * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
-     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
+     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first,
+     *                                or the actor's draft first; in that last case the move is written, so the caller
+     *                                rolls back
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team, is its step now,
      *                                the policy refuses it, a waiting-on is given for a step other than Needs input,
      *                                or the person to wait on (the reporter when nobody is named) is no member of the
      *                                organization
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is not one line of at
      *                                most 100 characters
+     * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft on the ticket
      */
     public function moveTo(
         OrganizationId $organizationId,
@@ -187,7 +198,8 @@ final readonly class MoveTicket
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
-    ): int {
+        ?DraftChoice $draftChoice = DraftChoice::Keep,
+    ): MoveResult {
         if (null !== $waitingOnUserId && null !== $waitingOnLabel) {
             throw new WaitingOnRefused('A ticket waits on a person or a label, not both.');
         }
@@ -219,7 +231,7 @@ final readonly class MoveTicket
         };
         $waitingTurns = $this->waitingTurnsOf($before);
 
-        return $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns));
+        return $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns), $draftChoice);
     }
 
     /**
@@ -305,12 +317,16 @@ final readonly class MoveTicket
 
     /**
      * The reviewer or tester is stored on entering Code review or Testing (FR-WF-14), chosen from the same loads the
-     * turn refresh gets, so the stored person, the turn row and who may approve are one person.
+     * turn refresh gets, so the stored person, the turn row and who may approve are one person. Both moves change the
+     * step, so both ask about the actor's undecided draft here, after every check of the move but the save, and decide
+     * it after the save (ADR-0017, hand-off); a give keeps its step or only leaves Backlog, and does not ask.
      *
      * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
      * @param TeamFacts                         $teamFacts    the team facts built from $before and $waitingTurns
      *
-     * @return int how many of the actor's pings on the ticket the move cleared
+     * @return MoveResult the pings the move cleared and what it did with the actor's draft round
+     *
+     * @throws DraftDecisionNeeded when $draftChoice is null and the actor has an undecided draft on the ticket
      */
     private function moveAndRecord(
         Ticket $ticket,
@@ -323,10 +339,20 @@ final readonly class MoveTicket
         \DateTimeImmutable $at,
         array $waitingTurns,
         TeamFacts $teamFacts,
-    ): int {
+        ?DraftChoice $draftChoice,
+    ): MoveResult {
         $fromStepId = $ticket->stepId();
         if ($target->id() === $fromStepId) {
             throw new MoveRefused(null);
+        }
+        if (null === $draftChoice) {
+            $draft = $this->shareDraftQuestion->undecidedDraftOf($ticket->id(), $actor);
+            if (null !== $draft) {
+                throw new DraftDecisionNeeded($draft);
+            }
+            $draftId = null;
+        } else {
+            $draftId = $this->shareDraftQuestion->undecidedDraftIdOf($ticket->id(), $actor);
         }
         $ticket->move(
             $target->id(),
@@ -338,7 +364,16 @@ final readonly class MoveTicket
             self::TEST === $target->coreCode() ? $this->turnPeopleChoice->testerToStore($teamFacts) : null,
         );
 
-        return $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
+        $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
+        if (null === $draftId) {
+            return new MoveResult($clearedPingCount);
+        }
+        if (DraftChoice::Share === $draftChoice) {
+            return new MoveResult($clearedPingCount, DraftChoice::Share, $this->shareDraftQuestion->share($draftId, $actor, $at));
+        }
+        $this->shareDraftQuestion->keepPrivate($draftId, $actor, $at);
+
+        return new MoveResult($clearedPingCount, DraftChoice::Keep);
     }
 
     /**

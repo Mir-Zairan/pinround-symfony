@@ -9,8 +9,43 @@ import { Controller } from '@hotwired/stimulus';
 // The composer writes a comment or asks a question: each kind chip and person chip carries the form's action, texts
 // and asked person for its choice. A question's answer redirects to the whole page, as asking pauses the ticket and
 // changes its header. ask-choices, on the same element, keeps Ask a question and the people in step with the list.
+// The review round page's "Ask <lead>" link opens the thread page with ?ask=<user id> (Review's RoundPanel::ASK_PARAMETER).
+const ASK_PARAMETER = 'ask';
+
 export default class extends Controller {
   static targets = ['body', 'submit', 'messages', 'label', 'note', 'commentChip', 'askChip', 'people', 'person', 'askedUser'];
+
+  connect() {
+    this.askThePersonInTheAddress();
+  }
+
+  // Starts a question to the person the address names, while they may be asked; otherwise the composer stays a comment.
+  askThePersonInTheAddress() {
+    const askedUserId = new URLSearchParams(window.location.search).get(ASK_PARAMETER);
+    if (askedUserId === null || !this.hasAskChipTarget || this.askChipTarget.disabled) {
+      return;
+    }
+    const person = this.personTargets.find((each) => each.dataset.userId === askedUserId);
+    if (person) {
+      this.ask(person);
+      this.focusBodyOnceLoaded();
+    }
+  }
+
+  // The "Ask <lead>" link ends in the composer form's #id. While the page loads, the browser focuses a fragment's
+  // target, or the page itself when the target (a form) takes no focus, which would undo a focus given any sooner.
+  // Focus a person moved on their own before the load ended stays where they put it.
+  focusBodyOnceLoaded() {
+    if (document.readyState === 'complete') {
+      this.bodyTarget.focus();
+      return;
+    }
+    window.addEventListener('load', () => {
+      if (document.activeElement === null || document.activeElement === document.body) {
+        this.bodyTarget.focus();
+      }
+    }, { once: true });
+  }
 
   bodyTargetConnected() {
     this.update();

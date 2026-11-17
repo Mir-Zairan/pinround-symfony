@@ -12,6 +12,15 @@ WORKDIR /app
 # sodium and opcache are already in the base image.
 RUN install-php-extensions pdo_pgsql intl zip apcu redis
 
+# The vips command-line tool re-encodes uploads in worker-media (VipsImageEncoder, ADR-0011); in the base stage so
+# dev, prod and every worker role have it. Pinned to bookworm's 8.14.1, whose WebP and thumbnail behaviour the encoder
+# and its tests rely on; the wildcard lets Debian's security and point releases of 8.14.1 in. It pulls every loader
+# libvips is built with (ImageMagick, librsvg, poppler, OpenSlide, libheif, libjxl and more); only pngload, jpegload
+# and webpload are ever given an upload (media-pipeline.md, Processing worker).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends 'libvips-tools=8.14.1-*' \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY docker/frankenphp/Caddyfile /etc/caddy/Caddyfile
 COPY docker/frankenphp/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 RUN chmod +x /usr/local/bin/docker-entrypoint

@@ -12,7 +12,8 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * What rvw_round, rvw_screenshot and rvw_pin keep on their own (Version20261115180000), whatever writes them: the
+ * What rvw_round, rvw_screenshot, rvw_pin and rvw_check_item keep on their own (Version20261115180000,
+ * Version20261116100000, Version20261116120000, Version20261116130000), whatever writes them: the
  * CHECKs and keys refuse a row the domain could not make, written as the app past the domain, and the rows next to it
  * are still accepted; the indexes and foreign keys are as the migration made them. Grants, ownership and the schema
  * filter are pinned with every other module's in DatabaseRolesTest, row-level security in CatalogTest.
@@ -28,14 +29,21 @@ final class RoundTablesTest extends KernelTestCase
     private const string PIN = '0197a3c0-0000-7000-8000-0000000f5231';
     private const string SECOND_PIN = '0197a3c0-0000-7000-8000-0000000f5232';
     private const string MISSING_ROUND = '0197a3c0-0000-7000-8000-0000000f5241';
+    private const string MISSING_PIN = '0197a3c0-0000-7000-8000-0000000f5242';
     private const string MEDIA = '0197a3c0-0000-7000-8000-0000000f5251';
+    private const string CHECKLIST = '0197a3c0-0000-7000-8000-0000000f5212';
+    private const string SECOND_CHECKLIST = '0197a3c0-0000-7000-8000-0000000f5213';
+    private const string CHECK_ITEM = '0197a3c0-0000-7000-8000-0000000f5261';
+    private const string SECOND_CHECK_ITEM = '0197a3c0-0000-7000-8000-0000000f5262';
     private const string CHECK_VIOLATION = '23514';
     private const string UNIQUE_VIOLATION = '23505';
     private const string FOREIGN_KEY_VIOLATION = '23503';
 
     /**
      * Every CHECK, foreign key and unique index but the primary keys (DbalRoundsTest clashes those) has a case below
-     * that breaks it, and every case breaks one the tables have.
+     * that breaks it, and every case breaks one the tables have. rvw_screenshot_round_id_id_key is the primary key with
+     * round_id, which no row breaks without clashing the primary key; it is there for rvw_area_after_screenshot_fkey,
+     * which AreaTablesTest breaks.
      */
     #[Test]
     public function theCasesCoverEveryCheckForeignKeyAndUniqueIndexOfTheRoundTables(): void
@@ -44,12 +52,13 @@ final class RoundTablesTest extends KernelTestCase
             static fn (array $case): string => $case[1],
             iterator_to_array(self::rowsTheDatabaseRefuses(), false),
         )));
+        $constraintsTheCasesBreak[] = 'rvw_screenshot_round_id_id_key';
 
         self::assertEqualsCanonicalizing(
             $this->connection()->fetchFirstColumn(
-                "SELECT conname FROM pg_constraint WHERE contype IN ('c', 'f') AND conrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass)"
+                "SELECT conname FROM pg_constraint WHERE contype IN ('c', 'f') AND conrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass, 'public.rvw_check_item'::regclass)"
                 .' UNION ALL SELECT indexrelid::regclass::text FROM pg_index WHERE indisunique AND NOT indisprimary'
-                ." AND indrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass)",
+                ." AND indrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass, 'public.rvw_check_item'::regclass)",
             ),
             $constraintsTheCasesBreak,
         );
@@ -69,6 +78,13 @@ final class RoundTablesTest extends KernelTestCase
         yield 'a shared draft as Round 0' => [[self::draftRound(['number' => 0, 'shared_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_number_check', self::CHECK_VIOLATION];
         yield 'a round number below 0' => [[self::draftRound(['number' => -1, 'shared_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_number_check', self::CHECK_VIOLATION];
         yield 'a round at version 0' => [[self::round(['version' => 0])], 'rvw_round_version_check', self::CHECK_VIOLATION];
+        yield 'a draft decision of an unknown kind' => [[self::draftRound(['decision' => 'later', 'decided_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_decision_check', self::CHECK_VIOLATION];
+        yield 'a decision on a report' => [[self::round(['decision' => 'kept_private', 'decided_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_decision_check', self::CHECK_VIOLATION];
+        yield 'a decision with no time' => [[self::draftRound(['decision' => 'kept_private'])], 'rvw_round_decided_check', self::CHECK_VIOLATION];
+        yield 'a decision time with no decision' => [[self::draftRound(['decided_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_decided_check', self::CHECK_VIOLATION];
+        yield 'a deleted draft still open' => [[self::draftRound(['deleted_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_deleted_check', self::CHECK_VIOLATION];
+        yield 'a deleted shared draft' => [[self::draftRound(['number' => 1, 'shared_at' => '2027-03-16 09:00:00+00', 'state' => 'closed', 'deleted_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_deleted_check', self::CHECK_VIOLATION];
+        yield 'a deleted report' => [[self::round(['state' => 'closed', 'deleted_at' => '2027-03-16 09:00:00+00'])], 'rvw_round_deleted_check', self::CHECK_VIOLATION];
         yield 'a second Round 0 of the ticket' => [[self::round([]), self::round(['id' => self::MISSING_ROUND])], 'rvw_round_ticket_id_number_key', self::UNIQUE_VIOLATION];
         yield 'a second open draft of the owner on the ticket' => [[self::draftRound([]), self::draftRound(['id' => self::MISSING_ROUND])], 'rvw_round_ticket_id_owner_id_open_draft_key', self::UNIQUE_VIOLATION];
         yield 'a screenshot of a round that does not exist' => [[self::screenshot(['round_id' => self::MISSING_ROUND])], 'rvw_screenshot_round_fkey', self::FOREIGN_KEY_VIOLATION];
@@ -93,6 +109,13 @@ final class RoundTablesTest extends KernelTestCase
         yield 'an AI pin with no state' => [[self::round([]), self::screenshot([]), self::pin(['source' => 'ai'])], 'rvw_pin_ai_check', self::CHECK_VIOLATION];
         yield 'a person\'s pin with an AI state' => [[self::round([]), self::screenshot([]), self::pin(['ai_state' => 'kept'])], 'rvw_pin_ai_check', self::CHECK_VIOLATION];
         yield 'a second pin with one number' => [[self::round([]), self::screenshot([]), self::pin([]), self::pin(['id' => self::SECOND_PIN])], 'rvw_pin_screenshot_id_number_key', self::UNIQUE_VIOLATION];
+        yield 'a second checklist round of the ticket' => [[self::checklistRound([]), self::checklistRound(['id' => self::SECOND_CHECKLIST, 'number' => 2])], 'rvw_round_ticket_id_checklist_key', self::UNIQUE_VIOLATION];
+        yield 'a check item in an unknown state' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem(['state' => 'done'])], 'rvw_check_item_state_check', self::CHECK_VIOLATION];
+        yield 'a check item changed by someone at no time' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem(['state' => 'fixed', 'changed_by' => self::LENA])], 'rvw_check_item_changed_check', self::CHECK_VIOLATION];
+        yield 'a check item changed at a time by nobody' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem(['state' => 'fixed', 'changed_at' => '2027-03-16 09:00:00+00'])], 'rvw_check_item_changed_check', self::CHECK_VIOLATION];
+        yield 'a check item of a round that does not exist' => [[...self::reportWithPin(), self::checkItem(['round_id' => self::MISSING_ROUND])], 'rvw_check_item_round_fkey', self::FOREIGN_KEY_VIOLATION];
+        yield 'a check item on a pin that does not exist' => [[self::checklistRound([]), self::checkItem(['pin_id' => self::MISSING_PIN])], 'rvw_check_item_pin_fkey', self::FOREIGN_KEY_VIOLATION];
+        yield 'a second check item on one pin' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem([]), self::checkItem(['id' => self::SECOND_CHECK_ITEM])], 'rvw_check_item_pin_id_key', self::UNIQUE_VIOLATION];
     }
 
     /**
@@ -123,7 +146,23 @@ final class RoundTablesTest extends KernelTestCase
             self::draftRound([]),
             self::draftRound(['id' => self::MISSING_ROUND, 'number' => 1, 'shared_at' => '2027-03-16 09:00:00+00']),
         ]];
+        yield 'a deleted draft and a new open one of one owner on the ticket' => [[
+            self::draftRound(['state' => 'closed', 'deleted_at' => '2027-03-16 09:00:00+00']),
+            self::draftRound(['id' => self::MISSING_ROUND]),
+        ]];
+        yield 'a draft kept private and a shared one decided as shared' => [[
+            self::draftRound(['decision' => 'kept_private', 'decided_at' => '2027-03-16 09:00:00+00']),
+            self::draftRound(['id' => self::MISSING_ROUND, 'number' => 1, 'shared_at' => '2027-03-16 09:00:00+00', 'decision' => 'shared', 'decided_at' => '2027-03-16 09:00:00+00']),
+        ]];
         yield 'an AI pin kept' => [[self::round([]), self::screenshot([]), self::pin(['source' => 'ai', 'ai_state' => 'kept'])]];
+        yield 'a checklist round with an open item and one confirmed OK, beside a shared draft' => [[
+            ...self::reportWithPin(),
+            self::pin(['id' => self::SECOND_PIN, 'number' => 2]),
+            self::checklistRound([]),
+            self::draftRound(['id' => self::MISSING_ROUND, 'number' => 2, 'shared_at' => '2027-03-16 09:00:00+00']),
+            self::checkItem([]),
+            self::checkItem(['id' => self::SECOND_CHECK_ITEM, 'pin_id' => self::SECOND_PIN, 'state' => 'ok', 'changed_by' => self::LENA, 'changed_at' => '2027-03-16 09:00:00+00']),
+        ]];
         yield 'two screenshots at two positions with a pin 1 each' => [[
             self::round([]),
             self::screenshot([]),
@@ -150,26 +189,39 @@ final class RoundTablesTest extends KernelTestCase
             [
                 'CREATE UNIQUE INDEX rvw_round_pkey ON public.rvw_round USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_round_ticket_id_number_key ON public.rvw_round USING btree (organization_id, ticket_id, number)',
-                "CREATE UNIQUE INDEX rvw_round_ticket_id_owner_id_open_draft_key ON public.rvw_round USING btree (organization_id, ticket_id, owner_id) WHERE ((kind = 'draft'::text) AND (shared_at IS NULL))",
+                "CREATE UNIQUE INDEX rvw_round_ticket_id_owner_id_open_draft_key ON public.rvw_round USING btree (organization_id, ticket_id, owner_id) WHERE ((kind = 'draft'::text) AND (shared_at IS NULL) AND (state = 'open'::text))",
+                "CREATE UNIQUE INDEX rvw_round_ticket_id_checklist_key ON public.rvw_round USING btree (organization_id, ticket_id) WHERE (kind = 'checklist'::text)",
+                'CREATE UNIQUE INDEX rvw_check_item_pkey ON public.rvw_check_item USING btree (organization_id, id)',
+                'CREATE UNIQUE INDEX rvw_check_item_pin_id_key ON public.rvw_check_item USING btree (organization_id, pin_id)',
+                'CREATE INDEX rvw_check_item_round_id_idx ON public.rvw_check_item USING btree (organization_id, round_id)',
                 'CREATE UNIQUE INDEX rvw_screenshot_pkey ON public.rvw_screenshot USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_screenshot_round_id_position_key ON public.rvw_screenshot USING btree (organization_id, round_id, "position")',
+                'CREATE UNIQUE INDEX rvw_screenshot_round_id_id_key ON public.rvw_screenshot USING btree (organization_id, round_id, id)',
                 'CREATE UNIQUE INDEX rvw_pin_pkey ON public.rvw_pin USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_pin_screenshot_id_number_key ON public.rvw_pin USING btree (organization_id, screenshot_id, number)',
             ],
-            $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('rvw_round', 'rvw_screenshot', 'rvw_pin')"),
+            $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('rvw_round', 'rvw_screenshot', 'rvw_pin', 'rvw_check_item')"),
         );
     }
 
-    /** Ticket, owner, picture and author are ids of other modules (ADR-0002): the foreign keys stay inside Review. */
+    /**
+     * Ticket, owner, picture, author and who changed a check item are ids of other modules (ADR-0002): the foreign keys
+     * stay inside Review.
+     */
     #[Test]
     public function theForeignKeysOfTheRoundTablesStayInsideReview(): void
     {
         self::assertEqualsCanonicalizing(
-            ['rvw_screenshot (organization_id, round_id) -> rvw_round', 'rvw_pin (organization_id, screenshot_id) -> rvw_screenshot'],
+            [
+                'rvw_screenshot (organization_id, round_id) -> rvw_round',
+                'rvw_pin (organization_id, screenshot_id) -> rvw_screenshot',
+                'rvw_check_item (organization_id, round_id) -> rvw_round',
+                'rvw_check_item (organization_id, pin_id) -> rvw_pin',
+            ],
             $this->connection()->fetchFirstColumn(
                 "SELECT c.conrelid::regclass::text || ' (' || (SELECT string_agg(a.attname, ', ' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ord)"
                 ." JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum) || ') -> ' || c.confrelid::regclass::text"
-                ." FROM pg_constraint c WHERE c.contype = 'f' AND c.conrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass)",
+                ." FROM pg_constraint c WHERE c.contype = 'f' AND c.conrelid IN ('public.rvw_round'::regclass, 'public.rvw_screenshot'::regclass, 'public.rvw_pin'::regclass, 'public.rvw_check_item'::regclass)",
             ),
         );
     }
@@ -244,6 +296,42 @@ final class RoundTablesTest extends KernelTestCase
             'source' => 'human',
             'author_id' => self::LENA,
             'created_at' => '2027-03-15 10:00:00+00',
+            ...$change,
+        ]];
+    }
+
+    /**
+     * @param array<string, mixed> $change the columns that differ from a valid checklist round 1 of the ticket
+     *
+     * @return array{string, array<string, mixed>}
+     */
+    private static function checklistRound(array $change): array
+    {
+        return self::round(['id' => self::CHECKLIST, 'kind' => 'checklist', 'number' => 1, ...$change]);
+    }
+
+    /**
+     * @return list<array{string, array<string, mixed>}> Round 0 with a picture and pin 1 on it
+     */
+    private static function reportWithPin(): array
+    {
+        return [self::round([]), self::screenshot([]), self::pin([])];
+    }
+
+    /**
+     * @param array<string, mixed> $change the columns that differ from a valid open item of the checklist on the pin
+     *
+     * @return array{string, array<string, mixed>}
+     */
+    private static function checkItem(array $change): array
+    {
+        return ['rvw_check_item', [
+            'organization_id' => self::ACME_FOODS,
+            'id' => self::CHECK_ITEM,
+            'round_id' => self::CHECKLIST,
+            'pin_id' => self::PIN,
+            'state' => 'open',
+            'created_at' => '2027-03-16 09:00:00+00',
             ...$change,
         ]];
     }

@@ -1,0 +1,98 @@
+{#- The selected area's side panel, from RoundPages::panelOf: the page renders it, and a verdict's Turbo Stream replaces
+    it. The forms are Turbo forms (Drive is off), so a saved verdict answers with that stream; without JavaScript they
+    post and come back to the area's tab. -#}
+{% set verdictController = 'App\\Review\\UI\\Controller\\VerdictController' %}
+{% set csrfField = constant(verdictController ~ '::CSRF_FIELD') %}
+{% set verdictField = constant(verdictController ~ '::VERDICT_FIELD') %}
+{% set saveFailedToast = constant(verdictController ~ '::SAVE_FAILED') %}
+{% set csrfToken = panel.mayGiveVerdicts ? csrf_token(verdictCsrfId) : null %}
+{% set panelClass = 'App\\Review\\UI\\RoundPage\\RoundPanel' %}
+{#- Set by the verdict's stream only: Turbo focuses the [autofocus] control once the panel holding the clicked one is gone. -#}
+{% set focusedControlId = focusedControlId|default(null) %}
+<aside id="round-panel" class="round-panel" aria-label="Review of {{ panel.areaName }}">
+    {% if panel.earlierPinsHeading is not null %}
+        <section class="round-panel__section" aria-labelledby="round-panel-pins">
+            <h2 id="round-panel-pins" class="round-panel__title">{{ panel.earlierPinsHeading }}</h2>
+            {% if panel.earlierPins is empty %}
+                <p class="round-panel__empty">That round left no pins here.</p>
+            {% else %}
+                <ol class="round-panel__pins">
+                    {% for row in panel.earlierPins %}
+                        <li class="round-panel__pin" value="{{ row.number }}">
+                            <span class="pin-list__number">{{ row.number }}</span>
+                            <p class="round-panel__note" id="round-panel-pin-{{ row.id }}">{% if row.note|trim is same as('') %}(no note){% else %}{{ row.note }}{% endif %}</p>
+                            {% if row.authorLine is not null %}
+                                <p class="round-panel__author">{{ row.authorLine }}</p>
+                            {% endif %}
+                            <twig:Tag class="verdict-tag {{ row.verdictClass }}">{{ row.verdictLabel }}</twig:Tag>
+                            {% if panel.mayGiveVerdicts %}
+                                {% if row.isChecked %}
+                                    <form method="post" action="{{ path(constant(verdictController ~ '::PIN_UNDO_ROUTE'), {key: ticketKey, number: roundNumber, pinId: row.id}) }}" class="round-panel__pin-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
+                                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                        {% set undoId = constant(panelClass ~ '::UNDO_BUTTON_ID_PREFIX') ~ row.id %}
+                                        <twig:Button type="submit" variant="text" size="sm" id="{{ undoId }}" :autofocus="undoId is same as(focusedControlId)" aria-describedby="round-panel-pin-{{ row.id }}">Undo</twig:Button>
+                                    </form>
+                                {% else %}
+                                    <form method="post" action="{{ path(constant(verdictController ~ '::PIN_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, pinId: row.id}) }}" class="round-panel__pin-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
+                                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                        {% set fixedId = constant(panelClass ~ '::FIXED_BUTTON_ID_PREFIX') ~ row.id %}
+                                        <twig:Button type="submit" variant="tonal" size="sm" id="{{ fixedId }}" :autofocus="fixedId is same as(focusedControlId)" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') }}" aria-describedby="round-panel-pin-{{ row.id }}">Fixed</twig:Button>
+                                        <twig:Button type="submit" variant="outline" size="sm" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') }}" aria-describedby="round-panel-pin-{{ row.id }}">Still wrong</twig:Button>
+                                    </form>
+                                {% endif %}
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ol>
+            {% endif %}
+        </section>
+    {% endif %}
+
+    <section class="round-panel__section" aria-labelledby="round-panel-verdict">
+        <h2 id="round-panel-verdict" class="round-panel__title">{{ panel.mayGiveVerdicts ? 'Your verdict' : 'Verdict' }} on {{ panel.areaName }}</h2>
+        {% if panel.verdictLabel is null %}
+            <p class="round-panel__empty">No verdict yet.</p>
+        {% else %}
+            <p class="round-panel__verdict"><twig:Tag>{{ panel.verdictLabel }}</twig:Tag></p>
+            {% if panel.note is not null and panel.note|trim is not same as('') %}
+                <p class="round-panel__note">{{ panel.note }}</p>
+            {% endif %}
+            {% if panel.decidedByName is not null %}
+                <p class="round-panel__author">Saved by {{ panel.decidedByName }}</p>
+            {% endif %}
+        {% endif %}
+        {% if panel.mayGiveVerdicts %}
+            {#- No required on the chips: a save without one gets the prototype's toast from the server. -#}
+            <form method="post" action="{{ path(constant(verdictController ~ '::AREA_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, areaId: panel.areaId}) }}" class="round-panel__verdict-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
+                <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                <fieldset class="round-panel__choices">
+                    <legend class="visually-hidden">Your verdict on {{ panel.areaName }}</legend>
+                    {% for value, choiceLabel in constant('App\\Review\\UI\\RoundPage\\RoundPages::AREA_VERDICT_LABELS') %}
+                        <label class="chip round-panel__choice">
+                            <input type="radio" name="{{ verdictField }}" value="{{ value }}"{% if value == panel.verdict %} checked{% endif %}>
+                            {{ choiceLabel }}
+                        </label>
+                    {% endfor %}
+                </fieldset>
+                <label class="round-panel__label" for="round-panel-note">Note (optional)</label>
+                <textarea id="round-panel-note" class="text-field round-panel__note-field" name="{{ constant(verdictController ~ '::NOTE_FIELD') }}" placeholder="What should {{ panel.leadName }} know?" maxlength="{{ constant(verdictController ~ '::NOTE_MAX_LENGTH') }}" rows="3">{{ panel.note }}</textarea>
+                <p class="round-panel__then">Then: {{ panel.leadName }}, team lead</p>
+                {% set saveId = constant(panelClass ~ '::SAVE_BUTTON_ID') %}
+                <twig:Button type="submit" class="round-panel__save" id="{{ saveId }}" :autofocus="saveId is same as(focusedControlId)">Save verdict</twig:Button>
+            </form>
+        {% endif %}
+    </section>
+
+    {% if panel.nextVerb is not null %}
+        {% set offer = panel.nextVerb %}
+        <section class="round-panel__next" aria-labelledby="round-panel-next">
+            <h2 id="round-panel-next" class="round-panel__title">Next step</h2>
+            <p class="round-panel__next-sentence">{{ offer.sentence }}</p>
+            {% if offer.askedLeadId is not null %}
+                <twig:Button variant="filled" href="{{ path(constant(panelClass ~ '::THREAD_ROUTE'), {key: ticketKey, (constant(panelClass ~ '::ASK_PARAMETER')): offer.askedLeadId}) }}#{{ constant(panelClass ~ '::QUESTION_COMPOSER_ID_PREFIX') }}{{ ticketKey }}" class="round-panel__next-link">{{ offer.linkLabel }}</twig:Button>
+            {% else %}
+                <twig:Button variant="filled" href="{{ path(ticketRoute, {key: ticketKey}) }}#{{ constant(panelClass ~ '::TICKET_NEXT_STEP_ID') }}" class="round-panel__next-link">{{ offer.linkLabel }}</twig:Button>
+            {% endif %}
+        </section>
+    {% endif %}
+</aside>

@@ -1,17 +1,23 @@
-{#- RoundsController's answer to RoundsSection's lazy frame: the bare frame with the cards, and no layout. -#}
+{#- RoundsController's answer to RoundsSection's lazy frame: the bare frame with the cards, and no layout. The draft
+    forms leave the frame (_top): DraftRoundController answers with the ticket page. -#}
+{% set draftCsrfToken = canStartDraft or section.hasPrivateDraft ? csrf_token(draftCsrfId) : null %}
 <turbo-frame id="{{ constant('App\\Review\\UI\\Component\\RoundsSection::FRAME_ID') }}">
     {% if section.cards is empty %}
         <twig:EmptyState :message="constant('App\\Review\\UI\\Component\\RoundsSection::EMPTY')" />
     {% else %}
         {% for card in section.cards %}
             <twig:Card tag="article" :class="'round-card' ~ (card.isPrivateDraft ? ' round-card--private' : '')" id="{{ card.domId }}" aria-labelledby="{{ card.domId }}-heading">
+                {% if card.isPrivateDraft %}
+                    {#- The editor shows the header (with the status line), the description, the screenshots, the empty note and the "more" note itself, so they follow each change. -#}
+                    <twig:DraftRoundEditor :ticketKey="ticketKey" :roundId="card.roundId" :card="card" />
+                {% elseif card.checklist is not null %}
+                    {{ include('@Review/_checklist_card.html.twig', {checklist: card.checklist}) }}
+                {% else %}
                 <header class="round-card__header">
                     <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>
-                    {% if card.isPrivateDraft %}<twig:Tag class="round-card__private">PRIVATE</twig:Tag>{% endif %}
                     {% if card.status is not null %}<p class="round-card__status">{{ card.status }}</p>{% endif %}
-                    {% if card.hasOpenRound %}
-                        {#- No round page exists yet, so the button is shown as the prototype has it, and cannot be used. -#}
-                        <twig:Button variant="outline" size="sm" :disabled="true" class="round-card__open">Open round</twig:Button>
+                    {% if card.hasOpenRound and card.number is not null %}
+                        <twig:Button variant="outline" size="sm" href="{{ path(constant('App\\Review\\UI\\Controller\\RoundController::ROUND_ROUTE'), {key: ticketKey, number: card.number}) }}" class="round-card__open">Open round</twig:Button>
                     {% endif %}
                 </header>
                 {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
@@ -31,10 +37,34 @@
                 {% if card.moreScreenshotsNote is not null %}
                     <p class="round-card__more">{{ card.moreScreenshotsNote }}</p>
                 {% endif %}
+                {% endif %}
+                {% if card.isPrivateDraft %}
+                    <div class="round-card__actions">
+                        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::SHARE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top">
+                            <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
+                            <twig:Button type="submit" size="sm" class="round-card__share">Share with the team now</twig:Button>
+                        </form>
+                        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::DELETE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top" data-turbo-confirm="{{ constant('App\\Review\\UI\\RoundCards::DELETE_DRAFT_CONFIRM') }}">
+                            <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
+                            <twig:Button type="submit" variant="text" size="sm" class="round-card__delete">Delete draft</twig:Button>
+                        </form>
+                    </div>
+                    <section class="claude-code-box" aria-labelledby="{{ card.domId }}-claude-code">
+                        <h4 id="{{ card.domId }}-claude-code" class="claude-code-box__title">For Claude Code</h4>
+                        <p class="claude-code-box__line"><code class="claude-code-box__prompt">{{ constant('App\\Review\\UI\\RoundCards::CLAUDE_CODE_PROMPT')|format(ticketKey) }}</code></p>
+                        <p class="claude-code-box__tools">{{ constant('App\\Review\\UI\\RoundCards::CLAUDE_CODE_TOOLS_NOTE') }}</p>
+                    </section>
+                {% endif %}
             </twig:Card>
         {% endfor %}
         {% if section.olderRoundsNote is not null %}
             <p class="rounds__older">{{ section.olderRoundsNote }}</p>
         {% endif %}
+    {% endif %}
+    {% if canStartDraft %}
+        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::START_ROUTE'), {key: ticketKey}) }}" class="rounds__start" data-turbo-frame="_top">
+            <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
+            <twig:Button type="submit" variant="outline" size="sm" class="rounds__start-draft">Start a draft round</twig:Button>
+        </form>
     {% endif %}
 </turbo-frame>

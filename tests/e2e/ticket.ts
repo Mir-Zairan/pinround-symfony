@@ -16,7 +16,7 @@ export async function makeTicketGivenTo(browser: Browser, title: string, assigne
   const shopValue = await page.locator('select[name="project_id"] option', { hasText: /^SHOP · / }).getAttribute('value');
   expect(shopValue, 'the seeded SHOP project is missing: run make seed').not.toBeNull();
   await page.getByLabel('Project').selectOption(shopValue ?? '');
-  await page.getByLabel('Title').fill(title);
+  await page.getByLabel('Title', { exact: true }).fill(title);
   await page.getByLabel('Give it to').selectOption({ label: assigneeFirstName });
   await page.getByRole('button', { name: 'Make ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);

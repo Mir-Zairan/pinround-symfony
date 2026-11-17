@@ -12,4 +12,7 @@ final class MediaPermission
 {
     /** Begin an upload for a target; the subject is an UploadTarget, the MediaTargetAuthorizer of its kind decides. */
     public const string UPLOAD = 'MEDIA_UPLOAD';
+
+    /** Read the processing state of a picture; the subject is an UploadedMediaId, granted to the person who uploaded it. */
+    public const string VIEW_UPLOAD_STATE = 'MEDIA_VIEW_UPLOAD_STATE';
 }

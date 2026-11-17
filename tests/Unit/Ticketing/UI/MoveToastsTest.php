@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Ticketing\UI;
 
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\MoveResult;
 use App\Ticketing\UI\MoveToasts;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -112,5 +114,28 @@ final class MoveToastsTest extends TestCase
         $this->expectExceptionMessageIsOrContains(\sprintf('The verb "%s" has no toast.', $verb));
 
         MoveToasts::ofVerb($verb, 'Lena', 'To do');
+    }
+
+    #[Test]
+    public function aSharedDraftToastNamesTheStepAndTheRoundTheDraftGot(): void
+    {
+        self::assertSame(
+            'Moved to Code review. Your draft is now round 3 for the team.',
+            MoveToasts::movedToWithDraft('Code review', new MoveResult(0, DraftChoice::Share, 3)),
+        );
+    }
+
+    #[Test]
+    public function aKeptDraftToastSaysTheDraftStaysPrivate(): void
+    {
+        self::assertSame('Moved to Code review. Your draft stays private.', MoveToasts::movedToWithDraft('Code review', new MoveResult(2, DraftChoice::Keep)));
+    }
+
+    #[Test]
+    public function aMoveThatDecidedNoDraftHasNoDraftToast(): void
+    {
+        $this->expectException(\LogicException::class);
+
+        MoveToasts::movedToWithDraft('Code review', new MoveResult(0));
     }
 }

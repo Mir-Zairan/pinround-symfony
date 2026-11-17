@@ -22,6 +22,9 @@ parameters:
         App\Identity\Api\Event\IdentityEvent: async_notify
         # Short jobs for worker-notify too; no module handles MediaReady or MediaRejected yet.
         App\Media\Api\Event\MediaEvent: async_notify
+        # Short jobs for worker-notify too, today the ticket history row of each (RecordReviewChangesHandler) and
+        # queueing the ticket page refresh (QueueTicketPagesRefreshHandler).
+        App\Review\Api\Event\ReviewEvent: async_notify
         # Checking and re-encoding an uploaded picture, for worker-media (ProcessUploadHandler).
         App\Media\Application\ProcessUpload: async_media
 
@@ -174,6 +177,8 @@ framework:
             App\Identity\Api\Event\IdentityEvent: outbox
             # Domain events of Media, dispatched on event.bus by the processing worker inside its transaction.
             App\Media\Api\Event\MediaEvent: outbox
+            # Domain events of Review, dispatched on event.bus inside the transaction of their change.
+            App\Review\Api\Event\ReviewEvent: outbox
 
 when@test:
     parameters:
@@ -185,6 +190,7 @@ when@test:
             App\Notification\Api\Event\NotificationEvent: async_notify
             App\Identity\Api\Event\IdentityEvent: async_notify
             App\Media\Api\Event\MediaEvent: async_notify
+            App\Review\Api\Event\ReviewEvent: async_notify
             App\Media\Application\ProcessUpload: async_media
             App\Tests\Fixtures\Messaging\OutboxProbeRecorded: async_notify
             App\Tests\Fixtures\Messaging\UnreachableProbeRecorded: unreachable_valkey

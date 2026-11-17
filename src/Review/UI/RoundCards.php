@@ -12,6 +12,8 @@ use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\Review\Application\RoundsVisibleTo;
+use App\Review\UI\Checklist\ChecklistCard;
+use App\Review\UI\Checklist\ChecklistCards;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -20,13 +22,25 @@ use App\Ticketing\Api\TicketVisibility;
 /**
  * Builds the cards of the Rounds section for one viewer. Besides RoundQueries' own queries it reads the owners'
  * names in one batch and signs the pictures shown in one query per SignedUrls::MAX_MEDIA_IDS pictures, whatever the
- * number of rounds. Only the report and drafts show their pictures, at most MAX_PICTURES_PER_CARD each; a checklist or
- * review round is a row that opens its own page.
+ * number of rounds. Only the report and drafts show their pictures, at most MAX_PICTURES_PER_CARD each; a review round
+ * is a row that opens its own page, and the checklist round shows its rows through ChecklistCards, read only when the
+ * ticket has one. The viewer's own unshared draft is the exception: its card shows every picture (the domain caps them),
+ * so its editor can reach each one. forDraft builds that one card alone.
  */
 final readonly class RoundCards
 {
     public const string UNKNOWN_OWNER = 'a former member';
     public const string VARIANT = 'view';
+
+    /**
+     * The "For Claude Code" box of the viewer's own unshared draft: the line to give Claude Code, with the ticket's key,
+     * and the tools it will use (served in P09).
+     */
+    public const string CLAUDE_CODE_PROMPT = 'Read my pinround notes for %s and fix what is marked “Not right yet”.';
+    public const string CLAUDE_CODE_TOOLS_NOTE = 'Planned: pinround’s tool connection (built with mcp/sdk) lets Claude Code read these notes and verdicts, and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict. Not built yet.';
+
+    /** Asked by the browser before the owner's draft is deleted; the delete form carries it as data-turbo-confirm. */
+    public const string DELETE_DRAFT_CONFIRM = 'Delete this draft round? Its screenshots, pins and notes go too.';
 
     /** The pictures one card shows; a round may hold 50 screenshots, and the card says how many more it left out. */
     public const int MAX_PICTURES_PER_CARD = 10;
@@ -39,12 +53,13 @@ final readonly class RoundCards
     private const string NOT_RIGHT = 'not_right';
 
     private const string PRIVATE_DRAFT_DESCRIPTION = 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.';
-    private const string EMPTY_DRAFT_NOTE = 'No screenshots yet. Add one here, or let Claude Code add them.';
+    private const string EMPTY_DRAFT_NOTE = 'No screenshots yet.';
 
     public function __construct(
         private RoundsVisibleTo $roundsVisibleTo,
         private MemberNameQueries $memberNameQueries,
         private SignedUrls $signedUrls,
+        private ChecklistCards $checklistCards,
     ) {
     }
 
@@ -62,25 +77,52 @@ final readonly class RoundCards
 
         $ownerNames = $this->memberNameQueries->displayNamesOf($organizationId, self::ownersOf($rounds));
         $images = $this->imagesOf($organizationId, $rounds, $now);
+        $checklist = self::hasChecklist($rounds) ? $this->checklistCards->forTicket($organizationId, $ticketId) : null;
 
         return new RoundsSectionView(
-            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $images), $rounds),
+            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $images, $checklist), $rounds),
             $ticketRounds->olderRoundsNotShown,
         );
     }
 
     /**
-     * @param array<string, MediaImage> $images by media id
+     * The card of one draft round of its owner, reading and signing nothing of any other round: every picture of an
+     * unshared draft, and the owner's name in one query only once the draft was shared (its headline names them). Runs
+     * inside the request transaction like forTicket.
      */
-    private function cardOf(RoundView $round, string $ownerName, array $images): RoundCard
+    public function forDraft(OrganizationId $organizationId, RoundView $draft, \DateTimeImmutable $now): RoundCard
+    {
+        if (RoundView::DRAFT !== $draft->kind) {
+            throw new \InvalidArgumentException('Only a draft round has a card of its own.');
+        }
+        $ownerName = $draft->isUnsharedDraft()
+            ? self::UNKNOWN_OWNER
+            : ($this->memberNameQueries->displayNamesOf($organizationId, [$draft->ownerId])[$draft->ownerId->toString()] ?? self::UNKNOWN_OWNER);
+
+        return $this->cardOf($draft, $ownerName, $this->imagesOf($organizationId, [$draft], $now));
+    }
+
+    /**
+     * @param array<string, MediaImage> $images    by media id
+     * @param ChecklistCard|null        $checklist the ticket's checklist card, which its checklist round shows
+     */
+    private function cardOf(RoundView $round, string $ownerName, array $images, ?ChecklistCard $checklist = null): RoundCard
     {
         $domId = 'round-'.$round->id;
-        if (!$this->showsPictures($round)) {
-            $title = self::CHECKLIST === $round->kind ? 'Checklist from the report' : 'Review';
+        if (self::CHECKLIST === $round->kind) {
+            // Checklist::fromReport makes none without pins, DbalChecklists stores the round with its items in one
+            // savepoint, and no command removes a report's pins: a round without items is broken data, not an empty card.
+            if (null === $checklist || $checklist->roundId !== $round->id) {
+                throw new \LogicException(\sprintf('Checklist round %s has no items.', $round->id));
+            }
 
-            return new RoundCard($domId, \sprintf('Round %d · %s · by %s', $round->number ?? 0, $title, $ownerName), null, false, [], true);
+            return new RoundCard($round->id, $domId, $checklist->headline, $checklist->status, false, [], false, number: $round->number, checklist: $checklist);
+        }
+        if (!$this->showsPictures($round)) {
+            return new RoundCard($round->id, $domId, \sprintf('Round %d · Review · by %s', $round->number ?? 0, $ownerName), null, false, [], true, number: $round->number);
         }
 
+        $pictureLimit = self::pictureLimitOf($round);
         $screenshots = [];
         $pinCount = 0;
         $looksRightCount = 0;
@@ -90,7 +132,7 @@ final readonly class RoundCards
             if (self::LOOKS_RIGHT === $screenshot->verdict) {
                 ++$looksRightCount;
             }
-            if (\count($screenshots) < self::MAX_PICTURES_PER_CARD) {
+            if (null === $pictureLimit || \count($screenshots) < $pictureLimit) {
                 $screenshots[] = $this->cardScreenshotOf($round, $screenshot, $images[$screenshot->mediaId] ?? null, $shownPins);
             }
         }
@@ -98,15 +140,16 @@ final readonly class RoundCards
         $moreNote = 0 === $notShown ? null : (1 === $notShown ? '1 more screenshot is not shown.' : \sprintf('%d more screenshots are not shown.', $notShown));
 
         if (self::REPORT === $round->kind) {
-            return new RoundCard($domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false, $moreNote);
+            return new RoundCard($round->id, $domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false, $moreNote);
         }
         $status = [] === $round->screenshots ? null : \sprintf('%d of %d look right', $looksRightCount, \count($round->screenshots));
         $emptyNote = [] === $round->screenshots ? self::EMPTY_DRAFT_NOTE : null;
         if ($round->isUnsharedDraft()) {
-            return new RoundCard($domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
+            return new RoundCard($round->id, $domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
         }
 
         return new RoundCard(
+            $round->id,
             $domId,
             \sprintf('Round %d · self-check by %s', $round->number ?? 0, $ownerName),
             $status,
@@ -141,7 +184,7 @@ final readonly class RoundCards
     {
         $view = $this->screenshotViewOf($round, $screenshot, $image, $pins);
         if (RoundView::DRAFT !== $round->kind) {
-            return new RoundCardScreenshot($view);
+            return new RoundCardScreenshot($screenshot->id, $view);
         }
         [$verdictLabel, $verdictClass] = match ($screenshot->verdict) {
             self::LOOKS_RIGHT => [RoundCardScreenshot::LOOKS_RIGHT, 'verdict-tag--looks-right'],
@@ -149,7 +192,7 @@ final readonly class RoundCards
             default => [RoundCardScreenshot::NO_VERDICT, 'verdict-tag--none'],
         };
 
-        return new RoundCardScreenshot($view, \sprintf('Screenshot %d', $screenshot->position + 1), $verdictLabel, $verdictClass);
+        return new RoundCardScreenshot($screenshot->id, $view, \sprintf('Screenshot %d', $screenshot->position + 1), $verdictLabel, $verdictClass);
     }
 
     /**
@@ -157,20 +200,46 @@ final readonly class RoundCards
      */
     private function screenshotViewOf(RoundView $round, RoundScreenshotView $screenshot, ?MediaImage $image, array $pins): ScreenshotView
     {
-        $domId = 'screenshot-'.$screenshot->id;
         $altText = $screenshot->title ?? \sprintf('Screenshot %d of %s', $screenshot->position + 1, $round->isUnsharedDraft() ? 'your draft round' : 'round '.($round->number ?? 0));
-        // A picture Media does not know is shown as refused rather than left out, so a round never loses a screenshot silently.
+
+        return self::viewOfPicture('screenshot-'.$screenshot->id, $altText, $screenshot->title, $screenshot->summary, $image, $pins);
+    }
+
+    /**
+     * The picture of one screenshot as the components draw it. A picture Media does not know is shown as refused rather
+     * than left out, so a round never loses a screenshot silently.
+     *
+     * @param list<PinView> $pins
+     */
+    public static function viewOfPicture(string $domId, string $altText, ?string $title, ?string $summary, ?MediaImage $image, array $pins): ScreenshotView
+    {
         $status = $image->status ?? MediaImageStatus::Rejected;
         if (MediaImageStatus::Ready === $status && null !== $image && null !== $image->url && null !== $image->width && null !== $image->height) {
-            return new ScreenshotView($domId, $image->url, $image->width, $image->height, $altText, $screenshot->title, $screenshot->summary, $pins);
+            return new ScreenshotView($domId, $image->url, $image->width, $image->height, $altText, $title, $summary, $pins);
         }
 
-        return new ScreenshotView($domId, null, null, null, $altText, $screenshot->title, $screenshot->summary, $pins, MediaImageStatus::Pending === $status ? MediaImageStatus::Pending : MediaImageStatus::Rejected);
+        return new ScreenshotView($domId, null, null, null, $altText, $title, $summary, $pins, MediaImageStatus::Pending === $status ? MediaImageStatus::Pending : MediaImageStatus::Rejected);
     }
 
     private static function pinViewOf(RoundPinView $pin): PinView
     {
         return new PinView($pin->number, $pin->xPercent, $pin->yPercent, $pin->note, self::AI === $pin->source);
+    }
+
+    /**
+     * @return int|null null for the viewer's own unshared draft, whose editor must reach every picture it holds
+     */
+    private static function pictureLimitOf(RoundView $round): ?int
+    {
+        return $round->isUnsharedDraft() ? null : self::MAX_PICTURES_PER_CARD;
+    }
+
+    /**
+     * @param list<RoundView> $rounds
+     */
+    private static function hasChecklist(array $rounds): bool
+    {
+        return array_any($rounds, static fn ($round) => self::CHECKLIST === $round->kind);
     }
 
     private function showsPictures(RoundView $round): bool
@@ -205,7 +274,8 @@ final readonly class RoundCards
             if (!$this->showsPictures($round)) {
                 continue;
             }
-            foreach (\array_slice($round->screenshots, 0, self::MAX_PICTURES_PER_CARD) as $screenshot) {
+            $pictureLimit = self::pictureLimitOf($round);
+            foreach (null === $pictureLimit ? $round->screenshots : \array_slice($round->screenshots, 0, $pictureLimit) as $screenshot) {
                 $mediaIds[$screenshot->mediaId] = true;
             }
         }

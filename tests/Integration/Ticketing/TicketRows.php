@@ -86,6 +86,14 @@ final readonly class TicketRows
         ));
     }
 
+    public function moveToStepOf(string $organizationId, string $ticketId, string $stepId): void
+    {
+        $this->asTenant($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE tkt_ticket SET step_id = ? WHERE id = ?',
+            [$stepId, $ticketId],
+        ));
+    }
+
     public function removeAllOf(string ...$organizationIds): void
     {
         foreach ($organizationIds as $organizationId) {

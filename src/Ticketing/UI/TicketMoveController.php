@@ -15,6 +15,8 @@ use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\SharedKernel\UI\PingsClearedToast;
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\DraftDecisionNeeded;
 use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
@@ -23,6 +25,7 @@ use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\UndecidedDraft;
 use App\Ticketing\Api\WaitingOnRefused;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\RoleTicketVisibilities;
@@ -48,6 +51,9 @@ use Symfony\UX\Turbo\TurboBundle;
  * order: a ticket the person may not see is not found, as on its page; someone who may not move tickets of its team
  * (a Viewer, or a Manager or Admin with no team role) is denied; a form token that is not valid, or a version that is
  * no number, changes nothing. Who may make which move is then the team's transition policy, whose refusal is a toast.
+ * A verb move or move to a step the policy allows, by the owner of an undecided draft round with a screenshot, moves
+ * nothing until the form says share or keep (ADR-0017, hand-off): until then it answers 409 with what the Share draft
+ * dialog asks. A give does not ask.
  */
 final class TicketMoveController extends AbstractController
 {
@@ -64,6 +70,8 @@ final class TicketMoveController extends AbstractController
     public const string WAITING_ON_USER_FIELD = 'waiting_on_user_id';
     public const string WAITING_ON_LABEL_FIELD = 'waiting_on_label';
     public const string ASSIGNEE_FIELD = 'assignee';
+    /** A verb move's or move-to's answer to "Share your draft round?": a DraftChoice value, share or keep. */
+    public const string DRAFT_CHOICE_FIELD = 'draft_choice';
 
     /** In characters after trimming, as TicketCommands::moveTo counts them. */
     public const int WAITING_ON_LABEL_MAX_LENGTH = 100;
@@ -111,23 +119,28 @@ final class TicketMoveController extends AbstractController
         $this->requestTenant();
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
         $expectedVersion = self::versionOf($request);
+        // Absent or unknown asks first, so only a posted share or keep decides about the draft.
+        $draftChoice = DraftChoice::tryFrom($request->request->getString(self::DRAFT_CHOICE_FIELD));
         $now = $this->clock->now();
 
         try {
-            $toast = $this->transactions->run(function () use ($key, $verb, $csrfToken, $expectedVersion, $now): string {
+            $toast = $this->transactions->run(function () use ($key, $verb, $csrfToken, $expectedVersion, $draftChoice, $now): string {
                 [$actor, $ticket] = $this->movableTicketOf($key);
                 $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 try {
-                    $clearedPingCount = $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now);
+                    $moveResult = $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now, $draftChoice);
                 } catch (MoveRefused $refused) {
                     throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
+                }
+                if (null !== $moveResult->draftOutcome) {
+                    return PingsClearedToast::withClearedPings(MoveToasts::movedToWithDraft($this->stepNameAfterMoveOf($ticket), $moveResult), $moveResult->clearedPingCount);
                 }
 
                 return PingsClearedToast::withClearedPings(MoveToasts::ofVerb(
                     $verb,
                     MoveToasts::namesPerson($verb) ? $this->turnFirstNameOf($ticket) : null,
                     MoveToasts::namesStep($verb) ? $this->stepNameAfterMoveOf($ticket) : null,
-                ), $clearedPingCount);
+                ), $moveResult->clearedPingCount);
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -135,6 +148,8 @@ final class TicketMoveController extends AbstractController
             return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MoveRefusedWithToast $refused) {
             return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (DraftDecisionNeeded $needed) {
+            return $this->answerWithDraftQuestion($request, $key, $needed->draft, $this->generateUrl(self::MOVE_ROUTE, ['key' => $key, 'verb' => $verb]), fn (TicketPageView $ticket, ActorContext $actor): ?string => $this->verbTargetStepNameOf($verb, $ticket, $actor));
         }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
@@ -152,17 +167,18 @@ final class TicketMoveController extends AbstractController
         $expectedVersion = self::versionOf($request);
         $waitingOnUserId = $request->request->getString(self::WAITING_ON_USER_FIELD);
         $waitingOnLabel = $request->request->getString(self::WAITING_ON_LABEL_FIELD);
+        $draftChoice = DraftChoice::tryFrom($request->request->getString(self::DRAFT_CHOICE_FIELD));
         $now = $this->clock->now();
 
         try {
-            $toast = $this->transactions->run(function () use ($key, $stepId, $csrfToken, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $now): string {
+            $toast = $this->transactions->run(function () use ($key, $stepId, $csrfToken, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $draftChoice, $now): string {
                 [$actor, $ticket] = $this->movableTicketOf($key);
                 $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 if (self::isWaitingOnMalformed($waitingOnUserId, $waitingOnLabel)) {
                     throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
                 try {
-                    $clearedPingCount = $this->ticketCommands->moveTo(
+                    $moveResult = $this->ticketCommands->moveTo(
                         $actor->organizationId(),
                         $actor->userId(),
                         $key,
@@ -171,6 +187,7 @@ final class TicketMoveController extends AbstractController
                         '' === $waitingOnUserId ? null : new UserId(strtolower($waitingOnUserId)),
                         '' === $waitingOnLabel ? null : $waitingOnLabel,
                         $now,
+                        $draftChoice,
                     );
                 } catch (MoveRefused $refused) {
                     throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
@@ -178,7 +195,12 @@ final class TicketMoveController extends AbstractController
                     throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
 
-                return PingsClearedToast::withClearedPings(MoveToasts::movedTo($this->listedStepNameOf($stepId)), $clearedPingCount);
+                $stepName = $this->listedStepNameOf($stepId);
+
+                return PingsClearedToast::withClearedPings(
+                    null === $moveResult->draftOutcome ? MoveToasts::movedTo($stepName) : MoveToasts::movedToWithDraft($stepName, $moveResult),
+                    $moveResult->clearedPingCount,
+                );
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -186,6 +208,8 @@ final class TicketMoveController extends AbstractController
             return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MoveRefusedWithToast $refused) {
             return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (DraftDecisionNeeded $needed) {
+            return $this->answerWithDraftQuestion($request, $key, $needed->draft, $this->generateUrl(self::MOVE_TO_ROUTE, ['key' => $key, 'stepId' => $stepId]), fn (): string => $this->listedStepNameOf($stepId));
         }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
@@ -231,6 +255,70 @@ final class TicketMoveController extends AbstractController
         }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
+    }
+
+    /**
+     * "Share your draft round?" in place of the move, which nothing made: the Share draft dialog as a Turbo Stream for a
+     * Turbo form, whose buttons send the same form again with DRAFT_CHOICE_FIELD; for any other form a page with the
+     * same question and buttons, which needs no script. Both answer 409, and both repeat the form's own fields.
+     *
+     * @param string                                                $moveUrl        where the buttons send the form again
+     * @param \Closure(TicketPageView, ActorContext): (string|null) $targetStepName the step the move leads to, read in a transaction of its own
+     */
+    private function answerWithDraftQuestion(Request $request, string $key, UndecidedDraft $draft, string $moveUrl, \Closure $targetStepName): Response
+    {
+        $stepName = $this->transactions->run(function () use ($key, $targetStepName): ?string {
+            [$actor, $ticket] = $this->movableTicketOf($key);
+
+            return $targetStepName($ticket, $actor);
+        });
+        $parameters = [
+            'ticketKey' => $key,
+            'moveUrl' => $moveUrl,
+            'draft' => $draft,
+            'stepName' => $stepName,
+            'fields' => [
+                self::CSRF_FIELD => $request->request->getString(self::CSRF_FIELD),
+                self::VERSION_FIELD => $request->request->getString(self::VERSION_FIELD),
+                self::WAITING_ON_USER_FIELD => $request->request->getString(self::WAITING_ON_USER_FIELD),
+                self::WAITING_ON_LABEL_FIELD => $request->request->getString(self::WAITING_ON_LABEL_FIELD),
+            ],
+            'choiceField' => self::DRAFT_CHOICE_FIELD,
+            'failedToast' => MoveToasts::MOVE_FAILED,
+        ];
+        if (TurboBundle::STREAM_FORMAT === $request->getPreferredFormat()) {
+            return $this->render('@Ticketing/draft_question.stream.html.twig', $parameters, new Response(null, Response::HTTP_CONFLICT, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]));
+        }
+
+        return $this->render('@Ticketing/draft_question.html.twig', $parameters, new Response(null, Response::HTTP_CONFLICT));
+    }
+
+    /**
+     * The name of the step the verb leads to for this actor, from the same transitions the Your next step box offers.
+     *
+     * @return string|null null when the verb is not among them, so the dialog's button names no step
+     */
+    private function verbTargetStepNameOf(string $verb, TicketPageView $ticket, ActorContext $actor): ?string
+    {
+        $transitions = $this->ticketPageParts->of($ticket, $actor)['nextStep']->transitions ?? [];
+        foreach ($transitions as $transition) {
+            if ($transition->verb !== $verb) {
+                continue;
+            }
+            $target = $transition->moveTarget;
+            if (null !== $target->stepId) {
+                return $this->listedStepNameOf($target->stepId);
+            }
+            if (null !== $ticket->visibilityFacts->teamId) {
+                foreach ($this->stepQueries->stepsFor($ticket->visibilityFacts->teamId) as $step) {
+                    if ($step->coreCode() === $target->coreCode) {
+                        return $step->name();
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

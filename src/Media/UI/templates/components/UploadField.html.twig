@@ -1,6 +1,7 @@
 <div class="upload-field" id="{{ this.fieldId }}"
     data-controller="presigned-upload"
     data-presigned-upload-url-value="{{ path('media_upload_intent_begin') }}"
+    data-presigned-upload-status-url-value="{{ path('media_upload_status', {id: 'MEDIA_ID'}) }}"
     data-presigned-upload-csrf-token-value="{{ csrf_token('media_upload') }}"
     data-presigned-upload-target-kind-value="{{ this.targetKind }}"
     data-presigned-upload-target-id-value="{{ this.targetId }}"

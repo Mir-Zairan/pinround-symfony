@@ -129,7 +129,8 @@ app_dependencies() {
 }
 
 # app waits for every service its first request needs; a dependency added to compose.yaml has to be weighed
-# against compose.ci.yaml, which replaces the list for the e2e job (it must not start minio, minio-init or mailpit).
+# against compose.ci.yaml, which replaces the list for the e2e job (app must not wait for minio-init, which the job
+# runs itself, or mailpit).
 app_all=$(printf '%s\n' "$config" | app_dependencies)
 app_all_expected=$(printf '%s\n' minio-init:service_completed_successfully mailpit:service_healthy postgres:service_healthy valkey-cache:service_healthy valkey-state:service_healthy | sort)
 if [ "$app_all" != "$app_all_expected" ]; then

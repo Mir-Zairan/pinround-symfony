@@ -12,6 +12,8 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\ReadsSentSql;
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\MoveResult;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
 use App\Ticketing\Application\ProjectNotFound;
@@ -268,7 +270,7 @@ final class NewTicketTest extends WebTestCase
                 throw $this->refusal;
             }
 
-            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int
+            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
             {
                 throw new \LogicException('The new ticket page moves no ticket.');
             }
@@ -278,7 +280,7 @@ final class NewTicketTest extends WebTestCase
                 throw new \LogicException('The new ticket page gives no ticket.');
             }
 
-            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): int
+            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
             {
                 throw new \LogicException('The new ticket page moves no ticket.');
             }

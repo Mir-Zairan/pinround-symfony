@@ -9,6 +9,8 @@ use App\Notification\UI\Controller\PingController;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Infrastructure\Http\BackgroundReadOnlySessionHandler;
+use App\SharedKernel\Infrastructure\Http\RecordingCsrfTokenStorage;
 use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
 use App\Tests\Fixtures\Entity\TenantProbe;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
@@ -27,6 +29,8 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\HttpKernel\Event\ResponseEvent;
+use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -50,8 +54,13 @@ final class WorkerResetTest extends WebTestCase
     /** Before today: a clock ahead of the login would end the session as idle. */
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const int SHOP_1_VERSION = 3;
+    private const string LOGIN = 'O:8:"stdClass":1:{s:4:"user";s:4:"lena";}';
+    private const string THREAD_TOKEN_ID = 'https-conversation_thread:SHOP-1';
+    private const string DRAFT_TOKEN_KEY = '_csrf/https-review_draft_round:SHOP-1';
 
     private KernelBrowser $client;
+    /** @var list<string> */
+    private array $sessionIds = [];
 
     protected function setUp(): void
     {
@@ -62,6 +71,9 @@ final class WorkerResetTest extends WebTestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->sessionIds as $sessionId) {
+            $this->stateValkey()->del($this->sessionKey($sessionId));
+        }
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
                 foreach (['ntf_ping', 'tkt_ticket', 'wf_step'] as $table) {
@@ -107,6 +119,50 @@ final class WorkerResetTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertFalse($storage->hasStoredToken());
+    }
+
+    /**
+     * A logout clears every CSRF token and destroys the session it read. Were both still noted in the next request, its
+     * session write would take over no token stored meanwhile, and a session it starts under the read id would be dropped.
+     */
+    #[Test]
+    public function theNextRequestTakesOverAStoredTokenAndWritesASessionALogoutReadAfterTheLogout(): void
+    {
+        $this->client->setServerParameter('HTTPS', 'on');
+        $this->logIn($this->client, $this->createUserWithPassword('Lena Berg'));
+        $readSessionId = $this->storedSession(self::encoded(['_security_main' => self::LOGIN]));
+
+        $this->requestRunning(function () use ($readSessionId): void {
+            $sessionHandler = $this->openedSessionHandler();
+            $sessionHandler->read($readSessionId);
+            $sessionHandler->destroy($readSessionId);
+        }, 'POST', '/logout', ['_csrf_token' => $this->csrfTokenFor($this->client, 'logout')]);
+
+        self::assertResponseStatusCodeSame(302);
+        self::assertResponseRedirects('https://localhost/login');
+        self::assertTrue($this->csrfTokenStorage()->hasCleared(), 'the logout cleared no token, so this test proves nothing');
+        self::assertSame(0, $this->stateValkey()->exists($this->sessionKey($readSessionId)));
+        $this->assertTheNextRequestTakesOverAStoredTokenAndWritesTheSession($readSessionId);
+    }
+
+    /**
+     * The same after a request that read a session and removed a token, then threw: the session is gone meanwhile.
+     */
+    #[Test]
+    public function theNextRequestTakesOverAStoredTokenAndWritesASessionARequestReadAfterARequestThatThrew(): void
+    {
+        $this->client->setServerParameter('HTTPS', 'on');
+        $readSessionId = $this->storedSession(self::encoded(['_security_main' => self::LOGIN]));
+
+        $this->requestRunning(function () use ($readSessionId): void {
+            $this->openedSessionHandler()->read($readSessionId);
+            $this->csrfTokenStorage()->removeToken(self::THREAD_TOKEN_ID);
+        }, 'POST', '/_test/worker-reset/'.self::ORG_A.'/fail');
+
+        self::assertResponseStatusCodeSame(500);
+        self::assertTrue($this->csrfTokenStorage()->hasRemovedToken(self::THREAD_TOKEN_ID), 'the request removed no token, so this test proves nothing');
+        $this->stateValkey()->del($this->sessionKey($readSessionId));
+        $this->assertTheNextRequestTakesOverAStoredTokenAndWritesTheSession($readSessionId);
     }
 
     #[Test]
@@ -301,6 +357,98 @@ final class WorkerResetTest extends WebTestCase
         self::assertSame('HTTP GET test_tracing_respond', $roots[1]->getName());
         self::assertNotSame($roots[0]->getTraceId(), $roots[1]->getTraceId());
         self::assertNull($this->client->getContainer()->get(CurrentSpan::class)->span());
+    }
+
+    /**
+     * In the next request, writes a session whose stored copy has a token the written one lacks, and a new session under
+     * $readSessionId, which is gone from Valkey.
+     */
+    private function assertTheNextRequestTakesOverAStoredTokenAndWritesTheSession(string $readSessionId): void
+    {
+        $mergedSessionId = $this->storedSession(self::encoded(['_security_main' => self::LOGIN, '_csrf/'.self::THREAD_TOKEN_ID => 'thread-token']));
+        $newSession = self::encoded(['_csrf/https-authenticate' => 'login-token']);
+        $writeResults = [];
+
+        $this->requestRunning(function () use ($mergedSessionId, $readSessionId, $newSession, &$writeResults): void {
+            $sessionHandler = $this->openedSessionHandler();
+            $writeResults = [
+                $sessionHandler->write($mergedSessionId, self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'draft-token'])),
+                $sessionHandler->write($readSessionId, $newSession),
+            ];
+        }, 'GET', '/_test/worker-reset');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([true, true], $writeResults);
+        self::assertSame(
+            self::encoded(['_security_main' => self::LOGIN, self::DRAFT_TOKEN_KEY => 'draft-token', '_csrf/'.self::THREAD_TOKEN_ID => 'thread-token']),
+            $this->stateValkey()->get($this->sessionKey($mergedSessionId)),
+        );
+        self::assertSame($newSession, $this->stateValkey()->get($this->sessionKey($readSessionId)));
+    }
+
+    /**
+     * Sends the request with $work run inside it once its response is ready, as the session handler's own calls of that
+     * request would run.
+     *
+     * @param \Closure(): void      $work
+     * @param array<string, string> $parameters
+     */
+    private function requestRunning(\Closure $work, string $method, string $uri, array $parameters = []): void
+    {
+        $eventDispatcher = $this->client->getContainer()->get('event_dispatcher');
+        $listener = static function (ResponseEvent $event) use ($work): void {
+            if ($event->isMainRequest()) {
+                $work();
+            }
+        };
+        $eventDispatcher->addListener(KernelEvents::RESPONSE, $listener);
+        try {
+            $this->client->request($method, $uri, $parameters);
+        } finally {
+            $eventDispatcher->removeListener(KernelEvents::RESPONSE, $listener);
+        }
+    }
+
+    /**
+     * @return string the id of a new session stored in the state Valkey as $encoded
+     */
+    private function storedSession(string $encoded): string
+    {
+        $sessionId = bin2hex(random_bytes(16));
+        $this->sessionIds[] = $sessionId;
+        $this->stateValkey()->set($this->sessionKey($sessionId), $encoded);
+
+        return $sessionId;
+    }
+
+    private function sessionKey(string $sessionId): string
+    {
+        return $this->client->getContainer()->getParameter('app.session_key_prefix').$sessionId;
+    }
+
+    /**
+     * @param array<string, string> $attributes
+     */
+    private static function encoded(array $attributes): string
+    {
+        return '_sf2_attributes|'.serialize($attributes).'_sf2_meta|'.serialize(['u' => 1, 'c' => 1, 'l' => 0]);
+    }
+
+    /**
+     * The session handler dev and prod use, opened as PHP opens it before any other call of a request.
+     */
+    private function openedSessionHandler(): \SessionHandlerInterface
+    {
+        $sessionHandler = $this->client->getContainer()->get('test.session_handler');
+        self::assertInstanceOf(BackgroundReadOnlySessionHandler::class, $sessionHandler);
+        $sessionHandler->open('', $this->client->getContainer()->getParameter('app.session_cookie_name'));
+
+        return $sessionHandler;
+    }
+
+    private function csrfTokenStorage(): RecordingCsrfTokenStorage
+    {
+        return $this->client->getContainer()->get('security.csrf.token_storage');
     }
 
     private function tenantContext(): TenantContext

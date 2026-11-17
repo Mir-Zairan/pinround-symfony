@@ -1,0 +1,62 @@
+<section{{ attributes.defaults({class: 'screenshot-report', id: this.fieldId, 'aria-labelledby': this.fieldId ~ '-heading'}) }}
+    data-controller="presigned-upload screenshot-report"
+    data-presigned-upload-url-value="{{ path('media_upload_intent_begin') }}"
+    data-presigned-upload-status-url-value="{{ path('media_upload_status', {id: 'MEDIA_ID'}) }}"
+    data-presigned-upload-csrf-token-value="{{ csrf_token('media_upload') }}"
+    data-presigned-upload-target-kind-value="{{ this.uploadTargetKind }}"
+    data-presigned-upload-target-id-value="{{ this.uploadTargetId }}"
+    data-screenshot-report-pin-placer-outlet="#{{ this.placerId }}"
+    data-action="paste->presigned-upload#paste dragover->presigned-upload#dragOver drop->presigned-upload#drop presigned-upload:started->screenshot-report#showNewPicture presigned-upload:failed->screenshot-report#dropPicture presigned-upload:rejected->screenshot-report#dropPicture presigned-upload:ready->screenshot-report#sendHeldSubmit presigned-upload:still-processing->screenshot-report#endWait pin-placer:change->screenshot-report#countPins"
+>
+    <h2 class="screenshot-report__heading" id="{{ this.fieldId }}-heading">Screenshot</h2>
+    {% if this.error is not null %}
+        <p class="screenshot-report__error" id="{{ this.errorId }}">{{ this.error }}</p>
+    {% endif %}
+    <div class="screenshot-report__actions">
+        <input class="visually-hidden screenshot-report__file" id="{{ this.fieldId }}-file" type="file" accept="image/png,image/jpeg,image/webp"
+            data-presigned-upload-target="input" data-screenshot-report-target="file" data-action="change->presigned-upload#choose"{% if this.error is not null %} aria-describedby="{{ this.errorId }}"{% endif %}>
+        <label class="btn btn-outline screenshot-report__pick" for="{{ this.fieldId }}-file">Upload a file</label>
+        <button type="button" class="btn btn-text screenshot-report__remove" data-screenshot-report-target="remove"
+            data-action="presigned-upload#clear screenshot-report#removePicture"{% if not this.hasPicture %} hidden{% endif %}>Remove screenshot</button>
+    </div>
+    <p class="screenshot-report__empty" data-screenshot-report-target="empty"{% if this.hasPicture %} hidden{% endif %}>Paste or drop a screenshot here, or upload a file. PNG, JPEG or WebP, up to 15 MB.</p>
+    <progress class="upload-field__progress" max="100" value="0" hidden aria-label="Upload progress" data-presigned-upload-target="progress"></progress>
+    <p class="upload-field__status" role="status" aria-live="polite" data-presigned-upload-target="status"></p>
+    <input type="hidden" name="screenshot_media_id" value="{{ this.mediaId }}" data-presigned-upload-target="mediaId">
+
+    <div class="screenshot-report__picture" data-screenshot-report-target="picture"{% if not this.hasPicture %} hidden{% endif %}>
+        <p class="screenshot-report__hint">Click on the screenshot to drop a pin. Then say what is wrong at that pin.</p>
+        <div class="pin-placer" id="{{ this.placerId }}"
+            data-controller="pin-placer"
+            data-pin-placer-note-max-value="{{ this.noteMaxLength }}"
+            data-pin-placer-note-placeholder-value="{{ this.notePlaceholder }}"
+            data-action="click->pin-placer#onClick keydown->pin-placer#onKeydown input->pin-placer#onInput focusin->pin-placer#onFocusin pointerdown->pin-placer#onPointerdown pointermove->pin-placer#onPointermove pointerup->pin-placer#onPointerend pointercancel->pin-placer#onPointerend"
+        >
+            {% set isPending = this.hasPicture and this.view.isPending %}
+            <div class="screenshot__frame{% if isPending %} screenshot__frame--placeholder{% endif %}" id="{{ this.frameId }}" data-screenshot-report-target="frame">
+                <img class="screenshot__image" alt="{{ this.view.altText }}" decoding="async"
+                    {%- if this.view.isReady %} src="{{ this.view.imageUrl }}" width="{{ this.view.width }}" height="{{ this.view.height }}"{% else %} hidden{% endif %}
+                    data-presigned-upload-target="preview" data-screenshot-report-target="image">
+                {% if isPending %}
+                    <div class="screenshot__placeholder" role="status" data-screenshot-report-target="placeholder">Processing…</div>
+                {% endif %}
+                <twig:PinLayer :view="this.view" />
+            </div>
+            <button type="button" class="btn btn-outline pin-placer__add" data-pin-add data-action="pin-placer#addAtCentre">Add pin</button>
+            <p class="pin-placer__status" role="status" data-pin-placer-target="status"></p>
+            <twig:PinList :view="this.view" :isEditable="true" :notePlaceholder="this.notePlaceholder" />
+            <div hidden data-pin-placer-target="fields"></div>
+        </div>
+        <p class="screenshot-report__count" data-screenshot-report-target="count">{{ this.pinCountText }}</p>
+    </div>
+
+    <div class="screenshot-report__field">
+        <label class="screenshot-report__label" for="{{ this.fieldId }}-title">Picture title · optional</label>
+        <input class="screenshot-report__input" id="{{ this.fieldId }}-title" type="text" name="screenshot_title" value="{{ this.title }}" maxlength="{{ this.titleMaxLength }}"{% if this.error is not null %} aria-describedby="{{ this.errorId }}"{% endif %}>
+    </div>
+    <div class="screenshot-report__field">
+        <label class="screenshot-report__label" for="{{ this.fieldId }}-summary">Picture summary · optional</label>
+        <textarea class="screenshot-report__input" id="{{ this.fieldId }}-summary" name="screenshot_summary" rows="3" maxlength="{{ this.summaryMaxLength }}"{% if this.error is not null %} aria-describedby="{{ this.errorId }}"{% endif %}>{{ this.summary }}</textarea>
+    </div>
+    <p class="screenshot-report__status" role="status" data-screenshot-report-target="status"></p>
+</section>

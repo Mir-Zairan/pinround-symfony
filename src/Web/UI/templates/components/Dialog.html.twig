@@ -1,4 +1,4 @@
-<div {{ stimulus_controller('dialog') }}>
+<div {{ stimulus_controller('dialog', this.openOnConnect ? {openOnConnect: true} : {}) }}>
     {% block trigger %}{% endblock %}
     <dialog id="{{ this.id }}" class="dialog" aria-labelledby="{{ this.id }}-title" {{ stimulus_target('dialog', 'dialog') }} data-action="pointerdown->dialog#rememberPress pointerup->dialog#rememberRelease click->dialog#closeOnBackdrop">
         <div class="dialog__box">

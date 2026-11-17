@@ -6,6 +6,8 @@ namespace App\Ticketing\Application;
 
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\MoveResult;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
@@ -33,9 +35,9 @@ final readonly class UseCaseTicketCommands implements TicketCommands
         return $this->createTicket->create($organizationId, $reporter, $projectId, $title, $description, $type, $priority, $assignee, $reportedAt);
     }
 
-    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int
+    public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
     {
-        return $this->moveTicket->move($organizationId, $actor, $key, $verb, $expectedVersion, $at);
+        return $this->moveTicket->move($organizationId, $actor, $key, $verb, $expectedVersion, $at, $draftChoice);
     }
 
     public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): int
@@ -52,7 +54,8 @@ final readonly class UseCaseTicketCommands implements TicketCommands
         ?UserId $waitingOnUserId,
         ?string $waitingOnLabel,
         \DateTimeImmutable $at,
-    ): int {
-        return $this->moveTicket->moveTo($organizationId, $actor, $key, $stepId, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $at);
+        ?DraftChoice $draftChoice = DraftChoice::Keep,
+    ): MoveResult {
+        return $this->moveTicket->moveTo($organizationId, $actor, $key, $stepId, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $at, $draftChoice);
     }
 }

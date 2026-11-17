@@ -65,4 +65,12 @@ interface TicketHistory
         UserId $assignee,
         \DateTimeImmutable $at,
     ): void;
+
+    /**
+     * Adds a row of the change's kind in the caller's transaction, under the organization of its tenant, with no steps
+     * and the payload {"outcome", "pin_number", "area_name"}, each label null when it is missing.
+     *
+     * @throws \LogicException when no transaction is open
+     */
+    public function recordReviewChange(OrganizationId $organizationId, TicketId $ticketId, UserId $actor, ReviewChange $change, \DateTimeImmutable $at): void;
 }

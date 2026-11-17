@@ -318,6 +318,97 @@ textarea.pin-list__note {
   border-radius: var(--radius-input);
 }
 
+/* The Screenshot section of a report form (ScreenshotReportField, screenshot-report controller). */
+.screenshot-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.screenshot-report__heading {
+  margin: 0;
+}
+
+.screenshot-report__error {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-input);
+  background: var(--error-container);
+  color: var(--on-error-container);
+  overflow-wrap: anywhere;
+}
+
+.screenshot-report__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.screenshot-report__pick {
+  cursor: pointer;
+}
+
+/* The file input is hidden but keeps the keyboard focus, so its button-like label shows the focus ring. */
+.screenshot-report__file:focus-visible + .screenshot-report__pick {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.screenshot-report__empty {
+  margin: 0;
+  padding: var(--space-16);
+  border: 2px dashed var(--outline);
+  border-radius: var(--radius-input);
+  color: var(--on-surface-var);
+}
+
+.screenshot-report__hint,
+.screenshot-report__count {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
+.screenshot-report__hint {
+  margin-bottom: var(--space-8);
+}
+
+.screenshot-report__count {
+  margin-top: var(--space-8);
+}
+
+.screenshot-report__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screenshot-report__label {
+  font-weight: 600;
+}
+
+.screenshot-report__input {
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font: inherit;
+}
+
+textarea.screenshot-report__input {
+  resize: vertical;
+}
+
+.screenshot-report__status:empty {
+  display: none;
+}
+
+.screenshot-report__status {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
 /* The ticket page's Rounds section (RoundsSection). */
 
 .round-card {
@@ -386,4 +477,526 @@ textarea.pin-list__note {
 .tag.verdict-tag--not-right {
   background: var(--error-container);
   color: var(--on-error-container);
+}
+
+/* The checklist round's card (ChecklistCard, ChecklistController). */
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.checklist__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checklist__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
+}
+
+/* After .pin-list__number, whose shape it keeps: a reported pin is drawn in the error colours. */
+.checklist__number {
+  background: var(--error);
+  color: var(--on-error);
+}
+
+.checklist__note {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.checklist__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.checklist__form {
+  margin: 0;
+}
+
+.tag.check-state--open {
+  background: var(--s-highest);
+  color: var(--on-surface);
+}
+
+.tag.check-state--fixed {
+  background: var(--ping-container);
+  color: var(--on-ping-container);
+}
+
+.tag.check-state--ok {
+  background: var(--passed-container);
+  color: var(--on-passed-container);
+}
+
+.tag.check-state--not-fixed {
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
+/* The viewer's own unshared draft: its buttons and the "For Claude Code" box (DraftRoundController). */
+.round-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.round-card__form {
+  margin: 0;
+}
+
+/* The owner's draft editor (DraftRoundEditor, draft-round-editor controller). */
+.draft-round-editor,
+.draft-round-editor__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.draft-round-editor__refusal {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-input);
+  background: var(--error-container);
+  color: var(--on-error-container);
+  overflow-wrap: anywhere;
+}
+
+.draft-round-editor__upload {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+.draft-round-editor__preview {
+  max-width: 160px;
+  border-radius: var(--radius-input);
+}
+
+.draft-shot {
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--outline);
+}
+
+.draft-shot__verdict,
+.draft-shot__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.claude-code-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-12);
+  border-radius: var(--radius-input);
+  background: var(--s-c);
+}
+
+.claude-code-box__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.claude-code-box__line {
+  margin: 0;
+}
+
+/* One click selects the whole line, so it copies in one go. */
+.claude-code-box__prompt {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.claude-code-box__tools {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.rounds__start {
+  margin: var(--space-12) 0 0;
+}
+
+/* The review round page (RoundController). */
+.round-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+}
+
+.round-page__ticket {
+  margin: 0;
+}
+
+.round-page__key {
+  font-family: var(--font-mono);
+}
+
+.round-page__title {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 20px;
+}
+
+.round-page__detail {
+  color: var(--on-surface-var);
+  font-weight: 400;
+}
+
+.round-page__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* .seg-group shows it as inline-flex, which would win over the hidden attribute. */
+.round-compare-control[hidden] {
+  display: none;
+}
+
+.area-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: var(--space-16) 0;
+}
+
+.area-tab {
+  gap: var(--space-8);
+  text-decoration: none;
+}
+
+.area-tab[aria-current="page"] {
+  background: var(--secondary-container);
+  border-color: transparent;
+  color: var(--on-secondary-container);
+}
+
+.tag.area-chip--none {
+  background: var(--s-highest);
+  color: var(--on-surface-var);
+}
+
+.tag.area-chip--passed {
+  background: var(--passed-container);
+  color: var(--on-passed-container);
+}
+
+.tag.area-chip--pins {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.tag.area-chip--needs-fix {
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
+.tag.area-chip--question {
+  background: var(--waiting-container);
+  color: var(--on-waiting-container);
+}
+
+.round-page__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-16);
+}
+
+@media (min-width: 960px) {
+  .round-page__body {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    align-items: start;
+  }
+}
+
+.round-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-16);
+}
+
+.round-compare__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.round-compare__caption {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.round-compare__none {
+  color: var(--on-surface-var);
+}
+
+[data-compare-mode="before"] .round-compare__side--after,
+[data-compare-mode="after"] .round-compare__side--before {
+  display: none;
+}
+
+.round-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  padding: var(--space-12);
+  border-radius: var(--radius-input);
+  background: var(--s-c);
+}
+
+.round-panel__title {
+  margin: 0 0 var(--space-8);
+  font-size: 16px;
+}
+
+.round-panel__empty,
+.round-panel__note,
+.round-panel__verdict {
+  margin: 0;
+}
+
+.round-panel__empty {
+  color: var(--on-surface-var);
+}
+
+.round-panel__pins {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.round-panel__pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.round-panel__pin .round-panel__note {
+  flex: 1 1 8rem;
+  overflow-wrap: anywhere;
+}
+
+.round-panel__author {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* The verdict forms of a person who may give them (VerdictController). */
+.round-panel__pin-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.round-panel__verdict-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+  margin: var(--space-12) 0 0;
+}
+
+.round-panel__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.round-panel__choice {
+  cursor: pointer;
+}
+
+.round-panel__choice:has(input:checked) {
+  background: var(--secondary-container);
+  border-color: transparent;
+  color: var(--on-secondary-container);
+}
+
+.round-panel__choice:has(input:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.round-panel__label {
+  font-weight: 600;
+}
+
+.round-panel__note-field {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.round-panel__then,
+.round-panel__next-sentence {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
+.round-panel__next {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+/* The full-screen review (focus.html.twig): always dark (RoundController passes the dark theme), no site header. The
+   shell is exactly the screen's height and main takes what the shell's other lines (the live updates notice) leave: the
+   header and the pin bar take what they need, wrapped or not, and the picture gets the row left between them, so the
+   bar stays on screen at any width or zoom. */
+.app:has(> .page > .focus-review) {
+  height: 100dvh;
+  min-height: 0;
+}
+
+.page:has(> .focus-review) {
+  flex: 1 1 0;
+  min-height: 0;
+  padding-top: var(--space-16);
+  padding-bottom: var(--space-16);
+}
+
+.focus-review {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  justify-items: center;
+  gap: var(--space-16);
+}
+
+.focus-review__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+  width: 100%;
+}
+
+.focus-review__line {
+  flex: 1 1 16rem;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* A size container, so the image below can be capped at the height of the picture's row (100cqh). A long note's bubble
+   is cut at the row's edge rather than making the page scroll: the pin bar shows the whole note. */
+.focus-review__picture {
+  container-type: size;
+  overflow: clip;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 1200px;
+  min-height: 0;
+}
+
+.focus-review__picture .screenshot__frame {
+  border-radius: var(--radius-input);
+  box-shadow: var(--shadow-deep);
+}
+
+/* A picture still processing or refused has no image to size it, so its placeholder keeps the column's full width,
+   and no more of the row's height than there is. */
+.focus-review__picture .screenshot__frame--placeholder {
+  align-self: stretch;
+  max-height: 100cqh;
+}
+
+.focus-review__picture .screenshot__frame--placeholder .screenshot__placeholder {
+  max-height: 100cqh;
+}
+
+/* A tall picture fits its row; the frame shrinks to the image, so the pin layer over it still matches. */
+.focus-review__picture .screenshot__image {
+  width: auto;
+  max-height: 100cqh;
+}
+
+.focus-review__none {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
+.focus-bar {
+  width: 100%;
+  max-width: 720px;
+}
+
+.focus-bar__stop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  border-radius: 18px;
+  background: var(--s-high);
+}
+
+.focus-bar__stop[hidden] {
+  display: none;
+}
+
+.focus-bar__text {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.focus-bar__label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+/* A long note scrolls inside the bar, so on a short screen it cannot push the choices off it. focus.html.twig makes the
+   note focusable, so a keyboard can scroll it. */
+.focus-bar__note {
+  max-height: 30dvh;
+  margin: var(--space-4) 0 0;
+  overflow-y: auto;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.focus-bar__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
 }

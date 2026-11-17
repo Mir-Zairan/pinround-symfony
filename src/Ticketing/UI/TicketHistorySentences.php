@@ -5,17 +5,30 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Application\ReviewChange;
 use App\Ticketing\Application\TicketHistoryEntry;
 use App\Workflow\Api\NowNextContext;
 
 /**
- * Words the ticket page's What happened (FR-TKT-12): each move as a plain sentence with first names and step names,
- * never an id or a verb code, and the ticket's creation.
+ * Words the ticket page's What happened (FR-TKT-12): each move and each checklist or verdict change as a plain sentence
+ * with first names, step names, pin numbers and area names, never an id or a code, and the ticket's creation.
  */
 final readonly class TicketHistorySentences
 {
     /** For a step id the organization no longer has at all; a removed step keeps its name. */
     public const string UNKNOWN_STEP = 'a step that is gone';
+
+    /** For a pin or area Review could not name when the change was recorded. */
+    public const string UNKNOWN_PIN = 'a pin';
+    public const string UNKNOWN_AREA = 'an area';
+
+    /**
+     * Review's codes (ChecklistCommands::STATE_*, VerdictCommands::PIN_* and AREA_*), written out here because
+     * Ticketing_UI may not use Review's Api.
+     */
+    private const array CHECK_ITEM_STATES = ['fixed' => 'Fixed', 'ok' => 'Checked OK', 'not_fixed' => 'Not fixed'];
+    private const array PIN_VERDICTS = ['fixed' => 'Fixed', 'still_wrong' => 'Still wrong'];
+    private const array AREA_VERDICTS = ['pass' => 'Pass', 'needs_fix' => 'Needs fix', 'question' => 'Question'];
 
     /** @var array<string, string> step names by lower-case step id */
     private array $stepNames;
@@ -61,6 +74,12 @@ final readonly class TicketHistorySentences
     public function sentenceOf(TicketHistoryEntry $entry): string
     {
         $actor = $this->subjectOf($entry->actorId);
+        if (null !== $entry->reviewChange) {
+            return $actor.' '.self::reviewChangeWordsOf($entry->reviewChange);
+        }
+        if (null === $entry->toStepId) {
+            throw new \LogicException('A move entry names the step it entered.');
+        }
         if ($entry->isGive()) {
             if (null !== $entry->givenToId && $entry->givenToId->equals($entry->actorId)) {
                 return $actor.' took it';
@@ -74,6 +93,30 @@ final readonly class TicketHistorySentences
         }
 
         return $actor.' moved it from '.$this->stepNameOf($entry->fromStepId).' to '.$toStep;
+    }
+
+    /**
+     * The words after the actor, as the round pages label the states and verdicts (ticket-page.md, Rounds). An outcome
+     * code these words do not know reads as a change with no outcome, never as the code.
+     */
+    private static function reviewChangeWordsOf(ReviewChange $change): string
+    {
+        $pin = null === $change->pinNumber ? self::UNKNOWN_PIN : 'pin '.$change->pinNumber;
+        $area = null === $change->areaName ? self::UNKNOWN_AREA : 'area '.$change->areaName;
+
+        return match ($change->kind) {
+            ReviewChange::CHECK_ITEM_CHANGED => isset(self::CHECK_ITEM_STATES[$change->outcome])
+                ? \sprintf('set %s on the checklist to %s', $pin, self::CHECK_ITEM_STATES[$change->outcome])
+                : \sprintf('changed %s on the checklist', $pin),
+            ReviewChange::PIN_VERDICT_SET => isset(self::PIN_VERDICTS[$change->outcome])
+                ? \sprintf('set %s in %s to %s', $pin, $area, self::PIN_VERDICTS[$change->outcome])
+                : \sprintf('changed the verdict on %s in %s', $pin, $area),
+            ReviewChange::PIN_VERDICT_UNDONE => \sprintf('undid the verdict on %s in %s', $pin, $area),
+            ReviewChange::AREA_VERDICT_SAVED => isset(self::AREA_VERDICTS[$change->outcome])
+                ? \sprintf('gave %s: %s', $area, self::AREA_VERDICTS[$change->outcome])
+                : \sprintf('changed the verdict on %s', $area),
+            default => throw new \LogicException(\sprintf('A review change of kind "%s" has no words.', $change->kind)),
+        };
     }
 
     /**

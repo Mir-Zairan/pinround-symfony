@@ -143,16 +143,6 @@ final readonly class NotifyRecipients
             return false;
         }
 
-        return $this->ticketVisibilities->of($organizationId, $recipient)->isVisible(new TicketVisibilityFacts(
-            $organizationId,
-            $ticket->visibility,
-            $ticket->teamId,
-            $ticket->reporterId,
-            $ticket->assigneeId,
-            $ticket->pendingAssigneeId,
-            $ticket->reviewerId,
-            $ticket->testerId,
-            $ticket->waitingOnUserId,
-        ));
+        return $this->ticketVisibilities->of($organizationId, $recipient)->isVisible(TicketVisibilityFacts::ofSnapshot($organizationId, $ticket));
     }
 }

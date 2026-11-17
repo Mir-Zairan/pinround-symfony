@@ -19,6 +19,14 @@ export function refusalFor(file) {
   return null;
 }
 
+/**
+ * Whether a drag's DataTransfer.types (an array, or a DOMStringList in older browsers) carries files. Only such a drag
+ * is taken over: text dragged onto a field of the form keeps the browser's own drop.
+ */
+export function carriesFiles(types) {
+  return Array.from(types ?? []).includes('Files');
+}
+
 /** The first file of a clipboard or drop that is a picture, else the first file, else null. */
 export function pickedFile(files) {
   const list = Array.from(files ?? []);

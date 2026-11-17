@@ -600,6 +600,11 @@ final class NotifyRecipientsTest extends TestCase
             {
                 return $ticketId->equals($this->shopTicketId) ? 'SHOP-42' : null;
             }
+
+            public function idOf(string $key): ?TicketId
+            {
+                return 'SHOP-42' === $key ? $this->shopTicketId : null;
+            }
         };
     }
 

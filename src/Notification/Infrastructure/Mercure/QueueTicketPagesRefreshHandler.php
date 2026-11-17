@@ -6,10 +6,13 @@ namespace App\Notification\Infrastructure\Mercure;
 
 use App\Conversation\Api\Event\ConversationEvent;
 use App\Notification\Api\Event\PingEvent;
+use App\Review\Api\Event\ReviewEvent;
 use App\Ticketing\Api\Event\TicketEvent;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\DispatchAfterCurrentBusStamp;
+use Symfony\Component\Messenger\Stamp\StampInterface;
 
 /**
  * Queues a refresh of the pages open on a ticket for every change to it, in worker-notify once the relayed event
@@ -41,8 +44,21 @@ final readonly class QueueTicketPagesRefreshHandler
         $this->queueRefresh($event->organizationId, $event->ticketId);
     }
 
-    private function queueRefresh(string $organizationId, string $ticketId): void
+    /**
+     * Ticketing writes the event's What happened line in this same delivery's transaction (RecordReviewChangesHandler),
+     * so the refresh is held until that commits: sent at once, a page could fetch itself without the line.
+     */
+    #[AsMessageHandler(bus: 'event.bus')]
+    public function onReviewEvent(ReviewEvent $event): void
     {
-        $this->commandBus->dispatch(new RefreshTicketPages($organizationId, $ticketId, RefreshAttempt::Leading));
+        $this->queueRefresh($event->organizationId, $event->ticketId, [new DispatchAfterCurrentBusStamp()]);
+    }
+
+    /**
+     * @param list<StampInterface> $stamps
+     */
+    private function queueRefresh(string $organizationId, string $ticketId, array $stamps = []): void
+    {
+        $this->commandBus->dispatch(new RefreshTicketPages($organizationId, $ticketId, RefreshAttempt::Leading), $stamps);
     }
 }

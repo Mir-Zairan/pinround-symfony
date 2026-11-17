@@ -9,6 +9,10 @@ use App\Insight\Api\TurnProjector;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPeopleQueries;
 use App\Organization\Infrastructure\Cache\TeamPeopleCache;
+use App\Review\Domain\Round;
+use App\Review\Domain\RoundId;
+use App\Review\Domain\ScreenshotId;
+use App\Review\Infrastructure\Doctrine\DbalRounds;
 use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -17,9 +21,11 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\ReadsSentSql;
+use App\Ticketing\Api\DraftChoice;
 use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\Event\TicketMoved;
 use App\Ticketing\Api\MoveRefused;
+use App\Ticketing\Api\ShareDraftQuestion;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketNotFound;
@@ -121,6 +127,26 @@ final class MoveTicketTest extends KernelTestCase
     private const string TICKET_BY_KEY = 'SELECT t0.project_id AS project_id_1, t0.number AS number_2, t0.key AS key_3,';
     private const string WAITING_TURNS = 'SELECT turn_user_id, kind, count(*) AS tickets FROM ins_ticket_turn';
     private const string SAVED = 'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?,';
+    /** Review's read of the mover's open draft round, which a move to another step asks about (ShareDraftQuestion). */
+    private const string OPEN_DRAFT = 'SELECT draft.id, draft.decision, (SELECT CAST(COUNT(*) AS integer) FROM rvw_screenshot';
+    /** Review's whole read of the draft a move shares or keeps private, and its save; see DbalRounds. */
+    private const array DRAFT_READ = [
+        'SELECT id, organization_id, ticket_id, kind, owner_id, number, shared_at, state, version,',
+        'SELECT pin.id, pin.screenshot_id,',
+        'SELECT id, media_id, position, variant_label, verdict, title, summary FROM rvw_screenshot',
+    ];
+    private const array DRAFT_NUMBERED = [
+        'SELECT pg_advisory_xact_lock(',
+        'SELECT COALESCE(MAX(number), 0) + 1 FROM rvw_round',
+    ];
+    private const array DRAFT_SAVED = [
+        'SAVEPOINT DOCTRINE_2',
+        'UPDATE rvw_round SET number = ?, shared_at = ?,',
+        'SELECT id, media_id, position, variant_label, verdict, title, summary FROM rvw_screenshot',
+        'SELECT pin.id, pin.screenshot_id,',
+        'RELEASE SAVEPOINT DOCTRINE_2',
+    ];
+    private const string OMARS_DRAFT = '0197a3c0-0000-7000-8000-00000000e781';
     // Auto-clear's lock of the actor's open pings on the ticket (the auto_clear switch comes with the settings already
     // read), the turn projector's writes, the history row, then the event bus's doctrine_transaction savepoint around
     // the outbox's own.
@@ -902,12 +928,12 @@ final class MoveTicketTest extends KernelTestCase
     }
 
     /**
-     * The team's steps, people and rules come from the caches the first move filled, so a verb move reads the ticket
-     * and the team's waiting reviews and tests, then saves, locks the actor's open pings on the ticket, projects and
-     * publishes.
+     * The team's steps, people and rules come from the caches the first move filled, so a verb move reads the ticket,
+     * the team's waiting reviews and tests and the mover's open draft round (P05.T9), then saves, locks the actor's
+     * open pings on the ticket, projects and publishes.
      */
     #[Test]
-    public function aWarmVerbMoveRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveRunsTenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -916,12 +942,15 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P04.T6: a move uses at most 9 queries');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P04.T6\'s 9 queries of a move, plus P05.T9\'s read of the mover\'s draft');
     }
 
+    /**
+     * A move to a chosen step reads the mover's open draft round as a verb move does (P05.T9).
+     */
     #[Test]
-    public function aWarmMoveToAPlainStepRunsNineQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToAPlainStepRunsTenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -930,15 +959,55 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::ON_HOLD_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(9, self::queriesBesideSavepoints($statements), 'P04.T6: a move uses at most 9 queries');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P04.T6\'s 9 queries of a move, plus P05.T9\'s read of the mover\'s draft');
+    }
+
+    /**
+     * A verb move with the answer "share" reads only the facts of the mover's draft before the save, then reads the
+     * draft whole once, takes the round number under its lock, and shares and decides it in one save (P05.T9).
+     */
+    #[Test]
+    public function aWarmVerbMoveThatSharesTheMoversDraftRunsEighteenQueriesBesideItsSavepoints(): void
+    {
+        $versionBefore = $this->stepAndVersion()[1];
+        $ticketId = $this->ticketId();
+
+        $statements = $this->statementsOfAWarmMove(
+            function () use ($versionBefore, $ticketId): void {
+                $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'start_work', $versionBefore, new \DateTimeImmutable(self::MOVED_AT));
+                $this->addOmarsDraftWithAScreenshot($ticketId);
+            },
+            fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT), DraftChoice::Share),
+        );
+
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::DRAFT_READ, ...self::DRAFT_NUMBERED, ...self::DRAFT_SAVED], $statements);
+        self::assertCount(18, self::queriesBesideSavepoints($statements), 'The 10 of a move, the draft read whole, its number and its one save');
+    }
+
+    #[Test]
+    public function aWarmVerbMoveThatKeepsTheMoversDraftPrivateRunsSixteenQueriesBesideItsSavepoints(): void
+    {
+        $versionBefore = $this->stepAndVersion()[1];
+        $ticketId = $this->ticketId();
+
+        $statements = $this->statementsOfAWarmMove(
+            function () use ($versionBefore, $ticketId): void {
+                $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'start_work', $versionBefore, new \DateTimeImmutable(self::MOVED_AT));
+                $this->addOmarsDraftWithAScreenshot($ticketId);
+            },
+            fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT), DraftChoice::Keep),
+        );
+
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::DRAFT_READ, ...self::DRAFT_SAVED], $statements);
+        self::assertCount(16, self::queriesBesideSavepoints($statements), 'The 10 of a move, the draft read whole and its one save, with no number');
     }
 
     /**
      * Raj is in the team, but who a ticket waits on may be any member of the organization, so his membership is read.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnAPersonRunsElevenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -947,16 +1016,16 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, new UserId(self::RAJ), null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        // Ten, not nine: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
-        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the waited-on person\'s membership check');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        // Eleven, not ten: no event clears the cached team people when a membership ends, so they cannot vouch for Raj.
+        self::assertCount(11, self::queriesBesideSavepoints($statements), 'P03.T7: the move with its draft read plus the waited-on person\'s membership check');
     }
 
     /**
      * With nobody named the ticket waits on Mia, its reporter, whose membership is read as a named person's is.
      */
     #[Test]
-    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmMoveToNeedsInputWaitingOnItsReporterRunsElevenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -965,8 +1034,8 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->moveTo(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), self::KEY, self::NEEDS_INPUT_STEP, $versionBefore + 1, null, null, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P03.T7: the move plus the reporter\'s membership check');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, 'SELECT organization_id FROM resolve_user_orgs(?)', self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
+        self::assertCount(11, self::queriesBesideSavepoints($statements), 'P03.T7: the move with its draft read plus the reporter\'s membership check');
     }
 
     /**
@@ -1053,6 +1122,17 @@ final class MoveTicketTest extends KernelTestCase
 
             return self::sqlOf($debugData);
         });
+    }
+
+    /**
+     * In the caller's transaction, which statementsOfAWarmMove rolls back, so no round outlives the test.
+     */
+    private function addOmarsDraftWithAScreenshot(TicketId $ticketId): void
+    {
+        $omar = new UserId(self::OMAR);
+        $draft = Round::draft(new RoundId(self::OMARS_DRAFT), new OrganizationId(self::ACME_FOODS), $ticketId, $omar, new \DateTimeImmutable(self::MOVED_AT));
+        $draft->addScreenshot($omar, new ScreenshotId('0197a3c0-0000-7000-8000-00000000e782'), '0197a3c0-0000-7000-8000-00000000e783');
+        new DbalRounds($this->connection(), $this->tenantContext())->add($draft);
     }
 
     private function assertMoved(string $stepBefore, int $versionBefore, string $expectedStepId, string $actor, ?string $verb): void
@@ -1581,6 +1661,8 @@ final class MoveTicketTest extends KernelTestCase
         self::assertInstanceOf(TicketTurnSnapshots::class, $snapshots);
         $pingClearing = $container->get('test.shared_kernel_ping_clearing');
         \assert($pingClearing instanceof PingClearing);
+        $shareDraftQuestion = $container->get('test.ticketing_share_draft_question');
+        \assert($shareDraftQuestion instanceof ShareDraftQuestion);
 
         return new MoveTicket(
             $tickets,
@@ -1596,6 +1678,7 @@ final class MoveTicketTest extends KernelTestCase
             new MessengerTicketEvents($container->get('event.bus'), $this->connection()),
             $container->get(TurnPeopleChoice::class),
             $pingClearing,
+            $shareDraftQuestion,
         );
     }
 

@@ -20,4 +20,16 @@ interface TicketKeyQueries
      * @throws \App\SharedKernel\Application\TenantNotSet when no tenant is set, before any query
      */
     public function keyOf(TicketId $ticketId): ?string;
+
+    /**
+     * One query by the organization's unique key, for a caller that has the key of a ticket it just made and needs its
+     * id. It does not check that anyone may see the ticket.
+     *
+     * @param string $key matched exactly, for example "SHOP-12"; a lowercase or malformed key finds nothing
+     *
+     * @return TicketId|null null when the organization has no ticket with this key
+     *
+     * @throws \App\SharedKernel\Application\TenantNotSet when no tenant is set, before any query
+     */
+    public function idOf(string $key): ?TicketId;
 }

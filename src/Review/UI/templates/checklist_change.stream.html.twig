@@ -1,0 +1,4 @@
+{#- ChecklistController's answer to a Turbo form: the checklist card as it is now, then the toast. The card's
+    focusedControlId control has autofocus, which Turbo focuses after the swap, as the clicked button went with the old card. -#}
+<turbo-stream action="replace" target="{{ checklist.id }}"><template>{{ include('@Review/_checklist_card.html.twig') }}</template></turbo-stream>
+{{ include('@Web/_toast_stream.html.twig', {message: toast}) }}

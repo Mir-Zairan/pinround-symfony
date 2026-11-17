@@ -9,6 +9,7 @@ use App\Notification\Api\PingPermission;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamPermission;
+use App\Review\Api\RoundPermission;
 use App\Ticketing\Api\ProjectPermission;
 use App\Ticketing\Api\TicketPermission;
 use App\Workflow\Api\WorkflowPermission;
@@ -49,6 +50,11 @@ use App\Workflow\Api\WorkflowPermission;
  * extend: the STEP_CHANGE_TEAM and RULES_CHANGE_TEAM rows hold under extend only. WorkflowVoterTest has the locked and
  * team cases.
  *
+ * Or a round (RoundPermission VIEW, EDIT): "Unshared draft round of Omar" or "Deleted draft round of Omar" on a Shop ticket,
+ *            "Shared round of Omar on a team-only Shop ticket" or "… Support ticket", "… on a ticket nobody has", or
+ *            "Shared round of another organization" or "Unshared draft round of Omar in another organization". Or a ticket for DRAFT_CREATE: "Unassigned Shop ticket", "Shop ticket
+ *            assigned to Omar", "Done Shop ticket assigned to Omar", "Ticket nobody has, for a draft round".
+ *
  * The roles doc has no mute row: whoever may see a ticket may mute it for themselves (MuteVoter), so the
  * NOTIFICATION_MUTE rows cite the visibility text.
  */
@@ -81,6 +87,9 @@ $resolveAComment = '| Resolve a comment | ⚠️ own | ⚠️ own | ✅ any in t
 $adminPings = 'An admin with no team role may see every ticket in the org (including team-only ones), comment, ask questions and ping';
 $seeForEveryoneTickets = '| See tickets (visibility "all") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
+
+$seeADraftRound = '| See a draft round |';
+$editADraftRound = '| Start / edit / share a draft round |';
 
 return [
     ['source' => $isAUser, 'attribute' => OrganizationPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted'],
@@ -363,4 +372,45 @@ return [
     ['source' => $deniedUnlessARuleAllows, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Ben', 'subject' => 'Upload to a team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Lena', 'subject' => 'Upload to a ticket nobody has', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => MediaPermission::UPLOAD, 'actor' => 'Lena', 'subject' => 'Upload to a target of an unknown kind', 'expected' => 'denied'],
+
+    // Rounds and draft rounds.
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar', 'expected' => 'granted'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Sara', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar', 'expected' => 'granted'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Sara', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Deleted draft round of Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Deleted draft round of Omar', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Sara', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Ben', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Raj', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Sara', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Noor', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Shared round of Omar on a team-only Support ticket', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Shared round of Omar on a ticket nobody has', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Shared round of another organization', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Shared round of another organization', 'expected' => 'denied'],
+    ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar in another organization', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar in another organization', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'granted'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Lena', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Mia', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Raj', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Sara', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Noor', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Ben', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Done Shop ticket assigned to Omar', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Unassigned Shop ticket', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Ticket nobody has, for a draft round', 'expected' => 'denied'],
 ];

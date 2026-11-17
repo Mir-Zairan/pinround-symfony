@@ -4,12 +4,8 @@ declare(strict_types=1);
 
 namespace App\Review\UI;
 
-use App\Organization\Api\CurrentActor;
-use App\Organization\Api\OrganizationPermission;
-use App\SharedKernel\Application\TenantContext;
-use App\Ticketing\Api\TicketPermission;
-use App\Ticketing\Api\TicketQueries;
-use App\Ticketing\Api\TicketVisibilities;
+use App\Review\Api\RoundPermission;
+use App\Review\UI\Controller\ChecklistController;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -24,7 +20,9 @@ use Symfony\Component\Routing\Attribute\Route;
  * Runs in the request transaction, as the visibility predicate and the rounds are read under row-level security. An
  * unknown or malformed key, another organization's ticket and a ticket the viewer may not see (TicketPermission VIEW
  * on its visibility facts, after TicketQueries::pageOf reads only what the viewer may see) all answer the same 404 as
- * the ticket's page, so no answer tells that a hidden ticket exists.
+ * the ticket's page, so no answer tells that a hidden ticket exists. "Start a draft round" shows only when
+ * RoundPermission DRAFT_CREATE grants it and the viewer has no unshared draft shown; DraftRoundController takes its
+ * post and the own draft's Share and Delete.
  */
 final class RoundsController extends AbstractController
 {
@@ -38,10 +36,7 @@ final class RoundsController extends AbstractController
     private const string TURBO_FRAME_HEADER = 'Turbo-Frame';
 
     public function __construct(
-        private readonly TenantContext $tenantContext,
-        private readonly CurrentActor $currentActor,
-        private readonly TicketVisibilities $ticketVisibilities,
-        private readonly TicketQueries $ticketQueries,
+        private readonly VisibleTicketLookup $visibleTicketLookup,
         private readonly RoundCards $roundCards,
         private readonly ClockInterface $clock,
     ) {
@@ -50,17 +45,22 @@ final class RoundsController extends AbstractController
     #[Route('/t/{key}/rounds', name: self::ROUNDS_ROUTE, methods: ['GET'])]
     public function rounds(string $key, Request $request): Response
     {
-        $this->denyAccessUnlessGranted(OrganizationPermission::VIEW, $this->tenantContext->get());
-        $actor = $this->currentActor->actorFor($this->getUser()) ?? throw $this->createAccessDeniedException();
-        $visibility = $this->ticketVisibilities->of($actor->organizationId(), $actor->userId());
-        $ticket = $this->ticketQueries->pageOf($key, $visibility);
-        if (null === $ticket || !$this->isGranted(TicketPermission::VIEW, $ticket->visibilityFacts)) {
-            throw $this->createNotFoundException(self::NOT_FOUND);
-        }
+        $visible = $this->visibleTicketLookup->visibleTicketOf($key);
+        $ticket = $visible->ticket;
+
+        // The voter runs whether or not the viewer has a draft, so the frame reads the same queries either way.
+        $mayStartDraft = $this->isGranted(RoundPermission::DRAFT_CREATE, $ticket->id);
+        $section = $this->roundCards->forTicket($ticket->id, $visible->visibility, $this->clock->now());
 
         $response = $this->render(
             $request->headers->has(self::TURBO_FRAME_HEADER) ? '@Review/rounds_frame.html.twig' : '@Review/rounds.html.twig',
-            ['ticketKey' => $ticket->key, 'section' => $this->roundCards->forTicket($ticket->id, $visibility, $this->clock->now())],
+            [
+                'ticketKey' => $ticket->key,
+                'section' => $section,
+                'canStartDraft' => $mayStartDraft && !$section->hasPrivateDraft(),
+                'draftCsrfId' => DraftRoundController::csrfIdOf($ticket->key),
+                'checklistCsrfId' => ChecklistController::csrfIdOf($ticket->key),
+            ],
         );
         $response->setVary(self::TURBO_FRAME_HEADER);
 

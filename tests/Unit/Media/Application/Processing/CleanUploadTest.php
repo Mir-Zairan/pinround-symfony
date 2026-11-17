@@ -19,7 +19,7 @@ use App\Media\Domain\MediaRejectReason;
 use App\Media\Domain\MediaStatus;
 use App\Media\Domain\UploadPolicy;
 use App\Media\Infrastructure\Processing\PurePhpImageHeaderReader;
-use App\Media\Infrastructure\Processing\UnavailableImageEncoder;
+use App\Media\Infrastructure\Processing\VipsImageEncoder;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -35,9 +35,10 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * CleanUpload over in-memory ports that behave like the Doctrine, Flysystem, Messenger and ledger ones, with the real
- * PurePhpImageHeaderReader and a FakeImageEncoder; some cases use the UnavailableImageEncoder that dev and prod run
- * today, or a PassThroughImageEncoder that breaks the contract as a real encoder could. The clock stands at 2026-03-02
- * 10:00 UTC. Every rejection is checked for its reason, its event, the deleted upload and that nothing else was stored.
+ * PurePhpImageHeaderReader and a FakeImageEncoder; some cases use the VipsImageEncoder of dev and prod pointed at a vips
+ * that is not there, or a PassThroughImageEncoder that breaks the contract as a real encoder could. The clock stands
+ * at 2026-03-02 10:00 UTC. Every rejection is checked for its reason, its event, the deleted upload and that nothing
+ * else was stored.
  */
 final class CleanUploadTest extends TestCase
 {
@@ -234,23 +235,23 @@ final class CleanUploadTest extends TestCase
     }
 
     #[Test]
-    public function withTheUnavailableEncoderACheckedUploadStaysPendingWithItsUploadAndPublishesNothing(): void
+    public function whenTheEncoderCannotRunACheckedUploadStaysPendingWithItsUploadAndPublishesNothing(): void
     {
         $original = ImageFixtures::png(64, 64);
         $this->upload(self::FIRST_MEDIA, $original, 'image/png');
 
         try {
-            $this->cleanWith(new UnavailableImageEncoder(), self::FIRST_MEDIA);
+            $this->cleanWith(self::encoderWithoutVips(), self::FIRST_MEDIA);
             self::fail('An upload was finished without an encoder.');
         } catch (\RuntimeException $failure) {
-            self::assertSame('No image encoder is installed, so uploads cannot be re-encoded yet.', $failure->getMessage());
+            self::assertSame('The vips tool is not installed or cannot be executed.', $failure->getMessage());
         }
 
         $this->assertNothingChangedFor(self::FIRST_MEDIA, $original);
     }
 
     #[Test]
-    public function withTheUnavailableEncoderADuplicateOfAReadyPictureStillBecomesReadyWithItsVariants(): void
+    public function whenTheEncoderCannotRunADuplicateOfAReadyPictureStillBecomesReadyWithItsVariants(): void
     {
         $original = ImageFixtures::png(300, 200);
         $this->upload(self::FIRST_MEDIA, $original, 'image/png');
@@ -260,7 +261,7 @@ final class CleanUploadTest extends TestCase
         $storedAfterFirst = $this->mediaFiles->keys();
         $this->upload(self::SECOND_MEDIA, $original, 'image/png');
 
-        $this->cleanWith(new UnavailableImageEncoder(), self::SECOND_MEDIA, 'message-2');
+        $this->cleanWith(self::encoderWithoutVips(), self::SECOND_MEDIA, 'message-2');
 
         self::assertSame($firstState, $this->stateOf(self::SECOND_MEDIA));
         self::assertSame($storedAfterFirst, $this->mediaFiles->keys(), 'No variant was written, and the second upload object is deleted.');
@@ -771,6 +772,11 @@ final class CleanUploadTest extends TestCase
     {
         $this->onceOnlyHandling->deliver($messageId);
         $this->cleanUpload->__invoke(new ProcessUpload($organizationId, $mediaId), new \DateTimeImmutable(self::NOW));
+    }
+
+    private static function encoderWithoutVips(): VipsImageEncoder
+    {
+        return new VipsImageEncoder(new PurePhpImageHeaderReader(), '/nonexistent/vips');
     }
 
     private function cleanWith(ImageEncoder $imageEncoder, string $mediaId, string $messageId = 'message-1'): void

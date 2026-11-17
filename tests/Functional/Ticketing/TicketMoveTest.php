@@ -13,6 +13,8 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\ReadsSentSql;
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\MoveResult;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\UseCaseTicketCommands;
@@ -1309,7 +1311,7 @@ final class TicketMoveTest extends WebTestCase
                 throw new \LogicException('The move routes create no ticket.');
             }
 
-            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at): int
+            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
             {
                 throw new \LogicException('Only moveTo is replaced.');
             }
@@ -1319,7 +1321,7 @@ final class TicketMoveTest extends WebTestCase
                 throw new \LogicException('Only moveTo is replaced.');
             }
 
-            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at): int
+            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
             {
                 throw $this->fault;
             }

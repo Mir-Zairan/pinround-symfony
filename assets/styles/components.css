@@ -19,7 +19,7 @@
   color: var(--on-primary);
 }
 
-.btn-filled:hover:not(:disabled, [aria-disabled="true"]) {
+.btn-filled:hover:not(:disabled, [aria-disabled="true"], [aria-busy="true"]) {
   filter: brightness(1.1);
 }
 
@@ -28,7 +28,7 @@
   color: var(--on-secondary-container);
 }
 
-.btn-tonal:hover:not(:disabled, [aria-disabled="true"]) {
+.btn-tonal:hover:not(:disabled, [aria-disabled="true"], [aria-busy="true"]) {
   filter: brightness(.96);
 }
 
@@ -38,7 +38,7 @@
   border-color: var(--outline-var);
 }
 
-.btn-outline:hover:not(:disabled, [aria-disabled="true"]) {
+.btn-outline:hover:not(:disabled, [aria-disabled="true"], [aria-busy="true"]) {
   background: var(--s-high);
 }
 
@@ -48,15 +48,20 @@
   padding: 0 12px;
 }
 
-.btn-text:hover:not(:disabled, [aria-disabled="true"]) {
+.btn-text:hover:not(:disabled, [aria-disabled="true"], [aria-busy="true"]) {
   background: var(--s-high);
 }
 
 .btn:disabled,
-.btn[aria-disabled="true"] {
+.btn[aria-disabled="true"],
+.btn[aria-busy="true"] {
   opacity: .38;
   cursor: default;
   filter: none;
+}
+
+.btn[aria-busy="true"] {
+  cursor: progress;
 }
 
 .btn-sm {

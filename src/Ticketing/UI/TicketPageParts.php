@@ -22,7 +22,7 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
  * TicketMoveController's Turbo Stream answer renders them again after a move, both through _ticket_state.html.twig,
  * _next_step.html.twig, _people.html.twig and _activity.html.twig.
  *
- * One query for the latest moves (TicketHistoryEntries), one for the saved turn with the waiting turns
+ * One query for the latest moves and checklist or verdict changes (TicketHistoryEntries), one for the saved turn with the waiting turns
  * (NowNextSentences::pageTurnOf), one more for the names of movers the ticket does not hold, and the organization's
  * steps and a lead's move targets, which are cached.
  */
@@ -91,12 +91,12 @@ final readonly class TicketPageParts
      * @param list<TicketHistoryEntry> $historyEntries newest first
      * @param array<string, string>    $displayNames   by user id string, the movers' included
      *
-     * @return list<ActivityLine> the moves newest first, then the created line
+     * @return list<ActivityLine> the history entries newest first, then the created line
      */
     private function activityOf(TicketPageView $ticket, array $historyEntries, array $displayNames): array
     {
         $stepNames = [];
-        if ([] !== $historyEntries) {
+        if (array_any($historyEntries, static fn (TicketHistoryEntry $entry): bool => null !== $entry->toStepId)) {
             foreach ($this->stepQueries->listedSteps() as $step) {
                 $stepNames[strtolower($step->id)] = $step->name;
             }

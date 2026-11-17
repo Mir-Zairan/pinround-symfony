@@ -1,0 +1,434 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Unit\Review\Application\Checklist;
+
+use App\Review\Api\CheckItemChange;
+use App\Review\Api\ChecklistCommands;
+use App\Review\Api\ChecklistRefused;
+use App\Review\Api\Event\ChecklistItemChanged;
+use App\Review\Application\Checklist\UseCaseChecklistCommands;
+use App\Review\Domain\CheckItem;
+use App\Review\Domain\CheckItemState;
+use App\Review\Domain\Pin;
+use App\Review\Domain\Round;
+use App\Review\Domain\RoundKind;
+use App\Review\Domain\Screenshot;
+use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantNotSet;
+use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\UserId;
+use App\Tests\Unit\Conversation\Application\InMemoryPingClearing;
+use App\Tests\Unit\Review\Application\InMemoryChecklists;
+use App\Tests\Unit\Review\Application\InMemoryRounds;
+use App\Tests\Unit\Review\Application\RecordingReviewEvents;
+use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * UseCaseChecklistCommands over InMemoryChecklists and InMemoryRounds, which keep what DbalChecklists and DbalRounds
+ * keep: the tenant's rows only, one checklist round per ticket and the conditional item write. Lena reported SHOP-1
+ * with two pictures; Omar marks its items fixed and Mia checks them, in Acme Foods. Beta Bakery has a checklist of its
+ * own, and Omar and Mia have open pings on SHOP-1 and on another ticket, which a refusal must leave alone. Every refusal
+ * is proven with its reason, the stored items exactly as they were, no event and no ping cleared.
+ */
+final class UseCaseChecklistCommandsTest extends TestCase
+{
+    private const string ACME_FOODS = '0197a3c0-0000-7000-8000-000000007a01';
+    private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000007a02';
+    private const string TICKET = '0197a3c0-0000-7000-8000-000000007a11';
+    private const string OTHER_TICKET = '0197a3c0-0000-7000-8000-000000007a12';
+    private const string TICKET_WITHOUT_PINS = '0197a3c0-0000-7000-8000-000000007a13';
+    private const string TICKET_WITHOUT_REPORT = '0197a3c0-0000-7000-8000-000000007a14';
+    private const string BETA_TICKET = '0197a3c0-0000-7000-8000-000000007a15';
+    private const string LENA = '0197a3c0-0000-7000-8000-000000007a21';
+    private const string OMAR = '0197a3c0-0000-7000-8000-000000007a22';
+    private const string MIA = '0197a3c0-0000-7000-8000-000000007a23';
+    private const string MEDIA = '0197a3c0-0000-7000-8000-000000007a31';
+    private const string UNKNOWN_ITEM = '0197a3c0-0000-7000-8000-000000007aff';
+    private const string REPORTED_AT = '2027-03-15 09:00:00+00:00';
+    private const string CREATED_AT = '2027-03-15 10:00:00+00:00';
+    private const string NOW = '2027-03-16 09:30:00+00:00';
+
+    private TenantContext $tenantContext;
+    private InMemoryRounds $rounds;
+    private InMemoryChecklists $checklists;
+    private RecordingReviewEvents $events;
+    private InMemoryPingClearing $pingClearing;
+    private UseCaseChecklistCommands $commands;
+
+    protected function setUp(): void
+    {
+        $this->tenantContext = new TenantContext(new RecordingTenantSwitchGuard());
+        $this->rounds = new InMemoryRounds($this->tenantContext);
+        $this->checklists = new InMemoryChecklists($this->rounds, $this->tenantContext);
+        $this->events = new RecordingReviewEvents();
+        $this->pingClearing = new InMemoryPingClearing();
+        $this->commands = new UseCaseChecklistCommands(
+            $this->checklists,
+            $this->rounds,
+            new InMemoryChecklistQueries($this->checklists, $this->rounds, $this->tenantContext),
+            $this->events,
+            $this->pingClearing,
+            $this->tenantContext,
+        );
+
+        $this->tenantContext->set(new OrganizationId(self::BETA_BAKERY));
+        $this->addReport(self::BETA_BAKERY, self::BETA_TICKET, true);
+        $this->commands->createFromReport(new TicketId(self::BETA_TICKET), new \DateTimeImmutable(self::CREATED_AT));
+        $this->rounds->numberedTicketIds = [];
+        $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        $this->addReport(self::ACME_FOODS, self::TICKET, true);
+        $this->addReport(self::ACME_FOODS, self::TICKET_WITHOUT_PINS, false);
+
+        $acmeFoods = new OrganizationId(self::ACME_FOODS);
+        foreach ([self::OMAR, self::MIA] as $userId) {
+            $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::TICKET), new UserId($userId), 2);
+            $this->pingClearing->addOpenPings($acmeFoods, new TicketId(self::OTHER_TICKET), new UserId($userId), 1);
+        }
+    }
+
+    #[Test]
+    public function theApiStatesAreTheDomainStates(): void
+    {
+        self::assertEquals(
+            [ChecklistCommands::STATE_OPEN, ChecklistCommands::STATE_FIXED, ChecklistCommands::STATE_OK, ChecklistCommands::STATE_NOT_FIXED],
+            array_map(static fn (CheckItemState $state): string => $state->value, CheckItemState::cases()),
+        );
+    }
+
+    #[Test]
+    public function theChecklistIsMadeFromRoundZerosPinsAsTheNextRoundOwnedByTheReporter(): void
+    {
+        $roundId = $this->commands->createFromReport(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT));
+
+        $checklist = $this->storedRound($roundId);
+        self::assertSame([RoundKind::Checklist, 1, self::LENA], [$checklist->kind(), $checklist->number(), $checklist->ownerId()->toString()]);
+        $items = $this->acmeItems();
+        self::assertCount(3, $items);
+        foreach ($items as $item) {
+            self::assertSame([$roundId, CheckItemState::Open], [$item->roundId()->toString(), $item->state()]);
+        }
+        self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
+        self::assertSame([], $this->events->published());
+    }
+
+    #[Test]
+    public function aChecklistGoesPastARoundTheTicketHasShared(): void
+    {
+        $draft = Round::draft($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::OMAR), new \DateTimeImmutable(self::REPORTED_AT));
+        $draft->share(new UserId(self::OMAR), 1, new \DateTimeImmutable(self::REPORTED_AT));
+        $this->rounds->add($draft);
+
+        $roundId = $this->commands->createFromReport(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT));
+
+        self::assertSame(2, $this->storedRound($roundId)->number());
+    }
+
+    #[Test]
+    public function aSecondChecklistOfTheTicketIsNoneAndWritesNothing(): void
+    {
+        $this->commands->createFromReport(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT));
+        $roundsBefore = $this->rounds->stored;
+        $itemsBefore = $this->checklists->storedItems;
+
+        $secondRoundId = $this->commands->createFromReport(new TicketId(self::TICKET), new \DateTimeImmutable(self::NOW));
+
+        self::assertNull($secondRoundId);
+        self::assertEquals([$roundsBefore, $itemsBefore], [$this->rounds->stored, $this->checklists->storedItems]);
+        self::assertSame([], $this->events->published());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function ticketsWithNothingToCheck(): iterable
+    {
+        yield 'a Round 0 with no pins' => [self::TICKET_WITHOUT_PINS];
+        yield 'a ticket with no Round 0' => [self::TICKET_WITHOUT_REPORT];
+        yield 'a ticket only Beta Bakery has' => [self::BETA_TICKET];
+    }
+
+    #[Test]
+    #[DataProvider('ticketsWithNothingToCheck')]
+    public function aTicketWithNothingToCheckGetsNoChecklist(string $ticketId): void
+    {
+        $roundsBefore = $this->rounds->stored;
+        $itemsBefore = $this->checklists->storedItems;
+
+        self::assertNull($this->commands->createFromReport(new TicketId($ticketId), new \DateTimeImmutable(self::CREATED_AT)));
+
+        self::assertEquals([$roundsBefore, $itemsBefore], [$this->rounds->stored, $this->checklists->storedItems]);
+    }
+
+    #[Test]
+    public function omarMarksTheSecondPinFixedAndHisPingsOnTheTicketAreCleared(): void
+    {
+        $item = $this->secondItemOfAcmeChecklist();
+
+        $change = $this->commands->markFixed($item->id()->toString(), new UserId(self::OMAR), new \DateTimeImmutable(self::NOW));
+
+        self::assertEquals(new CheckItemChange(2, ChecklistCommands::STATE_FIXED, 2), $change);
+        $stored = $this->storedItem($item);
+        self::assertSame([CheckItemState::Fixed, self::OMAR, self::NOW], [$stored->state(), $stored->changedBy()?->toString(), $stored->changedAt()?->format('Y-m-d H:i:sP')]);
+        self::assertSame([$item->id()->toString()], $this->checklists->lockedItemIds);
+        self::assertEquals(
+            [new ChecklistItemChanged(self::ACME_FOODS, self::TICKET, $item->roundId()->toString(), $item->id()->toString(), 'fixed', self::OMAR, new \DateTimeImmutable(self::NOW))],
+            $this->events->published(),
+        );
+        self::assertEquals([[self::ACME_FOODS, self::TICKET, self::OMAR, new \DateTimeImmutable(self::NOW)]], $this->pingClearing->calls());
+        // Only Omar's pings on SHOP-1 went: a second clear finds Mia's and Omar's other ticket's still open.
+        self::assertSame(
+            [0, 2, 1],
+            [
+                $this->pingClearing->clearForActor(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::OMAR), new \DateTimeImmutable(self::NOW)),
+                $this->pingClearing->clearForActor(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::MIA), new \DateTimeImmutable(self::NOW)),
+                $this->pingClearing->clearForActor(new OrganizationId(self::ACME_FOODS), new TicketId(self::OTHER_TICKET), new UserId(self::OMAR), new \DateTimeImmutable(self::NOW)),
+            ],
+        );
+    }
+
+    #[Test]
+    public function miaConfirmsAFixedPinOk(): void
+    {
+        $item = $this->secondItemOfAcmeChecklist();
+        $this->moveStoredItem($item, static fn (CheckItem $read) => $read->markFixed(new UserId(self::OMAR), new \DateTimeImmutable(self::CREATED_AT)));
+
+        $change = $this->commands->markOk($item->id()->toString(), new UserId(self::MIA), new \DateTimeImmutable(self::NOW));
+
+        self::assertEquals(new CheckItemChange(2, ChecklistCommands::STATE_OK, 2), $change);
+        self::assertSame([CheckItemState::Ok, self::MIA], [$this->storedItem($item)->state(), $this->storedItem($item)->changedBy()?->toString()]);
+        self::assertEquals(
+            [new ChecklistItemChanged(self::ACME_FOODS, self::TICKET, $item->roundId()->toString(), $item->id()->toString(), 'ok', self::MIA, new \DateTimeImmutable(self::NOW))],
+            $this->events->published(),
+        );
+    }
+
+    #[Test]
+    public function miaSendsAFixedPinBackAsNotFixedAndOmarCanMarkItFixedAgain(): void
+    {
+        $item = $this->secondItemOfAcmeChecklist();
+        $this->moveStoredItem($item, static fn (CheckItem $read) => $read->markFixed(new UserId(self::OMAR), new \DateTimeImmutable(self::CREATED_AT)));
+
+        $sentBack = $this->commands->markNotFixed($item->id()->toString(), new UserId(self::MIA), new \DateTimeImmutable(self::NOW));
+        $fixedAgain = $this->commands->markFixed($item->id()->toString(), new UserId(self::OMAR), new \DateTimeImmutable(self::NOW));
+
+        self::assertEquals([new CheckItemChange(2, ChecklistCommands::STATE_NOT_FIXED, 2), new CheckItemChange(2, ChecklistCommands::STATE_FIXED, 2)], [$sentBack, $fixedAgain]);
+        self::assertSame(['not_fixed', 'fixed'], array_map(static fn (object $event): string => $event instanceof ChecklistItemChanged ? $event->state : '', $this->events->published()));
+    }
+
+    #[Test]
+    public function anIdInUpperCaseNamesTheSameItem(): void
+    {
+        $item = $this->secondItemOfAcmeChecklist();
+
+        $this->commands->markFixed(strtoupper($item->id()->toString()), new UserId(self::OMAR), new \DateTimeImmutable(self::NOW));
+
+        self::assertSame(CheckItemState::Fixed, $this->storedItem($item)->state());
+    }
+
+    /**
+     * The command, the state the item is put in first (null leaves it open), and the reason.
+     *
+     * @return iterable<string, array{string, CheckItemState|null, string}>
+     */
+    public static function refusedMoves(): iterable
+    {
+        yield 'marking fixed an item marked fixed' => ['markFixed', CheckItemState::Fixed, 'This check is marked fixed already.'];
+        yield 'marking fixed an item confirmed OK' => ['markFixed', CheckItemState::Ok, 'This check is confirmed OK, so it no longer changes.'];
+        yield 'confirming an open item OK' => ['markOk', null, 'Only a check marked fixed can be confirmed OK.'];
+        yield 'confirming a not-fixed item OK' => ['markOk', CheckItemState::NotFixed, 'Only a check marked fixed can be confirmed OK.'];
+        yield 'confirming an OK item OK again' => ['markOk', CheckItemState::Ok, 'Only a check marked fixed can be confirmed OK.'];
+        yield 'sending back an open item' => ['markNotFixed', null, 'Only a check marked fixed can be sent back as not fixed.'];
+        yield 'sending back an OK item' => ['markNotFixed', CheckItemState::Ok, 'Only a check marked fixed can be sent back as not fixed.'];
+    }
+
+    #[Test]
+    #[DataProvider('refusedMoves')]
+    public function aMoveTheItemsStateRefusesChangesNothing(string $command, ?CheckItemState $stateFirst, string $reason): void
+    {
+        $item = $this->secondItemOfAcmeChecklist();
+        if (null !== $stateFirst) {
+            $this->moveStoredItem($item, static fn (CheckItem $read) => $read->markFixed(new UserId(self::OMAR), new \DateTimeImmutable(self::CREATED_AT)));
+        }
+        if (CheckItemState::Ok === $stateFirst) {
+            $this->moveStoredItem($item, static fn (CheckItem $read) => $read->markOk(new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT)));
+        }
+        if (CheckItemState::NotFixed === $stateFirst) {
+            $this->moveStoredItem($item, static fn (CheckItem $read) => $read->markNotFixed(new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT)));
+        }
+
+        $refusal = $this->refusalOf($command, $item->id()->toString());
+
+        self::assertSame($reason, $refusal->getMessage());
+        self::assertFalse($refusal->isNotFound());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function itemsTheTenantHasNot(): iterable
+    {
+        yield 'a malformed id' => ['not-an-item'];
+        yield 'an empty id' => [''];
+        yield 'an unknown id' => [self::UNKNOWN_ITEM];
+    }
+
+    #[Test]
+    public function theIdOfAnItemWithATrailingNewlineIsNotFound(): void
+    {
+        $item = $this->secondItemOfAcmeChecklist();
+
+        self::assertSame(ChecklistRefused::NOT_FOUND, $this->refusalOf('markFixed', $item->id()->toString()."\n")->getMessage());
+        self::assertSame(CheckItemState::Open, $this->storedItem($item)->state());
+    }
+
+    #[Test]
+    #[DataProvider('itemsTheTenantHasNot')]
+    public function anItemTheTenantHasNotIsNotFoundForEveryCommand(string $itemId): void
+    {
+        foreach (['markFixed', 'markOk', 'markNotFixed'] as $command) {
+            $refusal = $this->refusalOf($command, $itemId);
+
+            self::assertSame(ChecklistRefused::NOT_FOUND, $refusal->getMessage(), $command);
+            self::assertTrue($refusal->isNotFound());
+        }
+    }
+
+    #[Test]
+    public function anotherOrganizationsItemIsNotFoundAndStaysAsItWas(): void
+    {
+        $betaItemIds = [];
+        foreach ($this->checklists->storedItems as $itemId => [$organizationId]) {
+            if ($organizationId->equals(new OrganizationId(self::BETA_BAKERY))) {
+                $betaItemIds[] = $itemId;
+            }
+        }
+        self::assertNotEmpty($betaItemIds);
+
+        foreach ($betaItemIds as $betaItemId) {
+            self::assertSame(ChecklistRefused::NOT_FOUND, $this->refusalOf('markFixed', $betaItemId)->getMessage());
+        }
+    }
+
+    #[Test]
+    public function withNoTenantNothingIsRead(): void
+    {
+        $item = $this->secondItemOfAcmeChecklist();
+        $this->tenantContext->clear();
+        $itemsBefore = $this->checklists->storedItems;
+
+        try {
+            $this->commands->markFixed($item->id()->toString(), new UserId(self::OMAR), new \DateTimeImmutable(self::NOW));
+            self::fail('A change with no tenant was not refused.');
+        } catch (TenantNotSet) {
+        }
+
+        self::assertEquals($itemsBefore, $this->checklists->storedItems);
+        self::assertSame([[], [], []], [$this->checklists->lockedItemIds, $this->events->published(), $this->pingClearing->calls()]);
+    }
+
+    /**
+     * Runs the command and proves the refusal left the items, events and pings as they were.
+     */
+    private function refusalOf(string $command, string $itemId): ChecklistRefused
+    {
+        $itemsBefore = $this->checklists->storedItems;
+        $eventsBefore = $this->events->published();
+        $pingCallsBefore = $this->pingClearing->calls();
+        try {
+            match ($command) {
+                'markFixed' => $this->commands->markFixed($itemId, new UserId(self::OMAR), new \DateTimeImmutable(self::NOW)),
+                'markOk' => $this->commands->markOk($itemId, new UserId(self::MIA), new \DateTimeImmutable(self::NOW)),
+                'markNotFixed' => $this->commands->markNotFixed($itemId, new UserId(self::MIA), new \DateTimeImmutable(self::NOW)),
+                default => throw new \LogicException('No such command.'),
+            };
+        } catch (ChecklistRefused $refusal) {
+            self::assertEquals($itemsBefore, $this->checklists->storedItems, 'A refused change wrote an item.');
+            self::assertSame($eventsBefore, $this->events->published(), 'A refused change published.');
+            self::assertSame($pingCallsBefore, $this->pingClearing->calls(), 'A refused change cleared pings.');
+
+            return $refusal;
+        }
+
+        self::fail(\sprintf('%s on %s was not refused.', $command, $itemId));
+    }
+
+    /**
+     * Lena's Round 0 of the ticket: two pins on the first picture and one on the second, given out of order; with
+     * $hasPins false, one picture and no pin.
+     */
+    private function addReport(string $organizationId, string $ticketId, bool $hasPins): void
+    {
+        $lena = new UserId(self::LENA);
+        $screenshots = $hasPins
+            ? [
+                Screenshot::of($this->rounds->nextScreenshotIdentity(), self::MEDIA, 1, null, null, [
+                    Pin::placedBy($this->rounds->nextPinIdentity(), 1, 10.0, 10.0, 'Logo too small', $lena),
+                ]),
+                Screenshot::of($this->rounds->nextScreenshotIdentity(), self::MEDIA, 0, null, null, [
+                    Pin::placedBy($this->rounds->nextPinIdentity(), 2, 20.0, 20.0, 'Wrong total', $lena),
+                    Pin::placedBy($this->rounds->nextPinIdentity(), 1, 30.0, 30.0, 'Missing price', $lena),
+                ]),
+            ]
+            : [Screenshot::of($this->rounds->nextScreenshotIdentity(), self::MEDIA, 0, null, null, [])];
+        $this->rounds->add(Round::report($this->rounds->nextIdentity(), new OrganizationId($organizationId), new TicketId($ticketId), $lena, $screenshots, new \DateTimeImmutable(self::REPORTED_AT)));
+    }
+
+    private function storedRound(?string $roundId): Round
+    {
+        self::assertNotNull($roundId);
+        foreach ($this->rounds->stored as $round) {
+            if ($round->id()->toString() === $roundId) {
+                return $round;
+            }
+        }
+
+        self::fail(\sprintf('Round %s is not stored.', $roundId));
+    }
+
+    /**
+     * @return list<CheckItem> Acme Foods' items, in the order they were added
+     */
+    private function acmeItems(): array
+    {
+        $items = [];
+        foreach ($this->checklists->storedItems as [$organizationId, $item]) {
+            if ($organizationId->equals(new OrganizationId(self::ACME_FOODS))) {
+                $items[] = $item;
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * The open item of pin 2 on the first picture, which reportPinsOf gives second.
+     */
+    private function secondItemOfAcmeChecklist(): CheckItem
+    {
+        $this->commands->createFromReport(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT));
+
+        return $this->acmeItems()[1] ?? self::fail('The checklist has no second item.');
+    }
+
+    private function storedItem(CheckItem $item): CheckItem
+    {
+        return $this->checklists->storedItems[$item->id()->toString()][1] ?? self::fail('The item is not stored.');
+    }
+
+    /**
+     * @param \Closure(CheckItem): void $move
+     */
+    private function moveStoredItem(CheckItem $item, \Closure $move): void
+    {
+        $read = $this->checklists->lockedItem($item->id()) ?? self::fail('The item is not the tenant\'s.');
+        $move($read);
+        $this->checklists->saveItem($read);
+        $this->checklists->lockedItemIds = [];
+    }
+}

@@ -1,0 +1,55 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- One round of a ticket (RoundController). The tabs are links ("?area=N"), so a tab works without JavaScript; only the
+    compare control needs the compare Stimulus controller, and it stays hidden without it. -#}
+
+{% block title %}Round {{ roundNumber }} · {{ page.ticketKey }} · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+{% endblock %}
+
+{% block main %}
+    {% set selected = page.selected %}
+    <article class="ticket round-page" data-controller="compare" data-compare-mode="both">
+        <header class="round-page__header">
+            <twig:Button variant="text" href="{{ path(ticketRoute, {key: page.ticketKey}) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Back to {{ page.ticketKey }}</twig:Button>
+            <p class="round-page__ticket"><span class="round-page__key">{{ page.ticketKey }}</span> · <a href="{{ path(ticketRoute, {key: page.ticketKey}) }}">{{ page.ticketTitle }}</a></p>
+            <h1 class="round-page__title">{{ page.title }}<span class="round-page__detail"> · {{ page.detail }}</span></h1>
+            {% if selected is not null %}
+                <div class="round-page__tools">
+                    <twig:SegmentedControl label="Compare" :options="{both: 'Side by side', before: 'Before', after: 'After'}" selected="both" class="round-compare-control" hidden data-compare-target="control" data-action="click->compare#choose" />
+                    <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, {key: page.ticketKey, number: roundNumber, (areaParameter): page.panel.areaPosition}) }}" class="round-page__full-screen">Full screen</twig:Button>
+                </div>
+            {% endif %}
+        </header>
+
+        {% if selected is null %}
+            <twig:EmptyState message="This round has no screen areas." />
+        {% else %}
+            {{ include('@Review/_area_tabs.html.twig', {tabs: page.tabs}) }}
+
+            <div class="round-page__body">
+                <section class="round-compare" aria-label="Pictures of {{ selected.name }}">
+                    {% if selected.before is not null %}
+                        <figure class="round-compare__side round-compare__side--before">
+                            <figcaption class="round-compare__caption">{{ selected.beforeCaption }}</figcaption>
+                            <twig:Screenshot :view="selected.before" :headingLevel="3" />
+                            <twig:PinList :view="selected.before" />
+                        </figure>
+                    {% else %}
+                        <p class="round-compare__side round-compare__side--before round-compare__none">There is no earlier picture of this place.</p>
+                    {% endif %}
+                    <figure class="round-compare__side round-compare__side--after">
+                        <figcaption class="round-compare__caption">{{ selected.afterCaption }}</figcaption>
+                        <twig:Screenshot :view="selected.after" :headingLevel="3" />
+                        <twig:PinList :view="selected.after" />
+                    </figure>
+                </section>
+
+                {{ include('@Review/_round_panel.html.twig', {panel: page.panel}) }}
+            </div>
+        {% endif %}
+    </article>
+{% endblock %}

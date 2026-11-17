@@ -9,6 +9,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Application\ReviewChange;
 use App\Ticketing\Application\TicketHistoryEntry;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketHistoryEntries;
 use Doctrine\DBAL\Connection;
@@ -123,13 +124,87 @@ final class DbalTicketHistoryEntriesTest extends KernelTestCase
         $ticketId = $this->createdTicketOf(self::ACME_FOODS);
         $this->addEvents(self::ACME_FOODS, $ticketId->toString(), [
             ['0197a3c0-0000-7000-8000-0000000ef201', 'moved', '2027-03-16 09:00:00+00', '{}'],
+            ['0197a3c0-0000-7000-8000-0000000ef202', ReviewChange::AREA_VERDICT_SAVED, '2027-03-16 09:01:00+00', '{"outcome": "pass", "pin_number": null, "area_name": "Totals"}'],
         ]);
 
         $idsUnderAcmeFoods = $this->acmeFoodsIdsReadAs(self::ACME_FOODS, $ticketId);
         $idsUnderBetaBakery = $this->acmeFoodsIdsReadAs(self::BETA_BAKERY, $ticketId);
 
-        self::assertSame(['0197a3c0-0000-7000-8000-0000000ef201'], $idsUnderAcmeFoods);
+        self::assertSame(['0197a3c0-0000-7000-8000-0000000ef202', '0197a3c0-0000-7000-8000-0000000ef201'], $idsUnderAcmeFoods);
         self::assertSame([], $idsUnderBetaBakery);
+    }
+
+    /**
+     * The four kinds of review change come with the moves in one time order, each with its outcome and labels and no
+     * steps; the created row and a type the page has no words for stay out.
+     */
+    #[Test]
+    public function itReadsReviewChangesWithTheMovesInTimeOrder(): void
+    {
+        $ticketId = $this->createdTicketOf(self::ACME_FOODS);
+        $this->addEvents(self::ACME_FOODS, $ticketId->toString(), [
+            ['0197a3c0-0000-7000-8000-0000000ef304', ReviewChange::AREA_VERDICT_SAVED, '2027-03-16 09:04:00+00', '{"outcome": "needs_fix", "pin_number": null, "area_name": "Totals"}'],
+            ['0197a3c0-0000-7000-8000-0000000ef300', 'moved', '2027-03-16 09:00:00+00', '{"verb": "start_work"}'],
+            ['0197a3c0-0000-7000-8000-0000000ef302', ReviewChange::PIN_VERDICT_SET, '2027-03-16 09:02:00+00', '{"outcome": "still_wrong", "pin_number": 3, "area_name": "Per product"}'],
+            ['0197a3c0-0000-7000-8000-0000000ef301', ReviewChange::CHECK_ITEM_CHANGED, '2027-03-16 09:01:00+00', '{"outcome": "fixed", "pin_number": 2, "area_name": null}'],
+            ['0197a3c0-0000-7000-8000-0000000ef303', ReviewChange::PIN_VERDICT_UNDONE, '2027-03-16 09:03:00+00', '{"outcome": "still_wrong", "pin_number": 3, "area_name": "Per product"}'],
+            ['0197a3c0-0000-7000-8000-0000000ef305', 'created', '2027-03-16 09:05:00+00', '{}'],
+            ['0197a3c0-0000-7000-8000-0000000ef306', 'commented', '2027-03-16 09:06:00+00', '{"outcome": "posted"}'],
+        ]);
+
+        $entries = $this->latestOf(self::ACME_FOODS, $ticketId);
+
+        self::assertSame(
+            [
+                [null, null, [ReviewChange::AREA_VERDICT_SAVED, 'needs_fix', null, 'Totals']],
+                [null, null, [ReviewChange::PIN_VERDICT_UNDONE, 'still_wrong', 3, 'Per product']],
+                [null, null, [ReviewChange::PIN_VERDICT_SET, 'still_wrong', 3, 'Per product']],
+                [null, null, [ReviewChange::CHECK_ITEM_CHANGED, 'fixed', 2, null]],
+                [ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, null],
+            ],
+            array_map(static fn (TicketHistoryEntry $entry): array => [
+                $entry->fromStepId,
+                $entry->toStepId,
+                null === $entry->reviewChange ? null : [$entry->reviewChange->kind, $entry->reviewChange->outcome, $entry->reviewChange->pinNumber, $entry->reviewChange->areaName],
+            ], $entries),
+        );
+        self::assertSame([], $this->latestOf(self::BETA_BAKERY, $ticketId));
+    }
+
+    /**
+     * A payload is JSON any later code may have written: a pin number that is not a whole number from 1, or an empty
+     * area name, reads as unnamed rather than as a wrong label.
+     */
+    #[Test]
+    public function aReviewChangeWithLabelsItCannotUseReadsThemAsUnnamed(): void
+    {
+        $ticketId = $this->createdTicketOf(self::ACME_FOODS);
+        $this->addEvents(self::ACME_FOODS, $ticketId->toString(), [
+            ['0197a3c0-0000-7000-8000-0000000ef311', ReviewChange::PIN_VERDICT_SET, '2027-03-16 09:01:00+00', '{"outcome": "fixed", "pin_number": 0, "area_name": ""}'],
+            ['0197a3c0-0000-7000-8000-0000000ef312', ReviewChange::PIN_VERDICT_SET, '2027-03-16 09:02:00+00', '{"outcome": "fixed", "pin_number": "2abc", "area_name": null}'],
+            ['0197a3c0-0000-7000-8000-0000000ef313', ReviewChange::PIN_VERDICT_SET, '2027-03-16 09:03:00+00', '{"outcome": "fixed", "pin_number": -4}'],
+        ]);
+
+        $entries = $this->latestOf(self::ACME_FOODS, $ticketId);
+
+        self::assertCount(3, $entries);
+        foreach ($entries as $entry) {
+            self::assertNotNull($entry->reviewChange);
+            self::assertSame([null, null], [$entry->reviewChange->pinNumber, $entry->reviewChange->areaName]);
+        }
+    }
+
+    #[Test]
+    public function aReviewChangeRowWithNoOutcomeIsRefused(): void
+    {
+        $ticketId = $this->createdTicketOf(self::ACME_FOODS);
+        $this->addEvents(self::ACME_FOODS, $ticketId->toString(), [
+            ['0197a3c0-0000-7000-8000-0000000ef321', ReviewChange::AREA_VERDICT_SAVED, '2027-03-16 09:01:00+00', '{"pin_number": null, "area_name": "Totals"}'],
+        ]);
+
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessageIsOrContains('A ticket review change row lacks its outcome.');
+        $this->latestOf(self::ACME_FOODS, $ticketId);
     }
 
     #[Test]
@@ -190,7 +265,9 @@ final class DbalTicketHistoryEntriesTest extends KernelTestCase
 
     /**
      * @param list<array{string, string, string, string}> $events id, type, time and payload of each row, written in
-     *                                                            this order by Lena, from Backlog to To do
+     *                                                            this order by Lena, a move or created row from Backlog
+     *                                                            to To do, a review change with no steps, as
+     *                                                            DbalTicketHistory writes them
      */
     private function addEvents(string $organizationId, string $ticketId, array $events): void
     {
@@ -199,10 +276,16 @@ final class DbalTicketHistoryEntriesTest extends KernelTestCase
         try {
             $this->migrator()->transactional(static function (Connection $migrator) use ($organizationId, $ticketId, $events): void {
                 foreach ($events as [$id, $type, $at, $payload]) {
+                    $isReviewChange = \in_array($type, ReviewChange::KINDS, true);
                     $migrator->executeStatement(
                         'INSERT INTO tkt_ticket_event (id, organization_id, ticket_id, actor_id, type, from_step, to_step, payload, at)
                          VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS timestamptz))',
-                        [$id, $organizationId, $ticketId, self::LENA, $type, ShopTeamRows::BACKLOG_STEP, ShopTeamRows::TO_DO_STEP, $payload, $at],
+                        [
+                            $id, $organizationId, $ticketId, self::LENA, $type,
+                            $isReviewChange ? null : ShopTeamRows::BACKLOG_STEP,
+                            $isReviewChange ? null : ShopTeamRows::TO_DO_STEP,
+                            $payload, $at,
+                        ],
                     );
                 }
             });

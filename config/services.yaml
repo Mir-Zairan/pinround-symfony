@@ -9,6 +9,8 @@
 parameters:
     # The session cookie (framework.yaml); the test env's mock session storage uses the same name.
     app.session_cookie_name: '__Host-pinround'
+    # The state Valkey key of each session is this and its id, for RedisSessionHandler and MergingSessionHandler alike.
+    app.session_key_prefix: 'session:'
     # Session limits of ADR-0012 (idle 8 hours, absolute 30 days), read by EndExpiredSession. The idle one is in
     # seconds because it is also the Valkey key's TTL, which every request renews (RedisSessionHandler below).
     identity.session_idle_seconds: 28800
@@ -91,9 +93,16 @@ services:
         factory: [Symfony\Component\Cache\Adapter\RedisAdapter, createConnection]
         arguments: ['%env(STATE_VALKEY_DSN)%', { lazy: true }]
     Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler:
-        arguments: ['@state_valkey.connection', { prefix: 'session:', ttl: '%identity.session_idle_seconds%' }]
-    # It takes no lock, so a background request (live refresh, realtime token) writes the session only to keep a new
-    # CSRF token: else it could write back an older copy over the person's own POST (BackgroundReadOnlySessionHandler).
+        arguments: ['@state_valkey.connection', { prefix: '%app.session_key_prefix%', ttl: '%identity.session_idle_seconds%' }]
+    # It takes no lock, so a page's lazy frames, which load at once, each kept only their own new CSRF token: every write
+    # now takes over the tokens stored meanwhile (MergingSessionHandler). Priority 1 puts it next to the Valkey handler,
+    # whose connection and key prefix it shares, inside BackgroundReadOnlySessionHandler.
+    App\SharedKernel\Infrastructure\Http\MergingSessionHandler:
+        decorates: Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler
+        decoration_priority: 1
+        arguments: { $sessionHandler: '@.inner', $connection: '@state_valkey.connection', $keyPrefix: '%app.session_key_prefix%' }
+    # A background request (live refresh, realtime token) writes the session only to keep a new CSRF token: else it
+    # could write back an older copy over the person's own POST (BackgroundReadOnlySessionHandler).
     App\SharedKernel\Infrastructure\Http\BackgroundReadOnlySessionHandler:
         decorates: Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler
         arguments: { $sessionHandler: '@.inner' }
@@ -158,6 +167,8 @@ services:
     App\Media\Infrastructure\Processing\FlysystemMediaFiles:
         arguments:
             $objectStorage: '@media.object_storage'
+    # Runs the vips tool of the image's libvips-tools package (Dockerfile, base stage); the test env binds a fake below.
+    App\Media\Application\Processing\ImageEncoder: '@App\Media\Infrastructure\Processing\VipsImageEncoder'
 
     # Several services read the step policy on one page; it is read once per request. AddStep and SetRule check it
     # again inside their own transaction, after the voter, so they read it fresh.
@@ -194,6 +205,10 @@ services:
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
     App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
     App\Ticketing\Api\AssigneeTicketCounts: '@App\Ticketing\Infrastructure\Doctrine\DbalAssigneeTicketCounts'
+    # Ticketing's port that Review implements, so a move asks about the mover's draft round without depending on Review.
+    App\Ticketing\Api\ShareDraftQuestion: '@App\Review\Application\RoundShareDraftQuestion'
+    # Ticketing's port that Review implements, so the ticket's history names a Review event's pin and area.
+    App\Ticketing\Api\ReviewChangeLabels: '@App\Review\Infrastructure\Doctrine\DbalReviewChangeLabels'
     App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
     App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
     App\Insight\Api\TeamLoadQueries: '@App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries'
@@ -367,11 +382,41 @@ when@test:
         test.media_signed_urls:
             alias: App\Media\Api\SignedUrls
             public: true
+        # UploadedMediaTest gets the Api as the status route does.
+        test.media_uploaded_media:
+            alias: App\Media\Api\UploadedMedia
+            public: true
         # The container drops a private service no test asks for; the integration tests get the Api as a page does.
         test.review_round_queries:
             alias: App\Review\Api\RoundQueries
             public: true
-        # The box has no libvips, so ProcessUploadHandlerTest runs the worker with an encoder that follows the same port.
+        test.review_review_round_queries:
+            alias: App\Review\Api\ReviewRoundQueries
+            public: true
+        # No route gives a verdict before the round page's controllers (P05.T7); UseCaseVerdictCommandsTest gets the Api
+        # as a controller will.
+        test.review_verdict_commands:
+            alias: App\Review\Api\VerdictCommands
+            public: true
+        # No route changes a checklist item before the checklist card ships;
+        # UseCaseChecklistCommandsTest gets the Api as they will.
+        test.review_checklist_commands:
+            alias: App\Review\Api\ChecklistCommands
+            public: true
+        test.review_checklist_queries:
+            alias: App\Review\Api\ChecklistQueries
+            public: true
+        # No page saves a report before the new ticket form takes a screenshot; ScreenshotReportOnNewTicketTest gets
+        # Ticketing's port as that form will.
+        test.ticketing_new_ticket_report:
+            alias: App\Ticketing\Api\NewTicketReport
+            public: true
+        # Only MoveTicket takes the port, which would inline it; MoveTicketTest builds MoveTicket with the real one.
+        test.ticketing_share_draft_question:
+            alias: App\Ticketing\Api\ShareDraftQuestion
+            public: true
+        # Tests do not need the vips tool (CI has none), so ProcessUploadHandlerTest runs the worker with an encoder that
+        # follows the same port; tests/Integration/Media/Processing/VipsImageEncoderTest.php runs the real one.
         App\Tests\Fixtures\Media\FakeImageEncoder:
             public: true
         App\Media\Application\Processing\ImageEncoder: '@App\Tests\Fixtures\Media\FakeImageEncoder'

@@ -143,8 +143,9 @@ jobs:
           -f docker/postgres/roles.sql
       # The test-only readonly connection proves what pinround_readonly is refused.
       # The object-storage group (Media against MinIO) runs locally only: this job has no MinIO, only the stand-in
-      # listener above, so its uploads, CORS preflights and reads would fail here.
-      - run: composer test:integration -- --exclude-group object-storage
+      # listener above, so its uploads, CORS preflights and reads would fail here. The libvips group needs the vips
+      # tool of the app image, so the build job runs it in that image.
+      - run: composer test:integration -- --exclude-group object-storage --exclude-group libvips
         env:
           READONLY_DATABASE_URL: postgresql://pinround_readonly:change-me-ci-only-readonly-db@127.0.0.1:5432/pinround?serverVersion=18&charset=utf8
       - run: composer test:functional
@@ -153,7 +154,9 @@ jobs:
 
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    # About 3 minutes for the prod image; the dev image reuses its base stage, and php-setup plus the libvips tests
+    # add about 2.
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,14 +173,39 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - run: sh tests/shell/compose-config-check.sh
+      # The libvips group runs VipsImageEncoder against the vips tool the Dockerfile installs (libvips 8.14 of
+      # bookworm), so it runs in the dev image, which shares the prod image's base stage and has PHPUnit's dev vendor
+      # mounted from php-setup. Same build args as above, so the base layers come from that build.
+      - uses: ./.github/actions/php-setup
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: dev
+          load: true
+          push: false
+          tags: pinround-app:ci-libvips
+          build-args: |
+            APP_UID=1000
+            APP_GID=1000
+          cache-from: type=gha
+      # Only the test file is named: given the whole suite, PHPUnit would run every data provider, and Foundry's boot
+      # the kernel. No network, as the group needs no database or service. The runner user owns the mounted checkout;
+      # --fail-on-skipped turns a missing vips into a failure.
+      - name: Run the libvips tests in the app image
+        run: >-
+          docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp
+          -v "$PWD:/app" -w /app pinround-app:ci-libvips
+          php vendor/bin/phpunit --group libvips --fail-on-skipped --fail-on-empty-test-suite
+          tests/Integration/Media/Processing/VipsImageEncoderTest.php
 
-  # The dev stack without file storage or mail (compose.ci.yaml), then every Playwright spec but the pixel compares.
-  # Runs on pull requests and on pushes to main only.
+  # The dev stack without mail (compose.ci.yaml), with MinIO and the media worker, then every Playwright spec but the
+  # pixel compares. Runs on pull requests and on pushes to main only.
   e2e:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    # About 3 minutes of setup and 6 to 8 of Playwright since phase 4's live update specs; 20 leaves room.
-    timeout-minutes: 20
+    # About 3 minutes of setup, up to 5 more to build MinIO on a cold cache, and 8 to 10 of Playwright with the upload
+    # journeys; 30 leaves room.
+    timeout-minutes: 30
     env:
       # Read by `docker compose` and `make`: the CI override replaces app's depends_on.
       COMPOSE_FILE: compose.yaml:compose.ci.yaml
@@ -206,8 +234,23 @@ jobs:
             APP_GID=${{ env.APP_GID }}
           cache-from: type=gha,scope=e2e-dev
           cache-to: type=gha,scope=e2e-dev,mode=max
-      # No minio, mailpit, worker-heavy or scheduler: see compose.ci.yaml. vendor/ and assets/vendor come from
-      # php-setup, so the entrypoint skips composer install.
+      # MinIO has no upstream image to pin and compiles from Go source (ADR-0031), about five minutes cold, so it has
+      # its own layer cache. Compose then finds pinround-minio:dev and does not build it again.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: docker/minio
+          load: true
+          push: false
+          tags: pinround-minio:dev
+          cache-from: type=gha,scope=e2e-minio
+          cache-to: type=gha,scope=e2e-minio,mode=max
+      # Starts minio, waits for it to be healthy, and makes the private bucket with CORS for https://localhost. The
+      # browser reaches it on the runner at http://localhost:9000, the OBJECT_STORAGE_PUBLIC_URL of .env.dev that
+      # presigned URLs are signed for; app and the workers reach it at http://minio:9000.
+      - name: Start MinIO and make the bucket
+        run: docker compose --env-file .env --env-file .env.dev run --rm minio-init
+      # No mailpit or scheduler: see compose.ci.yaml. vendor/ and assets/vendor come from php-setup, so the entrypoint
+      # skips composer install.
       - name: Start the stack
         run: docker compose --env-file .env --env-file .env.dev up -d --wait app
       - name: Apply the database roles and migrate
@@ -220,10 +263,11 @@ jobs:
           echo "::add-mask::$demo_password"
           echo "DEMO_PASSWORD=$demo_password" >> "$GITHUB_ENV"
           DEMO_PASSWORD="$demo_password" make --no-print-directory seed
-      # The live update and bell specs need the outbox relay and worker (async_notify publishes to the hub). They
+      # The live update and bell specs need the outbox relay and worker (async_notify publishes to the hub); the upload
+      # journeys need worker-heavy (async_media, with the image's vips) to turn an upload into a ready picture. They
       # connect as pinround_app, so they start once the roles and tables exist.
-      - name: Start the outbox relay and the notify worker
-        run: docker compose --env-file .env --env-file .env.dev up -d --wait worker-outbox worker
+      - name: Start the outbox relay, the notify worker and the media worker
+        run: docker compose --env-file .env --env-file .env.dev up -d --wait worker-outbox worker worker-heavy
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.12"
@@ -237,9 +281,11 @@ jobs:
         working-directory: tests/e2e
         env:
           E2E_PASSWORD: ${{ env.DEMO_PASSWORD }}
+          # Runs the specs that upload to MinIO and wait for worker-heavy, skipped without it.
+          E2E_MEDIA_PIPELINE: "1"
       - name: Show the app logs
         if: failure()
-        run: docker compose --env-file .env --env-file .env.dev logs app worker-outbox worker
+        run: docker compose --env-file .env --env-file .env.dev logs app worker-outbox worker worker-heavy minio
       - name: Keep the Playwright traces
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

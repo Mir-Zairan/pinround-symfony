@@ -1,5 +1,6 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LENA_STORAGE_STATE } from './auth';
+import { beginAnswer, MEDIA_ID, PNG, routeCompletedUpload, routeStatus, routeStorage } from './media-mocks';
 
 test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 900 } });
 
@@ -8,48 +9,14 @@ test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 90
 // origin, which the dev stack does for the app's own origin only.
 const FIELD = '#gallery-upload';
 // The dev stack's OBJECT_STORAGE_PUBLIC_URL (.env.dev), the only storage origin the page's CSP lets it connect to.
-const STORAGE_URL = 'http://localhost:9000/pinround-dev/uploads/slot';
-const APP_ORIGIN = new URL(process.env.E2E_BASE_URL ?? 'https://localhost').origin;
-// What the bucket's CORS rule answers for the app's origin; a PUT with a Content-Type is preflighted.
-const STORAGE_CORS = {
-  'Access-Control-Allow-Origin': APP_ORIGIN,
-  'Access-Control-Allow-Methods': 'PUT, GET, HEAD',
-  'Access-Control-Allow-Headers': 'content-type',
-  Vary: 'Origin',
-};
-
-// Answers the browser's preflight like the bucket, and each PUT with what onPut returns.
-async function routeStorage(page: Page, onPut: (route: Route) => Promise<{ status: number; body?: string }> | { status: number; body?: string } = () => ({ status: 200 })) {
-  await page.route(STORAGE_URL, async (route) => {
-    if ('OPTIONS' === route.request().method()) {
-      await route.fulfill({ status: 200, headers: STORAGE_CORS, body: '' });
-      return;
-    }
-    const { status, body = '' } = await onPut(route);
-    await route.fulfill({ status, headers: STORAGE_CORS, body }).catch(() => {});
-  });
-}
-const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 const MULTIBYTE_NAME = 'Café ☕ 画面.png';
-const MEDIA_ID = '0192f3a0-7b2c-7d3e-8a4f-5b6c7d8e9f02';
 const USED_ALREADY_MESSAGE = 'This upload has ended. Upload the file again.';
 const NOT_A_BEGIN_REQUEST_MESSAGE = 'This upload request needs a purpose, a file type, a size and a target. Reload the page and try again.';
 
-// What PresignedUploads::forPut answers: the signed Content-Type and Content-Length headers.
-function beginAnswer(intentId: string) {
-  return {
-    status: 201,
-    json: {
-      intentId,
-      url: STORAGE_URL,
-      method: 'PUT',
-      headers: { 'Content-Type': 'image/png', 'Content-Length': String(PNG.length) },
-      expiresAt: '2026-11-06T12:05:00+00:00',
-    },
-  };
-}
-
-async function openUploadField(page: Page) {
+async function openUploadField(page: Page, { withStatusRoute = true }: { withStatusRoute?: boolean } = {}) {
+  if (withStatusRoute) {
+    await routeStatus(page);
+  }
   // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
   await page.goto('/_gallery', { waitUntil: 'networkidle' });
   const field = page.locator(FIELD);
@@ -311,4 +278,156 @@ test('leaving the page mid-upload aborts it: no complete call is made', async ({
 
   await page.waitForLoadState('networkidle');
   expect(isCompleteCalled).toBe(false);
+});
+
+// Playwright's clock fires the timers at once, so no test waits a real second. The status request between two timers is
+// real, hence a run of short steps until the polls are done.
+async function runClockUntil(page: Page, isDone: () => boolean) {
+  await expect
+    .poll(
+      async () => {
+        await page.clock.runFor(1000);
+        return isDone();
+      },
+      { timeout: 30_000, intervals: [20] },
+    )
+    .toBe(true);
+}
+
+async function recordEvents(field: Locator, names: string[]) {
+  await field.evaluate((element, eventNames) => {
+    const events: { name: string; mediaId: string }[] = [];
+    (window as unknown as { uploadEvents: typeof events }).uploadEvents = events;
+    for (const name of eventNames) {
+      element.addEventListener(`presigned-upload:${name}`, (event) => events.push({ name, mediaId: (event as CustomEvent).detail.mediaId }));
+    }
+  }, names);
+  return () => field.evaluate(() => (window as unknown as { uploadEvents: { name: string; mediaId: string }[] }).uploadEvents);
+}
+
+async function uploadPng(page: Page, status: Locator) {
+  await page.locator(`${FIELD} input[type="file"]`).setInputFiles({ name: 'checkout.png', mimeType: 'image/png', buffer: PNG });
+  await expect(status).toHaveText('checkout.png uploaded.');
+}
+
+test('the field polls the status URL and, once ready after two polls, marks itself ready and says so in an event', async ({ page }) => {
+  await routeCompletedUpload(page, 'intent-8');
+  const polledUrls: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/status')) {
+      polledUrls.push(new URL(request.url()).pathname);
+    }
+  });
+  const pollCount = await routeStatus(page, (poll) => ({ status: 200, json: { status: poll < 2 ? 'pending' : 'ready' } }));
+  await page.clock.install();
+  const { field, status, mediaId } = await openUploadField(page, { withStatusRoute: false });
+  const events = await recordEvents(field, ['uploaded', 'ready', 'still-processing']);
+
+  await uploadPng(page, status);
+  await expect(field).toHaveAttribute('data-media-state', 'pending');
+  await runClockUntil(page, () => pollCount() >= 2);
+
+  await expect(field).toHaveAttribute('data-media-state', 'ready');
+  expect(await events()).toEqual([
+    { name: 'uploaded', mediaId: MEDIA_ID },
+    { name: 'ready', mediaId: MEDIA_ID },
+  ]);
+  await expect(mediaId).toHaveValue(MEDIA_ID);
+  expect(pollCount()).toBe(2);
+  expect([...new Set(polledUrls)]).toEqual([`/media/${MEDIA_ID}/status`]);
+});
+
+test('a rejected picture shows the plain message, empties the media id and never says ready', async ({ page }) => {
+  await routeCompletedUpload(page, 'intent-9');
+  const pollCount = await routeStatus(page, () => ({ status: 200, json: { status: 'rejected' } }));
+  await page.clock.install();
+  const { field, status, mediaId, preview } = await openUploadField(page, { withStatusRoute: false });
+  const events = await recordEvents(field, ['ready', 'rejected', 'still-processing']);
+
+  await uploadPng(page, status);
+  await runClockUntil(page, () => pollCount() >= 1);
+
+  await expect(mediaId).toHaveValue('');
+  await expect(field).toHaveAttribute('data-media-state', 'rejected');
+  await expect(preview).toBeHidden();
+  await page.clock.runFor(100);
+  await expect(status).toHaveText('We could not process this image. Try again.');
+  expect(await events()).toEqual([{ name: 'rejected', mediaId: MEDIA_ID }]);
+  expect(pollCount()).toBe(1);
+});
+
+test('after 15 polls still pending it fires still-processing, shows no text, keeps the media id and polls no more', async ({ page }) => {
+  await routeCompletedUpload(page, 'intent-10');
+  const pollCount = await routeStatus(page, () => ({ status: 200, json: { status: 'pending' } }));
+  await page.clock.install();
+  const { field, status, mediaId } = await openUploadField(page, { withStatusRoute: false });
+  const events = await recordEvents(field, ['ready', 'still-processing']);
+  await uploadPng(page, status);
+
+  await runClockUntil(page, () => pollCount() >= 15);
+  await expect.poll(async () => (await events()).length).toBe(1);
+  await page.clock.runFor(5000);
+  await page.clock.runFor(100);
+
+  expect(await events()).toEqual([{ name: 'still-processing', mediaId: MEDIA_ID }]);
+  await expect(mediaId).toHaveValue(MEDIA_ID);
+  await expect(field).toHaveAttribute('data-media-state', 'pending');
+  await expect(status).toHaveText('checkout.png uploaded.');
+  await expect(field).not.toContainText('Still processing');
+  expect(pollCount()).toBe(15);
+});
+
+test('a failed poll is not the end: the next poll asks again', async ({ page }) => {
+  await routeCompletedUpload(page, 'intent-11');
+  const pollCount = await routeStatus(page, (poll) => (1 === poll ? { status: 429, json: { message: 'Slow down.' } } : { status: 200, json: { status: 'ready' } }));
+  await page.clock.install();
+  const { field, status } = await openUploadField(page, { withStatusRoute: false });
+  await uploadPng(page, status);
+
+  await runClockUntil(page, () => pollCount() >= 2);
+
+  await expect(field).toHaveAttribute('data-media-state', 'ready');
+});
+
+test('a new upload stops the polling of the earlier one', async ({ page }) => {
+  let beginCount = 0;
+  await page.route('**/media/intents', (route) => route.fulfill(beginAnswer(`intent-12-${(beginCount += 1)}`)));
+  await routeStorage(page);
+  await page.route('**/media/intents/intent-12-*/complete', (route) => route.fulfill({ status: 202, json: { mediaId: 1 === beginCount ? MEDIA_ID : 'second-media-id', status: 'pending' } }));
+  const polledIds: string[] = [];
+  await page.route('**/media/*/status', (route) => {
+    polledIds.push(new URL(route.request().url()).pathname.split('/')[2]);
+    return route.fulfill({ status: 200, json: { status: 'pending' } });
+  });
+  await page.clock.install();
+  const { field, input, status, mediaId } = await openUploadField(page, { withStatusRoute: false });
+  await uploadPng(page, status);
+  await runClockUntil(page, () => polledIds.length >= 2);
+  const pollsOfFirst = polledIds.length;
+
+  await input.setInputFiles({ name: 'second.png', mimeType: 'image/png', buffer: PNG });
+  await expect(mediaId).toHaveValue('second-media-id');
+  await expect(field).toHaveAttribute('data-media-state', 'pending');
+  await runClockUntil(page, () => polledIds.filter((id) => 'second-media-id' === id).length >= 3);
+
+  expect(polledIds.slice(pollsOfFirst).filter((id) => MEDIA_ID === id).length).toBeLessThanOrEqual(1);
+});
+
+test('leaving the page stops the polling', async ({ page }) => {
+  await routeCompletedUpload(page, 'intent-13');
+  const pollCount = await routeStatus(page, () => ({ status: 200, json: { status: 'pending' } }));
+  await page.clock.install();
+  const { field, status } = await openUploadField(page, { withStatusRoute: false });
+  await uploadPng(page, status);
+  await runClockUntil(page, () => pollCount() >= 1);
+
+  await field.evaluate((element) => element.remove());
+  await page.waitForLoadState('networkidle');
+  const pollsWhenLeft = pollCount();
+  for (let step = 0; step < 5; step += 1) {
+    await page.clock.runFor(1000);
+    await page.waitForLoadState('networkidle');
+  }
+
+  expect(pollCount()).toBe(pollsWhenLeft);
 });

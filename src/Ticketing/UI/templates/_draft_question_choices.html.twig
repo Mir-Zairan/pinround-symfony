@@ -1,0 +1,3 @@
+{#- The two buttons that send the move form with the draft decision; they name the form by id so the dialog can keep them outside it. -#}
+<twig:Button type="submit" variant="outline" form="share-draft-form" name="{{ choiceField }}" value="keep">Keep private and move</twig:Button>
+<twig:Button type="submit" form="share-draft-form" name="{{ choiceField }}" value="share">{{ null == stepName ? 'Share and move' : 'Share and move to ' ~ stepName }}</twig:Button>

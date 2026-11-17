@@ -21,6 +21,7 @@ final class UploadFieldTest extends WebTestCase
         self::assertSame('/media/intents', $field->attr('data-presigned-upload-url-value'));
         self::assertSame('ticket', $field->attr('data-presigned-upload-target-kind-value'));
         self::assertSame('00000000-0000-7000-8000-000000000000', $field->attr('data-presigned-upload-target-id-value'));
+        self::assertSame('/media/MEDIA_ID/status', $field->attr('data-presigned-upload-status-url-value'));
         $token = (string) $field->attr('data-presigned-upload-csrf-token-value');
         self::assertNotSame('', $token);
         self::assertCount(1, $field->filter('input[type="file"][accept="image/png,image/jpeg,image/webp"][data-presigned-upload-target="input"]'));

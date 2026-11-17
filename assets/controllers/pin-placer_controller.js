@@ -12,7 +12,7 @@ import { noteLength, percentOfPicture } from '../review/pin_position.js';
 // The events are wired by data-action on the form (EditableScreenshot).
 export default class extends Controller {
   static targets = ['layer', 'list', 'fields', 'status'];
-  static values = { noteMax: { type: Number, default: 1000 } };
+  static values = { noteMax: { type: Number, default: 1000 }, notePlaceholder: String };
 
   connect() {
     this.board = new PinBoard({
@@ -24,6 +24,7 @@ export default class extends Controller {
         this.statusTarget.textContent = message;
       },
       announceChange: () => this.dispatch('change', { detail: { pins: this.board.snapshot() } }),
+      notePlaceholder: this.notePlaceholderValue,
     });
     this.drag = null;
     this.dragJustEnded = false;
@@ -33,6 +34,12 @@ export default class extends Controller {
 
   disconnect() {
     this.element.removeEventListener('beforeinput', this.onBeforeinput);
+  }
+
+  // Called through an outlet (screenshot-report) when the picture under the pins is removed or replaced.
+  clear() {
+    this.drag = null;
+    this.board.clear();
   }
 
   addAtCentre() {

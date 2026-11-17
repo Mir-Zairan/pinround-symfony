@@ -57,17 +57,7 @@ final readonly class TicketMediaTarget implements MediaTargetAuthorizer
         if (null === $ticket) {
             return false;
         }
-        $visibilityFacts = new TicketVisibilityFacts(
-            $organizationId,
-            $ticket->visibility,
-            $ticket->teamId,
-            $ticket->reporterId,
-            $ticket->assigneeId,
-            $ticket->pendingAssigneeId,
-            $ticket->reviewerId,
-            $ticket->testerId,
-            $ticket->waitingOnUserId,
-        );
+        $visibilityFacts = TicketVisibilityFacts::ofSnapshot($organizationId, $ticket);
 
         return $this->authorizationChecker->isGranted(TicketPermission::VIEW, $visibilityFacts)
             && $this->authorizationChecker->isGranted(TicketPermission::EDIT, $visibilityFacts);

@@ -58,6 +58,47 @@ final class RecordingCsrfTokenStorageTest extends TestCase
         self::assertSame('abc', $storage->getToken('logout'));
     }
 
+    #[Test]
+    public function removingATokenNotesItsIdOnly(): void
+    {
+        $storage = $this->recording();
+        $storage->setToken('logout', 'abc');
+        $storage->setToken('move', 'def');
+
+        $storage->removeToken('logout');
+
+        self::assertTrue($storage->hasRemovedToken('logout'));
+        self::assertFalse($storage->hasRemovedToken('move'));
+        self::assertFalse($storage->hasCleared());
+        self::assertSame('def', $storage->getToken('move'));
+    }
+
+    #[Test]
+    public function clearingNotesThatEveryTokenWent(): void
+    {
+        $storage = $this->recording();
+        $storage->setToken('logout', 'abc');
+
+        $storage->clear();
+
+        self::assertTrue($storage->hasCleared());
+        self::assertFalse($storage->hasToken('logout'));
+    }
+
+    #[Test]
+    public function resetForgetsTheRemovedAndClearedTokens(): void
+    {
+        $storage = $this->recording();
+        $storage->setToken('logout', 'abc');
+        $storage->removeToken('logout');
+        $storage->clear();
+
+        $storage->reset();
+
+        self::assertFalse($storage->hasRemovedToken('logout'));
+        self::assertFalse($storage->hasCleared());
+    }
+
     private function recording(): RecordingCsrfTokenStorage
     {
         return new RecordingCsrfTokenStorage($this->inMemoryStorage());

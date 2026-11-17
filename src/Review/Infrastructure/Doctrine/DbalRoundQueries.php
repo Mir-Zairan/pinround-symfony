@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace App\Review\Infrastructure\Doctrine;
 
+use App\Review\Api\PinNote;
+use App\Review\Api\RoundAccessFacts;
+use App\Review\Api\RoundNotes;
 use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
+use App\Review\Api\ScreenshotNotes;
 use App\Review\Api\TicketRounds;
 use App\Review\Application\RoundsVisibleTo;
+use App\Review\Domain\RoundId;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -23,7 +28,9 @@ use Doctrine\DBAL\Connection;
  * The rounds of a ticket from rvw_round, rvw_screenshot and rvw_pin through DBAL, after Ticketing's batch visibility
  * check of the ticket. Each level reads the next one's index ((organization_id, ticket_id, number), (organization_id,
  * round_id, position), (organization_id, screenshot_id, number)) and says whether it has rows below it, so a round with
- * no screenshot or a screenshot with no pin costs no query.
+ * no screenshot or a screenshot with no pin costs no query. accessFactsOf and roundNotes send one query each and need no
+ * visibility check: the first leaves the decision to RoundVoter, the second reads only the owner's own draft. draftOf
+ * reads one draft of its owner with its screenshots and pins, and needs none either.
  */
 final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
 {
@@ -50,6 +57,121 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
         }
 
         return $this->roundsOf($organizationId, $ticketId, $viewer);
+    }
+
+    public function accessFactsOf(string $roundId): ?RoundAccessFacts
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        try {
+            $id = new RoundId($roundId);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+
+        $roundRow = $this->connection->fetchAssociative(
+            "SELECT round.ticket_id, round.owner_id, (round.kind = 'draft' AND round.shared_at IS NULL) AS is_unshared_draft,"
+            .' round.deleted_at IS NOT NULL AS is_deleted'
+            .' FROM rvw_round AS round WHERE round.organization_id = CAST(:organization AS uuid) AND round.id = CAST(:round AS uuid)',
+            ['organization' => $organizationId->toString(), 'round' => $id->toString()],
+        );
+        if (false === $roundRow) {
+            return null;
+        }
+
+        return new RoundAccessFacts(
+            $organizationId,
+            $id->toString(),
+            new TicketId(self::text($roundRow['ticket_id'], 'ticket_id')),
+            new UserId(self::text($roundRow['owner_id'], 'owner_id')),
+            self::boolean($roundRow['is_unshared_draft'], 'is_unshared_draft'),
+            self::boolean($roundRow['is_deleted'], 'is_deleted'),
+        );
+    }
+
+    public function draftOf(string $roundId, UserId $owner): ?RoundView
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        try {
+            $id = new RoundId($roundId);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+
+        $roundRow = $this->connection->fetchAssociative(
+            'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state FROM rvw_round AS round'
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.id = CAST(:round AS uuid)'
+            ." AND round.owner_id = CAST(:owner AS uuid) AND round.kind = 'draft' AND round.deleted_at IS NULL",
+            ['organization' => $organizationId->toString(), 'round' => $id->toString(), 'owner' => $owner->toString()],
+        );
+        if (false === $roundRow) {
+            return null;
+        }
+        $draftId = self::text($roundRow['id'], 'id');
+        $sharedAt = self::textOrNull($roundRow['shared_at'], 'shared_at');
+
+        return new RoundView(
+            $draftId,
+            self::integerOrNull($roundRow['number'], 'number'),
+            self::text($roundRow['kind'], 'kind'),
+            new UserId(self::text($roundRow['owner_id'], 'owner_id')),
+            null === $sharedAt ? null : new \DateTimeImmutable($sharedAt),
+            self::text($roundRow['state'], 'state'),
+            $this->screenshotsOf($organizationId->toString(), [$draftId])[$draftId] ?? [],
+        );
+    }
+
+    public function roundNotes(TicketId $ticketId, UserId $owner): ?RoundNotes
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        // One row per pin, or per picture with no pin, or one for a draft with no picture; the round conditions are
+        // those of rvw_round_ticket_id_owner_id_open_draft_key, which holds at most one such draft.
+        $noteRows = $this->connection->fetchAllAssociative(
+            'SELECT round.id AS round_id, screenshot.id AS screenshot_id, screenshot.position, screenshot.title, screenshot.summary,'
+            .' screenshot.verdict, pin.number AS pin_number, pin.x_pct, pin.y_pct, pin.note'
+            .' FROM rvw_round AS round'
+            .' LEFT JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id'
+            .' LEFT JOIN rvw_pin AS pin ON pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id'
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
+            ." AND round.owner_id = CAST(:owner AS uuid) AND round.kind = 'draft' AND round.shared_at IS NULL AND round.state = 'open'"
+            .' AND round.deleted_at IS NULL'
+            .' ORDER BY screenshot.position, pin.number',
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'owner' => $owner->toString()],
+        );
+        if ([] === $noteRows) {
+            return null;
+        }
+
+        /** @var array<string, array{int, ?string, ?string, ?string, list<PinNote>}> $screenshotFields by screenshot id */
+        $screenshotFields = [];
+        foreach ($noteRows as $noteRow) {
+            $screenshotId = self::textOrNull($noteRow['screenshot_id'], 'screenshot_id');
+            if (null === $screenshotId) {
+                continue;
+            }
+            $screenshotFields[$screenshotId] ??= [
+                self::integer($noteRow['position'], 'position'),
+                self::textOrNull($noteRow['title'], 'title'),
+                self::textOrNull($noteRow['summary'], 'summary'),
+                self::textOrNull($noteRow['verdict'], 'verdict'),
+                [],
+            ];
+            $pinNumber = self::integerOrNull($noteRow['pin_number'], 'pin_number');
+            if (null !== $pinNumber) {
+                $screenshotFields[$screenshotId][4][] = new PinNote(
+                    $pinNumber,
+                    (float) self::text($noteRow['x_pct'], 'x_pct'),
+                    (float) self::text($noteRow['y_pct'], 'y_pct'),
+                    self::text($noteRow['note'], 'note'),
+                );
+            }
+        }
+
+        $screenshots = [];
+        foreach ($screenshotFields as $screenshotId => [$position, $title, $summary, $verdict, $pins]) {
+            $screenshots[] = new ScreenshotNotes($screenshotId, $position, $title, $summary, $verdict, $pins);
+        }
+
+        return new RoundNotes(self::text($noteRows[0]['round_id'], 'round_id'), $screenshots);
     }
 
     private function requireTransactionAndTenant(): OrganizationId
@@ -82,7 +204,7 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
             .' COUNT(*) OVER (PARTITION BY (round.number >= 1)) AS group_size'
             .' FROM rvw_round AS round'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
-            .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid))'
+            .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid)) AND round.deleted_at IS NULL'
             .') AS listed'
             .' WHERE listed.number IS NULL OR listed.number = 0 OR listed.newest_rank <= :cap'
             .' ORDER BY listed.number NULLS LAST, listed.id',
