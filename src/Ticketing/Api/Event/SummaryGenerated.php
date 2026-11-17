@@ -8,6 +8,8 @@ namespace App\Ticketing\Api\Event;
  * The AI wrote a summary a person asked for with "Summarize with AI"; Ticketing stores it as the ticket's current
  * summary. Dispatch it on command.bus inside the transaction of the job that made it, under that organization: it has
  * no route, so it is handled at once and rolls back with the job. Not a TicketEvent, so it never goes to the outbox.
+ * A summary that breaks a summary rule is not stored: the dispatch throws a HandlerFailedException that wraps a
+ * GeneratedSummaryRefused.
  */
 final readonly class SummaryGenerated
 {

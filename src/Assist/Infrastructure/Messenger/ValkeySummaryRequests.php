@@ -107,11 +107,24 @@ final readonly class ValkeySummaryRequests implements SummaryRequests
 
         return match ($state['status'] ?? null) {
             SummaryRequestView::QUEUED => SummaryRequestView::queued($requesterId, $at),
-            SummaryRequestView::FAILED => \is_string($state['sentence'] ?? null)
-                ? SummaryRequestView::failed($requesterId, $at, $state['sentence'])
-                : throw new \RuntimeException('The summary request state holds a failure without its sentence.'),
+            SummaryRequestView::FAILED => self::failedOf($requesterId, $at, $state['sentence'] ?? null),
             default => throw new \RuntimeException('The summary request state holds an unknown status.'),
         };
+    }
+
+    /**
+     * @throws \RuntimeException when the sentence is missing or blank
+     */
+    private static function failedOf(UserId $requesterId, \DateTimeImmutable $failedAt, mixed $sentence): SummaryRequestView
+    {
+        if (!\is_string($sentence)) {
+            throw new \RuntimeException('The summary request state holds a failure without its sentence.');
+        }
+        try {
+            return SummaryRequestView::failed($requesterId, $failedAt, $sentence);
+        } catch (\InvalidArgumentException $blankSentence) {
+            throw new \RuntimeException('The summary request state holds a failure with a blank sentence.', 0, $blankSentence);
+        }
     }
 
     private static function keyOf(OrganizationId $organizationId, TicketId $ticketId): string

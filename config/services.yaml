@@ -466,6 +466,13 @@ when@test:
         test.assist_summary_requests:
             alias: App\Assist\Application\Summaries\SummaryRequests
             public: true
+        # QueuedSummaries inlines both; QueuedSummariesTest builds it by hand with a queue that fails.
+        test.assist_summary_requesters:
+            alias: App\Assist\Application\Summaries\SummaryRequesters
+            public: true
+        test.assist_ai_task_admission:
+            alias: App\Assist\Application\Gateway\AiTaskAdmission
+            public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.
         test.conversation_ask_question:

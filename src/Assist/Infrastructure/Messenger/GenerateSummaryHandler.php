@@ -22,18 +22,20 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\Event\SummaryGenerated;
+use App\Ticketing\Api\GeneratedSummaryRefused;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * Writes the summary a person asked for, in worker-ai inside the bus transaction under the message's TenantStamp. The
  * gateway decides the policy again with the requester's roles as they are now. An answer goes to Ticketing as
- * SummaryGenerated, in this transaction, and the request state is released; any other outcome is recorded as a failed
- * request and nothing is thrown, so the transaction commits the usage rows Metering wrote and Messenger never retries a
- * paid call. A message delivered again does nothing.
+ * SummaryGenerated, in this transaction, and the request state is released; any other outcome, Ticketing refusing to
+ * store the answer included, is recorded as a failed request and nothing is thrown, so the transaction commits the
+ * usage rows Metering wrote and Messenger never retries a paid call. A message delivered again does nothing.
  */
 #[AsMessageHandler(bus: 'command.bus')]
 final readonly class GenerateSummaryHandler
@@ -84,8 +86,10 @@ final readonly class GenerateSummaryHandler
     }
 
     /**
-     * @return string|null null when the summary went to Ticketing; else what stopped it, an AiResult status or the class
-     *                     of what the gateway threw, never its message
+     * @return string|null null when Ticketing stored the summary; else what stopped it, an AiResult status or the class
+     *                     of what the gateway or Ticketing threw, never its message
+     *
+     * @throws HandlerFailedException when storing the summary failed for another reason than a summary rule
      */
     private function summarize(GenerateSummary $generateSummary, OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): ?string
     {
@@ -103,16 +107,34 @@ final readonly class GenerateSummaryHandler
             return $gatewayAnswer->status->value;
         }
 
-        $this->commandBus->dispatch(new SummaryGenerated(
-            $generateSummary->organizationId,
-            $generateSummary->ticketId,
-            $gatewayAnswer->text,
-            $generateSummary->requesterId,
-            $gatewayAnswer->model,
-            $gatewayAnswer->promptVersion,
-            $this->clock->now(),
-        ));
+        try {
+            $this->commandBus->dispatch(new SummaryGenerated(
+                $generateSummary->organizationId,
+                $generateSummary->ticketId,
+                $gatewayAnswer->text,
+                $generateSummary->requesterId,
+                $gatewayAnswer->model,
+                $gatewayAnswer->promptVersion,
+                $this->clock->now(),
+            ));
+        } catch (HandlerFailedException $storeFailure) {
+            if (!self::isOnlyRefusedSummaries($storeFailure)) {
+                throw $storeFailure;
+            }
+
+            return GeneratedSummaryRefused::class;
+        }
 
         return null;
+    }
+
+    /**
+     * Ticketing refusing the answer is final, and the dispatch rolled back to its savepoint; any other failure is not.
+     */
+    private static function isOnlyRefusedSummaries(HandlerFailedException $storeFailure): bool
+    {
+        $wrappedFailures = $storeFailure->getWrappedExceptions();
+
+        return [] !== $wrappedFailures && \count($wrappedFailures) === \count($storeFailure->getWrappedExceptions(GeneratedSummaryRefused::class));
     }
 }
