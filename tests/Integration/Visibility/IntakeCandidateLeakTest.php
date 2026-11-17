@@ -15,16 +15,20 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
- * IntakeCandidateQueries::openCandidatesIn, the ticket titles the intake check sends to an AI: no viewer gets a cast
- * ticket, as both are team-only, not even the Shop lead, the reporter, the admin or the triager who may see them.
- * SHOP also has SHOP-50, for everyone, which every Acme Foods viewer gets. Beta Bakery has a project with SHOP's id and
- * its own SHOP-1 in it, which only Ben gets. Each case runs in a rolled-back transaction under the viewer's own
- * organization.
+ * IntakeCandidateQueries::openCandidatesIn, the ticket titles the intake check sends to an AI. With team-only tickets
+ * left out, no viewer gets a cast ticket, as both are team-only, not even the Shop lead, the reporter, the admin or the
+ * triager who may see them; with them included, each viewer gets exactly the cast tickets they may see. SHOP also has
+ * SHOP-50, for everyone, which every Acme Foods viewer gets. Beta Bakery has a project with SHOP's id and its own
+ * SHOP-1 in it, which only Ben gets. Each case runs in a rolled-back transaction under the viewer's own organization.
  */
 final class IntakeCandidateLeakTest extends VisibilityLeakCast
 {
     private const string FOR_EVERYONE_TICKET = '0197a3c0-0000-7000-8000-0000000057e4';
     private const string BAKERY_TICKET = '0197a3c0-0000-7000-8000-0000000057e5';
+    /** The title TicketRows gives SHOP-50 and Beta Bakery's SHOP-1. */
+    private const string FOR_EVERYONE_TITLE = 'Checkout button is hidden';
+    /** TicketRows keys every ticket it adds SHOP-<number>, the cast's no-team ticket in OPS too. */
+    private const string NO_TEAM_TICKET_KEY = 'SHOP-90';
 
     public static function setUpBeforeClass(): void
     {
@@ -42,7 +46,7 @@ final class IntakeCandidateLeakTest extends VisibilityLeakCast
         [$visibility, $shopCandidates, $noTeamProjectCandidates] = self::asViewer($viewer, function () use ($viewer): array {
             $visibility = $this->visibilityOf($viewer);
 
-            return [$visibility, $this->queries()->openCandidatesIn(self::SHOP_PROJECT, $visibility), $this->queries()->openCandidatesIn(self::NO_TEAM_PROJECT, $visibility)];
+            return [$visibility, $this->queries()->openCandidatesIn(self::SHOP_PROJECT, $visibility, false), $this->queries()->openCandidatesIn(self::NO_TEAM_PROJECT, $visibility, false)];
         });
 
         // Those who may see a cast ticket are why the query must leave team-only tickets out, not only hidden ones.
@@ -53,6 +57,25 @@ final class IntakeCandidateLeakTest extends VisibilityLeakCast
             self::assertNotSame(self::LEAK_MARKER, $candidate->title);
         }
         self::assertSame([], $noTeamProjectCandidates);
+    }
+
+    #[Test]
+    #[DataProvider('viewers')]
+    public function withTeamOnlyIncludedAViewerGetsExactlyTheTeamOnlyTicketsTheyMaySee(string $viewer, bool $seesTeamOnly, bool $seesNoTeamTicket): void
+    {
+        [$shopCandidates, $noTeamProjectCandidates] = self::asViewer($viewer, function () use ($viewer): array {
+            $visibility = $this->visibilityOf($viewer);
+
+            return [$this->queries()->openCandidatesIn(self::SHOP_PROJECT, $visibility, true), $this->queries()->openCandidatesIn(self::NO_TEAM_PROJECT, $visibility, true)];
+        });
+
+        self::assertNotSame([], $shopCandidates);
+        self::assertContains('Ben' === $viewer ? 'SHOP-1' : 'SHOP-50', self::keysOf($shopCandidates));
+        self::assertEqualsCanonicalizing(
+            $seesTeamOnly ? [self::LEAK_MARKER, self::FOR_EVERYONE_TITLE] : [self::FOR_EVERYONE_TITLE],
+            array_map(static fn (IntakeCandidate $candidate): string => $candidate->title, $shopCandidates),
+        );
+        self::assertSame($seesNoTeamTicket ? [self::NO_TEAM_TICKET_KEY] : [], self::keysOf($noTeamProjectCandidates));
     }
 
     private function visibilityOf(string $viewer): TicketVisibility

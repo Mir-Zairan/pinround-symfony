@@ -11,21 +11,25 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\ReadsSentSql;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\IntakeCandidate;
 use App\Ticketing\Api\IntakeCandidateQueries;
 use App\Ticketing\Api\TicketVisibility;
+use App\Ticketing\Infrastructure\Doctrine\DbalIntakeCandidateQueries;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * IntakeCandidateQueries as Assist's intake check will get it. In Acme Foods, Mia is in the Shop team. SHOP has 85 open
  * tickets for everyone, SHOP-1 to SHOP-85, written out of order, each updated a minute after the one before it except
- * SHOP-51, updated in the same minute as SHOP-50. Newer than all of them are the rows the query must leave out: a
- * team-only ticket of Shop, a team-only ticket of another team that Mia reported, a team-only ticket of another team, a
- * closed ticket for everyone, a ticket for everyone in the project OPS, and Beta Bakery's ticket in its own project
- * with SHOP's id.
+ * SHOP-51, updated in the same minute as SHOP-50. Newer than all of them, in this order, are a team-only ticket of Shop
+ * (SHOP-86), a team-only ticket of another team that Mia reported (SHOP-87) and a team-only ticket of another team
+ * (SHOP-88), which the query gives only with team-only tickets included and only to whom may see them, and the rows it
+ * always leaves out: a closed ticket for everyone, a ticket for everyone in the project OPS, and Beta Bakery's ticket in
+ * its own project with SHOP's id.
  */
 final class IntakeCandidateQueriesTest extends KernelTestCase
 {
@@ -82,7 +86,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     #[Test]
     public function theEightyNewestOpenTicketsForEveryoneComeNewestFirstWithTheHigherIdFirstInATie(): void
     {
-        $candidates = $this->candidatesIn(self::SHOP_PROJECT, self::miaVisibility(false));
+        $candidates = $this->candidatesIn(self::SHOP_PROJECT, self::miaVisibility(false), false);
 
         self::assertNotSame([], $candidates);
         self::assertCount(IntakeCandidateQueries::CANDIDATE_LIMIT, $candidates);
@@ -94,9 +98,9 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     }
 
     #[Test]
-    public function anAdminWhoMaySeeEveryTeamOnlyTicketStillGetsNone(): void
+    public function anAdminWhoMaySeeEveryTeamOnlyTicketGetsNoneWhenTeamOnlyIsLeftOut(): void
     {
-        $candidates = $this->candidatesIn(self::SHOP_PROJECT, self::miaVisibility(true));
+        $candidates = $this->candidatesIn(self::SHOP_PROJECT, self::miaVisibility(true), false);
 
         self::assertNotSame([], $candidates);
         $keys = array_map(static fn (IntakeCandidate $candidate): string => $candidate->key, $candidates);
@@ -104,11 +108,60 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         self::assertSame('SHOP-'.self::OPEN_TICKET_COUNT, $keys[0]);
     }
 
+    /**
+     * SHOP-87 is another team's, but Mia reported it, so she may see it; SHOP-88 she may not.
+     */
+    #[Test]
+    public function withTeamOnlyIncludedAReporterGetsTheTeamOnlyTicketsTheyMaySeeAndNoOther(): void
+    {
+        $candidates = $this->candidatesIn(self::SHOP_PROJECT, self::miaVisibility(false), true);
+
+        self::assertNotSame([], $candidates);
+        self::assertSame(['SHOP-87', 'SHOP-86', ...self::shopKeysFrom(self::OPEN_TICKET_COUNT, 8)], self::keysOf($candidates));
+    }
+
+    #[Test]
+    public function withTeamOnlyIncludedAnAdminGetsEveryOpenTeamOnlyTicket(): void
+    {
+        $candidates = $this->candidatesIn(self::SHOP_PROJECT, self::miaVisibility(true), true);
+
+        self::assertNotSame([], $candidates);
+        self::assertSame(['SHOP-88', 'SHOP-87', 'SHOP-86', ...self::shopKeysFrom(self::OPEN_TICKET_COUNT, 9)], self::keysOf($candidates));
+    }
+
+    /**
+     * The SQL names Acme Foods both times and only the transaction's tenant differs, so without row-level security
+     * the read under Beta Bakery would give Acme Foods' tickets too.
+     */
+    #[Test]
+    #[DataProvider('teamOnlyChoices')]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsCandidates(bool $includeTeamOnly): void
+    {
+        $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
+        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext())
+            ->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(true), $includeTeamOnly);
+
+        $underAcmeFoods = $ownConnectionTransactions->rolledBackAs(self::ACME_FOODS, $candidatesOn);
+        $underBetaBakery = $ownConnectionTransactions->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $candidatesOn);
+
+        self::assertNotSame([], $underAcmeFoods);
+        self::assertSame([], $underBetaBakery);
+    }
+
+    /**
+     * @return iterable<string, array{bool}>
+     */
+    public static function teamOnlyChoices(): iterable
+    {
+        yield 'team-only left out' => [false];
+        yield 'team-only included' => [true];
+    }
+
     #[Test]
     public function aProjectWithFewerTicketsGivesThemAllAndAnUnknownOneNone(): void
     {
-        $opsCandidates = $this->candidatesIn(self::OPS_PROJECT, self::miaVisibility(false));
-        $unknownCandidates = $this->candidatesIn(self::UNKNOWN_PROJECT, self::miaVisibility(false));
+        $opsCandidates = $this->candidatesIn(self::OPS_PROJECT, self::miaVisibility(false), false);
+        $unknownCandidates = $this->candidatesIn(self::UNKNOWN_PROJECT, self::miaVisibility(false), false);
 
         self::assertEquals([new IntakeCandidate('OPS-1', self::titleOf('OPS', 1))], $opsCandidates);
         self::assertSame([], $unknownCandidates);
@@ -120,7 +173,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         [$refusal, $queryCount] = $this->transactions()->committedAs(self::ACME_FOODS, function (): array {
             $this->debugData()->reset();
             try {
-                $this->queries()->openCandidatesIn(strtoupper(self::SHOP_PROJECT), self::miaVisibility(false));
+                $this->queries()->openCandidatesIn(strtoupper(self::SHOP_PROJECT), self::miaVisibility(false), false);
             } catch (\InvalidArgumentException $refusal) {
                 return [$refusal->getMessage(), self::queryCountOf($this->debugData())];
             }
@@ -137,7 +190,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         $this->debugData()->reset();
         try {
-            $this->queries()->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(false));
+            $this->queries()->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(false), false);
             self::fail('The candidates were read outside a transaction.');
         } catch (\LogicException $refusal) {
             self::assertSame('Intake candidates are read in a transaction under the organization as tenant; none is open.', $refusal->getMessage());
@@ -154,7 +207,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         $connection->beginTransaction();
         $this->debugData()->reset();
         try {
-            $this->queries()->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(false));
+            $this->queries()->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(false), false);
             self::fail('The candidates were read with no tenant.');
         } catch (TenantNotSet $refusal) {
             self::assertSame('No organization is set for this unit of work.', $refusal->getMessage());
@@ -170,7 +223,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         [$refusal, $queryCount] = $this->transactions()->committedAs(self::BETA_BAKERY, function (): array {
             $this->debugData()->reset();
             try {
-                $this->queries()->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(false));
+                $this->queries()->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(false), false);
             } catch (\LogicException $refusal) {
                 return [$refusal->getMessage(), self::queryCountOf($this->debugData())];
             }
@@ -184,12 +237,30 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     /**
      * @return list<IntakeCandidate>
      */
-    private function candidatesIn(string $projectId, TicketVisibility $reporter): array
+    private function candidatesIn(string $projectId, TicketVisibility $reporter, bool $includeTeamOnly): array
     {
         return $this->transactions()->committedAs(
             self::ACME_FOODS,
-            fn (): array => $this->queries()->openCandidatesIn($projectId, $reporter),
+            fn (): array => $this->queries()->openCandidatesIn($projectId, $reporter, $includeTeamOnly),
         );
+    }
+
+    /**
+     * @param list<IntakeCandidate> $candidates
+     *
+     * @return list<string>
+     */
+    private static function keysOf(array $candidates): array
+    {
+        return array_map(static fn (IntakeCandidate $candidate): string => $candidate->key, $candidates);
+    }
+
+    /**
+     * @return list<string> SHOP-<from> down to SHOP-<to>
+     */
+    private static function shopKeysFrom(int $from, int $to): array
+    {
+        return array_map(static fn (int $number): string => 'SHOP-'.$number, range($from, $to));
     }
 
     private static function miaVisibility(bool $isAdmin): TicketVisibility

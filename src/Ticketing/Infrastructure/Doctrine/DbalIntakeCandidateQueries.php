@@ -20,7 +20,7 @@ final readonly class DbalIntakeCandidateQueries implements IntakeCandidateQuerie
     {
     }
 
-    public function openCandidatesIn(string $projectId, TicketVisibility $reporter): array
+    public function openCandidatesIn(string $projectId, TicketVisibility $reporter, bool $includeTeamOnly): array
     {
         if (!ListFilter::isCanonicalUuid($projectId)) {
             throw new \InvalidArgumentException('An intake candidate\'s project id must be a canonical lowercase uuid.');
@@ -33,18 +33,23 @@ final readonly class DbalIntakeCandidateQueries implements IntakeCandidateQuerie
             throw new \LogicException('Intake candidates are read under the reporter\'s own organization as tenant.');
         }
 
-        // Both conditions bind :t_visible_org; they name the same organization, so merging their parameters is safe.
         $visibleToReporter = TicketVisibilitySql::of($reporter, self::TICKET_ALIAS);
-        $forEveryone = TicketVisibilitySql::forEveryoneIn($reporter->organizationId(), self::TICKET_ALIAS);
+        $audienceSql = $visibleToReporter->sql();
+        $audienceParameters = $visibleToReporter->parameters();
+        if (!$includeTeamOnly) {
+            // Both conditions bind :t_visible_org; they name the same organization, so merging their parameters is safe.
+            $forEveryone = TicketVisibilitySql::forEveryoneIn($reporter->organizationId(), self::TICKET_ALIAS);
+            $audienceSql .= ' AND '.$forEveryone->sql();
+            $audienceParameters = [...$audienceParameters, ...$forEveryone->parameters()];
+        }
         $rows = $this->connection->fetchAllAssociative(
             'SELECT t.key, t.title FROM tkt_ticket t'
             .' WHERE t.organization_id = CAST(:organization AS uuid) AND t.project_id = CAST(:project AS uuid)'
-            .' AND t.closed_at IS NULL AND '.$visibleToReporter->sql().' AND '.$forEveryone->sql()
+            .' AND t.closed_at IS NULL AND '.$audienceSql
             .' ORDER BY t.updated_at DESC, t.id DESC'
             .' LIMIT '.self::CANDIDATE_LIMIT,
             [
-                ...$visibleToReporter->parameters(),
-                ...$forEveryone->parameters(),
+                ...$audienceParameters,
                 'organization' => $organizationId->toString(),
                 'project' => $projectId,
             ],
