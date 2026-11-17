@@ -43,7 +43,7 @@ FR-AI-01, FR-AI-02, FR-AI-03, FR-AI-04, FR-AI-05, FR-AI-06, FR-AI-07, FR-AI-08, 
 NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-PERF-09, NFR-AVL-05.
 
 ## Design notes
-- **Module:** Assist (`App\Assist`). Public Api: `AiPolicy`, `Summaries`, `Explanations`, `IntakeAssist`, `LocalAi` (see modules.md). Internal: `Application\AiGateway` (interface from ai-architecture.md), `Infrastructure\Platform\SymfonyAiGateway` (the only class that touches Symfony AI), `Infrastructure\Prompt\templates\{feature}.v{n}.md.twig` + `{feature}.v{n}.schema.json`.
+- **Module:** Assist (`App\Assist`). Public Api: `AiPolicy`, `Summaries`, `Explanations`, `IntakeAssist`, `LocalAi` (see modules.md). Internal: `Application\AiGateway` (interface from ai-architecture.md), `Infrastructure\Platform\SymfonyAiGateway` and `Infrastructure\Platform\SymfonyAiProvider` (the `Infrastructure\Platform` folder is the only code that touches Symfony AI), `Infrastructure\Prompt\templates\{feature}.v{n}.md.twig` + `{feature}.v{n}.schema.json`.
 - **Tables:** `ast_explanation`, `ast_suggestion`, `ast_embedding` (optional, pgvector), `ast_usage` (partitioned monthly, no content), `ast_local_package`. Summaries are stored by Ticketing (`tkt_summary` with `source`, `model`, `prompt_version`, `is_current`) when `SummaryGenerated` arrives. Policy is an org setting owned by Organization (`org_settings.data` key `ai`), provider credentials encrypted (`secret_enc`, `key_id`).
 - **Laptop endpoints (binding names):** `POST /ai/laptop/status`, `POST /ai/laptop/package` (single use, expires in 5 minutes), `POST /ai/laptop/result`.
 - **Limits:** 30 AI calls per user per hour; monthly org budget; admin notice at 80%; cloud stops at 100% (laptop still works). Message: "Too many AI requests. Try again in a minute."
@@ -51,7 +51,7 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
 - **Safety:** ticket text inside delimiters with "data, not instructions"; JSON schema validation with one retry; HTML-escape every output; label every output (AI chip / ✦ / dashed pins); AI never writes by itself; restricted (team-only) tickets never go to cloud AI unless the admin opts in; "title only" policy removes the description; prompts and answers never in logs (only `ast_usage` metadata).
 - **Speed:** every server AI call runs on the Messenger `ai` transport or streams via Mercure; no web request waits on a model. Per-org concurrency cap on the `ai` transport. Content-hash cache for summaries.
 - **CSP:** `connect-src http://localhost:11434` only for orgs whose policy allows laptop mode.
-- **Symfony AI is beta** (1.0.0-BETA1 was the current release on 2026-11-06; check again at implementation): verify bridge package names, config keys and the Hugging Face and Ollama bridge APIs; keep all Symfony AI usage inside `SymfonyAiGateway`.
+- **Symfony AI is beta** (1.0.0-BETA1 was the current release on 2026-11-06; check again at implementation): verify bridge package names, config keys and the Hugging Face and Ollama bridge APIs; keep all Symfony AI usage inside `src/Assist/Infrastructure/Platform`.
 - **Restricted data and cloud AI (binding):** before any cloud AI call on a draft report, run `CheckReasons::isSecuritySensitive` (P06.T3); a match makes the draft restricted, so no cloud AI (laptop AI is still allowed). Tickets with `visibility = 'team'` are excluded from cloud AI features, from AI duplicate candidate lists and from embeddings unless the admin opted in (`ai.restricted_to_cloud`).
 - **Laptop results are user content (binding):** `model` must match `[a-z0-9:._-]{1,64}`; the label is "posted by <first name> using local model <model> (unverified)"; a laptop result never becomes the current summary by itself: it is shown as the viewer's own result, and "Use as main summary" is a separate click.
 
@@ -60,14 +60,14 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
 ### P08.T1 — AiGateway, providers and a fake provider 🏁
 - **Why:** one door for all server-side AI, so policy, safety and metering cannot be skipped.
 - **Steps:**
-  1. Install Symfony AI (Platform + AI Bundle) and the Hugging Face and Ollama bridges; verify package names and config in the docs.
+  1. Install Symfony AI 1.0.0-BETA1: the core Platform (`symfony/ai-platform`) and the Hugging Face, Anthropic and Ollama bridges only (`symfony/ai-hugging-face-platform`, which pulls in `symfony/ai-generic-platform`; `symfony/ai-anthropic-platform`; `symfony/ai-ollama-platform`). No AI Bundle and no `config/packages/ai.yaml`: `SymfonyAiProvider` builds each bridge's platform itself, reading its settings through `#[Autowire(env: …)]`, and `config/services.yaml` binds `AiProvider` to it (to `FakeProvider` in the test env). All Symfony AI use stays inside `src/Assist/Infrastructure/Platform` (Deptrac layer `Assist_AiPlatform`, see [modules.md](../02-architecture/modules.md#deptrac-rules)).
   2. Write `AiTask` (feature, ticketId, userInput), `AiResult` (text or data, model, provider, promptVersion, label), `AiGateway::run(AiTask, Viewer)`.
   3. `SymfonyAiGateway`: choose provider from org settings (Hugging Face default, Anthropic optional); call Platform; map errors to `AiUnavailable`, `AiRateLimited`.
   4. Server-side Ollama provider: base URL from env on SaaS (operator setting); on self-host the admin may set it, through the outbound URL guard from [security.md](../02-architecture/security.md) (https or an explicitly allowed internal host, no redirects).
   5. A fake provider for tests (deterministic responses), selected by env in the test kernel.
-- **Files:** `src/Assist/Application/AiGateway.php`, `src/Assist/Infrastructure/Platform/SymfonyAiGateway.php`, `src/Assist/Infrastructure/Platform/FakeProvider.php`, `config/packages/ai.yaml`.
+- **Files:** `src/Assist/Application/AiGateway.php`, `src/Assist/Application/AiProvider.php`, `src/Assist/Infrastructure/Platform/SymfonyAiProvider.php`, `src/Assist/Infrastructure/Platform/FakeProvider.php`, `src/Assist/Infrastructure/Platform/SymfonyAiGateway.php`, `config/services.yaml`. No AI Bundle, no `config/packages/ai.yaml`: core Platform plus the Hugging Face, Anthropic and Ollama bridges only, all Symfony AI use inside `src/Assist/Infrastructure/Platform`.
 - **Acceptance:**
-  - [ ] Only `SymfonyAiGateway` imports Symfony AI classes (Deptrac or PHPStan rule).
+  - [ ] Only `src/Assist/Infrastructure/Platform` imports Symfony AI classes (Deptrac layer `Assist_AiPlatform`, proven by `SymfonyAiImportRuleTest`).
   - [ ] Provider credentials are stored encrypted with a key id.
   - [ ] With the fake provider, a gateway call returns the fixed text and the provider name.
 - **Tests:** unit (provider choice), integration with the fake provider, Deptrac rule test.
@@ -238,3 +238,4 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
 ## Hand-off notes
 - Phase 09 (MCP) must not route through `AiGateway`: MCP callers are the user's own agent, so the "what is sent" policy does not apply, but voters and scopes do.
 - Record the chosen Hugging Face models and measured laptop seconds per summary here.
+- 2026-11-17 (P08.T1): the server-side Ollama URL comes only from the environment (`AI_OLLAMA_URL`, see [config.md](../operations/config.md)) in this slice. The admin-entered Ollama URL for self-host (step 4) is not built, and there is no outbound URL guard in code yet; build both together, before any admin can set a URL.
