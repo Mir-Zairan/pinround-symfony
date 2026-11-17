@@ -28,8 +28,18 @@ export default class extends Controller {
     const person = this.personTargets.find((each) => each.dataset.userId === askedUserId);
     if (person) {
       this.ask(person);
-      this.bodyTarget.focus();
+      this.focusBodyOnceLoaded();
     }
+  }
+
+  // The "Ask <lead>" link ends in the composer form's #id. While the page loads, the browser focuses a fragment's
+  // target, or the page itself when the target (a form) takes no focus, which would undo a focus given any sooner.
+  focusBodyOnceLoaded() {
+    if (document.readyState === 'complete') {
+      this.bodyTarget.focus();
+      return;
+    }
+    window.addEventListener('load', () => this.bodyTarget.focus(), { once: true });
   }
 
   bodyTargetConnected() {
