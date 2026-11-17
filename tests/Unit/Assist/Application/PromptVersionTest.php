@@ -49,7 +49,7 @@ final class PromptVersionTest extends TestCase
     public function aMalformedNameIsRefused(string $name): void
     {
         $this->expectException(UnknownPromptTemplate::class);
-        $this->expectExceptionMessage('The prompt version is not a feature name and a version number, like summary.v1.');
+        $this->expectExceptionMessageIs('The prompt version is not a feature name and a version number, like summary.v1.');
 
         PromptVersion::fromName($name);
     }
@@ -58,7 +58,7 @@ final class PromptVersionTest extends TestCase
     public function aVersionBelowOneIsRefused(): void
     {
         $this->expectException(UnknownPromptTemplate::class);
-        $this->expectExceptionMessage('The prompt version is not a feature name and a version number, like summary.v1.');
+        $this->expectExceptionMessageIs('The prompt version is not a feature name and a version number, like summary.v1.');
 
         new PromptVersion(AiFeature::Summary, 0);
     }

@@ -67,7 +67,7 @@ final class ProviderChoiceTest extends TestCase
     public function anUnknownProviderIsRefusedInsteadOfFallingBackToTheDefault(string $provider): void
     {
         $this->expectException(UnknownAiProvider::class);
-        $this->expectExceptionMessage('The AI settings name a provider that is not huggingface, anthropic or ollama.');
+        $this->expectExceptionMessageIs('The AI settings name a provider that is not huggingface, anthropic or ollama.');
 
         ProviderChoice::fromSettings($provider);
     }
@@ -76,7 +76,7 @@ final class ProviderChoiceTest extends TestCase
     public function anEmptyModelIsRefusedInsteadOfUsingTheDefault(): void
     {
         $this->expectException(UnknownAiProvider::class);
-        $this->expectExceptionMessage('The AI settings name an empty model.');
+        $this->expectExceptionMessageIs('The AI settings name an empty model.');
 
         ProviderChoice::fromSettings('ollama', '');
     }

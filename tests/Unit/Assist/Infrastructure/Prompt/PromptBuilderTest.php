@@ -207,7 +207,7 @@ final class PromptBuilderTest extends TestCase
         }
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('At most 80 duplicate candidates can go into a prompt.');
+        $this->expectExceptionMessageIs('At most 80 duplicate candidates can go into a prompt.');
 
         $this->builder->build($this->intakeV1(), new PromptTicket('Report'), false, $candidates);
     }
@@ -240,7 +240,7 @@ final class PromptBuilderTest extends TestCase
     public function aMalformedCandidateKeyIsRefused(string $key): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A duplicate candidate key is not a ticket key like SHOP-12.');
+        $this->expectExceptionMessageIs('A duplicate candidate key is not a ticket key like SHOP-12.');
 
         $this->builder->build($this->intakeV1(), new PromptTicket('Report'), false, [$key => 'Title']);
     }
@@ -249,7 +249,7 @@ final class PromptBuilderTest extends TestCase
     public function aFeatureWithNoTemplateYetHasNoCurrentVersion(): void
     {
         $this->expectException(UnknownPromptTemplate::class);
-        $this->expectExceptionMessage('The explain feature has no prompt template yet.');
+        $this->expectExceptionMessageIs('The explain feature has no prompt template yet.');
 
         $this->builder->currentVersion(AiFeature::Explain);
     }
@@ -268,7 +268,7 @@ final class PromptBuilderTest extends TestCase
     public function aVersionWithNoTemplateFailsClosed(PromptVersion $version, string $message): void
     {
         $this->expectException(UnknownPromptTemplate::class);
-        $this->expectExceptionMessage($message);
+        $this->expectExceptionMessageIs($message);
 
         $this->builder->build($version, new PromptTicket('Checkout fails', 'Text'), false);
     }
@@ -290,7 +290,7 @@ final class PromptBuilderTest extends TestCase
         $builder = new PromptBuilder(__DIR__.'/Fixtures/templates');
 
         $this->expectException(UnknownPromptTemplate::class);
-        $this->expectExceptionMessage(\sprintf('The prompt template summary.v%d renders no instructions, no content or no ticket.', $number));
+        $this->expectExceptionMessageIs(\sprintf('The prompt template summary.v%d renders no instructions, no content or no ticket.', $number));
 
         $builder->build(new PromptVersion(AiFeature::Summary, $number), new PromptTicket('Checkout fails', 'Text'), false);
     }
@@ -311,7 +311,7 @@ final class PromptBuilderTest extends TestCase
         $builder = new PromptBuilder(__DIR__.'/Fixtures/templates');
 
         $this->expectException(RuntimeError::class);
-        $this->expectExceptionMessage($message);
+        $this->expectExceptionMessageIsOrContains($message);
 
         $builder->build(new PromptVersion(AiFeature::Summary, $number), new PromptTicket('Checkout fails', 'Text'), false);
     }

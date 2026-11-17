@@ -157,7 +157,7 @@ final class SymfonyAiProviderTest extends TestCase
         $provider = $this->provider([]);
 
         $this->expectException(AiUnavailable::class);
-        $this->expectExceptionMessage('The AI provider anthropic has no key or URL set.');
+        $this->expectExceptionMessageIs('The AI provider anthropic has no key or URL set.');
 
         $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings('anthropic', null, ''));
     }
@@ -168,7 +168,7 @@ final class SymfonyAiProviderTest extends TestCase
         $provider = new SymfonyAiProvider(new MockHttpClient([]), self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, '', self::TIMEOUT_SECONDS);
 
         $this->expectException(AiUnavailable::class);
-        $this->expectExceptionMessage('The AI provider ollama has no key or URL set.');
+        $this->expectExceptionMessageIs('The AI provider ollama has no key or URL set.');
 
         $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings('ollama', null, 'ollama-acme-key'));
     }
@@ -226,7 +226,7 @@ final class SymfonyAiProviderTest extends TestCase
         $provider = $this->provider([new MockResponse('', ['error' => 'Could not resolve host'])]);
 
         $this->expectException(AiUnavailable::class);
-        $this->expectExceptionMessage('The AI provider huggingface did not answer (');
+        $this->expectExceptionMessageIsOrContains('The AI provider huggingface did not answer (');
 
         $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings(null));
     }
@@ -282,7 +282,7 @@ final class SymfonyAiProviderTest extends TestCase
     public function aTimeoutOutsideOneToThreeHundredSecondsIsRefused(int $timeoutSeconds): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('AI_PROVIDER_TIMEOUT_SECONDS must be from 1 to 300 seconds, not '.$timeoutSeconds.'.');
+        $this->expectExceptionMessageIs('AI_PROVIDER_TIMEOUT_SECONDS must be from 1 to 300 seconds, not '.$timeoutSeconds.'.');
 
         new SymfonyAiProvider(new MockHttpClient([]), self::OPERATOR_HF_TOKEN, self::OPERATOR_ANTHROPIC_KEY, self::OLLAMA_URL, $timeoutSeconds);
     }
@@ -365,7 +365,7 @@ final class SymfonyAiProviderTest extends TestCase
         $provider = $this->provider([]);
 
         $this->expectException(AiUnavailable::class);
-        $this->expectExceptionMessage('The AI provider anthropic did not answer (Symfony\AI\Platform\Exception\ModelNotFoundException).');
+        $this->expectExceptionMessageIs('The AI provider anthropic did not answer (Symfony\AI\Platform\Exception\ModelNotFoundException).');
 
         $provider->complete($this->summaryPrompt(), ProviderChoice::fromSettings('anthropic', 'no-such-model'));
     }

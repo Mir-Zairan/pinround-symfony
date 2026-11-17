@@ -257,7 +257,7 @@ final class OutputValidatorTest extends TestCase
     public function anIntakeAnswerCannotBeCheckedAsText(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The intake feature answers with data; check it with checkData().');
+        $this->expectExceptionMessageIs('The intake feature answers with data; check it with checkData().');
 
         $this->validator->checkText($this->intakeV1(), 'Short.');
     }
@@ -266,7 +266,7 @@ final class OutputValidatorTest extends TestCase
     public function aSummaryCannotBeCheckedAsData(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The summary feature answers with text; check it with checkText().');
+        $this->expectExceptionMessageIs('The summary feature answers with text; check it with checkText().');
 
         $this->validator->checkData($this->summaryV1(), self::VALID_INTAKE, self::CANDIDATE_KEYS, false);
     }
@@ -275,7 +275,7 @@ final class OutputValidatorTest extends TestCase
     public function aVersionWithNoSchemaFailsClosedInsteadOfPassingTheAnswer(): void
     {
         $this->expectException(UnknownPromptTemplate::class);
-        $this->expectExceptionMessage('The prompt template intake.v2 has no output schema.');
+        $this->expectExceptionMessageIs('The prompt template intake.v2 has no output schema.');
 
         $this->validator->checkData(new PromptVersion(AiFeature::Intake, 2), self::VALID_INTAKE, self::CANDIDATE_KEYS, false);
     }
@@ -286,7 +286,7 @@ final class OutputValidatorTest extends TestCase
         $validator = new OutputValidator(__DIR__.'/Fixtures/templates');
 
         $this->expectException(UnknownPromptTemplate::class);
-        $this->expectExceptionMessage('The prompt template intake.v3 has no output schema.');
+        $this->expectExceptionMessageIs('The prompt template intake.v3 has no output schema.');
 
         $validator->checkData(new PromptVersion(AiFeature::Intake, 3), self::VALID_INTAKE, self::CANDIDATE_KEYS, false);
     }
