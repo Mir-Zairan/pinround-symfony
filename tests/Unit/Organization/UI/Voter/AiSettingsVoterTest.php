@@ -16,6 +16,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Security\Core\Authentication\Token\NullToken;
+use Symfony\Component\Security\Core\Authentication\Token\RememberMeToken;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
@@ -58,6 +59,45 @@ final class AiSettingsVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_DENIED, self::voter()->vote(self::sessionOf($userId), self::acmeFoods(), [AdminPermission::AI]));
     }
 
+    /**
+     * @return iterable<string, array{bool, ?int}>
+     */
+    public static function loginsTheAdminPagesRefuse(): iterable
+    {
+        yield 'a code over an hour old' => [true, 3601];
+        yield 'two-step login on, no code in this session' => [true, null];
+        yield 'two-step login off' => [false, 0];
+    }
+
+    #[Test]
+    #[DataProvider('loginsTheAdminPagesRefuse')]
+    public function anAdminWithoutACodeOfTheLastHourIsDenied(bool $isTwoStepLoginOn, ?int $codeProofAgeSeconds): void
+    {
+        $voter = self::voter($isTwoStepLoginOn, $codeProofAgeSeconds);
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::sessionOf(self::SARA), self::acmeFoods(), [AdminPermission::AI]));
+    }
+
+    #[Test]
+    public function anAdminWithACodeOfExactlyAnHourAgoMayChangeTheAiSettings(): void
+    {
+        $voter = self::voter(isTwoStepLoginOn: true, codeProofAgeSeconds: 3600);
+
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::sessionOf(self::SARA), self::acmeFoods(), [AdminPermission::AI]));
+    }
+
+    /**
+     * Remember-me stands for every token that is not a password session, the personal access token of P09 included
+     * (personas-and-roles.md note 6).
+     */
+    #[Test]
+    public function anAdminWhoseLoginIsNotAPasswordSessionIsDeniedEvenWithAFreshCode(): void
+    {
+        $rememberMe = new RememberMeToken(new InMemoryUser(self::SARA, null), 'main');
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, self::voter()->vote($rememberMe, self::acmeFoods(), [AdminPermission::AI]));
+    }
+
     #[Test]
     public function anAnonymousRequestIsDenied(): void
     {
@@ -93,9 +133,10 @@ final class AiSettingsVoterTest extends TestCase
 
     /**
      * Sara is an Admin, Raj a Manager, Lena the lead, Omar a member and Mia a viewer of Shop, all of Acme Foods, the
-     * organization of the request; Nobody has no actor.
+     * organization of the request; Nobody has no actor. Unless asked otherwise, two-step login is on and the last code
+     * was typed just now.
      */
-    private static function voter(): AiSettingsVoter
+    private static function voter(bool $isTwoStepLoginOn = true, ?int $codeProofAgeSeconds = 0): AiSettingsVoter
     {
         $acmeFoods = self::acmeFoods();
         $shop = [new TeamId(self::SHOP_TEAM)];
@@ -106,6 +147,6 @@ final class AiSettingsVoterTest extends TestCase
             self::LENA => new ActorContext(new UserId(self::LENA), $acmeFoods, new Roles(false, false, $shop, [], [])),
             self::OMAR => new ActorContext(new UserId(self::OMAR), $acmeFoods, new Roles(false, false, [], $shop, [])),
             self::MIA => new ActorContext(new UserId(self::MIA), $acmeFoods, new Roles(false, false, [], [], $shop)),
-        ]));
+        ]), new FixedLoginAssurance($isTwoStepLoginOn, $codeProofAgeSeconds));
     }
 }
