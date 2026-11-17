@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Assist\Infrastructure\Messenger;
+namespace App\Assist\Infrastructure\Valkey;
 
 use App\Assist\Api\SummaryRequestView;
 use App\Assist\Application\Summaries\SummaryRequests;

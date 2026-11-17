@@ -6,7 +6,7 @@ namespace App\Tests\Integration\Assist\Summaries;
 
 use App\Assist\Api\SummaryRequestView;
 use App\Assist\Application\Summaries\SummaryRequests;
-use App\Assist\Infrastructure\Messenger\ValkeySummaryRequests;
+use App\Assist\Infrastructure\Valkey\ValkeySummaryRequests;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;

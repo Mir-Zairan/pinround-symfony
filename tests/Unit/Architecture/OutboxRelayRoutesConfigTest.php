@@ -63,7 +63,7 @@ final class OutboxRelayRoutesConfigTest extends TestCase
 
     /**
      * Each of these is sent straight to its worker's transport, never through the outbox: the notify commands and mail
-     * to worker-notify, the summary job to worker-ai.
+     * to async_notify (compose.yaml's worker), the summary job to async_ai (worker-heavy).
      */
     #[Test]
     public function exactlyTheNotifyCommandsMailAndTheSummaryJobAreRoutedStraightToTheirTransports(): void

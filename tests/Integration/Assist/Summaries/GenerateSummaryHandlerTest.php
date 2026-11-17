@@ -19,6 +19,7 @@ use App\Assist\Application\Summaries\SummaryRequests;
 use App\Assist\Domain\AiFeature;
 use App\Assist\Infrastructure\Messenger\GenerateSummaryHandler;
 use App\Assist\Infrastructure\Platform\FakeProvider;
+use App\Assist\Infrastructure\Valkey\ValkeySummaryRequests;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\Roles;
@@ -34,9 +35,9 @@ use App\Tests\Integration\Messaging\RunsTheWorkerUntilIdle;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\Summary\SummaryRows;
-use App\Ticketing\Api\Event\SummaryGenerated;
 use App\Ticketing\Api\TicketCommands;
-use App\Ticketing\Infrastructure\Messenger\StoreSummaryHandler;
+use App\Ticketing\Api\TicketSummaryCommands;
+use App\Ticketing\Application\CheckedTicketSummaryCommands;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Formatter\JsonFormatter;
@@ -45,6 +46,7 @@ use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
@@ -52,9 +54,9 @@ use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 
 /**
- * The summary job as worker-ai runs it: Omar asks for a summary of the checkout ticket through the Api, and Messenger's
- * worker handles the queued GenerateSummary from the in-memory async_ai transport on the real command.bus, gateway
- * (FakeProvider), metering and Ticketing's store, each in a transaction that commits. The ticket has a human summary
+ * The summary job as worker-heavy runs it: Omar asks for a summary of the checkout ticket through the Api, and
+ * Messenger's worker handles the queued GenerateSummary from the in-memory async_ai transport on the real command.bus,
+ * gateway (FakeProvider), metering and Ticketing's store, each in a transaction that commits. The ticket has a human summary
  * already, which an answer must replace as the current one and a failure must leave. Its text carries a marker that
  * must reach no log. The clock is frozen in March 2027, a month whose usage partition the migrations always create.
  */
@@ -271,12 +273,12 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     public function aStoreThatFailsForAnotherReasonThanASummaryRuleIsThrownAndRolledBack(): void
     {
         $storeFailure = new \RuntimeException('The database connection was lost.');
-        self::getContainer()->set(StoreSummaryHandler::class, new readonly class($storeFailure) {
+        self::getContainer()->set(CheckedTicketSummaryCommands::class, new readonly class($storeFailure) implements TicketSummaryCommands {
             public function __construct(private \RuntimeException $storeFailure)
             {
             }
 
-            public function __invoke(SummaryGenerated $summaryGenerated): void
+            public function storeAiSummary(OrganizationId $organizationId, TicketId $ticketId, string $text, UserId $requesterId, string $model, string $promptVersion, \DateTimeImmutable $generatedAt): void
             {
                 throw $this->storeFailure;
             }
@@ -297,6 +299,111 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::assertTrue($state->isQueued(), 'The job recorded a failure that a retry may still turn into a summary.');
         self::assertSame([self::HUMAN_SUMMARY_ROW], $this->summaryRowsOfTheCheckoutTicket());
         self::assertSame(0, $this->processedMessageCount());
+    }
+
+    /**
+     * A page that polls sees the request end only when it can read the new summary, or it stops polling and shows the
+     * old one.
+     */
+    #[Test]
+    public function theRequestIsReleasedOnlyOnceTheStoredSummaryAndItsUsageRowAreCommitted(): void
+    {
+        $watchedRequests = $this->watchSummaryRequests();
+        $this->requestAsOmar();
+
+        self::runTheWorkerUntilIdle('async_ai');
+
+        self::assertSame([['release', ['current_summary_source' => 'ai', 'usage_statuses' => ['answered']]]], $watchedRequests->endings());
+        self::assertNull($this->requestState());
+    }
+
+    #[Test]
+    public function aFailedRequestIsRecordedOnlyOnceItsUsageRowIsCommitted(): void
+    {
+        $watchedRequests = $this->watchSummaryRequests();
+        $this->requestAsOmar();
+        $this->arrange('provider fails');
+
+        self::runTheWorkerUntilIdle('async_ai');
+
+        self::assertSame([['recordFailure', ['current_summary_source' => 'human', 'usage_statuses' => ['failed']]]], $watchedRequests->endings());
+        $this->assertTheRequestFailedAndTheSummaryStayed();
+    }
+
+    /**
+     * Ending the request inside the job's transaction would roll the stored summary and the usage row back on a Valkey
+     * failure, and Messenger would pay for the AI call again with no usage row for the first.
+     */
+    #[Test]
+    public function aRequestStateValkeyCannotReleaseKeepsTheStoredSummaryAndItsUsageRowAndIsNotRetried(): void
+    {
+        $watchedRequests = $this->watchSummaryRequests();
+        $watchedRequests->failEveryEndWith(new \RedisException('read error on connection'));
+        $this->requestAsOmar();
+
+        self::runTheWorkerUntilIdle('async_ai');
+
+        self::assertSame(
+            [['human', false], ['ai', true]],
+            array_map(static fn (array $row): array => [$row['source'], $row['is_current']], $this->summaryRowsOfTheCheckoutTicket()),
+        );
+        self::assertSame(['answered'], $this->usageStatuses());
+        self::assertCount(1, $this->fakeProvider()->calls());
+        self::assertSame(1, $this->processedMessageCount());
+        self::assertCount(1, $this->asyncAi()->getSent(), 'The job was retried.');
+        $state = $this->requestState();
+        self::assertNotNull($state);
+        self::assertTrue($state->isQueued(), 'The request ended although Valkey refused it.');
+        self::assertSame([['A summary request could not be ended; it stays queued until it expires.', ['exception_class' => \RedisException::class]]], $this->warnings());
+    }
+
+    #[Test]
+    public function aFailureValkeyCannotRecordKeepsTheUsageRowAndIsNotRetried(): void
+    {
+        $watchedRequests = $this->watchSummaryRequests();
+        $watchedRequests->failEveryEndWith(new \RedisException('read error on connection'));
+        $this->requestAsOmar();
+        $this->arrange('provider fails');
+
+        self::runTheWorkerUntilIdle('async_ai');
+
+        self::assertSame(['failed'], $this->usageStatuses());
+        self::assertCount(1, $this->fakeProvider()->calls());
+        self::assertSame(1, $this->processedMessageCount());
+        self::assertCount(1, $this->asyncAi()->getSent(), 'The job was retried.');
+        self::assertSame([self::HUMAN_SUMMARY_ROW], $this->summaryRowsOfTheCheckoutTicket());
+        $state = $this->requestState();
+        self::assertNotNull($state);
+        self::assertTrue($state->isQueued(), 'The request failed although Valkey refused it.');
+        self::assertSame([
+            ['An AI summary failed.', ['outcome' => 'failed']],
+            ['A summary request could not be ended; it stays queued until it expires.', ['exception_class' => \RedisException::class]],
+        ], $this->warnings());
+    }
+
+    private function watchSummaryRequests(): WatchedSummaryRequests
+    {
+        $realRequests = new ValkeySummaryRequests(self::getContainer()->get('state_valkey.connection'), new MockClock(self::NOW));
+        $watchedRequests = new WatchedSummaryRequests($realRequests, $this->whatAnotherConnectionSees(...));
+        // Before anything builds QueuedSummaries or the handlers, which take the port once.
+        self::getContainer()->set(ValkeySummaryRequests::class, $watchedRequests);
+
+        return $watchedRequests;
+    }
+
+    /**
+     * Through the migrator's own connection, under the organization the handler runs for, so only committed rows.
+     *
+     * @return array{current_summary_source: mixed, usage_statuses: list<mixed>}
+     */
+    private function whatAnotherConnectionSees(): array
+    {
+        $ticketId = $this->checkoutTicketId()->toString();
+
+        return $this->migrator()->transactional(static fn (Connection $migrator): array => [
+            'current_summary_source' => $migrator->fetchOne('SELECT source FROM tkt_summary WHERE ticket_id = ? AND is_current', [$ticketId]),
+            'usage_statuses' => $migrator->fetchFirstColumn('SELECT status FROM ast_usage WHERE organization_id = ? ORDER BY at, id', [self::ACME_FOODS]),
+        ]);
     }
 
     private function arrange(string $failure): void

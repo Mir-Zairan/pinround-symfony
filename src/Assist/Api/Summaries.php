@@ -10,7 +10,7 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * "Summarize with AI" for the ticket page: queue a summary job for a person and read how the latest one is doing. The
- * AI runs in worker-ai (async_ai); no web request waits on it. An answered job becomes the ticket's current summary
+ * AI runs in worker-heavy (async_ai); no web request waits on it. An answered job becomes the ticket's current summary
  * through Ticketing; a failed one leaves a failed request with its line until it expires or a new request replaces it.
  */
 interface Summaries
