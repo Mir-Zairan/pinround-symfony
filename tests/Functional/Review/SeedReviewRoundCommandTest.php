@@ -10,6 +10,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Command\Command;
@@ -130,6 +131,50 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
         self::assertSame(['rounds' => 2, 'media' => 4, 'screenshots' => 4, 'pins' => 2, 'areas' => 2], $this->rowCounts());
     }
 
+    public function testItGivesTheFirstPinTheLongNoteAndLeavesTheNamedAreasAfterPicturePending(): void
+    {
+        $ticketId = $this->seedAssignedTicket();
+        $tester = $this->commandTester();
+
+        $exitCode = $tester->execute(['organization' => 'acme-foods', 'ticket' => 'SHOP-1', '--long-note' => true, '--pending-after' => '1']);
+
+        self::assertSame(Command::SUCCESS, $exitCode, $tester->getDisplay());
+        self::assertStringContainsString('The "after" picture of Checkout button is still processing.', $tester->getDisplay());
+        $rounds = $this->roundRowsOf($ticketId);
+        self::assertCount(2, $rounds);
+        self::assertSame(
+            [SeedReviewRoundCommand::LONG_PIN_NOTE, SeedReviewRoundCommand::PIN_NOTES[1]],
+            array_column($this->pinRowsOf(self::idOf($rounds[0])), 'note'),
+        );
+        self::assertSame([[0, 'ready'], [1, 'pending']], $this->afterPictureStatusesOf(self::idOf($rounds[1])));
+        self::assertSame(['rounds' => 2, 'media' => 4, 'screenshots' => 4, 'pins' => 2, 'areas' => 2], $this->rowCounts());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function positionsOfNoArea(): iterable
+    {
+        yield 'past the last area' => ['2'];
+        yield 'negative' => ['-1'];
+        yield 'a leading zero' => ['01'];
+        yield 'a word' => ['first'];
+        yield 'empty' => [''];
+    }
+
+    #[DataProvider('positionsOfNoArea')]
+    public function testItRefusesAPendingAfterPositionOfNoAreaAndWritesNothing(string $position): void
+    {
+        $this->seedAssignedTicket();
+        $tester = $this->commandTester();
+
+        $exitCode = $tester->execute(['organization' => 'acme-foods', 'ticket' => 'SHOP-1', '--pending-after' => $position]);
+
+        self::assertSame(Command::FAILURE, $exitCode);
+        self::assertStringContainsString('There is no screen area at that position; give 0 to 1.', $tester->getDisplay());
+        self::assertSame(self::NO_ROWS, $this->rowCounts());
+    }
+
     public function testItRefusesATicketThatHasRoundsAlreadyAndWritesNothingMore(): void
     {
         $this->seedAssignedTicket();
@@ -171,6 +216,24 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
         });
 
         return $rows;
+    }
+
+    /**
+     * @return list<array{mixed, mixed}> the position of each area of the round and the status of its after picture
+     */
+    private function afterPictureStatusesOf(string $roundId): array
+    {
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($roundId, &$rows): int {
+            $rows = $migrator->fetchAllNumeric(
+                'SELECT a.position, m.status FROM rvw_area a JOIN rvw_screenshot s ON s.id = a.after_screenshot_id JOIN med_object m ON m.id = s.media_id WHERE a.round_id = ? ORDER BY a.position',
+                [$roundId],
+            );
+
+            return \count($rows);
+        });
+
+        return array_map(static fn (array $row): array => [$row[0], $row[1]], $rows);
     }
 
     /**

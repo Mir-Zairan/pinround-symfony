@@ -22,4 +22,14 @@ interface ReadyPictureSeeds
      * @throws \LogicException when no transaction is open
      */
     public function add(OrganizationId $organizationId, UserId $uploader, \DateTimeImmutable $at): string;
+
+    /**
+     * Adds a media object uploaded by $uploader that stays pending, as one the worker has not processed yet, so a page
+     * shows its "Processing…" placeholder. The same transaction rules as add.
+     *
+     * @return string the id of the new media object, a UUIDv7
+     *
+     * @throws \LogicException when no transaction is open
+     */
+    public function addPending(OrganizationId $organizationId, UserId $uploader, \DateTimeImmutable $at): string;
 }

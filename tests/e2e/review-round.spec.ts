@@ -108,24 +108,37 @@ test('Mia opens the round from the Rounds section, switches area tabs and compar
   await context.close();
 });
 
-test('Mia marks a pin Fixed, focus lands on its Undo, and Undo takes the verdict back', async ({ browser }) => {
+test('Mia marks pins Fixed and Still wrong, focus lands on each Undo, and Undo takes the verdict back', async ({ browser }) => {
   const { page, close } = await openRound(browser, MIA_STORAGE_STATE);
   const firstPin = panel(page).locator('.round-panel__pin').filter({ hasText: EARLIER_PIN_NOTES[0] });
   const secondPin = panel(page).locator('.round-panel__pin').filter({ hasText: EARLIER_PIN_NOTES[1] });
-  await expect(firstPin).toContainText('Not checked yet');
+  const verdictTag = (pin: typeof firstPin) => pin.locator('.verdict-tag');
+  await expect(verdictTag(firstPin)).toHaveText('Not checked yet');
 
   await firstPin.getByRole('button', { name: 'Fixed' }).click();
   await expect(page.locator(TOAST_REGION)).toContainText('Pin 1 marked fixed.');
   await expect(firstPin.getByRole('button', { name: 'Undo' })).toBeFocused();
-  await expect(firstPin).toContainText('Fixed');
-  await expect(secondPin).toContainText('Not checked yet');
+  await expect(verdictTag(firstPin)).toHaveText('Fixed');
+  await expect(firstPin).not.toContainText('Not checked yet');
+  await expect(verdictTag(secondPin)).toHaveText('Not checked yet');
   await expect(secondPin.getByRole('button', { name: 'Fixed' })).toBeVisible();
 
   await firstPin.getByRole('button', { name: 'Undo' }).click();
   await expect(page.locator(TOAST_REGION)).toContainText('Verdict on pin 1 undone.');
   await expect(firstPin.getByRole('button', { name: 'Fixed' })).toBeFocused();
-  await expect(firstPin).toContainText('Not checked yet');
+  await expect(verdictTag(firstPin)).toHaveText('Not checked yet');
   await expect(firstPin.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+
+  await secondPin.getByRole('button', { name: 'Still wrong' }).click();
+  await expect(page.locator(TOAST_REGION)).toContainText('Pin 2 marked still wrong.');
+  await expect(secondPin.getByRole('button', { name: 'Undo' })).toBeFocused();
+  await expect(verdictTag(secondPin)).toHaveText('Still wrong');
+  await expect(verdictTag(firstPin)).toHaveText('Not checked yet');
+
+  await secondPin.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator(TOAST_REGION)).toContainText('Verdict on pin 2 undone.');
+  await expect(secondPin.getByRole('button', { name: 'Fixed' })).toBeFocused();
+  await expect(verdictTag(secondPin)).toHaveText('Not checked yet');
   await close();
 });
 
@@ -133,7 +146,7 @@ test('a save with no choice is refused, Pass and Question save, and then Ask Len
   const { page, close } = await openRound(browser, MIA_STORAGE_STATE);
   const nextStep = panel(page).getByRole('heading', { name: 'Next step' });
 
-  expect(await saveVerdict(page)).toBeGreaterThanOrEqual(400);
+  expect(await saveVerdict(page), 'the status VerdictControllerTest pins for a save with no choice').toBe(422);
   await expect(page.locator(TOAST_REGION)).toContainText('Pick Pass, Needs fix or Question first.');
   await expect(panel(page)).toContainText('No verdict yet.');
   await expect(areaTab(page, REVIEW_AREAS[0])).toContainText('2 pins');
@@ -171,6 +184,34 @@ test('a save with no choice is refused, Pass and Question save, and then Ask Len
   await expect(composer.locator('[data-thread-composer-target="askedUser"]')).toBeEnabled();
   await expect(composer.getByRole('button', { name: 'Ask Lena' })).toBeVisible();
   await expect(composer.locator('#thread-composer-body')).toBeFocused();
+
+  // A held picture keeps the page loading, so the person moves focus before the load ends: the load leaves it there.
+  const heldPage = await page.context().newPage();
+  let releaseLoad = () => {};
+  const loadHeld = new Promise<void>((resolve) => {
+    releaseLoad = resolve;
+  });
+  await heldPage.route('**/held-load.png', async (route) => {
+    await loadHeld;
+    await route.fulfill({ status: 404 });
+  });
+  await heldPage.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const picture = new Image();
+      picture.src = '/held-load.png';
+      document.body.append(picture);
+    });
+  });
+  await heldPage.goto(`/t/${key}/thread?ask=${askedLeadId}`, { waitUntil: 'domcontentloaded' });
+  const heldComposer = heldPage.locator(`form#thread-composer-${key}`);
+  const lenaChip = heldComposer.getByRole('group', { name: 'Whom to ask' }).getByRole('button', { name: 'Lena', exact: true });
+  await expect(lenaChip).toHaveAttribute('aria-pressed', 'true');
+  await lenaChip.focus();
+  expect(await heldPage.evaluate(() => document.readyState), 'the page is still loading').not.toBe('complete');
+  releaseLoad();
+  await heldPage.waitForLoadState('load');
+  await expect(lenaChip).toBeFocused();
+  await expect(heldComposer.locator('#thread-composer-body')).not.toBeFocused();
   await close();
 });
 

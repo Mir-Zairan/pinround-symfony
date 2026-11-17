@@ -34,12 +34,17 @@ export default class extends Controller {
 
   // The "Ask <lead>" link ends in the composer form's #id. While the page loads, the browser focuses a fragment's
   // target, or the page itself when the target (a form) takes no focus, which would undo a focus given any sooner.
+  // Focus a person moved on their own before the load ended stays where they put it.
   focusBodyOnceLoaded() {
     if (document.readyState === 'complete') {
       this.bodyTarget.focus();
       return;
     }
-    window.addEventListener('load', () => this.bodyTarget.focus(), { once: true });
+    window.addEventListener('load', () => {
+      if (document.activeElement === null || document.activeElement === document.body) {
+        this.bodyTarget.focus();
+      }
+    }, { once: true });
   }
 
   bodyTargetConnected() {

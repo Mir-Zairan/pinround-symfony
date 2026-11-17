@@ -131,6 +131,7 @@ final class FocusPageTest extends WebTestCase
             [['Pin 1 of 3 · Mia', 'Planted wrong', false], ['Pin 2 of 3 · Lena', 'Header cut', true], ['Pin 3 of 3 · Omar', '(no note)', true]],
             $page->filter('.focus-bar__stop')->each(static fn (Crawler $stop): array => [$stop->filter('.focus-bar__label')->text(), $stop->filter('.focus-bar__note')->text(), null !== $stop->attr('hidden')]),
         );
+        self::assertSame(['0', '0', '0'], $page->filter('.focus-bar__note')->each(static fn (Crawler $note): string => (string) $note->attr('tabindex')), 'A long note scrolls in the bar, so a keyboard must reach it.');
         $first = $page->filter('.focus-bar__stop')->first();
         self::assertSame(['Previous pin', 'Next pin'], $first->filter('a.focus-bar__step')->each(static fn (Crawler $link): string => (string) $link->attr('aria-label')));
         self::assertSame(
@@ -355,7 +356,19 @@ final class FocusPageTest extends WebTestCase
     }
 
     #[Test]
-    public function aChoiceMadeHereReadsAPinnedNumberOfQueriesBelowTheRoundPagesVerdict(): void
+    public function theNextPinIsWorkedOutFromThePinSavedNotFromThePlaceTheFormPosts(): void
+    {
+        $this->seedRoundTwo();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->postFocusVerdict($this->pins[3], 'after', '1', '1');
+
+        self::assertSame('Pin 3 marked fixed.', $this->toastAfterTheRedirect('/t/SHOP-1/rounds/2/focus?area=0&side=after&pin=1'), 'Pin 3 is the last of area 0, so the walk wraps to its first pin.');
+        self::assertSame([1 => null, 2 => null, 3 => 'fixed', 4 => null], $this->pinVerdicts());
+    }
+
+    #[Test]
+    public function aChoiceMadeHereSavesMovesOnAndReadsAPinnedNumberOfQueries(): void
     {
         $this->seedRoundTwo();
         $this->logIn($this->client, $this->people['Lena']);
@@ -377,6 +390,8 @@ final class FocusPageTest extends WebTestCase
             $queryCount += \count($queriesOfOneConnection);
         }
         self::assertSame(self::FOCUS_VERDICT_QUERIES, $queryCount);
+        self::assertSame('/t/SHOP-1/rounds/2/focus?area=0&side=after&pin=2', $this->client->getResponse()->headers->get('Location'));
+        self::assertSame([1 => 'fixed', 2 => null, 3 => null, 4 => null], $this->pinVerdicts());
     }
 
     #[Test]
