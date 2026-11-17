@@ -164,7 +164,8 @@ framework:
             # Sent with a TenantStamp by QueueDigests every 15 minutes, one per person with a ping or question due in a digest.
             App\Notification\Application\Digest\SendDigest: async_notify
             # Sent straight from the request by MessengerSummaryJobQueue, with a TenantStamp: that request writes no row
-            # the job could miss. Its handler never throws on a provider's answer, so a retry never pays for a call twice.
+            # the job could miss. Its handler marks the request on Valkey before it asks the AI, so a retry never pays for
+            # a call twice; FailSummaryRequestOfAbandonedJob fails the request when the retries run out.
             App\Assist\Application\Summaries\GenerateSummary: async_ai
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox

@@ -21,4 +21,12 @@ interface AiCallLimit
      * @throws \Throwable    the counter's storage error when it cannot be read or written; the call is not allowed
      */
     public function consume(ActorContext $caller): void;
+
+    /**
+     * Whether the person may make one more call in the caller's organization now, without counting one, so a page
+     * that queues a call can refuse it up front. consume() still decides: a call made meanwhile may use the last one.
+     *
+     * @throws \Throwable the counter's storage error when it cannot be read; the call is not allowed
+     */
+    public function hasCallsLeft(ActorContext $caller): bool;
 }

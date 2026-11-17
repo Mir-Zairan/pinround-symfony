@@ -12,6 +12,7 @@ use App\Assist\Application\AiUnavailable;
 use App\Assist\Application\Summaries\EndSummaryRequest;
 use App\Assist\Application\Summaries\GenerateSummary;
 use App\Assist\Application\Summaries\SummaryRequesters;
+use App\Assist\Application\Summaries\SummaryRequests;
 use App\Assist\Application\UnknownAiProvider;
 use App\Assist\Application\UnknownPromptTemplate;
 use App\Assist\Domain\AiFeature;
@@ -21,8 +22,8 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use App\Ticketing\Api\GeneratedSummaryRefused;
 use App\Ticketing\Api\TicketSummaryCommands;
+use Doctrine\DBAL\Connection;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -32,12 +33,15 @@ use Symfony\Component\Messenger\Stamp\DispatchAfterCurrentBusStamp;
 
 /**
  * Writes the summary a person asked for, in worker-heavy (async_ai) inside the bus transaction under the message's
- * TenantStamp. The gateway decides the policy again with the requester's roles as they are now. An answer is stored
- * through Ticketing's TicketSummaryCommands in this transaction; any other outcome, Ticketing refusing to store the
- * answer included, is a failed request and nothing is thrown, so the transaction commits the usage rows Metering wrote
- * and Messenger never retries a paid call. The request state on Valkey changes only after that commit
+ * TenantStamp. The gateway decides the policy again with the requester's roles as they are now.
+ *
+ * The AI is asked at most once per request: the request is marked on Valkey before the gateway runs (markAiAsked), and
+ * a delivery that finds the mark, after an earlier one asked and then rolled back, fails the request without asking.
+ * An answer is stored through Ticketing's TicketSummaryCommands in a savepoint, so a store that fails for any reason
+ * rolls back only itself, and the transaction commits the usage rows Metering wrote with a failed request. Any other
+ * outcome is a failed request too, and nothing is thrown. The request state on Valkey ends only after that commit
  * (EndSummaryRequest), so a Valkey failure never rolls the paid call back and a poll never sees the request end before
- * the summary is readable. A message delivered again does nothing.
+ * the summary is readable. A message delivered again after a commit does nothing.
  */
 #[AsMessageHandler(bus: 'command.bus')]
 final readonly class GenerateSummaryHandler
@@ -52,8 +56,10 @@ final readonly class GenerateSummaryHandler
         private TenantContext $tenantContext,
         private OnceOnlyHandling $onceOnlyHandling,
         private SummaryRequesters $summaryRequesters,
+        private SummaryRequests $summaryRequests,
         private AiGateway $aiGateway,
         private TicketSummaryCommands $ticketSummaryCommands,
+        private Connection $connection,
         #[Autowire(service: 'command.bus')]
         private MessageBusInterface $commandBus,
         private ClockInterface $clock,
@@ -64,6 +70,7 @@ final readonly class GenerateSummaryHandler
     /**
      * @throws \App\SharedKernel\Application\TenantNotSet when no organization is set, before any read
      * @throws MessageForAnotherTenantRefused             when the message names another organization than the one set
+     * @throws \RuntimeException                          when the request state cannot be marked, before the AI is asked
      */
     public function __invoke(GenerateSummary $generateSummary): void
     {
@@ -83,19 +90,23 @@ final readonly class GenerateSummaryHandler
             }
 
             $this->logger->warning('An AI summary failed.', ['outcome' => $failure]);
-            $this->endRequestAfterCommit(EndSummaryRequest::failed($organizationId, $ticketId, $requesterId, self::FAILED_SENTENCE));
+            $this->endRequestAfterCommit(EndSummaryRequest::failed($organizationId, $ticketId, $requesterId, self::sentenceFor($failure)));
         });
     }
 
     /**
-     * @return string|null null when Ticketing stored the summary; else what stopped it, an AiResult status or the class
-     *                     of what the gateway or Ticketing threw, never its message
+     * @return string|null null when Ticketing stored the summary; else what stopped it, an AiResult status, a word for
+     *                     a request that may not ask, or the class of what the gateway or Ticketing threw, never its
+     *                     message
      */
     private function summarize(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): ?string
     {
         $requester = $this->summaryRequesters->actorOf($requesterId, $organizationId);
         if (null === $requester) {
             return 'requester_not_member';
+        }
+        if (!$this->summaryRequests->markAiAsked($organizationId, $ticketId, $requesterId)) {
+            return 'asked_before_or_not_queued';
         }
 
         try {
@@ -108,21 +119,29 @@ final readonly class GenerateSummaryHandler
         }
 
         try {
-            $this->ticketSummaryCommands->storeAiSummary(
-                $organizationId,
-                $ticketId,
-                $gatewayAnswer->text,
-                $requesterId,
-                $gatewayAnswer->model,
-                $gatewayAnswer->promptVersion,
-                $this->clock->now(),
-            );
-        } catch (GeneratedSummaryRefused $refused) {
-            // Final, as the same answer is refused again; it wrote nothing, so the transaction may still commit.
-            return $refused::class;
+            $answerText = $gatewayAnswer->text;
+            $this->connection->transactional(function () use ($organizationId, $ticketId, $answerText, $requesterId, $gatewayAnswer): void {
+                $this->ticketSummaryCommands->storeAiSummary(
+                    $organizationId,
+                    $ticketId,
+                    $answerText,
+                    $requesterId,
+                    $gatewayAnswer->model,
+                    $gatewayAnswer->promptVersion,
+                    $this->clock->now(),
+                );
+            });
+        } catch (\Throwable $storeFailure) {
+            // Not retried: a retry would not ask the AI again (markAiAsked), so it could not store the answer either.
+            return $storeFailure::class;
         }
 
         return null;
+    }
+
+    private static function sentenceFor(string $failure): string
+    {
+        return AiRateLimited::class === $failure ? AiRateLimited::PER_PERSON_MESSAGE : self::FAILED_SENTENCE;
     }
 
     /**

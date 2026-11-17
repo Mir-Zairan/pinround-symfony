@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Assist\Summaries;
 use App\Assist\Api\Summaries;
 use App\Assist\Api\SummaryRequestRefused;
 use App\Assist\Api\SummaryRequestView;
+use App\Assist\Application\AiCallLimit;
 use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\Summaries\GenerateSummary;
 use App\Assist\Application\Summaries\QueuedSummaries;
@@ -14,6 +15,9 @@ use App\Assist\Application\Summaries\SummaryJobQueue;
 use App\Assist\Application\Summaries\SummaryRequesters;
 use App\Assist\Application\Summaries\SummaryRequests;
 use App\Assist\Infrastructure\Platform\FakeProvider;
+use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
+use App\Organization\Api\ActorContext;
+use App\Organization\Api\Roles;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -33,6 +37,7 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
+use Symfony\Component\RateLimiter\Policy\Window;
 
 /**
  * "Summarize with AI" as the container wires it, as pinround_app in a transaction under Acme Foods that each test rolls
@@ -56,6 +61,8 @@ final class QueuedSummariesTest extends KernelTestCase
     private const string MIA = '0197a3c0-0000-7000-8000-0000000c7a13';
     private const string NOW = '2027-03-15 10:00:00 UTC';
     private const string AI_ON_IN_THE_CLOUD = '{"on": true, "where": "cloud"}';
+    private const string USAGE_LIMITER_PREFIX = 'ai_calls_per_user-';
+    private const int CALL_LIMIT = 30;
 
     private static ?TicketId $checkoutTicketId = null;
     private static ?TicketId $teamOnlyTicketId = null;
@@ -110,11 +117,13 @@ final class QueuedSummariesTest extends KernelTestCase
     {
         self::mockTime(self::NOW);
         $this->forgetRequestStates();
+        $this->forgetCountedCalls();
     }
 
     protected function tearDown(): void
     {
         $this->forgetRequestStates();
+        $this->forgetCountedCalls();
         self::getContainer()->get('doctrine')->resetManager();
         self::tenantContext()->reset();
         parent::tearDown();
@@ -182,6 +191,43 @@ final class QueuedSummariesTest extends KernelTestCase
         self::assertSame([], $this->asyncAi()->getSent());
         self::assertNull($this->stateOf($ticketId));
         self::assertNull($this->requests()->latestOf(new OrganizationId(self::BETA_BAKERY), $ticketId));
+    }
+
+    /**
+     * Omar's earlier request failed; a claim would replace that state, so the refusal must come before the claim.
+     */
+    #[Test]
+    public function aPersonWithNoAiCallLeftIsRefusedWithTheLimitLineAndQueuesAndChangesNothing(): void
+    {
+        $this->requests()->recordFailure(new OrganizationId(self::ACME_FOODS), self::checkoutTicketId(), new UserId(self::OMAR), 'The AI answer failed. Try again.');
+        $this->useUpCallsOf(self::OMAR, self::CALL_LIMIT);
+
+        try {
+            $this->requestAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::checkoutTicketId());
+            self::fail('A request over the limit was queued.');
+        } catch (SummaryRequestRefused $refusal) {
+            self::assertSame(
+                [SummaryRequestRefused::TOO_MANY_AI_REQUESTS, 'Too many AI requests. Try again in a minute.'],
+                [$refusal->refusalCode, $refusal->getMessage()],
+            );
+        }
+
+        self::assertSame([], $this->asyncAi()->getSent());
+        $failed = $this->stateOf(self::checkoutTicketId());
+        self::assertNotNull($failed);
+        self::assertSame([SummaryRequestView::FAILED, self::OMAR, '2027-03-15 10:00:00', 'The AI answer failed. Try again.'], self::fieldsOf($failed));
+        self::assertSame(self::CALL_LIMIT, $this->countedCallsOf(self::OMAR));
+    }
+
+    #[Test]
+    public function aPersonWithOneAiCallLeftIsQueuedAndTheRequestCountsNoCall(): void
+    {
+        $this->useUpCallsOf(self::OMAR, self::CALL_LIMIT - 1);
+
+        $this->requestAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::checkoutTicketId());
+
+        self::assertCount(1, $this->asyncAi()->getSent());
+        self::assertSame(self::CALL_LIMIT - 1, $this->countedCallsOf(self::OMAR));
     }
 
     #[Test]
@@ -300,7 +346,38 @@ final class QueuedSummariesTest extends KernelTestCase
         $ticketQueries = self::getContainer()->get('test.ticketing_ticket_queries');
         \assert($ticketQueries instanceof TicketQueries);
 
-        return new QueuedSummaries($summaryRequesters, $aiTaskAdmission, $this->requests(), $summaryJobQueue, $ticketVisibilities, $ticketQueries);
+        return new QueuedSummaries($summaryRequesters, $aiTaskAdmission, $this->limit(), $this->requests(), $summaryJobQueue, $ticketVisibilities, $ticketQueries);
+    }
+
+    private function limit(): AiCallLimit
+    {
+        $limit = self::getContainer()->get('test.assist_ai_call_limit');
+        \assert($limit instanceof AiCallLimit);
+
+        return $limit;
+    }
+
+    private function useUpCallsOf(string $userId, int $calls): void
+    {
+        $caller = new ActorContext(new UserId($userId), new OrganizationId(self::ACME_FOODS), Roles::none());
+        for ($call = 1; $call <= $calls; ++$call) {
+            $this->limit()->consume($caller);
+        }
+    }
+
+    private function countedCallsOf(string $userId): int
+    {
+        $window = self::getContainer()->get(ValkeyLimiterStorage::class)->fetch(self::USAGE_LIMITER_PREFIX.self::ACME_FOODS.':'.$userId);
+        self::assertInstanceOf(Window::class, $window);
+
+        return $window->getHitCount();
+    }
+
+    private function forgetCountedCalls(): void
+    {
+        foreach ([self::LENA, self::OMAR] as $userId) {
+            self::getContainer()->get(ValkeyLimiterStorage::class)->delete(self::USAGE_LIMITER_PREFIX.self::ACME_FOODS.':'.$userId);
+        }
     }
 
     private function requests(): SummaryRequests

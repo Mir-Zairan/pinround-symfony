@@ -13,7 +13,8 @@ use App\SharedKernel\Domain\UserId;
 /**
  * The real request states, with a look at what another database connection sees each time a request ends, so a test
  * tells an end written after the job's commit from one written inside its transaction. An armed failure is thrown
- * instead of ending the request, as the real state throws when Valkey cannot be reached, and leaves the state as it was.
+ * instead of ending or marking the request, as the real state throws when Valkey cannot be reached, and leaves the
+ * state as it was.
  */
 final class WatchedSummaryRequests implements SummaryRequests
 {
@@ -21,6 +22,8 @@ final class WatchedSummaryRequests implements SummaryRequests
     private array $endings = [];
 
     private ?\RuntimeException $endFailure = null;
+
+    private ?\RuntimeException $markFailure = null;
 
     /**
      * @param \Closure(): mixed $whatAnotherConnectionSees
@@ -34,6 +37,11 @@ final class WatchedSummaryRequests implements SummaryRequests
         $this->endFailure = $endFailure;
     }
 
+    public function failEveryMarkWith(\RuntimeException $markFailure): void
+    {
+        $this->markFailure = $markFailure;
+    }
+
     /**
      * @return list<array{string, mixed}> each end's method and what another connection saw as it began, in call order
      */
@@ -45,6 +53,15 @@ final class WatchedSummaryRequests implements SummaryRequests
     public function claim(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool
     {
         return $this->realRequests->claim($organizationId, $ticketId, $requesterId);
+    }
+
+    public function markAiAsked(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool
+    {
+        if (null !== $this->markFailure) {
+            throw $this->markFailure;
+        }
+
+        return $this->realRequests->markAiAsked($organizationId, $ticketId, $requesterId);
     }
 
     public function recordFailure(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId, string $sentence): void

@@ -109,6 +109,79 @@ final class ValkeySummaryRequestsTest extends KernelTestCase
     }
 
     #[Test]
+    public function aQueuedRequestIsMarkedAsHavingAskedTheAiOnceAndKeepsItsStateAndExpiry(): void
+    {
+        self::assertTrue($this->requests()->claim(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        $this->connection()->expire(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET), 1800);
+
+        self::assertTrue($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        self::assertFalse($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+
+        $queued = $this->requests()->latestOf(self::acmeFoods(), self::checkoutTicket());
+        self::assertNotNull($queued);
+        self::assertSame([SummaryRequestView::QUEUED, self::OMAR, '2027-03-15 10:00:00', null], self::fieldsOf($queued));
+        self::assertTimeToLiveIsAbout(1800, self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function statesThatMayNotAsk(): iterable
+    {
+        yield 'no request' => ['none'];
+        yield 'a failed request' => ['failed'];
+        yield 'a request queued by someone else' => ['queued by Lena'];
+        yield 'another organization\'s request' => ['queued at Beta Bakery'];
+    }
+
+    #[Test]
+    #[DataProvider('statesThatMayNotAsk')]
+    public function aTicketWithNoQueuedRequestOfTheRequesterIsNotMarkedAndKeepsItsState(string $state): void
+    {
+        $arrangement = match ($state) {
+            'none' => static fn (): bool => true,
+            'failed' => fn () => $this->requests()->recordFailure(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR), self::FAILED_SENTENCE),
+            'queued by Lena' => fn (): bool => $this->requests()->claim(self::acmeFoods(), self::checkoutTicket(), new UserId(self::LENA)),
+            'queued at Beta Bakery' => fn (): bool => $this->requests()->claim(new OrganizationId(self::BETA_BAKERY), self::checkoutTicket(), new UserId(self::OMAR)),
+            default => throw new \LogicException('No state is called '.$state.'.'),
+        };
+        $arrangement();
+        $before = $this->connection()->get(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET));
+
+        self::assertFalse($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+
+        self::assertSame($before, $this->connection()->get(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET)));
+    }
+
+    #[Test]
+    public function aNewClaimAfterAFailureMayAskTheAiAgain(): void
+    {
+        self::assertTrue($this->requests()->claim(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        self::assertTrue($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        $this->requests()->recordFailure(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR), self::FAILED_SENTENCE);
+
+        self::assertTrue($this->requests()->claim(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+
+        self::assertTrue($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+    }
+
+    #[Test]
+    public function aMarkOverAValueTheScriptCannotDecodeFailsAndLeavesTheValue(): void
+    {
+        $this->connection()->set(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET), 'not json');
+
+        try {
+            $this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR));
+            self::fail('A mark went through over a value the script cannot decode.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame('The summary request could not be marked as having asked the AI.', $failure->getMessage());
+        }
+
+        self::assertSame('not json', $this->connection()->get(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET)));
+        self::assertNull($this->connection()->getLastError(), 'The script error stayed on the connection for the next caller.');
+    }
+
+    #[Test]
     public function aFailureReplacesTheQueuedStateWithItsSentenceForADay(): void
     {
         self::assertTrue($this->requests()->claim(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));

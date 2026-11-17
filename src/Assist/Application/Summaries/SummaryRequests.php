@@ -27,6 +27,18 @@ interface SummaryRequests
     public function claim(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool;
 
     /**
+     * Marks the requester's queued request as having asked the AI, before its job asks; the check and the write are
+     * one step, so of two deliveries of one job only one may ask and pay. The mark outlives a rolled-back transaction
+     * and keeps the state's expiry; a new claim starts without it.
+     *
+     * @return bool false when the request was marked already, or the ticket has no queued request of this requester;
+     *              nothing changed then
+     *
+     * @throws \RuntimeException when the state cannot be reached or holds a value this class did not write
+     */
+    public function markAiAsked(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool;
+
+    /**
      * Replaces the ticket's state with failed, as of now, with the line to show.
      *
      * @throws \RuntimeException when the state cannot be reached

@@ -80,6 +80,42 @@ final class SymfonyAiCallLimitTest extends TestCase
     }
 
     #[Test]
+    public function aPeekOneCallBelowTheLimitCountsNothingSoTheLastCallIsStillAllowed(): void
+    {
+        for ($call = 1; $call < self::LIMIT; ++$call) {
+            $this->limit->consume(self::caller(self::OMAR));
+        }
+
+        self::assertTrue($this->limit->hasCallsLeft(self::caller(self::OMAR)));
+        self::assertTrue($this->limit->hasCallsLeft(self::caller(self::OMAR)));
+
+        self::assertSame(self::LIMIT - 1, $this->hitsOf(self::OMAR));
+        $this->limit->consume(self::caller(self::OMAR));
+        self::assertSame(self::LIMIT, $this->hitsOf(self::OMAR));
+    }
+
+    #[Test]
+    public function aPeekAtTheLimitSaysNoCallIsLeftForThatPersonOnly(): void
+    {
+        for ($call = 1; $call <= self::LIMIT; ++$call) {
+            $this->limit->consume(self::caller(self::OMAR));
+        }
+
+        self::assertFalse($this->limit->hasCallsLeft(self::caller(self::OMAR)));
+        self::assertTrue($this->limit->hasCallsLeft(self::caller(self::MIA)));
+        self::assertSame(self::LIMIT, $this->hitsOf(self::OMAR));
+    }
+
+    /** A peek that saved a window would start the person's hour before their first call. */
+    #[Test]
+    public function aPeekBeforeAnyCallOpensNoWindow(): void
+    {
+        self::assertTrue($this->limit->hasCallsLeft(self::caller(self::OMAR)));
+
+        self::assertNull($this->storage->fetch('ai_calls_per_user-'.self::ACME_FOODS.':'.self::OMAR));
+    }
+
+    #[Test]
     public function theCounterIsKeyedByTheOrganizationAndTheUserId(): void
     {
         $this->limit->consume(self::caller(self::OMAR));
