@@ -55,13 +55,13 @@ final class WatchedSummaryRequests implements SummaryRequests
         return $this->realRequests->claim($organizationId, $ticketId, $requesterId);
     }
 
-    public function markAiAsked(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool
+    public function markAiMayBeAsked(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool
     {
         if (null !== $this->markFailure) {
             throw $this->markFailure;
         }
 
-        return $this->realRequests->markAiAsked($organizationId, $ticketId, $requesterId);
+        return $this->realRequests->markAiMayBeAsked($organizationId, $ticketId, $requesterId);
     }
 
     public function recordFailure(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId, string $sentence): void

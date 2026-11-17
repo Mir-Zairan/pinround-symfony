@@ -109,13 +109,13 @@ final class ValkeySummaryRequestsTest extends KernelTestCase
     }
 
     #[Test]
-    public function aQueuedRequestIsMarkedAsHavingAskedTheAiOnceAndKeepsItsStateAndExpiry(): void
+    public function aQueuedRequestIsMarkedAsOneThatMayHaveAskedTheAiOnceAndKeepsItsStateAndExpiry(): void
     {
         self::assertTrue($this->requests()->claim(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
         $this->connection()->expire(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET), 1800);
 
-        self::assertTrue($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
-        self::assertFalse($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        self::assertTrue($this->requests()->markAiMayBeAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        self::assertFalse($this->requests()->markAiMayBeAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
 
         $queued = $this->requests()->latestOf(self::acmeFoods(), self::checkoutTicket());
         self::assertNotNull($queued);
@@ -148,7 +148,7 @@ final class ValkeySummaryRequestsTest extends KernelTestCase
         $arrangement();
         $before = $this->connection()->get(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET));
 
-        self::assertFalse($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        self::assertFalse($this->requests()->markAiMayBeAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
 
         self::assertSame($before, $this->connection()->get(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET)));
     }
@@ -157,12 +157,12 @@ final class ValkeySummaryRequestsTest extends KernelTestCase
     public function aNewClaimAfterAFailureMayAskTheAiAgain(): void
     {
         self::assertTrue($this->requests()->claim(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
-        self::assertTrue($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        self::assertTrue($this->requests()->markAiMayBeAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
         $this->requests()->recordFailure(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR), self::FAILED_SENTENCE);
 
         self::assertTrue($this->requests()->claim(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
 
-        self::assertTrue($this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
+        self::assertTrue($this->requests()->markAiMayBeAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR)));
     }
 
     #[Test]
@@ -171,10 +171,10 @@ final class ValkeySummaryRequestsTest extends KernelTestCase
         $this->connection()->set(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET), 'not json');
 
         try {
-            $this->requests()->markAiAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR));
+            $this->requests()->markAiMayBeAsked(self::acmeFoods(), self::checkoutTicket(), new UserId(self::OMAR));
             self::fail('A mark went through over a value the script cannot decode.');
         } catch (\RuntimeException $failure) {
-            self::assertSame('The summary request could not be marked as having asked the AI.', $failure->getMessage());
+            self::assertSame('The summary request could not be marked as one that may have asked the AI.', $failure->getMessage());
         }
 
         self::assertSame('not json', $this->connection()->get(self::keyOf(self::ACME_FOODS, self::CHECKOUT_TICKET)));

@@ -302,12 +302,13 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::assertSame(['answered'], $this->usageStatuses());
         self::assertCount(1, $this->fakeProvider()->calls());
         self::assertSame(1, $this->processedMessageCount());
-        self::assertSame([['An AI summary failed.', ['outcome' => DriverException::class]]], $this->warnings());
+        self::assertSame([['An AI summary failed.', ['outcome' => DriverException::class, 'sqlstate' => '22012', 'code' => 7]]], $this->warnings());
     }
 
     /**
      * The usage insert fails in PostgreSQL after the provider answered, so the job's transaction rolls back and
-     * Messenger delivers it again. That delivery finds the request marked and fails it without asking the AI again.
+     * Messenger delivers it again. That delivery finds the request marked as one that may have asked the AI and fails it
+     * without asking again.
      */
     #[Test]
     public function aJobRetriedAfterTheAiWasAskedFailsTheRequestWithoutAskingAgain(): void
@@ -326,7 +327,13 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         $this->assertTheRequestFailedAndTheSummaryStayed(expectedDeliveries: 2);
         self::assertSame([], $this->usageStatuses(), 'The test proves nothing if the usage insert did not fail.');
         self::assertSame(1, $this->processedMessageCount());
-        self::assertContains(['An AI summary failed.', ['outcome' => 'asked_before_or_not_queued']], $this->warnings());
+        $warnings = $this->warnings();
+        self::assertSame([
+            'Error thrown while handling message {class}. Sending for retry #{retryCount} using {delay} ms delay. Error: "{error}"',
+            'An AI summary failed.',
+        ], array_column($warnings, 0), 'The first delivery is retried and the second fails the request, each warning once.');
+        self::assertSame([GenerateSummary::class, 1], [$warnings[0][1]['class'] ?? null, $warnings[0][1]['retryCount'] ?? null]);
+        self::assertSame(['outcome' => 'ai_may_have_been_asked_or_not_queued'], $warnings[1][1]);
     }
 
     /**

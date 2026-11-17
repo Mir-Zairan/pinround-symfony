@@ -15,8 +15,8 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 /**
  * Summary request states on the state Valkey, which never evicts (ADR-0010), so a queued state is never dropped to
  * make room. Each ticket has one key, "summary_request:<organization>:<ticket>", holding the state as JSON
- * ({"status", "requesterId", "at" in Unix seconds, "sentence" when failed, "aiAsked" once the queued job asked the AI})
- * that Valkey expires on its own.
+ * ({"status", "requesterId", "at" in Unix seconds, "sentence" when failed, "aiMayBeAsked" once the queued job may
+ * have asked the AI}) that Valkey expires on its own.
  */
 final readonly class ValkeySummaryRequests implements SummaryRequests
 {
@@ -35,16 +35,16 @@ final readonly class ValkeySummaryRequests implements SummaryRequests
 
     // Answers 1 when the requester's queued state was not marked and now is, else 0. A value it cannot decode fails
     // the script. cjson writes the state back with the same fields, and KEEPTTL keeps the claim's expiry.
-    private const string MARK_AI_ASKED_SCRIPT = <<<'LUA'
+    private const string MARK_AI_MAY_BE_ASKED_SCRIPT = <<<'LUA'
         local held = redis.call('GET', KEYS[1])
         if not held then
             return 0
         end
         local state = cjson.decode(held)
-        if state['status'] ~= 'queued' or state['requesterId'] ~= ARGV[1] or state['aiAsked'] == true then
+        if state['status'] ~= 'queued' or state['requesterId'] ~= ARGV[1] or state['aiMayBeAsked'] == true then
             return 0
         end
-        state['aiAsked'] = true
+        state['aiMayBeAsked'] = true
         redis.call('SET', KEYS[1], cjson.encode(state), 'KEEPTTL')
         return 1
         LUA;
@@ -70,14 +70,14 @@ final readonly class ValkeySummaryRequests implements SummaryRequests
         return 1 === $answer;
     }
 
-    public function markAiAsked(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool
+    public function markAiMayBeAsked(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool
     {
-        $answer = $this->connection->eval(self::MARK_AI_ASKED_SCRIPT, [self::keyOf($organizationId, $ticketId), $requesterId->toString()], 1);
+        $answer = $this->connection->eval(self::MARK_AI_MAY_BE_ASKED_SCRIPT, [self::keyOf($organizationId, $ticketId), $requesterId->toString()], 1);
         // phpredis answers a script error with false instead of throwing.
         if (false === $answer) {
             $this->connection->clearLastError();
 
-            throw new \RuntimeException('The summary request could not be marked as having asked the AI.');
+            throw new \RuntimeException('The summary request could not be marked as one that may have asked the AI.');
         }
 
         return 1 === $answer;

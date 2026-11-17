@@ -24,6 +24,7 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketSummaryCommands;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -35,9 +36,11 @@ use Symfony\Component\Messenger\Stamp\DispatchAfterCurrentBusStamp;
  * Writes the summary a person asked for, in worker-heavy (async_ai) inside the bus transaction under the message's
  * TenantStamp. The gateway decides the policy again with the requester's roles as they are now.
  *
- * The AI is asked at most once per request: the request is marked on Valkey before the gateway runs (markAiAsked), and
- * a delivery that finds the mark, after an earlier one asked and then rolled back, fails the request without asking.
- * An answer is stored through Ticketing's TicketSummaryCommands in a savepoint, so a store that fails for any reason
+ * The AI is asked at most once per request: the request is marked on Valkey as one that may have asked the AI before the
+ * gateway runs (markAiMayBeAsked), and a delivery that finds the mark fails the request without asking. The mark comes
+ * before the gateway because only there can it stop a second paid call: the gateway may throw after the provider
+ * answered, and nothing outside it can tell. So a delivery that stopped in the gateway's policy check, key read or limit
+ * step, before any provider call, also leaves the mark, and its retry fails the request instead of asking. An answer is stored through Ticketing's TicketSummaryCommands in a savepoint, so a store that fails for any reason
  * rolls back only itself, and the transaction commits the usage rows Metering wrote with a failed request. Any other
  * outcome is a failed request too, and nothing is thrown. The request state on Valkey ends only after that commit
  * (EndSummaryRequest), so a Valkey failure never rolls the paid call back and a poll never sees the request end before
@@ -89,33 +92,35 @@ final readonly class GenerateSummaryHandler
                 return;
             }
 
-            $this->logger->warning('An AI summary failed.', ['outcome' => $failure]);
-            $this->endRequestAfterCommit(EndSummaryRequest::failed($organizationId, $ticketId, $requesterId, self::sentenceFor($failure)));
+            $this->logger->warning('An AI summary failed.', $failure);
+            $this->endRequestAfterCommit(EndSummaryRequest::failed($organizationId, $ticketId, $requesterId, self::sentenceFor($failure['outcome'])));
         });
     }
 
     /**
-     * @return string|null null when Ticketing stored the summary; else what stopped it, an AiResult status, a word for
-     *                     a request that may not ask, or the class of what the gateway or Ticketing threw, never its
-     *                     message
+     * Answers null when Ticketing stored the summary, else the failure warning's context: what stopped it (an AiResult
+     * status, a word for a request that may not ask, or the class of what the gateway or Ticketing threw), with a
+     * database error's SQLSTATE and code, never a message.
+     *
+     * @return array{outcome: string, sqlstate?: string|null, code?: int}|null
      */
-    private function summarize(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): ?string
+    private function summarize(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): ?array
     {
         $requester = $this->summaryRequesters->actorOf($requesterId, $organizationId);
         if (null === $requester) {
-            return 'requester_not_member';
+            return ['outcome' => 'requester_not_member'];
         }
-        if (!$this->summaryRequests->markAiAsked($organizationId, $ticketId, $requesterId)) {
-            return 'asked_before_or_not_queued';
+        if (!$this->summaryRequests->markAiMayBeAsked($organizationId, $ticketId, $requesterId)) {
+            return ['outcome' => 'ai_may_have_been_asked_or_not_queued'];
         }
 
         try {
             $gatewayAnswer = $this->aiGateway->run(new AiTask(AiFeature::Summary, $ticketId), $requester);
         } catch (AiNotAllowed|AiRateLimited|AiUnavailable|UnknownAiProvider|UnknownPromptTemplate $refusal) {
-            return $refusal::class;
+            return ['outcome' => $refusal::class];
         }
         if (!$gatewayAnswer->isAnswered() || null === $gatewayAnswer->text) {
-            return $gatewayAnswer->status->value;
+            return ['outcome' => $gatewayAnswer->status->value];
         }
 
         try {
@@ -132,8 +137,13 @@ final readonly class GenerateSummaryHandler
                 );
             });
         } catch (\Throwable $storeFailure) {
-            // Not retried: a retry would not ask the AI again (markAiAsked), so it could not store the answer either.
-            return $storeFailure::class;
+            // Not retried: a retry would not ask the AI again (markAiMayBeAsked), so it could not store the answer either.
+            // Class, SQLSTATE and code only: a database message can quote the answer.
+            if ($storeFailure instanceof DriverException) {
+                return ['outcome' => $storeFailure::class, 'sqlstate' => $storeFailure->getSQLState(), 'code' => $storeFailure->getCode()];
+            }
+
+            return ['outcome' => $storeFailure::class];
         }
 
         return null;

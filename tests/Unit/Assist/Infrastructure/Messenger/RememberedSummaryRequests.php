@@ -27,7 +27,7 @@ final class RememberedSummaryRequests implements SummaryRequests
         throw new \LogicException('Not kept by this double.');
     }
 
-    public function markAiAsked(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool
+    public function markAiMayBeAsked(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): bool
     {
         throw new \LogicException('Not kept by this double.');
     }
