@@ -1,0 +1,29 @@
+{#
+    The controls of admin/ai.html.twig. They live in a template of their own because the page calls them inside
+    <twig:Card> content, which Twig compiles as a separate template that sees neither the page's imports nor its macros.
+#}
+{% macro switch_row(setting, label, chosen) %}
+    {% set is_on = chosen == 'on' %}
+    <div class="admin-ai__row">
+        <form class="admin-ai__setting-form" method="post" action="{{ path('organization_admin_ai_change') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_ai_change') }}">
+            <input type="hidden" name="setting" value="{{ setting }}">
+            <input type="hidden" name="choice" value="{{ is_on ? 'off' : 'on' }}">
+            <twig:Switch type="submit" :checked="is_on" :label="label"/>
+        </form>
+        <span>{{ label }}</span>
+    </div>
+{% endmacro %}
+
+{% macro chip_group(setting, label, choices, chosen) %}
+    <form class="admin-ai__row admin-ai__row--chips" method="post" action="{{ path('organization_admin_ai_change') }}" role="group" aria-label="{{ label }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_ai_change') }}">
+        <input type="hidden" name="setting" value="{{ setting }}">
+        <span class="admin-ai__label" aria-hidden="true">{{ label }}</span>
+        <div class="admin-ai__chips">
+            {% for choice, choice_label in choices %}
+                <twig:Chip type="submit" name="choice" value="{{ choice }}" :pressed="choice == chosen">{{ choice_label }}</twig:Chip>
+            {% endfor %}
+        </div>
+    </form>
+{% endmacro %}
