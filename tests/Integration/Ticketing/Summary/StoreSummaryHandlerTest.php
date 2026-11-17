@@ -12,6 +12,7 @@ use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\Event\SummaryGenerated;
+use App\Ticketing\Api\GeneratedSummaryRefused;
 use Monolog\Formatter\JsonFormatter;
 use Monolog\Level;
 use Monolog\LogRecord;
@@ -33,6 +34,7 @@ final class StoreSummaryHandlerTest extends KernelTestCase
     private const string SHOP_7 = '0197a3c0-0000-7000-8000-0000000f8a04';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000f8a11';
     private const string TEXT = 'Checkout button hidden MARKER-f8a';
+    private const string CURRENT_SUMMARY = '0197a3c0-0000-7000-8000-0000000f8a21';
 
     protected function setUp(): void
     {
@@ -95,9 +97,29 @@ final class StoreSummaryHandlerTest extends KernelTestCase
         self::assertSame([], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
     }
 
-    private static function summaryGenerated(): SummaryGenerated
+    #[Test]
+    public function aBlankSummaryIsRefusedForItsBlanknessAndTheCurrentSummaryStaysCurrent(): void
     {
-        return new SummaryGenerated(self::ACME_FOODS, self::SHOP_7, self::TEXT, self::MIA, 'claude-sonnet', 'summary.v1', new \DateTimeImmutable('2027-03-03 10:05:00 UTC'));
+        $this->summaryRows()->addOf(self::ACME_FOODS, self::CURRENT_SUMMARY, self::SHOP_7, 'Cart total wrong after coupon', true, '2027-03-02 09:00:00+00');
+        $currentSummaryOnly = [['text' => 'Cart total wrong after coupon', 'source' => 'human', 'author_id' => null, 'model' => null, 'prompt_version' => null, 'is_current' => true, 'created_at' => '2027-03-02 09:00:00']];
+        self::assertSame($currentSummaryOnly, $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
+
+        try {
+            $this->commandBus()->dispatch(new Envelope(self::summaryGenerated(" \t\r\n  \n"), [new TenantStamp(new OrganizationId(self::ACME_FOODS))]));
+            self::fail('The blank summary was stored.');
+        } catch (HandlerFailedException $failure) {
+            self::assertSame(
+                [[GeneratedSummaryRefused::class, 'A summary has text; this one is blank.']],
+                array_map(static fn (\Throwable $wrapped): array => [$wrapped::class, $wrapped->getMessage()], array_values($failure->getWrappedExceptions())),
+            );
+        }
+
+        self::assertSame($currentSummaryOnly, $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
+    }
+
+    private static function summaryGenerated(string $text = self::TEXT): SummaryGenerated
+    {
+        return new SummaryGenerated(self::ACME_FOODS, self::SHOP_7, $text, self::MIA, 'claude-sonnet', 'summary.v1', new \DateTimeImmutable('2027-03-03 10:05:00 UTC'));
     }
 
     private function commandBus(): MessageBusInterface
