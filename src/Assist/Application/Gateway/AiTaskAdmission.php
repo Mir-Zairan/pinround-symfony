@@ -67,9 +67,11 @@ final readonly class AiTaskAdmission
     /**
      * The policy for a prompt package the viewer's browser hands to Ollama on the laptop (LocalAi), in admit()'s order
      * but with the laptop ready: AI on and the viewer allowed, the ticket as the viewer may see it, then the laptop
-     * route, which "laptop" and "laptop first" take. A team-only ticket may go there, as its text stays on the laptop of
-     * someone who may see it; "title only" applies as on the server path. Reads under row-level security, so it needs
-     * an open transaction whose tenant is the viewer's organization.
+     * route, which "laptop" and "laptop first" take. An organization that runs AI in the cloud only is refused with
+     * CloudOnly before the route is decided, so a team-only ticket kept from cloud AI gets that refusal too. A team-only
+     * ticket may go to the laptop, as its text stays on the laptop of someone who may see it; "title only" applies as on
+     * the server path. Reads under row-level security, so it needs an open transaction whose tenant is the viewer's
+     * organization.
      *
      * @throws AiNotAllowed              when the policy forbids the task for this person or ticket, or runs AI in the
      *                                   cloud only (CloudOnly)
@@ -82,6 +84,9 @@ final readonly class AiTaskAdmission
         $ticket = $this->askedTicketQueries->visibleTicketOf($ticketId, $viewer);
         if (null === $ticket) {
             throw new AiNotAllowed(PolicyRefusal::CannotSeeTicket);
+        }
+        if (AiSettings::WHERE_CLOUD === $settings->whereAiRuns) {
+            throw new AiNotAllowed(PolicyRefusal::CloudOnly);
         }
         $decision = $this->policyEvaluator->decide($settings, $viewer, canSeeTicket: true, isTicketRestricted: $ticket->isTeamOnly, isLaptopReady: true);
         if (null !== $decision->refusal) {

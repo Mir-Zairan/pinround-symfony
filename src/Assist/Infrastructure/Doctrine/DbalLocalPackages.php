@@ -8,6 +8,7 @@ use App\Assist\Api\LocalAiPurpose;
 use App\Assist\Api\LocalModelName;
 use App\Assist\Api\LocalPackageId;
 use App\Assist\Application\LocalAi\IssuedLocalPackage;
+use App\Assist\Application\LocalAi\LocalPackageLimit;
 use App\Assist\Application\LocalAi\LocalPackageOwner;
 use App\Assist\Application\LocalAi\LocalPackages;
 use App\Assist\Application\PromptVersion;
@@ -29,15 +30,18 @@ final readonly class DbalLocalPackages implements LocalPackages
     // An advisory lock, not a row lock: a person with no open package has no row to lock.
     private const string LOCK = 'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))';
 
-    private const string COUNT_OPEN = 'SELECT count(*) FROM ast_local_package'
-        .' WHERE organization_id = ? AND user_id = ? AND used_at IS NULL AND expires_at > ?';
+    // A package created in the last hour expires after an hour ago (expires_at > created_at), and so does an open one,
+    // so the bound on expires_at lets the (organization_id, user_id, expires_at) index find both counts' rows.
+    private const string COUNT_OPEN_AND_LAST_HOUR = 'SELECT count(*) FILTER (WHERE used_at IS NULL AND expires_at > ?) AS open_packages,'
+        .' count(*) FILTER (WHERE created_at > ?) AS packages_last_hour'
+        .' FROM ast_local_package WHERE organization_id = ? AND user_id = ? AND expires_at > ?';
 
     private const string INSERT = 'INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at)'
         .' VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
 
     private const string RESOLVE = 'SELECT organization_id, user_id FROM resolve_laptop_package(?::uuid)';
 
-    private const string SELECT_OF_USER = 'SELECT purpose, prompt_version, (used_at IS NULL AND expires_at > ?) AS is_open'
+    private const string SELECT_OF_USER = 'SELECT purpose, ticket_id, prompt_version, (used_at IS NULL AND expires_at > ?) AS is_open'
         .' FROM ast_local_package WHERE organization_id = ? AND id = ? AND user_id = ?';
 
     private const string POST = 'UPDATE ast_local_package SET used_at = ?, result_text = ?, model = ?'
@@ -49,17 +53,27 @@ final readonly class DbalLocalPackages implements LocalPackages
     {
     }
 
-    public function issue(LocalPackageId $packageId, OrganizationId $organizationId, UserId $requesterId, TicketId $ticketId, LocalAiPurpose $purpose, PromptVersion $promptVersion, int $lifetimeSeconds, int $maxOpenPackages): ?\DateTimeImmutable
+    public function issue(LocalPackageId $packageId, OrganizationId $organizationId, UserId $requesterId, TicketId $ticketId, LocalAiPurpose $purpose, PromptVersion $promptVersion, int $lifetimeSeconds, int $maxOpenPackages, int $maxPackagesPerHour): \DateTimeImmutable|LocalPackageLimit
     {
         $this->requireTenant($organizationId);
         $now = $this->clock->now();
+        $anHourAgo = $now->modify('-1 hour')->format(self::TIMESTAMP_FORMAT);
         $this->connection->executeStatement(self::LOCK, [\sprintf('ast_local_package:open:%s:%s', $organizationId->toString(), $requesterId->toString())]);
-        $openPackages = $this->connection->fetchOne(self::COUNT_OPEN, [$organizationId->toString(), $requesterId->toString(), $now->format(self::TIMESTAMP_FORMAT)]);
-        if (!\is_int($openPackages)) {
-            throw new \UnexpectedValueException('The count of open laptop packages is not a number.');
+        $counts = $this->connection->fetchAssociative(self::COUNT_OPEN_AND_LAST_HOUR, [
+            $now->format(self::TIMESTAMP_FORMAT),
+            $anHourAgo,
+            $organizationId->toString(),
+            $requesterId->toString(),
+            $anHourAgo,
+        ]);
+        if (false === $counts || !\is_int($counts['open_packages']) || !\is_int($counts['packages_last_hour'])) {
+            throw new \UnexpectedValueException('The counts of laptop packages are not numbers.');
         }
-        if ($openPackages >= $maxOpenPackages) {
-            return null;
+        if ($counts['open_packages'] >= $maxOpenPackages) {
+            return LocalPackageLimit::OpenPackages;
+        }
+        if ($counts['packages_last_hour'] >= $maxPackagesPerHour) {
+            return LocalPackageLimit::PackagesPerHour;
         }
 
         $expiresAt = $now->modify(\sprintf('+%d seconds', $lifetimeSeconds));
@@ -103,8 +117,8 @@ final readonly class DbalLocalPackages implements LocalPackages
             return null;
         }
         $purpose = \is_string($row['purpose']) ? LocalAiPurpose::tryFrom($row['purpose']) : null;
-        if (null === $purpose || !\is_string($row['prompt_version']) || !\is_bool($row['is_open'])) {
-            throw new \UnexpectedValueException('A stored laptop package has a purpose or prompt version issue() does not write.');
+        if (null === $purpose || !\is_string($row['ticket_id']) || !\is_string($row['prompt_version']) || !\is_bool($row['is_open'])) {
+            throw new \UnexpectedValueException('A stored laptop package has a purpose, ticket or prompt version issue() does not write.');
         }
         try {
             $promptVersion = PromptVersion::fromName($row['prompt_version']);
@@ -112,7 +126,7 @@ final readonly class DbalLocalPackages implements LocalPackages
             throw new \UnexpectedValueException('A stored laptop package has a prompt version issue() does not write.', 0, $unreadable);
         }
 
-        return new IssuedLocalPackage($purpose, $promptVersion, $row['is_open']);
+        return new IssuedLocalPackage($purpose, new TicketId($row['ticket_id']), $promptVersion, $row['is_open']);
     }
 
     public function post(OrganizationId $organizationId, LocalPackageId $packageId, UserId $posterId, string $text, LocalModelName $model): ?\DateTimeImmutable

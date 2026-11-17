@@ -6,6 +6,7 @@ namespace App\Assist\UI;
 
 use App\Assist\Api\AiPolicy;
 use App\Assist\Api\PolicyView;
+use App\Assist\Application\Policy\PolicyRefusal;
 use App\Organization\Api\CurrentActor;
 use App\SharedKernel\UI\CspConnectSources;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
@@ -25,7 +26,6 @@ final class LocalAiChip implements ResetInterface
 
     public const string NOT_A_MEMBER = 'Local AI is for members of this organization.';
     public const string ADMIN_ONLY = 'Local AI is for people in a team and for managers.';
-    public const string CLOUD_ONLY = 'Your admin runs AI help in the company cloud, not on laptops.';
 
     /** The policy when the person gets the chip, else the one line that says why not; null until read. */
     private PolicyView|string|null $decision = null;
@@ -97,6 +97,6 @@ final class LocalAiChip implements ResetInterface
             return $policy->refusalSentence;
         }
 
-        return $policy->isLaptopAllowed() ? $policy : self::CLOUD_ONLY;
+        return $policy->isLaptopAllowed() ? $policy : PolicyRefusal::CloudOnly->sentence();
     }
 }

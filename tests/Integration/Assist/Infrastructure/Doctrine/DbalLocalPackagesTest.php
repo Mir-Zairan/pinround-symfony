@@ -8,6 +8,7 @@ use App\Assist\Api\LocalAiPurpose;
 use App\Assist\Api\LocalModelName;
 use App\Assist\Api\LocalPackageId;
 use App\Assist\Application\LocalAi\IssuedLocalPackage;
+use App\Assist\Application\LocalAi\LocalPackageLimit;
 use App\Assist\Application\LocalAi\LocalPackageOwner;
 use App\Assist\Application\LocalAi\LocalPackages;
 use App\Assist\Application\PromptVersion;
@@ -139,9 +140,9 @@ final class DbalLocalPackagesTest extends KernelTestCase
     #[Test]
     public function issuingStoresAnOpenPackageThatExpiresAfterItsLifetime(): void
     {
-        $expiresAt = self::transactions()->committedAs(self::ACME_FOODS, fn (): ?\DateTimeImmutable => $this->issueNewPackage(self::ACME_FOODS, 10));
+        $expiresAt = self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 10));
 
-        self::assertNotNull($expiresAt);
+        self::assertInstanceOf(\DateTimeImmutable::class, $expiresAt);
         self::assertSame('2027-03-15 10:07:00.500', $expiresAt->format('Y-m-d H:i:s.v'));
         self::assertSame(
             [[self::NEW_PACKAGE, self::OMAR, self::TICKET, 'summary', 'summary.v1', '2027-03-15 10:02:00.500', '2027-03-15 10:07:00.500', null, null, null]],
@@ -152,7 +153,10 @@ final class DbalLocalPackagesTest extends KernelTestCase
     #[Test]
     public function issuingPastTheCapOfOpenPackagesStoresNothing(): void
     {
-        self::assertNull(self::transactions()->committedAs(self::ACME_FOODS, fn (): ?\DateTimeImmutable => $this->issueNewPackage(self::ACME_FOODS, 1)));
+        self::assertSame(
+            LocalPackageLimit::OpenPackages,
+            self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 1)),
+        );
 
         self::assertSame([self::ACME_PACKAGE], $this->idsAs(self::ACME_FOODS));
     }
@@ -165,15 +169,55 @@ final class DbalLocalPackagesTest extends KernelTestCase
         self::seed(self::ACME_FOODS, '0197a3c0-0000-7000-8000-00000000d543', self::MIA);
         self::seed(self::BETA_BAKERY, '0197a3c0-0000-7000-8000-00000000d544', self::OMAR);
 
-        self::assertNotNull(self::transactions()->committedAs(self::ACME_FOODS, fn (): ?\DateTimeImmutable => $this->issueNewPackage(self::ACME_FOODS, 2)));
+        self::assertInstanceOf(\DateTimeImmutable::class, self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 2)));
         self::assertContains(self::NEW_PACKAGE, $this->idsAs(self::ACME_FOODS));
+    }
+
+    /**
+     * Omar's open package and a used one were created this hour, and only the open one counts towards the open cap of
+     * 2, so the refusal is the hour's; Mia's and Beta Bakery's packages of the same hour do not count.
+     */
+    #[Test]
+    public function issuingPastTheCapOfPackagesThisHourStoresNothingWhetherTheyAreUsedOrNot(): void
+    {
+        self::seed(self::ACME_FOODS, '0197a3c0-0000-7000-8000-00000000d545', self::OMAR, ['used_at' => self::NOW, 'result_text' => self::RESULT, 'model' => self::MODEL]);
+        self::seed(self::ACME_FOODS, '0197a3c0-0000-7000-8000-00000000d546', self::MIA);
+        self::seed(self::BETA_BAKERY, '0197a3c0-0000-7000-8000-00000000d547', self::OMAR);
+        $idsBefore = $this->idsAs(self::ACME_FOODS);
+
+        self::assertSame(
+            LocalPackageLimit::PackagesPerHour,
+            self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 2, 2)),
+        );
+        self::assertSame($idsBefore, $this->idsAs(self::ACME_FOODS));
+        self::assertInstanceOf(
+            \DateTimeImmutable::class,
+            self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 2, 3)),
+            'Three a hour let a third through, so the refusal above counted two.',
+        );
+    }
+
+    /** Both packages were created at 10:00:00.250; an hour later to the millisecond they no longer count. */
+    #[Test]
+    public function packagesCreatedAnHourAgoNoLongerCount(): void
+    {
+        self::seed(self::ACME_FOODS, '0197a3c0-0000-7000-8000-00000000d545', self::OMAR, ['used_at' => self::NOW, 'result_text' => self::RESULT, 'model' => self::MODEL]);
+
+        self::assertSame(
+            LocalPackageLimit::PackagesPerHour,
+            self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 10, 2, '2027-03-15 11:00:00.249+00')),
+        );
+        self::assertInstanceOf(
+            \DateTimeImmutable::class,
+            self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 10, 2, '2027-03-15 11:00:00.250+00')),
+        );
     }
 
     #[Test]
     public function theHolderReadsTheirOpenPackageAndNobodyElseDoes(): void
     {
         self::assertEquals(
-            new IssuedLocalPackage(LocalAiPurpose::Summary, new PromptVersion(AiFeature::Summary, 1), true),
+            new IssuedLocalPackage(LocalAiPurpose::Summary, new TicketId(self::TICKET), new PromptVersion(AiFeature::Summary, 1), true),
             $this->issuedAs(self::ACME_FOODS, self::ACME_PACKAGE, self::OMAR),
         );
         self::assertNull($this->issuedAs(self::ACME_FOODS, self::ACME_PACKAGE, self::MIA));
@@ -355,9 +399,9 @@ final class DbalLocalPackagesTest extends KernelTestCase
         };
     }
 
-    private function issueNewPackage(string $organizationId, int $maxOpenPackages): ?\DateTimeImmutable
+    private function issueNewPackage(string $organizationId, int $maxOpenPackages, int $maxPackagesPerHour = 30, string $now = self::NOW): \DateTimeImmutable|LocalPackageLimit
     {
-        return $this->packages()->issue(
+        return $this->packages($now)->issue(
             new LocalPackageId(self::NEW_PACKAGE),
             new OrganizationId($organizationId),
             new UserId(self::OMAR),
@@ -366,6 +410,7 @@ final class DbalLocalPackagesTest extends KernelTestCase
             new PromptVersion(AiFeature::Summary, 1),
             300,
             $maxOpenPackages,
+            $maxPackagesPerHour,
         );
     }
 

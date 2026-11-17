@@ -8,6 +8,7 @@ use App\Assist\Api\LocalAiPurpose;
 use App\Assist\Api\LocalModelName;
 use App\Assist\Api\LocalPackageId;
 use App\Assist\Application\LocalAi\IssuedLocalPackage;
+use App\Assist\Application\LocalAi\LocalPackageLimit;
 use App\Assist\Application\LocalAi\LocalPackageOwner;
 use App\Assist\Application\LocalAi\LocalPackages;
 use App\Assist\Application\PromptVersion;
@@ -48,9 +49,9 @@ final class WatchedLocalPackages implements LocalPackages
         return $this->packageCalls;
     }
 
-    public function issue(LocalPackageId $packageId, OrganizationId $organizationId, UserId $requesterId, TicketId $ticketId, LocalAiPurpose $purpose, PromptVersion $promptVersion, int $lifetimeSeconds, int $maxOpenPackages): ?\DateTimeImmutable
+    public function issue(LocalPackageId $packageId, OrganizationId $organizationId, UserId $requesterId, TicketId $ticketId, LocalAiPurpose $purpose, PromptVersion $promptVersion, int $lifetimeSeconds, int $maxOpenPackages, int $maxPackagesPerHour): \DateTimeImmutable|LocalPackageLimit
     {
-        return $this->realPackages->issue($packageId, $organizationId, $requesterId, $ticketId, $purpose, $promptVersion, $lifetimeSeconds, $maxOpenPackages);
+        return $this->realPackages->issue($packageId, $organizationId, $requesterId, $ticketId, $purpose, $promptVersion, $lifetimeSeconds, $maxOpenPackages, $maxPackagesPerHour);
     }
 
     public function ownerOf(LocalPackageId $packageId): ?LocalPackageOwner

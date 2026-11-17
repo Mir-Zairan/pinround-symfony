@@ -6,8 +6,9 @@ namespace App\Assist\Api;
 
 /**
  * A laptop's result was not kept, and nothing was stored: the package is unknown (or another person's or another
- * organization's, which reads the same), it was used or it expired, or the model name or the text failed the check.
- * The message is the one line the person is shown; it never holds the text.
+ * organization's, which reads the same), it was used or it expired, the AI policy no longer gives the poster laptop AI,
+ * or the model name or the text failed the check. The message is the one line the person is shown; it never holds the
+ * text.
  */
 final class LocalResultRefused extends \DomainException
 {
@@ -41,5 +42,16 @@ final class LocalResultRefused extends \DomainException
     public static function resultRejected(string $reason): self
     {
         return new self(self::RESULT_REJECTED, $reason);
+    }
+
+    /**
+     * The organization's AI policy no longer gives the poster laptop AI; a page answers it with 403.
+     *
+     * @param string $refusalCode a PolicyView refusal code: ai_off, leads_only or cloud_only
+     * @param string $sentence    the line shown where the button is
+     */
+    public static function notAllowed(string $refusalCode, string $sentence): self
+    {
+        return new self($refusalCode, $sentence);
     }
 }

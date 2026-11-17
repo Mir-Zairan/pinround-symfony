@@ -96,7 +96,7 @@ final class LaptopStatusTest extends WebTestCase
      */
     public static function refusedPeople(): iterable
     {
-        yield 'AI runs in the cloud' => [['on' => true, 'where' => 'cloud'], '{}', LocalAiChip::CLOUD_ONLY];
+        yield 'AI runs in the cloud' => [['on' => true, 'where' => 'cloud'], '{}', 'Your admin runs AI help in the company cloud, not on laptops.'];
         yield 'AI is off, though set to laptops' => [['on' => false, 'where' => 'laptop'], '{}', 'Your admin turned AI help off.'];
         yield 'AI for leads only, and Omar leads no team' => [['on' => true, 'who' => 'leads_only', 'where' => 'laptop'], '{}', 'Your admin allows AI help for leads only.'];
         yield 'Omar is an admin with no team or manager role' => [self::laptopAi(), '{admin}', LocalAiChip::ADMIN_ONLY];

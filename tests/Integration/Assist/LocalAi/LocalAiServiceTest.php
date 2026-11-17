@@ -19,8 +19,10 @@ use App\Assist\Application\LocalAi\LocalPackages;
 use App\Assist\Application\LocalAiService;
 use App\Assist\Application\PromptRenderer;
 use App\Assist\Infrastructure\Uid\UuidV7LocalPackageIds;
+use App\Audit\Api\AuditLog;
 use App\Organization\Api\MemberNameQueries;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -46,10 +48,11 @@ use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 
 /**
  * Laptop AI as the container wires it, as pinround_app in committed transactions under Acme Foods, so a refusal that
- * a page catches could not hide a written row behind a rollback. Lena leads the Shop team that owns SHOP; Omar
- * (display name "Omar Haddad") is in Acme Foods but in no team, so he sees the checkout ticket for everyone but not the
- * team-only one; Mia leads the Ops team. The checkout ticket has a current AI summary. The packages are removed by hand
- * after each test, as pinround_app may not delete them. The clock is frozen in March 2027.
+ * a page catches could not hide a written row behind a rollback: package() in the test's transaction, accept() in its
+ * own. Lena leads the Shop team that owns SHOP; Omar (display name "Omar Haddad") is in Acme Foods but in no team, so
+ * he sees the checkout ticket for everyone but not the team-only one; Mia leads the Ops team. The checkout ticket has a
+ * current AI summary. The packages and audit entries are removed by hand after each test, as pinround_app may not
+ * delete them. The clock is frozen in March 2027, which has its aud_event partition.
  */
 final class LocalAiServiceTest extends KernelTestCase
 {
@@ -149,7 +152,7 @@ final class LocalAiServiceTest extends KernelTestCase
 
     protected function tearDown(): void
     {
-        self::removePackages();
+        self::removePackagesAndAuditEntries();
         self::getContainer()->get('doctrine')->resetManager();
         self::tenantContext()->reset();
         parent::tearDown();
@@ -208,6 +211,8 @@ final class LocalAiServiceTest extends KernelTestCase
         yield 'Omar, in no team, on a team-only ticket' => [self::OMAR, self::ON_THE_LAPTOP, 'team-only', 'cannot_see_ticket', 'AI help works only on tickets you can see.'];
         yield 'an unknown ticket' => [self::OMAR, self::ON_THE_LAPTOP, 'unknown', 'cannot_see_ticket', 'AI help works only on tickets you can see.'];
         yield 'AI in the cloud only' => [self::OMAR, '{"on": true, "where": "cloud"}', 'checkout', 'cloud_only', 'Your admin runs AI help in the company cloud, not on laptops.'];
+        // Team-only tickets are kept from cloud AI by default; the laptop refusal still names the cloud-only setting.
+        yield 'AI in the cloud only, Lena on a team-only ticket she may see' => [self::LENA, '{"on": true, "where": "cloud"}', 'team-only', 'cloud_only', 'Your admin runs AI help in the company cloud, not on laptops.'];
         yield 'AI off' => [self::OMAR, '{"on": false, "where": "laptop"}', 'checkout', 'ai_off', 'Your admin turned AI help off.'];
         yield 'leads only, Omar leads no team' => [self::OMAR, '{"on": true, "where": "laptop", "who": "leads_only"}', 'checkout', 'leads_only', 'Your admin allows AI help for leads only.'];
     }
@@ -424,6 +429,134 @@ final class LocalAiServiceTest extends KernelTestCase
         self::assertSame([['The answer of a second tab.', 'phi4-mini:latest']], array_map(static fn (array $row): array => [$row[8], $row[9]], $rows));
     }
 
+    /**
+     * Omar was given 29 used packages at 09:00:01, so at 10:00:00 the 30th is the last of the hour. His package of
+     * 09:00:00 is past the hour, and Lena's and his Beta Bakery package of the hour are not his in Acme Foods.
+     */
+    #[Test]
+    public function theThirtyFirstPackageOfAnHourIsRefusedAndOneSecondLaterItIsGiven(): void
+    {
+        for ($package = 1; $package <= 29; ++$package) {
+            self::seedPackage(self::ACME_FOODS, \sprintf('0197a3c0-0000-7000-8000-0000000e7%03d', $package), self::OMAR, createdAt: '2027-03-15 09:00:01+00', expiresAt: '2027-03-15 09:05:01+00', usedAt: '2027-03-15 09:01:00+00');
+        }
+        self::seedPackage(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000e7100', self::OMAR, createdAt: '2027-03-15 09:00:00+00', expiresAt: '2027-03-15 09:05:00+00');
+        self::seedPackage(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000e7101', self::LENA, createdAt: '2027-03-15 09:30:00+00', expiresAt: '2027-03-15 09:35:00+00');
+        self::seedPackage(self::BETA_BAKERY, '0197a3c0-0000-7000-8000-0000000e7102', self::OMAR, createdAt: '2027-03-15 09:30:00+00', expiresAt: '2027-03-15 09:35:00+00');
+
+        self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
+        $rowsAtTheCap = $this->packageRowsOf(self::ACME_FOODS);
+        $refusal = $this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId());
+
+        self::assertInstanceOf(LocalPackageRefused::class, $refusal);
+        self::assertSame(
+            [LocalPackageRefused::TOO_MANY_PACKAGES, 'You asked for 30 laptop packages this hour. Try again later.'],
+            [$refusal->refusalCode, $refusal->getMessage()],
+        );
+        $rowsAfterTheRefusal = $this->packageRowsOf(self::ACME_FOODS);
+        self::assertCount(32, $rowsAtTheCap);
+        self::assertSame($rowsAtTheCap, $rowsAfterTheRefusal);
+
+        self::mockTime('2027-03-15 10:00:01 UTC');
+        self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
+        self::assertCount(33, $this->packageRowsOf(self::ACME_FOODS));
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}> the AI setting after the package was issued, the code, the sentence
+     */
+    public static function policiesChangedAfterThePackage(): iterable
+    {
+        yield 'AI switched off' => ['{"on": false, "where": "laptop"}', 'ai_off', 'Your admin turned AI help off.'];
+        yield 'AI moved to the cloud' => ['{"on": true, "where": "cloud"}', 'cloud_only', 'Your admin runs AI help in the company cloud, not on laptops.'];
+        yield 'AI for leads only, Omar leads no team' => ['{"on": true, "where": "laptop", "who": "leads_only"}', 'leads_only', 'Your admin allows AI help for leads only.'];
+    }
+
+    #[Test]
+    #[DataProvider('policiesChangedAfterThePackage')]
+    public function aResultThePolicyNoLongerAllowsIsRefusedAndThePackageStaysOpen(string $aiJson, string $expectedCode, string $expectedSentence): void
+    {
+        $package = self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
+        $unusedRows = $this->packageRowsOf(self::ACME_FOODS);
+        $this->changeAiSettings($aiJson);
+
+        $refusal = $this->acceptAs(self::OMAR, $package->packageId, self::RESULT);
+
+        self::assertInstanceOf(LocalResultRefused::class, $refusal);
+        self::assertSame([$expectedCode, $expectedSentence], [$refusal->refusalCode, $refusal->getMessage()]);
+        self::assertSame($unusedRows, $this->packageRowsOf(self::ACME_FOODS));
+        $this->assertOneRefusalAudited($package->packageId, $expectedCode);
+        $this->changeAiSettings(self::ON_THE_LAPTOP);
+        self::assertInstanceOf(LocalResult::class, $this->acceptAs(self::OMAR, $package->packageId, self::RESULT), 'The refusal used the package up.');
+    }
+
+    /** Omar sees the team-only ticket while in the Shop team; taken off it, his result reads as for no package. */
+    #[Test]
+    public function aResultOfAPosterTakenOffTheTeamOfATeamOnlyTicketIsNotFoundAndChangesNothing(): void
+    {
+        self::asMigratorOf(self::ACME_FOODS, static function (Connection $migrator): void {
+            $migrator->executeStatement(
+                "INSERT INTO org_team_member (organization_id, team_id, user_id, team_role, job, created_at) VALUES (?, ?, ?, 'member', 'developer', '2027-03-15 10:00:00+00')",
+                [self::ACME_FOODS, self::SHOP_TEAM, self::OMAR],
+            );
+        });
+        $package = self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::teamOnlyTicketId()));
+        $unusedRows = $this->packageRowsOf(self::ACME_FOODS);
+        self::removeOmarFromTheShopTeam();
+
+        $refusal = $this->acceptAs(self::OMAR, $package->packageId, self::RESULT);
+
+        self::assertNotFound($refusal);
+        self::assertSame($unusedRows, $this->packageRowsOf(self::ACME_FOODS));
+        $this->assertOneRefusalAudited($package->packageId, LocalResultRefused::PACKAGE_NOT_FOUND);
+    }
+
+    /** Lena's package in Acme Foods and Omar's own in Beta Bakery: the entry stays in Omar's organization. */
+    #[Test]
+    #[DataProvider('packagesThatAreNotOmarsInAcmeFoods')]
+    public function aResultForAPackageThatIsNotOmarsIsAuditedInHisOrganizationOnly(string $ownerId, string $organizationId, string $packageId): void
+    {
+        self::seedPackage($organizationId, $packageId, $ownerId);
+
+        self::assertNotFound($this->acceptAs(self::OMAR, new LocalPackageId($packageId), self::RESULT));
+
+        $this->assertOneRefusalAudited(new LocalPackageId($packageId), LocalResultRefused::PACKAGE_NOT_FOUND);
+        self::assertSame([], $this->auditRowsOf(self::BETA_BAKERY));
+    }
+
+    #[Test]
+    public function aResultForAnUnknownPackageIsAudited(): void
+    {
+        self::assertNotFound($this->acceptAs(self::OMAR, new LocalPackageId(self::UNKNOWN_PACKAGE), self::RESULT, 'Qwen3:4b'));
+
+        $this->assertOneRefusalAudited(new LocalPackageId(self::UNKNOWN_PACKAGE), LocalResultRefused::PACKAGE_NOT_FOUND, null);
+    }
+
+    #[Test]
+    public function aSecondResultIsAuditedAsGoneAndTheFirstIsNot(): void
+    {
+        $package = self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
+        self::assertInstanceOf(LocalResult::class, $this->acceptAs(self::OMAR, $package->packageId, self::RESULT));
+        self::assertSame([], $this->auditRowsOf(self::ACME_FOODS), 'A kept result was audited.');
+
+        self::assertGone($this->acceptAs(self::OMAR, $package->packageId, self::RESULT));
+
+        $this->assertOneRefusalAudited($package->packageId, LocalResultRefused::PACKAGE_GONE);
+    }
+
+    /** The entry keeps the code and a valid model name only: neither the text nor the rule's sentence. */
+    #[Test]
+    public function aRejectedResultIsAuditedWithoutItsText(): void
+    {
+        $package = self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
+
+        $refusal = $this->acceptAs(self::OMAR, $package->packageId, str_repeat('MARKER-e6x ', 61));
+
+        self::assertInstanceOf(LocalResultRefused::class, $refusal);
+        self::assertSame(LocalResultRefused::RESULT_REJECTED, $refusal->refusalCode);
+        $this->assertOneRefusalAudited($package->packageId, LocalResultRefused::RESULT_REJECTED);
+        self::assertStringNotContainsString('MARKER', (string) json_encode($this->auditRowsOf(self::ACME_FOODS)));
+    }
+
     #[Test]
     public function neitherTheTicketTextNorThePromptNorTheResultReachesALog(): void
     {
@@ -462,19 +595,62 @@ final class LocalAiServiceTest extends KernelTestCase
     }
 
     /**
-     * Posts the result in one committed transaction under Acme Foods, as a page that catches the refusal would commit it.
+     * Posts the result under Acme Foods as tenant with no transaction open, as accept() runs one of its own.
      */
     private function acceptAs(string $posterId, LocalPackageId $packageId, string $text, string $model = self::MODEL, ?LocalAi $localAi = null): LocalResult|LocalResultRefused
     {
         $localAi ??= $this->localAi();
+        self::assertFalse(self::connection()->isTransactionActive());
+        self::tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            return $localAi->accept($packageId, $model, $text, new UserId($posterId), new OrganizationId(self::ACME_FOODS));
+        } catch (LocalResultRefused $refusal) {
+            return $refusal;
+        } finally {
+            self::entityManager()->clear();
+            self::tenantContext()->clear();
+        }
+    }
 
-        return self::transactions()->committedAs(self::ACME_FOODS, static function () use ($localAi, $posterId, $packageId, $text, $model): LocalResult|LocalResultRefused {
-            try {
-                return $localAi->accept($packageId, $model, $text, new UserId($posterId), new OrganizationId(self::ACME_FOODS));
-            } catch (LocalResultRefused $refusal) {
-                return $refusal;
-            }
-        });
+    private function changeAiSettings(string $aiJson): void
+    {
+        self::transactions()->committedAs(self::ACME_FOODS, static fn (): int|string => self::connection()->executeStatement(
+            "UPDATE org_settings SET data = jsonb_set(data, '{ai}', ?::jsonb) WHERE organization_id = ?",
+            [$aiJson, self::ACME_FOODS],
+        ));
+    }
+
+    /**
+     * The audit entries pinround_app sees under $organizationId: actor kind, actor, action, target type, target, data.
+     *
+     * @return list<array{string, string|null, string, string, string|null, array<string, mixed>}>
+     */
+    private function auditRowsOf(string $organizationId): array
+    {
+        $rows = self::transactions()->rolledBackAs($organizationId, static fn (): array => self::connection()->fetchAllNumeric(
+            'SELECT actor_kind, actor_user_id, action, target_type, target_id, data::text FROM aud_event ORDER BY id',
+        ));
+
+        return array_map(static function (array $row): array {
+            [$actorKind, $actorUserId, $action, $targetType, $targetId, $data] = $row;
+            \assert(\is_string($actorKind) && (null === $actorUserId || \is_string($actorUserId)) && \is_string($action));
+            \assert(\is_string($targetType) && (null === $targetId || \is_string($targetId)) && \is_string($data));
+            /** @var array<string, mixed> $decoded a JSON object, as DbalAuditLog writes */
+            $decoded = json_decode($data, true, flags: \JSON_THROW_ON_ERROR);
+
+            return [$actorKind, $actorUserId, $action, $targetType, $targetId, $decoded];
+        }, $rows);
+    }
+
+    /**
+     * @param string|null $model the model name the entry keeps, null for one that breaks LocalModelName's rule
+     */
+    private function assertOneRefusalAudited(LocalPackageId $packageId, string $reason, ?string $model = self::MODEL): void
+    {
+        self::assertEquals(
+            [['user', self::OMAR, 'local_ai.result_refused', 'local_ai_package', $packageId->toString(), ['reason' => $reason, 'model' => $model]]],
+            $this->auditRowsOf(self::ACME_FOODS),
+        );
     }
 
     private static function expectPackage(PromptPackage|LocalPackageRefused $answer): PromptPackage
@@ -568,6 +744,8 @@ final class LocalAiServiceTest extends KernelTestCase
             $localPackages,
             new UuidV7LocalPackageIds(new Clock()),
             $container->get(MemberNameQueries::class),
+            $container->get(AuditLog::class),
+            $container->get(Transactions::class),
         );
     }
 
@@ -611,19 +789,31 @@ final class LocalAiServiceTest extends KernelTestCase
         return self::$teamOnlyTicketId ?? throw new \LogicException('The tickets are made before each class.');
     }
 
-    /** The app may not delete packages; the migrator owns the table, and row-level security applies to it too. */
-    private static function removePackages(): void
+    /**
+     * The app may not delete packages or audit entries; the migrator owns the tables, and row-level security applies
+     * to it too. Omar leaves the Shop team a test put him in.
+     */
+    private static function removePackagesAndAuditEntries(): void
     {
         foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
             self::asMigratorOf($organizationId, static function (Connection $migrator) use ($organizationId): void {
                 $migrator->executeStatement('DELETE FROM ast_local_package WHERE organization_id = ?', [$organizationId]);
+                $migrator->executeStatement('DELETE FROM aud_event WHERE organization_id = ?', [$organizationId]);
             });
         }
+        self::removeOmarFromTheShopTeam();
+    }
+
+    private static function removeOmarFromTheShopTeam(): void
+    {
+        self::asMigratorOf(self::ACME_FOODS, static function (Connection $migrator): void {
+            $migrator->executeStatement('DELETE FROM org_team_member WHERE organization_id = ? AND team_id = ? AND user_id = ?', [self::ACME_FOODS, self::SHOP_TEAM, self::OMAR]);
+        });
     }
 
     private static function removeRows(): void
     {
-        self::removePackages();
+        self::removePackagesAndAuditEntries();
         self::shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA], self::ACME_FOODS, self::BETA_BAKERY);
     }
 

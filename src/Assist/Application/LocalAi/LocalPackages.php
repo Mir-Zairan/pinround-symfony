@@ -20,15 +20,16 @@ use App\SharedKernel\Domain\UserId;
 interface LocalPackages
 {
     /**
-     * Counts the person's unused, unexpired packages and adds this one only when they hold fewer than
-     * $maxOpenPackages, under a lock per person held to the end of the transaction, so two at once never both pass.
+     * Counts the person's unused, unexpired packages and the packages they were given in the last hour, and adds this
+     * one only when they hold fewer than $maxOpenPackages and were given fewer than $maxPackagesPerHour, under a lock
+     * per person held to the end of the transaction, so two at once never both pass.
      *
-     * @return \DateTimeImmutable|null when the package expires; null when the person holds $maxOpenPackages already,
-     *                                 and nothing was stored
+     * @return \DateTimeImmutable|LocalPackageLimit when the package expires; else the cap the person reached (the open
+     *                                              one when both are), and nothing was stored
      *
      * @throws \LogicException when no transaction is open or $organizationId is not its tenant, before any query
      */
-    public function issue(LocalPackageId $packageId, OrganizationId $organizationId, UserId $requesterId, TicketId $ticketId, LocalAiPurpose $purpose, PromptVersion $promptVersion, int $lifetimeSeconds, int $maxOpenPackages): ?\DateTimeImmutable;
+    public function issue(LocalPackageId $packageId, OrganizationId $organizationId, UserId $requesterId, TicketId $ticketId, LocalAiPurpose $purpose, PromptVersion $promptVersion, int $lifetimeSeconds, int $maxOpenPackages, int $maxPackagesPerHour): \DateTimeImmutable|LocalPackageLimit;
 
     /**
      * Through resolve_laptop_package, so it finds the package in any organization; the caller compares the owner
@@ -42,7 +43,7 @@ interface LocalPackages
      * @return IssuedLocalPackage|null null when the organization has no package with this id that $userId holds
      *
      * @throws \LogicException           when no transaction is open or $organizationId is not its tenant, before any query
-     * @throws \UnexpectedValueException when the stored purpose or prompt version is not one issue() writes
+     * @throws \UnexpectedValueException when the stored purpose, ticket or prompt version is not one issue() writes
      */
     public function issuedOf(OrganizationId $organizationId, LocalPackageId $packageId, UserId $userId): ?IssuedLocalPackage;
 
