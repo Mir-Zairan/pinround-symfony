@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Assist\Metering;
+namespace App\Tests\Unit\Assist\Infrastructure\RateLimit;
 
 use App\Assist\Application\AiRateLimited;
 use App\Assist\Infrastructure\RateLimit\SymfonyAiCallLimit;
@@ -96,7 +96,7 @@ final class SymfonyAiCallLimitTest extends TestCase
      */
     private static function configuredLimiter(): array
     {
-        $section = Yaml::parseFile(\dirname(__DIR__, 4).'/config/packages/rate_limiter.yaml');
+        $section = Yaml::parseFile(\dirname(__DIR__, 5).'/config/packages/rate_limiter.yaml');
         foreach (['framework', 'rate_limiter', 'ai_calls_per_user'] as $key) {
             self::assertIsArray($section);
             self::assertArrayHasKey($key, $section);
