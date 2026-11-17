@@ -111,6 +111,9 @@ final class CheckReasonsTest extends TestCase
         yield 'a Hangul jungseong filler inside the word' => [new DraftReport("to\u{1160}ken in the URL", '', [])];
         yield 'a Hangul filler inside the word' => [new DraftReport("pass\u{3164}word on screen", '', [])];
         yield 'a half-width Hangul filler inside the word' => [new DraftReport("hack\u{FFA0}ed account", '', [])];
+        yield 'a Braille blank inside the word' => [new DraftReport("pass\u{2800}word shown on screen", '', [])];
+        yield 'a Khitan filler inside the word' => [new DraftReport("to\u{16FE4}ken in the URL", '', [])];
+        yield 'a musical null notehead inside the word' => [new DraftReport("pri\u{1D159}vacy page", '', [])];
         yield 'full-width upper case' => [new DraftReport('ＰＡＳＳＷＯＲＤ shown on screen', '', [])];
         yield 'full-width lower case' => [new DraftReport('ｔｏｋｅｎ in the URL', '', [])];
         yield 'mathematical bold letters' => [new DraftReport("\u{1D420}\u{1D41D}\u{1D429}\u{1D42B} export", '', [])];

@@ -13,9 +13,10 @@ final readonly class CheckReasons
     /**
      * Format characters and every default-ignorable code point (zero-width space, joiners, soft hyphen, BOM, variation
      * selectors, the combining grapheme joiner, Hangul fillers) are removed, so an invisible character cannot split a
-     * word past the list.
+     * word past the list. So are the blank symbols Unicode counts as neither: the Braille blank U+2800, the Khitan
+     * filler U+16FE4 and the musical null notehead U+1D159.
      */
-    private const string INVISIBLE_CHARACTERS = '/[\p{Cf}\p{DI}]+/u';
+    private const string INVISIBLE_CHARACTERS = '/[\p{Cf}\p{DI}\x{2800}\x{16FE4}\x{1D159}]+/u';
 
     /**
      * True when the security word list matches the title, the detail or any pin note. Each text is NFKC-normalized
