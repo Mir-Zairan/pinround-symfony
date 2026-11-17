@@ -14,10 +14,13 @@ use App\SharedKernel\Application\UndecryptableField;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Encryption\SodiumFieldEncryption;
+use App\SharedKernel\Infrastructure\Logging\RedactionProcessor;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
+use Monolog\Level;
+use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Psr\Log\AbstractLogger;
@@ -221,7 +224,7 @@ final class DbalAiSettingsQueriesTest extends KernelTestCase
     {
         self::assertSame(self::AI_OFF, self::shapeOf($this->settingsWithAi(self::ACME_FOODS, $storedJson)));
         self::assertSame(
-            [['org_settings holds an unknown AI setting; AI help is off.', ['organization_id' => self::ACME_FOODS, 'key' => $expectedKey]]],
+            [['org_settings holds an unknown AI setting; AI help is off.', ['organization_id' => self::ACME_FOODS, 'setting' => $expectedKey]]],
             $this->warnings,
         );
     }
@@ -232,7 +235,7 @@ final class DbalAiSettingsQueriesTest extends KernelTestCase
         $tooDeep = str_repeat('[', 600).str_repeat(']', 600);
 
         self::assertSame(self::AI_OFF, self::shapeOf($this->settingsWithAi(self::ACME_FOODS, \sprintf('{"on": true, "provider": %s}', $tooDeep))));
-        self::assertSame('ai', $this->warnings[0][1]['key'] ?? null);
+        self::assertSame('ai', $this->warnings[0][1]['setting'] ?? null);
     }
 
     #[Test]
@@ -460,11 +463,14 @@ final class DbalAiSettingsQueriesTest extends KernelTestCase
     }
 
     /**
+     * Through RedactionProcessor, as every real log record goes: a key it drops is missing here too.
+     *
      * @param array<array-key, mixed> $context
      */
     private function recordWarning(string $message, array $context): void
     {
-        $this->warnings[] = [$message, $context];
+        $redacted = new RedactionProcessor()(new LogRecord(new \DateTimeImmutable('2027-03-15 10:00:00 UTC'), 'app', Level::Warning, $message, $context));
+        $this->warnings[] = [$redacted->message, $redacted->context];
     }
 
     private function fieldEncryption(): FieldEncryption

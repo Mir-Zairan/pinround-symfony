@@ -93,16 +93,17 @@ final readonly class GenerateSummaryHandler
             }
 
             $this->logger->warning('An AI summary failed.', $failure);
-            $this->endRequestAfterCommit(EndSummaryRequest::failed($organizationId, $ticketId, $requesterId, self::sentenceFor($failure['outcome'])));
+            $this->endRequestAfterCommit(EndSummaryRequest::failed($organizationId, $ticketId, $requesterId, self::sentenceFor($failure)));
         });
     }
 
     /**
-     * Answers null when Ticketing stored the summary, else the failure warning's context: what stopped it (an AiResult
-     * status, a word for a request that may not ask, or the class of what the gateway or Ticketing threw), with a
-     * database error's SQLSTATE and code, never a message.
+     * Answers null when Ticketing stored the summary, else the failure warning's context: what stopped it, as an
+     * `outcome` (an AiResult status or a word for a request that may not ask) or as the `exception_class` of what the
+     * gateway or Ticketing threw, with a database error's SQLSTATE and code, never a message. Each key is one
+     * RedactionProcessor keeps.
      *
-     * @return array{outcome: string, sqlstate?: string|null, code?: int}|null
+     * @return array{outcome: string}|array{exception_class: class-string<\Throwable>, sqlstate?: string|null, code?: int}|null
      */
     private function summarize(OrganizationId $organizationId, TicketId $ticketId, UserId $requesterId): ?array
     {
@@ -117,7 +118,7 @@ final readonly class GenerateSummaryHandler
         try {
             $gatewayAnswer = $this->aiGateway->run(new AiTask(AiFeature::Summary, $ticketId), $requester);
         } catch (AiNotAllowed|AiRateLimited|AiUnavailable|UnknownAiProvider|UnknownPromptTemplate $refusal) {
-            return ['outcome' => $refusal::class];
+            return ['exception_class' => $refusal::class];
         }
         if (!$gatewayAnswer->isAnswered() || null === $gatewayAnswer->text) {
             return ['outcome' => $gatewayAnswer->status->value];
@@ -140,18 +141,21 @@ final readonly class GenerateSummaryHandler
             // Not retried: a retry would not ask the AI again (markAiMayBeAsked), so it could not store the answer either.
             // Class, SQLSTATE and code only: a database message can quote the answer.
             if ($storeFailure instanceof DriverException) {
-                return ['outcome' => $storeFailure::class, 'sqlstate' => $storeFailure->getSQLState(), 'code' => $storeFailure->getCode()];
+                return ['exception_class' => $storeFailure::class, 'sqlstate' => $storeFailure->getSQLState(), 'code' => $storeFailure->getCode()];
             }
 
-            return ['outcome' => $storeFailure::class];
+            return ['exception_class' => $storeFailure::class];
         }
 
         return null;
     }
 
-    private static function sentenceFor(string $failure): string
+    /**
+     * @param array{outcome?: string, exception_class?: class-string<\Throwable>} $failure
+     */
+    private static function sentenceFor(array $failure): string
     {
-        return AiRateLimited::class === $failure ? AiRateLimited::PER_PERSON_MESSAGE : self::FAILED_SENTENCE;
+        return AiRateLimited::class === ($failure['exception_class'] ?? null) ? AiRateLimited::PER_PERSON_MESSAGE : self::FAILED_SENTENCE;
     }
 
     /**

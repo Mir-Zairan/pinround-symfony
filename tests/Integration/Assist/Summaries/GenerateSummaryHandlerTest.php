@@ -28,6 +28,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Logging\RedactionProcessor;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\Tests\Factory\Ticketing\TicketFactory;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
@@ -168,23 +169,24 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{string, int, list<string>, string, string}>
+     * @return iterable<string, array{string, int, list<string>, array<string, string>, string}>
      */
     public static function failures(): iterable
     {
-        yield 'the provider failed' => ['provider fails', 1, ['failed'], 'failed', self::FAILED_SENTENCE];
-        yield 'Omar reached his limit after the request' => ['limit reached', 0, [], AiRateLimited::class, 'Too many AI requests. Try again in a minute.'];
-        yield 'the organization key cannot be read' => ['unreadable key', 0, [], AiUnavailable::class, self::FAILED_SENTENCE];
-        yield 'the admin turned AI off after the request' => ['AI turned off', 0, [], AiNotAllowed::class, self::FAILED_SENTENCE];
-        yield 'Omar left the organization after the request' => ['Omar left', 0, [], 'requester_not_member', self::FAILED_SENTENCE];
+        yield 'the provider failed' => ['provider fails', 1, ['failed'], ['outcome' => 'failed'], self::FAILED_SENTENCE];
+        yield 'Omar reached his limit after the request' => ['limit reached', 0, [], ['exception_class' => AiRateLimited::class], 'Too many AI requests. Try again in a minute.'];
+        yield 'the organization key cannot be read' => ['unreadable key', 0, [], ['exception_class' => AiUnavailable::class], self::FAILED_SENTENCE];
+        yield 'the admin turned AI off after the request' => ['AI turned off', 0, [], ['exception_class' => AiNotAllowed::class], self::FAILED_SENTENCE];
+        yield 'Omar left the organization after the request' => ['Omar left', 0, [], ['outcome' => 'requester_not_member'], self::FAILED_SENTENCE];
     }
 
     /**
-     * @param list<string> $expectedUsageStatuses
+     * @param list<string>          $expectedUsageStatuses
+     * @param array<string, string> $expectedContext
      */
     #[Test]
     #[DataProvider('failures')]
-    public function aJobThatGetsNoAnswerLeavesAFailedRequestAndTheCurrentSummaryAndIsNotRetried(string $failure, int $expectedProviderCalls, array $expectedUsageStatuses, string $expectedOutcome, string $expectedSentence): void
+    public function aJobThatGetsNoAnswerLeavesAFailedRequestAndTheCurrentSummaryAndIsNotRetried(string $failure, int $expectedProviderCalls, array $expectedUsageStatuses, array $expectedContext, string $expectedSentence): void
     {
         $this->requestAsOmar();
         $this->arrange($failure);
@@ -194,7 +196,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         $this->assertTheRequestFailedAndTheSummaryStayed($expectedSentence);
         self::assertCount($expectedProviderCalls, $this->fakeProvider()->calls());
         self::assertSame($expectedUsageStatuses, $this->usageStatuses(), 'The job\'s transaction did not commit the usage rows.');
-        self::assertSame([['An AI summary failed.', ['outcome' => $expectedOutcome]]], $this->warnings());
+        self::assertSame([['An AI summary failed.', $expectedContext]], $this->warnings());
     }
 
     #[Test]
@@ -226,7 +228,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::assertGreaterThan(2000, mb_strlen(trim($tooLongText)));
         $this->assertTheRequestFailedAndTheSummaryStayed();
         self::assertSame(1, $this->processedMessageCount(), 'The job\'s transaction did not commit.');
-        self::assertSame([['An AI summary failed.', ['outcome' => \App\Ticketing\Api\GeneratedSummaryRefused::class]]], $this->warnings());
+        self::assertSame([['An AI summary failed.', ['exception_class' => \App\Ticketing\Api\GeneratedSummaryRefused::class]]], $this->warnings());
         $formatter = new JsonFormatter();
         foreach ($this->capturedLogRecords()->all() as $record) {
             if ($record->level->isHigherThan(Level::Debug)) {
@@ -302,7 +304,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::assertSame(['answered'], $this->usageStatuses());
         self::assertCount(1, $this->fakeProvider()->calls());
         self::assertSame(1, $this->processedMessageCount());
-        self::assertSame([['An AI summary failed.', ['outcome' => DriverException::class, 'sqlstate' => '22012', 'code' => 7]]], $this->warnings());
+        self::assertSame([['An AI summary failed.', ['exception_class' => DriverException::class, 'sqlstate' => '22012', 'code' => 7]]], $this->warnings());
     }
 
     /**
@@ -576,12 +578,21 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     }
 
     /**
+     * CapturedLogRecords keeps a record before RedactionProcessor runs, so each goes through it here: a key a real log
+     * drops is missing from what a test asserts too.
+     *
      * @return list<array{string, array<mixed>}> message and context of each warning and worse
      */
     private function warnings(): array
     {
+        $redaction = new RedactionProcessor();
+
         return array_values(array_map(
-            static fn (LogRecord $record): array => [$record->message, $record->context],
+            static function (LogRecord $record) use ($redaction): array {
+                $redacted = $redaction($record);
+
+                return [$redacted->message, $redacted->context];
+            },
             array_filter($this->capturedLogRecords()->all(), static fn (LogRecord $record): bool => Level::Warning->includes($record->level)),
         ));
     }

@@ -31,6 +31,19 @@ final class RedactionProcessorTest extends TestCase
     }
 
     #[Test]
+    public function itKeepsAJobsOutcomeAndAnUnknownSettingsNameAndDropsTheKeyBesideThem(): void
+    {
+        $redacted = self::redact(self::record(context: [
+            'outcome' => 'requester_not_member',
+            'setting' => 'where',
+            'key' => self::MARKER,
+            'answer' => self::MARKER,
+        ]));
+
+        self::assertSame(['outcome' => 'requester_not_member', 'setting' => 'where'], $redacted->context);
+    }
+
+    #[Test]
     public function itDropsTheSqlParamsAndTypesOfAQueryRecord(): void
     {
         $redacted = self::redact(self::record(context: ['sql' => 'SELECT ?', 'params' => [self::MARKER], 'types' => [2]]));
@@ -234,7 +247,7 @@ final class RedactionProcessorTest extends TestCase
                 'route', 'method', 'status_code', 'duration_ms',
                 'class', 'message_id', 'transport', 'retryCount', 'delay',
                 'exception', 'exception_class', 'sqlstate', 'code',
-                'check',
+                'check', 'outcome', 'setting',
             ],
             RedactionProcessor::ALLOWED_KEYS,
         );
