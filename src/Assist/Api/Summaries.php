@@ -16,15 +16,18 @@ use App\SharedKernel\Domain\UserId;
 interface Summaries
 {
     /**
-     * Decides the organization's AI policy for the person and ticket as the job's gateway call will, then queues the job.
-     * Reads under row-level security, so it needs an open transaction whose tenant is $organizationId. Queueing does
-     * not wait for that transaction: the job is sent at once and reads only committed rows.
+     * Decides the organization's AI policy for the person and ticket as the job's gateway call will, and whether the
+     * person has an AI call left without counting one, then queues the job. Reads under row-level security, so it needs
+     * an open transaction whose tenant is $organizationId. Queueing does not wait for that transaction: the job is sent
+     * at once and reads only committed rows.
      *
      * @throws SummaryRequestRefused when the policy says no (the person is no member, cannot see the ticket, AI is off
-     *                               or for leads only, or the ticket is team-only and kept from cloud AI), or a
-     *                               summary of the ticket is already queued; nothing is queued then
+     *                               or for leads only, or the ticket is team-only and kept from cloud AI), the person
+     *                               has no AI call left this hour, or a summary of the ticket is already queued;
+     *                               nothing is queued then
      * @throws \RuntimeException     when the request state or the queue cannot be reached; the request is not kept
      *                               then, so the person may try again
+     * @throws \Throwable            the call limit's storage error when it cannot be read; nothing is queued then
      */
     public function request(TicketId $ticketId, UserId $requesterId, OrganizationId $organizationId): void;
 

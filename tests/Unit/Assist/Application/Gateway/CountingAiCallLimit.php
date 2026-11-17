@@ -26,4 +26,9 @@ final class CountingAiCallLimit implements AiCallLimit
         }
         $this->counted[$key] = ($this->counted[$key] ?? 0) + 1;
     }
+
+    public function hasCallsLeft(ActorContext $caller): bool
+    {
+        return ($this->counted[$caller->organizationId()->toString().':'.$caller->userId()->toString()] ?? 0) < self::LIMIT;
+    }
 }

@@ -28,6 +28,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Logging\RedactionProcessor;
 use App\SharedKernel\Infrastructure\Messenger\TenantStamp;
 use App\Tests\Factory\Ticketing\TicketFactory;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
@@ -38,7 +39,9 @@ use App\Tests\Integration\Ticketing\Summary\SummaryRows;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketSummaryCommands;
 use App\Ticketing\Application\CheckedTicketSummaryCommands;
+use App\Ticketing\Infrastructure\Doctrine\DbalTicketSummaries;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Formatter\JsonFormatter;
 use Monolog\Level;
@@ -46,6 +49,7 @@ use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\Clock;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 use Symfony\Component\Messenger\Envelope;
@@ -76,6 +80,11 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     private const string TICKET_TEXT = 'Pressing Pay does nothing MARKER-7cd.';
     private const string AI_ON_IN_THE_CLOUD = '{"on": true, "where": "cloud"}';
     private const string USAGE_LIMITER_PREFIX = 'ai_calls_per_user-';
+    private const string FAILED_SENTENCE = 'The AI answer failed. Try again.';
+    /** One character over ast_usage_model_check, so the usage insert of an answer from this model fails in PostgreSQL. */
+    private const int TOO_LONG_MODEL_LENGTH = 201;
+    /** max_retries of async_ai in config/packages/messenger.yaml. */
+    private const int ASYNC_AI_MAX_RETRIES = 5;
     private const array HUMAN_SUMMARY_ROW = [
         'text' => 'Lena: Pay does nothing on the last step.', 'source' => 'human', 'author_id' => null, 'model' => null,
         'prompt_version' => null, 'is_current' => true, 'created_at' => '2027-03-14 09:00:00',
@@ -160,33 +169,34 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{string, int, list<string>, string}>
+     * @return iterable<string, array{string, int, list<string>, array<string, string>, string}>
      */
     public static function failures(): iterable
     {
-        yield 'the provider failed' => ['provider fails', 1, ['failed'], 'failed'];
-        yield 'Omar reached his limit' => ['limit reached', 0, [], AiRateLimited::class];
-        yield 'the organization key cannot be read' => ['unreadable key', 0, [], AiUnavailable::class];
-        yield 'the admin turned AI off after the request' => ['AI turned off', 0, [], AiNotAllowed::class];
-        yield 'Omar left the organization after the request' => ['Omar left', 0, [], 'requester_not_member'];
+        yield 'the provider failed' => ['provider fails', 1, ['failed'], ['summary_outcome' => 'failed'], self::FAILED_SENTENCE];
+        yield 'Omar reached his limit after the request' => ['limit reached', 0, [], ['exception_class' => AiRateLimited::class], 'Too many AI requests. Try again in a minute.'];
+        yield 'the organization key cannot be read' => ['unreadable key', 0, [], ['exception_class' => AiUnavailable::class], self::FAILED_SENTENCE];
+        yield 'the admin turned AI off after the request' => ['AI turned off', 0, [], ['exception_class' => AiNotAllowed::class], self::FAILED_SENTENCE];
+        yield 'Omar left the organization after the request' => ['Omar left', 0, [], ['summary_outcome' => 'requester_not_member'], self::FAILED_SENTENCE];
     }
 
     /**
-     * @param list<string> $expectedUsageStatuses
+     * @param list<string>          $expectedUsageStatuses
+     * @param array<string, string> $expectedContext
      */
     #[Test]
     #[DataProvider('failures')]
-    public function aJobThatGetsNoAnswerLeavesAFailedRequestAndTheCurrentSummaryAndIsNotRetried(string $failure, int $expectedProviderCalls, array $expectedUsageStatuses, string $expectedOutcome): void
+    public function aJobThatGetsNoAnswerLeavesAFailedRequestAndTheCurrentSummaryAndIsNotRetried(string $failure, int $expectedProviderCalls, array $expectedUsageStatuses, array $expectedContext, string $expectedSentence): void
     {
         $this->requestAsOmar();
         $this->arrange($failure);
 
         self::runTheWorkerUntilIdle('async_ai');
 
-        $this->assertTheRequestFailedAndTheSummaryStayed();
+        $this->assertTheRequestFailedAndTheSummaryStayed($expectedSentence);
         self::assertCount($expectedProviderCalls, $this->fakeProvider()->calls());
         self::assertSame($expectedUsageStatuses, $this->usageStatuses(), 'The job\'s transaction did not commit the usage rows.');
-        self::assertSame([['An AI summary failed.', ['outcome' => $expectedOutcome]]], $this->warnings());
+        self::assertSame([['An AI summary failed.', $expectedContext]], $this->warnings());
     }
 
     #[Test]
@@ -198,7 +208,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::runTheWorkerUntilIdle('async_ai');
 
         $this->assertTheRequestFailedAndTheSummaryStayed();
-        self::assertSame([['An AI summary failed.', ['outcome' => 'rejected']]], $this->warnings());
+        self::assertSame([['An AI summary failed.', ['summary_outcome' => 'rejected']]], $this->warnings());
     }
 
     /**
@@ -218,7 +228,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::assertGreaterThan(2000, mb_strlen(trim($tooLongText)));
         $this->assertTheRequestFailedAndTheSummaryStayed();
         self::assertSame(1, $this->processedMessageCount(), 'The job\'s transaction did not commit.');
-        self::assertSame([['An AI summary failed.', ['outcome' => \App\Ticketing\Api\GeneratedSummaryRefused::class]]], $this->warnings());
+        self::assertSame([['An AI summary failed.', ['exception_class' => \App\Ticketing\Api\GeneratedSummaryRefused::class]]], $this->warnings());
         $formatter = new JsonFormatter();
         foreach ($this->capturedLogRecords()->all() as $record) {
             if ($record->level->isHigherThan(Level::Debug)) {
@@ -266,38 +276,88 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     }
 
     /**
-     * Only a summary rule makes Ticketing's refusal final; a store that failed for another reason, such as a lost
-     * database connection, may work on a retry, so the job throws and rolls back to let Messenger retry it.
+     * The store writes the summary rows, then PostgreSQL refuses a statement and aborts the transaction, as a failed
+     * tkt_summary write does. Without the savepoint the job's commit fails, the usage row of the paid call is lost and
+     * Messenger retries the job.
      */
     #[Test]
-    public function aStoreThatFailsForAnotherReasonThanASummaryRuleIsThrownAndRolledBack(): void
+    public function aStoreTheDatabaseRefusesIsUndoneAloneAndKeepsTheUsageRowAndFailsTheRequestWithoutARetry(): void
     {
-        $storeFailure = new \RuntimeException('The database connection was lost.');
-        self::getContainer()->set(CheckedTicketSummaryCommands::class, new readonly class($storeFailure) implements TicketSummaryCommands {
-            public function __construct(private \RuntimeException $storeFailure)
+        // Built by hand: resolving the container's store would lock its service id against the replacement below.
+        $realStore = new CheckedTicketSummaryCommands($this->tenantContext(), new DbalTicketSummaries($this->connection(), $this->tenantContext()));
+        self::getContainer()->set(CheckedTicketSummaryCommands::class, new readonly class($realStore, $this->connection()) implements TicketSummaryCommands {
+            public function __construct(private TicketSummaryCommands $realStore, private Connection $connection)
             {
             }
 
             public function storeAiSummary(OrganizationId $organizationId, TicketId $ticketId, string $text, UserId $requesterId, string $model, string $promptVersion, \DateTimeImmutable $generatedAt): void
             {
-                throw $this->storeFailure;
+                $this->realStore->storeAiSummary($organizationId, $ticketId, $text, $requesterId, $model, $promptVersion, $generatedAt);
+                $this->connection->executeQuery('SELECT 1 / 0');
             }
         });
         $this->requestAsOmar();
-        $generateSummary = new GenerateSummary(self::ACME_FOODS, $this->checkoutTicketId()->toString(), self::OMAR);
 
-        try {
-            self::getContainer()->get('command.bus')->dispatch(new Envelope($generateSummary, [new TenantStamp(new OrganizationId(self::ACME_FOODS)), new ReceivedStamp('async_ai')]));
-            self::fail('The store failure was swallowed.');
-        } catch (HandlerFailedException $failure) {
-            self::assertSame([$storeFailure], array_values($failure->getWrappedExceptions(\RuntimeException::class, true)));
-        }
+        self::runTheWorkerUntilIdle('async_ai');
 
-        self::assertCount(1, $this->fakeProvider()->calls(), 'The test proves nothing if the AI was not asked.');
-        $state = $this->requestState();
-        self::assertNotNull($state);
-        self::assertTrue($state->isQueued(), 'The job recorded a failure that a retry may still turn into a summary.');
-        self::assertSame([self::HUMAN_SUMMARY_ROW], $this->summaryRowsOfTheCheckoutTicket());
+        $this->assertTheRequestFailedAndTheSummaryStayed();
+        self::assertSame(['answered'], $this->usageStatuses());
+        self::assertCount(1, $this->fakeProvider()->calls());
+        self::assertSame(1, $this->processedMessageCount());
+        self::assertSame([['An AI summary failed.', ['exception_class' => DriverException::class, 'sqlstate' => '22012', 'code' => 7]]], $this->warnings());
+    }
+
+    /**
+     * The usage insert fails in PostgreSQL after the provider answered, so the job's transaction rolls back and
+     * Messenger delivers it again. That delivery finds the request marked as one that may have asked the AI and fails it
+     * without asking again.
+     */
+    #[Test]
+    public function aJobRetriedAfterTheAiWasAskedFailsTheRequestWithoutAskingAgain(): void
+    {
+        $this->requestAsOmar();
+        $this->storeAiSettings(json_encode(['on' => true, 'where' => 'cloud', 'provider_model' => str_repeat('m', self::TOO_LONG_MODEL_LENGTH)], \JSON_THROW_ON_ERROR));
+
+        self::runTheWorkerUntilIdle('async_ai');
+        $queued = $this->requestState();
+        self::assertNotNull($queued);
+        self::assertTrue($queued->isQueued(), 'The request ended although its job will be retried.');
+        self::assertCount(2, $this->asyncAi()->getSent(), 'The job was not retried, so the usage insert did not fail.');
+        $this->runTheWorkerThroughRetries(1);
+
+        self::assertCount(1, $this->fakeProvider()->calls(), 'The retry asked the AI again.');
+        $this->assertTheRequestFailedAndTheSummaryStayed(expectedDeliveries: 2);
+        self::assertSame([], $this->usageStatuses(), 'The test proves nothing if the usage insert did not fail.');
+        self::assertSame(1, $this->processedMessageCount());
+        $warnings = $this->warnings();
+        self::assertSame([
+            'Error thrown while handling message {class}. Sending for retry #{retryCount} using {delay} ms delay. Error: "{error}"',
+            'An AI summary failed.',
+        ], array_column($warnings, 0), 'The first delivery is retried and the second fails the request, each warning once.');
+        self::assertSame([GenerateSummary::class, 1], [$warnings[0][1]['class'] ?? null, $warnings[0][1]['retryCount'] ?? null]);
+        self::assertSame(['summary_outcome' => 'ai_may_have_been_asked_or_not_queued'], $warnings[1][1]);
+    }
+
+    /**
+     * Every delivery fails before the AI is asked, so no job is left to end the request when Messenger gives up.
+     */
+    #[Test]
+    public function aJobMessengerGivesUpOnFailsTheRequest(): void
+    {
+        $watchedRequests = $this->watchSummaryRequests();
+        $watchedRequests->failEveryMarkWith(new \RedisException('read error on connection'));
+        $this->requestAsOmar();
+
+        self::runTheWorkerUntilIdle('async_ai');
+        $this->runTheWorkerThroughRetries(self::ASYNC_AI_MAX_RETRIES - 1);
+        $queued = $this->requestState();
+        self::assertNotNull($queued);
+        self::assertTrue($queued->isQueued(), 'The request ended although its job has a retry left.');
+        $this->runTheWorkerThroughRetries(1);
+
+        self::assertCount(1 + self::ASYNC_AI_MAX_RETRIES, $this->asyncAi()->getSent(), 'The job was not delivered once and retried five times.');
+        self::assertSame([], $this->fakeProvider()->calls());
+        $this->assertTheRequestFailedAndTheSummaryStayed(expectedDeliveries: 1 + self::ASYNC_AI_MAX_RETRIES);
         self::assertSame(0, $this->processedMessageCount());
     }
 
@@ -376,9 +436,22 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::assertNotNull($state);
         self::assertTrue($state->isQueued(), 'The request failed although Valkey refused it.');
         self::assertSame([
-            ['An AI summary failed.', ['outcome' => 'failed']],
+            ['An AI summary failed.', ['summary_outcome' => 'failed']],
             ['A summary request could not be ended; it stays queued until it expires.', ['exception_class' => \RedisException::class]],
         ], $this->warnings());
+    }
+
+    /**
+     * The in-memory transport hands out a retry only once the clock is past the time it was sent at, which the frozen
+     * clock never is. A millisecond passes before each run, as the worker's wait would, and the test retry delay is 0,
+     * so each run gets one retry; the request state stores whole seconds, so its time stays 10:00:00.
+     */
+    private function runTheWorkerThroughRetries(int $retryCount): void
+    {
+        for ($retry = 1; $retry <= $retryCount; ++$retry) {
+            Clock::get()->sleep(0.001);
+            self::runTheWorkerUntilIdle('async_ai');
+        }
     }
 
     private function watchSummaryRequests(): WatchedSummaryRequests
@@ -419,16 +492,16 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         $arrangement();
     }
 
-    private function assertTheRequestFailedAndTheSummaryStayed(): void
+    private function assertTheRequestFailedAndTheSummaryStayed(string $expectedSentence = self::FAILED_SENTENCE, int $expectedDeliveries = 1): void
     {
         $failed = $this->requestState();
         self::assertNotNull($failed, 'The request state was released, so the page shows nothing.');
         self::assertSame(
-            [SummaryRequestView::FAILED, self::OMAR, '2027-03-15 10:00:00', 'The AI answer failed. Try again.'],
+            [SummaryRequestView::FAILED, self::OMAR, '2027-03-15 10:00:00', $expectedSentence],
             [$failed->status, $failed->requesterId->toString(), $failed->at->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'), $failed->sentence],
         );
         self::assertSame([self::HUMAN_SUMMARY_ROW], $this->summaryRowsOfTheCheckoutTicket());
-        self::assertCount(1, $this->asyncAi()->getSent(), 'The job was retried.');
+        self::assertCount($expectedDeliveries, $this->asyncAi()->getSent(), 'The job was delivered another number of times.');
     }
 
     private function givenGatewayAnswering(AiResult $answer): void
@@ -505,12 +578,21 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     }
 
     /**
+     * CapturedLogRecords keeps a record before RedactionProcessor runs, so each goes through it here: a key a real log
+     * drops is missing from what a test asserts too.
+     *
      * @return list<array{string, array<mixed>}> message and context of each warning and worse
      */
     private function warnings(): array
     {
+        $redaction = new RedactionProcessor();
+
         return array_values(array_map(
-            static fn (LogRecord $record): array => [$record->message, $record->context],
+            static function (LogRecord $record) use ($redaction): array {
+                $redacted = $redaction($record);
+
+                return [$redacted->message, $redacted->context];
+            },
             array_filter($this->capturedLogRecords()->all(), static fn (LogRecord $record): bool => Level::Warning->includes($record->level)),
         ));
     }
@@ -549,6 +631,8 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
     private function removeRows(): void
     {
         $this->migrator()->executeStatement('DELETE FROM processed_message WHERE handler = ?', [GenerateSummaryHandler::HANDLER_NAME]);
+        // Where a job Messenger gave up on lands.
+        $this->connection()->executeStatement('DELETE FROM messenger_failed');
         // ast_usage is append-only for the app; the migrator owns it, and row-level security applies to it too.
         $this->asMigratorUnderAcmeFoods('DELETE FROM ast_usage WHERE organization_id = ?', [self::ACME_FOODS]);
         $this->shopTeamRows()->removeAllOf([self::LENA, self::OMAR], self::ACME_FOODS, self::BETA_BAKERY);

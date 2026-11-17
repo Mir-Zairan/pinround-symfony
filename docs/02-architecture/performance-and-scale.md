@@ -67,6 +67,8 @@ Browser: LCP ≤ 2.0 s on a mid laptop, INP ≤ 200 ms, JavaScript ≤ 120 KB gz
 
 The query counts are enforced in tests (see [testing-strategy.md](testing-strategy.md)).
 
+Every main page shown to a team member or manager also runs one indexed read of the organization's AI setting, for the header's "Local AI" chip (P08.T8, 2026-11-18); frame requests, which render no header, skip it. Of the page query tests, only Home's (`DatabaseSpanTest`, where a manager's Home is now at 8 SELECTs, its limit) and the round page's (`RoundPageTest`) count this read. The Tickets list and Ticket page tests count only the queries beyond the shell (`/_test/menu/shell` renders `base.html.twig` with the chip), so they never count this read.
+
 ## Principles
 
 1. **Read models for questions people ask all day.** "Whose turn is it?" and "what needs me?" are stored, not computed per request.

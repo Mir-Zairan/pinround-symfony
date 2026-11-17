@@ -49,9 +49,9 @@ final class DatabaseSpanTest extends WebTestCase
     public function theManagerHomeRunsOneTeamQueryAndNoFocusQuery(): void
     {
         // As the work Home before its focus query (login, organizations, BEGIN, the roles reads), then
-        // every team in one query (allSummariesOf).
+        // every team in one query (allSummariesOf), then the header's Local AI chip's AI settings (LocalAiChip).
         self::assertSame(
-            ['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'],
+            ['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'],
             $this->spanNamesOfHomeFor('{manager}'),
         );
     }
@@ -59,7 +59,8 @@ final class DatabaseSpanTest extends WebTestCase
     #[Test]
     public function theAdminHomeRunsOneTeamCountAndNoFocusQuery(): void
     {
-        // As the work Home before its focus query, then the team count (countOf).
+        // As the work Home before its focus query, then the team count (countOf). An admin with no team or manager role
+        // gets no Local AI chip, so the header reads no AI settings.
         self::assertSame(
             ['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'],
             $this->spanNamesOfHomeFor('{admin}'),
@@ -115,8 +116,9 @@ final class DatabaseSpanTest extends WebTestCase
         self::assertCount(1, $roots);
         $children = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => $span !== $roots[0]));
         // The user and their password, the user's organizations (resolve_user_orgs), then BEGIN with the tenant's set_config,
-        // then the user's org roles and team roles for the header's menu (MainMenu), then the saved Home focus chip.
-        self::assertSame(['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
+        // then the user's org roles and team roles for the header's menu (MainMenu), then the saved Home focus chip, then the
+        // AI settings for the header's Local AI chip (LocalAiChip).
+        self::assertSame(['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
         foreach ($children as $child) {
             self::assertSame($roots[0]->getTraceId(), $child->getTraceId());
             self::assertSame($roots[0]->getSpanId(), $child->getParentSpanId());

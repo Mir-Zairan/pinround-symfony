@@ -31,6 +31,21 @@ final class RedactionProcessorTest extends TestCase
     }
 
     #[Test]
+    public function itKeepsASummaryOutcomeAndAnUnknownAiSettingsNameAndDropsTheGenericWordsBesideThem(): void
+    {
+        $redacted = self::redact(self::record(context: [
+            'summary_outcome' => 'requester_not_member',
+            'unknown_ai_setting' => 'where',
+            'outcome' => self::MARKER,
+            'setting' => self::MARKER,
+            'key' => self::MARKER,
+            'answer' => self::MARKER,
+        ]));
+
+        self::assertSame(['summary_outcome' => 'requester_not_member', 'unknown_ai_setting' => 'where'], $redacted->context);
+    }
+
+    #[Test]
     public function itDropsTheSqlParamsAndTypesOfAQueryRecord(): void
     {
         $redacted = self::redact(self::record(context: ['sql' => 'SELECT ?', 'params' => [self::MARKER], 'types' => [2]]));
@@ -234,7 +249,7 @@ final class RedactionProcessorTest extends TestCase
                 'route', 'method', 'status_code', 'duration_ms',
                 'class', 'message_id', 'transport', 'retryCount', 'delay',
                 'exception', 'exception_class', 'sqlstate', 'code',
-                'check',
+                'check', 'summary_outcome', 'unknown_ai_setting',
             ],
             RedactionProcessor::ALLOWED_KEYS,
         );

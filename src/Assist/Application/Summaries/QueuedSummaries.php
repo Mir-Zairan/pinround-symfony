@@ -7,6 +7,8 @@ namespace App\Assist\Application\Summaries;
 use App\Assist\Api\Summaries;
 use App\Assist\Api\SummaryRequestRefused;
 use App\Assist\Api\SummaryRequestView;
+use App\Assist\Application\AiCallLimit;
+use App\Assist\Application\AiRateLimited;
 use App\Assist\Application\AiTask;
 use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\Policy\PolicyRefusal;
@@ -18,15 +20,17 @@ use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibilities;
 
 /**
- * Asks AiTaskAdmission, the check the job's gateway call makes first, so a request the gateway would refuse queues
- * nothing; then claims the ticket's request state and queues the job. A person who is no member is refused as one who
- * cannot see the ticket, so the refusal never tells whether it exists.
+ * Asks AiTaskAdmission, the check the job's gateway call makes first, and the person's call limit without counting a
+ * call, so a request the gateway would refuse queues nothing; then claims the ticket's request state and queues the
+ * job. A person who is no member is refused as one who cannot see the ticket, so the refusal never tells whether it
+ * exists.
  */
 final readonly class QueuedSummaries implements Summaries
 {
     public function __construct(
         private SummaryRequesters $summaryRequesters,
         private AiTaskAdmission $aiTaskAdmission,
+        private AiCallLimit $aiCallLimit,
         private SummaryRequests $summaryRequests,
         private SummaryJobQueue $summaryJobQueue,
         private TicketVisibilities $ticketVisibilities,
@@ -40,6 +44,9 @@ final readonly class QueuedSummaries implements Summaries
         $refusal = $this->aiTaskAdmission->refusalFor(new AiTask(AiFeature::Summary, $ticketId), $requester);
         if (null !== $refusal) {
             throw self::refusedFor($refusal);
+        }
+        if (!$this->aiCallLimit->hasCallsLeft($requester)) {
+            throw new SummaryRequestRefused(SummaryRequestRefused::TOO_MANY_AI_REQUESTS, AiRateLimited::PER_PERSON_MESSAGE);
         }
 
         if (!$this->summaryRequests->claim($organizationId, $ticketId, $requesterId)) {
