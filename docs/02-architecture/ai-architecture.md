@@ -6,7 +6,7 @@ How pinround uses AI to help people understand and sort work, while each company
 
 - [Why AI, and why carefully](#why-ai-and-why-carefully) — the scene.
 - [What AI does in pinround](#what-ai-does-in-pinround) — the feature list and who sees the result.
-- [Building blocks](#building-blocks) — AiGateway on Symfony AI Platform, Agent and Store.
+- [Building blocks](#building-blocks) — AiGateway on Symfony AI Platform, Agent and Store; the gateway's contract and order.
 - [Providers and when we use them](#providers-and-when-we-use-them) — cloud, server Ollama, laptop Ollama.
 - [Org AI policy](#org-ai-policy) — the settings and the decision flow.
 - [Features, prompt templates and output schemas](#features-prompt-templates-and-output-schemas) — versioned prompts, JSON schemas.
@@ -66,18 +66,36 @@ flowchart LR
 ```php
 use App\Organization\Api\ActorContext;
 
+/**
+ * Once the provider was asked, run() throws nothing: Metering writes the usage row in the caller's transaction, so a
+ * rejected or failed call comes back as an AiResult the caller stores, and the paid call stays metered.
+ */
 interface AiGateway
 {
     /**
-     * @throws AiNotAllowed  when the org policy forbids this feature for this person; nothing is sent
-     * @throws AiRateLimited when the person, the organization or the provider made too many calls
-     * @throws AiUnavailable when the provider is not configured, cannot be reached or fails
+     * Waits for the provider; call it from a Messenger worker, in a transaction whose tenant is the viewer's organization.
+     *
+     * @return AiResult answered, or rejected or failed when the provider was asked but gave nothing usable
+     *
+     * @throws AiNotAllowed              when the org policy forbids this feature for this person or ticket; nothing is sent
+     * @throws AiRateLimited             when the person made too many calls (AiCallLimit); nothing is sent
+     * @throws AiUnavailable             when the organization's own provider key cannot be read; nothing is sent, and the
+     *                                   operator's key is never used instead
+     * @throws UnknownAiProvider         when the settings name a provider or model pinround cannot use; nothing is sent
+     * @throws UnknownPromptTemplate     when the feature has no prompt template yet; nothing is sent
+     * @throws \InvalidArgumentException when the task names no ticket; nothing is sent
      */
     public function run(AiTask $task, ActorContext $viewer): AiResult;
 }
 ```
 
-`AiTask` names the feature (`summary`, `explain`, `intake`, `duplicates`, `risk`), the ticket id, and user input. The gateway loads data through the normal voters, applies the policy, builds the prompt from a template, calls the provider, validates the output, meters it, and returns a labeled result.
+The source of truth is the docblock of `src/Assist/Application/AiGateway.php`; keep this copy in step with it. A provider that fails, times out, answers blank or refuses with 429 does not throw out of `run()`: the gateway meters a `failed` row and returns a failed `AiResult` with the reason. A per-organization budget limit is not built yet.
+
+`AiTask` names the feature (`summary`, `explain`, `intake`, `duplicates`, `risk`), the ticket id, and user input. `GuardedAiGateway` (`src/Assist/Application/Gateway`) is the implementation. In this order it checks the org policy for the viewer, reads the ticket as the viewer may see it, decides where the call goes, picks the provider and key, builds the prompt from a template, takes one call from the person's limit, calls the provider, validates the answer, meters every provider call, and returns a labeled result. A data answer (intake) the validator refuses gets one retry with `OutputValidator::retryInstruction()` added to the prompt; the retry is metered but not counted against the limit again. A refused text answer is not retried.
+
+- **The ticket is read with the viewer's visibility predicate, not a Voter.** The gateway runs in a Messenger worker, which has no security token for a Voter to decide on. `TicketPageAskedTicketQueries` (the `AskedTicketQueries` port) gets the viewer's predicate from `Ticketing\Api\TicketVisibilities`, reads the ticket with `TicketQueries::pageOf` under it, and checks the predicate again on the page's own facts, as the ticket page does. That is the same predicate `TicketVoter` decides VIEW on ([ADR-0013](../03-adr/0013-authorization.md)). An unknown ticket, a hidden one and another organization's one all get the same `CannotSeeTicket` refusal.
+- **"Laptop first" goes to the cloud on the server path.** The server never sends a prompt to a laptop, so the gateway decides with the laptop not ready: "laptop first" falls through to the cloud rules (the team-only check included), and "laptop" refuses with the setup sheet's line (`LaptopNotReady`).
+- **An organization key that cannot be read refuses the call.** When `AiSettingsQueries::providerKeyOf` throws `UndecryptableField`, the gateway throws `AiUnavailable` and never falls back to the operator's key. Only a missing key (none stored) means the operator's key.
 
 ## Providers and when we use them
 
@@ -109,7 +127,7 @@ flowchart TD
   B -- no --> X[Hide feature / refuse]
   B -- yes --> C{Viewer allowed? everyone or leads only}
   C -- no --> X
-  C -- yes --> D{Viewer can see the ticket? voter}
+  C -- yes --> D{Viewer can see the ticket? visibility predicate}
   D -- no --> X
   D -- yes --> E{Where?}
   E -- laptop --> L{Laptop AI ready in this browser?}

@@ -20,11 +20,14 @@ use App\Organization\Api\ActorContext;
 use App\Organization\Api\Roles;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\Tests\Factory\Ticketing\TicketFactory;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
+use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketCommands;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -37,16 +40,20 @@ use Symfony\Component\RateLimiter\Policy\Window;
  * The gateway as the test container wires it (FakeProvider, the real policy, prompt builder, answer check, limit on
  * the test Valkey and DbalMetering), as pinround_app in a transaction under Acme Foods that each test rolls back, so
  * its usage rows are read inside it. Lena leads the Shop team that owns SHOP; Omar is in Acme Foods but in no team, so
- * he sees the checkout ticket for everyone but not the team-only one. The clock is frozen in March 2027, a month whose
- * usage partition the migrations always create.
+ * he sees the checkout ticket for everyone but not the team-only one. Beta Bakery has a ticket for everyone under the
+ * key SHOP-7, the checkout ticket's key in Acme Foods, so a leaked id would summarize the wrong ticket. The clock is
+ * frozen in March 2027, a month whose usage partition the migrations always create.
  */
 final class GuardedAiGatewayTest extends KernelTestCase
 {
     use ClockSensitiveTrait;
 
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000a9a1';
+    private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000a9a2';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000a9c1';
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-00000000a9d1';
+    private const string BETA_PROJECT = '0197a3c0-0000-7000-8000-00000000a9d2';
+    private const string BETA_TICKET = '0197a3c0-0000-7000-8000-00000000a9e2';
     private const string LENA = '0197a3c0-0000-7000-8000-00000000a9b1';
     private const string OMAR = '0197a3c0-0000-7000-8000-00000000a9b2';
     private const string NOW = '2027-03-15 10:00:00 UTC';
@@ -89,6 +96,7 @@ final class GuardedAiGatewayTest extends KernelTestCase
         } finally {
             self::tenantContext()->clear();
         }
+        new TicketRows(self::migrator(), self::tenantContext())->addOf(self::BETA_BAKERY, self::BETA_TICKET, self::BETA_PROJECT, self::LENA, 7);
         self::ensureKernelShutdown();
     }
 
@@ -104,13 +112,13 @@ final class GuardedAiGatewayTest extends KernelTestCase
     protected function setUp(): void
     {
         self::mockTime(self::NOW);
-        // The limiter counts in Valkey across runs; each test starts Omar with no calls this hour.
-        self::getContainer()->get(ValkeyLimiterStorage::class)->delete(self::USAGE_LIMITER_PREFIX.self::ACME_FOODS.':'.self::OMAR);
+        // The limiter counts in Valkey across runs; each test starts Omar and Lena with no calls this hour.
+        self::forgetCountedCalls();
     }
 
     protected function tearDown(): void
     {
-        self::getContainer()->get(ValkeyLimiterStorage::class)->delete(self::USAGE_LIMITER_PREFIX.self::ACME_FOODS.':'.self::OMAR);
+        self::forgetCountedCalls();
         self::getContainer()->get('doctrine')->resetManager();
         self::tenantContext()->reset();
         parent::tearDown();
@@ -154,7 +162,7 @@ final class GuardedAiGatewayTest extends KernelTestCase
         self::assertSame('Your admin turned AI help off.', $refusal->getMessage());
         self::assertSame([], $this->fakeProvider()->calls());
         self::assertSame([], $usageRows);
-        self::assertSame(0, $this->omarsCountedCalls());
+        self::assertSame(0, $this->countedCallsOf(self::OMAR));
     }
 
     #[Test]
@@ -180,6 +188,65 @@ final class GuardedAiGatewayTest extends KernelTestCase
     }
 
     #[Test]
+    public function anotherOrganizationsTicketIsRefusedAsOneOmarCannotSee(): void
+    {
+        [$refusal, $usageRows] = $this->runAsOmar(self::AI_ON_IN_THE_CLOUD, self::summaryOf(new TicketId(self::BETA_TICKET)));
+
+        self::assertInstanceOf(AiNotAllowed::class, $refusal);
+        self::assertSame([PolicyRefusal::CannotSeeTicket, 'AI help works only on tickets you can see.'], [$refusal->refusal, $refusal->getMessage()]);
+        self::assertSame([], $this->fakeProvider()->calls());
+        self::assertSame([], $usageRows);
+        self::assertSame(0, $this->countedCallsOf(self::OMAR));
+        self::assertSame([self::BETA_TICKET], $this->ticketIdsSeenUnder(self::BETA_BAKERY), 'Beta Bakery does not have the ticket either, so the refusal proves nothing.');
+    }
+
+    /**
+     * The gateway reads tickets and settings with SQL, so the ORM's tenant filter is not what keeps Beta Bakery's ticket
+     * out: with it off, the gateway still refuses, and in the same transaction a read that names no organization finds
+     * only Acme Foods' tickets, which is row-level security alone.
+     */
+    #[Test]
+    public function rowLevelSecurityKeepsAnotherOrganizationsTicketFromTheGatewayWithTheTenantFilterOff(): void
+    {
+        self::entityManager()->getFilters()->disable(TenantFilter::NAME);
+
+        [$refusal, $usageRows, $ticketIdsSeen] = $this->runAsOmar(self::AI_ON_IN_THE_CLOUD, self::summaryOf(new TicketId(self::BETA_TICKET)));
+
+        self::assertFalse(self::entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
+        self::assertInstanceOf(AiNotAllowed::class, $refusal);
+        self::assertSame(PolicyRefusal::CannotSeeTicket, $refusal->refusal);
+        self::assertSame([], $this->fakeProvider()->calls());
+        self::assertSame([], $usageRows);
+        self::assertSame(0, $this->countedCallsOf(self::OMAR));
+        self::assertEqualsCanonicalizing([self::checkoutTicketId()->toString(), self::teamOnlyTicketId()->toString()], $ticketIdsSeen);
+    }
+
+    #[Test]
+    public function aTeamOnlyTicketLenaMaySeeIsKeptFromCloudAiWithoutTheAdminsOptIn(): void
+    {
+        [$refusal, $usageRows] = $this->runAs(self::lena(), self::AI_ON_IN_THE_CLOUD, self::summaryOf(self::teamOnlyTicketId()));
+
+        self::assertInstanceOf(AiNotAllowed::class, $refusal);
+        self::assertSame([PolicyRefusal::RestrictedTicketToCloud, 'Your admin keeps team-only tickets away from cloud AI.'], [$refusal->refusal, $refusal->getMessage()]);
+        self::assertSame([], $this->fakeProvider()->calls());
+        self::assertSame([], $usageRows);
+        self::assertSame(0, $this->countedCallsOf(self::LENA));
+    }
+
+    #[Test]
+    public function aTeamOnlyTicketLenaMaySeeGoesToCloudAiWhenTheAdminAllowsIt(): void
+    {
+        [$result, $usageRows] = $this->runAs(self::lena(), '{"on": true, "where": "cloud", "restricted_to_cloud": true}', self::summaryOf(self::teamOnlyTicketId()));
+
+        self::assertInstanceOf(AiResult::class, $result);
+        self::assertSame([AiCallStatus::Answered, FakeProvider::fixedTextFor(AiFeature::Summary)], [$result->status, $result->text]);
+        self::assertCount(1, $this->fakeProvider()->calls());
+        self::assertStringContainsString('Card numbers in the log', $this->fakeProvider()->calls()[0]['prompt']->content);
+        self::assertSame([[self::LENA, 'answered']], array_map(static fn (array $row): array => [$row['user_id'], $row['status']], $usageRows));
+        self::assertSame(1, $this->countedCallsOf(self::LENA));
+    }
+
+    #[Test]
     public function aPersonAtTheLimitIsRefusedAndTheProviderIsNotAsked(): void
     {
         $limit = self::getContainer()->get('test.assist_ai_call_limit');
@@ -194,7 +261,7 @@ final class GuardedAiGatewayTest extends KernelTestCase
         self::assertSame('Too many AI requests. Try again in a minute.', $refusal->getMessage());
         self::assertSame([], $this->fakeProvider()->calls());
         self::assertSame([], $usageRows);
-        self::assertSame(30, $this->omarsCountedCalls());
+        self::assertSame(30, $this->countedCallsOf(self::OMAR));
     }
 
     /** The fake answers intake with "{}", which the schema refuses, so the one retry is refused too. */
@@ -213,7 +280,7 @@ final class GuardedAiGatewayTest extends KernelTestCase
             static fn (array $row): array => [$row['feature'], $row['status'], $row['provider']],
             $usageRows,
         ));
-        self::assertSame(1, $this->omarsCountedCalls());
+        self::assertSame(1, $this->countedCallsOf(self::OMAR));
     }
 
     #[Test]
@@ -243,30 +310,52 @@ final class GuardedAiGatewayTest extends KernelTestCase
         self::assertSame('The organization\'s key for the AI provider anthropic cannot be read. An admin must enter it again.', $refusal->getMessage());
         self::assertSame([], $this->fakeProvider()->calls());
         self::assertSame([], $usageRows);
-        self::assertSame(0, $this->omarsCountedCalls());
+        self::assertSame(0, $this->countedCallsOf(self::OMAR));
     }
 
     /**
-     * Stores data.ai, runs the gateway as Omar and reads the usage rows, all in one transaction under Acme Foods that
-     * is rolled back.
-     *
-     * @return array{AiResult|\Throwable, list<array<string, mixed>>} the result or what the gateway threw, and the rows
+     * @return array{AiResult|\Throwable, list<array<string, mixed>>, list<string>} as runAs
      */
     private function runAsOmar(string $aiJson, AiTask $task): array
     {
-        return self::transactions()->rolledBackAs(self::ACME_FOODS, function () use ($aiJson, $task): array {
+        return $this->runAs(self::omar(), $aiJson, $task);
+    }
+
+    /**
+     * Stores data.ai, runs the gateway as the viewer and reads the usage rows and the ids of every ticket the
+     * transaction sees, all in one transaction under Acme Foods that is rolled back.
+     *
+     * @return array{AiResult|\Throwable, list<array<string, mixed>>, list<string>} the result or what the gateway threw,
+     *                                                                              the usage rows, the ticket ids
+     */
+    private function runAs(ActorContext $viewer, string $aiJson, AiTask $task): array
+    {
+        return self::transactions()->rolledBackAs(self::ACME_FOODS, function () use ($viewer, $aiJson, $task): array {
             self::connection()->executeStatement("UPDATE org_settings SET data = jsonb_set(data, '{ai}', ?::jsonb) WHERE organization_id = ?", [$aiJson, self::ACME_FOODS]);
             try {
-                $outcome = $this->gateway()->run($task, self::omar());
+                $outcome = $this->gateway()->run($task, $viewer);
             } catch (AiNotAllowed|AiRateLimited|AiUnavailable $refusal) {
                 $outcome = $refusal;
             }
 
             /** @var list<array<string, mixed>> $usageRows */
             $usageRows = self::connection()->fetchAllAssociative("SELECT *, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS+00') AS at_utc FROM ast_usage ORDER BY id");
+            /** @var list<string> $ticketIds */
+            $ticketIds = self::connection()->fetchFirstColumn('SELECT id FROM tkt_ticket');
 
-            return [$outcome, $usageRows];
+            return [$outcome, $usageRows, $ticketIds];
         });
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function ticketIdsSeenUnder(string $organizationId): array
+    {
+        /** @var list<string> $ticketIds */
+        $ticketIds = self::transactions()->rolledBackAs($organizationId, static fn (): array => self::connection()->fetchFirstColumn('SELECT id FROM tkt_ticket'));
+
+        return $ticketIds;
     }
 
     private function gateway(): AiGateway
@@ -282,9 +371,9 @@ final class GuardedAiGatewayTest extends KernelTestCase
         return self::getContainer()->get(FakeProvider::class);
     }
 
-    private function omarsCountedCalls(): int
+    private function countedCallsOf(string $userId): int
     {
-        $window = self::getContainer()->get(ValkeyLimiterStorage::class)->fetch(self::USAGE_LIMITER_PREFIX.self::ACME_FOODS.':'.self::OMAR);
+        $window = self::getContainer()->get(ValkeyLimiterStorage::class)->fetch(self::USAGE_LIMITER_PREFIX.self::ACME_FOODS.':'.$userId);
 
         if (null === $window) {
             return 0;
@@ -292,6 +381,13 @@ final class GuardedAiGatewayTest extends KernelTestCase
         self::assertInstanceOf(Window::class, $window);
 
         return $window->getHitCount();
+    }
+
+    private static function forgetCountedCalls(): void
+    {
+        foreach ([self::OMAR, self::LENA] as $userId) {
+            self::getContainer()->get(ValkeyLimiterStorage::class)->delete(self::USAGE_LIMITER_PREFIX.self::ACME_FOODS.':'.$userId);
+        }
     }
 
     private static function summaryOf(TicketId $ticketId): AiTask
@@ -302,6 +398,11 @@ final class GuardedAiGatewayTest extends KernelTestCase
     private static function omar(): ActorContext
     {
         return new ActorContext(new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS), Roles::none());
+    }
+
+    private static function lena(): ActorContext
+    {
+        return new ActorContext(new UserId(self::LENA), new OrganizationId(self::ACME_FOODS), new Roles(false, false, [new TeamId(self::SHOP_TEAM)], [], []));
     }
 
     private static function checkoutTicketId(): TicketId
@@ -316,7 +417,7 @@ final class GuardedAiGatewayTest extends KernelTestCase
 
     private static function removeRows(): void
     {
-        self::shopTeamRows()->removeAllOf([self::LENA, self::OMAR], self::ACME_FOODS);
+        self::shopTeamRows()->removeAllOf([self::LENA, self::OMAR], self::ACME_FOODS, self::BETA_BAKERY);
     }
 
     private static function shopTeamRows(): ShopTeamRows
