@@ -1,0 +1,52 @@
+{#- The header's "Local AI" chip and its setup sheet (dialogs-and-popovers.md, Local AI sheet), for a person
+    local_ai_chip() gives a policy to: `policy`. The local-ai controller checks Ollama only when "Check again" is
+    pressed, never on page load, and shows the lines of the state it reaches; every line is here, so the controller
+    writes no text but the model name. -#}
+{%- set laptopController = 'App\\Assist\\UI\\Controller\\LaptopController' -%}
+<div class="local-ai" data-state="not-checked" {{ stimulus_controller('local-ai', {
+    tagsUrl: constant('App\\Assist\\UI\\LocalAiChip::OLLAMA_ORIGIN') ~ '/api/tags',
+    statusUrl: path(constant(laptopController ~ '::STATUS_ROUTE')),
+    csrfHeader: constant(laptopController ~ '::CSRF_HEADER'),
+    csrfToken: csrf_token(constant(laptopController ~ '::CSRF_ID')),
+}) }}>
+    <twig:Dialog id="local-ai-sheet" title="AI on your laptop">
+        <twig:block name="trigger">
+            <button type="button" class="local-ai__chip" aria-haspopup="dialog" data-action="dialog#open">
+                <span class="local-ai__dot" aria-hidden="true"></span>
+                <span data-states="not-checked" {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: not checked</span>
+                <span data-states="checking" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: checking…</span>
+                <span data-states="ready" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: ready</span>
+                <span data-states="no-model not-found" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: not found</span>
+            </button>
+        </twig:block>
+        <twig:block name="content">
+            <p class="local-ai__sub">
+                Your company runs pinround’s AI on each laptop, for free.
+                {% if policy.whereAiRuns == constant('App\\Assist\\Api\\PolicyView::WHERE_LAPTOP_FIRST') %}
+                    Until it runs, pinround uses the company cloud AI.
+                {% else %}
+                    Until it runs, AI features stay hidden for you.
+                {% endif %}
+            </p>
+            <p class="local-ai__status" role="status">
+                <span data-states="not-checked" {{ stimulus_target('local-ai', 'stateLine') }}>Not checked yet.</span>
+                <span data-states="checking" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Looking for Ollama on this laptop…</span>
+                <span data-states="ready" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Ollama runs on this laptop. pinround uses <span {{ stimulus_target('local-ai', 'modelName') }}></span>. Ticket text stays on this laptop.</span>
+                <span data-states="no-model" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Ollama runs, but it has no model yet. Do step 2.</span>
+                <span data-states="not-found" hidden {{ stimulus_target('local-ai', 'stateLine') }}>pinround could not reach Ollama on this laptop.</span>
+            </p>
+            {# Filled with one chip per model when Ollama has more than one. #}
+            <div class="local-ai__models" role="group" aria-label="Model" hidden {{ stimulus_target('local-ai', 'modelChoices') }}></div>
+            <ol class="local-ai__steps">
+                <li>Install Ollama from ollama.com. It runs in the background.</li>
+                <li>Get the model once, in a terminal: <code>ollama pull qwen3:4b</code> (about 2.5 GB).</li>
+                <li>Let pinround talk to it: set <code>OLLAMA_ORIGINS</code> to your pinround address and restart Ollama. Your IT team can do this for everyone.</li>
+                <li>Press “Check again”. Your browser may ask if this page may talk to apps on your computer. Say yes.</li>
+            </ol>
+        </twig:block>
+        <twig:block name="actions">
+            <twig:Button variant="text" data-action="dialog#close">Close</twig:Button>
+            <twig:Button data-action="local-ai#check" data-local-ai-target="checkButton">Check again</twig:Button>
+        </twig:block>
+    </twig:Dialog>
+</div>
