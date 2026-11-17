@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Assist\Infrastructure\Doctrine;
 
+use App\Assist\Application\AiCallUsage;
 use App\Assist\Application\Metering;
 use App\Assist\Application\ProviderAnswer;
 use App\Assist\Domain\AiFeature;
@@ -58,7 +59,7 @@ final class DbalMeteringTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
         $this->metering()->record(
-            new ProviderAnswer('The checkout button is hidden behind the cookie banner.', 'claude-haiku-4-5', 'anthropic', 812, 64, 1350),
+            AiCallUsage::answered(new ProviderAnswer('The checkout button is hidden behind the cookie banner.', 'claude-haiku-4-5', 'anthropic', 812, 64, 1350)),
             AiFeature::Explain,
             $this->actor(self::OMAR, self::ACME_FOODS),
         );
@@ -86,7 +87,7 @@ final class DbalMeteringTest extends KernelTestCase
     {
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
-        $this->metering()->record(new ProviderAnswer('A summary.', 'qwen3:4b', 'ollama', null, null, 0), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
+        $this->metering()->record(AiCallUsage::answered(new ProviderAnswer('A summary.', 'qwen3:4b', 'ollama', null, null, 0)), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
 
         $rows = $this->visibleRows();
         self::assertCount(1, $rows);
@@ -100,7 +101,7 @@ final class DbalMeteringTest extends KernelTestCase
     public function theTableHasOnlyMetadataColumns(): void
     {
         self::assertSame(
-            ['organization_id', 'id', 'user_id', 'feature', 'provider', 'model', 'input_tokens', 'output_tokens', 'duration_ms', 'cost_estimate', 'at'],
+            ['organization_id', 'id', 'user_id', 'feature', 'provider', 'model', 'input_tokens', 'output_tokens', 'duration_ms', 'cost_estimate', 'at', 'status'],
             $this->connection()->fetchFirstColumn(
                 "SELECT attname FROM pg_attribute WHERE attrelid = 'public.ast_usage'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
             ),
@@ -143,7 +144,7 @@ final class DbalMeteringTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
         try {
-            $this->metering()->record(self::answer(), AiFeature::Summary, $this->actor(self::OMAR, self::OTHER_ORGANIZATION));
+            $this->metering()->record(AiCallUsage::answered(self::answer()), AiFeature::Summary, $this->actor(self::OMAR, self::OTHER_ORGANIZATION));
             self::fail('A call of another organization was metered under the tenant.');
         } catch (\LogicException $refusal) {
             self::assertStringContainsString('the caller acted in another one', $refusal->getMessage());
@@ -158,7 +159,7 @@ final class DbalMeteringTest extends KernelTestCase
     public function withoutATenantNothingIsWritten(): void
     {
         try {
-            $this->metering()->record(self::answer(), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
+            $this->metering()->record(AiCallUsage::answered(self::answer()), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
             self::fail('A call was metered with no tenant set.');
         } catch (TenantNotSet) {
         }
@@ -171,7 +172,7 @@ final class DbalMeteringTest extends KernelTestCase
     {
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         $this->connection()->beginTransaction();
-        $this->metering()->record(self::answer(), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
+        $this->metering()->record(AiCallUsage::answered(self::answer()), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
         $this->connection()->rollBack();
 
         self::assertSame([], $this->visibleRows());
@@ -229,7 +230,7 @@ final class DbalMeteringTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
         try {
-            $this->metering()->record($answer, AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
+            $this->metering()->record(AiCallUsage::answered($answer), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
             self::fail('Not refused: '.$violatedConstraint);
         } catch (DriverException $refusal) {
             self::assertSame('23514', $refusal->getSQLState());
@@ -244,7 +245,7 @@ final class DbalMeteringTest extends KernelTestCase
     {
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
-        $this->metering()->record(new ProviderAnswer('x', str_repeat('é', 200), str_repeat('a', 64), 812, 64, 1350), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
+        $this->metering()->record(AiCallUsage::answered(new ProviderAnswer('x', str_repeat('é', 200), str_repeat('a', 64), 812, 64, 1350)), AiFeature::Summary, $this->actor(self::OMAR, self::ACME_FOODS));
 
         self::assertSame([[str_repeat('é', 200), str_repeat('a', 64)]], $this->callsSeenBy(self::ACME_FOODS, 'SELECT model, provider FROM ast_usage'));
     }
@@ -258,7 +259,7 @@ final class DbalMeteringTest extends KernelTestCase
     {
         $this->tenantContext()->set(new OrganizationId($organizationId));
         try {
-            $this->metering()->record(self::answer(), $feature, $this->actor($userId, $organizationId));
+            $this->metering()->record(AiCallUsage::answered(self::answer()), $feature, $this->actor($userId, $organizationId));
         } finally {
             $this->tenantContext()->clear();
         }
