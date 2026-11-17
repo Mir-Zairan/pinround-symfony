@@ -1,0 +1,121 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Assist\Application;
+
+use App\Assist\Api\DraftReport;
+use App\Assist\Api\IntakeAssist;
+use App\Assist\Api\IntakeCheckId;
+use App\Assist\Api\IntakeCheckRefused;
+use App\Assist\Api\IntakeCheckView;
+use App\Assist\Application\Gateway\AiTaskAdmission;
+use App\Assist\Application\Intake\GenerateIntakeSuggestion;
+use App\Assist\Application\Intake\IntakeJobQueue;
+use App\Assist\Application\Intake\IntakeRequests;
+use App\Assist\Application\Summaries\SummaryRequesters;
+use App\Assist\Domain\AiFeature;
+use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\ListFilter;
+use Psr\Clock\ClockInterface;
+use Symfony\Component\Uid\UuidV7;
+
+/**
+ * Refuses a draft over AiDraft's caps first, then asks AiTaskAdmission, the check the job's gateway call makes first,
+ * without reading the draft's candidates, and the person's call limit without counting a call, so a check the gateway
+ * would refuse queues nothing; then keeps the draft with the check's state and queues the job.
+ */
+final readonly class IntakeAssistService implements IntakeAssist
+{
+    public function __construct(
+        private SummaryRequesters $requesters,
+        private AiTaskAdmission $aiTaskAdmission,
+        private AiCallLimit $aiCallLimit,
+        private IntakeRequests $intakeRequests,
+        private IntakeJobQueue $intakeJobQueue,
+        private Suggestions $suggestions,
+        private ClockInterface $clock,
+    ) {
+    }
+
+    public function suggest(DraftReport $draft, UserId $requesterId, OrganizationId $organizationId): IntakeCheckId
+    {
+        $aiDraft = self::aiDraftOf($draft);
+        $requester = $this->requesters->actorOf($requesterId, $organizationId)
+            ?? throw new IntakeCheckRefused(IntakeCheckRefused::NOT_A_MEMBER, 'AI help works only in your own organization.');
+        $refusal = $this->aiTaskAdmission->refusalFor(new AiTask(AiFeature::Intake, draft: $aiDraft), $requester);
+        if (null !== $refusal) {
+            throw new IntakeCheckRefused($refusal->value, $refusal->sentence());
+        }
+        if (!$this->aiCallLimit->hasCallsLeft($requester)) {
+            throw new IntakeCheckRefused(IntakeCheckRefused::TOO_MANY_AI_REQUESTS, AiRateLimited::PER_PERSON_MESSAGE);
+        }
+
+        $checkId = new IntakeCheckId(UuidV7::generate($this->clock->now()));
+        $this->intakeRequests->open($organizationId, $checkId, $requesterId, $draft);
+        try {
+            $this->intakeJobQueue->queue(new GenerateIntakeSuggestion($organizationId->toString(), $checkId->toString(), $requesterId->toString()));
+        } catch (\Throwable $queueFailure) {
+            try {
+                $this->intakeRequests->release($organizationId, $checkId);
+            } finally {
+                // The queue's failure is the one the caller must see, also when the release fails too.
+                throw $queueFailure;
+            }
+        }
+
+        return $checkId;
+    }
+
+    public function checkOf(IntakeCheckId $checkId, UserId $viewerId, OrganizationId $organizationId): ?IntakeCheckView
+    {
+        // The state first: it is released only after the suggestion is committed, so one of the two always answers.
+        $pending = $this->intakeRequests->stateOf($organizationId, $checkId, $viewerId);
+        $suggestion = $this->suggestions->intakeOf($organizationId, $checkId, $viewerId);
+        if (null === $pending && null === $suggestion) {
+            return null;
+        }
+        if (null === $this->requesters->actorOf($viewerId, $organizationId)) {
+            return null;
+        }
+
+        return null === $suggestion ? $pending : IntakeCheckView::done($suggestion);
+    }
+
+    /**
+     * @throws IntakeCheckRefused when the project id is no canonical uuid, or a text is not UTF-8 or over its cap
+     */
+    private static function aiDraftOf(DraftReport $draft): AiDraft
+    {
+        if (!ListFilter::isCanonicalUuid($draft->projectId)) {
+            throw new IntakeCheckRefused(IntakeCheckRefused::UNKNOWN_PROJECT, 'Choose a project first.');
+        }
+        foreach ([$draft->title, $draft->detail, ...$draft->pinNotes] as $text) {
+            if (!mb_check_encoding($text, 'UTF-8')) {
+                throw new IntakeCheckRefused(IntakeCheckRefused::UNREADABLE_DRAFT, 'This report has text AI help cannot read.');
+            }
+        }
+        if (mb_strlen($draft->title, 'UTF-8') > AiDraft::MAX_TITLE_CHARACTERS) {
+            throw self::tooLong(\sprintf('The title is too long for AI help: %d characters at most.', AiDraft::MAX_TITLE_CHARACTERS));
+        }
+        if (mb_strlen($draft->detail, 'UTF-8') > AiDraft::MAX_DETAIL_CHARACTERS) {
+            throw self::tooLong(\sprintf('The details are too long for AI help: %s characters at most.', number_format(AiDraft::MAX_DETAIL_CHARACTERS)));
+        }
+        if (\count($draft->pinNotes) > AiDraft::MAX_PIN_NOTES) {
+            throw self::tooLong(\sprintf('Too many pins for AI help: %d at most.', AiDraft::MAX_PIN_NOTES));
+        }
+        foreach ($draft->pinNotes as $pinNote) {
+            if (mb_strlen($pinNote, 'UTF-8') > AiDraft::MAX_PIN_NOTE_CHARACTERS) {
+                throw self::tooLong(\sprintf('A pin note is too long for AI help: %s characters at most.', number_format(AiDraft::MAX_PIN_NOTE_CHARACTERS)));
+            }
+        }
+
+        return new AiDraft($draft->projectId, $draft->title, $draft->detail, $draft->pinNotes);
+    }
+
+    private static function tooLong(string $sentence): IntakeCheckRefused
+    {
+        return new IntakeCheckRefused(IntakeCheckRefused::DRAFT_TOO_LONG, $sentence);
+    }
+}

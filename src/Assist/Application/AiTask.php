@@ -28,7 +28,7 @@ final readonly class AiTask
             throw new \InvalidArgumentException('An intake task needs a draft report and no ticket.');
         }
         if (AiFeature::Intake !== $feature && (null === $ticketId || null !== $draft)) {
-            throw new \InvalidArgumentException(\sprintf('A %s task needs a ticket and no draft report.', $feature->value));
+            throw new \InvalidArgumentException(\sprintf('The %s task needs a ticket and no draft report.', $feature->value));
         }
     }
 }

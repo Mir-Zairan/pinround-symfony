@@ -230,6 +230,11 @@ services:
     App\Assist\Api\Summaries: '@App\Assist\Application\Summaries\QueuedSummaries'
     App\Assist\Application\Summaries\SummaryRequests: '@App\Assist\Infrastructure\Valkey\ValkeySummaryRequests'
     App\Assist\Application\Summaries\SummaryJobQueue: '@App\Assist\Infrastructure\Messenger\MessengerSummaryJobQueue'
+    # "Check with AI": the check's state and its draft on the state Valkey, the job on async_ai, the suggestion in ast_suggestion.
+    App\Assist\Api\IntakeAssist: '@App\Assist\Application\IntakeAssistService'
+    App\Assist\Application\Intake\IntakeRequests: '@App\Assist\Infrastructure\Valkey\ValkeyIntakeRequests'
+    App\Assist\Application\Intake\IntakeJobQueue: '@App\Assist\Infrastructure\Messenger\MessengerIntakeJobQueue'
+    App\Assist\Application\Suggestions: '@App\Assist\Infrastructure\Doctrine\DbalSuggestions'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -486,6 +491,17 @@ when@test:
             public: true
         test.assist_ai_task_admission:
             alias: App\Assist\Application\Gateway\AiTaskAdmission
+            public: true
+        # No page checks a draft before the report page's button (P08.T7, task 10); the intake tests get the Api as it
+        # will, and read the check's state and the stored suggestions through their ports.
+        test.assist_intake_assist:
+            alias: App\Assist\Api\IntakeAssist
+            public: true
+        test.assist_intake_requests:
+            alias: App\Assist\Application\Intake\IntakeRequests
+            public: true
+        test.assist_suggestions:
+            alias: App\Assist\Application\Suggestions
             public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.

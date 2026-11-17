@@ -36,10 +36,10 @@ final class AiTaskTest extends TestCase
     {
         yield 'intake without a draft' => [static fn (): AiTask => new AiTask(AiFeature::Intake, null, 'Pay does nothing.'), 'An intake task needs a draft report and no ticket.'];
         yield 'intake with a ticket as well' => [static fn (): AiTask => new AiTask(AiFeature::Intake, new TicketId(self::CHECKOUT_TICKET), null, self::draft()), 'An intake task needs a draft report and no ticket.'];
-        yield 'summary without a ticket' => [static fn (): AiTask => new AiTask(AiFeature::Summary), 'A summary task needs a ticket and no draft report.'];
-        yield 'summary of a draft' => [static fn (): AiTask => new AiTask(AiFeature::Summary, null, null, self::draft()), 'A summary task needs a ticket and no draft report.'];
-        yield 'summary of a ticket and a draft' => [static fn (): AiTask => new AiTask(AiFeature::Summary, new TicketId(self::CHECKOUT_TICKET), null, self::draft()), 'A summary task needs a ticket and no draft report.'];
-        yield 'explain of a draft' => [static fn (): AiTask => new AiTask(AiFeature::Explain, null, 'Why?', self::draft()), 'A explain task needs a ticket and no draft report.'];
+        yield 'summary without a ticket' => [static fn (): AiTask => new AiTask(AiFeature::Summary), 'The summary task needs a ticket and no draft report.'];
+        yield 'summary of a draft' => [static fn (): AiTask => new AiTask(AiFeature::Summary, null, null, self::draft()), 'The summary task needs a ticket and no draft report.'];
+        yield 'summary of a ticket and a draft' => [static fn (): AiTask => new AiTask(AiFeature::Summary, new TicketId(self::CHECKOUT_TICKET), null, self::draft()), 'The summary task needs a ticket and no draft report.'];
+        yield 'explain of a draft' => [static fn (): AiTask => new AiTask(AiFeature::Explain, null, 'Why?', self::draft()), 'The explain task needs a ticket and no draft report.'];
     }
 
     /**

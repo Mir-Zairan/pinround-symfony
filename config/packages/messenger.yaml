@@ -167,6 +167,9 @@ framework:
             # the job could miss. Its handler marks the request on Valkey before it asks the AI, so a retry never pays for
             # a call twice; FailSummaryRequestOfAbandonedJob fails the request when the retries run out.
             App\Assist\Application\Summaries\GenerateSummary: async_ai
+            # The same way from IntakeAssistService through MessengerIntakeJobQueue; it carries ids only, the draft waits in
+            # the check's state. FailIntakeRequestOfAbandonedJob fails the check when the retries run out.
+            App\Assist\Application\Intake\GenerateIntakeSuggestion: async_ai
             # Domain events of Organization, dispatched on event.bus inside the transaction of their change.
             App\Organization\Api\Event\OrganizationEvent: outbox
             # Domain events of Workflow, the same way.
