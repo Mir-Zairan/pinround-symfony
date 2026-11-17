@@ -7,6 +7,7 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Application\ReviewChange;
 use App\Ticketing\Application\TicketHistory;
 use App\Ticketing\Application\TicketHistoryEntries;
 use App\Ticketing\Application\TicketHistoryEntry;
@@ -18,10 +19,12 @@ use Doctrine\DBAL\Connection;
  */
 final readonly class DbalTicketHistoryEntries implements TicketHistoryEntries
 {
-    public const string LATEST_SQL = "SELECT id, actor_id, from_step, to_step, payload ->> 'verb' AS verb, payload ->> '".TicketHistory::GIVEN_TO_PAYLOAD_KEY."' AS given_to_id, at"
+    public const string LATEST_SQL = "SELECT id, actor_id, type, from_step, to_step, payload ->> 'verb' AS verb, payload ->> '".TicketHistory::GIVEN_TO_PAYLOAD_KEY."' AS given_to_id,"
+        ." payload ->> 'outcome' AS outcome, payload ->> 'pin_number' AS pin_number, payload ->> 'area_name' AS area_name, at"
         .' FROM tkt_ticket_event'
         .' WHERE organization_id = CAST(:organization AS uuid) AND ticket_id = CAST(:ticket AS uuid)'
-        .' AND at >= CAST(:ticket_created_at AS timestamptz) AND type = \''.DbalTicketHistory::MOVED.'\''
+        .' AND at >= CAST(:ticket_created_at AS timestamptz)'
+        ." AND type IN ('".DbalTicketHistory::MOVED."', '".ReviewChange::CHECK_ITEM_CHANGED."', '".ReviewChange::PIN_VERDICT_SET."', '".ReviewChange::PIN_VERDICT_UNDONE."', '".ReviewChange::AREA_VERDICT_SAVED."')"
         .' ORDER BY at DESC, id DESC'
         .' LIMIT '.self::LATEST_COUNT;
 
@@ -58,8 +61,14 @@ final readonly class DbalTicketHistoryEntries implements TicketHistoryEntries
      */
     private static function entryOf(array $row): TicketHistoryEntry
     {
-        if (!\is_string($row['actor_id']) || !\is_string($row['to_step']) || !\is_string($row['at'])) {
-            throw new \UnexpectedValueException('A ticket event row lacks its actor, step or time.');
+        if (!\is_string($row['actor_id']) || !\is_string($row['at'])) {
+            throw new \UnexpectedValueException('A ticket event row lacks its actor or time.');
+        }
+        if (DbalTicketHistory::MOVED !== $row['type']) {
+            return new TicketHistoryEntry(new UserId($row['actor_id']), null, null, null, null, new \DateTimeImmutable($row['at']), self::reviewChangeOf($row));
+        }
+        if (!\is_string($row['to_step'])) {
+            throw new \UnexpectedValueException('A ticket move row lacks the step it entered.');
         }
 
         return new TicketHistoryEntry(
@@ -69,6 +78,29 @@ final readonly class DbalTicketHistoryEntries implements TicketHistoryEntries
             \is_string($row['verb']) ? $row['verb'] : null,
             self::userIdOrNull($row['given_to_id']),
             new \DateTimeImmutable($row['at']),
+        );
+    }
+
+    /**
+     * A pin number or area name the payload lacks, or a pin number that is not a whole number from 1, reads as
+     * unnamed.
+     *
+     * @param array<string, mixed> $row
+     *
+     * @throws \UnexpectedValueException when the row has no outcome, which RecordReviewChangesHandler always writes
+     */
+    private static function reviewChangeOf(array $row): ReviewChange
+    {
+        if (!\is_string($row['type']) || !\is_string($row['outcome']) || '' === $row['outcome']) {
+            throw new \UnexpectedValueException('A ticket review change row lacks its outcome.');
+        }
+        $pinNumber = \is_string($row['pin_number']) && 1 === preg_match('/\A[1-9][0-9]{0,8}\z/', $row['pin_number']) ? (int) $row['pin_number'] : null;
+
+        return new ReviewChange(
+            $row['type'],
+            $row['outcome'],
+            $pinNumber,
+            \is_string($row['area_name']) && '' !== $row['area_name'] ? $row['area_name'] : null,
         );
     }
 

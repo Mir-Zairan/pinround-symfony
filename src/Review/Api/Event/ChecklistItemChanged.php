@@ -6,8 +6,8 @@ namespace App\Review\Api\Event;
 
 /**
  * Someone marked an item of a ticket's checklist round fixed, confirmed it OK or sent it back as not fixed (P05.T6).
- * It never moves the ticket and carries no pin note (ADR-0027). No module consumes it yet; the ticket page and the
- * activity log will.
+ * It never moves the ticket and carries no pin note (ADR-0027). Ticketing writes it into the ticket's What happened and
+ * Notification refreshes the ticket's open pages; the activity log will use it too.
  */
 final readonly class ChecklistItemChanged implements ReviewEvent
 {

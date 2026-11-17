@@ -10,6 +10,7 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\Event\TicketEvent;
+use App\Ticketing\Application\ReviewChange;
 use App\Ticketing\Application\TicketEvents;
 use App\Ticketing\Application\TicketHistory;
 use App\Ticketing\Domain\Ticket;
@@ -141,6 +142,20 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
             $fromStepId,
             $toStepId,
             $assignee->toString(),
+            $at->format('Y-m-d H:i'),
+        );
+    }
+
+    public function recordReviewChange(OrganizationId $organizationId, TicketId $ticketId, UserId $actor, ReviewChange $change, \DateTimeImmutable $at): void
+    {
+        $this->writes[] = \sprintf(
+            '%s %s by %s to %s on pin %s in area %s at %s',
+            $change->kind,
+            $ticketId->toString(),
+            $actor->toString(),
+            $change->outcome,
+            $change->pinNumber ?? '-',
+            $change->areaName ?? '-',
             $at->format('Y-m-d H:i'),
         );
     }

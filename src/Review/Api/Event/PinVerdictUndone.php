@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Review\Api\Event;
 
 /**
- * A reviewer cleared a pin's verdict in a review round, so it can be given again. No module consumes it yet; open
- * round pages will use it to update the pin.
+ * A reviewer cleared a pin's verdict in a review round, so it can be given again. Ticketing writes it into the
+ * ticket's What happened and Notification refreshes the ticket's open pages; open round pages will use it to update
+ * the pin.
  */
 final readonly class PinVerdictUndone implements ReviewEvent
 {

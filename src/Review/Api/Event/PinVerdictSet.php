@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Review\Api\Event;
 
 /**
- * A reviewer gave a pin of the earlier round its verdict in a review round. It never moves the ticket. No module
- * consumes it yet; open round pages will use it to update the pin.
+ * A reviewer gave a pin of the earlier round its verdict in a review round. It never moves the ticket. Ticketing writes
+ * it into the ticket's What happened and Notification refreshes the ticket's open pages; open round pages will use it
+ * to update the pin.
  */
 final readonly class PinVerdictSet implements ReviewEvent
 {

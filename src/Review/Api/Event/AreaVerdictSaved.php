@@ -6,8 +6,8 @@ namespace App\Review\Api\Event;
 
 /**
  * A reviewer saved a screen area's verdict, in place of any earlier one. It never moves the ticket. It says whether
- * the area has a note, never its text (ADR-0027). No module consumes it yet; open round pages will use it to update the
- * area.
+ * the area has a note, never its text (ADR-0027). Ticketing writes it into the ticket's What happened and Notification
+ * refreshes the ticket's open pages; open round pages will use it to update the area.
  */
 final readonly class AreaVerdictSaved implements ReviewEvent
 {
