@@ -25,18 +25,24 @@ use Symfony\Contracts\HttpClient\Exception\ExceptionInterface as HttpFailure;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
- * The only class that uses Symfony AI (deptrac.yaml, layer Assist_AiPlatform): Symfony AI is beta, so a change in it
- * stays here. It builds the chosen provider's platform for each call, because the key can be the organization's own.
- * It logs nothing: prompts and answers never reach a log (ADR-0027).
+ * Calls the chosen provider through its Symfony AI bridge (Hugging Face, Anthropic or Ollama) with the organization's
+ * key, or the operator's when the organization has none. Every request follows no redirects and gives up after
+ * $timeoutSeconds, both waiting for the next byte and for the whole answer. It throws only AiRateLimited and
+ * AiUnavailable, never chaining the library's exception, and logs nothing (ADR-0027).
  */
 final readonly class SymfonyAiProvider implements AiProvider
 {
+    private const int MAX_TIMEOUT_SECONDS = 300;
+
     private HttpClientInterface $httpClient;
 
     /**
      * @param string $huggingFaceToken the operator's token, used when the organization has no key; empty turns it off
      * @param string $anthropicKey     the operator's key, used when the organization has no key; empty turns it off
      * @param string $ollamaUrl        the operator-run Ollama server; never a tenant setting (SSRF)
+     * @param int    $timeoutSeconds   from 1 to 300
+     *
+     * @throws \InvalidArgumentException when $timeoutSeconds is outside 1 to 300
      */
     public function __construct(
         HttpClientInterface $httpClient,
@@ -48,9 +54,19 @@ final readonly class SymfonyAiProvider implements AiProvider
         private string $anthropicKey,
         #[Autowire(env: 'AI_OLLAMA_URL')]
         private string $ollamaUrl,
+        #[Autowire(env: 'int:default:assist.ai_provider_timeout_default_seconds:AI_PROVIDER_TIMEOUT_SECONDS')]
+        int $timeoutSeconds,
     ) {
+        if ($timeoutSeconds < 1 || $timeoutSeconds > self::MAX_TIMEOUT_SECONDS) {
+            throw new \InvalidArgumentException(\sprintf('AI_PROVIDER_TIMEOUT_SECONDS must be from 1 to %d seconds, not %d.', self::MAX_TIMEOUT_SECONDS, $timeoutSeconds));
+        }
+
         // ai-architecture.md, providers: outbound AI calls follow no redirects.
-        $this->httpClient = $httpClient->withOptions(['max_redirects' => 0]);
+        $this->httpClient = $httpClient->withOptions([
+            'max_redirects' => 0,
+            'timeout' => (float) $timeoutSeconds,
+            'max_duration' => (float) $timeoutSeconds,
+        ]);
     }
 
     public function complete(AiPrompt $prompt, ProviderChoice $choice): ProviderAnswer
@@ -67,6 +83,10 @@ final readonly class SymfonyAiProvider implements AiProvider
             throw AiUnavailable::failed($choice->provider->value, $failure::class);
         }
 
+        if (self::isBlank($text)) {
+            throw AiUnavailable::emptyAnswer($choice->provider->value);
+        }
+
         $tokenUsage = $usage instanceof TokenUsageInterface ? $usage : null;
 
         return new ProviderAnswer(
@@ -80,11 +100,15 @@ final readonly class SymfonyAiProvider implements AiProvider
     }
 
     /**
-     * @throws AiUnavailable when the chosen provider has no key or URL; no other provider is tried
+     * @throws AiUnavailable when the chosen provider has no key or URL, or the organization's key is empty; no other
+     *                       provider and not the operator's key is tried
      */
     private function platformFor(ProviderChoice $choice): PlatformInterface
     {
         $organizationKey = $choice->organizationKey();
+        if ('' === $organizationKey) {
+            throw AiUnavailable::notConfigured($choice->provider->value);
+        }
 
         return match ($choice->provider) {
             AiProviderName::HuggingFace => HuggingFaceFactory::createPlatform($this->configuredOrRefuse($choice, $organizationKey ?? $this->huggingFaceToken), httpClient: $this->httpClient),
@@ -100,5 +124,14 @@ final readonly class SymfonyAiProvider implements AiProvider
         }
 
         return $keyOrUrl;
+    }
+
+    /**
+     * Unicode spaces, line separators and the zero-width space and BOM count as blank too: a model can answer with
+     * them alone. Text that is not valid UTF-8 is not blank.
+     */
+    private static function isBlank(string $text): bool
+    {
+        return 1 === preg_match('/\A[\s\p{Z}\x{200B}\x{FEFF}]*\z/u', $text);
     }
 }

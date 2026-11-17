@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Assist\Application;
 
 /**
- * No answer could be had from the provider: it is not configured, cannot be reached, failed, or answered with something
- * that is not text. The message names only the provider and an exception class, never the library's message, which
+ * No answer could be had from the provider: it is not configured, cannot be reached, failed, timed out, or answered with
+ * something that is not text or with blank text. The message names only the provider and an exception class, never the library's message, which
  * may quote the prompt or the answer (ADR-0027: no AI content in logs).
  */
 final class AiUnavailable extends \RuntimeException
@@ -19,6 +19,11 @@ final class AiUnavailable extends \RuntimeException
     public static function notConfigured(string $provider): self
     {
         return new self($provider, \sprintf('The AI provider %s has no key or URL set.', $provider));
+    }
+
+    public static function emptyAnswer(string $provider): self
+    {
+        return new self($provider, \sprintf('The AI provider %s answered with no text.', $provider));
     }
 
     /**
