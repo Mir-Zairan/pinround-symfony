@@ -324,6 +324,22 @@ final class GuardedAiGatewayTest extends TestCase
     }
 
     #[Test]
+    public function aRetryTheProviderFailsComesBackAsFailedWithBothCallsMeteredAndOneCounted(): void
+    {
+        $this->givenProviderScript(['not json', AiUnavailable::failed('huggingface', \RuntimeException::class), self::INTAKE_JSON]);
+
+        $result = $this->gateway()->run(new AiTask(AiFeature::Intake, new TicketId(self::CHECKOUT_TICKET)), self::omar());
+
+        self::assertSame(
+            [AiCallStatus::Failed, null, 'The AI provider huggingface did not answer (RuntimeException).', 'intake.v1', 'AI suggestion'],
+            [$result->status, $result->data, $result->failureReason, $result->promptVersion, $result->label],
+        );
+        self::assertCount(2, $this->provider->calls);
+        self::assertSame([[AiCallStatus::Rejected, 812, 64, AiFeature::Intake, self::OMAR], [AiCallStatus::Failed, null, null, AiFeature::Intake, self::OMAR]], $this->meteredRows());
+        self::assertSame([self::ACME_FOODS.':'.self::OMAR => 1], $this->limit->counted);
+    }
+
+    #[Test]
     public function aTaskWithoutATicketIsRefusedBeforeAnythingIsRead(): void
     {
         try {

@@ -67,7 +67,7 @@ final readonly class GuardedAiGateway implements AiGateway
         if (null === $ticket) {
             throw new AiNotAllowed(PolicyRefusal::CannotSeeTicket);
         }
-        $decision = $this->policyEvaluator->decide($settings, $viewer, true, $ticket->isTeamOnly, false);
+        $decision = $this->policyEvaluator->decide($settings, $viewer, canSeeTicket: true, isTicketRestricted: $ticket->isTeamOnly, isLaptopReady: false);
         if (null !== $decision->refusal) {
             throw new AiNotAllowed($decision->refusal);
         }
