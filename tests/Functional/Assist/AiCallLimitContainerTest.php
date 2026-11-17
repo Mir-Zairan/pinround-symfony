@@ -98,7 +98,7 @@ final class AiCallLimitContainerTest extends KernelTestCase
         });
 
         $this->expectException(\RedisException::class);
-        $this->expectExceptionMessage('Connection refused');
+        $this->expectExceptionMessageIsOrContains('Connection refused');
         $this->limit()->consume(self::freshCaller());
     }
 
