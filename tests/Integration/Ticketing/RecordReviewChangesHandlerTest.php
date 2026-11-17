@@ -168,6 +168,16 @@ final class RecordReviewChangesHandlerTest extends KernelTestCase
         self::runTheWorkerUntilIdle('outbox');
         self::runTheWorkerUntilIdle('async_notify');
 
+        // The setup this test needs: the set, which happened first, was written last and so has the higher id.
+        $typesByRowId = $this->transactions()->rolledBackAs(
+            self::ACME_FOODS,
+            fn (): array => $this->connection()->fetchFirstColumn(
+                'SELECT type FROM tkt_ticket_event WHERE organization_id = ? AND ticket_id = ? AND type IN (?, ?) ORDER BY id',
+                [self::ACME_FOODS, self::TICKET, ReviewChange::PIN_VERDICT_UNDONE, ReviewChange::PIN_VERDICT_SET],
+            ),
+        );
+        self::assertSame([ReviewChange::PIN_VERDICT_UNDONE, ReviewChange::PIN_VERDICT_SET], $typesByRowId);
+
         $entries = $this->transactions()->rolledBackAs(
             self::ACME_FOODS,
             fn (): array => new DbalTicketHistoryEntries($this->connection(), $this->tenantContext())->latestOf(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT)),
