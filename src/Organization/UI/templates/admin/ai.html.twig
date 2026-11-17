@@ -14,7 +14,6 @@
     it stands for, not "toggle", so a second click of the same button changes nothing.
 #}
 {% block main %}
-    {% import _self as ai_settings %}
     {% set where_notes = {
         cloud: 'Every AI request goes to the company’s cloud AI. It costs money per use.',
         laptop: 'Free. Ticket text never leaves the laptop. People without Ollama get no AI features.',
@@ -28,6 +27,7 @@
         {% endif %}
 
         <twig:Card tag="section" class="admin-ai__card" aria-label="AI help">
+            {% import '@Organization/admin/_ai_setting_controls.html.twig' as ai_settings %}
             {{ ai_settings.switch_row('on', 'AI help (summaries, “Explain it to me”, checking new tickets)', chosen.on) }}
             {{ ai_settings.chip_group('who', 'Who may use it', {everyone: 'Everyone', leads_only: 'Leads only'}, chosen.who) }}
             {{ ai_settings.chip_group('send', 'What goes to the AI', {title_and_text: 'Title and ticket text', title_only: 'Title only'}, chosen.send) }}
@@ -39,6 +39,7 @@
         </twig:Card>
 
         <twig:Card tag="section" class="admin-ai__card" aria-labelledby="admin-ai-provider-title">
+            {% import '@Organization/admin/_ai_setting_controls.html.twig' as ai_settings %}
             <h2 class="admin-ai__heading" id="admin-ai-provider-title">Cloud AI</h2>
             {{ ai_settings.chip_group('provider', 'Provider', {huggingface: 'Hugging Face', anthropic: 'Anthropic (Claude)', ollama: 'Ollama server'}, chosen.provider) }}
             <form class="admin-ai__key" method="post" action="{{ path('organization_admin_ai_provider_key') }}">
@@ -71,29 +72,3 @@
         <p class="admin-ai__footnote">pinround uses Symfony AI: the Ollama bridge for laptops, and a cloud bridge (Claude or Hugging Face) for the rest.</p>
     </div>
 {% endblock %}
-
-{% macro switch_row(setting, label, chosen) %}
-    {% set is_on = chosen == 'on' %}
-    <div class="admin-ai__row">
-        <form class="admin-ai__setting-form" method="post" action="{{ path('organization_admin_ai_change') }}">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_ai_change') }}">
-            <input type="hidden" name="setting" value="{{ setting }}">
-            <input type="hidden" name="choice" value="{{ is_on ? 'off' : 'on' }}">
-            <twig:Switch type="submit" :checked="is_on" :label="label"/>
-        </form>
-        <span>{{ label }}</span>
-    </div>
-{% endmacro %}
-
-{% macro chip_group(setting, label, choices, chosen) %}
-    <form class="admin-ai__row admin-ai__row--chips" method="post" action="{{ path('organization_admin_ai_change') }}" role="group" aria-label="{{ label }}">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_ai_change') }}">
-        <input type="hidden" name="setting" value="{{ setting }}">
-        <span class="admin-ai__label" aria-hidden="true">{{ label }}</span>
-        <div class="admin-ai__chips">
-            {% for choice, choice_label in choices %}
-                <twig:Chip type="submit" name="choice" value="{{ choice }}" :pressed="choice == chosen">{{ choice_label }}</twig:Chip>
-            {% endfor %}
-        </div>
-    </form>
-{% endmacro %}
