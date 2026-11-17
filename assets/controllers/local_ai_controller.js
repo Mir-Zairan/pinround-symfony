@@ -6,6 +6,12 @@ const MODEL_NAME = /^[a-z0-9:._-]{1,64}$/;
 const CHECK_TIMEOUT_MS = 3000;
 // The choice of model outlives the page; a browser that refuses storage just picks again on the next check.
 const CHOSEN_MODEL_KEY = 'pinround.localAiModel';
+// Every page renders a new header, so the last check's result is kept for the tab and shown again without calling
+// Ollama; a browser that refuses storage shows "not checked" instead.
+const LAST_CHECK_KEY = 'pinround.localAiLastCheck';
+const NOT_CHECKED = { state: 'not-checked', model: null, models: [] };
+// The abort reason when the person leaves the page: the check then ends with nothing shown, kept or reported.
+const LEFT_PAGE = Symbol('left the page');
 
 // The header's Local AI chip and setup sheet (ADR-0019). It looks for Ollama only when "Check again" is pressed, never
 // on page load: a public page calling localhost may make the browser ask for local network access, and that prompt must
@@ -16,8 +22,24 @@ export default class extends Controller {
 
   pendingCheck = null;
 
+  // Also undoes a check that a page snapshot kept half done, so Back never shows "checking…" with Check again off.
+  connect() {
+    this.#showLastCheck();
+  }
+
+  // The element is off the page, so nothing is written into it.
   disconnect() {
-    this.pendingCheck?.abort();
+    this.pendingCheck?.abort(LEFT_PAGE);
+  }
+
+  // On beforeunload and pagehide. Leaving the page cancels the request, which would read as Ollama not found; and a
+  // page the browser keeps for Back must not come back mid-check.
+  leavePage() {
+    if (!this.pendingCheck) {
+      return;
+    }
+    this.pendingCheck.abort(LEFT_PAGE);
+    this.#showLastCheck();
   }
 
   async check() {
@@ -30,19 +52,23 @@ export default class extends Controller {
     this.#showState('checking');
     this.modelChoicesTarget.hidden = true;
     this.checkButtonTarget.disabled = true;
-    try {
-      const models = await this.#installedModels(pendingCheck.signal);
-      this.#showModels(models);
-    } finally {
-      clearTimeout(timeout);
-      this.pendingCheck = null;
-      this.checkButtonTarget.disabled = false;
+    const models = await this.#installedModels(pendingCheck.signal);
+    clearTimeout(timeout);
+    this.pendingCheck = null;
+    if (pendingCheck.signal.reason === LEFT_PAGE) {
+      return;
     }
+    this.checkButtonTarget.disabled = false;
+    const outcome = this.#outcomeOf(models);
+    this.#showOutcome(outcome);
+    this.#rememberOutcome(outcome);
+    this.#reportStatus(outcome.state === 'ready', outcome.model);
   }
 
   choose(event) {
     const model = event.currentTarget.textContent;
-    if (!MODEL_NAME.test(model)) {
+    const models = this.#shownChoices();
+    if (!MODEL_NAME.test(model) || !models.includes(model)) {
       return;
     }
     try {
@@ -50,10 +76,12 @@ export default class extends Controller {
     } catch {
       // Storage off or full: the choice holds for this page only.
     }
-    this.#showReady(model);
+    this.#showModel(model);
+    this.#rememberOutcome({ state: 'ready', model, models });
+    this.#reportStatus(true, model);
   }
 
-  // Null when Ollama could not be reached or answered with something that is not its list of models.
+  // Null when Ollama could not be reached or answered with something that is not its list of models. Never throws.
   async #installedModels(signal) {
     try {
       const response = await fetch(this.tagsUrlValue, { signal, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
@@ -71,40 +99,48 @@ export default class extends Controller {
     }
   }
 
-  #showModels(models) {
-    this.modelChoicesTarget.replaceChildren();
-    this.modelChoicesTarget.hidden = true;
+  #outcomeOf(models) {
     if (models === null) {
-      this.#showState('not-found');
-      this.#reportStatus(false, null);
-      return;
+      return { state: 'not-found', model: null, models: [] };
     }
     if (models.length === 0) {
-      this.#showState('no-model');
-      this.#reportStatus(false, null);
-      return;
+      return { state: 'no-model', model: null, models: [] };
     }
-    if (models.length > 1) {
-      for (const model of models) {
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'chip';
-        chip.textContent = model;
-        chip.dataset.action = 'local-ai#choose';
-        this.modelChoicesTarget.append(chip);
-      }
-      this.modelChoicesTarget.hidden = false;
-    }
-    this.#showReady(this.#preferredModel(models));
+    return { state: 'ready', model: this.#preferredModel(models), models };
   }
 
-  #showReady(model) {
-    this.modelNameTarget.textContent = model;
+  #showLastCheck() {
+    this.checkButtonTarget.disabled = false;
+    this.#showOutcome(this.#lastCheck() ?? NOT_CHECKED);
+  }
+
+  #showOutcome({ state, model, models }) {
+    // One model needs no choice.
+    const choices = models.length > 1 ? models : [];
+    this.modelChoicesTarget.replaceChildren(...choices.map((name) => this.#modelChip(name)));
+    this.modelChoicesTarget.hidden = choices.length === 0;
+    this.#showModel(model);
+    this.#showState(state);
+  }
+
+  #modelChip(model) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.textContent = model;
+    chip.dataset.action = 'local-ai#choose';
+    return chip;
+  }
+
+  #showModel(model) {
+    this.modelNameTarget.textContent = model ?? '';
     for (const chip of this.modelChoicesTarget.children) {
       chip.setAttribute('aria-pressed', String(chip.textContent === model));
     }
-    this.#showState('ready');
-    this.#reportStatus(true, model);
+  }
+
+  #shownChoices() {
+    return Array.from(this.modelChoicesTarget.children, (chip) => chip.textContent);
   }
 
   // The model chosen before when Ollama still has it, else the first qwen3, else the first phi4 or gemma, else the first.
@@ -124,6 +160,36 @@ export default class extends Controller {
     } catch {
       return null;
     }
+  }
+
+  #rememberOutcome(outcome) {
+    try {
+      sessionStorage.setItem(LAST_CHECK_KEY, JSON.stringify(outcome));
+    } catch {
+      // Storage off or full: the next page shows "not checked".
+    }
+  }
+
+  // Null when there is none, storage is off, or what is stored is not a result a check gives.
+  #lastCheck() {
+    let stored;
+    try {
+      stored = JSON.parse(sessionStorage.getItem(LAST_CHECK_KEY) ?? 'null');
+    } catch {
+      return null;
+    }
+    const models = stored?.models;
+    if (!Array.isArray(models) || !models.every((name) => typeof name === 'string' && MODEL_NAME.test(name))) {
+      return null;
+    }
+    if (stored.state === 'ready') {
+      const isKnownModel = typeof stored.model === 'string' && MODEL_NAME.test(stored.model);
+      return isKnownModel && (models.length === 0 || models.includes(stored.model)) ? { state: 'ready', model: stored.model, models } : null;
+    }
+    if (stored.state === 'not-found' || stored.state === 'no-model') {
+      return { state: stored.state, model: null, models: [] };
+    }
+    return null;
   }
 
   #showState(state) {

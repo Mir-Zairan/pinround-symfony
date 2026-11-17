@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Web;
 
+use App\Assist\UI\LocalAiChip;
 use App\Identity\Domain\User;
 use App\Notification\UI\Controller\PingController;
 use App\SharedKernel\Application\TenantContext;
@@ -14,6 +15,7 @@ use App\SharedKernel\Infrastructure\Http\RecordingCsrfTokenStorage;
 use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
 use App\Tests\Fixtures\Entity\TenantProbe;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
+use App\Tests\Functional\Assist\Laptop\StoresAiSettings;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Organization\SendsInvitationLinks;
 use App\Ticketing\UI\MoveToasts;
@@ -49,6 +51,7 @@ final class WorkerResetTest extends WebTestCase
         tearDown as private removeUsersAndOrganizations;
     }
     use SendsInvitationLinks;
+    use StoresAiSettings;
 
     private const string ORG_A = '0197a3c0-0000-7000-8000-00000000000a';
     /** Before today: a clock ahead of the login would end the session as idle. */
@@ -57,6 +60,8 @@ final class WorkerResetTest extends WebTestCase
     private const string LOGIN = 'O:8:"stdClass":1:{s:4:"user";s:4:"lena";}';
     private const string THREAD_TOKEN_ID = 'https-conversation_thread:SHOP-1';
     private const string DRAFT_TOKEN_KEY = '_csrf/https-review_draft_round:SHOP-1';
+    /** Object storage and Mercure, as the test env sets them under HTTPS (LocalAiChipTest). */
+    private const string CONNECT_SRC = "connect-src 'self' http://localhost:9000 https://localhost";
 
     private KernelBrowser $client;
     /** @var list<string> */
@@ -337,6 +342,40 @@ final class WorkerResetTest extends WebTestCase
         self::assertSame(['Ping Lena'], $page->filter('#ping-'.$lenaId.' .dialog__title')->each(static fn (Crawler $title): string => trim($title->text())));
     }
 
+    /**
+     * LocalAiChip keeps its decision and CspConnectSources the origins it allowed for the rest of a request; Omar's
+     * page in a cloud organization must get neither the chip nor Ollama in connect-src from Lena's page before it.
+     */
+    #[Test]
+    public function theNextRequestHasNoLocalAiChipAndThePlainConnectSrcAfterAnEarlierRequestShowedTheChip(): void
+    {
+        $this->client->setServerParameter('HTTPS', 'on');
+        self::getContainer()->set('clock', new MockClock(new \DateTimeImmutable(self::NOW)));
+        $laptopOrganization = $this->createOrganization('Acme Foods');
+        $this->storeAiSettings($laptopOrganization, self::laptopAi());
+        $lena = $this->createUserWithoutOrganization('Lena Berg');
+        $this->addMembership($lena, $laptopOrganization);
+        $cloudOrganization = $this->createOrganization('Beta Bakery');
+        $this->storeAiSettings($cloudOrganization, ['on' => true, 'who' => 'everyone', 'where' => 'cloud']);
+        $omar = $this->createUserWithoutOrganization('Omar Haddad');
+        $this->addMembership($omar, $cloudOrganization);
+        $this->logIn($this->client, $lena);
+
+        $page = $this->client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('.site-header .local-ai'));
+        self::assertSame(self::CONNECT_SRC.' '.LocalAiChip::OLLAMA_ORIGIN, $this->connectSrc());
+
+        $this->client->getCookieJar()->clear();
+        $this->logIn($this->client, $omar);
+        $page = $this->client->request('GET', '/');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('.site-header'));
+        self::assertCount(0, $page->filter('.local-ai'));
+        self::assertSame(self::CONNECT_SRC, $this->connectSrc());
+    }
+
     #[Test]
     public function theNextRequestStartsANewTraceWithNoParentAfterARequestThatThrew(): void
     {
@@ -464,6 +503,18 @@ final class WorkerResetTest extends WebTestCase
     private function stateValkey(): \Redis
     {
         return self::getContainer()->get('state_valkey.connection');
+    }
+
+    /**
+     * @return string the connect-src directive of the last response's Content-Security-Policy
+     */
+    private function connectSrc(): string
+    {
+        $directives = array_map(trim(...), explode(';', (string) $this->client->getResponse()->headers->get('Content-Security-Policy')));
+        $connectSrc = array_values(array_filter($directives, static fn (string $directive): bool => str_starts_with($directive, 'connect-src ')));
+        self::assertCount(1, $connectSrc);
+
+        return $connectSrc[0];
     }
 
     private function responseJson(): mixed

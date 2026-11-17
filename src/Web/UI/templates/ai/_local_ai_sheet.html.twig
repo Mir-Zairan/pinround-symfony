@@ -8,10 +8,10 @@
     statusUrl: path(constant(laptopController ~ '::STATUS_ROUTE')),
     csrfHeader: constant(laptopController ~ '::CSRF_HEADER'),
     csrfToken: csrf_token(constant(laptopController ~ '::CSRF_ID')),
-}) }}>
+}) }} data-action="beforeunload@window->local-ai#leavePage pagehide@window->local-ai#leavePage">
     <twig:Dialog id="local-ai-sheet" title="AI on your laptop">
         <twig:block name="trigger">
-            <button type="button" class="local-ai__chip" aria-haspopup="dialog" data-action="dialog#open">
+            <button type="button" class="chip local-ai__chip" aria-haspopup="dialog" data-action="dialog#open">
                 <span class="local-ai__dot" aria-hidden="true"></span>
                 <span data-states="not-checked" {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: not checked</span>
                 <span data-states="checking" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: checking…</span>
