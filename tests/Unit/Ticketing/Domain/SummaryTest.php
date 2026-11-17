@@ -78,7 +78,7 @@ final class SummaryTest extends TestCase
     public function aSummaryThatCannotBeStoredIsRefused(string $text, string $model, string $promptVersion, string $expectedReason): void
     {
         $this->expectException(SummaryRefused::class);
-        $this->expectExceptionMessage($expectedReason);
+        $this->expectExceptionMessageIsOrContains($expectedReason);
         self::summaryOf($text, $model, $promptVersion);
     }
 

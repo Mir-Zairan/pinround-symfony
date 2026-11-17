@@ -146,7 +146,7 @@ final class DbalTicketSummaryQueriesTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
         try {
             $this->expectException(\LogicException::class);
-            $this->expectExceptionMessage('Ticket summaries are read in a transaction under the organization as tenant; none is open.');
+            $this->expectExceptionMessageIsOrContains('Ticket summaries are read in a transaction under the organization as tenant; none is open.');
             $this->queries()->historyOf(new TicketId(self::SHOP_7), self::visibilityOf(self::MIA, []));
         } finally {
             $this->tenantContext()->clear();

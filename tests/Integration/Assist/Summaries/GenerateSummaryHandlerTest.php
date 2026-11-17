@@ -218,7 +218,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
         self::assertGreaterThan(2000, mb_strlen(trim($tooLongText)));
         $this->assertTheRequestFailedAndTheSummaryStayed();
         self::assertSame(1, $this->processedMessageCount(), 'The job\'s transaction did not commit.');
-        self::assertSame([['An AI summary failed.', ['outcome' => 'App\Ticketing\Api\GeneratedSummaryRefused']]], $this->warnings());
+        self::assertSame([['An AI summary failed.', ['outcome' => \App\Ticketing\Api\GeneratedSummaryRefused::class]]], $this->warnings());
         $formatter = new JsonFormatter();
         foreach ($this->capturedLogRecords()->all() as $record) {
             if ($record->level->isHigherThan(Level::Debug)) {

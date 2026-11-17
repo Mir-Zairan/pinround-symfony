@@ -51,7 +51,7 @@ final class SummaryRequestViewTest extends TestCase
     public function aFailedRequestWithoutASentenceIsRefused(string $blankSentence): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A failed summary request says why in a sentence.');
+        $this->expectExceptionMessageIsOrContains('A failed summary request says why in a sentence.');
 
         SummaryRequestView::failed(new UserId(self::OMAR), new \DateTimeImmutable('2027-03-15 10:02:00 UTC'), $blankSentence);
     }

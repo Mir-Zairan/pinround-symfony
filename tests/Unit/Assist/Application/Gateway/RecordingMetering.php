@@ -19,7 +19,7 @@ final class RecordingMetering implements Metering
     /** @var list<array{usage: AiCallUsage, feature: AiFeature, caller: ActorContext}> */
     public array $rows = [];
 
-    public function __construct(private OrganizationId $tenant)
+    public function __construct(private readonly OrganizationId $tenant)
     {
     }
 

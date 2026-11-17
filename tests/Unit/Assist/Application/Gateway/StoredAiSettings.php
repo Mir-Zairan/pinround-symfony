@@ -22,11 +22,11 @@ final class StoredAiSettings implements AiSettingsQueries
      * @param non-empty-string|null $providerKey
      */
     public function __construct(
-        private OrganizationId $organizationId,
-        private AiSettings $settings,
+        private readonly OrganizationId $organizationId,
+        private readonly AiSettings $settings,
         #[\SensitiveParameter]
-        private ?string $providerKey = null,
-        private bool $isKeyUnreadable = false,
+        private readonly ?string $providerKey = null,
+        private readonly bool $isKeyUnreadable = false,
     ) {
     }
 
