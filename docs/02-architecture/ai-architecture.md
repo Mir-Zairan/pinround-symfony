@@ -12,7 +12,7 @@ How pinround uses AI to help people understand and sort work, while each company
 - [Features, prompt templates and output schemas](#features-prompt-templates-and-output-schemas) — versioned prompts (`PromptVersion`), delimited ticket data, the answer check and JSON schemas.
 - [Summaries pipeline](#summaries-pipeline) — on demand (queued job, Valkey request state, stored by Ticketing), history; on sync, "Use as main summary" and the cache still to build.
 - [Private explanations](#private-explanations) — "Explain it to me" and Share.
-- [Intake suggestions and duplicates](#intake-suggestions-and-duplicates) — type, priority, risk, missing info, duplicates.
+- [Intake suggestions and duplicates](#intake-suggestions-and-duplicates) — type, priority, risk, missing info, duplicates; the queued, polled check.
 - [Laptop mode protocol](#laptop-mode-protocol) — browser ↔ Ollama ↔ pinround.
 - [Vision pin suggestions (later)](#vision-pin-suggestions-later) — AI pins on screenshots.
 - [Cost, rate limits and metering](#cost-rate-limits-and-metering) — budgets per org.
@@ -220,6 +220,7 @@ Two layers ([ADR-0022](../03-adr/0022-search-and-duplicates.md)):
 2. **With AI (policy allows):**
    - **Word check first.** Before "Check with AI" sends the draft, the security word list runs on it in PHP. A match makes the draft team-only, so it is **never sent to cloud AI** (laptop AI may still be used). The draft's own visibility decides the provider, not the AI.
    - The intake template gets the report and the top 80 open ticket keys and titles (titles only; team-only tickets are excluded unless the admin allows cloud AI for them; the [ticket visibility predicate](data-model.md#ticket-visibility-predicate) applies). It returns the JSON above.
+   - **Queued, then polled (built, backend only).** `IntakeAssist::suggest` reads the requester through `AiRequesters` (as the summary path does) and opens the check on the state Valkey: a small state the page polls with `IntakeAssist::checkOf`, and the draft under a key of its own (an hour; removed on every end path), so a poll never reads the draft. A person has at most 3 checks open per organization; a fourth is refused with "You have 3 AI checks running. Wait for one to finish." The `GenerateIntakeSuggestion` job takes the draft before its one gateway call and stores the checked answer in `ast_suggestion` (`IntakeSuggestionMapper`), for the requester only. No `SuggestionReady` event is emitted yet.
    - **Optional embeddings:** if the org enables semantic duplicates, each ticket gets an embedding (title + summary) in pgvector through the Store — except team-only tickets, unless the admin allows cloud AI for them (embedding means sending the text to the embedding model). The candidate list sent to the model is then the top 20 by vector similarity instead of 80 by recency. Laptop-only orgs skip embeddings (the server cannot embed without a server-side model).
 
 Risk: the rule-based word list (security, leak, password, data loss, crash, outage words) always runs. AI `risky = true` adds the "risk" reason. Only the word list sets restricted visibility, because visibility must not depend on a model's mood.

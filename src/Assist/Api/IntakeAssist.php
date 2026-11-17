@@ -17,7 +17,7 @@ interface IntakeAssist
     /**
      * Checks the draft's sizes, then decides the organization's AI policy for the person and draft as the job's gateway
      * call will, the draft's words included, and whether the person has an AI call left without counting one, then
-     * keeps the draft with the check's state and queues the job. Reads under row-level security, so it needs an open
+     * opens the check, its draft kept apart from the state checkOf() reads, and queues the job. Reads under row-level security, so it needs an open
      * transaction whose tenant is $organizationId. Queueing does not wait for that transaction: the job is sent at once.
      * Whether the person may report in the project is the page's voter's to decide (TicketCreationVoter).
      *
@@ -25,8 +25,9 @@ interface IntakeAssist
      *
      * @throws IntakeCheckRefused when the project id is no canonical uuid, the draft is too long or not UTF-8, the
      *                            person is no member, the policy says no (AI off or for leads only, the laptop, or a
-     *                            draft that mentions security on its way to cloud AI) or the person has no AI call left
-     *                            this hour; nothing is kept or queued then
+     *                            draft that mentions security on its way to cloud AI), the person has no AI call left
+     *                            this hour, or the person has 3 checks open in the organization already; nothing is
+     *                            kept or queued then
      * @throws \RuntimeException  when the check's state or the queue cannot be reached; the check is not kept then, so
      *                            the person may try again
      * @throws \Throwable         the call limit's storage error when it cannot be read; nothing is queued then

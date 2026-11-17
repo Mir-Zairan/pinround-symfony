@@ -23,7 +23,7 @@ use App\Ticketing\Api\ListFilter;
 /**
  * Refuses a draft over AiDraft's caps first, then asks AiTaskAdmission, the check the job's gateway call makes first,
  * without reading the draft's candidates, and the person's call limit without counting a call, so a check the gateway
- * would refuse queues nothing; then keeps the draft with the check's state, at most
+ * would refuse queues nothing; then opens the check with its draft under a key of its own, at most
  * IntakeRequests::MAX_OPEN_CHECKS_PER_PERSON open at once per person, and queues the job.
  */
 final readonly class IntakeAssistService implements IntakeAssist
