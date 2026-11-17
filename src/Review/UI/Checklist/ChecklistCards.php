@@ -9,17 +9,21 @@ use App\Review\Api\ChecklistPermission;
 use App\Review\Api\ChecklistQueries;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
+use App\Ticketing\Api\TicketTurnQueries;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
- * Builds a ticket's checklist card for the logged-in viewer in a fixed number of queries, whatever its number of items:
- * the items in one, and ChecklistPermission MARK_FIXED and CHECK decided once each, on the first item, as CheckItemVoter
- * decides them on the item's ticket alone, which every item of the card shares.
+ * Builds a ticket's checklist card for the logged-in viewer in two queries, whatever its number of items: the items, and
+ * the ticket's facts, which CheckItemVoter then decides ChecklistPermission MARK_FIXED and CHECK on without reading them
+ * again. Both are decided once, on the first item, as the voter decides them on the item's ticket alone, which every
+ * item of the card shares.
  */
 final readonly class ChecklistCards
 {
     public function __construct(
         private ChecklistQueries $checklistQueries,
+        private TicketTurnQueries $ticketTurnQueries,
         private AuthorizationCheckerInterface $authorizationChecker,
     ) {
     }
@@ -37,12 +41,24 @@ final readonly class ChecklistCards
             return null;
         }
         $firstItem = $checklist->items[0];
-        $itemFacts = new CheckItemAccessFacts($organizationId, $firstItem->itemId, $checklist->roundId, $ticketId, $firstItem->pinNumber);
+        $itemFacts = new CheckItemAccessFacts($organizationId, $firstItem->itemId, $checklist->roundId, $ticketId, $firstItem->pinNumber, $this->ticketOf($ticketId));
 
         return ChecklistCard::of(
             $checklist,
             $this->authorizationChecker->isGranted(ChecklistPermission::MARK_FIXED, $itemFacts),
             $this->authorizationChecker->isGranted(ChecklistPermission::CHECK, $itemFacts),
         );
+    }
+
+    /**
+     * @return TicketTurnSnapshot|null null when the facts cannot be read, so the voter reads them itself and denies
+     */
+    private function ticketOf(TicketId $ticketId): ?TicketTurnSnapshot
+    {
+        try {
+            return $this->ticketTurnQueries->factsOf($ticketId);
+        } catch (\LogicException) {
+            return null;
+        }
     }
 }

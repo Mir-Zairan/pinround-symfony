@@ -8,6 +8,7 @@ use App\Identity\Domain\User;
 use App\Review\Api\RoundRefused;
 use App\Review\UI\Component\DraftRoundEditor;
 use App\Review\UI\Component\RoundsSection;
+use App\Review\UI\Controller\RefusedWithToast;
 use App\Review\UI\DraftRoundController;
 use App\Review\UI\RoundsController;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -290,7 +291,7 @@ final class DraftRoundControllerTest extends WebTestCase
                         $content = (string) $this->client->getResponse()->getContent();
                         self::assertResponseStatusCodeSame(404, $person.' '.$url);
                         self::assertStringContainsString(RoundRefused::NOT_FOUND, $content, $person.' '.$url);
-                        self::assertStringNotContainsString(DraftRoundController::FORM_EXPIRED, $content, $person.' '.$url);
+                        self::assertStringNotContainsString(RefusedWithToast::FORM_EXPIRED, $content, $person.' '.$url);
                         self::assertSame($before, $this->roundRowsOf($ticketId), $person.' '.$url);
                     }
                 }
@@ -386,15 +387,15 @@ final class DraftRoundControllerTest extends WebTestCase
         $this->logIn($this->client, $this->people['Omar']);
 
         $this->client->request('POST', self::START, [], [], self::TURBO_FORM_HEADERS);
-        self::assertSame(DraftRoundController::FORM_EXPIRED, $this->toastOfTheRefusal());
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheRefusal());
         self::assertSame([], $this->roundRowsOf($ticketId));
 
         $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $before = $this->roundRowsOf($ticketId);
         $this->client->request('POST', $this->shareUrl($draft), [DraftRoundController::CSRF_FIELD => 'not-the-token'], [], self::TURBO_FORM_HEADERS);
-        self::assertSame(DraftRoundController::FORM_EXPIRED, $this->toastOfTheRefusal());
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheRefusal());
         $this->client->request('POST', $this->deleteUrl($draft), [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, 'another_form')]);
-        self::assertSame(DraftRoundController::FORM_EXPIRED, $this->toastAfterTheRedirect());
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastAfterTheRedirect());
         self::assertSame($before, $this->roundRowsOf($ticketId));
     }
 

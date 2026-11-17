@@ -66,7 +66,6 @@ final class VerdictController extends AbstractController
     /** With the pin's number. */
     public const string PIN_VERDICT_UNDONE = 'Verdict on pin %d undone.';
     public const string ONLY_TESTER_OR_LEAD = "Only the ticket's tester or the team lead can give verdicts.";
-    public const string FORM_EXPIRED = 'This page was open too long. Reload it and try again.';
     /** The toast app.js leaves when a verdict form gets no stream back. */
     public const string SAVE_FAILED = 'Could not save the verdict. Try again.';
 
@@ -80,6 +79,7 @@ final class VerdictController extends AbstractController
         private readonly VisibleTicketLookup $visibleTicketLookup,
         private readonly ReviewRoundQueries $reviewRoundQueries,
         private readonly VerdictCommands $verdictCommands,
+        private readonly RefusalAnswers $refusalAnswers,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -192,10 +192,10 @@ final class VerdictController extends AbstractController
                     throw new NotFoundHttpException(RoundController::NOT_FOUND);
                 }
                 if (!$this->isGranted(VerdictPermission::SET, $facts)) {
-                    throw new VerdictRefusedWithToast(self::ONLY_TESTER_OR_LEAD, Response::HTTP_FORBIDDEN);
+                    throw new RefusedWithToast(self::ONLY_TESTER_OR_LEAD, Response::HTTP_FORBIDDEN);
                 }
                 if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
-                    throw new VerdictRefusedWithToast(self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+                    throw RefusedWithToast::formExpired();
                 }
                 [$area, $target] = $targetOf($round) ?? throw new NotFoundHttpException($notFound);
                 $areaPosition = $area->position;
@@ -206,7 +206,7 @@ final class VerdictController extends AbstractController
                     if ($refused->isNotFound()) {
                         throw new NotFoundHttpException($refused->getMessage(), $refused);
                     }
-                    throw new VerdictRefusedWithToast($refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+                    throw new RefusedWithToast($refused->getMessage());
                 }
 
                 $changed = $this->reviewRoundQueries->roundOf($visible->ticket->id, $number, $visible->actor->userId())
@@ -223,8 +223,8 @@ final class VerdictController extends AbstractController
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(RoundsController::NOT_FOUND);
-        } catch (VerdictRefusedWithToast $refused) {
-            return $this->respondToRefusal($request, $key, $number, $areaPosition, $refused);
+        } catch (RefusedWithToast $refused) {
+            return $this->refusalAnswers->answer($request, $refused, fn (string $toast): Response => $this->redirectToArea($key, $number, $areaPosition, $toast));
         }
 
         return $this->respondToSaved($request, $key, $number, $answer, $focusedControlId);
@@ -253,22 +253,6 @@ final class VerdictController extends AbstractController
                 'ticketRoute' => RoundsController::TICKET_ROUTE,
             ],
             new Response(null, Response::HTTP_OK, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
-        );
-    }
-
-    /**
-     * A Turbo form gets the toast alone as a stream, which reads nothing; any other form the round page with it.
-     */
-    private function respondToRefusal(Request $request, string $key, int $number, ?int $areaPosition, VerdictRefusedWithToast $refused): Response
-    {
-        if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
-            return $this->redirectToArea($key, $number, $areaPosition, $refused->toast());
-        }
-
-        return $this->render(
-            '@Web/_toast_stream.html.twig',
-            ['message' => $refused->toast()],
-            new Response(null, $refused->status(), ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
         );
     }
 

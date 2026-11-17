@@ -109,13 +109,17 @@ final readonly class RoundCards
     private function cardOf(RoundView $round, string $ownerName, array $images, ?ChecklistCard $checklist = null): RoundCard
     {
         $domId = 'round-'.$round->id;
-        if (self::CHECKLIST === $round->kind && null !== $checklist && $checklist->roundId === $round->id) {
+        if (self::CHECKLIST === $round->kind) {
+            // Checklist::fromReport makes none without pins, DbalChecklists stores the round with its items in one
+            // savepoint, and no command removes a report's pins: a round without items is broken data, not an empty card.
+            if (null === $checklist || $checklist->roundId !== $round->id) {
+                throw new \LogicException(\sprintf('Checklist round %s has no items.', $round->id));
+            }
+
             return new RoundCard($round->id, $domId, $checklist->headline, $checklist->status, false, [], false, number: $round->number, checklist: $checklist);
         }
         if (!$this->showsPictures($round)) {
-            $title = self::CHECKLIST === $round->kind ? 'Checklist from the report' : 'Review';
-
-            return new RoundCard($round->id, $domId, \sprintf('Round %d · %s · by %s', $round->number ?? 0, $title, $ownerName), null, false, [], true, number: $round->number);
+            return new RoundCard($round->id, $domId, \sprintf('Round %d · Review · by %s', $round->number ?? 0, $ownerName), null, false, [], true, number: $round->number);
         }
 
         $pictureLimit = self::pictureLimitOf($round);

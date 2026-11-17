@@ -8,6 +8,7 @@ use App\Identity\Domain\User;
 use App\Review\UI\Checklist\ChecklistCard;
 use App\Review\UI\Component\DraftRoundEditor;
 use App\Review\UI\Component\RoundsSection;
+use App\Review\UI\Controller\ChecklistController;
 use App\Review\UI\RoundCards;
 use App\Review\UI\RoundsController;
 use App\Review\UI\RoundsSectionView;
@@ -53,8 +54,8 @@ final class RoundsFrameTest extends WebTestCase
      * ticket's facts for RoundPermission DRAFT_CREATE ("Start a draft round"), the visibility check and the rounds.
      */
     private const int EMPTY_FRAME_QUERIES = 16;
-    /** The checklist's items, then the ticket's facts for ChecklistPermission MARK_FIXED and for CHECK. */
-    private const int CHECKLIST_QUERIES = 3;
+    /** The checklist's items, then the ticket's facts, which ChecklistPermission MARK_FIXED and CHECK are both decided on. */
+    private const int CHECKLIST_QUERIES = 2;
     private const string ROUNDS_PAGE = '/t/SHOP-1/rounds';
     private const string ROUNDS = 'turbo-frame#ticket-rounds';
     /** What Turbo sends when it loads the Rounds section's frame. */
@@ -206,6 +207,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertSame(['Mark fixed'], $card->filter('form button')->each(static fn (Crawler $button): string => $button->text()), 'The assignee marks the open pin fixed and checks none.');
         self::assertSame('/t/SHOP-1/checklist/'.$openItem.'/fixed', $card->filter('form')->attr('action'));
         self::assertSame('_top', $card->filter('form')->attr('data-turbo-frame'));
+        self::assertSame(ChecklistController::SAVE_FAILED, $card->filter('form')->attr('data-failed-toast'), 'assets/app.js reloads with this toast when the answer is no stream.');
         self::assertCount(0, $page->filter(self::ROUNDS.' [autofocus]'), 'Only the stream of a change moves the focus.');
         self::assertCount(1, $page->filter(self::ROUNDS.' article#round-'.$review.' a.round-card__open'));
         self::assertCount(1, $page->filter(self::ROUNDS.' figure'), "Only the report's picture.");
@@ -227,6 +229,23 @@ final class RoundsFrameTest extends WebTestCase
         $card = $page->filter(self::ROUNDS.' article#round-'.$checklist);
         self::assertSame(['Open'], $card->filter('.check-state')->each(static fn (Crawler $chip): string => $chip->text()));
         self::assertCount(0, $card->filter('form, button, input'));
+    }
+
+    /**
+     * No command makes a checklist round without items, so one is broken data: the frame fails rather than show it as a
+     * round with nothing to check.
+     */
+    #[Test]
+    public function aChecklistRoundWithNoItemsIsAnErrorNotAnEmptyCard(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(500);
+        self::assertCount(0, $page->filter('.round-card, .checklist'));
     }
 
     #[Test]
@@ -685,7 +704,7 @@ final class RoundsFrameTest extends WebTestCase
 
     /**
      * The checklist card adds a pinned number of queries, the same for one item and five: its items in one, and
-     * ChecklistPermission MARK_FIXED and CHECK decided once each, on the ticket's facts.
+     * the ticket's facts in one, which ChecklistPermission MARK_FIXED and CHECK are both decided on.
      */
     #[Test]
     public function aChecklistAddsTheSameQueriesForOneItemAndForFive(): void

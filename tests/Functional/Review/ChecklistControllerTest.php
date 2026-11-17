@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Review;
 use App\Identity\Domain\User;
 use App\Review\Api\ChecklistRefused;
 use App\Review\UI\Controller\ChecklistController;
+use App\Review\UI\Controller\RefusedWithToast;
 use App\Review\UI\RoundsController;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -231,9 +232,9 @@ final class ChecklistControllerTest extends WebTestCase
         $this->logIn($this->client, $this->people['Omar']);
 
         $this->client->request('POST', $this->itemUrl(1, 'fixed'), [], [], self::TURBO_FORM_HEADERS);
-        self::assertSame(ChecklistController::FORM_EXPIRED, $this->toastOfTheStream(422));
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheStream(422));
         $this->client->request('POST', $this->itemUrl(1, 'fixed'), [ChecklistController::CSRF_FIELD => $this->csrfTokenFor($this->client, ChecklistController::csrfIdOf('SHOP-2'))], [], self::TURBO_FORM_HEADERS);
-        self::assertSame(ChecklistController::FORM_EXPIRED, $this->toastOfTheStream(422));
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheStream(422));
 
         self::assertSame(self::STATES_AS_SEEDED, $this->storedStates());
     }
@@ -283,9 +284,11 @@ final class ChecklistControllerTest extends WebTestCase
     #[Test]
     public function anAnonymousVisitorIsSentToLogInAndChangesNothing(): void
     {
-        $this->client->request('POST', $this->itemUrl(1, 'fixed'));
+        foreach ([$this->itemUrl(1, 'fixed'), $this->itemUrl(2, 'ok'), $this->itemUrl(5, 'not-fixed')] as $url) {
+            $this->client->request('POST', $url, [ChecklistController::CSRF_FIELD => 'any']);
 
-        self::assertResponseRedirects();
+            self::assertResponseRedirects('/login', 302, $url);
+        }
         self::assertSame(self::STATES_AS_SEEDED, $this->storedStates());
     }
 

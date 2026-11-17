@@ -61,7 +61,8 @@ final class ChecklistController extends AbstractController
     public const string SENT_BACK = 'Pin %d sent back.';
     public const string ONLY_THE_ASSIGNEE = "Only the ticket's assignee can mark a pin fixed.";
     public const string ONLY_THE_TESTER = "Only the ticket's tester can check a fixed pin.";
-    public const string FORM_EXPIRED = 'This page was open too long. Reload it and try again.';
+    /** The toast app.js leaves when a checklist form gets no stream back. */
+    public const string SAVE_FAILED = 'Could not save the checklist change. Try again.';
 
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
@@ -74,6 +75,7 @@ final class ChecklistController extends AbstractController
         private readonly ChecklistQueries $checklistQueries,
         private readonly ChecklistCommands $checklistCommands,
         private readonly ChecklistCards $checklistCards,
+        private readonly RefusalAnswers $refusalAnswers,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -156,10 +158,10 @@ final class ChecklistController extends AbstractController
                     throw new NotFoundHttpException(ChecklistRefused::NOT_FOUND);
                 }
                 if (!$this->isGranted($permission, $item)) {
-                    throw new VerdictRefusedWithToast($deniedToast, Response::HTTP_FORBIDDEN);
+                    throw new RefusedWithToast($deniedToast, Response::HTTP_FORBIDDEN);
                 }
                 if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
-                    throw new VerdictRefusedWithToast(self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+                    throw RefusedWithToast::formExpired();
                 }
 
                 try {
@@ -168,7 +170,7 @@ final class ChecklistController extends AbstractController
                     if ($refused->isNotFound()) {
                         throw new NotFoundHttpException($refused->getMessage(), $refused);
                     }
-                    throw new VerdictRefusedWithToast($refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+                    throw new RefusedWithToast($refused->getMessage());
                 }
 
                 return [
@@ -180,8 +182,8 @@ final class ChecklistController extends AbstractController
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(RoundsController::NOT_FOUND);
-        } catch (VerdictRefusedWithToast $refused) {
-            return $this->respondToRefusal($request, $key, $refused);
+        } catch (RefusedWithToast $refused) {
+            return $this->refusalAnswers->answer($request, $refused, fn (string $toast): Response => $this->redirectToRounds($key, $toast));
         }
 
         return $this->respondToChanged($request, $key, $answer['toast'], $answer['checklist'], $answer['itemId']);
@@ -203,22 +205,6 @@ final class ChecklistController extends AbstractController
                 'checklistCsrfId' => self::csrfIdOf($key),
             ],
             new Response(null, Response::HTTP_OK, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
-        );
-    }
-
-    /**
-     * A Turbo form gets the toast alone as a stream, which reads nothing; any other form the ticket page with it.
-     */
-    private function respondToRefusal(Request $request, string $key, VerdictRefusedWithToast $refused): Response
-    {
-        if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
-            return $this->redirectToRounds($key, $refused->toast());
-        }
-
-        return $this->render(
-            '@Web/_toast_stream.html.twig',
-            ['message' => $refused->toast()],
-            new Response(null, $refused->status(), ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
         );
     }
 

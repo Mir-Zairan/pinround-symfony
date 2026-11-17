@@ -46,13 +46,24 @@ document.addEventListener('turbo:frame-missing', (event) => {
   event.preventDefault();
   window.location.assign(event.detail.response.url);
 });
-// A page-level Turbo form (the ticket's move forms) expects a Turbo Stream. Any other answer (a plain 403/404/500,
-// the login page after the session expired) would be swapped in as a Turbo visit whose scripts the CSP blocks, so load
-// a real page instead: the redirect's target, or this page again, as the answered URL may be POST-only. Before that
-// reload, a form with data-failed-toast leaves its text as the next page's toast; a form without one reloads silently.
+// A form whose answer is a Turbo Stream: a page-level Turbo form (the ticket's move forms), or one inside a frame that
+// posts to _top and says so with data-failed-toast (the checklist's). The other _top forms in a frame (the draft
+// round's, the queue's) answer with a redirect whose page shows the flashed toast, which only Turbo's own visit keeps,
+// and a form that targets a frame is that frame's to render.
+function expectsTurboStream(form) {
+  const frameTarget = form.getAttribute('data-turbo-frame');
+  if (frameTarget === '_top') {
+    return form.hasAttribute('data-failed-toast');
+  }
+  return frameTarget === null && !form.closest('turbo-frame');
+}
+// Any answer to such a form but a stream (a plain 403/404/500, the login page after the session expired) would be
+// swapped in as a Turbo visit whose scripts the CSP blocks, so load a real page instead: the redirect's target, or this
+// page again, as the answered URL may be POST-only. Before that reload, a form with data-failed-toast leaves its text
+// as the next page's toast; a form without one reloads silently.
 document.addEventListener('turbo:before-fetch-response', (event) => {
   const form = event.target;
-  if (!(form instanceof HTMLFormElement) || form.closest('turbo-frame') || form.hasAttribute('data-turbo-frame')) {
+  if (!(form instanceof HTMLFormElement) || !expectsTurboStream(form)) {
     return;
   }
   const { fetchResponse } = event.detail;

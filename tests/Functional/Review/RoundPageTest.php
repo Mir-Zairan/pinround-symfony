@@ -339,7 +339,8 @@ final class RoundPageTest extends WebTestCase
     public function theOpenRoundLinkAppearsOnlyForRoundsTheViewerMayOpen(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
-        $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_EARLIER);
+        $reportShot = $this->addScreenshot($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_EARLIER), $this->addMedia('ready'), 0, 'Report shot', null);
+        $this->addCheckItem($this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_EARLIER), $this->addPin($reportShot, 1, '10.00', '10.00', 'A note', 'Mia'), 'open');
         $this->addRound($ticketId, 2, 'review', 'Lena', self::SHARED_EARLIER);
         $this->addRound($ticketId, null, 'draft', 'Lena', null);
         $this->logIn($this->client, $this->people['Mia']);
@@ -348,8 +349,8 @@ final class RoundPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         $links = $page->filter('a.round-card__open');
-        self::assertSame(['Open round', 'Open round'], $links->each(static fn (Crawler $link): string => $link->text()));
-        self::assertSame(['/t/SHOP-1/rounds/1', '/t/SHOP-1/rounds/2'], $links->each(static fn (Crawler $link): string => (string) $link->attr('href')));
+        self::assertSame(['Open round'], $links->each(static fn (Crawler $link): string => $link->text()), 'The checklist card shows its rows and has no page link.');
+        self::assertSame(['/t/SHOP-1/rounds/2'], $links->each(static fn (Crawler $link): string => (string) $link->attr('href')));
         self::assertCount(0, $page->filter('button.round-card__open'));
 
         foreach ($links->each(static fn (Crawler $link): string => (string) $link->attr('href')) as $href) {

@@ -1,9 +1,11 @@
 {#- The checklist round's card body (ChecklistCard): its header, the rule, and one row per pin of the report with the
     buttons the viewer may use. Each button posts a form of its own out of the frame (_top), so ChecklistController's
-    stream reaches the page. -#}
+    stream reaches the page; data-failed-toast tells assets/app.js the form expects that stream, and is its toast when
+    the answer is none. -#}
 {% set checklistController = 'App\\Review\\UI\\Controller\\ChecklistController' %}
 {% set csrfField = constant(checklistController ~ '::CSRF_FIELD') %}
 {% set csrfToken = checklist.hasControls ? csrf_token(checklistCsrfId) : null %}
+{% set saveFailedToast = constant(checklistController ~ '::SAVE_FAILED') %}
 {#- Set by the change's stream only: Turbo focuses the [autofocus] control once the card holding the clicked one is gone. -#}
 {% set focusedControlId = focusedControlId|default(null) %}
 <div id="{{ checklist.id }}" class="checklist">
@@ -22,17 +24,17 @@
                 {% if row.mayMarkFixed or row.mayCheck %}
                     <div class="checklist__actions">
                         {% if row.mayMarkFixed %}
-                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_FIXED_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top">
+                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_FIXED_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                                 <twig:Button type="submit" variant="tonal" size="sm" id="{{ row.markFixedId() }}" :autofocus="row.markFixedId() is same as(focusedControlId)" aria-describedby="{{ noteId }}">Mark fixed</twig:Button>
                             </form>
                         {% endif %}
                         {% if row.mayCheck %}
-                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_OK_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top">
+                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_OK_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                                 <twig:Button type="submit" variant="tonal" size="sm" id="{{ row.okId() }}" :autofocus="row.okId() is same as(focusedControlId)" aria-describedby="{{ noteId }}">OK</twig:Button>
                             </form>
-                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_NOT_FIXED_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top">
+                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_NOT_FIXED_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                                 <twig:Button type="submit" variant="outline" size="sm" aria-describedby="{{ noteId }}">Not fixed</twig:Button>
                             </form>
