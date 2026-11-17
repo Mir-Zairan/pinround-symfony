@@ -67,6 +67,8 @@ Browser: LCP ≤ 2.0 s on a mid laptop, INP ≤ 200 ms, JavaScript ≤ 120 KB gz
 
 The query counts are enforced in tests (see [testing-strategy.md](testing-strategy.md)).
 
+Every main page shown to a team member or manager also runs one indexed read of the organization's AI setting, for the header's "Local AI" chip (P08.T8, 2026-11-18). It counts toward each page's budget above; frame requests, which render no header, skip it.
+
 ## Principles
 
 1. **Read models for questions people ask all day.** "Whose turn is it?" and "what needs me?" are stored, not computed per request.
