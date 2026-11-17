@@ -21,6 +21,15 @@ final class AiUnavailable extends \RuntimeException
         return new self($provider, \sprintf('The AI provider %s has no key or URL set.', $provider));
     }
 
+    /**
+     * The organization stored its own key for the provider, but it cannot be decrypted. The operator's key is never used
+     * instead: the admin chose to send the organization's tickets on its own account.
+     */
+    public static function unreadableOrganizationKey(string $provider): self
+    {
+        return new self($provider, \sprintf('The organization\'s key for the AI provider %s cannot be read. An admin must enter it again.', $provider));
+    }
+
     public static function emptyAnswer(string $provider): self
     {
         return new self($provider, \sprintf('The AI provider %s answered with no text.', $provider));
