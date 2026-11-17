@@ -352,7 +352,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
   - `LocalAi::package(TicketId, Purpose, UserId): PromptPackage`
   - `LocalAi::accept(PackageId, string $output, string $model, UserId): void`
 - **Events:** `SummaryGenerated` (not emitted yet, see the [event catalogue](#event-catalogue)), `ExplanationShared`, `SuggestionReady`.
-- **Depends on:** Ticketing Api (a summary is stored through `TicketSummaryCommands`), Review Api, Organization Api (policy settings).
+- **Depends on:** Ticketing Api (a summary is stored through `TicketSummaryCommands`; the AI gateway's intake path checks a draft report's words with `DraftReportChecks`, reads the reporter's predicate from `TicketVisibilities` and their open duplicate candidates from `IntakeCandidateQueries`), Review Api, Organization Api (policy settings).
 - **More:** [ai-architecture.md](ai-architecture.md), ADRs [0018](../03-adr/0018-ai-provider-abstraction.md), [0019](../03-adr/0019-browser-local-ai.md), [0020](../03-adr/0020-ai-safety-and-prompt-injection.md).
 
 ### Integration (`int_`)

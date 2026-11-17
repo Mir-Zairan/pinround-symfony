@@ -44,7 +44,8 @@ use Symfony\Component\RateLimiter\Policy\Window;
  * he sees the checkout ticket for everyone but not the team-only one. Beta Bakery has a ticket for everyone under the
  * key SHOP-7, the checkout ticket's key in Acme Foods, so a leaked id would summarize the wrong ticket. The clock is
  * frozen in March 2027, a month whose usage partition the migrations always create. A draft report in SHOP has both
- * open tickets as candidates for Lena, the team-only one only when the admin lets team-only tickets go to cloud AI.
+ * open tickets as candidates for Lena, the team-only one only when the admin lets team-only tickets go to cloud AI; for
+ * Omar it never has the team-only one.
  */
 final class GuardedAiGatewayTest extends KernelTestCase
 {
@@ -345,6 +346,27 @@ final class GuardedAiGatewayTest extends KernelTestCase
         foreach ($this->fakeProvider()->calls() as $call) {
             self::assertEqualsCanonicalizing([$checkoutKey, $teamOnlyKey], self::candidateKeysIn($call['prompt']->content));
         }
+    }
+
+    #[Test]
+    public function aDraftOfOmarNeverCarriesTheShopTeamsTeamOnlyTicketEvenWhenTheAdminLetsTeamOnlyTicketsGoToCloudAi(): void
+    {
+        [$checkoutKey, $teamOnlyKey] = [self::keyOf(self::checkoutTicketId()), self::keyOf(self::teamOnlyTicketId())];
+        $this->fakeProvider()->answerNextCallsWith(self::intakeJsonNaming($teamOnlyKey, $checkoutKey), self::intakeJsonNaming($teamOnlyKey, $checkoutKey));
+
+        [$omarsResult] = $this->runAsOmar(self::AI_ON_IN_THE_CLOUD_WITH_TEAM_ONLY, self::intakeOf(self::draft()));
+        [$lenasResult] = $this->runAs(self::lena(), self::AI_ON_IN_THE_CLOUD_WITH_TEAM_ONLY, self::intakeOf(self::draft()));
+
+        self::assertCount(2, $this->fakeProvider()->calls());
+        $omarsCandidateKeys = self::candidateKeysIn($this->fakeProvider()->calls()[0]['prompt']->content);
+        $lenasCandidateKeys = self::candidateKeysIn($this->fakeProvider()->calls()[1]['prompt']->content);
+        self::assertNotSame([], $omarsCandidateKeys);
+        self::assertNotSame([], $lenasCandidateKeys);
+        self::assertSame([$checkoutKey], $omarsCandidateKeys);
+        self::assertEqualsCanonicalizing([$checkoutKey, $teamOnlyKey], $lenasCandidateKeys);
+        self::assertInstanceOf(AiResult::class, $omarsResult);
+        self::assertInstanceOf(AiResult::class, $lenasResult);
+        self::assertSame([[$checkoutKey], [$teamOnlyKey, $checkoutKey]], [$omarsResult->data['duplicates'] ?? null, $lenasResult->data['duplicates'] ?? null]);
     }
 
     #[Test]

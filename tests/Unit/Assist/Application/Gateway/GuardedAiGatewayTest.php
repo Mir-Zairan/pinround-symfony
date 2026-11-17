@@ -28,6 +28,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\IntakeCandidate;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use App\Ticketing\Application\Intake\WordListDraftReportChecks;
 use App\Ticketing\Domain\Intake\CheckReasons;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -36,8 +37,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * GuardedAiGateway with the real prompt builder, output validator and policy evaluator, and doubles of the ports that
- * behave as the real ones do. Omar drafts reports in the SHOP project, where he may see SHOP-3 and SHOP-5; SHOP-6 is
- * team-only and not his, so it is never a candidate.
+ * behave as the real ones do. Omar is in the Shop team and drafts reports in the SHOP project, where he may see SHOP-3
+ * and SHOP-5, for everyone; SHOP-6 is team-only in Pay, which he is not in, so it is never his candidate.
  */
 final class GuardedAiGatewayTest extends TestCase
 {
@@ -45,6 +46,7 @@ final class GuardedAiGatewayTest extends TestCase
     private const string LENA = '0197a3c0-0000-7000-8000-00000000a8b1';
     private const string OMAR = '0197a3c0-0000-7000-8000-00000000a8b2';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000a8c1';
+    private const string PAY_TEAM = '0197a3c0-0000-7000-8000-00000000a8c2';
     private const string CHECKOUT_TICKET = '0197a3c0-0000-7000-8000-00000000a8d1';
     private const string TEAM_ONLY_TICKET = '0197a3c0-0000-7000-8000-00000000a8d2';
     private const string TICKET_TEXT = 'Pressing Pay on the last checkout step does nothing.';
@@ -67,9 +69,9 @@ final class GuardedAiGatewayTest extends TestCase
         $this->tickets->add(new TicketId(self::CHECKOUT_TICKET), new AskedTicket(new PromptTicket('Checkout fails', self::TICKET_TEXT), false), [self::LENA, self::OMAR]);
         $this->tickets->add(new TicketId(self::TEAM_ONLY_TICKET), new AskedTicket(new PromptTicket('Card numbers in the log', self::TICKET_TEXT), true), [self::LENA, self::OMAR]);
         $this->candidates = new ListedIntakeCandidates(new OrganizationId(self::ACME_FOODS));
-        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-3', 'Basket total is wrong'), false, [self::LENA, self::OMAR]);
-        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-5', 'Pay button does nothing'), false, [self::LENA, self::OMAR]);
-        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-6', 'Refunds stay pending'), true, [self::LENA]);
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-3', 'Basket total is wrong'), self::facts(TicketVisibilityFacts::FOR_EVERYONE, self::PAY_TEAM));
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-5', 'Pay button does nothing'), self::facts(TicketVisibilityFacts::FOR_EVERYONE, null));
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-6', 'Refunds stay pending'), self::facts(TicketVisibilityFacts::TEAM_ONLY, self::PAY_TEAM));
         $this->limit = new CountingAiCallLimit();
         $this->metering = new RecordingMetering(new OrganizationId(self::ACME_FOODS));
         $this->givenSettings(self::settings());
@@ -422,6 +424,22 @@ final class GuardedAiGatewayTest extends TestCase
         self::assertSame([[], [], [], [], []], [$this->provider->calls, $this->metering->rows, $this->limit->counted, $this->aiSettings->keyReads, $this->candidates->reads]);
     }
 
+    #[Test]
+    public function aDraftWhenAiRunsOnlyOnTheLaptopIsSentToTheSetupSheetWithoutAProviderCallAUsageRowOrACountedCall(): void
+    {
+        $this->givenSettings(self::settings(where: AiSettings::WHERE_LAPTOP));
+        $this->givenProviderScript([self::INTAKE_JSON]);
+
+        try {
+            $this->gateway()->run(self::intakeOf(self::draft()), self::omar());
+            self::fail('A draft went to cloud AI when AI runs only on the laptop.');
+        } catch (AiNotAllowed $refusal) {
+            self::assertSame([PolicyRefusal::LaptopNotReady, PolicyRefusal::LaptopNotReady->sentence()], [$refusal->refusal, $refusal->getMessage()]);
+        }
+
+        self::assertSame([[], [], [], [], []], [$this->provider->calls, $this->metering->rows, $this->limit->counted, $this->aiSettings->keyReads, $this->candidates->reads]);
+    }
+
     private function gateway(): GuardedAiGateway
     {
         $admission = new AiTaskAdmission(
@@ -430,7 +448,7 @@ final class GuardedAiGatewayTest extends TestCase
             $this->tickets,
             new WordListDraftReportChecks(new CheckReasons()),
             $this->candidates,
-            new MemberTicketVisibilities(),
+            new MemberTicketVisibilities([self::LENA => [new TeamId(self::SHOP_TEAM), new TeamId(self::PAY_TEAM)], self::OMAR => [new TeamId(self::SHOP_TEAM)]]),
         );
 
         return new GuardedAiGateway($this->aiSettings, $admission, new PromptBuilder(), $this->limit, $this->provider, new OutputValidator(), $this->metering);
@@ -491,7 +509,12 @@ final class GuardedAiGatewayTest extends TestCase
 
     private static function omar(): ActorContext
     {
-        return new ActorContext(new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS), Roles::none());
+        return new ActorContext(new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS), new Roles(false, false, [], [new TeamId(self::SHOP_TEAM)], []));
+    }
+
+    private static function facts(string $visibility, ?string $teamId): TicketVisibilityFacts
+    {
+        return new TicketVisibilityFacts(new OrganizationId(self::ACME_FOODS), $visibility, null === $teamId ? null : new TeamId($teamId), new UserId(self::LENA));
     }
 
     private static function lena(): ActorContext

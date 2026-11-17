@@ -128,9 +128,9 @@ final readonly class SymfonyAiProvider implements AiProvider
 
     /**
      * Unicode spaces, line separators and the zero-width space and BOM count as blank too: a model can answer with
-     * them alone. Text that is not valid UTF-8 is not blank.
+     * them alone. Text that is not valid UTF-8 is not blank. FakeProvider refuses the same answers with this check.
      */
-    private static function isBlank(string $text): bool
+    public static function isBlank(string $text): bool
     {
         return 1 === preg_match('/\A[\s\p{Z}\x{200B}\x{FEFF}]*\z/u', $text);
     }

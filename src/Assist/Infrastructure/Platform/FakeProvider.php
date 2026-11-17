@@ -24,9 +24,6 @@ final class FakeProvider implements AiProvider, ResetInterface
 {
     public const string PROVIDER = 'fake';
 
-    /** SymfonyAiProvider's blank answer: only white space, separators and zero-width characters. */
-    private const string BLANK_PATTERN = '/\A[\s\p{Z}\x{200B}\x{FEFF}]*\z/u';
-
     /** @var list<array{prompt: AiPrompt, choice: ProviderChoice}> */
     private array $calls = [];
 
@@ -50,7 +47,7 @@ final class FakeProvider implements AiProvider, ResetInterface
         }
 
         $text = array_shift($this->scriptedTexts) ?? self::fixedTextFor($prompt->feature);
-        if (1 === preg_match(self::BLANK_PATTERN, $text)) {
+        if (SymfonyAiProvider::isBlank($text)) {
             throw AiUnavailable::emptyAnswer($choice->provider->value);
         }
 

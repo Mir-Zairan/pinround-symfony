@@ -22,6 +22,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\IntakeCandidate;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use App\Ticketing\Application\Intake\WordListDraftReportChecks;
 use App\Ticketing\Domain\Intake\CheckReasons;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -33,8 +34,9 @@ use PHPUnit\Framework\TestCase;
  * check, and doubles of the settings, ticket and candidate reads. It has no provider and no limit to reach, so what it
  * may never do is read the organization's provider key, which only the gateway needs once a call is about to go out.
  *
- * Omar drafts reports in the SHOP project. He may see SHOP-3 and SHOP-5, for everyone, and SHOP-4, a team-only ticket
- * he is on; SHOP-6 is team-only and not his, and OPS-1 is in another project.
+ * Omar is in the Shop team and drafts reports in the SHOP project. He may see SHOP-3 and SHOP-5, for everyone, SHOP-4,
+ * team-only in Shop, and SHOP-7, team-only in Pay but reported by him; SHOP-6 is team-only in Pay, which he is not in,
+ * and OPS-1 is in another project.
  */
 final class AiTaskAdmissionTest extends TestCase
 {
@@ -43,6 +45,7 @@ final class AiTaskAdmissionTest extends TestCase
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000c7f12';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000c7f13';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000c7f21';
+    private const string PAY_TEAM = '0197a3c0-0000-7000-8000-0000000c7f22';
     private const string CHECKOUT_TICKET = '0197a3c0-0000-7000-8000-0000000c7f31';
     private const string TEAM_ONLY_TICKET = '0197a3c0-0000-7000-8000-0000000c7f32';
     private const string MISSING_TICKET = '0197a3c0-0000-7000-8000-0000000c7f39';
@@ -61,12 +64,16 @@ final class AiTaskAdmissionTest extends TestCase
         // Mia is in Acme Foods but not in Shop, so she may not see the team-only ticket.
         $this->tickets->add(new TicketId(self::TEAM_ONLY_TICKET), new AskedTicket(new PromptTicket('Card numbers in the log', 'Card numbers show.'), true), [self::LENA, self::OMAR]);
         $this->candidates = new ListedIntakeCandidates(new OrganizationId(self::ACME_FOODS));
-        $this->candidates->add(self::OPS_PROJECT, new IntakeCandidate('OPS-1', 'Backups run late'), false, [self::LENA, self::OMAR]);
-        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-3', 'Basket total is wrong'), false, [self::LENA, self::OMAR]);
-        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-4', 'Card form shows the full number'), true, [self::LENA, self::OMAR]);
-        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-5', 'Pay button does nothing'), false, [self::LENA, self::OMAR]);
-        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-6', 'Refunds stay pending'), true, [self::LENA]);
-        $this->visibilities = new MemberTicketVisibilities();
+        $this->candidates->add(self::OPS_PROJECT, new IntakeCandidate('OPS-1', 'Backups run late'), self::facts(TicketVisibilityFacts::FOR_EVERYONE, null, self::LENA));
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-3', 'Basket total is wrong'), self::facts(TicketVisibilityFacts::FOR_EVERYONE, self::PAY_TEAM, self::LENA));
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-4', 'Card form shows the full number'), self::facts(TicketVisibilityFacts::TEAM_ONLY, self::SHOP_TEAM, self::LENA));
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-5', 'Pay button does nothing'), self::facts(TicketVisibilityFacts::FOR_EVERYONE, null, self::LENA));
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-6', 'Refunds stay pending'), self::facts(TicketVisibilityFacts::TEAM_ONLY, self::PAY_TEAM, self::LENA));
+        $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-7', 'Refund mail has no amount'), self::facts(TicketVisibilityFacts::TEAM_ONLY, self::PAY_TEAM, self::OMAR));
+        $this->visibilities = new MemberTicketVisibilities([
+            self::LENA => [new TeamId(self::SHOP_TEAM), new TeamId(self::PAY_TEAM)],
+            self::OMAR => [new TeamId(self::SHOP_TEAM)],
+        ]);
         $this->givenSettings(self::settings());
     }
 
@@ -151,31 +158,26 @@ final class AiTaskAdmissionTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{\Closure(): AiTask, string}>
+     * @return iterable<string, array{AiSettings}>
      */
-    public static function tasksWithTheWrongSubject(): iterable
+    public static function settingsThatLetAPlainDraftGo(): iterable
     {
-        yield 'intake without a draft' => [static fn (): AiTask => new AiTask(AiFeature::Intake, null, 'Pay does nothing.'), 'An intake task needs a draft report and no ticket.'];
-        yield 'intake with a ticket as well' => [static fn (): AiTask => new AiTask(AiFeature::Intake, new TicketId(self::CHECKOUT_TICKET), null, self::draft()), 'An intake task needs a draft report and no ticket.'];
-        yield 'summary of a draft' => [static fn (): AiTask => new AiTask(AiFeature::Summary, null, null, self::draft()), 'A summary task needs a ticket and no draft report.'];
-        yield 'summary of a ticket and a draft' => [static fn (): AiTask => new AiTask(AiFeature::Summary, new TicketId(self::CHECKOUT_TICKET), null, self::draft()), 'A summary task needs a ticket and no draft report.'];
+        yield 'cloud' => [self::settings()];
+        yield 'cloud, team-only tickets allowed to it' => [self::settings(isRestrictedToCloudAllowed: true)];
+        yield 'laptop first' => [self::settings(where: AiSettings::WHERE_LAPTOP_FIRST)];
     }
 
-    /**
-     * @param \Closure(): AiTask $task
-     */
     #[Test]
-    #[DataProvider('tasksWithTheWrongSubject')]
-    public function aTaskWithTheWrongSubjectIsRefusedBeforeAnythingIsRead(\Closure $task, string $expectedMessage): void
+    #[DataProvider('settingsThatLetAPlainDraftGo')]
+    public function askingWhetherADraftMayGoNeverReadsTheReporterOrTheCandidates(AiSettings $settings): void
     {
-        try {
-            $this->admission()->refusalFor($task(), self::omar());
-            self::fail('A task with the wrong subject was decided.');
-        } catch (\InvalidArgumentException $refusal) {
-            self::assertSame($expectedMessage, $refusal->getMessage());
-        }
+        $this->givenSettings($settings);
 
-        self::assertSame([[], [], [], []], [$this->tickets->reads, $this->candidates->reads, $this->visibilities->reads, $this->aiSettings->keyReads]);
+        self::assertNull($this->admission()->refusalFor(self::intakeOf(self::draft()), self::omar()));
+
+        self::assertSame([[], [], [], []], [$this->visibilities->reads, $this->candidates->reads, $this->tickets->reads, $this->aiSettings->keyReads]);
+        self::assertNotSame([], $this->admission()->admit(self::intakeOf(self::draft()), self::omar())->duplicateCandidates);
+        self::assertSame([self::OMAR], $this->visibilities->reads);
     }
 
     /**
@@ -233,7 +235,7 @@ final class AiTaskAdmissionTest extends TestCase
         } catch (AiNotAllowed $refusal) {
             self::assertSame([$expectedRefusal, $expectedRefusal->sentence()], [$refusal->refusal, $refusal->getMessage()]);
         }
-        self::assertSame([[], [], []], [$this->candidates->reads, $this->aiSettings->keyReads, $this->tickets->reads]);
+        self::assertSame([[], [], [], []], [$this->candidates->reads, $this->visibilities->reads, $this->aiSettings->keyReads, $this->tickets->reads]);
     }
 
     #[Test]
@@ -258,11 +260,24 @@ final class AiTaskAdmissionTest extends TestCase
 
         $admitted = $this->admission()->admit(self::intakeOf(self::draft()), self::omar());
 
+        // SHOP-7 is in a team Omar is not in, but he reported it; SHOP-6 is in that team and not his.
         self::assertSame(
-            ['SHOP-5' => 'Pay button does nothing', 'SHOP-4' => 'Card form shows the full number', 'SHOP-3' => 'Basket total is wrong'],
+            ['SHOP-7' => 'Refund mail has no amount', 'SHOP-5' => 'Pay button does nothing', 'SHOP-4' => 'Card form shows the full number', 'SHOP-3' => 'Basket total is wrong'],
             $admitted->duplicateCandidates,
         );
         self::assertSame([['projectId' => self::SHOP_PROJECT, 'viewerId' => self::OMAR, 'includeTeamOnly' => true]], $this->candidates->reads);
+    }
+
+    #[Test]
+    public function aReporterInTheTeamGetsItsTeamOnlyTicketsAsCandidates(): void
+    {
+        $this->givenSettings(self::settings(isRestrictedToCloudAllowed: true));
+        $lena = new ActorContext(new UserId(self::LENA), new OrganizationId(self::ACME_FOODS), new Roles(false, false, [], [new TeamId(self::SHOP_TEAM), new TeamId(self::PAY_TEAM)], []));
+
+        $admitted = $this->admission()->admit(self::intakeOf(self::draft()), $lena);
+
+        self::assertSame(['SHOP-7', 'SHOP-6', 'SHOP-5', 'SHOP-4', 'SHOP-3'], array_keys($admitted->duplicateCandidates));
+        self::assertSame([self::LENA], $this->visibilities->reads);
     }
 
     #[Test]
@@ -320,6 +335,11 @@ final class AiTaskAdmissionTest extends TestCase
 
     private static function omar(): ActorContext
     {
-        return new ActorContext(new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS), Roles::none());
+        return new ActorContext(new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS), new Roles(false, false, [], [new TeamId(self::SHOP_TEAM)], []));
+    }
+
+    private static function facts(string $visibility, ?string $teamId, string $reporterId): TicketVisibilityFacts
+    {
+        return new TicketVisibilityFacts(new OrganizationId(self::ACME_FOODS), $visibility, null === $teamId ? null : new TeamId($teamId), new UserId($reporterId));
     }
 }

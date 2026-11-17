@@ -9,15 +9,17 @@ use App\Ticketing\Api\IntakeCandidate;
 use App\Ticketing\Api\IntakeCandidateQueries;
 use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\TicketVisibility;
+use App\Ticketing\Api\TicketVisibilityFacts;
 
 /**
  * One organization's open tickets, newest updated first, as DbalIntakeCandidateQueries reads them: only the project's
- * tickets the reporter may see, team-only ones only when asked, at most CANDIDATE_LIMIT; a project id that is not a
- * canonical uuid or a reporter of another organization throws before anything is read.
+ * tickets the reporter's TicketVisibility lets them see (TicketVisibility::isVisible is the PHP twin of the SQL it
+ * renders), team-only ones only when asked, at most CANDIDATE_LIMIT; a project id that is not a canonical uuid or a
+ * reporter of another organization throws before anything is read.
  */
 final class ListedIntakeCandidates implements IntakeCandidateQueries
 {
-    /** @var list<array{projectId: string, candidate: IntakeCandidate, isTeamOnly: bool, viewerIds: list<string>}> */
+    /** @var list<array{projectId: string, candidate: IntakeCandidate, facts: TicketVisibilityFacts}> */
     private array $tickets = [];
 
     /** @var list<array{projectId: string, viewerId: string, includeTeamOnly: bool}> */
@@ -29,12 +31,10 @@ final class ListedIntakeCandidates implements IntakeCandidateQueries
 
     /**
      * Each ticket added is updated later than the ones before it, so it comes first.
-     *
-     * @param list<string> $viewerIds the users who may see it
      */
-    public function add(string $projectId, IntakeCandidate $candidate, bool $isTeamOnly, array $viewerIds): void
+    public function add(string $projectId, IntakeCandidate $candidate, TicketVisibilityFacts $facts): void
     {
-        array_unshift($this->tickets, ['projectId' => $projectId, 'candidate' => $candidate, 'isTeamOnly' => $isTeamOnly, 'viewerIds' => $viewerIds]);
+        array_unshift($this->tickets, ['projectId' => $projectId, 'candidate' => $candidate, 'facts' => $facts]);
     }
 
     public function openCandidatesIn(string $projectId, TicketVisibility $reporter, bool $includeTeamOnly): array
@@ -50,8 +50,8 @@ final class ListedIntakeCandidates implements IntakeCandidateQueries
         $candidates = [];
         foreach ($this->tickets as $ticket) {
             if ($ticket['projectId'] === $projectId
-                && ($includeTeamOnly || !$ticket['isTeamOnly'])
-                && \in_array($reporter->viewerId()->toString(), $ticket['viewerIds'], true)) {
+                && ($includeTeamOnly || TicketVisibilityFacts::FOR_EVERYONE === $ticket['facts']->visibility)
+                && $reporter->isVisible($ticket['facts'])) {
                 $candidates[] = $ticket['candidate'];
             }
         }
