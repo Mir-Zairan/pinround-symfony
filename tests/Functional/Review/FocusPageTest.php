@@ -42,6 +42,7 @@ final class FocusPageTest extends WebTestCase
     private const string SHARED_EARLIER = '2026-11-05 09:00:00+00';
     private const string SHARED_TODAY = '2026-11-06 09:12:00+00';
     private const string FOCUS_PAGE = '/t/SHOP-1/rounds/2/focus';
+    private const string PRIVATE_TITLE = 'Lena private draft picture';
     /**
      * As the round page: the session's user and password change, the organizations, the tenant, the viewer's roles and
      * teams, the settings, the ticket, the names, the visibility checks, the round, its areas, the pins, the round and
@@ -323,14 +324,14 @@ final class FocusPageTest extends WebTestCase
     {
         $ticketId = $this->addTicket('SHOP-1');
         $draft = $this->addRound($ticketId, null, 'draft', 'Lena', null);
-        $this->addScreenshot($draft, $this->addMedia('ready'), 0, 'Lena private draft picture', null);
+        $this->addScreenshot($draft, $this->addMedia('ready'), 0, self::PRIVATE_TITLE, null);
         $this->logIn($this->client, $this->people['Omar']);
 
         foreach ([0, 1, 2] as $number) {
             $this->client->request('GET', '/t/SHOP-1/rounds/'.$number.'/focus');
 
             self::assertResponseStatusCodeSame(404);
-            self::assertStringNotContainsString('Lena private draft picture', (string) $this->client->getResponse()->getContent());
+            self::assertStringNotContainsString(self::PRIVATE_TITLE, (string) $this->client->getResponse()->getContent());
         }
     }
 
@@ -388,10 +389,15 @@ final class FocusPageTest extends WebTestCase
         $this->queryCountOf(self::FOCUS_PAGE.'?area=1');
         $noPinsQueryCount = $this->queryCountOf(self::FOCUS_PAGE.'?area=1');
         $threePinsQueryCount = $this->queryCountOf(self::FOCUS_PAGE.'?side=before&pin=2');
-
         self::assertCount(3, $this->client->getCrawler()->filter('.focus-bar__stop'));
+        $this->addPin($this->beforeShot, 5, '60.00', '60.00', 'Price hidden', 'Lena');
+        $this->addPin($this->beforeShot, 6, '70.00', '70.00', 'Button off', 'Omar');
+        $fivePinsQueryCount = $this->queryCountOf(self::FOCUS_PAGE.'?side=before&pin=2');
+
+        self::assertCount(5, $this->client->getCrawler()->filter('.focus-bar__stop'));
         self::assertSame($noPinsQueryCount, $threePinsQueryCount);
-        self::assertSame(self::PAGE_QUERIES, $threePinsQueryCount);
+        self::assertSame($threePinsQueryCount, $fivePinsQueryCount);
+        self::assertSame(self::PAGE_QUERIES, $fivePinsQueryCount);
     }
 
     private static function assertNothingOfTheRoundIn(string $content): void

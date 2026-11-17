@@ -209,8 +209,8 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 3. "Exit full screen" back to the round page; keyboard: arrows for pins, Escape exits.
 **Files:** `src/Review/UI/templates/focus.html.twig`, `assets/controllers/pin-walker_controller.js`.
 **Acceptance criteria:**
-- [ ] Choices made here show on the round page.
-- [ ] Works with keyboard only.
+- [x] Choices made here show on the round page (`FocusPageTest::aChoiceMadeHereIsSavedMovesToTheNextPinAndShowsOnTheRoundPage`).
+- [ ] Works with keyboard only (left for the Playwright spec, task 20c).
 **Tests:** Playwright; axe.
 **Prototype check:** [Full-screen review: elements and rules](../04-prototype/screens/full-screen-review.md#elements-and-rules).
 **Size:** M
@@ -275,3 +275,9 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
   - **2026-11-16, P05.T9 UI (17b):** the 409 answer is now the dialog, not JSON: a Turbo Stream that appends the `Dialog` and opens it (`share-draft` controller), or, for a form without script, a page with the same question (`draft_question*.html.twig` in Ticketing UI, so Ticketing needs no Review class; the plan's `Review/UI/Component/ShareDraftDialog` is not built). `move`/`moveTo` return `MoveResult` (pings cleared and the draft outcome with the real round number) for the toast. The dialog and Cancel were not run in a browser here (no media worker): run `share-draft.spec.ts` with E2E_MEDIA_PIPELINE=1 on a full stack.
   - **2026-11-16, P05.T9 port change (17c):** `ShareDraftQuestion` now has `undecidedDraftIdOf` (the id only, one facts read) beside `undecidedDraftOf`, and `share`/`keepPrivate` take the round id; `share` is one save through `RoundCommands::shareDraftAtHandOff`. Query budgets of a move that asks and answers: share 18, keep 16.
 - **2026-11-17, P05.T7 review round page (19f):** the pin toasts `Pin N marked fixed.`, `Pin N marked still wrong.` and `Verdict on pin N undone.` are not in the prototype; they are kept on purpose as the status announcement after the side panel is swapped, with focus moved to the control that replaced the one clicked (`autofocus`, which Turbo 8 focuses in stream content). The header's day and time are in the viewer's saved zone (Identity's `CurrentTimeZone`, so Review now depends on the Identity Api). "Ask <lead>" opens the thread with `?ask=<lead id>`, which `thread-composer` reads on connect; the browser checks of the focus, the compare control and the question mode are for 19d.
+- **2026-11-17, P05.T10 full-screen review (20b):** server, page and `pin-walker` are built; "Works with keyboard only" stays open for the Playwright spec (20c), which also runs axe. Choices and differences from [full-screen-review.md](../04-prototype/screens/full-screen-review.md#elements-and-rules):
+  - (a) The line says `SHOP-1 · Round 2 · Per product · section 1 of 2`: "section N of M" counts the round's areas in their order, as in the prototype.
+  - (b) The verdict forms are plain POSTs, not Turbo Stream answers like the round page's: the answer is a 303 back to the full-screen page on the next pin (Undo stays on its pin), so the flashed toast survives the redirect. A refusal also redirects back with its toast and saves nothing.
+  - (c) No F (Fixed) or W (Still wrong) keys: Tab and Enter reach the buttons, and focus starts on the shown pin's first choice (`autofocus`). Only ← / → and Escape are added.
+  - (d) No AI pins and no Keep / Dismiss until P08: the walk shows round 1's (the earlier round's) kept human pins on both pictures; an AI suggestion nobody kept is not walked.
+  - (e) Query budget: 22 per page (`FocusPageTest::PAGE_QUERIES`, the same as the round page), whatever the number of areas or pins (0, 3 and 5 pins tested).
