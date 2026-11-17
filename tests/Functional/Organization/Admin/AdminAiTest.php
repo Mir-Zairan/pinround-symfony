@@ -87,8 +87,15 @@ final class AdminAiTest extends WebTestCase
         self::assertSame(['on' => 'true', 'sync' => 'true', 'restricted_to_cloud' => 'false'], $this->switchesOn($page));
         self::assertSame('Free when Ollama runs. Otherwise pinround uses the cloud AI, so nobody is left without AI.', $page->filter('main .admin-ai__where-note')->text());
         self::assertSame('No key saved. pinround uses its own key.', $page->filter('main #admin-ai-key-status')->text());
-        self::assertSame('', $page->filter('main input[name="provider_key"]')->attr('value'));
+        $keyField = $page->filter('main input[name="provider_key"]');
+        self::assertSame('', $keyField->attr('value'));
+        self::assertSame('new-password', $keyField->attr('autocomplete'));
+        self::assertNull($keyField->attr('aria-invalid'));
+        self::assertSame('admin-ai-key-status', $keyField->attr('aria-describedby'));
+        self::assertCount(0, $page->filter('main #admin-ai-key-error'));
         self::assertCount(0, $page->filter('main [role="alert"]'));
+        // RequiresRecentAuth asks only when the last code is over 10 minutes old, so the note says no more than that.
+        self::assertContains('If your last code is over 10 minutes old, you confirm it’s you before the key is saved.', $page->filter('main .admin-ai__note')->each(static fn (Crawler $note): string => $note->text()));
     }
 
     /**
@@ -358,9 +365,12 @@ final class AdminAiTest extends WebTestCase
         yield 'a letter outside ASCII' => ['sk-ant-tést-4f2b9c0e7d1a', ChangeAiSettings::PROVIDER_KEY_NOT_PRINTABLE];
     }
 
+    /**
+     * The reason is under the field and tied to it for screen readers, not a page alert.
+     */
     #[Test]
     #[DataProvider('valuesThatAreNoKey')]
-    public function aValueThatIsNoKeyShowsTheReasonStoresNothingAndIsNotShownAgain(string $typed, string $reason): void
+    public function aValueThatIsNoKeyShowsTheReasonUnderTheFieldStoresNothingAndIsNotShownAgain(string $typed, string $reason): void
     {
         [, $acmeFoods] = $this->adminLoggedInWithACode();
         $this->client->request('GET', self::AI_PAGE);
@@ -371,8 +381,12 @@ final class AdminAiTest extends WebTestCase
         $page = $this->client->submitForm('Save key', ['provider_key' => $typed]);
 
         self::assertResponseStatusCodeSame(422);
-        self::assertSame($reason, $page->filter('main [role="alert"]')->text());
-        self::assertSame('', $page->filter('main input[name="provider_key"]')->attr('value'));
+        self::assertSame($reason, $page->filter('main #admin-ai-key-error')->text());
+        self::assertCount(0, $page->filter('main [role="alert"]'));
+        $keyField = $page->filter('main input[name="provider_key"]');
+        self::assertSame('true', $keyField->attr('aria-invalid'));
+        self::assertSame('admin-ai-key-error admin-ai-key-status', $keyField->attr('aria-describedby'));
+        self::assertSame('', $keyField->attr('value'));
         if ('' !== $typed) {
             self::assertStringNotContainsString($typed, (string) $this->client->getResponse()->getContent());
         }
@@ -401,12 +415,24 @@ final class AdminAiTest extends WebTestCase
     }
 
     /**
+     * @return iterable<string, array{string, array<string, string>, string}>
+     */
+    public static function savesThatCanLoseARace(): iterable
+    {
+        yield 'a setting change' => [self::AI_PAGE, ['setting' => 'on', 'choice' => 'off'], self::CHANGE_CSRF_ID];
+        yield 'a provider key' => [self::PROVIDER_KEY_PAGE, ['provider_key' => self::RAW_PROVIDER_KEY], self::PROVIDER_KEY_CSRF_ID];
+    }
+
+    /**
      * Another request saves "where" between this request's read of the settings and its write. This request's write
      * then fails the version check: it is rolled back, the page shows the other save and says so, and nothing of this
      * request is stored or published.
+     *
+     * @param array<string, string> $fields
      */
     #[Test]
-    public function aChangeThatLostTheRaceToAnotherSaveIsRefusedAndKeepsTheOtherSave(): void
+    #[DataProvider('savesThatCanLoseARace')]
+    public function aSaveThatLostTheRaceToAnotherSaveIsRefusedAndKeepsTheOtherSave(string $route, array $fields, string $csrfId): void
     {
         $store = new OrgSettingsStoreWithAnotherSave(new DoctrineOrgSettingsStore(self::getContainer()->get('doctrine.orm.entity_manager')));
         // Set before the first request builds ChangeAiSettings, which keeps the store it is given.
@@ -420,15 +446,17 @@ final class AdminAiTest extends WebTestCase
             [$acmeFoods->toString()],
         )));
 
-        $page = $this->client->request('POST', self::AI_PAGE, ['setting' => 'on', 'choice' => 'off', '_csrf_token' => $this->csrfTokenFor($this->client, self::CHANGE_CSRF_ID)]);
+        $page = $this->client->request('POST', $route, [...$fields, '_csrf_token' => $this->csrfTokenFor($this->client, $csrfId)]);
 
         self::assertResponseStatusCodeSame(409);
         self::assertNull($store->anotherSaveAfterNextRead, 'The other save never ran.');
         self::assertSame(AiSettingsController::CHANGED_MEANWHILE, $page->filter('main [role="alert"]')->text());
         self::assertSame(['on' => 'true', 'sync' => 'true', 'restricted_to_cloud' => 'false'], $this->switchesOn($page));
         self::assertContains('Each person’s laptop (Ollama)', $page->filter('main button.chip[aria-pressed="true"]')->each(static fn (Crawler $chip): string => $chip->text()));
+        self::assertSame('No key saved. pinround uses its own key.', $page->filter('main #admin-ai-key-status')->text());
+        self::assertStringNotContainsString(self::RAW_PROVIDER_KEY, (string) $this->client->getResponse()->getContent());
         $stored = $this->storedSettingsOf($acmeFoods);
-        self::assertSame([true, 'laptop', 2], [$stored['ai']['on'] ?? null, $stored['ai']['where'] ?? null, $stored['version']]);
+        self::assertSame([true, 'laptop', 2, null], [$stored['ai']['on'] ?? null, $stored['ai']['where'] ?? null, $stored['version'], $stored['ai']['secret_enc'] ?? null]);
         self::assertSame(0, $this->outboxCount());
     }
 

@@ -2,26 +2,27 @@
 
 {% block title %}People and roles · pinround{% endblock %}
 
-{# The form fields and errors of the logged-out pages and the profile page; people.css lays out this page. #}
+{# The form fields and errors of the logged-out pages and the profile page; admin-tab.css and people.css lay out this page. #}
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/admin-tab.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/people.css') }}">
 {% endblock %}
 
 {# TODO(P11): the role help cards and the list of people with their roles. #}
 {% block main %}
-    <div class="people">
-        <h1 class="people__title">People and roles</h1>
+    <div class="admin-tab">
+        <h1 class="admin-tab__title">People and roles</h1>
         <p>A role says what someone may do. The job (tester, developer) is set by the team lead.</p>
         {% if formError %}
             <p class="login__error" role="alert">{{ formError }}</p>
         {% endif %}
 
         <twig:Card tag="section" aria-labelledby="people-invite-title">
-            <h2 class="people__heading" id="people-invite-title">Invite</h2>
-            <form class="people__invite" method="post" action="{{ path('organization_admin_people_invite') }}" {{ stimulus_controller('invite-email') }}>
-                <div class="profile__field people__email">
+            <h2 class="admin-tab__heading" id="people-invite-title">Invite</h2>
+            <form class="admin-tab__inline-form" method="post" action="{{ path('organization_admin_people_invite') }}" {{ stimulus_controller('invite-email') }}>
+                <div class="profile__field admin-tab__field">
                     <label class="login__field">
                         Email
                         <input class="login__input" type="email" name="email" value="{{ typedEmail }}" placeholder="name@company.com" autocomplete="off" required
@@ -38,7 +39,7 @@
         </twig:Card>
 
         <section class="people__pending" aria-labelledby="people-pending-title">
-            <h2 class="people__heading" id="people-pending-title">Not joined yet</h2>
+            <h2 class="admin-tab__heading" id="people-pending-title">Not joined yet</h2>
             {% if pendingInvitations is empty %}
                 <twig:EmptyState message="No open invites."/>
             {% else %}

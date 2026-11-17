@@ -26,7 +26,7 @@ final readonly class ChangeAiSettings
 
     public const string UNKNOWN_CHOICE = 'Choose one of the options shown.';
     public const string PROVIDER_KEY_MISSING = 'Paste the API key first.';
-    public const string PROVIDER_KEY_TOO_LONG = 'This API key is too long. A key has at most 512 characters.';
+    public const string PROVIDER_KEY_TOO_LONG = 'This API key is too long. A key has at most '.self::PROVIDER_KEY_MAX_LENGTH.' characters.';
     public const string PROVIDER_KEY_NOT_PRINTABLE = 'An API key has only letters, digits and symbols, with no spaces. Paste it again.';
 
     /** The setting path SettingsChanged names for the provider key, and the after value it carries instead of the key. */

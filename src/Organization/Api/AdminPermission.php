@@ -11,8 +11,8 @@ namespace App\Organization\Api;
 final class AdminPermission
 {
     /**
-     * Change the organization's AI settings (Admin › AI): an Admin there. The tab asks AREA too, and its provider key
-     * action is marked RequiresRecentAuth. Its subject is the OrganizationId of the request.
+     * Change the organization's AI settings (Admin › AI): an Admin there, with the login AREA needs. The tab asks AREA
+     * too, and its provider key action is marked RequiresRecentAuth. Its subject is the OrganizationId of the request.
      */
     public const string AI = 'ADMIN_AI';
 

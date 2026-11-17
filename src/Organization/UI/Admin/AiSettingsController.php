@@ -87,7 +87,11 @@ final class AiSettingsController extends AbstractController
         $providerKey = $request->request->getString('provider_key');
 
         return $this->runChange($request, self::PROVIDER_KEY_CSRF_ID, function (OrganizationId $organizationId) use ($providerKey): Response {
-            $this->changeAiSettings->changeProviderKey($organizationId, $providerKey, $this->actingUser(), $this->clock->now());
+            try {
+                $this->changeAiSettings->changeProviderKey($organizationId, $providerKey, $this->actingUser(), $this->clock->now());
+            } catch (ChangeAiSettingsRefused $refusal) {
+                return $this->renderPage($organizationId, providerKeyError: $refusal->getMessage(), status: Response::HTTP_UNPROCESSABLE_ENTITY);
+            }
             $this->addFlash(self::TOAST, self::PROVIDER_KEY_SAVED);
 
             return $this->redirectToRoute(self::ROUTE);
@@ -113,18 +117,18 @@ final class AiSettingsController extends AbstractController
                 $this->denyAccessUnlessGranted(AdminPermission::AREA, $organizationId);
                 $this->denyAccessUnlessGranted(AdminPermission::AI, $organizationId);
                 if (!$this->isCsrfTokenValid($csrfId, $csrfToken)) {
-                    return $this->renderPage($organizationId, self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+                    return $this->renderPage($organizationId, formError: self::FORM_EXPIRED, status: Response::HTTP_UNPROCESSABLE_ENTITY);
                 }
 
                 try {
                     return $change($organizationId);
                 } catch (ChangeAiSettingsRefused $refusal) {
-                    return $this->renderPage($organizationId, $refusal->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+                    return $this->renderPage($organizationId, formError: $refusal->getMessage(), status: Response::HTTP_UNPROCESSABLE_ENTITY);
                 }
             });
         } catch (OptimisticLockException) {
             // Rolled back: the page shows what the other save stored.
-            return $this->transactions->run(fn (): Response => $this->renderPage($organizationId, self::CHANGED_MEANWHILE, Response::HTTP_CONFLICT));
+            return $this->transactions->run(fn (): Response => $this->renderPage($organizationId, formError: self::CHANGED_MEANWHILE, status: Response::HTTP_CONFLICT));
         }
     }
 
@@ -134,9 +138,10 @@ final class AiSettingsController extends AbstractController
     }
 
     /**
-     * Reads the settings, so it needs a transaction open under $organizationId.
+     * Reads the settings, so it needs a transaction open under $organizationId. $formError shows as the page's alert,
+     * $providerKeyError under the key field.
      */
-    private function renderPage(OrganizationId $organizationId, ?string $formError = null, int $status = Response::HTTP_OK): Response
+    private function renderPage(OrganizationId $organizationId, ?string $formError = null, ?string $providerKeyError = null, int $status = Response::HTTP_OK): Response
     {
         $aiSettings = $this->aiSettingsQueries->aiSettingsOf($organizationId);
 
@@ -145,6 +150,7 @@ final class AiSettingsController extends AbstractController
             'hasProviderKey' => $this->changeAiSettings->hasProviderKey($organizationId),
             'providerKeyMaxLength' => ChangeAiSettings::PROVIDER_KEY_MAX_LENGTH,
             'formError' => $formError,
+            'providerKeyError' => $providerKeyError,
         ], new Response(status: $status));
     }
 
