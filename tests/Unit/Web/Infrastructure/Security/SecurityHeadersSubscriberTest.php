@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Web\Infrastructure\Security;
 
+use App\SharedKernel\UI\CspConnectSources;
 use App\Tests\Fixtures\Security\ExpectedSecurityHeaders;
 use App\Web\Infrastructure\Security\CspNonce;
 use App\Web\Infrastructure\Security\SecurityHeadersSubscriber;
@@ -25,7 +26,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     public function itSetsTheCspExampleHeadersWithTheRequestNonce(): void
     {
         $cspNonce = new CspNonce();
-        $response = $this->respond(new SecurityHeadersSubscriber($cspNonce, self::STORAGE_URL, self::MERCURE_URL, 'dev'));
+        $response = $this->respond(new SecurityHeadersSubscriber($cspNonce, new CspConnectSources(), self::STORAGE_URL, self::MERCURE_URL, 'dev'));
 
         self::assertSame(
             ExpectedSecurityHeaders::withoutStrictTransportSecurity($cspNonce->current(), self::STORAGE_URL, self::MERCURE_ORIGIN),
@@ -36,7 +37,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     #[Test]
     public function prodAlsoSendsStrictTransportSecurity(): void
     {
-        $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), self::STORAGE_URL, self::MERCURE_URL, 'prod'));
+        $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), self::STORAGE_URL, self::MERCURE_URL, 'prod'));
 
         self::assertSame(ExpectedSecurityHeaders::STRICT_TRANSPORT_SECURITY, $response->headers->get('Strict-Transport-Security'));
     }
@@ -45,7 +46,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     public function devAndTestSendNoStrictTransportSecurity(): void
     {
         foreach (['dev', 'test'] as $kernelEnvironment) {
-            $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), self::STORAGE_URL, self::MERCURE_URL, $kernelEnvironment));
+            $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), self::STORAGE_URL, self::MERCURE_URL, $kernelEnvironment));
 
             self::assertFalse($response->headers->has('Strict-Transport-Security'), $kernelEnvironment);
             self::assertTrue($response->headers->has('Content-Security-Policy'), $kernelEnvironment);
@@ -55,7 +56,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     #[Test]
     public function anEmptyStorageOrMercureUrlLeavesThatSourceOut(): void
     {
-        $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), '', '', 'dev'));
+        $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), '', '', 'dev'));
 
         $directives = $this->cspDirectives($response);
         self::assertSame("img-src 'self' data:", $directives['img-src']);
@@ -67,7 +68,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
     #[Test]
     public function aPublicUrlIsReducedToItsOriginAndKeepsItsPort(): void
     {
-        $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), 'http://localhost:9000/pinround/', 'https://localhost/.well-known/mercure?topic=x', 'dev'));
+        $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), 'http://localhost:9000/pinround/', 'https://localhost/.well-known/mercure?topic=x', 'dev'));
 
         $directives = $this->cspDirectives($response);
         self::assertSame("img-src 'self' http://localhost:9000 data:", $directives['img-src']);
@@ -77,11 +78,27 @@ final class SecurityHeadersSubscriberTest extends TestCase
     #[Test]
     public function theStorageOriginIsAllowedForPresignedUploadsInConnectSrc(): void
     {
-        $withStorage = $this->cspDirectives($this->respond(new SecurityHeadersSubscriber(new CspNonce(), 'http://localhost:9000', '', 'dev')));
-        $withoutStorage = $this->cspDirectives($this->respond(new SecurityHeadersSubscriber(new CspNonce(), '', '', 'dev')));
+        $withStorage = $this->cspDirectives($this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), 'http://localhost:9000', '', 'dev')));
+        $withoutStorage = $this->cspDirectives($this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), '', '', 'dev')));
 
         self::assertSame("connect-src 'self' http://localhost:9000", $withStorage['connect-src']);
         self::assertSame("connect-src 'self'", $withoutStorage['connect-src']);
+    }
+
+    #[Test]
+    public function anOriginThePageAllowedJoinsOnlyConnectSrcAndGoesAwayOnReset(): void
+    {
+        $cspConnectSources = new CspConnectSources();
+        $subscriber = new SecurityHeadersSubscriber(new CspNonce(), $cspConnectSources, 'http://localhost:9000', self::MERCURE_URL, 'dev');
+        $cspConnectSources->allow('http://localhost:11434');
+
+        $directives = $this->cspDirectives($this->respond($subscriber));
+        self::assertSame("connect-src 'self' http://localhost:9000 ".self::MERCURE_ORIGIN.' http://localhost:11434', $directives['connect-src']);
+        self::assertSame("img-src 'self' http://localhost:9000 data:", $directives['img-src']);
+        self::assertSame("default-src 'self'", $directives['default-src']);
+
+        $cspConnectSources->reset();
+        self::assertSame("connect-src 'self' http://localhost:9000 ".self::MERCURE_ORIGIN, $this->cspDirectives($this->respond($subscriber))['connect-src']);
     }
 
     /**
@@ -106,7 +123,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('OBJECT_STORAGE_PUBLIC_URL');
 
-        new SecurityHeadersSubscriber(new CspNonce(), $publicUrl, self::MERCURE_URL, 'dev');
+        new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), $publicUrl, self::MERCURE_URL, 'dev');
     }
 
     #[Test]
@@ -116,13 +133,13 @@ final class SecurityHeadersSubscriberTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('MERCURE_PUBLIC_URL');
 
-        new SecurityHeadersSubscriber(new CspNonce(), self::STORAGE_URL, $publicUrl, 'dev');
+        new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), self::STORAGE_URL, $publicUrl, 'dev');
     }
 
     #[Test]
     public function aSubRequestResponseGetsNoHeaders(): void
     {
-        $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), self::STORAGE_URL, self::MERCURE_URL, 'prod'), HttpKernelInterface::SUB_REQUEST);
+        $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), self::STORAGE_URL, self::MERCURE_URL, 'prod'), HttpKernelInterface::SUB_REQUEST);
 
         self::assertSame([], ExpectedSecurityHeaders::presentIn($response));
         self::assertFalse($response->headers->has('Strict-Transport-Security'));
@@ -136,7 +153,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
         $response->headers->set('Content-Security-Policy', "default-src *; script-src 'unsafe-inline'");
         $response->headers->set('Referrer-Policy', 'unsafe-url');
 
-        $this->respond(new SecurityHeadersSubscriber($cspNonce, self::STORAGE_URL, self::MERCURE_URL, 'dev'), HttpKernelInterface::MAIN_REQUEST, $response);
+        $this->respond(new SecurityHeadersSubscriber($cspNonce, new CspConnectSources(), self::STORAGE_URL, self::MERCURE_URL, 'dev'), HttpKernelInterface::MAIN_REQUEST, $response);
 
         self::assertSame(
             ExpectedSecurityHeaders::withoutStrictTransportSecurity($cspNonce->current(), self::STORAGE_URL, self::MERCURE_ORIGIN),

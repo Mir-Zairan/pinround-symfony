@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Web\Infrastructure\Security;
 
+use App\SharedKernel\UI\CspConnectSources;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
@@ -16,7 +17,8 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * The origin of OBJECT_STORAGE_PUBLIC_URL (the bucket's own URL) joins img-src and connect-src (images are read
  * from it and presigned uploads are PUT to it); the origin of MERCURE_PUBLIC_URL (the hub browsers subscribe to)
  * joins connect-src. An empty value adds no source; a value that is not http(s) with a
- * plain host throws \InvalidArgumentException.
+ * plain host throws \InvalidArgumentException. The origins the rendered page put in CspConnectSources (Ollama on the
+ * laptop, for an organization whose AI runs there) join connect-src last.
  */
 final readonly class SecurityHeadersSubscriber
 {
@@ -28,6 +30,7 @@ final readonly class SecurityHeadersSubscriber
 
     public function __construct(
         private CspNonce $cspNonce,
+        private CspConnectSources $cspConnectSources,
         #[Autowire(env: 'OBJECT_STORAGE_PUBLIC_URL')]
         string $objectStoragePublicUrl,
         #[Autowire(env: 'MERCURE_PUBLIC_URL')]
@@ -66,7 +69,7 @@ final readonly class SecurityHeadersSubscriber
             "script-src 'self' ".$nonceSource,
             "style-src 'self' ".$nonceSource,
             self::directive('img-src', "'self'", $this->objectStorageOrigin, 'data:'),
-            self::directive('connect-src', "'self'", $this->objectStorageOrigin, $this->mercureOrigin),
+            self::directive('connect-src', "'self'", $this->objectStorageOrigin, $this->mercureOrigin, ...$this->cspConnectSources->origins()),
             "font-src 'self'",
             "frame-ancestors 'none'",
             "base-uri 'none'",

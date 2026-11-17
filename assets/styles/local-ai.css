@@ -1,0 +1,70 @@
+/* The header's Local AI chip and its setup sheet (dialogs-and-popovers.md, Local AI sheet). */
+/* The host holds controllers only, so the chip lines up with the header's other buttons. */
+.local-ai,
+.local-ai > [data-controller="dialog"] {
+  display: contents;
+}
+
+.local-ai__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--outline-var);
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--on-surface);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.local-ai__chip:hover {
+  background: var(--s-high);
+}
+
+.local-ai__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--outline);
+}
+
+.local-ai[data-state="ready"] .local-ai__dot {
+  background: var(--passed);
+}
+
+.local-ai[data-state="no-model"] .local-ai__dot,
+.local-ai[data-state="not-found"] .local-ai__dot {
+  background: var(--error);
+}
+
+.local-ai__sub {
+  color: var(--on-surface-var);
+}
+
+.local-ai__status {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.local-ai__models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.local-ai__models[hidden] {
+  display: none;
+}
+
+.local-ai__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 24px;
+}
