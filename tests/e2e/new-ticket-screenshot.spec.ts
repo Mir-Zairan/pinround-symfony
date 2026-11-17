@@ -1,64 +1,25 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import path from 'node:path';
 import { LENA_STORAGE_STATE, MIA_STORAGE_STATE } from './auth';
 import { drawablePng, MEDIA_ID, routeCompletedUpload, routeStatus } from './media-mocks';
+import { fillTicket, openNewTicketForm, placeTwoPins, TICKET_DESCRIPTION } from './new-ticket-form';
 
 // The picture section of /tickets/new (P05.T5), as a member sees it in a real browser.
 //
 // Most tests here need no worker: the bucket, the begin, complete and status calls are answered in the browser (see
-// media-mocks.ts), so they run against any stack, also this one in CI.
+// media-mocks.ts), so they run against any stack.
 //
 // The last test is the whole journey with nothing mocked: a real upload to MinIO, the processing worker turning it into
-// a ready picture, and Round 0 on the ticket page. Run it from a full dev stack in the main checkout (MinIO up, a worker
-// on async_media, the app image rebuilt with vips), with E2E_MEDIA_PIPELINE=1 and the usual E2E_BASE_URL and E2E_PASSWORD:
+// a ready picture, and Round 0 on the ticket page. It needs MinIO, a worker on async_media and the app image with vips,
+// and runs only with E2E_MEDIA_PIPELINE=1, which the CI e2e job sets. Locally, from a full dev stack in the main checkout,
+// with the usual E2E_BASE_URL and E2E_PASSWORD:
 //   E2E_MEDIA_PIPELINE=1 npx playwright test new-ticket-screenshot.spec.ts --project=chromium
-// Without E2E_MEDIA_PIPELINE it is skipped.
 
 test.use({ storageState: LENA_STORAGE_STATE, viewport: { width: 1280, height: 900 } });
 
 const WAITING_MESSAGE = 'Waiting for your screenshot to be ready…';
 const NOT_A_SCREENSHOT_MESSAGE = 'This file is not a PNG, JPEG or WebP screenshot.';
 const TITLE = 'Checkout total is hidden by the banner';
-const DESCRIPTION = 'The banner covers the total.\nSecond line, with café ☕ and 画面.';
-
-async function openNewTicketForm(page: Page) {
-  // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
-  await page.goto('/tickets/new', { waitUntil: 'networkidle' });
-  const form = page.locator('form.login__form');
-  return {
-    form,
-    title: form.getByLabel('Title', { exact: true }),
-    description: form.getByLabel('Description', { exact: true }),
-    section: form.locator('section.screenshot-report'),
-    fileInput: form.getByLabel('Upload a file', { exact: true }),
-    uploadStatus: form.locator('[data-presigned-upload-target="status"]'),
-    holdStatus: form.locator('[data-screenshot-report-target="status"]'),
-    mediaId: form.locator('input[name="screenshot_media_id"]'),
-    frame: form.locator('.screenshot__frame'),
-    pins: form.locator('.screenshot__frame .pin'),
-    pinCount: form.locator('.screenshot-report__count'),
-    submit: form.getByRole('button', { name: 'Make ticket' }),
-  };
-}
-
-type TicketForm = Awaited<ReturnType<typeof openNewTicketForm>>;
-
-async function fillTicket(form: TicketForm, title: string) {
-  await form.title.fill(title);
-  await form.description.fill(DESCRIPTION);
-  await form.form.locator('input[name="type"]').first().check();
-  await form.form.locator('input[name="priority"]').first().check();
-}
-
-// Clicks the picture where it is 25% and 70% across, and 40% and 75% down: two pins in different places.
-async function placeTwoPins(form: TicketForm) {
-  const box = (await form.frame.boundingBox())!;
-  expect(box.width).toBeGreaterThan(100);
-  await form.frame.click({ position: { x: box.width * 0.25, y: box.height * 0.4 } });
-  await expect(form.pins).toHaveCount(1);
-  await form.frame.click({ position: { x: box.width * 0.7, y: box.height * 0.75 } });
-  await expect(form.pins).toHaveCount(2);
-}
 
 test('a ticket made without a picture is created and its page shows no round', async ({ page }) => {
   const form = await openNewTicketForm(page);
@@ -92,7 +53,7 @@ for (const [name, mimeType, buffer] of [
 
     await expect(form.uploadStatus).toHaveText(NOT_A_SCREENSHOT_MESSAGE);
     await expect(form.title).toHaveValue(TITLE);
-    await expect(form.description).toHaveValue(DESCRIPTION);
+    await expect(form.description).toHaveValue(TICKET_DESCRIPTION);
     await expect(form.mediaId).toHaveValue('');
     await expect(form.frame).toBeHidden();
     expect(intentRequests).toEqual([]);

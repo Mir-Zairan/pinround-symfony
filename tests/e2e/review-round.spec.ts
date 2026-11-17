@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { LENA_STORAGE_STATE, MIA_STORAGE_STATE } from './auth';
 import { EARLIER_PIN_NOTES, REVIEW_AREAS, seedReviewRound } from './review-round-seed';
+import { areaTab, roundPanel as panel, saveVerdict } from './round-page';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // The review round page (P05.T7) as Mia, the tester of Shop, and Lena, its lead. What the server answers for every
@@ -33,20 +34,6 @@ async function openRound(browser: Browser, storageState: string, areaPosition?: 
   await page.goto(roundPath(areaPosition), { waitUntil: 'networkidle' });
   await expect(page.getByRole('heading', { level: 1, name: new RegExp(`^Round ${roundNumber}`) })).toBeVisible();
   return { page, close: () => context.close() };
-}
-
-function panel(page: Page) {
-  return page.locator('aside#round-panel');
-}
-
-function areaTab(page: Page, name: string) {
-  return page.getByRole('navigation', { name: 'Screen areas' }).getByRole('link', { name: new RegExp(`^${name}`) });
-}
-
-async function saveVerdict(page: Page) {
-  const answer = page.waitForResponse((response) => /\/areas\/[^/]+\/verdict$/.test(new URL(response.url()).pathname) && 'POST' === response.request().method());
-  await panel(page).getByRole('button', { name: 'Save verdict' }).click();
-  return (await answer).status();
 }
 
 async function seriousViolations(page: Page): Promise<string[]> {

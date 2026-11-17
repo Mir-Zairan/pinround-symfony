@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const NODE_SPECS = ['pin-count.spec.ts', 'pin-position.spec.ts', 'submit-hold.spec.ts', 'upload-checks.spec.ts', 'upload-status.spec.ts'];
-const DRAFT_SPECS = ['share-draft.spec.ts', 'draft-round.spec.ts'];
+const DRAFT_SPECS = ['share-draft.spec.ts', 'draft-round.spec.ts', 'review-journey.spec.ts'];
 
 export default defineConfig({
   testDir: '.',

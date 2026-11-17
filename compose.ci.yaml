@@ -1,6 +1,7 @@
 # CI-only override for the e2e job: `docker compose -f compose.yaml -f compose.ci.yaml`.
-# No spec touches file storage or mail, and MinIO builds from Go source (ADR-0031), so app waits only for
-# the database and the two Valkeys. A journey that needs storage must add minio and minio-init back here.
+# No spec reads mail, so app waits only for the database and the two Valkeys. The job starts MinIO and makes the bucket
+# itself, with `docker compose run --rm minio-init`, before app: a one-shot dependency of app would make `up --wait`
+# depend on how the runner's Compose treats a container that has exited.
 services:
   app:
     depends_on: !override
