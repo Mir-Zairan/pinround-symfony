@@ -149,11 +149,10 @@ test('a change answered 404 reloads the page once with the failed-save toast and
     }
     await route.fulfill({ status: 404, contentType: 'text/html', body: '<!doctype html><title>Gone</title><h1>Nothing was found here</h1>' });
   });
+  // Full document loads only: Turbo's same-document history changes also fire framenavigated.
   let pageLoads = 0;
-  page.on('framenavigated', (frame) => {
-    if (frame === page.mainFrame()) {
-      pageLoads += 1;
-    }
+  page.on('load', () => {
+    pageLoads += 1;
   });
 
   await button(row(page, 2), 'OK').click();

@@ -145,7 +145,7 @@ FR-RND-01, FR-RND-02, FR-RND-03, FR-RND-04, FR-RND-05, FR-RND-06, FR-RND-07, FR-
 **Files:** `src/Review/Application/Checklist/*`.
 **Acceptance criteria:**
 - [x] Only the assignee can mark fixed; only the tester can mark OK / Not fixed (voter rows).
-- [ ] State chip colours and texts match the prototype. (Texts and colour classes are tested; the colours themselves wait for the 18d browser check.)
+- [x] State chip colours and texts match the prototype. (`tests/e2e/checklist.spec.ts` checks each chip's text and computed colours against the prototype's tokens, for Omar and Mia, in 12 passing steps.)
 **Tests:** unit (state machine), functional per role.
 **Prototype check:** checklist card in [Ticket page: rounds](../04-prototype/screens/ticket-page.md#rounds).
 **Size:** S
