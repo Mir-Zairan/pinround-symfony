@@ -24,19 +24,15 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
     },
-    // The draft specs fail when they run beside each other, so each is a project of its own, chained: a project starts
-    // only when its dependencies are done, while the other specs keep running in parallel.
+    // The draft specs read and decide the same people's drafts and fail when they run beside each other, so they share
+    // one worker, one test at a time, while the other specs keep running in parallel. No dependency chain between them:
+    // a failure in one spec must not hide the other.
     {
-      name: 'chromium-share-draft',
-      testMatch: 'share-draft.spec.ts',
+      name: 'chromium-drafts',
+      testMatch: DRAFT_SPECS,
+      workers: 1,
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
-    },
-    {
-      name: 'chromium-draft-round',
-      testMatch: 'draft-round.spec.ts',
-      use: { ...devices['Desktop Chrome'] },
-      dependencies: ['setup', 'chromium-share-draft'],
     },
   ],
 });

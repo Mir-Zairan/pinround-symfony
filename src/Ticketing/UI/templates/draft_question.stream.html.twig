@@ -2,7 +2,7 @@
 <turbo-stream action="append" targets="body"><template>
     {#- With Drive off, Turbo posts a form only when its submitter, too, sits in a data-turbo="true" element. -#}
     <div data-controller="share-draft" data-turbo="true">
-        <twig:Dialog id="share-draft-dialog" title="Share your draft round?">
+        <twig:Dialog id="share-draft-dialog" title="Share your draft round?" openOnConnect>
             <twig:block name="content">
                 {{ include('@Ticketing/_draft_question_text.html.twig') }}
                 <form id="share-draft-form" method="post" action="{{ moveUrl }}" data-turbo="true" data-failed-toast="{{ failedToast }}" data-action="turbo:submit-end->share-draft#close">

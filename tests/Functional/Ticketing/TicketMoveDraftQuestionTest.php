@@ -550,6 +550,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         self::assertStringContainsString('<turbo-stream action="append" targets="body">', $content);
         self::assertStringContainsString('data-controller="share-draft"', $content);
         self::assertStringContainsString('<dialog id="share-draft-dialog"', $content);
+        self::assertStringContainsString('data-controller="dialog" data-dialog-open-on-connect-value="true"', $content, 'The dialog opens itself; no button on the page opens it.');
         $this->assertTheQuestion($content, 2, 2, 'In progress', self::START_WORK);
         self::assertSame($before, $this->stateOf());
     }

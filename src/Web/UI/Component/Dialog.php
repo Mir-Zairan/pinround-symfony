@@ -18,6 +18,9 @@ final class Dialog
 
     public string $title = '';
 
+    /** Opens the dialog as soon as it is on the page, for a dialog that arrives with no trigger of its own (a Turbo Stream answer). */
+    public bool $openOnConnect = false;
+
     #[PostMount]
     public function assertIsValid(): void
     {

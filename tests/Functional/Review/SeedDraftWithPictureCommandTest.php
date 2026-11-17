@@ -20,6 +20,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Exception\CommandNotFoundException;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\DependencyInjection\Attribute\When;
+use Symfony\Component\DependencyInjection\Container;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\HttpKernel\KernelInterface;
@@ -125,6 +126,9 @@ final class SeedDraftWithPictureCommandTest extends KernelTestCase
     public function testItIsFoundInTestAndNotInAProdKernelBuiltInAFreshCacheDirectory(): void
     {
         self::assertSame(self::COMMAND, new Application($this->testKernel)->find(self::COMMAND)->getName(), 'Found in test.');
+        $testContainer = $this->testKernel->getContainer();
+        self::assertInstanceOf(Container::class, $testContainer);
+        self::assertArrayHasKey(ReadyPictureSeeds::class, $testContainer->getRemovedIds(), 'Where the seed is wired, its port alias is among the removed private ids.');
 
         $filesystem = new Filesystem();
         $prodCache = $this->testKernel->getProjectDir().'/var/cache/prod';
@@ -140,8 +144,14 @@ final class SeedDraftWithPictureCommandTest extends KernelTestCase
                 $this->addToAssertionCount(1);
             }
             $container = $prodKernel->getContainer();
-            self::assertSame([ReadyPictureSeeds::class => false, SeedReadyPicture::class => false], array_combine([ReadyPictureSeeds::class, SeedReadyPicture::class], array_map($container->has(...), [ReadyPictureSeeds::class, SeedReadyPicture::class])), 'The prod container has no ready picture seed.');
+            self::assertInstanceOf(Container::class, $container);
+            self::assertSame([ReadyPictureSeeds::class => false, SeedReadyPicture::class => false], array_combine([ReadyPictureSeeds::class, SeedReadyPicture::class], array_map($container->has(...), [ReadyPictureSeeds::class, SeedReadyPicture::class])), 'The prod container has no public ready picture seed.');
+            // has() misses private services. An excluded class is always a removed id; the port alias is one only once wired.
+            $removedIds = $container->getRemovedIds();
+            self::assertNotSame([], $removedIds, 'The compiled prod container lists the private services it removed.');
+            self::assertArrayNotHasKey(ReadyPictureSeeds::class, $removedIds, 'Prod wires no ready picture seed, not even a private one.');
             $mentions = [];
+            // removed-ids.php names every excluded class, the seed included; any other file naming it uses it.
             foreach (new Finder()->files()->in($prodCache)->name('*.php')->notName('removed-ids.php')->contains('SeedReadyPicture') as $file) {
                 $mentions[] = $file->getRelativePathname();
             }
