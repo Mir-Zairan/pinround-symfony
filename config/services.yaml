@@ -215,6 +215,8 @@ services:
     App\Insight\Api\WaitingTurnCounts: '@App\Insight\Infrastructure\Doctrine\DbalWaitingTurnCounts'
     App\Insight\Api\HomeQueries: '@App\Insight\Application\HomeQueriesService'
     App\Insight\Application\WhoseTurnRows: '@App\Insight\Infrastructure\Doctrine\DbalWhoseTurnRows'
+    # Server-side AI goes through Symfony AI (ADR-0018); the test env binds FakeProvider below.
+    App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\SymfonyAiProvider'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -420,6 +422,16 @@ when@test:
         App\Tests\Fixtures\Media\FakeImageEncoder:
             public: true
         App\Media\Application\Processing\ImageEncoder: '@App\Tests\Fixtures\Media\FakeImageEncoder'
+        # No test may call a real AI provider, so the port gets the deterministic one; public so a test can arm a
+        # failure and read the calls. autoconfigure keeps it tagged as resettable, so each kernel reset empties it.
+        App\Assist\Infrastructure\Platform\FakeProvider:
+            autoconfigure: true
+            public: true
+        App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\FakeProvider'
+        # No gateway calls the port before P08.T2; FakeProviderWiringTest gets it as the gateway will.
+        test.assist_ai_provider:
+            alias: App\Assist\Application\AiProvider
+            public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.
         test.conversation_ask_question:

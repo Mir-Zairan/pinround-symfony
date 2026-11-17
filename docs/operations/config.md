@@ -14,6 +14,7 @@ One page that lists every environment variable pinround reads: its default, who 
 - [Mercure](#mercure) — hub keys, issuer, the public and internal hub URLs
 - [Object storage](#object-storage) — endpoint, public URL, bucket, region, signing keys, MinIO credentials
 - [Tracing](#tracing) — the OpenTelemetry settings
+- [AI](#ai) — the operator's provider keys and the Ollama URL
 - [Web server and runtime](#web-server-and-runtime) — FrankenPHP and Caddy settings
 - [Docker and compose host settings](#docker-and-compose-host-settings) — host ports, user ids, database role passwords
 - [Test-only](#test-only) — variables only tests read
@@ -120,6 +121,15 @@ Tracing is off while `OTEL_EXPORTER_OTLP_ENDPOINT` is empty. Spans go to the rec
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | app, all workers | no | `http/protobuf` or `http/json`. |
 | `OTEL_SERVICE_NAME` | `pinround` | app, all workers | no | Service name on every span. |
 | `OTEL_TRACES_SAMPLER_ARG` | `1.0` | app, all workers | no | Share of requests exported, from 0 to 1. Every request starts a new trace. Use `0.1` in prod. |
+
+## AI
+The operator's defaults for server-side AI ([ADR-0018](../03-adr/0018-ai-provider-abstraction.md)). Only `SymfonyAiProvider` reads them. An organization's own key, when it has one, is used instead of the operator's. A call to a provider whose value is empty fails with "AI is not available"; nothing falls back to another provider. The test env never reads them: its container gives `FakeProvider`.
+
+| Variable | Default | Read by | Secret | What it does |
+|---|---|---|---|---|
+| `AI_HUGGINGFACE_TOKEN` | empty (Hugging Face off) | app, all workers | yes | Hugging Face Inference Providers token. Hugging Face is the default provider. |
+| `AI_ANTHROPIC_KEY` | empty (Anthropic off) | app, all workers | yes | Anthropic API key. |
+| `AI_OLLAMA_URL` | empty (Ollama off) | app, all workers | no | Base URL of the operator-run Ollama server, for example `http://ollama:11434`. An operator setting only: tenants never enter a URL (SSRF). |
 
 ## Web server and runtime
 | Variable | Default | Read by | Secret | What it does |

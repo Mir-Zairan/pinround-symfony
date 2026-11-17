@@ -12,8 +12,8 @@ final class DeptracConfigTest extends TestCase
 {
     private const array PARTS = ['Api', 'Event', 'Domain', 'Application', 'Infrastructure', 'UI'];
 
-    /** Layers that are not module parts. */
-    private const array SPECIAL_LAYERS = ['SharedKernel', 'Kernel', 'Vendor'];
+    /** Layers that are not module parts; Assist_AiPlatform is the Platform folder cut out of Assist_Infrastructure. */
+    private const array SPECIAL_LAYERS = ['SharedKernel', 'Kernel', 'Vendor', 'SymfonyAi', 'Assist_AiPlatform'];
 
     #[Test]
     public function everyModuleFolderHasAllSixPartLayers(): void
@@ -156,6 +156,36 @@ final class DeptracConfigTest extends TestCase
     }
 
     #[Test]
+    public function onlyAssistAiPlatformMayUseSymfonyAiAndOnlyItsOwnModule(): void
+    {
+        $ruleset = $this->config()['ruleset'];
+        $layersAllowedSymfonyAi = array_keys(array_filter($ruleset, static fn (array $allowed): bool => \in_array('SymfonyAi', $allowed, true)));
+
+        self::assertSame(['Assist_AiPlatform'], $layersAllowedSymfonyAi);
+        self::assertEqualsCanonicalizing(
+            ['Assist_Domain', 'Assist_Application', 'Assist_Api', 'SharedKernel', 'Vendor', 'SymfonyAi'],
+            $ruleset['Assist_AiPlatform'],
+        );
+    }
+
+    #[Test]
+    public function symfonyAiClassesAreNotVendorAndThePlatformFolderIsNotAssistInfrastructure(): void
+    {
+        $layers = array_column($this->config()['layers'], null, 'name');
+
+        self::assertSame(
+            [['type' => 'classNameRegex', 'value' => '#^App\\\\#'], ['type' => 'classNameRegex', 'value' => '#^Symfony\\\\AI\\\\#'], ['type' => 'php_internal', 'value' => '.']],
+            $layers['Vendor']['collectors'][0]['must_not'] ?? null,
+        );
+        self::assertSame([['type' => 'classNameRegex', 'value' => '#^Symfony\\\\AI\\\\#']], $layers['SymfonyAi']['collectors']);
+        self::assertSame(
+            [['type' => 'classNameRegex', 'value' => '#^App\\\\Assist\\\\Infrastructure\\\\Platform\\\\#']],
+            $layers['Assist_Infrastructure']['collectors'][0]['must_not'] ?? null,
+        );
+        self::assertSame([['type' => 'classNameRegex', 'value' => '#^App\\\\Assist\\\\Infrastructure\\\\Platform\\\\#']], $layers['Assist_AiPlatform']['collectors']);
+    }
+
+    #[Test]
     public function analysisIsLimitedToSrc(): void
     {
         self::assertSame(['./src'], $this->config()['paths']);
@@ -226,11 +256,11 @@ final class DeptracConfigTest extends TestCase
     }
 
     /**
-     * @return array{paths: list<string>, layers: list<array{name: string}>, ruleset: array<string, list<string>>}
+     * @return array{paths: list<string>, layers: list<array{name: string, collectors: list<array<string, mixed>>}>, ruleset: array<string, list<string>>}
      */
     private function config(): array
     {
-        /** @var array{deptrac: array{paths: list<string>, layers: list<array{name: string}>, ruleset: array<string, list<string>>}} $parsed */
+        /** @var array{deptrac: array{paths: list<string>, layers: list<array{name: string, collectors: list<array<string, mixed>>}>, ruleset: array<string, list<string>>}} $parsed */
         $parsed = Yaml::parseFile(\dirname(__DIR__, 3).'/deptrac.yaml');
 
         return $parsed['deptrac'];

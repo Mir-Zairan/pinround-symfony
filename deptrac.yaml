@@ -20,7 +20,11 @@ deptrac:
             - { type: classNameRegex, value: '#.#' }
           must_not:
             - { type: classNameRegex, value: '#^App\\#' }
+            - { type: classNameRegex, value: '#^Symfony\\AI\\#' }
             - { type: php_internal, value: '.' }
+    # Symfony AI is beta, so only Assist_AiPlatform may use it (ADR-0018); every other layer that sees Vendor does not.
+    - name: SymfonyAi
+      collectors: [{ type: classNameRegex, value: '#^Symfony\\AI\\#' }]
     - name: Identity_Api
       collectors:
         - type: bool
@@ -197,7 +201,15 @@ deptrac:
     - name: Assist_Application
       collectors: [{ type: classNameRegex, value: '#^App\\Assist\\Application\\#' }]
     - name: Assist_Infrastructure
-      collectors: [{ type: classNameRegex, value: '#^App\\Assist\\Infrastructure\\#' }]
+      collectors:
+        - type: bool
+          must:
+            - { type: classNameRegex, value: '#^App\\Assist\\Infrastructure\\#' }
+          must_not:
+            - { type: classNameRegex, value: '#^App\\Assist\\Infrastructure\\Platform\\#' }
+    # The part of Assist_Infrastructure that wraps Symfony AI: the only layer allowed SymfonyAi.
+    - name: Assist_AiPlatform
+      collectors: [{ type: classNameRegex, value: '#^App\\Assist\\Infrastructure\\Platform\\#' }]
     - name: Assist_UI
       collectors: [{ type: classNameRegex, value: '#^App\\Assist\\UI\\#' }]
 
@@ -348,6 +360,7 @@ deptrac:
     Assist_Domain: [SharedKernel]
     Assist_Application: [Assist_Domain, Assist_Api, SharedKernel, Ticketing_Api, Review_Api, Organization_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
     Assist_Infrastructure: [Assist_Domain, Assist_Application, Assist_Api, SharedKernel, Vendor, Ticketing_Api, Review_Api, Organization_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    Assist_AiPlatform: [Assist_Domain, Assist_Application, Assist_Api, SharedKernel, Vendor, SymfonyAi]
     Assist_UI: [Assist_Application, Assist_Api, SharedKernel, Vendor, Ticketing_Api, Review_Api, Organization_Api]
 
     Integration_Api: [SharedKernel]
