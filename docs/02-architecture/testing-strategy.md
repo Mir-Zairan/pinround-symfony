@@ -8,7 +8,7 @@ What we test, with which tools, and what "done" means for any task.
 - [Test pyramid](#test-pyramid) — layers and what each catches.
 - [Tests per module](#tests-per-module) — the must-have tests for each module.
 - [Tools](#tools) — PHPUnit, Foundry, Playwright, PHPStan, Deptrac, k6, axe and more.
-- [Special suites](#special-suites) — tenant isolation, voters, query counts, prompts, MCP contracts, log leaks.
+- [Special suites](#special-suites) — tenant isolation, voters, query counts, prompts, MCP contracts, log leaks, performance.
 - [Fixtures and test data](#fixtures-and-test-data) — neutral data only.
 - [CI pipeline](#ci-pipeline) — the five CI jobs, what each runs and its timeout.
 - [Definition of done for any task](#definition-of-done-for-any-task) — the checklist.
@@ -82,6 +82,7 @@ See [ADR-0028](../03-adr/0028-testing-and-quality-gates.md).
 - **Tokens and admin:** a request with a personal access token gets 403 on every `ADMIN_*` action; creating a token without a fresh MFA check is refused.
 - **SSO:** an SSO login that asserts an existing user's email never opens that user's account without linking (password + MFA).
 - **Uploads:** an object bigger than its intent (uploaded despite the presigned limit) is deleted by the worker; a header claiming more than 40 MP is refused before decoding.
+- **Performance (group `performance`, not in the default run):** timing checks against an NFR, such as `tests/Performance/Media/ProcessingTimeTest` (a 15 MB picture processed 20 times, p95 ≤ 10 s, NFR-PERF-08); it skips without libvips. Run it on purpose and write the number into the task.
 
 ## Fixtures and test data
 
