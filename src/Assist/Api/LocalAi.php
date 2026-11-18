@@ -85,7 +85,8 @@ interface LocalAi
      * @param \DateTimeImmutable|null $currentSummaryCreatedAt as for proposalOf, read in the same transaction
      *
      * @throws MainSummaryRefused not_a_proposal when $packageId is not the ticket's proposal (unknown, another
-     *                            ticket's or organization's, made the main summary already, or not the newest), and
+     *                            ticket's or organization's, made the main summary already, or not the newest) or the
+     *                            ticket's current summary is no longer the one made at $currentSummaryCreatedAt, and
      *                            nothing changed; summary_rejected when Ticketing refuses the text as a summary, and
      *                            the mark is rolled back to a savepoint, so nothing changed and the caller may commit
      * @throws \LogicException    when no transaction is open; nothing is read or written
