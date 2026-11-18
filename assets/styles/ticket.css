@@ -270,6 +270,7 @@
 .ticket__ask-ai-off,
 .ticket__ask-notice,
 .ticket__ask-failed,
+.ticket__ask-laptop-status,
 .ticket__ask-earlier-more {
   margin: 0;
   color: var(--on-surface-var);
@@ -282,8 +283,14 @@
   margin: 0;
 }
 
-.ticket__ask-actions[hidden] {
+.ticket__ask-actions[hidden],
+.ticket__ask-laptop-status[hidden] {
   display: none;
+}
+
+/* Only the laptop-summary controller's scope: its lines and form keep the card's own spacing. */
+.ticket__ask-laptop {
+  display: contents;
 }
 
 /* .card has no margin, so the proposal would touch the card above it. */

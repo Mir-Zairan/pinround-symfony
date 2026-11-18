@@ -80,10 +80,23 @@
                         </form>
                     {% else %}
                         {#- On a laptop the server cannot tell whether the laptop is ready: the line shows and the
-                            button stays hidden until the browser finds it ready (task 13b), so a page without
-                            JavaScript stays truthful. -#}
+                            button stays hidden until the laptop-summary controller finds it ready, so a page without
+                            JavaScript stays truthful. With the policy allowing laptops, every line here keeps only the
+                            server's path, which a ready laptop does not take (PolicyEvaluator::decideRoute). -#}
+                        {%- set laptopController = 'App\\Assist\\UI\\Controller\\LaptopController' %}
+                        {% if isOnLaptop %}
+                        <div class="ticket__ask-laptop" data-controller="laptop-summary"
+                             data-action="local-ai:checked@window->laptop-summary#followCheck"
+                             data-laptop-summary-package-url-value="{{ path(constant(laptopController ~ '::PACKAGE_ROUTE')) }}"
+                             data-laptop-summary-result-url-value="{{ path(constant(laptopController ~ '::RESULT_ROUTE')) }}"
+                             data-laptop-summary-frame-url-value="{{ path(constant(controller ~ '::FRAME_ROUTE'), {key: ticket.key}) }}"
+                             data-laptop-summary-generate-url-value="{{ constant('App\\Assist\\UI\\LocalAiChip::OLLAMA_ORIGIN') }}/api/generate"
+                             data-laptop-summary-csrf-header-value="{{ constant(laptopController ~ '::CSRF_HEADER') }}"
+                             data-laptop-summary-token-value="{{ csrf_token(constant(laptopController ~ '::CSRF_ID')) }}"
+                             data-laptop-summary-ticket-id-value="{{ ticket.id.toString }}">
+                        {% endif %}
                         {% if aiRefusal is not null %}
-                            <p class="ticket__ask-ai-off">{{ aiRefusal }}</p>
+                            <p class="ticket__ask-ai-off"{% if isOnLaptop %} data-laptop-summary-target="notReadyLine"{% endif %}>{{ aiRefusal }}</p>
                         {% endif %}
                         {% if state == constant('App\\Assist\\UI\\Component\\TheAsk::STATE_FAILED') %}
                             <p class="ticket__ask-failed">{{ ask.summaryRequest.sentence }}</p>
@@ -91,17 +104,15 @@
                         {% if ask.notice is not null %}
                             <p class="ticket__ask-notice">{{ ask.notice }}</p>
                         {% endif %}
-                        {%- set laptopController = 'App\\Assist\\UI\\Controller\\LaptopController' %}
                         <form method="post" action="{{ path(constant(controller ~ '::REQUEST_ROUTE'), {key: ticket.key}) }}" class="ticket__ask-actions"
-                            {%- if isOnLaptop %}
-                              data-laptop-summary-package-url-value="{{ path(constant(laptopController ~ '::PACKAGE_ROUTE')) }}"
-                              data-laptop-summary-result-url-value="{{ path(constant(laptopController ~ '::RESULT_ROUTE')) }}"
-                              data-laptop-summary-token-value="{{ csrf_token(constant(laptopController ~ '::CSRF_ID')) }}"
-                              data-laptop-summary-ticket-id-value="{{ ticket.id.toString }}"
-                            {%- endif %}{% if aiRefusal is not null %} hidden{% endif %}>
+                            {%- if isOnLaptop %} data-laptop-summary-target="form" data-action="laptop-summary#summarize"{% endif %}{% if aiRefusal is not null %} hidden{% endif %}>
                             <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
-                            <twig:Button type="submit" variant="tonal" class="ticket__summarize" data-turbo-submits-with="Summarizing…">{{ summarizeLabel }}</twig:Button>
+                            <twig:Button type="submit" variant="tonal" class="ticket__summarize" data-turbo-submits-with="Summarizing…" data-laptop-summary-target="button">{{ summarizeLabel }}</twig:Button>
                         </form>
+                        {% if isOnLaptop %}
+                            <p class="ticket__ask-laptop-status" data-laptop-summary-target="statusLine" hidden></p>
+                        </div>
+                        {% endif %}
                     {% endif %}
                 </twig:Card>
             {% endif %}

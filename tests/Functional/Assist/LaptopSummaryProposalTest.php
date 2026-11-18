@@ -6,7 +6,9 @@ namespace App\Tests\Functional\Assist;
 
 use App\Assist\Application\Policy\PolicyRefusal;
 use App\Assist\UI\Component\TheAsk;
+use App\Assist\UI\Controller\LaptopController;
 use App\Assist\UI\Controller\SummaryController;
+use App\Assist\UI\LocalAiChip;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Assist\Laptop\SeedsLaptopAiTickets;
 use App\Tests\Functional\Assist\Laptop\StoresAiSettings;
@@ -310,7 +312,7 @@ final class LaptopSummaryProposalTest extends WebTestCase
 
     /**
      * The organization's AI settings, the ticket, and whether the Summarize with AI form is hidden, its line, and whether
-     * it carries the laptop attributes. SHOP-1 is for everyone, SHOP-2 team-only.
+     * the laptop-summary controller wraps them. SHOP-1 is for everyone, SHOP-2 team-only.
      *
      * @return iterable<string, array{array<string, bool|string>, string, bool, string|null, bool}>
      */
@@ -350,14 +352,30 @@ final class LaptopSummaryProposalTest extends WebTestCase
         }
         self::assertCount(1, $forms);
         self::assertSame($isHidden, null !== $forms->attr('hidden'));
-        $attributes = [
-            $forms->attr('data-laptop-summary-package-url-value'),
-            $forms->attr('data-laptop-summary-result-url-value'),
-            $forms->attr('data-laptop-summary-ticket-id-value'),
-            null !== $forms->attr('data-laptop-summary-token-value'),
-        ];
+        $laptopParts = $page->filter('[data-controller="laptop-summary"]');
+        if (!$hasLaptopAttributes) {
+            self::assertCount(0, $laptopParts);
+            self::assertNull($forms->attr('data-action'));
+
+            return;
+        }
+        self::assertCount(1, $laptopParts);
+        self::assertCount(1, $laptopParts->filter('form.ticket__ask-actions[data-laptop-summary-target="form"][data-action="laptop-summary#summarize"]'));
         $ticketId = 'SHOP-1' === $key ? $this->shopTicketId : $this->teamOnlyTicketId;
-        self::assertSame($hasLaptopAttributes ? ['/ai/laptop/package', '/ai/laptop/result', $ticketId, true] : [null, null, null, false], $attributes);
+        self::assertSame(
+            ['/ai/laptop/package', '/ai/laptop/result', '/t/'.$key.'/summary', LocalAiChip::OLLAMA_ORIGIN.'/api/generate', LaptopController::CSRF_HEADER, $ticketId, true],
+            [
+                $laptopParts->attr('data-laptop-summary-package-url-value'),
+                $laptopParts->attr('data-laptop-summary-result-url-value'),
+                $laptopParts->attr('data-laptop-summary-frame-url-value'),
+                $laptopParts->attr('data-laptop-summary-generate-url-value'),
+                $laptopParts->attr('data-laptop-summary-csrf-header-value'),
+                $laptopParts->attr('data-laptop-summary-ticket-id-value'),
+                '' !== (string) $laptopParts->attr('data-laptop-summary-token-value'),
+            ],
+        );
+        // Every line that keeps the server's AI from a laptop person's ticket is one a ready laptop cures.
+        self::assertSame(null === $line ? [] : [$line], $laptopParts->filter('.ticket__ask-ai-off[data-laptop-summary-target="notReadyLine"]')->each(static fn (Crawler $text): string => $text->text()));
     }
 
     private function assertNothingChanged(): void
