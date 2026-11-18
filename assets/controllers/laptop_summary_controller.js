@@ -19,7 +19,7 @@ export default class extends Controller {
   #run = null;
   #isReady = null;
   // Set when Ollama did not answer a press that the cloud may take: presses on this page go to the cloud, as the status
-  // line says, until readiness changes and clears that line.
+  // line says, until readiness changes or a new check finds the laptop ready, and clears that line.
   #isCloudNext = false;
 
   connect() {
@@ -30,13 +30,15 @@ export default class extends Controller {
     this.#run?.abort(LEFT_PAGE);
   }
 
-  // On connect and on local-ai:checked. A line about the last press is old news once the readiness changes.
-  followCheck() {
+  // On connect and on local-ai:checked. A line about the last press is old news once the readiness changes, and so is
+  // one sending presses to the cloud once a new check (or a model picked in the sheet) finds the laptop ready again.
+  followCheck(checkedEvent) {
     if (this.#run !== null) {
       return;
     }
     const isReady = readyModel() !== null;
-    if (isReady === this.#isReady) {
+    const isNewReadyCheck = isReady && checkedEvent !== undefined;
+    if (isReady === this.#isReady && !isNewReadyCheck) {
       return;
     }
     this.#isReady = isReady;

@@ -498,6 +498,44 @@ test.describe('an organization whose AI runs on laptops first, then in the cloud
     }
   });
 
+  test('a check that still finds a too-slow laptop ready takes the next press back from the cloud', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Promo banner covers the basket total');
+    await seedReadyLaptop(page);
+    const postedPaths = recordPathsPosted(page);
+    const heldRequests = await holdGenerateRequests(page);
+    await answerCloudSummaryHere(page, key);
+    await page.route(OLLAMA_TAGS_URL, (route) => answerAsOllama(route, page, { models: [{ name: MODEL, model: MODEL }] }));
+    await openTicket(page, key);
+
+    try {
+      await summarizeButton(page).click();
+      await expect.poll(() => heldRequests.length).toBe(1);
+      await page.clock.fastForward(GENERATE_TIMEOUT_MS + 1_000);
+      await expect(laptopStatusLine(page)).toHaveText(CLOUD_NEXT_LINE);
+
+      // The readiness does not change: the chip was ready before the check and is ready after it.
+      await localAiChip(page).click();
+      const sheet = page.getByRole('dialog', { name: 'AI on your laptop' });
+      await sheet.getByRole('button', { name: 'Check again' }).click();
+      await expect(sheet.getByRole('status')).toContainText(MODEL);
+      await page.keyboard.press('Escape');
+      await expect(sheet).toBeHidden();
+
+      await expect(chipState(page)).toHaveText('Local AI: ready');
+      await expect(laptopStatusLine(page)).toBeHidden();
+      await expect(laptopStatusLine(page)).toHaveText('');
+
+      await summarizeButton(page).click();
+
+      await expect.poll(() => heldRequests.length).toBe(2);
+      await expect(laptopStatusLine(page)).toHaveText(RUNNING_LINE);
+      expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/package'))).toEqual(['/ai/laptop/package', '/ai/laptop/package']);
+      expect(postedPaths.filter((path) => path === `/t/${key}/summary`)).toEqual([]);
+    } finally {
+      await abortHeldRequests(heldRequests);
+    }
+  });
+
   test('a laptop that is not ready leaves the press to the cloud', async ({ browser, page }) => {
     const key = await makeTicketWithAnAsk(browser, 'Order total shows the wrong currency');
     const postedPaths = recordPathsPosted(page);
