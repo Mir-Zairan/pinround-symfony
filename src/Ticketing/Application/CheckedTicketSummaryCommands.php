@@ -8,6 +8,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\CurrentSummaryChanged;
 use App\Ticketing\Api\GeneratedSummaryRefused;
 use App\Ticketing\Api\TicketSummaryCommands;
 use App\Ticketing\Domain\Summary;
@@ -54,6 +55,7 @@ final readonly class CheckedTicketSummaryCommands implements TicketSummaryComman
         string $promptVersion,
         UserId $chooserId,
         \DateTimeImmutable $chosenAt,
+        ?\DateTimeImmutable $currentSummaryCreatedAt,
     ): void {
         if (!$this->tenantContext->require()->equals($organizationId)) {
             throw new \LogicException('A laptop summary is stored under its own organization; another one is set.');
@@ -64,6 +66,8 @@ final readonly class CheckedTicketSummaryCommands implements TicketSummaryComman
         } catch (SummaryRefused $refused) {
             throw new GeneratedSummaryRefused($refused->getMessage(), $refused);
         }
-        $this->ticketSummaries->storeCurrent($summary);
+        if (!$this->ticketSummaries->storeCurrentInPlaceOf($summary, $currentSummaryCreatedAt)) {
+            throw new CurrentSummaryChanged();
+        }
     }
 }

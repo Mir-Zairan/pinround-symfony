@@ -296,7 +296,7 @@ final class GenerateSummaryHandlerTest extends KernelTestCase
                 $this->connection->executeQuery('SELECT 1 / 0');
             }
 
-            public function storeChosenLaptopSummary(OrganizationId $organizationId, TicketId $ticketId, string $text, UserId $posterId, string $model, string $promptVersion, UserId $chooserId, \DateTimeImmutable $chosenAt): void
+            public function storeChosenLaptopSummary(OrganizationId $organizationId, TicketId $ticketId, string $text, UserId $posterId, string $model, string $promptVersion, UserId $chooserId, \DateTimeImmutable $chosenAt, ?\DateTimeImmutable $currentSummaryCreatedAt): void
             {
                 throw new \LogicException('The summary job never stores a laptop summary.');
             }

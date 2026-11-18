@@ -45,16 +45,24 @@ interface TicketSummaryCommands
 
     /**
      * Makes a laptop's result the ticket's current summary when a person pressed "Use as main summary", and moves the
-     * one before to history, with the same lock, trimming and refusals as storeAiSummary. Who may choose it, and that
-     * the result is chosen once, is the caller's question.
+     * one before to history, with the same lock, trimming and refusals as storeAiSummary, when the current summary is
+     * still the one the person saw, checked under that lock. Who may choose it, and that the result is chosen once, is
+     * the caller's question.
      *
-     * @param UserId $posterId      who posted the result from their laptop, the summary's author
-     * @param string $model         the local model that wrote it
-     * @param string $promptVersion the prompt template of the result's package, such as "summary.v1"
-     * @param UserId $chooserId     who pressed "Use as main summary"
+     * @param UserId                  $posterId                who posted the result from their laptop, the summary's
+     *                                                         author
+     * @param string                  $model                   the local model that wrote it
+     * @param string                  $promptVersion           the prompt template of the result's package, such as
+     *                                                         "summary.v1"
+     * @param UserId                  $chooserId               who pressed "Use as main summary"
+     * @param \DateTimeImmutable|null $currentSummaryCreatedAt when the current summary the person saw was made
+     *                                                         (TicketSummaryView::$createdAt); null when they saw none
      *
      * @throws GeneratedSummaryRefused                    when the text, model or prompt version breaks a summary rule;
      *                                                    nothing is stored
+     * @throws CurrentSummaryChanged                      when the ticket's current summary is not the one made at
+     *                                                    $currentSummaryCreatedAt, or the ticket is gone; nothing is
+     *                                                    stored
      * @throws \App\SharedKernel\Application\TenantNotSet when no organization is set, before any query
      * @throws \LogicException                            when $organizationId is not the organization set, or no
      *                                                    transaction is open, before any query
@@ -68,5 +76,6 @@ interface TicketSummaryCommands
         string $promptVersion,
         UserId $chooserId,
         \DateTimeImmutable $chosenAt,
+        ?\DateTimeImmutable $currentSummaryCreatedAt,
     ): void;
 }

@@ -29,6 +29,7 @@ use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\CurrentSummaryChanged;
 use App\Ticketing\Api\GeneratedSummaryRefused;
 use App\Ticketing\Api\TicketSummaryCommands;
 
@@ -85,9 +86,12 @@ final readonly class LocalAiService implements LocalAi
                     $posted->promptVersion,
                     $chooserId,
                     $madeMainAt,
+                    $currentSummaryCreatedAt,
                 );
             } catch (GeneratedSummaryRefused $refused) {
                 throw MainSummaryRefused::summaryRejected($refused->getMessage());
+            } catch (CurrentSummaryChanged) {
+                throw MainSummaryRefused::notAProposal();
             }
         });
     }

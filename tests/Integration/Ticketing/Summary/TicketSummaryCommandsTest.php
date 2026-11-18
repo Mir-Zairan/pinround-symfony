@@ -10,9 +10,11 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
+use App\Ticketing\Api\CurrentSummaryChanged;
 use App\Ticketing\Api\GeneratedSummaryRefused;
 use App\Ticketing\Api\TicketSummaryCommands;
 use App\Ticketing\Domain\SummaryRefused;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -26,6 +28,7 @@ final class TicketSummaryCommandsTest extends KernelTestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000f8a02';
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000f8a03';
     private const string SHOP_7 = '0197a3c0-0000-7000-8000-0000000f8a04';
+    private const string SHOP_8 = '0197a3c0-0000-7000-8000-0000000f8a05';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000f8a11';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000f8a12';
     private const string TEXT = 'Checkout button hidden MARKER-f8a';
@@ -143,6 +146,59 @@ final class TicketSummaryCommandsTest extends KernelTestCase
         self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
     }
 
+    /**
+     * @return iterable<string, array{string|null}> when the current summary the person saw was made
+     */
+    public static function currentSummariesThePersonDidNotSee(): iterable
+    {
+        yield 'one made a second before' => ['2027-03-02 08:59:59+00'];
+        yield 'one made a second after' => ['2027-03-02 09:00:01+00'];
+        yield 'none, though the ticket has one' => [null];
+    }
+
+    /**
+     * The person read the page before another summary became the current one: storing theirs would replace one they
+     * never saw. The caller commits, so a refusal must leave nothing behind by itself.
+     */
+    #[Test]
+    #[DataProvider('currentSummariesThePersonDidNotSee')]
+    public function aChosenLaptopSummaryIsRefusedWhenTheCurrentSummaryIsNotTheOneThePersonSaw(?string $currentSummaryCreatedAt): void
+    {
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($currentSummaryCreatedAt): ?CurrentSummaryChanged {
+            try {
+                $this->storeChosenLaptopSummary(self::ACME_FOODS, self::TEXT, $currentSummaryCreatedAt);
+            } catch (CurrentSummaryChanged $refusal) {
+                return $refusal;
+            }
+
+            return null;
+        });
+
+        self::assertSame('The ticket\'s current summary changed since the page was read.', $refusal?->getMessage());
+        self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
+    }
+
+    #[Test]
+    public function aChosenLaptopSummaryOfATicketWithNoSummaryIsStoredOnlyWhenThePersonSawNone(): void
+    {
+        $this->ticketRows()->addOf(self::ACME_FOODS, self::SHOP_8, self::SHOP_PROJECT, self::MIA, 8);
+
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->storeChosenLaptopSummary(self::ACME_FOODS, self::TEXT, '2027-03-02 09:00:00+00', self::SHOP_8));
+            self::fail('A summary was stored in place of one the ticket does not have.');
+        } catch (CurrentSummaryChanged) {
+        }
+        self::getContainer()->get('doctrine')->resetManager();
+        self::assertSame([], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_8));
+
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->storeChosenLaptopSummary(self::ACME_FOODS, self::TEXT, null, self::SHOP_8));
+
+        self::assertSame(
+            [['text' => self::TEXT, 'source' => 'laptop', 'author_id' => self::MIA, 'model' => 'qwen3:4b', 'prompt_version' => 'summary.v1', 'is_current' => true, 'created_at' => '2027-03-03 10:05:00']],
+            $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_8),
+        );
+    }
+
     #[Test]
     public function aChosenLaptopSummaryForAnotherOrganizationThanTheOneSetIsRefusedAndTheCurrentSummaryStays(): void
     {
@@ -156,19 +212,20 @@ final class TicketSummaryCommandsTest extends KernelTestCase
         self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
     }
 
-    private function storeChosenLaptopSummary(string $organizationId, string $text): void
+    private function storeChosenLaptopSummary(string $organizationId, string $text, ?string $currentSummaryCreatedAt = '2027-03-02 09:00:00+00', string $ticketId = self::SHOP_7): void
     {
         $ticketSummaryCommands = self::getContainer()->get('test.ticketing_ticket_summary_commands');
         \assert($ticketSummaryCommands instanceof TicketSummaryCommands);
         $ticketSummaryCommands->storeChosenLaptopSummary(
             new OrganizationId($organizationId),
-            new TicketId(self::SHOP_7),
+            new TicketId($ticketId),
             $text,
             new UserId(self::MIA),
             'qwen3:4b',
             'summary.v1',
             new UserId(self::LENA),
             new \DateTimeImmutable('2027-03-03 10:05:00 UTC'),
+            null === $currentSummaryCreatedAt ? null : new \DateTimeImmutable($currentSummaryCreatedAt),
         );
     }
 

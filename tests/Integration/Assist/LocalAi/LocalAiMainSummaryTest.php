@@ -152,6 +152,25 @@ final class LocalAiMainSummaryTest extends KernelTestCase
     }
 
     /**
+     * The page was read when the current summary was an older one: the result is still newer than that one, so the
+     * mark matches, and Ticketing refuses under the ticket's lock; the savepoint takes the mark back.
+     */
+    #[Test]
+    public function aChoiceMadeOnAPageThatShowedAnotherCurrentSummaryIsRefusedAndChangesNothing(): void
+    {
+        try {
+            $this->makeMainSummary(self::NEWEST, self::SHOP_7, '2027-03-15 09:00:00+00');
+            self::fail('A summary the person never saw was replaced.');
+        } catch (MainSummaryRefused $refusal) {
+            self::assertSame(MainSummaryRefused::NOT_A_PROPOSAL, $refusal->refusalCode);
+        }
+        self::getContainer()->get('doctrine')->resetManager();
+
+        self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
+        self::assertSame([self::MADE_MAIN => '2027-03-15 10:03:30'], $this->madeMainTimes());
+    }
+
+    /**
      * @return iterable<string, array{string, string}>
      */
     public static function resultsThatAreNotTheProposal(): iterable
