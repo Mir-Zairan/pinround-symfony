@@ -18,10 +18,10 @@ use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\LocalAi\LocalPackages;
 use App\Assist\Application\LocalAiService;
 use App\Assist\Application\PromptRenderer;
+use App\Assist\Infrastructure\Doctrine\DbalMainSummaryMaker;
 use App\Assist\Infrastructure\Uid\UuidV7LocalPackageIds;
 use App\Audit\Api\AuditLog;
 use App\Organization\Api\MemberNameQueries;
-use App\SharedKernel\Application\Savepoints;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
@@ -822,8 +822,7 @@ final class LocalAiServiceTest extends KernelTestCase
             $container->get(MemberNameQueries::class),
             $container->get(AuditLog::class),
             $container->get(Transactions::class),
-            $container->get(Savepoints::class),
-            $summaryCommands,
+            new DbalMainSummaryMaker($container->get(Connection::class), $localPackages, $summaryCommands),
         );
     }
 

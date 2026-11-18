@@ -285,6 +285,30 @@ final class LocalAiMainSummaryTest extends KernelTestCase
         self::assertSame($refusedPackage, $this->proposalOf(self::SHOP_7, self::SUMMARY_WRITTEN_AT)?->packageId->toString());
     }
 
+    #[Test]
+    public function withNoTransactionOpenTheProposalIsNotMadeTheMainSummary(): void
+    {
+        self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
+
+        try {
+            $this->localAi()->makeMainSummary(
+                new LocalPackageId(self::NEWEST),
+                new TicketId(self::SHOP_7),
+                new \DateTimeImmutable(self::SUMMARY_WRITTEN_AT),
+                new UserId(self::LENA),
+                new OrganizationId(self::ACME_FOODS),
+            );
+            self::fail('A result was made the main summary outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('Use as main summary is part of an open transaction; none is open.', $refusal->getMessage());
+        } finally {
+            self::getContainer()->get(TenantContext::class)->clear();
+        }
+
+        self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
+        self::assertSame([self::MADE_MAIN => '2027-03-15 10:03:30'], $this->madeMainTimes());
+    }
+
     private function assertRefusedAsNotAProposal(string $packageId, string $ticketId): void
     {
         try {

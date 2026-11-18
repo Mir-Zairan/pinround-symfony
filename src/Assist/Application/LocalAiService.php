@@ -11,26 +11,23 @@ use App\Assist\Api\LocalPackageId;
 use App\Assist\Api\LocalPackageRefused;
 use App\Assist\Api\LocalResult;
 use App\Assist\Api\LocalResultRefused;
-use App\Assist\Api\MainSummaryRefused;
 use App\Assist\Api\PromptPackage;
 use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\LocalAi\IssuedLocalPackage;
 use App\Assist\Application\LocalAi\LocalPackageIds;
 use App\Assist\Application\LocalAi\LocalPackageLimit;
 use App\Assist\Application\LocalAi\LocalPackages;
+use App\Assist\Application\LocalAi\MainSummaryMaker;
 use App\Assist\Application\Policy\PolicyRefusal;
 use App\Assist\Domain\AiFeature;
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditLog;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\MemberNameQueries;
-use App\SharedKernel\Application\Savepoints;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use App\Ticketing\Api\CurrentSummaryChanged;
-use App\Ticketing\Api\GeneratedSummaryRefused;
 use App\Ticketing\Api\TicketSummaryCommands;
 
 /**
@@ -58,8 +55,7 @@ final readonly class LocalAiService implements LocalAi
         private MemberNameQueries $memberNameQueries,
         private AuditLog $auditLog,
         private Transactions $transactions,
-        private Savepoints $savepoints,
-        private TicketSummaryCommands $ticketSummaryCommands,
+        private MainSummaryMaker $mainSummaryMaker,
     ) {
     }
 
@@ -70,30 +66,7 @@ final readonly class LocalAiService implements LocalAi
 
     public function makeMainSummary(LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $currentSummaryCreatedAt, UserId $chooserId, OrganizationId $organizationId): void
     {
-        // The mark comes before Ticketing checks the text, so a refusal rolls it back here: a caller that catches the
-        // refusal and commits keeps the result a proposal.
-        $this->savepoints->run(function () use ($packageId, $ticketId, $currentSummaryCreatedAt, $chooserId, $organizationId): void {
-            $posted = $this->localPackages->markMadeMain($organizationId, $packageId, $ticketId, $currentSummaryCreatedAt)
-                ?? throw MainSummaryRefused::notAProposal();
-            $madeMainAt = $posted->madeMainAt ?? throw new \UnexpectedValueException('A result marked made the main summary has no time.');
-            try {
-                $this->ticketSummaryCommands->storeChosenLaptopSummary(
-                    $organizationId,
-                    $ticketId,
-                    $posted->result->text,
-                    $posted->result->posterId,
-                    $posted->result->model->value,
-                    $posted->promptVersion,
-                    $chooserId,
-                    $madeMainAt,
-                    $currentSummaryCreatedAt,
-                );
-            } catch (GeneratedSummaryRefused $refused) {
-                throw MainSummaryRefused::summaryRejected($refused->getMessage());
-            } catch (CurrentSummaryChanged) {
-                throw MainSummaryRefused::notAProposal();
-            }
-        });
+        $this->mainSummaryMaker->makeMain($packageId, $ticketId, $currentSummaryCreatedAt, $chooserId, $organizationId);
     }
 
     public function package(LocalAiPurpose $purpose, TicketId $ticketId, UserId $requesterId, OrganizationId $organizationId): PromptPackage
