@@ -146,8 +146,8 @@ final readonly class SetVerdict implements AgentTool
      * Verdict and summary are saved by one Review command, so a refused summary leaves the verdict unsaved too.
      *
      * @throws ToolRefusal     not found, read-only (a shared or closed draft, a checklist item marked fixed or OK
-     *                         already), or invalid input (a summary over 600 characters)
-     * @throws RoundRefused    DRAFT_CHANGED, when another request saved the draft meanwhile
+     *                         already), invalid input (a summary over 600 characters), or refused with Review's
+     *                         words (DRAFT_CHANGED, when another request saved the draft meanwhile)
      * @throws \LogicException without a user or a target of this tool
      */
     public function call(array $arguments, ?ToolTarget $target): CallToolResult
@@ -225,16 +225,16 @@ final readonly class SetVerdict implements AgentTool
     }
 
     /**
-     * Review's refusal as the tool's, by the kind Review gave it. Any other, such as DRAFT_CHANGED, goes on as a
-     * failure.
+     * Review's refusal as the tool's, by the kind Review gave it. One of no kind, such as DRAFT_CHANGED for a draft
+     * another request saved meanwhile, is plain text for the person, so it goes to the client as it is.
      */
-    private static function toolRefusalOf(RoundRefused $refused): \Throwable
+    private static function toolRefusalOf(RoundRefused $refused): ToolRefusal
     {
         return match (true) {
             $refused->isNotFound() => ToolRefusal::notFound(),
             $refused->isReadOnly() => ToolRefusal::readOnly(),
             $refused->isInvalidContent() => ToolRefusal::invalidInput($refused->getMessage()),
-            default => $refused,
+            default => ToolRefusal::refused($refused->getMessage()),
         };
     }
 

@@ -302,6 +302,10 @@ final class SetVerdictTest extends TestCase
         yield 'shared since it was read' => [RoundRefused::readOnly('This draft round is shared, so it no longer changes.'), ToolCallOutcome::ReadOnly, ToolRefusal::READ_ONLY];
         yield 'closed' => [RoundRefused::readOnly('This draft round is closed.'), ToolCallOutcome::ReadOnly, ToolRefusal::READ_ONLY];
         yield 'a summary over its cap' => [RoundRefused::invalidContent('A picture summary holds at most 600 characters.'), ToolCallOutcome::InvalidInput, \sprintf(ToolRefusal::INVALID_INPUT, 'A picture summary holds at most 600 characters.')];
+        yield 'changed meanwhile, of no kind' => [new RoundRefused(RoundRefused::DRAFT_CHANGED, 0, new \RuntimeException('The round changed since it was read.')), ToolCallOutcome::Refused, RoundRefused::DRAFT_CHANGED];
+        // The cause alone says nothing: only the kind Review set does.
+        yield 'a domain cause Review gave no kind' => [new RoundRefused('Only the person who owns a draft round can change it.', 0, new \DomainException('Not the owner.')), ToolCallOutcome::Refused, 'Only the person who owns a draft round can change it.'];
+        yield 'an invalid argument cause Review gave no kind' => [new RoundRefused('This draft round changed meanwhile.', 0, new \InvalidArgumentException('Not a kind.')), ToolCallOutcome::Refused, 'This draft round changed meanwhile.'];
     }
 
     #[Test]
@@ -315,28 +319,6 @@ final class SetVerdictTest extends TestCase
         self::assertSame($outcome, $refusal->outcome);
         self::assertSame($message, $refusal->getMessage());
         self::assertSame([], $this->roundCommands->verdictsSet);
-    }
-
-    /**
-     * @return iterable<string, array{RoundRefused}>
-     */
-    public static function refusalsOfNoKind(): iterable
-    {
-        yield 'changed meanwhile' => [new RoundRefused(RoundRefused::DRAFT_CHANGED, 0, new \RuntimeException('The round changed since it was read.'))];
-        // The cause alone says nothing: only the kind Review set does.
-        yield 'a domain refusal Review gave no kind' => [new RoundRefused('Only the person who owns a draft round can change it.', 0, new \DomainException('Only the person who owns a draft round can change it.'))];
-        yield 'an invalid argument Review gave no kind' => [new RoundRefused('Not a kind.', 0, new \InvalidArgumentException('Not a kind.'))];
-    }
-
-    #[Test]
-    #[DataProvider('refusalsOfNoKind')]
-    public function aRefusalOfNoKindGoesOnAsAFailure(RoundRefused $roundRefusal): void
-    {
-        $this->roundCommands->refusal = $roundRefusal;
-
-        $this->expectExceptionObject($roundRefusal);
-
-        $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'looks_right']);
     }
 
     #[Test]
