@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\Domain;
 
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 
 /**
@@ -21,6 +22,21 @@ interface ApiTokens
      * Saves the token at once.
      */
     public function add(ApiToken $token): void;
+
+    /**
+     * Holds, until the open transaction ends, the lock under which the user's tokens in the organization are counted and
+     * one is added, so of two issues at once the second counts after the first has added its token.
+     *
+     * @throws \LogicException when no transaction is open, or $organizationId is not the tenant
+     */
+    public function lockIssuingFor(OrganizationId $organizationId, UserId $userId): void;
+
+    /**
+     * The user's tokens in the tenant that are neither revoked nor expired at $at.
+     *
+     * @throws \LogicException when no tenant is set
+     */
+    public function countLiveOf(UserId $userId, \DateTimeImmutable $at): int;
 
     /**
      * @return ApiToken|null null when $id is not a UUID, no token of the tenant has it, or $ownerId does not own it

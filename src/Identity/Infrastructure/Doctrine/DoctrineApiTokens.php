@@ -28,6 +28,16 @@ final readonly class DoctrineApiTokens implements ApiTokens
 
     private const string RESOLVE = 'SELECT token_id, organization_id, user_id FROM resolve_api_token(?)';
 
+    // An advisory lock, not a row lock: a user with no token has no row to lock, and a row lock does not stop an insert.
+    private const string LOCK_ISSUING = 'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))';
+
+    /** Names the lock among every module's advisory locks, which share one key space; then organization and user. */
+    public const string ISSUING_LOCK_KEY_FORMAT = 'idn_api_token:issue:%s:%s';
+
+    // Served by idn_api_token_user_id_created_at_idx.
+    private const string COUNT_LIVE = 'SELECT count(*) FROM idn_api_token'
+        .' WHERE organization_id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?';
+
     // The columns keep whole seconds, and PostgreSQL rounds a fraction; cutting it here keeps "now" from moving ahead.
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:sP';
 
@@ -44,6 +54,34 @@ final readonly class DoctrineApiTokens implements ApiTokens
     {
         $this->entityManager->persist($token);
         $this->entityManager->flush();
+    }
+
+    public function lockIssuingFor(OrganizationId $organizationId, UserId $userId): void
+    {
+        $connection = $this->entityManager->getConnection();
+        // Outside a transaction the lock would end with its own statement.
+        if (!$connection->isTransactionActive()) {
+            throw new \LogicException('Issuing a token needs an open transaction; none is open.');
+        }
+        if (!$this->tenantContext->require()->equals($organizationId)) {
+            throw new \LogicException('A token is issued under its own organization as tenant.');
+        }
+
+        $connection->executeStatement(self::LOCK_ISSUING, [\sprintf(self::ISSUING_LOCK_KEY_FORMAT, $organizationId->toString(), $userId->toString())]);
+    }
+
+    public function countLiveOf(UserId $userId, \DateTimeImmutable $at): int
+    {
+        $liveTokens = $this->entityManager->getConnection()->fetchOne(self::COUNT_LIVE, [
+            $this->tenantContext->require()->toString(),
+            $userId->toString(),
+            $at->format(self::TIMESTAMP_FORMAT),
+        ]);
+        if (!\is_int($liveTokens)) {
+            throw new \UnexpectedValueException('The count of live tokens is not a number.');
+        }
+
+        return $liveTokens;
     }
 
     public function byIdForOwner(string $id, UserId $ownerId): ?ApiToken

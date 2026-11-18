@@ -93,6 +93,7 @@ final class ResolveApiTokenTest extends KernelTestCase
     public function theReadonlyRoleIsRefusedEvenForALiveToken(): void
     {
         $readonly = self::getContainer()->get('doctrine.dbal.readonly_connection');
+        self::assertInstanceOf(Connection::class, $readonly);
         self::assertSame('pinround_readonly', $readonly->fetchOne('SELECT current_user'));
 
         try {

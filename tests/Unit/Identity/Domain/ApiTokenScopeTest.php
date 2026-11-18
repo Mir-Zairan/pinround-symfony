@@ -16,7 +16,7 @@ final class ApiTokenScopeTest extends TestCase
     {
         self::assertSame(
             ['read', 'rounds:write', 'comments:write', 'tickets:move', 'reports:write'],
-            array_column(ApiTokenScope::cases(), 'value'),
+            self::valuesOf(ApiTokenScope::cases()),
         );
     }
 
@@ -48,5 +48,17 @@ final class ApiTokenScopeTest extends TestCase
         $this->expectException(UnknownApiTokenScope::class);
 
         ApiTokenScope::fromValues(['READ']);
+    }
+
+    /**
+     * Widened to any backed enum, so PHPStan does not read the cases' values as already known and call the check true.
+     *
+     * @param list<\BackedEnum> $cases
+     *
+     * @return list<int|string>
+     */
+    private static function valuesOf(array $cases): array
+    {
+        return array_map(static fn (\BackedEnum $case): int|string => $case->value, $cases);
     }
 }

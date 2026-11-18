@@ -195,13 +195,14 @@ final class DoctrineApiTokensTest extends KernelTestCase
     }
 
     #[Test]
-    public function withoutATenantRevokeAndMarkUsedRefuseAndChangeNothing(): void
+    public function withoutATenantRevokeMarkUsedAndTheLiveCountRefuseAndChangeNothing(): void
     {
         $at = new \DateTimeImmutable('2099-03-20 09:00:00 UTC');
         $refusals = [];
         $calls = [
             'revoke' => fn (): bool => $this->tokens()->revoke(self::OMAR_LIVE, $at),
             'markUsed' => fn (): bool => $this->tokens()->markUsed(self::OMAR_LIVE, $at),
+            'countLiveOf' => fn (): int => $this->tokens()->countLiveOf(new UserId(self::OMAR), $at),
         ];
         foreach ($calls as $method => $call) {
             try {
@@ -211,7 +212,7 @@ final class DoctrineApiTokensTest extends KernelTestCase
             }
         }
 
-        self::assertSame(['revoke', 'markUsed'], $refusals);
+        self::assertSame(['revoke', 'markUsed', 'countLiveOf'], $refusals);
         self::assertSame(
             ['revoked_at' => null, 'last_used_at' => null],
             $this->asAcmeFoods(fn (): array|false => $this->connection()->fetchAssociative('SELECT revoked_at, last_used_at FROM idn_api_token WHERE id = ?', [self::OMAR_LIVE])),
