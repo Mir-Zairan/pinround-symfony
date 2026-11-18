@@ -34,4 +34,21 @@ interface IntakeCandidateQueries
      *                                                    not the tenant, before any query
      */
     public function openCandidatesIn(string $projectId, TicketVisibility $reporter, bool $includeTeamOnly): array;
+
+    /**
+     * The open tickets with these keys that the reporter may see, team-only ones included, for showing the duplicates
+     * an intake check suggested: one query, none for no key or only keys no ticket can have.
+     *
+     * @param TicketVisibility $reporter the predicate of the person who asked for the check
+     * @param list<string>     $keys     at most CANDIDATE_LIMIT, for example "SHOP-12"; a lowercase or malformed key,
+     *                                   an unknown one, a closed ticket's and one the reporter may not see are dropped
+     *
+     * @return list<IntakeCandidate> in the order of $keys, each key once
+     *
+     * @throws \InvalidArgumentException                  when more than CANDIDATE_LIMIT keys are given, before any query
+     * @throws \App\SharedKernel\Application\TenantNotSet when no tenant is set, before any query
+     * @throws \LogicException                            when no transaction is open or the reporter's organization is
+     *                                                    not the tenant, before any query
+     */
+    public function openCandidatesByKeys(TicketVisibility $reporter, array $keys): array;
 }

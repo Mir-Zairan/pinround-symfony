@@ -235,6 +235,121 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     }
 
     /**
+     * SHOP-88 is another team's team-only ticket Mia may not see, SHOP-89 is closed, shop-1 is not how a key is
+     * written, SHOP-90 is Beta Bakery's and SHOP-999 no ticket's; the rest come in the order asked, each once.
+     */
+    #[Test]
+    public function byKeyAReporterGetsTheOpenTicketsTheyMaySeeInTheOrderAskedInOneQuery(): void
+    {
+        [$candidates, $queryCount] = $this->transactions()->committedAs(self::ACME_FOODS, function (): array {
+            $this->debugData()->reset();
+            $candidates = $this->queries()->openCandidatesByKeys(
+                self::miaVisibility(false),
+                ['SHOP-88', 'SHOP-3', 'SHOP-87', 'SHOP-89', 'OPS-1', 'shop-1', 'SHOP-90', 'SHOP-999', 'SHOP-3', 'SHOP-86'],
+            );
+
+            return [$candidates, self::queryCountOf($this->debugData())];
+        });
+
+        self::assertSame(
+            [['SHOP-3', self::titleOf('SHOP', 3)], ['SHOP-87', self::titleOf('SHOP', 87)], ['OPS-1', self::titleOf('OPS', 1)], ['SHOP-86', self::titleOf('SHOP', 86)]],
+            array_map(static fn (IntakeCandidate $candidate): array => [$candidate->key, $candidate->title], $candidates),
+        );
+        self::assertSame(1, $queryCount);
+    }
+
+    #[Test]
+    public function byKeyAnAdminGetsAnotherTeamsTeamOnlyTicket(): void
+    {
+        $candidates = $this->transactions()->committedAs(
+            self::ACME_FOODS,
+            fn (): array => $this->queries()->openCandidatesByKeys(self::miaVisibility(true), ['SHOP-88', 'SHOP-89']),
+        );
+
+        self::assertSame(['SHOP-88'], self::keysOf($candidates));
+    }
+
+    /**
+     * @return iterable<string, array{list<string>}>
+     */
+    public static function keysThatNeedNoQuery(): iterable
+    {
+        yield 'no key' => [[]];
+        yield 'only keys no ticket can have' => [['shop-1', 'SHOP-0', 'SHOP-01', "SHOP-1\n", 'SHOP-1,SHOP-2', 'SHOP-99999999999999999999']];
+    }
+
+    /**
+     * @param list<string> $keys
+     */
+    #[Test]
+    #[DataProvider('keysThatNeedNoQuery')]
+    public function byKeyNoKeyAnyTicketCanHaveFindsNoneWithoutAQuery(array $keys): void
+    {
+        [$candidates, $queryCount] = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($keys): array {
+            $this->debugData()->reset();
+            $candidates = $this->queries()->openCandidatesByKeys(self::miaVisibility(true), $keys);
+
+            return [$candidates, self::queryCountOf($this->debugData())];
+        });
+
+        self::assertSame([], $candidates);
+        self::assertSame(0, $queryCount);
+    }
+
+    #[Test]
+    public function byKeyMoreKeysThanTheCandidateLimitAreRefusedBeforeAnyQuery(): void
+    {
+        $keys = self::shopKeysFrom(IntakeCandidateQueries::CANDIDATE_LIMIT + 1, 1);
+        [$refusal, $queryCount] = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($keys): array {
+            $this->debugData()->reset();
+            try {
+                $this->queries()->openCandidatesByKeys(self::miaVisibility(false), $keys);
+            } catch (\InvalidArgumentException $refusal) {
+                return [$refusal->getMessage(), self::queryCountOf($this->debugData())];
+            }
+            self::fail('81 keys were read.');
+        });
+
+        self::assertSame('At most 80 intake candidates are read by key at once.', $refusal);
+        self::assertSame(0, $queryCount);
+        self::assertCount(IntakeCandidateQueries::CANDIDATE_LIMIT, $this->transactions()->committedAs(
+            self::ACME_FOODS,
+            fn (): array => $this->queries()->openCandidatesByKeys(self::miaVisibility(false), self::shopKeysFrom(IntakeCandidateQueries::CANDIDATE_LIMIT, 1)),
+        ));
+    }
+
+    #[Test]
+    public function byKeyRowLevelSecurityAloneHidesAnotherOrganizationsTickets(): void
+    {
+        $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
+        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext())
+            ->openCandidatesByKeys(self::miaVisibility(true), ['SHOP-1', 'SHOP-88']);
+
+        $underAcmeFoods = $ownConnectionTransactions->rolledBackAs(self::ACME_FOODS, $candidatesOn);
+        $underBetaBakery = $ownConnectionTransactions->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $candidatesOn);
+
+        self::assertSame(['SHOP-1', 'SHOP-88'], self::keysOf($underAcmeFoods));
+        self::assertSame([], $underBetaBakery);
+    }
+
+    #[Test]
+    public function byKeyAReporterOfAnotherOrganizationThanTheTenantIsRefusedBeforeAnyQuery(): void
+    {
+        [$refusal, $queryCount] = $this->transactions()->committedAs(self::BETA_BAKERY, function (): array {
+            $this->debugData()->reset();
+            try {
+                $this->queries()->openCandidatesByKeys(self::miaVisibility(false), ['SHOP-1']);
+            } catch (\LogicException $refusal) {
+                return [$refusal->getMessage(), self::queryCountOf($this->debugData())];
+            }
+            self::fail('Mia\'s candidates were read under Beta Bakery.');
+        });
+
+        self::assertSame('Intake candidates are read under the reporter\'s own organization as tenant.', $refusal);
+        self::assertSame(0, $queryCount);
+    }
+
+    /**
      * @return list<IntakeCandidate>
      */
     private function candidatesIn(string $projectId, TicketVisibility $reporter, bool $includeTeamOnly): array

@@ -38,6 +38,14 @@ final class ViewerAiPolicy implements ResetInterface
         return $this->aiPolicy->serverTicketRefusalOf($this->policy(), $isTicketTeamOnly);
     }
 
+    /**
+     * Why the server's AI may not check this person's draft report (AiPolicy::serverDraftRefusalOf); null when it may.
+     */
+    public function serverDraftRefusalOf(): ?string
+    {
+        return $this->aiPolicy->serverDraftRefusalOf($this->policy());
+    }
+
     public function reset(): void
     {
         $this->policy = null;

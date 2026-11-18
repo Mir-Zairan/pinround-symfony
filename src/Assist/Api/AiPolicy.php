@@ -40,4 +40,14 @@ interface AiPolicy
      * @return string|null null when the server's AI may run for the ticket
      */
     public function serverTicketRefusalOf(PolicyView $policy, bool $isTicketTeamOnly): ?string;
+
+    /**
+     * The line that keeps the server's AI from a draft report ("Check with AI") for the person $policy is about, in
+     * the order the server's AI door decides it before a check is queued, with the laptop not ready: $policy's own
+     * refusal, then "laptop only", which the server never runs. A draft is never team-only. The draft's words are
+     * not known here: a draft that mentions security is refused when the check is asked for. Reads nothing.
+     *
+     * @return string|null null when the server's AI may check a draft
+     */
+    public function serverDraftRefusalOf(PolicyView $policy): ?string;
 }

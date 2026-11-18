@@ -23,7 +23,6 @@ use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Api\TicketVisibilityFacts;
 use App\Ticketing\Api\TicketVisibilitySql;
-use App\Ticketing\Domain\InvalidTicketKey;
 use App\Ticketing\Domain\TicketKey;
 use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\StepQueries;
@@ -92,7 +91,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         if (!$organizationId->equals($filter->visibility->organizationId())) {
             throw new \LogicException('A ticket\'s place in a list is read under the viewer\'s own organization as tenant.');
         }
-        if (!self::canBeTicketKey($key)) {
+        if (!TicketKey::canBe($key)) {
             return null;
         }
         $shownSteps = $this->shownStepsOf($filter);
@@ -145,7 +144,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         if (!$organizationId->equals($viewer->organizationId())) {
             throw new \LogicException('A ticket page is read under the viewer\'s own organization as tenant.');
         }
-        if (!self::canBeTicketKey($key)) {
+        if (!TicketKey::canBe($key)) {
             return null;
         }
 
@@ -215,19 +214,6 @@ final readonly class DbalTicketQueries implements TicketQueries
         $isVisible = array_fill_keys(array_map(static fn (mixed $id): string => self::text($id, 'id'), $visibleIds), true);
 
         return array_values(array_filter($uniqueTicketIds, static fn (TicketId $ticketId): bool => isset($isVisible[$ticketId->toString()])));
-    }
-
-    /**
-     * A key that cannot be stored costs no query: TicketKey's format, and the same text back, so a number past the
-     * integer range, which no ticket has, is refused too.
-     */
-    private static function canBeTicketKey(string $key): bool
-    {
-        try {
-            return TicketKey::fromString($key)->toString() === $key;
-        } catch (InvalidTicketKey) {
-            return false;
-        }
     }
 
     /**

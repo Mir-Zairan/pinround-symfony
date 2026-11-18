@@ -35,6 +35,19 @@ final readonly class TicketKey
         return new self(new ProjectKey($parts[1]), (int) $parts[2]);
     }
 
+    /**
+     * Whether a ticket can have exactly this key text, so a lookup by a key no ticket can have costs no query: the
+     * format, and the same text back, so a number past the integer range is refused too.
+     */
+    public static function canBe(string $key): bool
+    {
+        try {
+            return self::fromString($key)->toString() === $key;
+        } catch (InvalidTicketKey) {
+            return false;
+        }
+    }
+
     public function projectKey(): ProjectKey
     {
         return $this->projectKey;

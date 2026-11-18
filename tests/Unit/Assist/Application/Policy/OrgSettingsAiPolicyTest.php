@@ -153,6 +153,29 @@ final class OrgSettingsAiPolicyTest extends TestCase
         self::assertSame([], $this->roleLookups);
     }
 
+    /**
+     * @return iterable<string, array{PolicyView, string|null}>
+     */
+    public static function serverDraftPolicies(): iterable
+    {
+        yield 'cloud AI that keeps team-only tickets from it, as a draft is not team-only' => [self::allowedView(), null];
+        yield 'laptop first goes to the cloud on the server' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), null];
+        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), 'AI help runs on your laptop, and Ollama is not ready there yet.'];
+        yield 'AI off' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false), 'Your admin turned AI help off.'];
+        yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false), 'Your admin allows AI help for leads only.'];
+    }
+
+    #[Test]
+    #[DataProvider('serverDraftPolicies')]
+    public function aDraftIsRefusedTheServersAiInTheGatewaysOrderWithoutReadingAnything(PolicyView $view, ?string $expectedLine): void
+    {
+        $policy = $this->policyWith(new AiSettings(true, false, false, false, 'cloud', false, null, null));
+
+        self::assertSame($expectedLine, $policy->serverDraftRefusalOf($view));
+        self::assertSame([], $this->settingsReads);
+        self::assertSame([], $this->roleLookups);
+    }
+
     private static function allowedView(string $whereAiRuns = PolicyView::WHERE_CLOUD, bool $isRestrictedToCloudAllowed = false): PolicyView
     {
         return new PolicyView(null, null, $whereAiRuns, false, false, $isRestrictedToCloudAllowed);

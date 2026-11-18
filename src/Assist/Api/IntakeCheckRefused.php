@@ -31,6 +31,12 @@ final class IntakeCheckRefused extends \DomainException
     public const string TOO_MANY_OPEN_CHECKS = 'too_many_open_checks';
 
     /**
+     * The policy's code of a refusal because the draft mentions security and the AI runs in the cloud; unlike the
+     * policy's other codes, the person can change the draft and ask again.
+     */
+    public const string SECURITY_SENSITIVE_DRAFT_TO_CLOUD = 'security_sensitive_draft_to_cloud';
+
+    /**
      * @param string $refusalCode a PolicyView refusal code (ai_off, leads_only, laptop_not_ready,
      *                            security_sensitive_draft_to_cloud) or one of this class's codes
      * @param string $sentence    the line shown where the button is

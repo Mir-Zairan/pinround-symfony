@@ -58,4 +58,25 @@ final class ListedIntakeCandidates implements IntakeCandidateQueries
 
         return \array_slice($candidates, 0, self::CANDIDATE_LIMIT);
     }
+
+    public function openCandidatesByKeys(TicketVisibility $reporter, array $keys): array
+    {
+        if (\count($keys) > self::CANDIDATE_LIMIT) {
+            throw new \InvalidArgumentException(\sprintf('At most %d intake candidates are read by key at once.', self::CANDIDATE_LIMIT));
+        }
+        if (!$reporter->organizationId()->equals($this->organizationId)) {
+            throw new \LogicException('Intake candidates are read under the reporter\'s own organization as tenant.');
+        }
+
+        $candidates = [];
+        foreach (array_unique($keys) as $key) {
+            foreach ($this->tickets as $ticket) {
+                if ($ticket['candidate']->key === $key && $reporter->isVisible($ticket['facts'])) {
+                    $candidates[] = $ticket['candidate'];
+                }
+            }
+        }
+
+        return $candidates;
+    }
 }

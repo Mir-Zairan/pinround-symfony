@@ -1,0 +1,54 @@
+{%- set controller = 'App\\Assist\\UI\\Controller\\IntakeCheckController' -%}
+{%- set component = 'App\\Assist\\UI\\Component\\IntakeCheck' -%}
+{%- set intakeCheck = this -%}
+{%- set state = intakeCheck.state -%}
+{#- Polite, so the suggestion that replaces "The AI is reading your report…" is read out once. -#}
+<turbo-frame id="{{ constant(component ~ '::FRAME_ID') }}" class="intake-check" aria-live="polite">
+    {#- Each state is the focus target for the swap that removes the focused button, only in a frame answer, as TheAsk. -#}
+    {%- set isFrameAnswer = app.request is not null and app.request.headers.get('Turbo-Frame') == constant(component ~ '::FRAME_ID') %}
+    <div class="intake-check__state" tabindex="-1"{% if isFrameAnswer %} autofocus{% endif %}
+         data-controller="intake-check"
+         data-intake-check-state-value="{{ state }}"
+         data-intake-check-request-url-value="{{ path(constant(controller ~ '::REQUEST_ROUTE')) }}"
+         {%- if intakeCheck.checkId is not null %} data-intake-check-id-value="{{ intakeCheck.checkId.toString }}" data-intake-check-url-value="{{ path(constant(controller ~ '::FRAME_ROUTE'), {checkId: intakeCheck.checkId.toString}) }}"{% endif %}
+         {%- if intakeCheck.suggestedType is not null %} data-intake-check-type-value="{{ intakeCheck.suggestedType }}"{% endif %}
+         {%- if intakeCheck.suggestedPriority is not null %} data-intake-check-priority-value="{{ intakeCheck.suggestedPriority }}"{% endif %}>
+        {% if state == constant(component ~ '::STATE_RUNNING') %}
+            <p class="intake-check__line">{{ constant(component ~ '::RUNNING_LINE') }}</p>
+            <twig:Button type="button" variant="tonal" size="sm" :disabled="true" aria-busy="true" class="intake-check__button">{{ constant(component ~ '::RUNNING_LABEL') }}</twig:Button>
+        {% else %}
+            {% set aiRefusal = intakeCheck.aiRefusal %}
+            {% if aiRefusal is not null %}
+                <p class="intake-check__ai-off">{{ aiRefusal }}</p>
+            {% else %}
+                {% if state == constant(component ~ '::STATE_DONE') %}
+                    {% set summary = intakeCheck.summary %}
+                    <p class="intake-check__line intake-check__summary">{% if summary is null %}{{ constant(component ~ '::NO_SUMMARY_LINE') }}{% else %}<strong>In short:</strong> {{ summary }}{% endif %}</p>
+                {% elseif state == constant(component ~ '::STATE_FAILED') %}
+                    <p class="intake-check__line intake-check__failed">{{ intakeCheck.check.sentence }}</p>
+                {% else %}
+                    <p class="intake-check__line">{{ constant(component ~ '::NOTE') }}</p>
+                {% endif %}
+                {% if intakeCheck.notice is not null %}
+                    <p class="intake-check__notice">{{ intakeCheck.notice }}</p>
+                {% endif %}
+                {#- Inside the New ticket form, so its fields go with the check; a button, not a submit, so Enter in a field still makes the ticket. -#}
+                <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
+                <twig:Button type="button" variant="tonal" size="sm" class="intake-check__button" data-action="intake-check#check">{{ state == constant(component ~ '::STATE_DONE') ? constant(component ~ '::CHECK_AGAIN_LABEL') : constant(component ~ '::CHECK_LABEL') }}</twig:Button>
+            {% endif %}
+        {% endif %}
+        {% if state == constant(component ~ '::STATE_DONE') and intakeCheck.duplicates is not empty %}
+            <section class="intake-check__duplicates" aria-labelledby="intake-check-duplicates-heading">
+                <h3 id="intake-check-duplicates-heading" class="intake-check__duplicates-heading">{{ constant(component ~ '::DUPLICATES_HEADING') }}</h3>
+                <ul class="intake-check__duplicate-list">
+                    {% for duplicate in intakeCheck.duplicates %}
+                        <li class="intake-check__duplicate">
+                            <span class="intake-check__duplicate-key">{{ duplicate.key }}</span>
+                            <a href="{{ path(constant('App\\Assist\\UI\\Controller\\SummaryController::TICKET_ROUTE'), {key: duplicate.key}) }}">{{ duplicate.title }}</a>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+    </div>
+</turbo-frame>
