@@ -106,6 +106,24 @@ final readonly class DoctrineApiTokens implements ApiTokens
         return $tokens;
     }
 
+    public function liveForUser(UserId $userId, \DateTimeImmutable $at): array
+    {
+        // Named as well as row-level security does, like countLiveOf(); require() fails closed without a tenant.
+        $organizationId = $this->tenantContext->require();
+        /** @var list<ApiToken> $tokens */
+        $tokens = $this->entityManager->createQuery(
+            'SELECT t FROM '.ApiToken::class.' t WHERE t.organizationId = :organizationId AND t.userId = :userId'
+            .' AND t.revokedAt IS NULL AND t.expiresAt > :at ORDER BY t.createdAt DESC, t.id DESC',
+        )
+            ->setParameter('organizationId', $organizationId->toString())
+            ->setParameter('userId', $userId->toString())
+            ->setParameter('at', $at->format(self::TIMESTAMP_FORMAT))
+            ->setMaxResults(self::MAX_LISTED_TOKENS)
+            ->getResult();
+
+        return $tokens;
+    }
+
     /**
      * A second revoke waits on the row lock of the first and then sees revoked_at set, so it updates nothing
      * (PostgreSQL checks the WHERE clause again after the lock).

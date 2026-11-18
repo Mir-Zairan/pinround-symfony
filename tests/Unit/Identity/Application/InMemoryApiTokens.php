@@ -127,6 +127,17 @@ final class InMemoryApiTokens implements ApiTokens
         return \array_slice($tokens, 0, self::MAX_LISTED_TOKENS);
     }
 
+    public function liveForUser(UserId $userId, \DateTimeImmutable $at): array
+    {
+        $tokens = array_values(array_filter(
+            $this->tenantTokens(),
+            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, $at),
+        ));
+        usort($tokens, static fn (ApiToken $a, ApiToken $b): int => [$b->createdAt(), $b->id()] <=> [$a->createdAt(), $a->id()]);
+
+        return \array_slice($tokens, 0, self::MAX_LISTED_TOKENS);
+    }
+
     public function revoke(string $id, \DateTimeImmutable $revokedAt): bool
     {
         $rowKey = self::rowKey($this->requireTenant(), $id);

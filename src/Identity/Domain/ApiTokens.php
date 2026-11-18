@@ -55,6 +55,16 @@ interface ApiTokens
     public function forUser(UserId $userId): array;
 
     /**
+     * The user's tokens in the tenant that are neither revoked nor expired at $at, newest first (by created_at, then
+     * the later id). IssueApiToken keeps at most 20 live per person, so the cap of MAX_LISTED_TOKENS leaves none out.
+     *
+     * @return list<ApiToken> at most MAX_LISTED_TOKENS
+     *
+     * @throws \LogicException when no tenant is set
+     */
+    public function liveForUser(UserId $userId, \DateTimeImmutable $at): array;
+
+    /**
      * Revokes the token in the database at once, in one conditional statement, so of two revokes only the first
      * counts and the first revocation time stays. A token already loaded keeps its old revokedAt.
      *
