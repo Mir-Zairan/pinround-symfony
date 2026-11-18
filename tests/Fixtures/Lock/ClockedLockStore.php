@@ -69,6 +69,8 @@ final class ClockedLockStore implements PersistingStoreInterface, LockLifetimes
             throw new LockConflictedException();
         }
         $this->locks[(string) $key] = ['token' => self::tokenOf($key), 'expiresAtMicroseconds' => $this->nowMicroseconds() + $ttlMicroseconds];
+        // As RedisStore: the key then tells its holder how long it has left, which Symfony's Scheduler Checkpoint reads.
+        $key->reduceLifetime($ttlMicroseconds / 1_000_000);
     }
 
     private function nowMicroseconds(): int

@@ -13,7 +13,7 @@ How pinround is run: environments, deployment, backups, monitoring and the jobs 
 - [Backups](#backups) — PostgreSQL PITR, bucket versioning, Valkey.
 - [Restore drill](#restore-drill) — proving backups work.
 - [Observability](#observability) — traces, logs, metrics, health endpoints, SLOs, alerts.
-- [Scheduled jobs](#scheduled-jobs) — retention, digests, partitions, rebuilds.
+- [Scheduled jobs](#scheduled-jobs) — the scheduler lock, retention, digests, partitions, rebuilds.
 - [Capacity alarms](#capacity-alarms) — when to grow.
 - [Runbooks](#runbooks) — the list of written procedures.
 
@@ -139,6 +139,8 @@ Alerts (page someone): error rate > 2% for 5 minutes; `notify` queue oldest mess
 ## Scheduled jobs
 
 Symfony Scheduler, run by the `scheduler` service. Each job is idempotent. Every job is on the `default` schedule (`SharedKernel\Infrastructure\Scheduler\DefaultSchedule`), which keeps when each job last ran in the pool `cache.scheduler` on the state Valkey (stateful) and holds the lock `scheduler_default` there, so only one scheduler worker runs it. The worker restarts every hour (`--time-limit=3600`), and a periodic job counts its period from when the schedule first ran: without the kept state a daily job would never fire. After a stop, each job runs once for the runs it missed (`processOnlyLastMissedRun`). Unit and integration `DefaultScheduleTest` pin this.
+
+The lock (`DefaultScheduleLock`) lives at most 60 s past its worker's last tick: the worker renews it on every tick (`WorkerRunningEvent`) and frees it when it stops (`WorkerStoppedEvent`, which the hourly `--time-limit` exit also fires). The image has no `pcntl`, so a container stop or restart (SIGTERM) ends PHP before it can free the lock; the next scheduler worker then takes over within 60 s and runs any job that fell due meanwhile. Symfony's own lock kept a dead worker's lock until its next run plus 300 s, so a restart paused every job for minutes. A job handled in the scheduler worker itself (not routed to a queue) should finish within those 60 s: past them a second scheduler worker, if one runs, can take the lock. `DefaultScheduleLockTest` pins this.
 
 | Job | When | What |
 |---|---|---|
