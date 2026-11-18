@@ -148,10 +148,10 @@ test.describe('Draft round', () => {
     await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Start a draft round' }).click();
     await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
-    // Before copy-text connects the controls are hidden anyway; only after it has run does hidden prove its check.
-    await page.waitForLoadState('networkidle');
     expect(await page.evaluate(() => typeof navigator.clipboard?.writeText)).toBe('undefined');
     const box = page.locator('article.round-card--private section.claude-code-box');
+    // Before copy-text connects the controls are hidden anyway; only after it has run does hidden prove its check.
+    await expect(box.locator('[data-controller~="copy-text"][data-copy-text-connected]')).toHaveCount(1);
 
     await expect(box.getByLabel('Line to give Claude Code')).toBeVisible();
     await expect(box.locator('[data-copy-text-target="controls"]')).toHaveCount(1);

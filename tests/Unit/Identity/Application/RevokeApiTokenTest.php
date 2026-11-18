@@ -166,6 +166,22 @@ final class RevokeApiTokenTest extends TestCase
     }
 
     /**
+     * The Admin list no longer shows it, but an expired token is revoked all the same, as its owner's revoke does.
+     */
+    #[Test]
+    public function anAdminRevokesAnExpiredTokenAndThePublishedEventNamesTheAdminAsActorAndTheOwnerAsUser(): void
+    {
+        self::assertTrue($this->revokeAsSara(self::OMARS_EXPIRED_TOKEN));
+
+        self::assertFalse($this->revokeAsSara(self::OMARS_EXPIRED_TOKEN), 'the expired token was not revoked the first time');
+        self::assertSame([self::OMARS_TOKEN], $this->liveIdsOf(self::OMAR));
+        self::assertEquals(
+            [new ApiTokenRevoked(self::ACME_FOODS, self::OMARS_EXPIRED_TOKEN, self::OMAR, self::SARA, new \DateTimeImmutable(self::NOW))],
+            $this->events->publishedEvents,
+        );
+    }
+
+    /**
      * Revoked by its owner first, so the Admin's revoke changes nothing and must not record a second revocation.
      */
     #[Test]
