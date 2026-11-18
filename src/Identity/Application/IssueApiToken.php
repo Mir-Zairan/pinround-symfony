@@ -10,6 +10,7 @@ use App\Identity\Domain\ApiTokens;
 use App\Identity\Domain\ApiTokenScope;
 use App\Identity\Domain\InvalidApiToken;
 use App\Identity\Domain\IssuedApiToken;
+use App\Identity\Domain\UnknownApiTokenScope;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 
@@ -21,6 +22,7 @@ use App\SharedKernel\Domain\UserId;
 final readonly class IssueApiToken
 {
     public const int MAX_LIVE_TOKENS_PER_USER = 20;
+    public const string UNKNOWN_SCOPE = 'Choose only the things listed on this page.';
 
     public function __construct(private ApiTokens $tokens, private ApiTokenHashing $hashing)
     {
@@ -47,5 +49,33 @@ final readonly class IssueApiToken
         $this->tokens->add($issued->token());
 
         return $issued;
+    }
+
+    /**
+     * The tokens page's way in: the scopes by name, as its checkboxes send them, and a result without Domain types.
+     *
+     * @param list<string> $scopeNames ApiTokenScope values; repeats count once
+     *
+     * @return NewApiToken the token, saved, and its plain text, to show once
+     *
+     * @throws ApiTokenRefused  when the name, a scope name or the lifetime is refused; nothing is added
+     * @throws TooManyApiTokens as __invoke(); nothing is added
+     * @throws \LogicException  as __invoke()
+     */
+    public function issueWithScopeNames(OrganizationId $organizationId, UserId $userId, string $name, array $scopeNames, int $lifetimeDays, \DateTimeImmutable $now): NewApiToken
+    {
+        // More names than there are scopes can only be a crafted form; refused before any of them is read.
+        if (\count($scopeNames) > \count(ApiTokenScope::cases())) {
+            throw new ApiTokenRefused(self::UNKNOWN_SCOPE);
+        }
+        try {
+            $issued = $this($organizationId, $userId, $name, ApiTokenScope::fromValues($scopeNames), $lifetimeDays, $now);
+        } catch (UnknownApiTokenScope) {
+            throw new ApiTokenRefused(self::UNKNOWN_SCOPE);
+        } catch (InvalidApiToken $refusal) {
+            throw new ApiTokenRefused($refusal->getMessage(), previous: $refusal);
+        }
+
+        return new NewApiToken(ApiTokenView::of($issued->token()), $issued->reveal());
     }
 }
