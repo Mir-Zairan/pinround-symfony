@@ -231,7 +231,9 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     {
         self::assertCount(Round::MAX_SCREENSHOTS, $this->storedRound(self::FULL_DRAFT)->screenshots());
 
-        $this->assertRefusedAndNothingSaved('A round holds at most 50 screenshots.', fn () => $this->commands->addDraftScreenshot(self::FULL_DRAFT, new UserId(self::LENA), self::MEDIA, self::at()));
+        $refused = $this->assertRefusedAndNothingSaved('A round holds at most 50 screenshots.', fn () => $this->commands->addDraftScreenshot(self::FULL_DRAFT, new UserId(self::LENA), self::MEDIA, self::at()));
+
+        self::assertSame([false, false, true], self::kindsOf($refused));
     }
 
     #[Test]
