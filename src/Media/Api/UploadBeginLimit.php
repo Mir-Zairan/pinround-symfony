@@ -9,12 +9,14 @@ use App\SharedKernel\Domain\UserId;
 /**
  * How many upload begins a person may make, on the web (POST /media/intents) and through MCP create_upload together:
  * media_upload_begin_per_user of rate_limiter.yaml, keyed by the user id. Each caller counts a begin before it asks
- * Uploads::begin, so one refused afterwards counts too, and one person cannot script begins against the storage.
+ * Uploads::begin, so a begin Uploads refuses afterwards counts too, and one person cannot script begins against the
+ * storage.
  */
 interface UploadBeginLimit
 {
     /**
-     * Counts one begin of $userId, whether the limit accepts it or not.
+     * Counts one begin of $userId when the limit accepts it, at once. A begin past the limit is not counted, so the
+     * lockout still ends when the window does.
      *
      * @throws UploadRefused when $userId used up the begins of the current window: UploadRefused::ADDING_TOO_FAST,
      *                       with the seconds until the window ends as retryAfterSeconds
