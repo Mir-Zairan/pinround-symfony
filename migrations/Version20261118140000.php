@@ -52,11 +52,8 @@ final class Version20261118140000 extends AbstractMigration
 
     public function down(Schema $schema): void
     {
-        $this->addSql('DROP INDEX ast_local_package_ticket_id_used_at_idx');
-        $this->addSql('ALTER TABLE ast_local_package DROP COLUMN made_main_at, DROP COLUMN result_label');
-        $this->addSql('ALTER TABLE tkt_summary DROP CONSTRAINT tkt_summary_laptop_label_check');
-        $this->addSql('ALTER TABLE tkt_summary DROP COLUMN chosen_by_id');
-        $this->addSql('ALTER TABLE tkt_summary DROP CONSTRAINT tkt_summary_source_check');
-        $this->addSql("ALTER TABLE tkt_summary ADD CONSTRAINT tkt_summary_source_check CHECK (source IN ('sync', 'ai', 'explanation', 'human'))");
+        // Once a laptop summary exists, the old source check refuses its row, and dropping the columns would lose who
+        // posted and who chose it and which results were made the main summary.
+        $this->throwIrreversibleMigrationException('Laptop summaries and their chooser cannot be kept without these columns; restore a backup instead.');
     }
 }
