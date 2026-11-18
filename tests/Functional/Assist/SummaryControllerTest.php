@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Assist;
 
+use App\Assist\Api\Summaries;
+use App\Assist\Api\SummaryRequestRefused;
 use App\Assist\Api\SummaryRequestView;
 use App\Assist\Application\AiCallLimit;
 use App\Assist\Application\Summaries\GenerateSummary;
+use App\Assist\Application\Summaries\QueuedSummaries;
 use App\Assist\Application\Summaries\SummaryRequests;
 use App\Assist\UI\Controller\SummaryController;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
@@ -14,18 +17,25 @@ use App\Organization\Api\ActorContext;
 use App\Organization\Api\Roles;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Assist\Laptop\SeedsLaptopAiTickets;
 use App\Tests\Functional\Assist\Laptop\StoresAiSettings;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Api\TicketVisibilityFacts;
+use App\Ticketing\UI\Voter\TicketVoter;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Component\Security\Core\Authorization\Voter\Vote;
+use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -234,6 +244,32 @@ final class SummaryControllerTest extends WebTestCase
         self::assertNull($this->stateOf('SHOP-1' === $key ? $this->shopTicketId : $this->teamOnlyTicketId));
     }
 
+    #[Test]
+    public function aRefusalCodeThePageDoesNotKnowAnswers403WithItsLineAndNoButton(): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+        $token = $this->summaryToken();
+        self::getContainer()->set(QueuedSummaries::class, new readonly class implements Summaries {
+            public function request(TicketId $ticketId, UserId $requesterId, OrganizationId $organizationId): void
+            {
+                throw new SummaryRequestRefused('a_code_added_later', 'AI help is not available for this ticket.');
+            }
+
+            public function latestRequestOf(TicketId $ticketId, UserId $viewerId, OrganizationId $organizationId): ?SummaryRequestView
+            {
+                return null;
+            }
+        });
+
+        $this->postSummaryRequest('SHOP-1', $token);
+
+        self::assertResponseStatusCodeSame(403);
+        $frame = $this->client->getCrawler()->filter('turbo-frame#ticket-ask');
+        self::assertSame('AI help is not available for this ticket.', $frame->filter('.ticket__ask-ai-off')->text());
+        self::assertCount(0, $frame->filter('.ticket__summarize'));
+        self::assertSame([], $this->sentJobs());
+    }
+
     /**
      * @return iterable<string, array{string|null}>
      */
@@ -411,6 +447,36 @@ final class SummaryControllerTest extends WebTestCase
         self::assertSame([], $this->sentJobs());
         self::assertNull($this->stateOf($this->shopTicketId));
         self::assertNull($this->stateOf($this->teamOnlyTicketId));
+    }
+
+    /**
+     * pageOf already leaves out a ticket the viewer may not see, so only a voter that refuses one pageOf finds proves
+     * each route asks TicketPermission::VIEW too.
+     */
+    #[Test]
+    #[DataProvider('routes')]
+    public function aTicketTheVoterRefusesToShowIsNotFoundAndNothingIsQueued(string $method, string $path): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+        $token = $this->summaryToken();
+        self::getContainer()->set(TicketVoter::class, new class extends Voter {
+            protected function supports(string $attribute, mixed $subject): bool
+            {
+                return TicketPermission::VIEW === $attribute && $subject instanceof TicketVisibilityFacts;
+            }
+
+            protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
+            {
+                return false;
+            }
+        });
+
+        $this->client->request($method, '/t/SHOP-1'.$path, 'POST' === $method ? [SummaryController::CSRF_FIELD => $token] : [], server: ['HTTP_TURBO_FRAME' => 'ticket-ask']);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringNotContainsString(self::TICKET_TEXT, (string) $this->client->getResponse()->getContent());
+        self::assertSame([], $this->sentJobs());
+        self::assertNull($this->stateOf($this->shopTicketId));
     }
 
     /**
