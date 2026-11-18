@@ -187,7 +187,7 @@ test.afterEach(() => {
 test.describe('an organization whose AI runs only on laptops', () => {
   useAiSettingsInEachTest(LAPTOP_ONLY_AI);
 
-  test('a ready laptop summarizes the ask, the summary shows as a proposal, and Lena makes it the main summary', async ({ browser, page }) => {
+  test('a ready laptop summarizes the ask, the summary shows as a proposal in place, and Lena makes it the main summary', async ({ browser, page }) => {
     const key = await makeTicketWithAnAsk(browser, 'Pay button does nothing at checkout');
     await seedReadyLaptop(page);
     const consoleMessages = recordConsole(page);
@@ -199,7 +199,11 @@ test.describe('an organization whose AI runs only on laptops', () => {
 
     await expect(notReadyLine(page)).toBeHidden();
     await expect(summarizeButton(page)).toBeVisible();
-    await summarizeButton(page).click();
+    // Gone after a reload: the proposal must come in through the frame.
+    await page.evaluate(() => {
+      (window as Window & { noReloadMark?: boolean }).noReloadMark = true;
+    });
+    await summarizeButton(page).press('Enter');
 
     await expect(summarizeForm(page).locator('.ticket__summarize')).toBeDisabled();
     await expect(summarizeForm(page).locator('.ticket__summarize')).toHaveText('Summarizing…');
@@ -212,6 +216,10 @@ test.describe('an organization whose AI runs only on laptops', () => {
     answerOllama();
 
     await expect(proposal(page)).toBeVisible();
+    expect(await page.evaluate(() => (window as Window & { noReloadMark?: boolean }).noReloadMark)).toBe(true);
+    // The keyboard press was in the ask, so the focus stays in it rather than falling to the top of the page.
+    await expect(page.locator('#ticket-ask .ticket__ask-state')).toBeFocused();
+    await expect(page.locator('#ticket-ask .ticket__ask-state')).not.toHaveAttribute('autofocus');
     await expect(proposal(page).locator('.ticket__ask-source strong')).toHaveText('Laptop summary');
     await expect(proposal(page).locator('.ticket__ask-proposal-label')).toHaveText(new RegExp(`^posted by Lena\\b.* using local model ${MODEL} \\(unverified\\)$`));
     await expect(proposal(page).locator('.ticket__ask-proposal-text')).toHaveText(LAPTOP_SUMMARY);
