@@ -6,10 +6,14 @@ namespace App\Tests\Functional\Assist\Laptop;
 
 use App\Assist\UI\Controller\LaptopController;
 use App\Identity\Domain\User;
+use App\Organization\UI\Voter\OrganizationVoter;
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Component\Security\Core\Authorization\Voter\Vote;
+use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -176,6 +180,32 @@ trait SeedsLaptopAiTickets
         self::assertIsString($packageId);
 
         return $packageId;
+    }
+
+    /**
+     * The organization voter as it answers for a membership removed after EnterChosenOrganization let the request in,
+     * which no test request can time: it denies every permission on every organization. A membership removed before the
+     * request never reaches the controller, as EnterChosenOrganization sends the person to the picker. The client's
+     * kernel is booted again first, keeping its session, as the voter is built by the first request and cannot be
+     * replaced after it.
+     */
+    private function replaceOrganizationVoterWithOneThatFindsNoMembership(): void
+    {
+        $kernel = $this->client->getKernel();
+        $kernel->shutdown();
+        $kernel->boot();
+        self::getContainer()->set('clock', $this->clock);
+        self::getContainer()->set(OrganizationVoter::class, new class extends Voter {
+            protected function supports(string $attribute, mixed $subject): bool
+            {
+                return $subject instanceof OrganizationId;
+            }
+
+            protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
+            {
+                return false;
+            }
+        });
     }
 
     private function laptopToken(): string

@@ -223,7 +223,7 @@ final class LaptopController extends AbstractController
         try {
             $this->laptopRequestLimit->consume($actor);
         } catch (LaptopRequestsLimited $limited) {
-            $refusal = self::refusal($limited->getMessage(), Response::HTTP_TOO_MANY_REQUESTS);
+            $refusal = self::refusal(self::TOO_MANY_REQUESTS, Response::HTTP_TOO_MANY_REQUESTS);
             $refusal->headers->set('Retry-After', (string) $limited->retryAfterSeconds);
 
             return $refusal;

@@ -288,6 +288,34 @@ final class LaptopResultTest extends WebTestCase
         self::assertSame([], $this->auditRowsOf($this->acmeFoods));
     }
 
+    /** Omar's session outlives his membership, but with a valid token he is sent to the picker before the controller. */
+    #[Test]
+    public function omarRemovedFromAcmeFoodsIsSentToThePickerAndHisOpenPackageStaysUnusedAndUnaudited(): void
+    {
+        $token = $this->laptopToken();
+        $this->removeMembership($this->people['Omar'], $this->acmeFoods);
+
+        $this->postResult(self::resultBody($this->omarsPackageId), $token);
+
+        self::assertResponseRedirects('/org/choose', 302);
+        self::assertSame($this->unusedRows, $this->packageRowsOf($this->acmeFoods));
+        self::assertSame([], $this->auditRowsOf($this->acmeFoods));
+    }
+
+    #[Test]
+    public function omarWhoseMembershipTheVoterNoLongerFindsIsNotAllowedAndHisOpenPackageStaysUnusedAndUnaudited(): void
+    {
+        $token = $this->laptopToken();
+        $this->replaceOrganizationVoterWithOneThatFindsNoMembership();
+
+        $this->postResult(self::resultBody($this->omarsPackageId), $token);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['message' => LaptopController::NOT_ALLOWED], $this->answer());
+        self::assertSame($this->unusedRows, $this->packageRowsOf($this->acmeFoods));
+        self::assertSame([], $this->auditRowsOf($this->acmeFoods));
+    }
+
     #[Test]
     public function aBodyOneByteOverTheCapIsRefusedBeforeThePackageIsLookedUpAndExactlyTheCapIsRead(): void
     {

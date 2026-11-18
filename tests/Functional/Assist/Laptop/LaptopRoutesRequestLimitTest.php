@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Assist\Laptop;
 
+use App\Assist\UI\Controller\LaptopController;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -58,6 +59,23 @@ final class LaptopRoutesRequestLimitTest extends WebTestCase
         $this->postPackageRequest(self::packageRequest($this->shopTicketId), $token);
         $this->assertTooManyRequests();
         $this->postResult(self::resultBody(Uuid::v7()->toRfc4122()), $token);
+        $this->assertTooManyRequests();
+
+        self::assertSame([], $this->packageRowsOf($this->acmeFoods));
+        self::assertSame([], $this->auditRowsOf($this->acmeFoods));
+    }
+
+    /** The limiter comes before the body is read, so a spent limit is the answer even to a body that is no request. */
+    #[Test]
+    public function onceTheLimitIsSpentAnOverCapPackageBodyAndANonJsonResultBodyAreTooManyRequestsToo(): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+        $token = $this->laptopToken();
+        $this->spendRequests($token, self::LIMIT);
+
+        $this->postPackageRequest(str_pad(self::packageRequest($this->shopTicketId), LaptopController::MAX_BODY_BYTES + 1), $token);
+        $this->assertTooManyRequests();
+        $this->postResult('packageId='.Uuid::v7()->toRfc4122(), $token);
         $this->assertTooManyRequests();
 
         self::assertSame([], $this->packageRowsOf($this->acmeFoods));
@@ -165,7 +183,7 @@ final class LaptopRoutesRequestLimitTest extends WebTestCase
     private function assertTooManyRequests(): void
     {
         self::assertResponseStatusCodeSame(429);
-        self::assertSame(['message' => 'You sent too many laptop AI requests. Wait a minute and try again.'], $this->answer());
+        self::assertSame(['message' => LaptopController::TOO_MANY_REQUESTS], $this->answer());
         self::assertResponseHeaderSame('Retry-After', '40');
     }
 }

@@ -135,6 +135,40 @@ final class LaptopPackageTest extends WebTestCase
         self::assertSame([], $this->packageRowsOf($this->acmeFoods));
     }
 
+    /** Omar's session outlives his membership, but with a valid token he is sent to the picker before the controller. */
+    #[Test]
+    public function omarRemovedFromAcmeFoodsIsSentToThePickerAndNothingIsStoredOrAudited(): void
+    {
+        $this->packageIdOf('Omar', $this->shopTicketId);
+        $packageRows = $this->packageRowsOf($this->acmeFoods);
+        self::assertCount(1, $packageRows);
+        $token = $this->laptopToken();
+        $this->removeMembership($this->people['Omar'], $this->acmeFoods);
+
+        $this->postPackageRequest(self::packageRequest($this->shopTicketId), $token);
+
+        self::assertResponseRedirects('/org/choose', 302);
+        self::assertSame($packageRows, $this->packageRowsOf($this->acmeFoods));
+        self::assertSame([], $this->auditRowsOf($this->acmeFoods));
+    }
+
+    #[Test]
+    public function omarWhoseMembershipTheVoterNoLongerFindsIsNotAllowedAndNothingIsStoredOrAudited(): void
+    {
+        $this->packageIdOf('Omar', $this->shopTicketId);
+        $packageRows = $this->packageRowsOf($this->acmeFoods);
+        self::assertCount(1, $packageRows);
+        $token = $this->laptopToken();
+        $this->replaceOrganizationVoterWithOneThatFindsNoMembership();
+
+        $this->postPackageRequest(self::packageRequest($this->shopTicketId), $token);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['message' => LaptopController::NOT_ALLOWED], $this->answer());
+        self::assertSame($packageRows, $this->packageRowsOf($this->acmeFoods));
+        self::assertSame([], $this->auditRowsOf($this->acmeFoods));
+    }
+
     #[Test]
     public function aVisitorWhoIsNotLoggedInIsSentToTheLoginPageAndNothingIsStored(): void
     {
