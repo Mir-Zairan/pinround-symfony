@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Organization\UI\Voter;
 
-use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Api\LoginAssurance;
 use App\Identity\Infrastructure\Security\ApiTokenAuthentication;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
@@ -38,10 +37,5 @@ final readonly class FixedLoginAssurance implements LoginAssurance
     public function isTokenAuthenticated(mixed $token): bool
     {
         return $token instanceof ApiTokenAuthentication;
-    }
-
-    public function apiTokenAccessOf(mixed $token): ?ApiTokenAccess
-    {
-        return $token instanceof ApiTokenAuthentication ? $token->access() : null;
     }
 }

@@ -22,6 +22,8 @@ use Symfony\Component\Security\Core\User\UserInterface;
  */
 final class OwnAccountVoter extends Voter
 {
+    public const string TOKEN_REFUSAL_REASON = 'Changing your account needs a browser session, not a personal access token.';
+
     public function __construct(private readonly LoginAssurance $loginAssurance)
     {
     }
@@ -33,8 +35,13 @@ final class OwnAccountVoter extends Voter
 
     protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
     {
+        if ($this->loginAssurance->isTokenAuthenticated($token)) {
+            $vote?->addReason(self::TOKEN_REFUSAL_REASON);
+
+            return false;
+        }
+
         // A remember-me login has not seen the password in this session (there is none today; this keeps it out).
-        return $token->getUser() instanceof UserInterface && !$token instanceof RememberMeToken
-            && !$this->loginAssurance->isTokenAuthenticated($token);
+        return $token->getUser() instanceof UserInterface && !$token instanceof RememberMeToken;
     }
 }

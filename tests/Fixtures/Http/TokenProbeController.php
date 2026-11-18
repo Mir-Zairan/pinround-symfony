@@ -4,23 +4,23 @@ declare(strict_types=1);
 
 namespace App\Tests\Fixtures\Http;
 
+use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
-use App\Identity\Api\LoginAssurance;
 use App\Organization\Api\AdminPermission;
+use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpKernel\Attribute\AsController;
-use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 use Symfony\Component\Security\Core\Authorization\AccessDecision;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
  * A test-only endpoint under /mcp and /api/v1 (config/routes/test_fixtures.yaml) that reports who a personal access
  * token authenticated, the organization the request works in, and the organizations whose idn_api_token rows the
- * request transaction can see, which row-level security limits to the tenant's; or how each ADMIN_* attribute is
- * decided on the tenant, with the reasons of the deciding votes.
+ * request transaction can see, which row-level security limits to the tenant's; or how each ADMIN_* attribute and the
+ * other admin-only ones are decided on the tenant, with the reasons of the deciding votes.
  */
 #[AsController]
 final readonly class TokenProbeController
@@ -28,8 +28,7 @@ final readonly class TokenProbeController
     public function __construct(
         private CurrentUser $currentUser,
         private TenantContext $tenantContext,
-        private LoginAssurance $loginAssurance,
-        private TokenStorageInterface $tokenStorage,
+        private CurrentApiToken $currentApiToken,
         #[Autowire(service: 'doctrine.dbal.default_connection')]
         private Connection $connection,
         private AuthorizationCheckerInterface $authorizationChecker,
@@ -38,7 +37,7 @@ final readonly class TokenProbeController
 
     public function reportTokenActor(): JsonResponse
     {
-        $access = $this->loginAssurance->apiTokenAccessOf($this->tokenStorage->getToken());
+        $access = $this->currentApiToken->access();
 
         return new JsonResponse([
             'userId' => $this->currentUser->id()?->toString(),
@@ -52,7 +51,7 @@ final readonly class TokenProbeController
     public function reportAdminDecisions(): JsonResponse
     {
         $decisions = [];
-        foreach ([AdminPermission::AREA, AdminPermission::AI] as $attribute) {
+        foreach ([AdminPermission::AREA, AdminPermission::AI, OrganizationPermission::ADMIN, OrganizationPermission::INVITE] as $attribute) {
             $accessDecision = new AccessDecision();
             $decisions[$attribute] = [
                 'isGranted' => $this->authorizationChecker->isGranted($attribute, $this->tenantContext->get(), $accessDecision),

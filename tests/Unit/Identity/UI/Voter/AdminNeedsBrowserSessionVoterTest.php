@@ -17,6 +17,7 @@ use App\Identity\Infrastructure\Security\ApiTokenAuthentication;
 use App\Identity\Infrastructure\Security\SecurityUser;
 use App\Identity\Infrastructure\Security\SymfonyLoginAssurance;
 use App\Identity\UI\Voter\AdminNeedsBrowserSessionVoter;
+use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;
@@ -41,8 +42,8 @@ final class AdminNeedsBrowserSessionVoterTest extends TestCase
     #[Test]
     public function aTokenActorIsDeniedEveryAdminAttributeInTheCodeOnAnySubject(): void
     {
-        $adminAttributes = self::adminAttributesInTheCode();
-        self::assertNotSame([], $adminAttributes, 'no ADMIN_* attribute was found, so nothing was checked');
+        $adminAttributes = [...self::adminAttributesInTheCode(), OrganizationPermission::ADMIN, OrganizationPermission::INVITE];
+        self::assertContains('ADMIN_AREA', $adminAttributes, 'no ADMIN_* attribute was found, so the prefix rule was not checked');
         $voter = $this->voter();
 
         foreach ($adminAttributes as $attribute) {
@@ -67,9 +68,11 @@ final class AdminNeedsBrowserSessionVoterTest extends TestCase
         $withoutThisVoter = new AccessDecisionManager([$grantsEveryAdminAttribute], new UnanimousStrategy(false));
         $withThisVoter = new AccessDecisionManager([$grantsEveryAdminAttribute, $this->voter()], new UnanimousStrategy(false));
 
-        self::assertTrue($withoutThisVoter->decide(self::tokenActor(), ['ADMIN_AREA'], $subject), 'the stand-in admin voter must grant on its own');
-        self::assertFalse($withThisVoter->decide(self::tokenActor(), ['ADMIN_AREA'], $subject));
-        self::assertTrue($withThisVoter->decide(self::browserSession(), ['ADMIN_AREA'], $subject), 'a browser session must be left to the admin voter');
+        foreach (['ADMIN_AREA', OrganizationPermission::ADMIN, OrganizationPermission::INVITE] as $attribute) {
+            self::assertTrue($withoutThisVoter->decide(self::tokenActor(), [$attribute], $subject), 'the stand-in admin voter must grant on its own');
+            self::assertFalse($withThisVoter->decide(self::tokenActor(), [$attribute], $subject), $attribute);
+            self::assertTrue($withThisVoter->decide(self::browserSession(), [$attribute], $subject), 'a browser session must be left to the admin voter');
+        }
     }
 
     #[Test]
@@ -78,7 +81,7 @@ final class AdminNeedsBrowserSessionVoterTest extends TestCase
         $voter = $this->voter();
 
         foreach ([self::browserSession(), new NullToken()] as $token) {
-            self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new OrganizationId(self::ACME_FOODS), ['ADMIN_AREA', 'ADMIN_AI']));
+            self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new OrganizationId(self::ACME_FOODS), ['ADMIN_AREA', 'ADMIN_AI', OrganizationPermission::ADMIN, OrganizationPermission::INVITE]));
         }
     }
 
@@ -87,7 +90,8 @@ final class AdminNeedsBrowserSessionVoterTest extends TestCase
     {
         $voter = $this->voter();
 
-        foreach (['TICKET_VIEW', AccountPermission::EDIT_OWN, 'TEAM_ADMIN_AREA', 'admin_area', 'ADMIN'] as $attribute) {
+        $otherAttributes = ['TICKET_VIEW', AccountPermission::EDIT_OWN, 'TEAM_ADMIN_AREA', 'admin_area', 'ADMIN', OrganizationPermission::VIEW, OrganizationPermission::ACCEPT_INVITATION, 'org_admin', 'ORG_ADMIN_'];
+        foreach ($otherAttributes as $attribute) {
             self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote(self::tokenActor(), null, [$attribute]), $attribute);
         }
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote(self::tokenActor(), null, [new \stdClass()]));
@@ -105,7 +109,10 @@ final class AdminNeedsBrowserSessionVoterTest extends TestCase
         $voter = $this->voter();
 
         self::assertTrue($voter->supportsAttribute('ADMIN_AREA'));
+        self::assertTrue($voter->supportsAttribute(OrganizationPermission::ADMIN));
+        self::assertTrue($voter->supportsAttribute(OrganizationPermission::INVITE));
         self::assertFalse($voter->supportsAttribute('TICKET_VIEW'));
+        self::assertFalse($voter->supportsAttribute(OrganizationPermission::VIEW));
         self::assertTrue($voter->supportsType(OrganizationId::class));
         self::assertTrue($voter->supportsType('null'));
     }
@@ -145,7 +152,7 @@ final class AdminNeedsBrowserSessionVoterTest extends TestCase
 
     private static function tokenActor(): ApiTokenAuthentication
     {
-        return new ApiTokenAuthentication(self::sara(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000007f1', new OrganizationId(self::ACME_FOODS), ['read']));
+        return new ApiTokenAuthentication(self::sara(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000007f1', new OrganizationId(self::ACME_FOODS), ['read']), null);
     }
 
     private static function browserSession(): UsernamePasswordToken

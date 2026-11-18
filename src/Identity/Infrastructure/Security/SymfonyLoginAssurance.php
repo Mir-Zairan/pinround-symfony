@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Identity\Infrastructure\Security;
 
-use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Api\LoginAssurance;
 use App\Identity\Application\RecentAuth;
 use App\Identity\Domain\TwoStepLogins;
@@ -55,11 +54,6 @@ final readonly class SymfonyLoginAssurance implements LoginAssurance
     public function isTokenAuthenticated(mixed $token): bool
     {
         return $token instanceof ApiTokenAuthentication;
-    }
-
-    public function apiTokenAccessOf(mixed $token): ?ApiTokenAccess
-    {
-        return $token instanceof ApiTokenAuthentication ? $token->access() : null;
     }
 
     private static function passwordSessionUserId(mixed $token): ?UserId

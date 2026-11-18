@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Identity;
 
 use App\Organization\Api\AdminPermission;
+use App\Organization\Api\OrganizationPermission;
 use App\Tests\Functional\Organization\LogsInAdmins;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -14,8 +15,8 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * An admin's personal access token never opens admin work (ADR-0012, ADR-0021, P09.T1): on /mcp every ADMIN_*
- * attribute is denied with AdminNeedsBrowserSessionVoter's reason, and the admin pages, behind the main firewall, never
- * read the token at all. The same admin with a browser session and a fresh code opens them. The client keeps its
+ * attribute, ORG_ADMIN and ORG_INVITE are denied with AdminNeedsBrowserSessionVoter's reason, and the admin pages,
+ * behind the main firewall, never read the token at all. The same admin with a browser session and a fresh code opens them. The client keeps its
  * kernel; the clock is fixed before the wall clock, by which the session store dates a browser session.
  */
 final class AdminNeedsBrowserSessionTest extends WebTestCase
@@ -68,7 +69,12 @@ final class AdminNeedsBrowserSessionTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         $denied = ['isGranted' => false, 'message' => 'Access Denied. '.self::BROWSER_SESSION_NEEDED];
-        self::assertSame([AdminPermission::AREA => $denied, AdminPermission::AI => $denied], $this->responseJson());
+        self::assertSame([
+            AdminPermission::AREA => $denied,
+            AdminPermission::AI => $denied,
+            OrganizationPermission::ADMIN => $denied,
+            OrganizationPermission::INVITE => $denied,
+        ], $this->responseJson());
 
         $this->client->request('GET', '/mcp/_test/admin-area', server: $bearer);
         self::assertResponseStatusCodeSame(403);

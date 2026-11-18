@@ -12,14 +12,15 @@ use App\Identity\Domain\PasswordHash;
 use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Security\ApiTokenAuthentication;
 use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Identity\Infrastructure\Security\SymfonyCurrentApiToken;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\Roles;
 use App\Organization\UI\EnterChosenOrganization;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchGuard;
+use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
-use App\Tests\Unit\Organization\UI\Voter\FixedLoginAssurance;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -42,11 +43,24 @@ final class EnterChosenOrganizationTest extends TestCase
 
     private TenantContext $tenantContext;
 
+    /** Whether the switch guard refuses, as the real one does while entities of the tenant are loaded. */
+    private bool $isSwitchRefused = false;
+
     protected function setUp(): void
     {
-        $this->tenantContext = new TenantContext(new class implements TenantSwitchGuard {
+        $this->tenantContext = new TenantContext(new readonly class($this->isSwitchRefused(...)) implements TenantSwitchGuard {
+            /**
+             * @param \Closure(): bool $isSwitchRefused
+             */
+            public function __construct(private \Closure $isSwitchRefused)
+            {
+            }
+
             public function prepareSwitch(): void
             {
+                if (($this->isSwitchRefused)()) {
+                    throw new TenantSwitchRefused();
+                }
             }
         });
     }
@@ -141,9 +155,31 @@ final class EnterChosenOrganizationTest extends TestCase
     }
 
     /**
+     * Fails closed: a 401 that left the token's organization as tenant would let the rest of the request run in it.
+     */
+    #[Test]
+    public function aRefusedTokenWhoseTenantCannotBeClearedFailsTheRequestInsteadOfAnswering(): void
+    {
+        $this->isSwitchRefused = true;
+
+        try {
+            $this->handle(self::LENA, [self::ACME_FOODS], tokenOrganizationId: self::BETA_BAKERY);
+            self::fail('The refusal answered with the tenant still set.');
+        } catch (TenantSwitchRefused) {
+            self::assertSame(self::BETA_BAKERY, $this->tenantContext->get()?->toString());
+        }
+    }
+
+    private function isSwitchRefused(): bool
+    {
+        return $this->isSwitchRefused;
+    }
+
+    /**
      * @param list<string> $organizationIds
      * @param string|null  $tokenOrganizationId the organization of the personal access token the request authenticated
-     *                                          with; null for a browser session
+     *                                          with, already the tenant as the authenticator sets it; null for a browser
+     *                                          session
      */
     private function handle(?string $userId, array $organizationIds, ?string $chosen = null, string $route = 'web_home', int $requestType = HttpKernelInterface::MAIN_REQUEST, ?string $tokenOrganizationId = null, bool $hasSession = true): RequestEvent
     {
@@ -218,17 +254,20 @@ final class EnterChosenOrganizationTest extends TestCase
         if (null !== $userId) {
             $tokenStorage->setToken(null === $tokenOrganizationId
                 ? new UsernamePasswordToken(self::securityUser($userId), 'main', ['ROLE_USER'])
-                : new ApiTokenAuthentication(self::securityUser($userId), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId($tokenOrganizationId), ['read'])));
+                : new ApiTokenAuthentication(self::securityUser($userId), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId($tokenOrganizationId), ['read']), null));
         }
 
         $this->tenantContext->reset();
+        if (null !== $userId && null !== $tokenOrganizationId) {
+            // As TokenAuthenticator leaves a token request.
+            $this->tenantContext->set(new OrganizationId($tokenOrganizationId));
+        }
         new EnterChosenOrganization(
             $currentUser,
             $membershipQueries,
             $this->tenantContext,
             $urlGenerator,
-            $tokenStorage,
-            new FixedLoginAssurance(isTwoStepLoginOn: true, codeProofAgeSeconds: 60),
+            new SymfonyCurrentApiToken($tokenStorage),
             ['organization_choose', 'identity_profile'],
         )($event);
 

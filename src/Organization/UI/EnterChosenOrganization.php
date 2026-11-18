@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace App\Organization\UI;
 
 use App\Identity\Api\ApiTokenAccess;
+use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
-use App\Identity\Api\LoginAssurance;
 use App\Organization\Api\MembershipQueries;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
@@ -19,7 +20,6 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
-use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 
 /**
  * Makes the organization chosen in the session the tenant of a logged-in user's request (ADR-0005). It runs after the
@@ -28,9 +28,10 @@ use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInt
  * from the chosen organization leaves it at their next request. A session without a valid choice gets the user's only
  * organization; with two or more, or none, the request goes to the picker, except on the routes listed in
  * organization.routes_without_organization (config/services.yaml). A request a personal access token authenticated
- * (ADR-0021) works in the token's organization only: its session is never read or written, so nothing in it can switch
- * the organization, and a token whose user has left that organization gets a 401. Holds no state, so it is safe in
- * worker mode.
+ * (ADR-0021) works in the token's organization only, which TokenAuthenticator has already made the tenant: this
+ * listener confirms the user is still a member there and never reads or writes the session, so nothing in it can switch
+ * the organization. A token whose user has left that organization gets a 401 with the tenant cleared, so nothing after
+ * the refusal runs under it. Holds no state, so it is safe in worker mode.
  */
 #[AsEventListener(event: KernelEvents::REQUEST, priority: 7)]
 final readonly class EnterChosenOrganization
@@ -48,8 +49,7 @@ final readonly class EnterChosenOrganization
         private MembershipQueries $membershipQueries,
         private TenantContext $tenantContext,
         private UrlGeneratorInterface $urlGenerator,
-        private TokenStorageInterface $tokenStorage,
-        private LoginAssurance $loginAssurance,
+        private CurrentApiToken $currentApiToken,
         #[Autowire(param: 'organization.routes_without_organization')]
         private array $routesWithoutOrganization,
     ) {
@@ -66,7 +66,7 @@ final readonly class EnterChosenOrganization
         $organizationIds = $this->membershipQueries->organizationsOf($userId);
         $request->attributes->set(self::ORGANIZATION_COUNT_ATTRIBUTE, \count($organizationIds));
 
-        $apiTokenAccess = $this->loginAssurance->apiTokenAccessOf($this->tokenStorage->getToken());
+        $apiTokenAccess = $this->currentApiToken->access();
         if (null !== $apiTokenAccess) {
             $this->enterTheTokensOrganization($event, $apiTokenAccess, $organizationIds);
 
@@ -78,11 +78,15 @@ final readonly class EnterChosenOrganization
 
     /**
      * @param list<OrganizationId> $organizationIds
+     *
+     * @throws TenantSwitchRefused when the user has left the organization and state of it is still loaded; the request
+     *                             then fails instead of answering under it
      */
     private function enterTheTokensOrganization(RequestEvent $event, ApiTokenAccess $apiTokenAccess, array $organizationIds): void
     {
         $organizationId = self::find($apiTokenAccess->organizationId->toString(), $organizationIds);
         if (null === $organizationId) {
+            $this->tenantContext->clear();
             $event->setResponse(new JsonResponse(
                 ['error' => self::NOT_A_MEMBER_OF_THE_TOKENS_ORGANIZATION],
                 Response::HTTP_UNAUTHORIZED,

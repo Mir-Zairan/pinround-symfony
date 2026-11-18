@@ -100,22 +100,18 @@ final class SymfonyLoginAssuranceTest extends TestCase
     }
 
     #[Test]
-    public function onlyAPersonalAccessTokenLoginIsTokenAuthenticatedAndCarriesItsAccess(): void
+    public function onlyAPersonalAccessTokenLoginIsTokenAuthenticated(): void
     {
         $assurance = $this->assurance();
-        $tokenLogin = self::tokenLoginOfLena();
 
-        self::assertTrue($assurance->isTokenAuthenticated($tokenLogin));
-        self::assertSame($tokenLogin->access(), $assurance->apiTokenAccessOf($tokenLogin));
+        self::assertTrue($assurance->isTokenAuthenticated(self::tokenLoginOfLena()));
         foreach (self::tokensThatAreNoPasswordSession() as $name => [$token]) {
             if ($token instanceof ApiTokenAuthentication) {
                 continue;
             }
             self::assertFalse($assurance->isTokenAuthenticated($token), $name);
-            self::assertNull($assurance->apiTokenAccessOf($token), $name);
         }
         self::assertFalse($assurance->isTokenAuthenticated(self::passwordSessionOfLena()));
-        self::assertNull($assurance->apiTokenAccessOf(self::passwordSessionOfLena()));
     }
 
     #[Test]
@@ -210,7 +206,7 @@ final class SymfonyLoginAssuranceTest extends TestCase
 
     private static function tokenLoginOfLena(): ApiTokenAuthentication
     {
-        return new ApiTokenAuthentication(self::lena(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000000a1'), ['read', 'rounds:write']));
+        return new ApiTokenAuthentication(self::lena(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000000a1'), ['read', 'rounds:write']), null);
     }
 
     private static function lenaUser(): User
