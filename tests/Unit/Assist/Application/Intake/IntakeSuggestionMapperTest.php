@@ -92,7 +92,7 @@ final class IntakeSuggestionMapperTest extends TestCase
     public function itRefusesDataWithAFieldMissingOrOfAnotherType(array $data, string $expectedMessage): void
     {
         $this->expectException(\UnexpectedValueException::class);
-        $this->expectExceptionMessage($expectedMessage);
+        $this->expectExceptionMessageIsOrContains($expectedMessage);
 
         IntakeSuggestionMapper::fromCheckedData($data, 'm', 'intake.v1');
     }

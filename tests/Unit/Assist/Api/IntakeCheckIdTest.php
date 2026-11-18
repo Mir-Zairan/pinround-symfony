@@ -58,7 +58,7 @@ final class IntakeCheckIdTest extends TestCase
     public function aValueThatIsNoCanonicalUuidV7IsRefused(string $value): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('An intake check id must be a canonical UUIDv7.');
+        $this->expectExceptionMessageIsOrContains('An intake check id must be a canonical UUIDv7.');
 
         new IntakeCheckId($value);
     }

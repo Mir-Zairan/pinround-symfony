@@ -50,7 +50,7 @@ final class AiTaskTest extends TestCase
     public function aTaskWithTheWrongSubjectIsRefused(\Closure $task, string $expectedMessage): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage($expectedMessage);
+        $this->expectExceptionMessageIsOrContains($expectedMessage);
 
         $task();
     }

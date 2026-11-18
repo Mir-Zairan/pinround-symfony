@@ -58,7 +58,7 @@ final class LocalPackageIdTest extends TestCase
     public function aValueThatIsNoCanonicalUuidV7IsRefused(string $value): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A laptop package id must be a canonical UUIDv7.');
+        $this->expectExceptionMessageIsOrContains('A laptop package id must be a canonical UUIDv7.');
 
         new LocalPackageId($value);
     }

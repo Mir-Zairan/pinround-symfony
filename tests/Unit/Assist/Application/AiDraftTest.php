@@ -65,7 +65,7 @@ final class AiDraftTest extends TestCase
     public function aDraftPastALimitIsRefused(\Closure $draft, string $expectedMessage): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage($expectedMessage);
+        $this->expectExceptionMessageIsOrContains($expectedMessage);
 
         $draft();
     }
