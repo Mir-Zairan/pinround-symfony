@@ -27,8 +27,8 @@ final class SummarySourceNote
     /** Stands for a laptop summary's model should its row have none. */
     public const string UNKNOWN_MODEL = 'unknown';
 
-    /** Stands for a requester Identity no longer knows. */
-    public const string UNKNOWN_REQUESTER = 'someone';
+    /** Stands for a person Identity no longer knows: a requester, a laptop summary's poster or who made it the main summary. */
+    public const string UNKNOWN_PERSON = 'someone';
 
     /** The sources whose text an AI wrote, which carry the AI SUMMARY chip. */
     private const array AI_SOURCES = ['ai', 'sync', 'explanation', 'laptop'];
@@ -58,7 +58,7 @@ final class SummarySourceNote
 
     private static function firstNameOf(?UserId $userId, ?string $displayName): string
     {
-        return null === $userId || null === $displayName ? self::UNKNOWN_REQUESTER : new UserView($userId, $displayName)->firstName();
+        return null === $userId || null === $displayName ? self::UNKNOWN_PERSON : new UserView($userId, $displayName)->firstName();
     }
 
     public static function isWrittenByAi(TicketSummaryView $summary): bool

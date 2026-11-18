@@ -116,16 +116,16 @@ final class SummaryController extends AbstractController
             return $this->redirectToTicket($key);
         }
         $history = $this->ticketSummaryQueries->historyOf($ticket->id, $visibility) ?? throw $this->createNotFoundException(self::NOT_FOUND);
-        $authorIds = [];
+        $personIds = [];
         foreach ($history->earlier as $summary) {
             foreach ([$summary->authorId, $summary->chosenById] as $personId) {
                 if (null !== $personId) {
-                    $authorIds[$personId->toString()] = $personId;
+                    $personIds[$personId->toString()] = $personId;
                 }
             }
         }
-        $authors = $this->userQueries->byIds(array_values($authorIds));
-        $nameOf = static fn (?UserId $personId): ?string => null === $personId ? null : ($authors[$personId->toString()] ?? null)?->displayName;
+        $people = $this->userQueries->byIds(array_values($personIds));
+        $nameOf = static fn (?UserId $personId): ?string => null === $personId ? null : ($people[$personId->toString()] ?? null)?->displayName;
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
 
