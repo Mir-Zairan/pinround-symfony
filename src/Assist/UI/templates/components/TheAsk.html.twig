@@ -10,7 +10,11 @@
     <turbo-frame id="{{ constant('App\\Assist\\UI\\Component\\TheAsk::FRAME_ID') }}" aria-live="polite">
         {#- Turbo swaps the frame's children, not the frame, so the summary-poll controller's values live here. -#}
         {%- set summarizeLabel = 'Summarize with AI' %}
-        <div class="ticket__ask-state"
+        {#- Each state is the focus target for the swap that removes the focused button: Turbo focuses [autofocus] after
+            its frame render, the summary-poll controller after its own. Only in a frame answer, as on a page load the
+            browser would move the focus here itself. -#}
+        {%- set isFrameAnswer = app.request is not null and app.request.headers.get('Turbo-Frame') == constant('App\\Assist\\UI\\Component\\TheAsk::FRAME_ID') %}
+        <div class="ticket__ask-state" tabindex="-1"{% if isFrameAnswer %} autofocus{% endif %}
              data-controller="summary-poll"
              data-action="visibilitychange@document->summary-poll#followVisibility turbo:submit-start->summary-poll#markBusy turbo:submit-end->summary-poll#clearBusy"
              data-summary-poll-url-value="{{ path(constant(controller ~ '::FRAME_ROUTE'), {key: ticket.key}) }}"

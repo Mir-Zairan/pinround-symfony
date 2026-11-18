@@ -1,5 +1,6 @@
 import { Controller } from '@hotwired/stimulus';
 import { sleep } from '../review/upload_status.js';
+import { showToast } from '../toast_region.js';
 
 /** ticket-page.md: while a summary request runs, The ask asks again every 3 s. */
 export const POLL_INTERVAL_MS = 3000;
@@ -14,6 +15,8 @@ const DONE = 'done';
 // most MAX_POLLS times per connect, and swaps the frame's children in only when the answer's state differs; it stops
 // when it disconnects and while the page is hidden, and goes on with the polls left when the page shows again. A summary
 // that arrives shows the toast "Summary saved for everyone." through the page's toast region, as _toast.html.twig does.
+// After each poll's answer is handled it counts it in the frame's data-answered-polls, which outlives the swaps; for an
+// answer that still says running, the next poll's timer is already set by then.
 export default class extends Controller {
   static targets = ['button'];
   static values = { url: String, state: String, savedToast: String, readyLabel: String };
@@ -80,6 +83,7 @@ export default class extends Controller {
         this.#show(freshFrame, freshState);
         return;
       }
+      this.#countAnsweredPoll(this.element.closest('turbo-frame'));
     }
     this.#offerTheButtonAgain();
   }
@@ -109,27 +113,29 @@ export default class extends Controller {
     }
   }
 
-  // Replacing the frame's children disconnects this controller, so the toast goes first.
+  // Replacing the frame's children disconnects this controller, so the toast goes first. The removed children may hold
+  // the focus, which would fall to the top of the page: it moves to the new state's focus target, its [autofocus], but
+  // only when it was inside the frame. That attribute comes off before the swap, so the browser never focuses it itself.
   #show(freshFrame, freshState) {
     const frame = this.element.closest('turbo-frame');
     if (freshState === DONE) {
-      this.#showToast(this.savedToastValue);
+      showToast(this.savedToastValue);
     }
+    const hadFocus = frame.contains(document.activeElement);
+    const focusTarget = freshFrame.querySelector('[autofocus]');
+    focusTarget?.removeAttribute('autofocus');
     frame.replaceChildren(...freshFrame.childNodes);
+    if (hadFocus) {
+      focusTarget?.focus();
+    }
+    this.#countAnsweredPoll(frame);
   }
 
-  // The markup of _toast.html.twig: the toast controller writes the text in a moment later, so the region announces it.
-  #showToast(message) {
-    const region = document.getElementById('toast-region');
-    if (region === null || message === '') {
+  #countAnsweredPoll(frame) {
+    if (frame === null) {
       return;
     }
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.dataset.controller = 'toast';
-    toast.dataset.toastMessageValue = message;
-    toast.dataset.turboTemporary = '';
-    region.replaceChildren(toast);
+    frame.dataset.answeredPolls = String(Number(frame.dataset.answeredPolls ?? '0') + 1);
   }
 
   #offerTheButtonAgain() {
