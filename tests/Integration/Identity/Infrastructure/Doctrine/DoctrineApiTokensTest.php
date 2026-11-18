@@ -37,6 +37,8 @@ final class DoctrineApiTokensTest extends KernelTestCase
     private const string OMAR_EXPIRED = '0197a3c0-0000-7000-8000-000000000ce4';
     private const string LENA_AT_ACME = '0197a3c0-0000-7000-8000-000000000ce5';
     private const string OMAR_AT_BETA = '0197a3c0-0000-7000-8000-000000000ce6';
+    private const string OMAR_REVOKED = '0197a3c0-0000-7000-8000-000000000ce7';
+    private const string OMAR_WITHIN_A_SECOND = '0197a3c0-0000-7000-8000-000000000ce8';
     private const string PEPPER = 'integration-test-pepper-of-32-bytes-or-more';
     private const string ISSUED_AT = '2099-03-15 10:00:00 UTC';
 
@@ -153,6 +155,104 @@ final class DoctrineApiTokensTest extends KernelTestCase
             ],
             $listed,
         );
+    }
+
+    /**
+     * The revoked token is the newest, so a revoked one counted in the list would show. Lena's, the expired one and
+     * Beta Bakery's are seeded in setUp().
+     */
+    #[Test]
+    public function theUsersLiveTokensOfTheOrganizationAreListedNewestFirstWithTheLaterIdFirstInOneSecond(): void
+    {
+        $issuedAt = new \DateTimeImmutable(self::ISSUED_AT);
+        $this->transactions()->committedAs(self::ACME_FOODS, function () use ($issuedAt): void {
+            $this->add(self::OMAR_REVOKED, self::ACME_FOODS, self::OMAR, $issuedAt->modify('+1 hour'));
+            self::assertTrue($this->tokens()->revoke(self::OMAR_REVOKED, $issuedAt->modify('+2 hours')));
+        });
+
+        $listed = $this->asAcmeFoods(fn (): array => $this->liveIdsOf(self::OMAR, $issuedAt->modify('+3 hours')));
+        $listedAtBeta = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => $this->liveIdsOf(self::OMAR, $issuedAt->modify('+3 hours')));
+
+        self::assertSame([self::OMAR_SAME_SECOND, self::OMAR_LIVE, self::OMAR_OLDER], $listed);
+        self::assertSame([self::OMAR_AT_BETA], $listedAtBeta);
+        self::assertSame([self::LENA_AT_ACME], $this->asAcmeFoods(fn (): array => $this->liveIdsOf(self::LENA, $issuedAt)));
+    }
+
+    /**
+     * expires_at keeps whole seconds and $at is cut to its second, so a token is listed until the second it expires
+     * starts, as resolve_api_token stops it then.
+     */
+    #[Test]
+    public function aTokenIsLiveUntilTheSecondItExpiresAndNotAtThatSecond(): void
+    {
+        // OMAR_OLDER lasts 90 days from a day before ISSUED_AT, so the others outlive it.
+        $expiresAt = new \DateTimeImmutable(self::ISSUED_AT)->modify('-1 day +90 days');
+
+        $listedAt = fn (string $at): array => $this->asAcmeFoods(fn (): array => $this->liveIdsOf(self::OMAR, new \DateTimeImmutable($at)));
+
+        self::assertSame('2099-06-12 10:00:00', $expiresAt->format('Y-m-d H:i:s'));
+        self::assertSame([self::OMAR_SAME_SECOND, self::OMAR_LIVE, self::OMAR_OLDER], $listedAt('2099-06-12 09:59:59 UTC'));
+        self::assertSame([self::OMAR_SAME_SECOND, self::OMAR_LIVE, self::OMAR_OLDER], $listedAt('2099-06-12 09:59:59.600 UTC'));
+        self::assertSame([self::OMAR_SAME_SECOND, self::OMAR_LIVE], $listedAt('2099-06-12 10:00:00 UTC'));
+        self::assertSame([self::OMAR_SAME_SECOND, self::OMAR_LIVE], $listedAt('2099-06-12 10:00:00.400 UTC'));
+        self::assertSame([], $listedAt('2099-06-13 10:00:00 UTC'));
+    }
+
+    /**
+     * A token issued within a second is stored at the start of that second, as Doctrine sends a time without its
+     * fraction: it expires at that start, a day on, and lists before tokens of the same second with a lower id.
+     */
+    #[Test]
+    public function aTokenIssuedWithinASecondCountsFromTheStartOfThatSecond(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->add(self::OMAR_WITHIN_A_SECOND, self::ACME_FOODS, self::OMAR, new \DateTimeImmutable('2099-03-15 10:00:00.700 UTC'), 1));
+
+        $listedAt = fn (string $at): array => $this->asAcmeFoods(fn (): array => $this->liveIdsOf(self::OMAR, new \DateTimeImmutable($at)));
+
+        self::assertSame(
+            ['2099-03-15 10:00:00', '2099-03-16 10:00:00'],
+            $this->asAcmeFoods(fn (): array => [$this->utcTextOf('created_at', self::OMAR_WITHIN_A_SECOND), $this->utcTextOf('expires_at', self::OMAR_WITHIN_A_SECOND)]),
+        );
+        self::assertSame([self::OMAR_WITHIN_A_SECOND, self::OMAR_SAME_SECOND, self::OMAR_LIVE, self::OMAR_OLDER], $listedAt('2099-03-16 09:59:59.900 UTC'));
+        self::assertSame([self::OMAR_SAME_SECOND, self::OMAR_LIVE, self::OMAR_OLDER], $listedAt('2099-03-16 10:00:00.300 UTC'));
+    }
+
+    /**
+     * 49 more of Omar's live tokens, as in onlyTheNewestFiftyTokensAreListedNewestFirst(), and OMAR_LIVE revoked: of
+     * the 51 live ones the oldest is left out, and the revoked one takes no place in the fifty.
+     */
+    #[Test]
+    public function atMostFiftyLiveTokensAreListedAndARevokedOneTakesNoPlace(): void
+    {
+        $issuedAt = new \DateTimeImmutable(self::ISSUED_AT);
+        $this->transactions()->committedAs(self::ACME_FOODS, function () use ($issuedAt): void {
+            for ($i = 0; $i < 49; ++$i) {
+                $hoursBack = ($i * 17) % 49 + 1;
+                $this->add(self::extraTokenId($hoursBack), self::ACME_FOODS, self::OMAR, $issuedAt->modify(\sprintf('-%d minutes', $hoursBack * 60 + 30)));
+            }
+            self::assertTrue($this->tokens()->revoke(self::OMAR_LIVE, $issuedAt));
+        });
+
+        $listed = $this->asAcmeFoods(fn (): array => $this->liveIdsOf(self::OMAR, $issuedAt));
+
+        self::assertCount(ApiTokens::MAX_LISTED_TOKENS, $listed);
+        self::assertSame(
+            [
+                self::OMAR_SAME_SECOND,
+                ...array_map(self::extraTokenId(...), range(1, 23)),
+                self::OMAR_OLDER,
+                ...array_map(self::extraTokenId(...), range(24, 48)),
+            ],
+            $listed,
+        );
+    }
+
+    #[Test]
+    public function withoutATenantTheLiveListRefuses(): void
+    {
+        $this->expectException(TenantNotSet::class);
+
+        $this->tokens()->liveForUser(new UserId(self::OMAR), new \DateTimeImmutable(self::ISSUED_AT));
     }
 
     #[Test]
@@ -312,6 +412,14 @@ final class DoctrineApiTokensTest extends KernelTestCase
         $issued = ApiToken::issue($id, new OrganizationId($organizationId), new UserId($userId), 'Claude Code', ApiTokenScope::claudeCodeDefaults(), new HmacApiTokenHashing(self::PEPPER), $issuedAt, $lifetimeDays);
         $this->tokens()->add($issued->token());
         $this->plainTokens[$id] = $issued->reveal();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function liveIdsOf(string $userId, \DateTimeImmutable $at): array
+    {
+        return array_map(static fn (ApiToken $token): string => $token->id(), $this->tokens()->liveForUser(new UserId($userId), $at));
     }
 
     private static function extraTokenId(int $hoursBack): string
