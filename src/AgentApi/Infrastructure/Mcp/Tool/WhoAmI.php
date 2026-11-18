@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
-use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\OwnIdentityTool;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
@@ -18,7 +18,7 @@ use Mcp\Schema\ToolAnnotations;
  * whoami: the person and organization the token works as, and the scopes it carries. Nothing secret: never the token
  * or its hash.
  */
-final readonly class WhoAmI implements AgentTool
+final readonly class WhoAmI implements OwnIdentityTool
 {
     public const string NAME = 'whoami';
 

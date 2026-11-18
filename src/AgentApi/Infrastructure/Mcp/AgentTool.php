@@ -35,8 +35,8 @@ interface AgentTool
      *
      * @param array<string, mixed> $arguments valid against the input schema
      *
-     * @return ToolTarget|null null only for a tool that reads nothing but the caller's own identity, which no voter
-     *                         guards
+     * @return ToolTarget|null null only from an OwnIdentityTool, which no voter guards; ToolCallGate fails the call of
+     *                         any other tool that answers null
      *
      * @throws ToolRefusal not found when there is no such target
      */

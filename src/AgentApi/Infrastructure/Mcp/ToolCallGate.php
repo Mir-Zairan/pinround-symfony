@@ -77,9 +77,7 @@ final readonly class ToolCallGate
         $savepointLevel = $this->connection->getTransactionNestingLevel();
         try {
             $target = $tool->targetOf($arguments);
-            if (null !== $target && !$this->authorizationChecker->isGranted($target->voterAttribute, $target->subject)) {
-                throw ToolRefusal::notFound();
-            }
+            $this->refuseUnlessGranted($tool, $target);
             $toolAnswer = $tool->call($arguments, $target);
             $this->toolCallAuditor->record($access, $userId, $definition->name, $target, ToolCallOutcome::Ok);
             $this->releaseSavepoint($savepointLevel);
@@ -120,6 +118,26 @@ final readonly class ToolCallGate
         );
 
         throw ToolRefusal::invalidInput(implode('; ', $descriptions));
+    }
+
+    /**
+     * Deny by default: a tool skips the voter only when it is an OwnIdentityTool and has no target.
+     *
+     * @throws ToolRefusal     not found, when the voter denies the target
+     * @throws \LogicException when a tool that is no OwnIdentityTool has no target
+     */
+    private function refuseUnlessGranted(AgentTool $tool, ?ToolTarget $target): void
+    {
+        if (null === $target) {
+            if (!$tool instanceof OwnIdentityTool) {
+                throw new \LogicException(\sprintf('The MCP tool "%s" has no target, and only an OwnIdentityTool may run without one.', $tool->definition()->name));
+            }
+
+            return;
+        }
+        if (!$this->authorizationChecker->isGranted($target->voterAttribute, $target->subject)) {
+            throw ToolRefusal::notFound();
+        }
     }
 
     /**

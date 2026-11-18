@@ -65,7 +65,7 @@ final class ToolCallGateTest extends TestCase
     public function anEmptyArgumentObjectPassesASchemaThatRequiresNothing(): void
     {
         $fixture = new GateFixture();
-        $tool = new ScriptedTool('read', static fn (): ?ToolTarget => null, inputSchema: ['type' => 'object', 'properties' => [], 'additionalProperties' => false]);
+        $tool = new ScriptedOwnIdentityTool(['type' => 'object', 'properties' => [], 'additionalProperties' => false]);
 
         $fixture->gate->call($tool, []);
 
@@ -137,15 +137,34 @@ final class ToolCallGateTest extends TestCase
     }
 
     #[Test]
-    public function aToolWithoutATargetAsksNoVoter(): void
+    public function anOwnIdentityToolWithoutATargetAsksNoVoter(): void
+    {
+        $fixture = new GateFixture();
+        $tool = new ScriptedOwnIdentityTool();
+
+        $fixture->gate->call($tool, ['ticket' => 'SHOP-42']);
+
+        self::assertSame(1, $tool->calls);
+        self::assertSame([], $fixture->voterQuestions);
+        $this->assertOneRow($fixture, 'ok', ToolCallAuditor::TOOL_TARGET_TYPE, null);
+    }
+
+    /**
+     * Deny by default: only an OwnIdentityTool may skip the voter.
+     */
+    #[Test]
+    public function anyOtherToolWithoutATargetIsRefusedBeforeItRunsWithAnErrorRow(): void
     {
         $fixture = new GateFixture();
         $tool = new ScriptedTool('read', static fn (): ?ToolTarget => null);
 
-        $fixture->gate->call($tool, ['ticket' => 'SHOP-42']);
+        $failure = $this->failureOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42']));
 
+        self::assertInstanceOf(\LogicException::class, $failure);
+        self::assertStringContainsString('only an OwnIdentityTool may run without one', $failure->getMessage());
+        self::assertSame([1, 0], [$tool->targetLookups, $tool->calls]);
         self::assertSame([], $fixture->voterQuestions);
-        $this->assertOneRow($fixture, 'ok', ToolCallAuditor::TOOL_TARGET_TYPE, null);
+        $this->assertOneRow($fixture, 'error', ToolCallAuditor::TOOL_TARGET_TYPE, null);
     }
 
     #[Test]
