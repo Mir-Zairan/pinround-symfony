@@ -58,4 +58,6 @@ The REST API under `/api/v1` and the MCP tools at `/mcp` for the browser plugin,
 
 Not built yet: the organization name in `whoami` (Organization has no Api for it), the tools `get_ticket`, `add_comment`, `move_ticket` and `create_report`, and any guard or limit on `/api/v1` (P09.T7).
 
+To connect Claude Code to these tools, follow the [Claude Code setup guide](../../docs/guides/claude-code.md).
+
 See the [module catalogue](../../docs/02-architecture/modules.md#agentapi-api_).
