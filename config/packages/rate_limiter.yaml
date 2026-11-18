@@ -16,6 +16,9 @@
 # Server-side AI calls get ai_calls_per_user through SymfonyAiCallLimit (AiCallLimit), before any provider is asked.
 # Laptop AI requests (POST /ai/laptop/package and /ai/laptop/result) get ai_laptop_per_user through
 # SymfonyLaptopRequestLimit (LaptopRequestLimit), after the form token check and before the body is read.
+# Every request to /mcp a personal access token authenticated gets mcp_calls_per_token_minute,
+# mcp_calls_per_token_hour and mcp_calls_per_organization_minute through ToolCallLimiter (ADR-0021), called by
+# McpRequestGuard after the firewall and before the MCP handler.
 parameters:
     # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter,
     # SymfonyPasswordResetRequestLimiter, SymfonyCurrentPasswordLimiter, SymfonyTwoStepCodeLimiter).
@@ -105,6 +108,28 @@ framework:
         ai_laptop_per_user:
             policy: fixed_window
             limit: 30
+            interval: '1 minute'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # MCP calls (ADR-0021), keyed by the token id and the clock's minute or hour (ToolCallLimiter): 60 a minute and
+        # 600 an hour per token. The 120 a minute of NFR-SEC-14 is older than the ADR's and P09's 60.
+        mcp_calls_per_token_minute:
+            policy: fixed_window
+            limit: 60
+            interval: '1 minute'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        mcp_calls_per_token_hour:
+            policy: fixed_window
+            limit: 600
+            interval: '60 minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # Keyed by the organization and the clock's minute: ten tokens at their full rate, so one organization's
+        # scripts cannot take the server from the others while a team of people working with Claude Code never meets it.
+        mcp_calls_per_organization_minute:
+            policy: fixed_window
+            limit: 600
             interval: '1 minute'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
