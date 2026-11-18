@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Assist\Infrastructure\Doctrine;
 
+use App\Assist\Api\LocalAi;
 use App\Assist\Api\LocalAiPurpose;
 use App\Assist\Api\LocalModelName;
 use App\Assist\Api\LocalPackageId;
@@ -198,6 +199,31 @@ final class DbalLocalPackagesTest extends KernelTestCase
             self::transactions()->committedAs(self::ACME_FOODS, fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, 2, 3)),
             'Three a hour let a third through, so the refusal above counted two.',
         );
+    }
+
+    /**
+     * Omar holds 10 open packages (the one setUp seeds and 9 more) and 20 used ones, all created this hour, so both caps
+     * are reached at once; the open cap is the one he can wait out in minutes, so it is the one he is told.
+     */
+    #[Test]
+    public function aPersonAtBothCapsIsRefusedForTheOpenPackagesAndNothingIsStored(): void
+    {
+        for ($i = 1; $i <= 29; ++$i) {
+            $columns = $i <= 9 ? [] : ['used_at' => self::NOW, 'result_text' => self::RESULT, 'model' => self::MODEL];
+            self::seed(self::ACME_FOODS, \sprintf('0197a3c0-0000-7000-8000-00000000e%03d', $i), self::OMAR, $columns);
+        }
+        $rowsBefore = $this->rowsAs(self::ACME_FOODS);
+        self::assertCount(30, $rowsBefore);
+        self::assertCount(10, array_filter($rowsBefore, static fn (array $row): bool => null === $row[7]));
+
+        self::assertSame(
+            LocalPackageLimit::OpenPackages,
+            self::transactions()->committedAs(
+                self::ACME_FOODS,
+                fn (): \DateTimeImmutable|LocalPackageLimit => $this->issueNewPackage(self::ACME_FOODS, LocalAi::MAX_OPEN_PACKAGES_PER_PERSON, LocalAi::MAX_PACKAGES_PER_PERSON_PER_HOUR),
+            ),
+        );
+        self::assertSame($rowsBefore, $this->rowsAs(self::ACME_FOODS));
     }
 
     /**
