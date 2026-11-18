@@ -11,6 +11,7 @@ use App\Identity\Domain\ApiTokens;
 use App\Identity\Domain\ApiTokenScope;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
+use Psr\Clock\ClockInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -27,7 +28,8 @@ use Symfony\Component\Security\Http\EntryPoint\AuthenticationEntryPointInterface
  * Authenticates every request of the stateless api_token firewall (/mcp and /api/v1, ADR-0021) by its
  * "Authorization: Bearer pr_…" header alone; cookies are never read there. A live token (resolve_api_token: neither
  * revoked nor expired by the database clock) makes the request its user's, with the token's organization as tenant
- * and an ApiTokenAuthentication as security token. Anything else, a missing header included, gets the same 401 at
+ * and an ApiTokenAuthentication as security token; a successful login records the token's use (ApiTokens::markUsed, at
+ * most once a minute). Anything else, a missing header included, gets the same 401 at
  * once, so a caller never learns which check failed. The plain token is hashed and dropped: it is in no exception,
  * passport or log record. Holds no state, so it is safe in worker mode (ADR-0008).
  */
@@ -46,6 +48,7 @@ final class TokenAuthenticator extends AbstractAuthenticator implements Authenti
         private readonly SecurityUserProvider $userProvider,
         private readonly TenantContext $tenantContext,
         private readonly Transactions $transactions,
+        private readonly ClockInterface $clock,
     ) {
     }
 
@@ -90,8 +93,18 @@ final class TokenAuthenticator extends AbstractAuthenticator implements Authenti
         return new ApiTokenAuthentication($user, $access);
     }
 
+    /**
+     * Records the use in a transaction of its own, before the request's: it stays recorded when the request fails, and
+     * a user the user checker refused never gets here.
+     */
     public function onAuthenticationSuccess(Request $request, TokenInterface $token, string $firewallName): ?Response
     {
+        if (!$token instanceof ApiTokenAuthentication) {
+            throw new \LogicException('A token login has an ApiTokenAuthentication.');
+        }
+        $tokenId = $token->access()->tokenId;
+        $this->transactions->run(fn (): bool => $this->apiTokens->markUsed($tokenId, $this->clock->now()));
+
         return null;
     }
 

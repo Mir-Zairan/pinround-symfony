@@ -242,7 +242,7 @@ User accounts are global (one person can belong to several orgs), but each org c
 - **In transit:** TLS everywhere. HSTS. Internal services use TLS when the platform supports it.
 - **At rest:** managed disk encryption for PostgreSQL and Valkey; server-side encryption on the bucket.
 - **Field encryption** (libsodium secretbox, key id stored next to the ciphertext): Jira tokens, OIDC client secrets, webhook secrets, MFA secrets. Keys come from the platform's secret store as plain environment variables, never from the repo; not from the Symfony secrets vault, because the prod entrypoint guard reads only the environment. Rotation: new key id for new writes, a background job re-encrypts old rows. Code: the `FieldEncryption` interface (SharedKernel `Application`) and `SodiumFieldEncryption`; the key ring comes from `FIELD_ENCRYPTION_KEYS` and `FIELD_ENCRYPTION_CURRENT_KEY_ID` ([config.md](../operations/config.md#field-encryption)). Tampered values, values cut short and unknown key ids throw `UndecryptableField`. The re-encrypt job is not built yet.
-- **Hashed, not encrypted:** passwords (argon2id), personal access tokens (SHA-256 of a 32-byte random value, with prefix `pr_` so secret scanners can find leaks), invite tokens.
+- **Hashed, not encrypted:** passwords (argon2id), personal access tokens (HMAC-SHA256 keyed by `API_TOKEN_PEPPER` of a 32-byte random value, [ADR-0043](../03-adr/0043-api-token-hash-is-hmac-sha256.md), with prefix `pr_` so secret scanners can find leaks), invite tokens.
 - **Not encrypted at field level:** ticket text and comments. We need full-text search on them. Disk encryption, RLS and access control protect them. This is a conscious trade-off, see [trade-offs.md](trade-offs.md).
 
 See [ADR-0027](../03-adr/0027-secrets-and-encryption.md).
@@ -268,7 +268,11 @@ See [ai-architecture.md](ai-architecture.md), [ADR-0020](../03-adr/0020-ai-safet
 - **Malicious tool input:** JSON schema validation on every tool input; ids must belong to the token's org; size limits on text and images.
 - **Repudiation:** each tool call writes an audit event with the token id, tool name and target id (not the content).
 - **Token minted from a stolen session:** creating a token needs password + MFA within the last 10 minutes.
-- **Skipping admin MFA with a token:** `ADMIN_*` voters deny every token-authenticated request.
+- **Skipping admin MFA with a token:** `ADMIN_*` voters deny every token-authenticated request (`Identity\UI\Voter\AdminNeedsBrowserSessionVoter`, reason "Admin work needs a browser session, not a personal access token."); the admin pages sit behind the main firewall, which never reads the `Authorization` header.
+- **Cookie or forged header on `/mcp` and `/api/v1`:** the `api_token` firewall is stateless and reads only `Authorization: Bearer pr_…` (`TokenAuthenticator`). A missing, malformed, unknown, revoked or expired token, a blocked user's token and a session cookie alone all get the same 401 JSON refusal with `WWW-Authenticate: Bearer`, so a caller never learns which check failed. The response sets no cookie.
+- **Token used in the wrong organization:** a token request works in the token's organization only (`Organization\UI\EnterChosenOrganization`); the session is never read or written there, so no session choice can switch it. A token whose user has left that organization gets 401 "You are no longer a member of the organization this token works in."
+- **Silent token use:** each successful token login writes `last_used_at` in its own transaction, at most once a minute (`ApiTokens::markUsed`).
+- **Token in logs:** the plain token is hashed and dropped in `TokenAuthenticator`; `ApiTokenLogLeakTest` checks that no record of any channel holds a live, revoked, unknown or malformed token or its random part.
 - **Images through MCP:** `add_screenshot` takes only an `upload_id` from a presigned intent; image bytes never travel in a tool call.
 
 See [ADR-0021](../03-adr/0021-mcp-server.md).
