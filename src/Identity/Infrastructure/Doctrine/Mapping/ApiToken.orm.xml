@@ -6,6 +6,12 @@
     <entity name="App\Identity\Domain\ApiToken" table="idn_api_token">
         <indexes>
             <index name="idn_api_token_user_id_created_at_idx" columns="organization_id,user_id,created_at"/>
+            <!-- ApiTokens::livePage and claimExpiryWarnings, both ordered by expiry. -->
+            <index name="idn_api_token_expires_at_id_live_idx" columns="organization_id,expires_at,id">
+                <options>
+                    <option name="where">(revoked_at IS NULL)</option>
+                </options>
+            </index>
         </indexes>
         <unique-constraints>
             <!-- For resolve_api_token, which runs before the tenant is known (data-model.md, the documented exception). -->
@@ -24,5 +30,6 @@
         <field name="expiresAt" type="datetimetz_immutable" column="expires_at"/>
         <field name="lastUsedAt" type="datetimetz_immutable" column="last_used_at" nullable="true"/>
         <field name="revokedAt" type="datetimetz_immutable" column="revoked_at" nullable="true"/>
+        <field name="expiryWarnedAt" type="datetimetz_immutable" column="expiry_warned_at" nullable="true"/>
     </entity>
 </doctrine-mapping>

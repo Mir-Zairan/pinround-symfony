@@ -710,13 +710,14 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
-     * idn_api_token (Version20261119100000), a tenant table: the app reads and adds tokens and changes only the
-     * revocation and the last use, never deletes; support reads under the tenant policy; resolve_api_token reads only
-     * the ids, the hash and the two dates it checks, never the name, prefix or scopes. Every index starts with the
-     * organization but the token_hash key, which the resolver looks up before the organization is known.
+     * idn_api_token (Version20261119100000, Version20261119150000), a tenant table: the app reads and adds tokens and
+     * changes only the revocation, the last use and the expiry warning, never deletes; support reads under the tenant
+     * policy; resolve_api_token and organizations_with_expiring_api_tokens read only the ids, the hash, the two dates
+     * they check and the warning, never the name, prefix or scopes. Every index starts with the organization but the
+     * token_hash key, which the resolver looks up before the organization is known.
      */
     #[Test]
-    public function theApiTokenTableLetsTheAppChangeOnlyRevocationAndLastUse(): void
+    public function theApiTokenTableLetsTheAppChangeOnlyRevocationLastUseAndExpiryWarning(): void
     {
         $connection = $this->connection();
 
@@ -730,9 +731,10 @@ final class DatabaseRolesTest extends KernelTestCase
         );
         self::assertEqualsCanonicalizing(
             [
-                'pinround_app UPDATE last_used_at', 'pinround_app UPDATE revoked_at',
+                'pinround_app UPDATE last_used_at', 'pinround_app UPDATE revoked_at', 'pinround_app UPDATE expiry_warned_at',
                 'pinround_resolver SELECT id', 'pinround_resolver SELECT organization_id', 'pinround_resolver SELECT user_id',
                 'pinround_resolver SELECT token_hash', 'pinround_resolver SELECT expires_at', 'pinround_resolver SELECT revoked_at',
+                'pinround_resolver SELECT expiry_warned_at',
             ],
             $connection->fetchFirstColumn(
                 "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
@@ -750,6 +752,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX idn_api_token_pkey ON public.idn_api_token USING btree (organization_id, id)',
                 'CREATE INDEX idn_api_token_user_id_created_at_idx ON public.idn_api_token USING btree (organization_id, user_id, created_at)',
                 'CREATE UNIQUE INDEX idn_api_token_token_hash_key ON public.idn_api_token USING btree (token_hash)',
+                'CREATE INDEX idn_api_token_expires_at_id_live_idx ON public.idn_api_token USING btree (organization_id, expires_at, id) WHERE (revoked_at IS NULL)',
             ],
             $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_api_token'"),
         );

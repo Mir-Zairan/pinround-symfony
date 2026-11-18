@@ -11,8 +11,8 @@ use App\SharedKernel\Domain\UserId;
 /**
  * A personal access token of one user in one organization, for Claude Code and the browser plugin (ADR-0021). Only
  * the peppered hash of the token is kept, with a short display prefix; the token itself is shown once, by issue().
- * Revocation and last use are written in the database only (ApiTokens::revoke, ApiTokens::markUsed), so two requests
- * at once decide on the row, never on an entity loaded earlier.
+ * Revocation, last use and the expiry warning are written in the database only (ApiTokens::revoke, ApiTokens::markUsed,
+ * ApiTokens::claimExpiryWarnings), so two requests at once decide on the row, never on an entity loaded earlier.
  */
 final class ApiToken implements TenantOwned
 {
@@ -44,6 +44,7 @@ final class ApiToken implements TenantOwned
     private readonly \DateTimeImmutable $expiresAt;
     private ?\DateTimeImmutable $lastUsedAt = null;
     private ?\DateTimeImmutable $revokedAt = null;
+    private ?\DateTimeImmutable $expiryWarnedAt = null;
 
     /**
      * @param list<string> $scopes
@@ -189,5 +190,14 @@ final class ApiToken implements TenantOwned
     public function revokedAt(): ?\DateTimeImmutable
     {
         return $this->revokedAt;
+    }
+
+    /**
+     * When the warning job claimed the token to email its owner that it stops working in about a week; null until then.
+     * A token already loaded keeps its old value.
+     */
+    public function expiryWarnedAt(): ?\DateTimeImmutable
+    {
+        return $this->expiryWarnedAt;
     }
 }
