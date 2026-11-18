@@ -29,6 +29,8 @@ final class TicketSummaryCommandsTest extends KernelTestCase
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-0000000f8a03';
     private const string SHOP_7 = '0197a3c0-0000-7000-8000-0000000f8a04';
     private const string SHOP_8 = '0197a3c0-0000-7000-8000-0000000f8a05';
+    private const string BETA_TICKET = '0197a3c0-0000-7000-8000-0000000f8a06';
+    private const string UNKNOWN_TICKET = '0197a3c0-0000-7000-8000-0000000f8a09';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000f8a11';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000f8a12';
     private const string TEXT = 'Checkout button hidden MARKER-f8a';
@@ -197,6 +199,41 @@ final class TicketSummaryCommandsTest extends KernelTestCase
             [['text' => self::TEXT, 'source' => 'laptop', 'author_id' => self::MIA, 'model' => 'qwen3:4b', 'prompt_version' => 'summary.v1', 'is_current' => true, 'created_at' => '2027-03-03 10:05:00']],
             $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_8),
         );
+    }
+
+    /**
+     * @return iterable<string, array{string, string|null}>
+     */
+    public static function ticketsAcmeFoodsDoesNotHave(): iterable
+    {
+        yield 'an unknown ticket, as one that has no summary' => [self::UNKNOWN_TICKET, null];
+        yield 'an unknown ticket, as one with a summary' => [self::UNKNOWN_TICKET, '2027-03-02 09:00:00+00'];
+        yield 'Beta Bakery\'s ticket, hidden by row-level security' => [self::BETA_TICKET, null];
+    }
+
+    /**
+     * The caller commits, so a refusal must leave nothing behind by itself.
+     */
+    #[Test]
+    #[DataProvider('ticketsAcmeFoodsDoesNotHave')]
+    public function aChosenLaptopSummaryOfATicketTheOrganizationDoesNotHaveIsRefusedAndStoresNothing(string $ticketId, ?string $currentSummaryCreatedAt): void
+    {
+        $this->ticketRows()->addOf(self::BETA_BAKERY, self::BETA_TICKET, self::SHOP_PROJECT, self::MIA, 8);
+
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($ticketId, $currentSummaryCreatedAt): ?CurrentSummaryChanged {
+            try {
+                $this->storeChosenLaptopSummary(self::ACME_FOODS, self::TEXT, $currentSummaryCreatedAt, $ticketId);
+            } catch (CurrentSummaryChanged $refusal) {
+                return $refusal;
+            }
+
+            return null;
+        });
+
+        self::assertSame('The ticket\'s current summary changed since the page was read.', $refusal?->getMessage());
+        self::assertSame([], $this->summaryRows()->of(self::ACME_FOODS, $ticketId));
+        self::assertSame([], $this->summaryRows()->of(self::BETA_BAKERY, $ticketId));
+        self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
     }
 
     #[Test]
