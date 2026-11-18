@@ -1,0 +1,89 @@
+/* "Where it goes" on the New ticket form: the AI check (IntakeCheck) above the Type and Priority choices. */
+.where-it-goes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: 0;
+  padding: var(--space-16);
+  border: 1px solid var(--outline-var);
+  border-radius: var(--radius-card);
+}
+
+.where-it-goes__title {
+  padding: 0 var(--space-4);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.intake-check__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.intake-check__state:focus {
+  outline: none;
+}
+
+.intake-check__line {
+  flex: 1 1 16rem;
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.intake-check__summary strong {
+  color: var(--ai);
+}
+
+.intake-check__ai-off,
+.intake-check__notice,
+.intake-check__failed {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.intake-check__duplicates {
+  flex: 1 1 100%;
+  padding: var(--space-12);
+  border-radius: var(--radius-input);
+  background: var(--ai-container);
+  color: var(--on-ai-container);
+}
+
+.intake-check__duplicates-heading {
+  margin: 0 0 var(--space-8);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.intake-check__duplicate-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.intake-check__duplicate {
+  display: flex;
+  gap: var(--space-8);
+  min-width: 0;
+  font-size: 14px;
+}
+
+.intake-check__duplicate-key {
+  flex: none;
+  font-family: var(--font-mono);
+}
+
+.intake-check__duplicate a {
+  min-width: 0;
+  color: inherit;
+  overflow-wrap: anywhere;
+}

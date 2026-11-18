@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/intake-check.css') }}">
 {% endblock %}
 
 {% block main %}
@@ -53,29 +54,34 @@
                 {% if screenshotProject %}
                     <twig:ScreenshotReportField :uploadTargetKind="constant('App\\Ticketing\\UI\\Media\\NewTicketMediaTarget::KIND')" :uploadTargetId="screenshotProject.teamId.toString" :postedReport="report|default({})" :error="errors.screenshot|default(null)" />
                 {% endif %}
-                <fieldset class="profile__themes"{% if errors.type is defined %} aria-describedby="ticket-type-error"{% endif %}>
-                    <legend class="profile__legend">Type</legend>
-                    {% for value, typeLabel in typeLabels %}
-                        <label class="profile__theme">
-                            <input type="radio" name="type" value="{{ value }}"{% if value == input.type %} checked{% endif %} required>
-                            {{ typeLabel }}
-                        </label>
-                    {% endfor %}
-                    {% if errors.type is defined %}
-                        <p class="profile__error" id="ticket-type-error">{{ errors.type }}</p>
-                    {% endif %}
-                </fieldset>
-                <fieldset class="profile__themes"{% if errors.priority is defined %} aria-describedby="ticket-priority-error"{% endif %}>
-                    <legend class="profile__legend">Priority</legend>
-                    {% for value, priorityLabel in priorityLabels %}
-                        <label class="profile__theme">
-                            <input type="radio" name="priority" value="{{ value }}"{% if value == input.priority %} checked{% endif %} required>
-                            {{ priorityLabel }}
-                        </label>
-                    {% endfor %}
-                    {% if errors.priority is defined %}
-                        <p class="profile__error" id="ticket-priority-error">{{ errors.priority }}</p>
-                    {% endif %}
+                {# Assist's check by its component name, as Ticketing's UI may not use Assist (deptrac.yaml); inside the form, so its button posts the typed fields. #}
+                <fieldset class="where-it-goes">
+                    <legend class="where-it-goes__title">Where it goes</legend>
+                    {{ component('IntakeCheck') }}
+                    <fieldset class="profile__themes"{% if errors.type is defined %} aria-describedby="ticket-type-error"{% endif %}>
+                        <legend class="profile__legend">Type</legend>
+                        {% for value, typeLabel in typeLabels %}
+                            <label class="profile__theme">
+                                <input type="radio" name="type" value="{{ value }}"{% if value == input.type %} checked{% endif %} required>
+                                {{ typeLabel }}
+                            </label>
+                        {% endfor %}
+                        {% if errors.type is defined %}
+                            <p class="profile__error" id="ticket-type-error">{{ errors.type }}</p>
+                        {% endif %}
+                    </fieldset>
+                    <fieldset class="profile__themes"{% if errors.priority is defined %} aria-describedby="ticket-priority-error"{% endif %}>
+                        <legend class="profile__legend">Priority</legend>
+                        {% for value, priorityLabel in priorityLabels %}
+                            <label class="profile__theme">
+                                <input type="radio" name="priority" value="{{ value }}"{% if value == input.priority %} checked{% endif %} required>
+                                {{ priorityLabel }}
+                            </label>
+                        {% endfor %}
+                        {% if errors.priority is defined %}
+                            <p class="profile__error" id="ticket-priority-error">{{ errors.priority }}</p>
+                        {% endif %}
+                    </fieldset>
                 </fieldset>
                 {# Only a Lead may give a ticket to someone, so the people are those of the teams they lead. #}
                 {% if mayAssign %}
