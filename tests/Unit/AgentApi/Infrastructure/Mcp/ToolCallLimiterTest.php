@@ -186,6 +186,6 @@ final class ToolCallLimiterTest extends TestCase
 
     private static function access(string $tokenId, string $organizationId): ApiTokenAccess
     {
-        return new ApiTokenAccess($tokenId, new OrganizationId($organizationId), ['read']);
+        return new ApiTokenAccess($tokenId, new OrganizationId($organizationId), ['read'], new \DateTimeImmutable('2099-06-18 09:00:20 UTC'));
     }
 }

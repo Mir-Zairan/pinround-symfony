@@ -29,7 +29,7 @@ final class SymfonyCurrentApiTokenTest extends TestCase
     #[Test]
     public function aRequestAPersonalAccessTokenAuthenticatedHasThatTokensAccess(): void
     {
-        $access = new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000000b1'), ['read', 'rounds:write']);
+        $access = new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000000b1'), ['read', 'rounds:write'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC'));
         $tokenStorage = new TokenStorage();
         $tokenStorage->setToken(new ApiTokenAuthentication(self::lena(), $access, null));
 

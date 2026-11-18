@@ -82,6 +82,7 @@ final class TokenAuthenticator extends AbstractAuthenticator implements Authenti
             $token->id(),
             $token->organizationId(),
             array_map(static fn (ApiTokenScope $scope): string => $scope->value, $token->scopes()),
+            $token->expiresAt(),
         ));
         $passport->setAttribute(self::LAST_USED_AT_ATTRIBUTE, $token->lastUsedAt());
 

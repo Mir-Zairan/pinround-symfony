@@ -206,7 +206,7 @@ final class SymfonyLoginAssuranceTest extends TestCase
 
     private static function tokenLoginOfLena(): ApiTokenAuthentication
     {
-        return new ApiTokenAuthentication(self::lena(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000000a1'), ['read', 'rounds:write']), null);
+        return new ApiTokenAuthentication(self::lena(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000000a1'), ['read', 'rounds:write'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC')), null);
     }
 
     private static function lenaUser(): User

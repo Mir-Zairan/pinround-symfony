@@ -48,7 +48,7 @@ final class GateFixture
         $this->auditLog = new RecordingAuditLog(new OrganizationId(self::ACME_FOODS), $auditFailure, $this->connection);
         $this->connection->beginTransaction();
         $this->logger = new CollectingLogger();
-        $access = $hasToken ? new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), $scopes) : null;
+        $access = $hasToken ? new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), $scopes, new \DateTimeImmutable('2027-01-31 09:30:00 UTC')) : null;
         $userId = $hasUser ? new UserId(self::OMAR) : null;
         $fixture = $this;
 

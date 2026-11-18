@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi;
 
+use App\AgentApi\Infrastructure\Mcp\McpSessionBinding;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\AI\McpBundle\McpBundle;
@@ -18,7 +19,7 @@ use Symfony\Component\Yaml\Yaml;
 final class McpServerConfigTest extends TestCase
 {
     private const array SERVER_HTTP = ['path' => '/mcp', 'allowed_hosts' => ['%env(key:host:url:DEFAULT_URI)%']];
-    private const array SERVER_SESSION = ['store' => 'cache', 'cache_pool' => 'agent_api.mcp_session_cache', 'ttl' => 3600];
+    private const array SERVER_SESSION = ['store' => 'cache', 'cache_pool' => 'agent_api.mcp_session_cache', 'ttl' => McpSessionBinding::TTL_SECONDS];
     private const array SESSION_CACHE_SERVICE = ['class' => Psr16Cache::class, 'arguments' => ['@cache.mcp_sessions']];
     private const array SESSION_POOL = ['adapter' => 'cache.adapter.redis', 'provider' => 'state_valkey.connection', 'default_lifetime' => 3600];
 

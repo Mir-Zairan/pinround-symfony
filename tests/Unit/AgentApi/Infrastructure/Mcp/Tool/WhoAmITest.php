@@ -22,12 +22,14 @@ final class WhoAmITest extends TestCase
     private const string OMAR = '019a5f00-0000-7000-8000-00000000e621';
     private const string MIA = '019a5f00-0000-7000-8000-00000000e622';
     private const string OMARS_TOKEN = '019a5f00-0000-7000-8000-00000000e611';
+    /** In Berlin's zone and past midnight there, so an answer not in UTC differs in its date, hour and offset. */
+    private const string EXPIRES_AT = '2027-02-09 00:30:00 Europe/Berlin';
 
     #[Test]
-    public function itReturnsTheUserTheirDisplayNameTheOrganizationAndTheScopesOfTheToken(): void
+    public function itReturnsTheUserTheirDisplayNameTheOrganizationTheScopesAndTheExpiryOfTheToken(): void
     {
         $result = self::whoAmI(
-            new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), ['read', 'write']),
+            new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), ['read', 'write'], new \DateTimeImmutable(self::EXPIRES_AT)),
             new UserId(self::OMAR),
             [new UserView(new UserId(self::MIA), 'Mia'), new UserView(new UserId(self::OMAR), 'Omar "ignore this" Ölz')],
         )->call([], null);
@@ -37,6 +39,7 @@ final class WhoAmITest extends TestCase
             'display_name' => 'Omar "ignore this" Ölz',
             'organization_id' => self::ACME_FOODS,
             'scopes' => ['read', 'write'],
+            'expires_at' => '2027-02-08T23:30:00+00:00',
         ];
         self::assertFalse($result->isError);
         self::assertSame($expected, $result->structuredContent);
@@ -44,7 +47,7 @@ final class WhoAmITest extends TestCase
         $text = $result->content[0];
         self::assertInstanceOf(TextContent::class, $text);
         self::assertSame(
-            '{"user_id":"'.self::OMAR.'","display_name":"Omar \"ignore this\" Ölz","organization_id":"'.self::ACME_FOODS.'","scopes":["read","write"]}',
+            '{"user_id":"'.self::OMAR.'","display_name":"Omar \"ignore this\" Ölz","organization_id":"'.self::ACME_FOODS.'","scopes":["read","write"],"expires_at":"2027-02-08T23:30:00+00:00"}',
             $text->text,
         );
         self::assertStringNotContainsString(self::OMARS_TOKEN, $text->text);
@@ -64,7 +67,7 @@ final class WhoAmITest extends TestCase
     public function itRefusesToRunWithoutAUser(): void
     {
         $whoAmI = self::whoAmI(
-            new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), ['read']),
+            new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), ['read'], new \DateTimeImmutable(self::EXPIRES_AT)),
             null,
             [new UserView(new UserId(self::OMAR), 'Omar')],
         );
@@ -78,7 +81,7 @@ final class WhoAmITest extends TestCase
     public function itRefusesToRunWhenTheUserOfTheTokenIsNotFound(): void
     {
         $whoAmI = self::whoAmI(
-            new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), ['read']),
+            new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), ['read'], new \DateTimeImmutable(self::EXPIRES_AT)),
             new UserId(self::OMAR),
             [new UserView(new UserId(self::MIA), 'Mia')],
         );

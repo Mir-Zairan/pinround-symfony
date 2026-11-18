@@ -6,6 +6,7 @@ namespace App\Tests\Functional\AgentApi;
 
 use App\AgentApi\Infrastructure\Mcp\GatedToolCallHandler;
 use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
+use App\AgentApi\Infrastructure\Mcp\McpSessionBinding;
 use App\AgentApi\Infrastructure\Mcp\Tool\WhoAmI;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
@@ -62,6 +63,8 @@ final class McpEndpointTest extends WebTestCase
     private const string ACCEPT = 'application/json, text/event-stream';
     private const int CALLS_PER_TOKEN_MINUTE = 60;
     private const int TOKENS_AT_FULL_RATE_PER_ORGANIZATION = 10;
+    /** IssuesApiTokens' LIVE_TOKEN_ISSUED_AT, 2099-03-15 10:00 UTC, plus ApiToken::DEFAULT_LIFETIME_DAYS (90). */
+    private const string LIVE_TOKEN_EXPIRES_AT = '2099-06-13T10:00:00+00:00';
 
     private KernelBrowser $client;
     private MockClock $clock;
@@ -216,7 +219,7 @@ final class McpEndpointTest extends WebTestCase
         [, $miasToken] = $this->issueApiToken($mia, $betaBakery);
         $toolCallLimiter = self::getContainer()->get(ToolCallLimiter::class);
         for ($token = 1; $token <= self::TOKENS_AT_FULL_RATE_PER_ORGANIZATION; ++$token) {
-            $otherTokenOfAcmeFoods = new ApiTokenAccess(Uuid::v7()->toRfc4122(), $acmeFoods, ['read']);
+            $otherTokenOfAcmeFoods = new ApiTokenAccess(Uuid::v7()->toRfc4122(), $acmeFoods, ['read'], new \DateTimeImmutable('2099-06-18 09:00:20 UTC'));
             for ($call = 1; $call <= self::CALLS_PER_TOKEN_MINUTE; ++$call) {
                 $toolCallLimiter->consume($otherTokenOfAcmeFoods);
             }
@@ -294,7 +297,7 @@ final class McpEndpointTest extends WebTestCase
         $this->callTool($token, $sessionId, WhoAmI::NAME, new \stdClass());
 
         self::assertResponseStatusCodeSame(200);
-        $identity = ['user_id' => $omar->id()->toString(), 'display_name' => self::OMAR, 'organization_id' => $acmeFoods->toString(), 'scopes' => ['read', 'rounds:write']];
+        $identity = ['user_id' => $omar->id()->toString(), 'display_name' => self::OMAR, 'organization_id' => $acmeFoods->toString(), 'scopes' => ['read', 'rounds:write'], 'expires_at' => self::LIVE_TOKEN_EXPIRES_AT];
         self::assertSame($identity, $this->responseValueAt('result', 'structuredContent'));
         self::assertSame([['type' => 'text', 'text' => json_encode($identity, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE)]], $this->responseValueAt('result', 'content'));
         self::assertFalse($this->responseValueAt('result', 'isError'));
@@ -436,6 +439,90 @@ final class McpEndpointTest extends WebTestCase
     }
 
     /**
+     * Both tokens are Omar's, in Acme Foods, so only the token tells them apart. The write probe would leave a row if
+     * it ran; the DELETE would end the session for both if it reached the SDK.
+     */
+    #[Test]
+    public function aSessionStartedWithOneTokenIsNotFoundForAnotherTokenOfTheSameUser(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token, $omar] = $this->omarsTokenInAcmeFoods();
+        [, $otherToken] = $this->issueApiToken($omar, $acmeFoods);
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($otherToken, $sessionId, WriteProbeTool::NAME, ['label' => 'other-token', 'fail' => false]);
+        $this->assertSessionNotFound();
+        $this->deleteSession($otherToken, $sessionId);
+        $this->assertSessionNotFound();
+
+        self::assertSame([], $this->committedProbeLabels($acmeFoods));
+        self::assertSame([], $this->auditRowsOf($acmeFoods));
+        $this->callTool($token, $sessionId, WriteProbeTool::NAME, ['label' => 'own-token', 'fail' => false]);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['own-token'], $this->committedProbeLabels($acmeFoods));
+        self::assertSame([$this->writeProbeRow($omar, $tokenId, $acmeFoods, 'ok')], $this->auditRowsOf($acmeFoods));
+    }
+
+    #[Test]
+    public function aSessionStartedInOneOrganizationIsNotFoundForTheSameUsersTokenInAnother(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        $omar = $this->createUserWithoutOrganization(self::OMAR);
+        $acmeFoods = $this->createOrganization('Acme Foods');
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($omar, $acmeFoods);
+        $this->addMembership($omar, $betaBakery);
+        [, $acmeToken] = $this->issueApiToken($omar, $acmeFoods);
+        [, $betaToken] = $this->issueApiToken($omar, $betaBakery);
+        $sessionId = $this->startSession($acmeToken);
+
+        $this->callTool($betaToken, $sessionId, WriteProbeTool::NAME, ['label' => 'other-organization', 'fail' => false]);
+
+        $this->assertSessionNotFound();
+        self::assertSame([], $this->committedProbeLabels($betaBakery));
+        self::assertSame([], $this->committedProbeLabels($acmeFoods));
+        self::assertSame([], $this->auditRowsOf($betaBakery));
+        self::assertSame([], $this->auditRowsOf($acmeFoods));
+    }
+
+    #[Test]
+    public function aSessionIdNoInitializeStartedIsNotFound(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, , $token] = $this->omarsTokenInAcmeFoods();
+        $this->startSession($token);
+
+        $this->callTool($token, Uuid::v4()->toRfc4122(), WriteProbeTool::NAME, ['label' => 'unknown-session', 'fail' => false]);
+
+        $this->assertSessionNotFound();
+        self::assertSame([], $this->committedProbeLabels($acmeFoods));
+        self::assertSame([], $this->auditRowsOf($acmeFoods));
+    }
+
+    /**
+     * The binding's TTL is cut to a minute before the call, so only the call's refresh can bring it back to an hour.
+     */
+    #[Test]
+    public function theTokenThatStartedTheSessionIsAnsweredAndRefreshesTheBindingToAnHour(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token, $omar] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+        $bindingKey = $this->bindingKeyOf($sessionId);
+        self::assertTrue($this->stateValkey()->expire($bindingKey, 60));
+
+        $this->callTool($token, $sessionId, WhoAmI::NAME, new \stdClass());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertSame([$this->toolCallRow($omar, $tokenId, 'ok')], $this->auditRowsOf($acmeFoods));
+        $ttlSeconds = $this->stateValkey()->ttl($bindingKey);
+        self::assertIsInt($ttlSeconds);
+        self::assertGreaterThan(McpSessionBinding::TTL_SECONDS - 60, $ttlSeconds, 'the call did not refresh the binding');
+        self::assertLessThanOrEqual(McpSessionBinding::TTL_SECONDS, $ttlSeconds);
+    }
+
+    /**
      * @return array{OrganizationId, string, string, User} Acme Foods, Omar's token id, its plain text and Omar
      */
     private function omarsTokenInAcmeFoods(): array
@@ -488,6 +575,34 @@ final class McpEndpointTest extends WebTestCase
     private function callTool(string $token, string $sessionId, string $toolName, mixed $arguments): void
     {
         $this->postJsonRpc($token, ['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => $toolName, 'arguments' => $arguments]], $sessionId);
+    }
+
+    private function deleteSession(string $token, string $sessionId): void
+    {
+        $this->client->request('DELETE', self::MCP, server: [...self::mcpHeaders($token), 'HTTP_MCP_SESSION_ID' => $sessionId, 'HTTP_MCP_PROTOCOL_VERSION' => self::PROTOCOL_VERSION]);
+    }
+
+    private function assertSessionNotFound(): void
+    {
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame(['jsonrpc' => '2.0', 'error' => ['code' => self::INVALID_REQUEST, 'message' => McpSessionBinding::SESSION_NOT_FOUND]], $this->responseJson());
+    }
+
+    /**
+     * @return string the Valkey key of the session's binding, under the pool's namespace
+     */
+    private function bindingKeyOf(string $sessionId): string
+    {
+        $keys = $this->stateValkey()->keys('*mcp_session_binding.'.$sessionId);
+        self::assertIsArray($keys);
+        self::assertCount(1, $keys, 'the session has no binding of its own');
+
+        return $keys[0];
+    }
+
+    private function stateValkey(): \Redis
+    {
+        return self::getContainer()->get('state_valkey.connection');
     }
 
     /**

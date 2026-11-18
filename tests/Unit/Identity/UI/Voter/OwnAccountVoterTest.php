@@ -74,7 +74,7 @@ final class OwnAccountVoterTest extends TestCase
     {
         $user = new User(new UserId('0197a3c0-0000-7000-8000-0000000007c2'), new Email('omar@acme-foods.example'), 'Omar Haddad', 'en', 'Europe/Berlin', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
         $omar = SecurityUser::of($user, new Credential($user, new PasswordHash('$argon2id$v=19$m=10,t=3,p=1$stored'), new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
-        $token = new ApiTokenAuthentication($omar, new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000007f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000007a1'), ['read', 'rounds:write']), null);
+        $token = new ApiTokenAuthentication($omar, new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000007f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000007a1'), ['read', 'rounds:write'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC')), null);
         $vote = new Vote();
 
         self::assertSame(VoterInterface::ACCESS_GRANTED, $this->voter()->vote(new UsernamePasswordToken($omar, 'main', ['ROLE_USER']), null, [AccountPermission::EDIT_OWN]));
