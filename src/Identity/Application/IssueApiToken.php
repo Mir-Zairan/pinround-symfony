@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\Application;
 
+use App\Identity\Api\Event\ApiTokenIssued;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\ApiTokens;
@@ -16,15 +17,16 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * A person makes a personal access token for Claude Code or the browser plugin (P09.T1, ADR-0021), at most
- * MAX_LIVE_TOKENS_PER_USER that still work per person and organization. Its write shares the caller's transaction
- * (RequestTransaction on the web), which must be open under $organizationId as tenant: the cap's lock lasts until it ends.
+ * MAX_LIVE_TOKENS_PER_USER that still work per person and organization. Its write and ApiTokenIssued, for the audit
+ * log, share the caller's transaction (RequestTransaction on the web), which must be open under $organizationId as
+ * tenant: the cap's lock lasts until it ends.
  */
 final readonly class IssueApiToken
 {
     public const int MAX_LIVE_TOKENS_PER_USER = 20;
     public const string UNKNOWN_SCOPE = 'Choose only the things listed on this page.';
 
-    public function __construct(private ApiTokens $tokens, private ApiTokenHashing $hashing)
+    public function __construct(private ApiTokens $tokens, private ApiTokenHashing $hashing, private IdentityEvents $events)
     {
     }
 
@@ -46,7 +48,17 @@ final readonly class IssueApiToken
         if ($this->tokens->countLiveOf($userId, $now) >= self::MAX_LIVE_TOKENS_PER_USER) {
             throw new TooManyApiTokens(self::MAX_LIVE_TOKENS_PER_USER);
         }
-        $this->tokens->add($issued->token());
+        $token = $issued->token();
+        $this->tokens->add($token);
+        $this->events->publish(new ApiTokenIssued(
+            $organizationId->toString(),
+            $token->id(),
+            $userId->toString(),
+            array_map(static fn (ApiTokenScope $scope): string => $scope->value, $token->scopes()),
+            $token->expiresAt(),
+            $userId->toString(),
+            $now,
+        ));
 
         return $issued;
     }

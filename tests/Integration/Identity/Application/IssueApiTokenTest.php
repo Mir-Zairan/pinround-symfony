@@ -16,6 +16,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Tests\Unit\Identity\Application\RecordingIdentityEvents;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -208,7 +209,7 @@ final class IssueApiTokenTest extends KernelTestCase
 
     private function issueForOmar(string $name): IssuedApiToken
     {
-        $issue = new IssueApiToken($this->tokens(), new HmacApiTokenHashing(self::PEPPER));
+        $issue = new IssueApiToken($this->tokens(), new HmacApiTokenHashing(self::PEPPER), new RecordingIdentityEvents());
 
         return $issue(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), $name, ApiTokenScope::claudeCodeDefaults(), 30, new \DateTimeImmutable(self::NOW));
     }

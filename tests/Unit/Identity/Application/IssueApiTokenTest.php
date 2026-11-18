@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity\Application;
 
+use App\Identity\Api\Event\ApiTokenIssued;
 use App\Identity\Application\IssueApiToken;
 use App\Identity\Application\TooManyApiTokens;
 use App\Identity\Domain\ApiToken;
@@ -33,6 +34,13 @@ final class IssueApiTokenTest extends TestCase
 
     private int $seededTokens = 0;
 
+    private RecordingIdentityEvents $events;
+
+    protected function setUp(): void
+    {
+        $this->events = new RecordingIdentityEvents();
+    }
+
     #[Test]
     public function theLockIsTakenBeforeTheCountAndTheTokenIsAddedAfterIt(): void
     {
@@ -43,6 +51,22 @@ final class IssueApiTokenTest extends TestCase
         self::assertSame(['lockIssuingFor', 'countLiveOf', 'add'], $tokens->calls);
         self::assertSame([$issued->token()->id()], $tokens->ids());
         self::assertSame('Claude Code', $issued->token()->name());
+    }
+
+    #[Test]
+    public function anIssuedTokenPublishesApiTokenIssuedWithItsIdsScopesAndExpiryOnly(): void
+    {
+        $issued = $this->issueForOmar($this->tokensOfAcmeFoods(), 'Claude Code');
+
+        self::assertEquals(
+            [new ApiTokenIssued(self::ACME_FOODS, $issued->token()->id(), self::OMAR, ['read', 'rounds:write'], new \DateTimeImmutable('2027-04-14 10:00:00 UTC'), self::OMAR, new \DateTimeImmutable(self::NOW))],
+            $this->events->publishedEvents,
+        );
+        $serialized = serialize($this->events->publishedEvents);
+        self::assertStringNotContainsString($issued->reveal(), $serialized);
+        self::assertStringNotContainsString($issued->token()->tokenHash(), $serialized);
+        self::assertStringNotContainsString($issued->token()->prefix(), $serialized);
+        self::assertStringNotContainsString('Claude Code', $serialized);
     }
 
     #[Test]
@@ -61,6 +85,7 @@ final class IssueApiTokenTest extends TestCase
 
         self::assertSame(['lockIssuingFor', 'countLiveOf'], $tokens->calls);
         self::assertSame($idsBefore, $tokens->ids());
+        self::assertSame([], $this->events->publishedEvents);
     }
 
     #[Test]
@@ -94,6 +119,7 @@ final class IssueApiTokenTest extends TestCase
 
         self::assertSame(['lockIssuingFor'], $tokens->calls);
         self::assertSame([], $tokens->ids());
+        self::assertSame([], $this->events->publishedEvents);
     }
 
     #[Test]
@@ -110,6 +136,7 @@ final class IssueApiTokenTest extends TestCase
 
         self::assertSame([], $tokens->calls);
         self::assertSame([], $tokens->ids());
+        self::assertSame([], $this->events->publishedEvents);
     }
 
     #[Test]
@@ -126,7 +153,7 @@ final class IssueApiTokenTest extends TestCase
 
     private function issueForOmar(InMemoryApiTokens $tokens, string $name): IssuedApiToken
     {
-        $issue = new IssueApiToken($tokens, new HmacApiTokenHashing(self::PEPPER));
+        $issue = new IssueApiToken($tokens, new HmacApiTokenHashing(self::PEPPER), $this->events);
 
         return $issue(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), $name, ApiTokenScope::claudeCodeDefaults(), 30, new \DateTimeImmutable(self::NOW));
     }
