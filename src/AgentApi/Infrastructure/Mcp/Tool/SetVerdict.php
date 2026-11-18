@@ -7,6 +7,7 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Review\Api\CheckItemAccessFacts;
 use App\Review\Api\ChecklistCommands;
@@ -18,14 +19,19 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
+use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use Mcp\Schema\Content\TextContent;
 use Mcp\Schema\Result\CallToolResult;
 use Mcp\Schema\Tool;
 use Mcp\Schema\ToolAnnotations;
 use Psr\Clock\ClockInterface;
+use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
  * set_verdict (FR-MCP-06, P09.T4): "Looks right" or "Not right yet", and optionally the summary, on a screenshot of the
@@ -34,9 +40,12 @@ use Psr\Clock\ClockInterface;
  * Holds no state (ADR-0008).
  *
  * A screenshot is looked up with RoundQueries::draftScreenshotOf among the ticket's drafts, however many rounds the
- * ticket has. Another person's unshared draft is denied by RoundPermission EDIT and so not found, as every denial of
- * the gate; a shared draft is read-only for everyone RoundPermission VIEW lets see it, its owner included (FR-RND-12).
- * A checklist item the voter denies, such as one of a ticket the caller is not the assignee of, is not found too.
+ * ticket has, once TicketPermission VIEW grants the ticket, as get_round_notes asks it: a ticket the caller may not see
+ * is not found, also for the owner of an unshared draft on it, which RoundPermission grants without reading the
+ * ticket. Another person's unshared draft is denied by RoundPermission EDIT and so not found, as every denial of the
+ * gate; a shared draft is read-only for everyone RoundPermission VIEW lets see it, its owner included (FR-RND-12).
+ * A checklist item the voter denies, such as one of a ticket the caller is not the assignee of or may not see, is not
+ * found too.
  */
 final readonly class SetVerdict implements AgentTool
 {
@@ -55,12 +64,15 @@ final readonly class SetVerdict implements AgentTool
     private const int MAX_KEY_OR_ID_LENGTH = 64;
 
     public function __construct(
+        private CurrentApiToken $currentApiToken,
         private CurrentUser $currentUser,
         private TicketKeyQueries $ticketKeyQueries,
+        private TicketTurnQueries $ticketTurnQueries,
         private RoundQueries $roundQueries,
         private RoundCommands $roundCommands,
         private ChecklistQueries $checklistQueries,
         private ChecklistCommands $checklistCommands,
+        private AuthorizationCheckerInterface $authorizationChecker,
         private ClockInterface $clock,
     ) {
     }
@@ -118,12 +130,14 @@ final readonly class SetVerdict implements AgentTool
     }
 
     /**
-     * Reads the ticket's id by its key, then the draft that holds the screenshot or the checklist item, one query
-     * each. The voter of an unshared draft is RoundPermission EDIT; of a shared one VIEW, as it is read-only and call()
-     * refuses it so; of a checklist item ChecklistPermission MARK_FIXED.
+     * Reads the ticket's id by its key, then, for a screenshot, the ticket as TicketPermission VIEW decides on it, then
+     * the draft that holds the screenshot or the checklist item, one query each. The voter of an unshared draft is
+     * RoundPermission EDIT; of a shared one VIEW, as it is read-only and call() refuses it so; of a checklist item
+     * ChecklistPermission MARK_FIXED.
      *
-     * @throws ToolRefusal not found for an unknown key, or a screenshot or item that is not of that ticket's drafts
-     *                     or of its checklist
+     * @throws ToolRefusal     not found for an unknown key, a ticket the caller may not see, or a screenshot or item
+     *                         that is not of that ticket's drafts or of its checklist
+     * @throws \LogicException when the request has no token, or Ticketing cannot read the ticket's team
      */
     public function targetOf(array $arguments): ToolTarget
     {
@@ -156,14 +170,37 @@ final readonly class SetVerdict implements AgentTool
         throw new \LogicException('set_verdict ran without a target of its own.');
     }
 
+    /**
+     * @throws ToolRefusal     not found, when TicketPermission VIEW denies the ticket or the screenshot is not of its
+     *                         drafts
+     * @throws \LogicException when the request has no token, or Ticketing cannot read the ticket's team
+     */
     private function screenshotTargetOf(TicketId $ticketId, string $screenshotId): ToolTarget
     {
+        $this->refuseUnlessTicketVisible($ticketId);
         $draft = $this->roundQueries->draftScreenshotOf($ticketId, $screenshotId) ?? throw ToolRefusal::notFound();
 
         // The lookup found it, so the id is a UUID, which Review keeps in lowercase.
         return new ToolTarget($draft->isUnsharedDraft ? RoundPermission::EDIT : RoundPermission::VIEW, $draft, self::SCREENSHOT_AUDIT_TYPE, strtolower($screenshotId));
     }
 
+    /**
+     * RoundPermission grants an unshared draft to its owner without reading the ticket, so the ticket is asked here,
+     * as get_round_notes asks it, before the draft is looked up.
+     *
+     * @throws ToolRefusal not found, for a ticket Ticketing does not read or TicketPermission VIEW denies
+     */
+    private function refuseUnlessTicketVisible(TicketId $ticketId): void
+    {
+        $ticket = $this->ticketTurnQueries->factsOf($ticketId) ?? throw ToolRefusal::notFound();
+        if (!$this->authorizationChecker->isGranted(TicketPermission::VIEW, TicketVisibilityFacts::ofSnapshot($this->organizationId(), $ticket))) {
+            throw ToolRefusal::notFound();
+        }
+    }
+
+    /**
+     * The checklist item's voter asks TicketPermission VIEW and EDIT itself, so the ticket is not asked here.
+     */
     private function checkItemTargetOf(TicketId $ticketId, string $checkItemId): ToolTarget
     {
         $item = $this->checklistQueries->accessFactsOf($checkItemId);
@@ -231,6 +268,16 @@ final readonly class SetVerdict implements AgentTool
             [new TextContent(json_encode($answer, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE))],
             structuredContent: $answer,
         );
+    }
+
+    /**
+     * @throws \LogicException when the request has no token, which the api_token firewall never lets through
+     */
+    private function organizationId(): OrganizationId
+    {
+        $access = $this->currentApiToken->access() ?? throw new \LogicException('set_verdict ran without a personal access token.');
+
+        return $access->organizationId;
     }
 
     /**

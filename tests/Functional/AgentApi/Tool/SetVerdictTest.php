@@ -242,6 +242,34 @@ final class SetVerdictTest extends WebTestCase
         self::assertSame([$this->toolRow('Omar', $tokenId, 'screenshot', $this->miasShot, 'not_found')], $this->toolRowsOf($this->acmeFoods));
     }
 
+    /**
+     * SHOP-1 moves to Mobile, for that team only, and to Lena: Omar is in no role of Mobile and no longer involved, so
+     * he may not see it. RoundPermission EDIT still grants him his own unshared draft without reading the ticket, so
+     * set_verdict asks TicketPermission VIEW itself and answers as for an unknown key.
+     */
+    #[Test]
+    public function theOwnersDraftOnATicketTheyMayNoLongerSeeIsNotFoundAndNothingIsWritten(): void
+    {
+        $ticketId = $this->ticketId;
+        $parameters = [$this->mobile->toString(), $this->people['Lena']->id()->toString(), $this->acmeFoods->toString(), $ticketId];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET team_id = ?, visibility = 'team', assignee_id = ? WHERE organization_id = ? AND id = ?",
+            $parameters,
+        ));
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $before = $this->stored();
+
+        $this->callSetVerdict($token, ['key' => 'SHOP-1', 'screenshot_id' => $this->omarsShot, 'verdict' => SetVerdict::LOOKS_RIGHT, 'summary' => self::NEW_SUMMARY]);
+
+        $this->assertRefused(ToolRefusal::NOT_FOUND);
+        self::assertSame($before, $this->stored());
+        self::assertSame(
+            [['id' => $this->omarsShot, 'position' => 0, 'verdict' => null, 'title' => self::TITLE, 'summary' => self::OLD_SUMMARY]],
+            $this->screenshotRowsOf($this->omarsDraft),
+        );
+        self::assertSame([$this->toolRow('Omar', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found')], $this->toolRowsOf($this->acmeFoods));
+    }
+
     #[Test]
     public function theOwnersSharedDraftIsReadOnlyAndNothingIsWritten(): void
     {
