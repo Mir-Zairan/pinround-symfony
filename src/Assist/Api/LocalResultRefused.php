@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Assist\Api;
 
 /**
- * A laptop's result was not kept, and nothing was stored: the package is unknown (or another person's or another
- * organization's, which reads the same), it was used or it expired, the AI policy no longer gives the poster laptop AI,
- * or the model name or the text failed the check. The message is the one line the person is shown; it never holds the
- * text.
+ * A laptop's result was not kept: the package is unknown (or another person's or another organization's, which reads
+ * the same), it was used or it expired, the AI policy no longer gives the poster laptop AI, or the model name or the
+ * text failed the check. The package stays as it was, and the refusal is recorded in the audit log as
+ * local_ai.result_refused (LocalAi::accept). The message is the one line the person is shown; it never holds the text.
  */
 final class LocalResultRefused extends \DomainException
 {

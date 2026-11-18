@@ -375,6 +375,34 @@ final class LocalAiServiceTest extends KernelTestCase
     }
 
     /**
+     * A valid result posted inside a committed transaction: were the guard gone, the result would be kept and committed
+     * with the caller's transaction.
+     */
+    #[Test]
+    public function aResultPostedInsideAnOpenTransactionIsRefusedAndChangesNothing(): void
+    {
+        $package = self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
+        $unusedRows = $this->packageRowsOf(self::ACME_FOODS);
+        self::assertNotSame([], $unusedRows);
+        $localAi = $this->localAi();
+
+        $refusal = self::transactions()->committedAs(self::ACME_FOODS, static function () use ($localAi, $package): ?\LogicException {
+            try {
+                $localAi->accept($package->packageId, self::MODEL, self::RESULT, new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS));
+            } catch (\LogicException $refusal) {
+                return $refusal;
+            }
+
+            return null;
+        });
+
+        self::assertInstanceOf(\LogicException::class, $refusal);
+        self::assertSame('A transaction of its own must not run inside another transaction.', $refusal->getMessage());
+        self::assertSame($unusedRows, $this->packageRowsOf(self::ACME_FOODS));
+        self::assertSame([], $this->auditRowsOf(self::ACME_FOODS));
+    }
+
+    /**
      * @return iterable<string, array{string, string, string}> text, model, the reason
      */
     public static function rejectedResults(): iterable
@@ -454,7 +482,7 @@ final class LocalAiServiceTest extends KernelTestCase
 
         self::assertInstanceOf(LocalPackageRefused::class, $refusal);
         self::assertSame(
-            [LocalPackageRefused::TOO_MANY_PACKAGES, 'You asked for 30 laptop packages this hour. Try again later.'],
+            [LocalPackageRefused::TOO_MANY_PACKAGES, 'You asked for 30 laptop AI requests in the last hour. Try again later.'],
             [$refusal->refusalCode, $refusal->getMessage()],
         );
         $rowsAfterTheRefusal = $this->packageRowsOf(self::ACME_FOODS);

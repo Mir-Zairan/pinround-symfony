@@ -38,6 +38,6 @@ final class LocalPackageRefused extends \DomainException
 
     public static function tooManyPackages(int $maxPackagesPerHour): self
     {
-        return new self(self::TOO_MANY_PACKAGES, \sprintf('You asked for %d laptop packages this hour. Try again later.', $maxPackagesPerHour));
+        return new self(self::TOO_MANY_PACKAGES, \sprintf('You asked for %d laptop AI requests in the last hour. Try again later.', $maxPackagesPerHour));
     }
 }
