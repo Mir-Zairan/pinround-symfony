@@ -36,7 +36,7 @@ use PHPUnit\Framework\TestCase;
  *
  * Omar is in the Shop team and drafts reports in the SHOP project. He may see SHOP-3 and SHOP-5, for everyone, SHOP-4,
  * team-only in Shop, and SHOP-7, team-only in Pay but reported by him; SHOP-6 is team-only in Pay, which he is not in,
- * and OPS-1 is in another project.
+ * and OPS-1 is in another project. Sara is an admin, who may see every ticket.
  */
 final class AiTaskAdmissionTest extends TestCase
 {
@@ -44,6 +44,7 @@ final class AiTaskAdmissionTest extends TestCase
     private const string LENA = '0197a3c0-0000-7000-8000-0000000c7f11';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000c7f12';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000c7f13';
+    private const string SARA = '0197a3c0-0000-7000-8000-0000000c7f14';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-0000000c7f21';
     private const string PAY_TEAM = '0197a3c0-0000-7000-8000-0000000c7f22';
     private const string CHECKOUT_TICKET = '0197a3c0-0000-7000-8000-0000000c7f31';
@@ -60,9 +61,9 @@ final class AiTaskAdmissionTest extends TestCase
     protected function setUp(): void
     {
         $this->tickets = new ListedAskedTickets();
-        $this->tickets->add(new TicketId(self::CHECKOUT_TICKET), new AskedTicket(new PromptTicket('Checkout fails', 'Pay does nothing.'), false), [self::LENA, self::OMAR]);
+        $this->tickets->add(new TicketId(self::CHECKOUT_TICKET), new AskedTicket(new PromptTicket('Checkout fails', 'Pay does nothing.'), false), [self::LENA, self::OMAR, self::SARA]);
         // Mia is in Acme Foods but not in Shop, so she may not see the team-only ticket.
-        $this->tickets->add(new TicketId(self::TEAM_ONLY_TICKET), new AskedTicket(new PromptTicket('Card numbers in the log', 'Card numbers show.'), true), [self::LENA, self::OMAR]);
+        $this->tickets->add(new TicketId(self::TEAM_ONLY_TICKET), new AskedTicket(new PromptTicket('Card numbers in the log', 'Card numbers show.'), true), [self::LENA, self::OMAR, self::SARA]);
         $this->candidates = new ListedIntakeCandidates(new OrganizationId(self::ACME_FOODS));
         $this->candidates->add(self::OPS_PROJECT, new IntakeCandidate('OPS-1', 'Backups run late'), self::facts(TicketVisibilityFacts::FOR_EVERYONE, null, self::LENA));
         $this->candidates->add(self::SHOP_PROJECT, new IntakeCandidate('SHOP-3', 'Basket total is wrong'), self::facts(TicketVisibilityFacts::FOR_EVERYONE, self::PAY_TEAM, self::LENA));
@@ -289,6 +290,72 @@ final class AiTaskAdmissionTest extends TestCase
 
         self::assertSame(['Pay does nothing', null, true], [$admitted->promptTicket->title, $admitted->promptTicket->text, $admitted->decision->isTitleOnly]);
         self::assertNotSame([], $admitted->duplicateCandidates);
+    }
+
+    /**
+     * @return iterable<string, array{AiSettings}>
+     */
+    public static function laptopSettings(): iterable
+    {
+        yield 'laptop only' => [self::settings(where: AiSettings::WHERE_LAPTOP)];
+        yield 'laptop first' => [self::settings(where: AiSettings::WHERE_LAPTOP_FIRST)];
+        // The Local AI chip gives this line before the others, so the package does too.
+        yield 'AI off' => [self::settings(isOn: false, where: AiSettings::WHERE_LAPTOP)];
+        yield 'the cloud' => [self::settings()];
+    }
+
+    #[Test]
+    #[DataProvider('laptopSettings')]
+    public function anAdminWithNoTeamOrManagerRoleGetsNoLaptopPackageAndTheTicketIsNeverRead(AiSettings $settings): void
+    {
+        $this->givenSettings($settings);
+        $sara = new ActorContext(new UserId(self::SARA), new OrganizationId(self::ACME_FOODS), new Roles(true, false, [], [], []));
+
+        try {
+            $this->admission()->admitToLaptop(self::summaryOf(self::CHECKOUT_TICKET), $sara);
+            self::fail('An admin with no team or manager role was given a laptop package.');
+        } catch (AiNotAllowed $refusal) {
+            self::assertSame(
+                [PolicyRefusal::AdminOnlyMember, 'Local AI is for people in a team and for managers.'],
+                [$refusal->refusal, $refusal->getMessage()],
+            );
+        }
+        self::assertSame([[], []], [$this->tickets->reads, $this->aiSettings->keyReads]);
+    }
+
+    #[Test]
+    public function theServerSendsAnAdminWithNoTeamOrManagerRoleToNoSetupSheetInALaptopOnlyOrganization(): void
+    {
+        $this->givenSettings(self::settings(where: AiSettings::WHERE_LAPTOP));
+        $sara = new ActorContext(new UserId(self::SARA), new OrganizationId(self::ACME_FOODS), new Roles(true, false, [], [], []));
+        $saraAsManager = new ActorContext(new UserId(self::SARA), new OrganizationId(self::ACME_FOODS), new Roles(true, true, [], [], []));
+
+        self::assertSame(
+            [PolicyRefusal::AdminOnlyMember, PolicyRefusal::LaptopNotReady],
+            [$this->admission()->refusalFor(self::summaryOf(self::CHECKOUT_TICKET), $sara), $this->admission()->refusalFor(self::summaryOf(self::CHECKOUT_TICKET), $saraAsManager)],
+        );
+    }
+
+    /**
+     * @return iterable<string, array{Roles}>
+     */
+    public static function adminsWithLaptopAi(): iterable
+    {
+        yield 'an admin who is also a manager' => [new Roles(true, true, [], [], [])];
+        yield 'an admin who is a member of Shop' => [new Roles(true, false, [], [new TeamId(self::SHOP_TEAM)], [])];
+    }
+
+    #[Test]
+    #[DataProvider('adminsWithLaptopAi')]
+    public function anAdminWithATeamOrManagerRoleGetsTheTicketForTheLaptop(Roles $roles): void
+    {
+        $this->givenSettings(self::settings(where: AiSettings::WHERE_LAPTOP));
+        $lena = new ActorContext(new UserId(self::LENA), new OrganizationId(self::ACME_FOODS), $roles);
+
+        $admitted = $this->admission()->admitToLaptop(self::summaryOf(self::CHECKOUT_TICKET), $lena);
+
+        self::assertSame(['Checkout fails', AiRoute::Laptop], [$admitted->promptTicket->title, $admitted->decision->route]);
+        self::assertSame([self::CHECKOUT_TICKET], $this->tickets->reads);
     }
 
     private function admission(): AiTaskAdmission

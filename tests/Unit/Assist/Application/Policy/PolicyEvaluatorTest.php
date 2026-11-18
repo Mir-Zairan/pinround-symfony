@@ -31,6 +31,7 @@ final class PolicyEvaluatorTest extends TestCase
     private const string SECURITY_SENSITIVE_DRAFT = 'This report mentions security, so it stays out of cloud AI.';
     private const string CLOUD_ONLY = 'Your admin runs AI help in the company cloud, not on laptops.';
     private const string INTAKE_NOT_ON_LAPTOP = 'Your company runs AI on laptops, and “Check with AI” does not run there yet.';
+    private const string ADMIN_ONLY_MEMBER = 'Local AI is for people in a team and for managers.';
 
     /**
      * Each row: the settings (on, leads only, where, restricted tickets to cloud, title only), the viewer, can see the
@@ -122,6 +123,31 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertNull($evaluator->refusalForViewer($leadsOnly, self::viewer('lead')));
     }
 
+    /**
+     * @return iterable<string, array{Roles, PolicyRefusal|null}>
+     */
+    public static function laptopViewers(): iterable
+    {
+        $shop = new TeamId(self::SHOP_TEAM);
+        yield 'an admin with no team or manager role' => [new Roles(true, false, [], [], []), PolicyRefusal::AdminOnlyMember];
+        yield 'an admin who is also a manager' => [new Roles(true, true, [], [], []), null];
+        yield 'an admin who leads a team' => [new Roles(true, false, [$shop], [], []), null];
+        yield 'an admin who is a member of a team' => [new Roles(true, false, [], [$shop], []), null];
+        yield 'an admin who is a viewer of a team' => [new Roles(true, false, [], [], [$shop]), null];
+        yield 'a manager with no team' => [new Roles(false, true, [], [], []), null];
+        yield 'a member of a team' => [new Roles(false, false, [], [$shop], []), null];
+        yield 'nobody with any role' => [Roles::none(), null];
+    }
+
+    #[Test]
+    #[DataProvider('laptopViewers')]
+    public function onlyAnAdminWithNoTeamOrManagerRoleIsRefusedLaptopAi(Roles $roles, ?PolicyRefusal $expectedRefusal): void
+    {
+        $viewer = new ActorContext(new UserId('0197a3c0-0000-7000-8000-00000000a5f1'), new OrganizationId('0197a3c0-0000-7000-8000-00000000a5e1'), $roles);
+
+        self::assertSame($expectedRefusal, new PolicyEvaluator()->refusalForLaptopViewer($viewer));
+    }
+
     #[Test]
     public function onlyLeadsOnlyWithAiOnNeedsTheViewersRoles(): void
     {
@@ -148,7 +174,7 @@ final class PolicyEvaluatorTest extends TestCase
     {
         $sentences = array_map(static fn (PolicyRefusal $refusal): string => $refusal->sentence(), PolicyRefusal::cases());
 
-        self::assertSame([self::AI_OFF, self::LEADS_ONLY, self::CANNOT_SEE, self::RESTRICTED, self::LAPTOP_NOT_READY, self::SECURITY_SENSITIVE_DRAFT, self::CLOUD_ONLY, self::INTAKE_NOT_ON_LAPTOP], $sentences);
+        self::assertSame([self::AI_OFF, self::LEADS_ONLY, self::CANNOT_SEE, self::RESTRICTED, self::LAPTOP_NOT_READY, self::SECURITY_SENSITIVE_DRAFT, self::CLOUD_ONLY, self::INTAKE_NOT_ON_LAPTOP, self::ADMIN_ONLY_MEMBER], $sentences);
     }
 
     #[Test]
@@ -168,6 +194,7 @@ final class PolicyEvaluatorTest extends TestCase
             'security_sensitive_draft_to_cloud' => 'security_sensitive_draft_to_cloud',
             'cloud_only' => 'cloud_only',
             'intake_not_on_laptop' => 'intake_not_on_laptop',
+            'admin_only_member' => 'admin_only_member',
         ], $draftRefusals);
     }
 

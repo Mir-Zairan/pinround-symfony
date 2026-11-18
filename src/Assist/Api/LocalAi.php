@@ -26,8 +26,9 @@ interface LocalAi
     public const int MAX_PACKAGES_PER_PERSON_PER_HOUR = 30;
 
     /**
-     * Decides the organization's AI policy for the person and ticket as the laptop route (laptop or laptop first, AI
-     * on, leads only, title only; a team-only ticket may go to the laptop), builds the prompt from the template the
+     * Decides the organization's AI policy for the person and ticket as the laptop route (not for an admin with no team
+     * or manager role, laptop or laptop first, AI on, leads only, title only; a team-only ticket may go to the laptop),
+     * builds the prompt from the template the
      * server path uses, and stores a single-use package that expires in PACKAGE_LIFETIME_SECONDS. Runs in the caller's
      * open transaction, whose tenant is $organizationId.
      *
@@ -55,7 +56,7 @@ interface LocalAi
      * @throws LocalResultRefused when the package is not the poster's in $organizationId, the poster is no longer a
      *                            member or may no longer see the ticket (package_not_found), the package was used or
      *                            expired (package_gone), the policy no longer gives the poster laptop AI (ai_off,
-     *                            leads_only, cloud_only), or the model name or the text fails the check
+     *                            leads_only, cloud_only, admin_only_member), or the model name or the text fails the check
      *                            (result_rejected); the package stays as it was then
      * @throws \LogicException    when a transaction is open or no tenant is set; nothing is read or written
      */

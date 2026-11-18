@@ -33,6 +33,17 @@ final readonly class PolicyEvaluator
     }
 
     /**
+     * The check laptop AI makes before every other, for the header's Local AI chip, its status call and a laptop
+     * package alike: an admin with no team role and no manager role has no tickets of their own to run it on.
+     */
+    public function refusalForLaptopViewer(ActorContext $viewer): ?PolicyRefusal
+    {
+        $roles = $viewer->roles();
+
+        return $roles->isAdmin() && !$roles->isManager() && [] === $roles->teamIds() ? PolicyRefusal::AdminOnlyMember : null;
+    }
+
+    /**
      * Whether the viewer's roles change the answer, so a caller that has none at hand reads them only then. When not,
      * any roles, Roles::none() included, give the same decision.
      */

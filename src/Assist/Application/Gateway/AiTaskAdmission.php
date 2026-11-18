@@ -26,8 +26,9 @@ use App\Ticketing\Api\TicketVisibilities;
  * that queues a task asks it first, so the person is refused up front for the same reason the gateway would give.
  *
  * The server never sends to a laptop, so the policy is decided with the laptop not ready: "laptop first" goes to the
- * cloud here, and "laptop" only refuses a ticket with the setup sheet's line and a draft with IntakeNotOnLaptop, as no
- * laptop checks a draft yet. Nothing here calls a provider, meters or counts against the person's limit.
+ * cloud here, and "laptop" only refuses a ticket with the setup sheet's line (AdminOnlyMember for an admin with no team
+ * or manager role, who gets no setup sheet) and a draft with IntakeNotOnLaptop, as no laptop checks a draft yet.
+ * Nothing here calls a provider, meters or counts against the person's limit.
  *
  * A draft report has no ticket yet: the reporter wrote it, so they may see it, and it is not team-only. On the cloud
  * route its words decide first: a draft that mentions security never goes to cloud AI, whatever the admin's opt-in for
@@ -66,8 +67,9 @@ final readonly class AiTaskAdmission
 
     /**
      * The policy for a prompt package the viewer's browser hands to Ollama on the laptop (LocalAi), in admit()'s order
-     * but with the laptop ready: AI on and the viewer allowed, the ticket as the viewer may see it, then the laptop
-     * route, which "laptop" and "laptop first" take. An organization that runs AI in the cloud only is refused with
+     * but with the laptop ready: an admin-only member is refused first (AdminOnlyMember, as the Local AI chip does),
+     * then AI on and the viewer allowed, the ticket as the viewer may see it, then the laptop route, which "laptop" and
+     * "laptop first" take. An organization that runs AI in the cloud only is refused with
      * CloudOnly before the route is decided, so a team-only ticket kept from cloud AI gets that refusal too. A team-only
      * ticket may go to the laptop, as its text stays on the laptop of someone who may see it; "title only" applies as on
      * the server path. Reads under row-level security, so it needs an open transaction whose tenant is the viewer's
@@ -80,6 +82,10 @@ final readonly class AiTaskAdmission
     public function admitToLaptop(AiTask $task, ActorContext $viewer): AdmittedAiTask
     {
         $ticketId = $task->ticketId ?? throw new \InvalidArgumentException('A laptop AI package names a ticket; a draft report cannot go to the laptop yet.');
+        $laptopViewerRefusal = $this->policyEvaluator->refusalForLaptopViewer($viewer);
+        if (null !== $laptopViewerRefusal) {
+            throw new AiNotAllowed($laptopViewerRefusal);
+        }
         $settings = $this->settingsForAllowedViewer($viewer);
         $ticket = $this->askedTicketQueries->visibleTicketOf($ticketId, $viewer);
         if (null === $ticket) {
@@ -139,6 +145,10 @@ final readonly class AiTaskAdmission
             throw new AiNotAllowed(PolicyRefusal::CannotSeeTicket);
         }
         $decision = $this->policyEvaluator->decide($settings, $viewer, canSeeTicket: true, isTicketRestricted: $ticket->isTeamOnly, isLaptopReady: false);
+        if (PolicyRefusal::LaptopNotReady === $decision->refusal) {
+            // Its line sends the person to the Local AI chip, which an admin-only member never gets.
+            throw new AiNotAllowed($this->policyEvaluator->refusalForLaptopViewer($viewer) ?? $decision->refusal);
+        }
         if (null !== $decision->refusal) {
             throw new AiNotAllowed($decision->refusal);
         }

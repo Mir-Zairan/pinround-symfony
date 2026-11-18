@@ -378,6 +378,80 @@ final class LaptopSummaryProposalTest extends WebTestCase
         self::assertSame(null === $line ? [] : [$line], $laptopParts->filter('.ticket__ask-ai-off[data-laptop-summary-target="notReadyLine"]')->each(static fn (Crawler $text): string => $text->text()));
     }
 
+    /**
+     * Where the AI runs, and the line Sara sees in place of "Summarize with AI", or null when she gets the cloud's.
+     *
+     * @return iterable<string, array{string, string|null}>
+     */
+    public static function placesWithoutTheChipForSara(): iterable
+    {
+        yield 'laptop only' => ['laptop', 'Local AI is for people in a team and for managers.'];
+        // As for anyone whose laptop is not ready: laptop first falls back to the cloud.
+        yield 'laptop first' => ['laptop_first', null];
+    }
+
+    /**
+     * Sara may open every ticket, but the header gives her no Local AI chip, so the page offers her no laptop and never
+     * sends her to the chip.
+     */
+    #[Test]
+    #[DataProvider('placesWithoutTheChipForSara')]
+    public function saraAnAdminWithNoTeamOrManagerRoleGetsTheChipsAnswerAndNoLaptopPart(string $where, ?string $line): void
+    {
+        $this->storeAiSettings($this->acmeFoods, self::laptopAi($where));
+        $organizationId = $this->acmeFoods->toString();
+        // The button shows only on a ticket with no summary.
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM tkt_summary WHERE organization_id = ?', [$organizationId]));
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.local-ai'));
+        self::assertCount(0, $page->filter('[data-controller="laptop-summary"]'));
+        self::assertSame(null === $line ? [] : [$line], $page->filter('.ticket__ask-ai-off')->each(static fn (Crawler $text): string => $text->text()));
+        self::assertStringNotContainsString('Use “Local AI” at the top', (string) $this->client->getResponse()->getContent());
+        $forms = $page->filter('form.ticket__ask-actions:has(.ticket__summarize)');
+        if (null !== $line) {
+            self::assertCount(0, $forms);
+
+            return;
+        }
+        self::assertCount(1, $forms);
+        self::assertNull($forms->attr('hidden'));
+        self::assertNull($forms->attr('data-action'));
+    }
+
+    /** A request sent without the button, which the page never shows her, is refused with the page's line. */
+    #[Test]
+    public function saraWhoAsksForASummaryInALaptopOnlyOrganizationIsRefusedWithTheChipsLineAndNothingIsQueued(): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM tkt_summary WHERE organization_id = ?', [$organizationId]));
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $frame = $this->client->request(
+            'POST',
+            '/t/SHOP-1/summary',
+            [SummaryController::CSRF_FIELD => $this->csrfTokenFor($this->client, SummaryController::CSRF_ID)],
+            server: ['HTTP_TURBO_FRAME' => TheAsk::FRAME_ID],
+        );
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['Local AI is for people in a team and for managers.'], $frame->filter('.ticket__ask-ai-off')->each(static fn (Crawler $text): string => $text->text()));
+        self::assertCount(0, $frame->filter('form.ticket__ask-actions:has(.ticket__summarize)'));
+        self::assertSame([], $this->sentAiJobs());
+        self::assertSame([], $this->summaryRows());
+
+        $this->client->request('POST', '/t/SHOP-1/summary', [SummaryController::CSRF_FIELD => $this->csrfTokenFor($this->client, SummaryController::CSRF_ID)]);
+
+        self::assertResponseRedirects('/t/SHOP-1', 303);
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Local AI is for people in a team and for managers.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+        self::assertSame([], $this->sentAiJobs());
+    }
+
     private function assertNothingChanged(): void
     {
         self::assertSame([[self::CURRENT_SUMMARY, 'ai', true, null]], $this->summaryRows());

@@ -19,6 +19,8 @@ enum PolicyRefusal: string
     case CloudOnly = 'cloud_only';
     /** A draft report in an organization that runs AI on laptops only: laptop intake is not built yet. */
     case IntakeNotOnLaptop = 'intake_not_on_laptop';
+    /** Laptop AI for an admin with no team role and no manager role (PolicyEvaluator::refusalForLaptopViewer). */
+    case AdminOnlyMember = 'admin_only_member';
 
     /**
      * The one line shown where the AI buttons would be.
@@ -34,6 +36,7 @@ enum PolicyRefusal: string
             self::SecuritySensitiveDraftToCloud => 'This report mentions security, so it stays out of cloud AI.',
             self::CloudOnly => 'Your admin runs AI help in the company cloud, not on laptops.',
             self::IntakeNotOnLaptop => 'Your company runs AI on laptops, and “Check with AI” does not run there yet.',
+            self::AdminOnlyMember => 'Local AI is for people in a team and for managers.',
         };
     }
 

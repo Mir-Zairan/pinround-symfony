@@ -22,8 +22,8 @@ final class LocalPackageRefused extends \DomainException
     public const string TOO_MANY_PACKAGES = 'too_many_packages';
 
     /**
-     * @param string $refusalCode a PolicyView refusal code (ai_off, leads_only, cannot_see_ticket, cloud_only) or one
-     *                            of this class's codes
+     * @param string $refusalCode a PolicyView refusal code (ai_off, leads_only, cannot_see_ticket, cloud_only,
+     *                            admin_only_member) or one of this class's codes
      * @param string $sentence    the line shown where the button is
      */
     public function __construct(public readonly string $refusalCode, string $sentence)

@@ -47,7 +47,7 @@ final class LocalResultRefused extends \DomainException
     /**
      * The organization's AI policy no longer gives the poster laptop AI; a page answers it with 403.
      *
-     * @param string $refusalCode a PolicyView refusal code: ai_off, leads_only or cloud_only
+     * @param string $refusalCode a PolicyView refusal code: ai_off, leads_only, cloud_only or admin_only_member
      * @param string $sentence    the line shown where the button is
      */
     public static function notAllowed(string $refusalCode, string $sentence): self

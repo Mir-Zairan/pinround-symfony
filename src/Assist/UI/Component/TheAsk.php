@@ -8,6 +8,7 @@ use App\Assist\Api\LocalAi;
 use App\Assist\Api\LocalResult;
 use App\Assist\Api\PolicyView;
 use App\Assist\Api\SummaryRequestView;
+use App\Assist\UI\LocalAiChip;
 use App\Assist\UI\SummarySourceNote;
 use App\Assist\UI\ViewerAiPolicy;
 use App\Identity\Api\CurrentTimeZone;
@@ -68,6 +69,7 @@ final class TheAsk
         private readonly CurrentTimeZone $currentTimeZone,
         private readonly LocalAi $localAi,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly LocalAiChip $localAiChip,
     ) {
     }
 
@@ -95,12 +97,13 @@ final class TheAsk
     }
 
     /**
-     * Whether the organization runs AI on laptops for this person (laptop only or laptop first), so "Summarize with AI"
-     * carries what the browser needs to run it on the laptop.
+     * Whether the organization runs AI on laptops for this person (laptop only or laptop first) and the header shows
+     * them the Local AI chip that sets the laptop up, so "Summarize with AI" carries what the browser needs to run it
+     * on the laptop. A cloud organization's page reads no more than the policy.
      */
     public function isOnLaptop(): bool
     {
-        return $this->viewerAiPolicy->policy()->isLaptopAllowed();
+        return $this->viewerAiPolicy->policy()->isLaptopAllowed() && null === $this->localAiChip->refusal();
     }
 
     /**
@@ -122,10 +125,20 @@ final class TheAsk
      * Why "Summarize with AI" is hidden for this person and ticket; null when it shows. Reads the viewer's policy only
      * for an ask with text and no summary, the only place the button may show. In a laptop-only organization the server
      * cannot tell whether this laptop is ready, so it is PolicyRefusal::LaptopNotReady's line (ticket-page.md, AI not
-     * available), which the browser hides when it is.
+     * available), which the browser hides when it is; for a person the Local AI chip leaves out, it is the chip's line,
+     * as no laptop can ever be set up for them, and it stands for the server's refusal of their request too. In "laptop
+     * first" that person keeps the server's answer: the cloud, as for a laptop that is not ready.
      */
     public function aiRefusal(): ?string
     {
+        $policy = $this->viewerAiPolicy->policy();
+        if (PolicyView::WHERE_LAPTOP === $policy->whereAiRuns && $policy->isAllowed()) {
+            $chipRefusal = $this->localAiChip->refusal();
+            if (null !== $chipRefusal) {
+                return $chipRefusal;
+            }
+        }
+
         return $this->refusal ?? $this->viewerAiPolicy->serverTicketRefusalOf($this->ticket->isTeamOnly());
     }
 

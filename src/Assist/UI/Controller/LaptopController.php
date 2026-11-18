@@ -13,6 +13,7 @@ use App\Assist\Api\LocalResultRefused;
 use App\Assist\Application\LaptopRequestLimit;
 use App\Assist\Application\LaptopRequestsLimited;
 use App\Assist\Application\Policy\PolicyRefusal;
+use App\Assist\UI\FormExpired;
 use App\Assist\UI\LaptopRefusalStatuses;
 use App\Assist\UI\LocalAiChip;
 use App\Organization\Api\ActorContext;
@@ -68,7 +69,7 @@ final class LaptopController extends AbstractController
     public const int MAX_RESULT_BODY_BYTES = 122880;
 
     public const string NOT_ALLOWED = LocalAiChip::NOT_A_MEMBER;
-    public const string FORM_EXPIRED = 'The page was open too long. Reload it and try again.';
+    public const string FORM_EXPIRED = FormExpired::LINE;
     public const string BODY_TOO_LARGE = 'This laptop status is larger than 1 KB.';
     public const string NOT_A_STATUS = 'A laptop status needs "ready" (true or false) and, for a ready laptop only, a model name of 1 to 64 characters from a-z, 0-9 and ":._-".';
     public const string PACKAGE_REQUEST_TOO_LARGE = 'This laptop AI request is larger than 1 KB.';
@@ -185,18 +186,18 @@ final class LaptopController extends AbstractController
         }
 
         try {
-            $result = $this->localAi->accept($packageId, $fields['model'], $fields['text'], $actor->userId(), $actor->organizationId());
+            $localResult = $this->localAi->accept($packageId, $fields['model'], $fields['text'], $actor->userId(), $actor->organizationId());
         } catch (LocalResultRefused $refused) {
             return self::refusal($refused->getMessage(), LaptopRefusalStatuses::ofResultRefusal($refused));
         }
 
         return new JsonResponse(
             [
-                'packageId' => $result->packageId->toString(),
-                'label' => $result->label,
-                'text' => $result->text,
-                'model' => $result->model->value,
-                'postedAt' => $result->postedAt->format(\DATE_ATOM),
+                'packageId' => $localResult->packageId->toString(),
+                'label' => $localResult->label,
+                'text' => $localResult->text,
+                'model' => $localResult->model->value,
+                'postedAt' => $localResult->postedAt->format(\DATE_ATOM),
             ],
             Response::HTTP_CREATED,
         );

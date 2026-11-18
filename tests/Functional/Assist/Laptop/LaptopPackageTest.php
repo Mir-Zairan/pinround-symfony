@@ -237,6 +237,46 @@ final class LaptopPackageTest extends WebTestCase
         self::assertSame([], $this->packageRowsOf($this->acmeFoods));
     }
 
+    /**
+     * The line the status route and the ticket page give her, so no route hands her a package the header never offers.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function laptopPlaces(): iterable
+    {
+        yield 'laptop only' => ['laptop'];
+        yield 'laptop first' => ['laptop_first'];
+    }
+
+    #[Test]
+    #[DataProvider('laptopPlaces')]
+    public function saraAnAdminWithNoTeamOrManagerRoleIsForbiddenWithTheChipsLineAndNothingIsStored(string $where): void
+    {
+        $this->storeAiSettings($this->acmeFoods, self::laptopAi($where));
+        $this->packageIdOf('Omar', $this->shopTicketId);
+        $packageRows = $this->packageRowsOf($this->acmeFoods);
+        self::assertCount(1, $packageRows);
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $this->postPackageRequest(self::packageRequest($this->shopTicketId), $this->laptopToken());
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['message' => 'Local AI is for people in a team and for managers.'], $this->answer());
+        self::assertSame($packageRows, $this->packageRowsOf($this->acmeFoods));
+    }
+
+    #[Test]
+    public function saraWhoIsAlsoAManagerGetsAPackage(): void
+    {
+        $this->setOrgRoles($this->people['Sara'], $this->acmeFoods, '{admin,manager}');
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $this->postPackageRequest(self::packageRequest($this->shopTicketId), $this->laptopToken());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([$this->idOf('Sara')], array_column($this->packageRowsOf($this->acmeFoods), 'user_id'));
+    }
+
     #[Test]
     public function omarsEleventhOpenPackageIsTooManyAndNothingMoreIsStored(): void
     {

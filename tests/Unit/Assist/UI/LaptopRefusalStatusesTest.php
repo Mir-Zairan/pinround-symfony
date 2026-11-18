@@ -29,6 +29,7 @@ final class LaptopRefusalStatusesTest extends TestCase
         'laptop_not_ready' => 403,
         'security_sensitive_draft_to_cloud' => 403,
         'intake_not_on_laptop' => 403,
+        'admin_only_member' => 403,
     ];
 
     private const array RESULT_STATUSES = [
@@ -43,6 +44,7 @@ final class LaptopRefusalStatusesTest extends TestCase
         'laptop_not_ready' => 403,
         'security_sensitive_draft_to_cloud' => 403,
         'intake_not_on_laptop' => 403,
+        'admin_only_member' => 403,
     ];
 
     #[Test]

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Assist\Laptop;
 
 use App\Assist\UI\Controller\LaptopController;
-use App\Assist\UI\LocalAiChip;
 use App\Identity\Domain\User;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -99,7 +98,7 @@ final class LaptopStatusTest extends WebTestCase
         yield 'AI runs in the cloud' => [['on' => true, 'where' => 'cloud'], '{}', 'Your admin runs AI help in the company cloud, not on laptops.'];
         yield 'AI is off, though set to laptops' => [['on' => false, 'where' => 'laptop'], '{}', 'Your admin turned AI help off.'];
         yield 'AI for leads only, and Omar leads no team' => [['on' => true, 'who' => 'leads_only', 'where' => 'laptop'], '{}', 'Your admin allows AI help for leads only.'];
-        yield 'Omar is an admin with no team or manager role' => [self::laptopAi(), '{admin}', LocalAiChip::ADMIN_ONLY];
+        yield 'Omar is an admin with no team or manager role' => [self::laptopAi(), '{admin}', 'Local AI is for people in a team and for managers.'];
         yield 'an unknown place where the AI runs' => [['on' => true, 'where' => 'everywhere'], '{}', 'Your admin turned AI help off.'];
     }
 

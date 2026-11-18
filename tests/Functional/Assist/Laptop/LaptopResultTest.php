@@ -11,6 +11,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -216,6 +217,25 @@ final class LaptopResultTest extends WebTestCase
         self::assertSame(['message' => $sentence], $this->answer());
         self::assertSame($this->unusedRows, $this->packageRowsOf($this->acmeFoods));
         self::assertSame([$this->refusalEntry('Omar', $code)], $this->auditRowsOf($this->acmeFoods));
+    }
+
+    #[Test]
+    public function omarMadeAnAdminWithNoTeamAfterThePackageIsForbiddenWithTheChipsLineAndThePackageStaysOpen(): void
+    {
+        $this->setOrgRoles($this->people['Omar'], $this->acmeFoods, '{admin}');
+        $organizationId = $this->acmeFoods->toString();
+        $omarId = $this->idOf('Omar');
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'DELETE FROM org_team_member WHERE organization_id = ? AND user_id = ?',
+            [$organizationId, $omarId],
+        ));
+
+        $this->postResult(self::resultBody($this->omarsPackageId), $this->laptopToken());
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['message' => 'Local AI is for people in a team and for managers.'], $this->answer());
+        self::assertSame($this->unusedRows, $this->packageRowsOf($this->acmeFoods));
+        self::assertSame([$this->refusalEntry('Omar', 'admin_only_member')], $this->auditRowsOf($this->acmeFoods));
     }
 
     /**
