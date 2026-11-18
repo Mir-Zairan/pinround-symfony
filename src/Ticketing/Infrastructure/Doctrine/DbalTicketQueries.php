@@ -154,11 +154,19 @@ final readonly class DbalTicketQueries implements TicketQueries
         $row = $this->connection->fetchAssociative(
             'SELECT ticket.id, ticket.key, ticket.title, ticket.description, ticket.type, ticket.created_at,'
             .' to_json(ticket.components) AS components, '.TurnSnapshotRow::COLUMNS.','
-            .' ticket.version, project.name AS project_name, parent.key AS parent_key'
+            .' ticket.version, project.name AS project_name, parent.key AS parent_key,'
+            .' summary.id AS summary_id, summary.text AS summary_text, summary.source AS summary_source,'
+            .' summary.author_id AS summary_author_id, summary.model AS summary_model,'
+            .' summary.prompt_version AS summary_prompt_version, summary.created_at AS summary_created_at,'
+            .' (SELECT count(*) FROM tkt_summary AS earlier WHERE earlier.organization_id = ticket.organization_id'
+            .' AND earlier.ticket_id = ticket.id AND NOT earlier.is_current) AS earlier_summary_count'
             .' FROM tkt_ticket AS ticket'
             .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
             .' LEFT JOIN tkt_ticket AS parent ON parent.organization_id = ticket.organization_id AND parent.id = ticket.parent_id'
             .' AND '.$visibleParent->sql()
+            // tkt_summary_ticket_id_current_key keeps at most one current summary per ticket, so the join adds no row.
+            .' LEFT JOIN tkt_summary AS summary ON summary.organization_id = ticket.organization_id AND summary.ticket_id = ticket.id'
+            .' AND summary.is_current'
             .' WHERE ticket.organization_id = CAST(:organization AS uuid) AND ticket.key = :key AND '.$visibleTicket->sql(),
             ['organization' => $organizationId->toString(), 'key' => $key, ...$visibleTicket->parameters(), ...$visibleParent->parameters()],
         );
@@ -232,10 +240,11 @@ final readonly class DbalTicketQueries implements TicketQueries
         $teamId = TurnSnapshotRow::teamIdOf($row);
         $coreCode = $this->teamLookup->stepOf($stepId, $teamId)?->coreCode();
         [$leadId, $leadDisplayName, $developerIds, $testerIds] = null === $teamId ? [null, null, [], []] : $this->teamLookup->peopleOf($teamId);
+        $currentSummary = null === $row['summary_id'] ? null : TicketSummaryRow::viewOf($row, 'summary_');
         $users = $this->userQueries->byIds(self::distinctUserIds([
             $reporterId, $assigneeId, self::userIdOrNull($row['pending_assignee_id'], 'pending assignee id'), self::userIdOrNull($row['reviewer_id'], 'reviewer id'),
             self::userIdOrNull($row['tester_id'], 'tester id'), self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
-            $leadId, ...$developerIds, ...$testerIds,
+            $leadId, ...$developerIds, ...$testerIds, $currentSummary?->authorId,
         ]));
         $displayNames = array_map(static fn (UserView $user): string => $user->displayName, $users);
         $decodedComponents = json_decode(self::text($row['components'], 'components'), true, 2, \JSON_THROW_ON_ERROR);
@@ -275,6 +284,8 @@ final readonly class DbalTicketQueries implements TicketQueries
             TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds),
             $displayNames,
             self::integer($row['version'], 'version'),
+            $currentSummary,
+            self::integer($row['earlier_summary_count'], 'earlier summary count'),
         );
     }
 

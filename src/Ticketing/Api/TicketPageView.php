@@ -14,25 +14,29 @@ use App\SharedKernel\Domain\TicketTurnSnapshot;
 final readonly class TicketPageView
 {
     /**
-     * @param string                $type            bug, story or task
-     * @param string                $priority        blocker, critical, major, normal or minor
-     * @param string|null           $release         null when the ticket has none
-     * @param string|null           $parentKey       null when the ticket has no parent or the viewer may not see it
-     * @param list<string>          $components      in the order the ticket holds them
-     * @param string                $groupCode       one of todo, doing, check, wait, done
-     * @param string                $groupLabel      the group's name as people read it, for example "Checking"
-     * @param string|null           $reporterName    null when no user has the reporter's id any more
-     * @param string|null           $assigneeName    null when nobody is assigned, or no user has the assignee's id any more
-     * @param TicketVisibilityFacts $visibilityFacts what TicketPermission VIEW is decided on; the page is shown only
-     *                                               when it is granted
-     * @param TicketTurnSnapshot    $turnSnapshot    the ticket's turn facts, read with the page so the turn needs no second
-     *                                               read of the ticket
-     * @param array<string, string> $displayNames    display names by user id string of the ticket's people (reporter,
-     *                                               assignee, reviewer, tester, pending assignee, waiting-on) and of its
-     *                                               team's lead, developers and testers; a person Identity does not know
-     *                                               is left out
-     * @param int                   $version         the ticket's version as read, which a move's form sends back so a
-     *                                               change made meanwhile is refused
+     * @param string                $type                bug, story or task
+     * @param string                $priority            blocker, critical, major, normal or minor
+     * @param string|null           $release             null when the ticket has none
+     * @param string|null           $parentKey           null when the ticket has no parent or the viewer may not see it
+     * @param list<string>          $components          in the order the ticket holds them
+     * @param string                $groupCode           one of todo, doing, check, wait, done
+     * @param string                $groupLabel          the group's name as people read it, for example "Checking"
+     * @param string|null           $reporterName        null when no user has the reporter's id any more
+     * @param string|null           $assigneeName        null when nobody is assigned, or no user has the assignee's id any more
+     * @param TicketVisibilityFacts $visibilityFacts     what TicketPermission VIEW is decided on; the page is shown only
+     *                                                   when it is granted
+     * @param TicketTurnSnapshot    $turnSnapshot        the ticket's turn facts, read with the page so the turn needs no second
+     *                                                   read of the ticket
+     * @param array<string, string> $displayNames        display names by user id string of the ticket's people (reporter,
+     *                                                   assignee, reviewer, tester, pending assignee, waiting-on) and of its
+     *                                                   team's lead, developers and testers; a person Identity does not know
+     *                                                   is left out
+     * @param int                   $version             the ticket's version as read, which a move's form sends back so a
+     *                                                   change made meanwhile is refused
+     * @param ?TicketSummaryView    $currentSummary      null when the ticket has no summary yet; its author's display name,
+     *                                                   when Identity knows them, is in $displayNames
+     * @param int                   $earlierSummaryCount how many summaries the current one replaced, read with the
+     *                                                   page; TicketSummaryQueries::historyOf lists them
      */
     public function __construct(
         public TicketId $id,
@@ -55,6 +59,8 @@ final readonly class TicketPageView
         public TicketTurnSnapshot $turnSnapshot,
         public array $displayNames,
         public int $version,
+        public ?TicketSummaryView $currentSummary = null,
+        public int $earlierSummaryCount = 0,
     ) {
     }
 
