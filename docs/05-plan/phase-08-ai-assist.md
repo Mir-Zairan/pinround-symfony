@@ -145,6 +145,7 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
 - **Acceptance:**
   - [ ] Another user (even admin) cannot read a private explanation (HTTP and repository).
   - [ ] Stream stops within 1 s of "Stop".
+  - [ ] When AI is not allowed for the viewer, "Explain it to me" is hidden and one line says why (functional data-provider case and an e2e "sees why" case, as for "Summarize with AI").
 - **Tests:** voter test; isolation test; functional share/clear; e2e explain → share → use as main summary.
 - **Prototype check:** ticket page Explain it to me flow.
 - **Size:** M
@@ -233,7 +234,7 @@ NFR-SEC-09, NFR-SEC-12, NFR-SEC-13, NFR-PRIV-02, NFR-PRIV-06, NFR-PERF-06, NFR-P
 ## Definition of done
 - [ ] All non-optional P08 tasks ticked; 🏁 tasks demoable with Hugging Face (and with a laptop Ollama if the stretch tasks were done). Open: P08.T5, P08.T6 and P08.T10 are not built; no Hugging Face model has been chosen or demoed (see the hand-off notes).
 - [x] Restricted-data rules proven: no cloud AI call for security drafts or team-only tickets without opt-in (gateway spy tests). (`tests/Integration/Assist/Gateway/GuardedAiGatewayTest.php`: `aDraftThatMentionsSecurityIsRefusedWithoutAProviderCallAUsageRowOrACountedCall`, `aTeamOnlyTicketLenaMaySeeIsKeptFromCloudAiWithoutTheAdminsOptIn`, and for the candidates `aDraftGoesOutWithTheOpenTicketsLenaMaySeeButNotTheTeamOnlyOneAndOnlyASentKeySurvives`.)
-- [ ] Policy matrix table test, prompt-injection golden set (mocked in CI), log-leak marker test and AI isolation tests green. Open: the golden set (`tests/Assist/golden/`) is not built, and no log-leak marker test for an AI call was found under `tests/*/Assist`; the policy matrix (`PolicyEvaluatorTest::eachRequestGetsTheRouteOrTheReasonOfTheFlow`), the injection test of the prompt (`PromptBuilderTest`) and the isolation tests are built.
+- [ ] Policy matrix table test, prompt-injection golden set (mocked in CI), log-leak marker test and AI isolation tests green. Open: the golden set (`tests/Assist/golden/`) is not built. Built: the log-leak marker tests (`GenerateSummaryHandlerTest::neitherTheTicketTextNorTheAnswerReachesALogAtInfoOrAbove`, `GenerateIntakeSuggestionHandlerTest::neitherTheDraftNorTheAnswerReachesALogAtInfoOrAbove`, `LocalAiServiceTest::neitherTheTicketTextNorThePromptNorTheResultReachesALog`), the policy matrix (`PolicyEvaluatorTest::eachRequestGetsTheRouteOrTheReasonOfTheFlow`), the injection test of the prompt (`PromptBuilderTest`) and the isolation tests are built.
 - [ ] No web request waits on a model; `ai` queue isolated from `notify`. Open: no web request waits on a model (summaries and "Check with AI" are queued on `async_ai` and polled, the laptop runs in the browser), but the queue isolation test of P08.T5 is not built.
 - [ ] `bin/console assist:eval --feature=intake` runs against the golden set (offline, not in CI). Open: neither the command nor the golden set is built.
 - [ ] Quality gates green; docs and Index updated. Open: docs updated for PR 2; the phase is not done, so the gates are run per pull request, not ticked here.

@@ -22,6 +22,6 @@ AI help that only suggests: summaries, explanations, intake suggestions and prom
 
 ## Planned
 
-`Explanations` in the Api, "Explain it to me" and Share (P08.T6); summaries on sync (P08.T5); budgets, the monthly stop and labels (P08.T10); the Review AI helpers (P08.T11); laptop intake ("Check with AI" on a laptop); the 7-day purge of `ast_suggestion` and `ast_local_package`; explanations, embeddings, budgets; the tables `ast_explanation` and `ast_embedding`. See the [phase 08 hand-off notes](../../docs/05-plan/phase-08-ai-assist.md#hand-off-notes).
+`Explanations` in the Api, "Explain it to me" and Share (P08.T6); summaries on sync (P08.T5); budgets, the monthly stop and labels (P08.T10); the Review AI helpers (P08.T11); laptop intake ("Check with AI" on a laptop); the 7-day purge of `ast_suggestion` and `ast_local_package`; embeddings; the tables `ast_explanation` and `ast_embedding`. See the [phase 08 hand-off notes](../../docs/05-plan/phase-08-ai-assist.md#hand-off-notes).
 
 See the [module catalogue](../../docs/02-architecture/modules.md#assist-ast_) and [ai-architecture.md](../../docs/02-architecture/ai-architecture.md).
