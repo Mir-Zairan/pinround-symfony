@@ -375,7 +375,7 @@ final class LocalAiServiceTest extends KernelTestCase
     }
 
     /**
-     * A valid result posted inside a committed transaction: were the guard gone, the result would be kept and committed
+     * A valid result posted inside an open transaction: were the guard gone, the result would be kept and committed
      * with the caller's transaction.
      */
     #[Test]

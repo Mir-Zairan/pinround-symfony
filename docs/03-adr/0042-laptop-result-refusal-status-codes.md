@@ -43,7 +43,7 @@ Chosen option: **2**, because it keeps the no-leak rule and gives the browser on
 
 | Refusal (`LocalResultRefused` code) | Status |
 |---|---|
-| Unknown package, another person's or another organization's, or the poster may no longer see the ticket (`package_not_found`) | 404 |
+| Unknown package, another person's or another organization's, or the poster is no longer a member or may no longer see the ticket (`package_not_found`) | 404 |
 | Package used or expired (`package_gone`) | 410 |
 | Model name or text fails the check (`result_rejected`) | 422 |
 | The AI policy no longer gives the poster laptop AI (`ai_off`, `leads_only`, `cloud_only`) | 403 |

@@ -6,7 +6,7 @@ namespace App\Assist\Api;
 
 /**
  * No laptop AI prompt package was issued: the person is no member or may not see the ticket, the organization's AI
- * policy gives them no laptop AI, or they already hold as many open packages, or were given as many this hour, as the
+ * policy gives them no laptop AI, or they already hold as many open packages, or were given as many in the last hour, as the
  * caps allow. Nothing was stored.
  * The message is the one line the person is shown.
  */

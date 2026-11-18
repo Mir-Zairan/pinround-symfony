@@ -45,7 +45,7 @@ interface LocalAi
      * package in the one UPDATE that uses it, so of two results for one package exactly one is kept.
      *
      * Runs in a transaction of its own (Transactions), so the caller must have none open and must have set the tenant
-     * to $organizationId. A refusal is recorded in the audit log of $organizationId (ADR-0019, ADR-0026) with its code
+     * to $organizationId. A refusal is recorded in the audit log of $organizationId (ADR-0042, ADR-0026) with its code
      * and the model name, never the text, and that transaction is committed before the refusal is thrown.
      *
      * @param string $model the model name the browser reports, LocalModelName's rule
