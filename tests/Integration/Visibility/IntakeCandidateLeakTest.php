@@ -11,15 +11,17 @@ use App\Ticketing\Api\IntakeCandidate;
 use App\Ticketing\Api\IntakeCandidateQueries;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibility;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
- * IntakeCandidateQueries::openCandidatesIn, the ticket titles the intake check sends to an AI. With team-only tickets
+ * IntakeCandidateQueries::openCandidatesIn, the ticket titles the intake check sends to an AI, and openCandidatesByKeys,
+ * the keys and titles the intake check shows the reporter. With team-only tickets
  * left out, no viewer gets a cast ticket, as both are team-only, not even the Shop lead, the reporter, the admin or the
  * triager who may see them; with them included, each viewer gets exactly the cast tickets they may see. SHOP also has
  * SHOP-50, for everyone, which every Acme Foods viewer gets. Beta Bakery has a project with SHOP's id and its own
- * SHOP-1 in it, which only Ben gets. Each case runs in a rolled-back transaction under the viewer's own organization.
+ * SHOP-1 in it, which only Ben gets. Asked by key, each viewer gets exactly the cast tickets they may see. Each case runs in a rolled-back transaction under the viewer's own organization.
  */
 final class IntakeCandidateLeakTest extends VisibilityLeakCast
 {
@@ -78,6 +80,28 @@ final class IntakeCandidateLeakTest extends VisibilityLeakCast
         self::assertSame($seesNoTeamTicket ? [self::NO_TEAM_TICKET_KEY] : [], self::keysOf($noTeamProjectCandidates));
     }
 
+    #[Test]
+    #[DataProvider('viewers')]
+    public function byKeyAViewerGetsExactlyTheCastTicketsTheyMaySee(string $viewer, bool $seesTeamOnly, bool $seesNoTeamTicket): void
+    {
+        $teamOnlyKey = self::keyOfTeamOnlyTicket();
+        $candidates = self::asViewer($viewer, fn (): array => $this->queries()->openCandidatesByKeys(
+            $this->visibilityOf($viewer),
+            [$teamOnlyKey, 'SHOP-50', self::NO_TEAM_TICKET_KEY, 'SHOP-1'],
+        ));
+
+        self::assertNotSame([], $candidates);
+        if ('Ben' === $viewer) {
+            self::assertSame(['SHOP-1'], self::keysOf($candidates));
+            self::assertSame(self::FOR_EVERYONE_TITLE, $candidates[0]->title);
+
+            return;
+        }
+        $expectedKeys = [...($seesTeamOnly ? [$teamOnlyKey] : []), 'SHOP-50', ...($seesNoTeamTicket ? [self::NO_TEAM_TICKET_KEY] : [])];
+        self::assertSame($expectedKeys, self::keysOf($candidates));
+        self::assertSame($seesTeamOnly, \in_array(self::LEAK_MARKER, array_map(static fn (IntakeCandidate $candidate): string => $candidate->title, $candidates), true));
+    }
+
     private function visibilityOf(string $viewer): TicketVisibility
     {
         $ticketVisibilities = self::getContainer()->get('test.ticketing_ticket_visibilities');
@@ -102,5 +126,20 @@ final class IntakeCandidateLeakTest extends VisibilityLeakCast
     private static function keysOf(array $candidates): array
     {
         return array_map(static fn (IntakeCandidate $candidate): string => $candidate->key, $candidates);
+    }
+
+    /**
+     * Read under Acme Foods as tenant, as row-level security binds the migrator too.
+     */
+    private static function keyOfTeamOnlyTicket(): string
+    {
+        $teamOnlyTicketId = self::teamOnlyTicketId();
+        $key = null;
+        self::asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator) use ($teamOnlyTicketId, &$key): void {
+            $key = $migrator->fetchOne('SELECT key FROM tkt_ticket WHERE id = ?', [$teamOnlyTicketId]);
+        });
+        \assert(\is_string($key));
+
+        return $key;
     }
 }
