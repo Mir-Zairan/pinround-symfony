@@ -47,6 +47,9 @@ final class LaptopSummaryProposalTest extends WebTestCase
     private const string OTHER_TICKETS_RESULT = '0197a3c0-0000-7000-8000-00000000a004';
     private const string MADE_MAIN_ALREADY = '0197a3c0-0000-7000-8000-00000000a005';
     private const string OTHER_ORGANIZATIONS_RESULT = '0197a3c0-0000-7000-8000-00000000a006';
+    private const string TOO_LONG_RESULT = '0197a3c0-0000-7000-8000-00000000a007';
+    private const string RESULT_TICKETING_REFUSES = '0197a3c0-0000-7000-8000-00000000a008';
+    private const string NEXT_PROPOSAL = '0197a3c0-0000-7000-8000-00000000a009';
     private const string UNKNOWN = '0197a3c0-0000-7000-8000-00000000a0ff';
 
     /** Markup a page must show as text, with a line end, a multibyte word and an ampersand. */
@@ -216,6 +219,55 @@ final class LaptopSummaryProposalTest extends WebTestCase
         $this->assertNothingChanged();
     }
 
+    #[Test]
+    public function anExpiredFormWithoutTurboGoesToTheTicketWithItsToastAndChangesNothing(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->postChoice('SHOP-1', self::PROPOSAL, $this->csrfTokenFor($this->client, SummaryController::CSRF_ID));
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertResponseRedirects('/t/SHOP-1');
+        $this->assertNothingChanged();
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(SummaryController::FORM_EXPIRED, $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+    }
+
+    /** The ticket's 404 comes before the form check, so a person who may not choose learns nothing from the token. */
+    #[Test]
+    public function omarWhoMayNotChooseGets404EvenWithAnExpiredFormAndNothingChanges(): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->postChoice('SHOP-1', self::PROPOSAL, $this->csrfTokenFor($this->client, SummaryController::CSRF_ID), asTurboStream: true);
+
+        self::assertResponseStatusCodeSame(404);
+        $this->assertNothingChanged();
+    }
+
+    #[Test]
+    public function aReplacedLaptopSummaryListsItsPosterModelAndChooserAmongTheEarlierSummaries(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->postChoice('SHOP-1', self::PROPOSAL, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID));
+        self::assertResponseStatusCodeSame(303);
+        $this->clock->modify('+1 minute');
+        $this->addResult($this->acmeFoods, self::NEXT_PROPOSAL, $this->shopTicketId, '2026-11-12 12:00:40+00', 'The next laptop result.');
+        $this->setReporterOfShop1('Omar');
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->postChoice('SHOP-1', self::NEXT_PROPOSAL, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID));
+        self::assertResponseStatusCodeSame(303);
+
+        $list = $this->client->request('GET', '/t/SHOP-1/summary/earlier', server: ['HTTP_TURBO_FRAME' => 'ticket-ask-earlier']);
+
+        self::assertResponseStatusCodeSame(200);
+        $items = $list->filter('.ticket__ask-earlier-item')->each(static fn (Crawler $item): array => [$item->filter('.ticket__ask-source')->text(), $item->filter('.ticket__ask-summary-text')->text(normalizeWhitespace: false)]);
+        self::assertCount(2, $items);
+        self::assertSame(['Earlier summary 1 · '.self::LABEL.', made the main summary by Lena', self::PROPOSAL_TEXT], $items[0]);
+        self::assertSame(self::CURRENT_SUMMARY, $items[1][1]);
+    }
+
     /**
      * A result stored with a control character stands for one Ticketing refuses as a summary, as accept() lets none
      * through.
@@ -223,17 +275,17 @@ final class LaptopSummaryProposalTest extends WebTestCase
     #[Test]
     public function aResultTicketingRefusesAnswers422WithTheRuleAndStaysTheProposal(): void
     {
-        $this->addResult($this->acmeFoods, self::UNKNOWN, $this->shopTicketId, '2026-11-11 11:45:00+00', "Pay does nothing\u{0007} on the last step.");
+        $this->addResult($this->acmeFoods, self::RESULT_TICKETING_REFUSES, $this->shopTicketId, '2026-11-11 11:45:00+00', "Pay does nothing\u{0007} on the last step.");
         $this->logIn($this->client, $this->people['Lena']);
 
-        $this->postChoice('SHOP-1', self::UNKNOWN, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID), asTurboStream: true);
+        $this->postChoice('SHOP-1', self::RESULT_TICKETING_REFUSES, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID), asTurboStream: true);
 
         self::assertResponseStatusCodeSame(422);
         self::assertStringContainsString('A summary is plain UTF-8 text; this one holds a control character or is not UTF-8.', (string) $this->client->getResponse()->getContent());
         $this->assertNothingChanged();
         $page = $this->client->request('GET', '/t/SHOP-1');
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('/t/SHOP-1/summary/laptop/'.self::UNKNOWN, $page->filter('.ticket__ask-proposal form')->attr('action'));
+        self::assertSame('/t/SHOP-1/summary/laptop/'.self::RESULT_TICKETING_REFUSES, $page->filter('.ticket__ask-proposal form')->attr('action'));
     }
 
     /**
@@ -243,31 +295,34 @@ final class LaptopSummaryProposalTest extends WebTestCase
     #[Test]
     public function aStoredResultLongerThanASummaryIsNotOfferedAndChoosingItAnswers404(): void
     {
-        $this->addResult($this->acmeFoods, self::UNKNOWN, $this->shopTicketId, '2026-11-11 11:45:00+00', str_repeat('a', 2001));
+        $this->addResult($this->acmeFoods, self::TOO_LONG_RESULT, $this->shopTicketId, '2026-11-11 11:45:00+00', str_repeat('a', 2001));
         $this->logIn($this->client, $this->people['Lena']);
 
         $page = $this->client->request('GET', '/t/SHOP-1');
         self::assertResponseStatusCodeSame(200);
         self::assertSame('/t/SHOP-1/summary/laptop/'.self::PROPOSAL, $page->filter('.ticket__ask-proposal form')->attr('action'));
 
-        $this->postChoice('SHOP-1', self::UNKNOWN, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID));
+        $this->postChoice('SHOP-1', self::TOO_LONG_RESULT, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID));
 
         self::assertResponseStatusCodeSame(404);
         $this->assertNothingChanged();
     }
 
     /**
-     * The organization's AI settings and whether the Summarize with AI form is hidden, its line, and whether it carries
-     * the laptop attributes.
+     * The organization's AI settings, the ticket, and whether the Summarize with AI form is hidden, its line, and whether
+     * it carries the laptop attributes. SHOP-1 is for everyone, SHOP-2 team-only.
      *
-     * @return iterable<string, array{array<string, bool|string>, bool, string|null, bool}>
+     * @return iterable<string, array{array<string, bool|string>, string, bool, string|null, bool}>
      */
     public static function placesWhereAiRuns(): iterable
     {
-        yield 'laptop only' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop'], true, PolicyRefusal::LaptopNotReady->sentence(), true];
-        yield 'laptop first' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop_first'], false, null, true];
-        yield 'the cloud' => [['on' => true, 'who' => 'everyone', 'where' => 'cloud'], false, null, false];
-        yield 'laptop only with AI off' => [['on' => false, 'where' => 'laptop'], true, 'Your admin turned AI help off.', false];
+        yield 'laptop only' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop'], 'SHOP-1', true, PolicyRefusal::LaptopNotReady->sentence(), true];
+        yield 'laptop first' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop_first'], 'SHOP-1', false, null, true];
+        yield 'the cloud' => [['on' => true, 'who' => 'everyone', 'where' => 'cloud'], 'SHOP-1', false, null, false];
+        yield 'laptop only with AI off' => [['on' => false, 'where' => 'laptop'], 'SHOP-1', true, 'Your admin turned AI help off.', false];
+        yield 'laptop only, a team-only ticket' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop'], 'SHOP-2', true, PolicyRefusal::LaptopNotReady->sentence(), true];
+        // The laptop may still run it, so the browser gets what it needs and shows the form once the laptop is ready.
+        yield 'laptop first, a team-only ticket kept from cloud AI' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop_first'], 'SHOP-2', true, PolicyRefusal::RestrictedTicketToCloud->sentence(), true];
     }
 
     /**
@@ -275,7 +330,7 @@ final class LaptopSummaryProposalTest extends WebTestCase
      */
     #[Test]
     #[DataProvider('placesWhereAiRuns')]
-    public function summarizeWithAiCarriesWhatTheLaptopNeedsOnlyWhereAiRunsOnLaptops(array $ai, bool $isHidden, ?string $line, bool $hasLaptopAttributes): void
+    public function summarizeWithAiCarriesWhatTheLaptopNeedsOnlyWhereAiRunsOnLaptops(array $ai, string $key, bool $isHidden, ?string $line, bool $hasLaptopAttributes): void
     {
         $this->storeAiSettings($this->acmeFoods, $ai);
         $organizationId = $this->acmeFoods->toString();
@@ -283,7 +338,7 @@ final class LaptopSummaryProposalTest extends WebTestCase
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM tkt_summary WHERE organization_id = ?', [$organizationId]));
         $this->logIn($this->client, $this->people['Omar']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1');
+        $page = $this->client->request('GET', '/t/'.$key);
 
         self::assertResponseStatusCodeSame(200);
         $forms = $page->filter('form.ticket__ask-actions:has(.ticket__summarize)');
@@ -301,7 +356,8 @@ final class LaptopSummaryProposalTest extends WebTestCase
             $forms->attr('data-laptop-summary-ticket-id-value'),
             null !== $forms->attr('data-laptop-summary-token-value'),
         ];
-        self::assertSame($hasLaptopAttributes ? ['/ai/laptop/package', '/ai/laptop/result', $this->shopTicketId, true] : [null, null, null, false], $attributes);
+        $ticketId = 'SHOP-1' === $key ? $this->shopTicketId : $this->teamOnlyTicketId;
+        self::assertSame($hasLaptopAttributes ? ['/ai/laptop/package', '/ai/laptop/result', $ticketId, true] : [null, null, null, false], $attributes);
     }
 
     private function assertNothingChanged(): void
