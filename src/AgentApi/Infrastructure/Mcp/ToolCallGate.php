@@ -169,7 +169,7 @@ final readonly class ToolCallGate
         } catch (\Throwable $rollBackFailure) {
             // Class and code only: a database message can quote row values.
             $this->logger->warning('Rolling back the writes of a failed MCP tool call failed; closing the connection instead.', [
-                'tool' => $toolName,
+                'mcp_tool' => $toolName,
                 'exception_class' => $rollBackFailure::class,
                 'sqlstate' => $rollBackFailure instanceof DriverException ? $rollBackFailure->getSQLState() : null,
                 'code' => $rollBackFailure->getCode(),
@@ -186,7 +186,7 @@ final readonly class ToolCallGate
         try {
             $this->toolCallAuditor->record($access, $userId, $toolName, $target, ToolCallOutcome::Error);
         } catch (\Throwable $auditFailure) {
-            $this->logger->warning('The audit row of a failed MCP tool call could not be written.', ['tool' => $toolName, 'exception_class' => $auditFailure::class]);
+            $this->logger->warning('The audit row of a failed MCP tool call could not be written.', ['mcp_tool' => $toolName, 'exception_class' => $auditFailure::class]);
         }
     }
 }

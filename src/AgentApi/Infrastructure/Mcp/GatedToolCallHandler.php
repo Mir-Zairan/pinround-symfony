@@ -68,7 +68,7 @@ final readonly class GatedToolCallHandler implements RequestHandlerInterface
 
             return new Response($request->getId(), CallToolResult::error([new TextContent($refusal->getMessage())]));
         } catch (\Throwable $failure) {
-            $this->logger->error('An MCP tool call failed.', ['tool' => $request->name, 'exception_class' => $failure::class]);
+            $this->logger->error('An MCP tool call failed.', ['mcp_tool' => $request->name, 'exception_class' => $failure::class]);
 
             return new Response($request->getId(), CallToolResult::error([new TextContent(self::TOOL_FAILED)]));
         }

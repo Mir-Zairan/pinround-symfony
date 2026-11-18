@@ -105,7 +105,7 @@ final class GatedToolCallHandlerTest extends TestCase
 
         self::assertSame([GatedToolCallHandler::TOOL_FAILED], self::toolErrorTexts($answer));
         self::assertSame(
-            [['level' => 'error', 'message' => 'An MCP tool call failed.', 'context' => ['tool' => ScriptedTool::NAME, 'exception_class' => \RuntimeException::class]]],
+            [['level' => 'error', 'message' => 'An MCP tool call failed.', 'context' => ['mcp_tool' => ScriptedTool::NAME, 'exception_class' => \RuntimeException::class]]],
             $fixture->logger->records,
         );
         self::assertSame('error', $fixture->auditLog->entries[0]->data['outcome'] ?? null);
