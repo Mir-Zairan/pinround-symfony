@@ -17,8 +17,8 @@ const MAX_POLLS = 60;
 const TOAST_ANNOUNCE_DELAY_MS = 150;
 /** Playwright's fake clock runs requestAnimationFrame callbacks on a 16 ms timer. */
 const ANIMATION_FRAME_MS = 16;
-/** The most pressSummarize moves the clock, so the first poll timer, set during its steps, has at most this much less to run. */
-const RENDER_SLACK_MS = 500;
+/** The most pressSummarize moves the clock while it waits for Turbo's render; far below POLL_INTERVAL_MS. */
+const MAX_RENDER_STEPPING_MS = 500;
 
 const ORGANIZATION_SLUG = 'acme-foods';
 const CLOUD_AI = { on: true, who: 'everyone', where: 'cloud' };
@@ -123,12 +123,18 @@ async function pressButtonWithEnter(button: Locator): Promise<void> {
 /**
  * Presses "Summarize with AI" on the open ticket and waits until Turbo has rendered the running frame and focused its
  * [autofocus]. Turbo takes those steps only after animation frames, which the paused clock fires only when it moves, so
- * the clock moves one frame at a time until the frame's turbo:frame-load, at most RENDER_SLACK_MS in all; the first
- * poll timer is set during those steps.
+ * the clock moves one frame at a time until the frame's turbo:frame-load, at most MAX_RENDER_STEPPING_MS in all.
+ * Resolves to the clock's time, in ms, when the running content went in: the first poll timer started then, when the new
+ * summary-poll controller connected, before turbo:frame-load.
  */
-async function pressSummarize(page: Page, key: string, press: (button: Locator) => Promise<void> = clickButton): Promise<void> {
-  const frameLoad = await page.locator(ASK_FRAME).evaluateHandle((frame) => {
-    const sign = { hasLoaded: false };
+async function pressSummarize(page: Page, key: string, press: (button: Locator) => Promise<void> = clickButton): Promise<number> {
+  const frameRender = await page.locator(ASK_FRAME).evaluateHandle((frame) => {
+    const sign: { swappedAtMs: number | null; hasLoaded: boolean } = { swappedAtMs: null, hasLoaded: false };
+    const swap = new MutationObserver(() => {
+      sign.swappedAtMs = Date.now();
+      swap.disconnect();
+    });
+    swap.observe(frame, { childList: true });
     frame.addEventListener(
       'turbo:frame-load',
       () => {
@@ -145,11 +151,11 @@ async function pressSummarize(page: Page, key: string, press: (button: Locator) 
   let steppedMs = 0;
   await expect
     .poll(async () => {
-      if (!(await frameLoad.evaluate((sign) => sign.hasLoaded)) && steppedMs + ANIMATION_FRAME_MS <= RENDER_SLACK_MS) {
+      if (!(await frameRender.evaluate((sign) => sign.hasLoaded)) && steppedMs + ANIMATION_FRAME_MS <= MAX_RENDER_STEPPING_MS) {
         await page.clock.runFor(ANIMATION_FRAME_MS);
         steppedMs += ANIMATION_FRAME_MS;
       }
-      return frameLoad.evaluate((sign) => sign.hasLoaded);
+      return frameRender.evaluate((sign) => sign.hasLoaded);
     })
     .toBe(true);
 
@@ -157,6 +163,32 @@ async function pressSummarize(page: Page, key: string, press: (button: Locator) 
   await expect(runningButton).toHaveAttribute('data-summary-poll-target', 'button');
   await expect(runningButton).toHaveText('Summarizing…');
   await expect(runningButton).toBeDisabled();
+
+  const swappedAtMs = await frameRender.evaluate((sign) => sign.swappedAtMs);
+  if (swappedAtMs === null) {
+    throw new Error('Turbo loaded #ticket-ask without swapping its content.');
+  }
+  return swappedAtMs;
+}
+
+/**
+ * Records the clock's time of each summary GET the page starts with fetch. The route handler only sees a poll some real
+ * time after the page sent it, so its count can neither show that a runFor sent no poll nor which runFor sent one.
+ */
+async function recordPollTimes(page: Page): Promise<() => Promise<number[]>> {
+  const pollTimes = await page.evaluateHandle(() => {
+    const startedAtMs: number[] = [];
+    const pageFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if ((init?.method ?? 'GET').toUpperCase() === 'GET' && url.pathname.endsWith('/summary')) {
+        startedAtMs.push(Date.now());
+      }
+      return pageFetch(input, init);
+    };
+    return startedAtMs;
+  });
+  return () => pollTimes.evaluate((startedAtMs) => [...startedAtMs]);
 }
 
 /**
@@ -190,23 +222,27 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
     const key = await makeTicketWithAnAsk(browser, 'Summary poll shows the summary');
     const polls = await answerPressAndPolls(page, key, ['running', 'done']);
     await openTicketWithPausedClock(page, key);
-    await pressSummarize(page, key);
+    const pollTimes = await recordPollTimes(page);
+    const swappedAtMs = await pressSummarize(page, key);
 
-    await page.clock.runFor(POLL_INTERVAL_MS - RENDER_SLACK_MS);
-    expect(polls).toHaveLength(0);
-    await page.clock.runFor(RENDER_SLACK_MS);
+    const renderedAtMs = await page.evaluate(() => Date.now());
+    await page.clock.runFor(swappedAtMs + POLL_INTERVAL_MS - 1 - renderedAtMs);
+    expect(await pollTimes()).toEqual([]);
+    await page.clock.runFor(1);
     await expect.poll(() => polls.length).toBe(1);
     await expect(page.locator(ASK_FRAME)).toHaveAttribute('data-answered-polls', '1');
+    expect(await pollTimes()).toEqual([swappedAtMs + POLL_INTERVAL_MS]);
     expect(polls[0].headers()['turbo-frame']).toBe('ticket-ask');
     await expect(page.locator(`${ASK_FRAME} .ticket__summarize`)).toHaveText('Summarizing…');
 
     await nextPoll(page, polls, 2);
+    expect(await pollTimes()).toEqual([swappedAtMs + POLL_INTERVAL_MS, swappedAtMs + 2 * POLL_INTERVAL_MS]);
     await expect(page.locator(`${ASK_FRAME} .ticket__ask-summary-text`)).toHaveText(SUMMARY_TEXT);
     await page.clock.runFor(TOAST_ANNOUNCE_DELAY_MS);
     await expect(page.locator(TOAST_REGION)).toHaveText('Summary saved for everyone.');
 
     await page.clock.runFor(3 * POLL_INTERVAL_MS);
-    expect(polls).toHaveLength(2);
+    expect(await pollTimes()).toHaveLength(2);
     expect(await seriousViolations(page)).toEqual([]);
   });
 
@@ -214,6 +250,7 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
     const key = await makeTicketWithAnAsk(browser, 'Summary poll shows a failure');
     const polls = await answerPressAndPolls(page, key, ['failed']);
     await openTicketWithPausedClock(page, key);
+    const pollTimes = await recordPollTimes(page);
     await pressSummarize(page, key);
 
     await nextPoll(page, polls, 1);
@@ -222,7 +259,7 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
     await expect(page.locator(ASK_FRAME).getByRole('button', { name: 'Summarize with AI' })).toBeEnabled();
     await page.clock.runFor(TOAST_ANNOUNCE_DELAY_MS + POLL_INTERVAL_MS);
     await expect(page.locator(TOAST_REGION)).toHaveText('');
-    expect(polls).toHaveLength(1);
+    expect(await pollTimes()).toHaveLength(1);
     expect(await seriousViolations(page)).toEqual([]);
   });
 
@@ -268,6 +305,7 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
     const key = await makeTicketWithAnAsk(browser, 'Summary poll waits while hidden');
     const polls = await answerPressAndPolls(page, key, ['running']);
     await openTicketWithPausedClock(page, key);
+    const pollTimes = await recordPollTimes(page);
     await pressSummarize(page, key);
 
     await page.evaluate(() => {
@@ -275,7 +313,7 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     await page.clock.runFor(3 * POLL_INTERVAL_MS);
-    expect(polls).toHaveLength(0);
+    expect(await pollTimes()).toEqual([]);
 
     await page.evaluate(() => {
       Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
@@ -289,6 +327,7 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
     const key = await makeTicketWithAnAsk(browser, 'Summary poll gives up');
     const polls = await answerPressAndPolls(page, key, ['running']);
     await openTicketWithPausedClock(page, key);
+    const pollTimes = await recordPollTimes(page);
     await pressSummarize(page, key);
 
     for (let poll = 1; poll <= MAX_POLLS; poll += 1) {
@@ -299,7 +338,7 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
     await expect(button).toBeEnabled();
     await expect(button).not.toHaveAttribute('aria-busy', 'true');
     await page.clock.runFor(3 * POLL_INTERVAL_MS);
-    expect(polls).toHaveLength(MAX_POLLS);
+    expect(await pollTimes()).toHaveLength(MAX_POLLS);
   });
 });
 
