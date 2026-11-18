@@ -1,5 +1,6 @@
 import './stimulus_bootstrap.js';
 import * as Turbo from '@hotwired/turbo';
+import { showToast } from './toast_region.js';
 
 // A toast a page leaves for the next page load, which shows it once in the toast region.
 const PENDING_TOAST_KEY = 'pinround.pendingToast';
@@ -21,23 +22,7 @@ function takePendingToast() {
   }
 }
 
-// The same empty toast base.html.twig renders for a flash: the toast controller writes the text in after connect, so
-// the region's role="status" announces it. It replaces any flashed toast, as the region shows one at a time.
-function showPendingToast() {
-  const message = takePendingToast();
-  const region = document.getElementById('toast-region');
-  if (!message || !region) {
-    return;
-  }
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.dataset.controller = 'toast';
-  toast.dataset.toastMessageValue = message;
-  toast.setAttribute('data-turbo-temporary', '');
-  region.replaceChildren(toast);
-}
-
-showPendingToast();
+showToast(takePendingToast());
 
 // Frames work with Drive off. Pages keep full loads until a change turns Drive on with an e2e sweep (ADR-0007).
 Turbo.session.drive = false;

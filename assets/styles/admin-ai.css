@@ -1,0 +1,37 @@
+/* The rows of the Admin › AI tab (src/Organization/UI/templates/admin/ai.html.twig); its layout comes from
+   admin-tab.css, its fields and errors from login.css and profile.css, its chips, switches and cards from
+   components.css. */
+
+.admin-ai__card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-ai__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-ai__row--chips {
+  align-items: baseline;
+}
+
+.admin-ai__label {
+  min-width: 160px;
+  font-weight: 600;
+}
+
+.admin-ai__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-ai__note,
+.admin-ai__footnote {
+  color: var(--on-surface-var);
+  font-size: 14px;
+}

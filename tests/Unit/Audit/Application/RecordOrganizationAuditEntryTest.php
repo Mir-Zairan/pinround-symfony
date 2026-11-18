@@ -12,6 +12,7 @@ use App\Organization\Api\Event\MemberInvited;
 use App\Organization\Api\Event\MemberJoined;
 use App\Organization\Api\Event\OrganizationEvent;
 use App\Organization\Api\Event\OrgRolesChanged;
+use App\Organization\Api\Event\SettingsChanged;
 use App\Organization\Api\Event\TeamCreated;
 use App\Organization\Api\Event\TeamRoleChanged;
 use App\SharedKernel\Application\OnceOnlyHandling;
@@ -40,6 +41,9 @@ final class RecordOrganizationAuditEntryTest extends TestCase
         yield 'org roles changed' => [new OrgRolesChanged(self::ACME_FOODS, self::LENA, ['admin'], ['admin', 'manager'], self::SARA, $now), 'org_roles.changed', 'user', self::LENA, ['from' => ['admin'], 'to' => ['admin', 'manager']]];
         yield 'team created' => [new TeamCreated(self::ACME_FOODS, self::SHOP_TEAM, self::LENA, self::SARA, $now), 'team.created', 'team', self::SHOP_TEAM, ['lead_user_id' => self::LENA]];
         yield 'team role changed' => [new TeamRoleChanged(self::ACME_FOODS, self::SHOP_TEAM, self::OMAR, null, 'viewer', self::SARA, $now), 'team_role.changed', 'user', self::OMAR, ['team_id' => self::SHOP_TEAM, 'from' => null, 'to' => 'viewer']];
+        yield 'settings changed' => [new SettingsChanged(self::ACME_FOODS, 'ai.where', 'cloud', 'laptop', self::SARA, $now), 'settings.changed', 'organization', self::ACME_FOODS, ['setting' => 'ai.where', 'from' => 'cloud', 'to' => 'laptop']];
+        yield 'a switch changed' => [new SettingsChanged(self::ACME_FOODS, 'ai.on', true, false, self::SARA, $now), 'settings.changed', 'organization', self::ACME_FOODS, ['setting' => 'ai.on', 'from' => true, 'to' => false]];
+        yield 'provider key changed' => [new SettingsChanged(self::ACME_FOODS, 'ai.provider_key', null, 'changed', self::SARA, $now), 'settings.changed', 'organization', self::ACME_FOODS, ['setting' => 'ai.provider_key', 'from' => null, 'to' => 'changed']];
     }
 
     /**

@@ -1,35 +1,5 @@
-/* The admin page of people (src/Organization/UI/templates/admin/people.html.twig); its fields and errors come from
-   login.css and profile.css. */
-
-.people {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  max-width: 720px;
-}
-
-.people__title {
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.people__heading {
-  margin-bottom: 12px;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.people__invite {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.people__email {
-  flex: 1 1 260px;
-  min-width: 0;
-}
+/* The rows of the admin page of people (src/Organization/UI/templates/admin/people.html.twig); its layout comes from
+   admin-tab.css, its fields and errors from login.css and profile.css. */
 
 .people__list {
   margin: 0;

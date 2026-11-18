@@ -85,6 +85,7 @@ $pingAPerson = '| Ping a person | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only a
 $askAQuestion = '| Ask a question (pauses ticket) | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
 $resolveAComment = '| Resolve a comment | ⚠️ own | ⚠️ own | ✅ any in team | ⚠️ own | ⚠️ own | ⚠️ own |';
 $adminPings = 'An admin with no team role may see every ticket in the org (including team-only ones), comment, ask questions and ping';
+$useAsMainSummary = '| Use an explanation as main summary | — | — | ✅ | ⚠️ if reporter | — | ⚠️ if reporter |';
 $seeForEveryoneTickets = '| See tickets (visibility "all") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
@@ -147,6 +148,25 @@ return [
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AREA, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AREA, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AREA, 'actor' => 'Raj', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Omar', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Mia', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Raj', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Noor', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Lena', 'subject' => 'Beta Bakery', 'expected' => 'denied', 'twoStepProof' => true],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Ben', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => 3600],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => 3601],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => 3601],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => 'noCode'],
+    ['source' => $adminPages, 'attribute' => AdminPermission::AI, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => 'noCode'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Raj', 'subject' => 'Acme Foods', 'expected' => 'denied'],
 
     ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
     ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Mobile', 'expected' => 'granted'],
@@ -299,6 +319,16 @@ return [
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Lena', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'denied'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Omar', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket reported by Noor', 'expected' => 'granted'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
 
     ['source' => $commentAndReply, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
     ['source' => $commentAndReply, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],

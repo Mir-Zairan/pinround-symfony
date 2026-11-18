@@ -69,7 +69,7 @@ Implementation notes:
 | MessageRemoved | ticket topic; user topic of each person whose `question` or `reply` row about the message it marks done | refresh the thread frame; one bell push per such person, none when nothing was open |
 | RoundShared, PinVerdictSet, ChecklistItemChanged | ticket topic; user topic of the next turn owner | refresh the rounds frame |
 | PingSent (delivered) / PingCleared | user topic of the recipient | bell push |
-| SuggestionReady, SummaryGenerated | user topic of the requester; ticket topic for summaries | refresh the report form or summary frame |
+| SuggestionReady, SummaryGenerated | user topic of the requester; ticket topic for summaries | refresh the report form or summary frame. SummaryGenerated is not emitted yet: while a summary request is queued, the summary frame polls every 3 s ([phase 08](../05-plan/phase-08-ai-assist.md), P08.T4). SuggestionReady is not emitted yet either: while a "Check with AI" is queued, the report page polls `IntakeAssist::checkOf` (P08.T7) |
 | MediaReady | user topic of the uploader | replace the "processing" placeholder with the thumbnail |
 
 A bell push is a `RefreshBell` on `async_notify`, sent once the notification row (or the clear) commits: worker-notify publishes the new badge, a fresh lazy popover frame that the page loads again through the person's own session, and the toast when there is one. It never carries bell cards, whose forms need that session's CSRF token. A reply or an assignment that adds a bell row pushes the same way, with no toast. A row of any kind held for quiet hours pushes nothing when it is made: its push goes out only when `ReleaseHeldNotifications` releases it, one push per released recipient, with no toast.

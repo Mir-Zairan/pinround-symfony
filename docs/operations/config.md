@@ -14,6 +14,7 @@ One page that lists every environment variable pinround reads: its default, who 
 - [Mercure](#mercure) — hub keys, issuer, the public and internal hub URLs
 - [Object storage](#object-storage) — endpoint, public URL, bucket, region, signing keys, MinIO credentials
 - [Tracing](#tracing) — the OpenTelemetry settings
+- [AI](#ai) — the operator's provider keys and the Ollama URL
 - [Web server and runtime](#web-server-and-runtime) — FrankenPHP and Caddy settings
 - [Docker and compose host settings](#docker-and-compose-host-settings) — host ports, user ids, database role passwords
 - [Test-only](#test-only) — variables only tests read
@@ -120,6 +121,23 @@ Tracing is off while `OTEL_EXPORTER_OTLP_ENDPOINT` is empty. Spans go to the rec
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | app, all workers | no | `http/protobuf` or `http/json`. |
 | `OTEL_SERVICE_NAME` | `pinround` | app, all workers | no | Service name on every span. |
 | `OTEL_TRACES_SAMPLER_ARG` | `1.0` | app, all workers | no | Share of requests exported, from 0 to 1. Every request starts a new trace. Use `0.1` in prod. |
+
+## AI
+The operator's defaults for server-side AI ([ADR-0018](../03-adr/0018-ai-provider-abstraction.md)). Only `SymfonyAiProvider` reads them. An organization's own key, when it has one, is used instead of the operator's. Every gap fails closed, before any request, and never as an empty answer:
+
+- The chosen provider's variable is empty and the organization has no key: the call throws `AiUnavailable` ("The AI provider … has no key or URL set."). For Ollama the URL must be set even when the organization has a key.
+- The organization's key is set but empty: the same refusal; the operator's key is not used instead.
+- The organization's settings name a provider other than `huggingface`, `anthropic` or `ollama` (an empty name included) or an empty model: `UnknownAiProvider`. No provider set means Hugging Face.
+- Nothing ever falls back to another provider. A provider that answers only blank text also throws `AiUnavailable`.
+
+The test env does not call a provider: its container gives `FakeProvider` for the `AiProvider` port.
+
+| Variable | Default | Read by | Secret | What it does |
+|---|---|---|---|---|
+| `AI_HUGGINGFACE_TOKEN` | empty (Hugging Face off) | app, all workers | yes | Hugging Face Inference Providers token. Hugging Face is the default provider. |
+| `AI_ANTHROPIC_KEY` | empty (Anthropic off) | app, all workers | yes | Anthropic API key. |
+| `AI_OLLAMA_URL` | empty (Ollama off) | app, all workers | no | Base URL of the operator-run Ollama server, for example `http://ollama:11434`. An operator setting only: tenants never enter a URL (SSRF). |
+| `AI_PROVIDER_TIMEOUT_SECONDS` | unset; 30 when unset or empty (`assist.ai_provider_timeout_default_seconds` in `config/services.yaml`) | app, all workers | no | Seconds a provider call may wait for the next byte and, separately, for the whole answer; past either the call throws `AiUnavailable`, so a hung provider cannot hold an `async_ai` worker. Whole seconds from 1 to 300: `SymfonyAiProvider` refuses any other number, and a value that is not a number fails, so every AI call fails until it is fixed. |
 
 ## Web server and runtime
 | Variable | Default | Read by | Secret | What it does |

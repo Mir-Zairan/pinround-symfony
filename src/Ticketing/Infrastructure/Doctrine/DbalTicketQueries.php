@@ -23,7 +23,6 @@ use App\Ticketing\Api\TicketQueries;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Api\TicketVisibilityFacts;
 use App\Ticketing\Api\TicketVisibilitySql;
-use App\Ticketing\Domain\InvalidTicketKey;
 use App\Ticketing\Domain\TicketKey;
 use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\StepQueries;
@@ -92,7 +91,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         if (!$organizationId->equals($filter->visibility->organizationId())) {
             throw new \LogicException('A ticket\'s place in a list is read under the viewer\'s own organization as tenant.');
         }
-        if (!self::canBeTicketKey($key)) {
+        if (!TicketKey::canBe($key)) {
             return null;
         }
         $shownSteps = $this->shownStepsOf($filter);
@@ -145,7 +144,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         if (!$organizationId->equals($viewer->organizationId())) {
             throw new \LogicException('A ticket page is read under the viewer\'s own organization as tenant.');
         }
-        if (!self::canBeTicketKey($key)) {
+        if (!TicketKey::canBe($key)) {
             return null;
         }
 
@@ -154,11 +153,22 @@ final readonly class DbalTicketQueries implements TicketQueries
         $row = $this->connection->fetchAssociative(
             'SELECT ticket.id, ticket.key, ticket.title, ticket.description, ticket.type, ticket.created_at,'
             .' to_json(ticket.components) AS components, '.TurnSnapshotRow::COLUMNS.','
-            .' ticket.version, project.name AS project_name, parent.key AS parent_key'
+            .' ticket.version, project.name AS project_name, parent.key AS parent_key,'
+            .' summary.id AS summary_id, summary.text AS summary_text, summary.source AS summary_source,'
+            .' summary.author_id AS summary_author_id, summary.model AS summary_model,'
+            .' summary.prompt_version AS summary_prompt_version, summary.chosen_by_id AS summary_chosen_by_id, summary.created_at AS summary_created_at,'
+            .' earlier.summary_count AS earlier_summary_count'
             .' FROM tkt_ticket AS ticket'
             .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
             .' LEFT JOIN tkt_ticket AS parent ON parent.organization_id = ticket.organization_id AND parent.id = ticket.parent_id'
             .' AND '.$visibleParent->sql()
+            // tkt_summary_ticket_id_current_key keeps at most one current summary per ticket, so the join adds no row.
+            .' LEFT JOIN tkt_summary AS summary ON summary.organization_id = ticket.organization_id AND summary.ticket_id = ticket.id'
+            .' AND summary.is_current'
+            // Lateral rather than a scalar subquery in the column list: the query-budget tests label a statement by its first FROM,
+            // which must stay tkt_ticket. count(*) always gives one row, so the cross join keeps the ticket's.
+            .' CROSS JOIN LATERAL (SELECT count(*) AS summary_count FROM tkt_summary AS replaced WHERE replaced.organization_id = ticket.organization_id'
+            .' AND replaced.ticket_id = ticket.id AND NOT replaced.is_current) AS earlier'
             .' WHERE ticket.organization_id = CAST(:organization AS uuid) AND ticket.key = :key AND '.$visibleTicket->sql(),
             ['organization' => $organizationId->toString(), 'key' => $key, ...$visibleTicket->parameters(), ...$visibleParent->parameters()],
         );
@@ -207,19 +217,6 @@ final readonly class DbalTicketQueries implements TicketQueries
     }
 
     /**
-     * A key that cannot be stored costs no query: TicketKey's format, and the same text back, so a number past the
-     * integer range, which no ticket has, is refused too.
-     */
-    private static function canBeTicketKey(string $key): bool
-    {
-        try {
-            return TicketKey::fromString($key)->toString() === $key;
-        } catch (InvalidTicketKey) {
-            return false;
-        }
-    }
-
-    /**
      * @param array<string, mixed> $row
      */
     private function pageViewOf(array $row, OrganizationId $organizationId): TicketPageView
@@ -232,10 +229,11 @@ final readonly class DbalTicketQueries implements TicketQueries
         $teamId = TurnSnapshotRow::teamIdOf($row);
         $coreCode = $this->teamLookup->stepOf($stepId, $teamId)?->coreCode();
         [$leadId, $leadDisplayName, $developerIds, $testerIds] = null === $teamId ? [null, null, [], []] : $this->teamLookup->peopleOf($teamId);
+        $currentSummary = null === $row['summary_id'] ? null : TicketSummaryRow::viewOf($row, 'summary_');
         $users = $this->userQueries->byIds(self::distinctUserIds([
             $reporterId, $assigneeId, self::userIdOrNull($row['pending_assignee_id'], 'pending assignee id'), self::userIdOrNull($row['reviewer_id'], 'reviewer id'),
             self::userIdOrNull($row['tester_id'], 'tester id'), self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
-            $leadId, ...$developerIds, ...$testerIds,
+            $leadId, ...$developerIds, ...$testerIds, $currentSummary?->authorId, $currentSummary?->chosenById,
         ]));
         $displayNames = array_map(static fn (UserView $user): string => $user->displayName, $users);
         $decodedComponents = json_decode(self::text($row['components'], 'components'), true, 2, \JSON_THROW_ON_ERROR);
@@ -275,6 +273,8 @@ final readonly class DbalTicketQueries implements TicketQueries
             TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds),
             $displayNames,
             self::integer($row['version'], 'version'),
+            $currentSummary,
+            self::integer($row['earlier_summary_count'], 'earlier summary count'),
         );
     }
 

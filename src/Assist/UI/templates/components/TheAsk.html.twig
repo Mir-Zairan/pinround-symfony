@@ -1,0 +1,135 @@
+{%- set controller = 'App\\Assist\\UI\\Controller\\SummaryController' -%}
+{#- Inside a design component's content, this is that component, so TheAsk is ask there. -#}
+{%- set ask = this -%}
+{%- set ticket = ask.ticket -%}
+{%- set summary = ticket.currentSummary -%}
+{%- set state = ask.state -%}
+<section{{ attributes.defaults({class: 'ticket__section', 'aria-labelledby': 'ticket-ask-heading'}) }}>
+    <h2 id="ticket-ask-heading" class="ticket__section-title">The ask</h2>
+    {#- Polite, so a summary that replaces the raw text while the reader is elsewhere on the page is read out once. -#}
+    <turbo-frame id="{{ constant('App\\Assist\\UI\\Component\\TheAsk::FRAME_ID') }}" aria-live="polite">
+        {#- Turbo swaps the frame's children, not the frame, so the summary-poll controller's values live here. -#}
+        {%- set summarizeLabel = 'Summarize with AI' %}
+        {#- Each state is the focus target for the swap that removes the focused button: Turbo focuses [autofocus] after
+            its frame render, the summary-poll controller after its own. Only in a frame answer, as on a page load the
+            browser would move the focus here itself. -#}
+        {%- set isFrameAnswer = app.request is not null and app.request.headers.get('Turbo-Frame') == constant('App\\Assist\\UI\\Component\\TheAsk::FRAME_ID') %}
+        <div class="ticket__ask-state" tabindex="-1"{% if isFrameAnswer %} autofocus{% endif %}
+             data-controller="summary-poll"
+             data-action="visibilitychange@document->summary-poll#followVisibility turbo:submit-start->summary-poll#markBusy turbo:submit-end->summary-poll#clearBusy"
+             data-summary-poll-url-value="{{ path(constant(controller ~ '::FRAME_ROUTE'), {key: ticket.key}) }}"
+             data-summary-poll-state-value="{{ state }}"
+             data-summary-poll-saved-toast-value="Summary saved for everyone."
+             data-summary-poll-ready-label-value="{{ summarizeLabel }}">
+            {% if summary is not null %}
+                <twig:Card tag="div" class="ticket__ask ticket__ask--summary">
+                    <p class="ticket__ask-source">
+                        <strong>In short</strong>
+                        {% if ask.summaryWrittenByAi %}<twig:AiChip>AI SUMMARY</twig:AiChip>{% endif %}
+                        {% set note = ask.sourceNote %}
+                        {% if note is not null %}<span class="ticket__ask-note">{{ note }}</span>{% endif %}
+                    </p>
+                    <div class="ticket__ask-summary-text">{{ summary.text }}</div>
+                    <p class="ticket__asked">{{ ask.askedLine }}</p>
+                    {% if ticket.earlierSummaryCount > 0 %}
+                        <details class="ticket__ask-more ticket__ask-earlier">
+                            <summary class="btn btn-text btn-sm"><span class="ticket__ask-show">Show {{ ask.earlierSummariesLabel }}</span><span class="ticket__ask-hide">Hide {{ ask.earlierSummariesLabel }}</span></summary>
+                            <turbo-frame id="{{ constant('App\\Assist\\UI\\Component\\TheAsk::EARLIER_FRAME_ID') }}" src="{{ path(constant(controller ~ '::EARLIER_ROUTE'), {key: ticket.key}) }}" loading="lazy">
+                                <p class="ticket__ask-source">Loading earlier summaries…</p>
+                            </turbo-frame>
+                        </details>
+                    {% endif %}
+                    {% if ticket.description is not empty %}
+                        {#- A native disclosure: it opens without JavaScript, and the browser tells screen readers whether it is expanded. -#}
+                        <details class="ticket__ask-more ticket__ask-original">
+                            <summary class="btn btn-outline btn-sm"><span class="ticket__ask-show">Show original text</span><span class="ticket__ask-hide">Hide original text</span></summary>
+                            <div class="ticket__ask-raw">
+                                <p class="ticket__ask-source"><strong>{{ ask.originalTextHeading }}</strong></p>
+                                <div class="ticket__ask-text">{{ ticket.description }}</div>
+                            </div>
+                        </details>
+                    {% endif %}
+                </twig:Card>
+            {% elseif ticket.description is empty %}
+                <p class="ticket__ask-none">The report came with no text.</p>
+                <p class="ticket__asked">{{ ask.askedLine }}</p>
+            {% else %}
+                {% set shortAsk = ask.shortAsk %}
+                <twig:Card tag="div" class="ticket__ask">
+                    <p class="ticket__ask-source"><strong>Original text from the report</strong> · not summarized yet</p>
+                    {% if shortAsk is null %}
+                        <div class="ticket__ask-text">{{ ticket.description }}</div>
+                    {% else %}
+                        <div class="ticket__ask-text ticket__ask-text--short">{{ shortAsk }}</div>
+                        {#- A native disclosure: it opens without JavaScript, and the browser tells screen readers whether it is expanded. -#}
+                        <details class="ticket__ask-more ticket__ask-full">
+                            <summary class="btn btn-outline btn-sm"><span class="ticket__ask-show">Show the full ask</span><span class="ticket__ask-hide">Show less</span></summary>
+                            <div class="ticket__ask-text ticket__ask-text--full">{{ ticket.description }}</div>
+                        </details>
+                    {% endif %}
+                    <p class="ticket__asked">{{ ask.askedLine }}</p>
+                    {% set aiRefusal = ask.aiRefusal %}
+                    {% set isOnLaptop = ask.onLaptop %}
+                    {% if aiRefusal is not null and not isOnLaptop %}
+                        <p class="ticket__ask-ai-off">{{ aiRefusal }}</p>
+                    {% elseif state == constant('App\\Assist\\UI\\Component\\TheAsk::STATE_RUNNING') %}
+                        {#- A form with the button off, so the summary-poll controller can offer it again after its last poll. -#}
+                        <form method="post" action="{{ path(constant(controller ~ '::REQUEST_ROUTE'), {key: ticket.key}) }}" class="ticket__ask-actions">
+                            <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
+                            <twig:Button type="submit" variant="tonal" :disabled="true" aria-busy="true" class="ticket__summarize" data-summary-poll-target="button" data-turbo-submits-with="Summarizing…">Summarizing…</twig:Button>
+                        </form>
+                    {% else %}
+                        {#- On a laptop the server cannot tell whether the laptop is ready: the line shows and the
+                            button stays hidden until the laptop-summary controller finds it ready, so a page without
+                            JavaScript stays truthful. With the policy allowing laptops, every line here keeps only the
+                            server's path, which a ready laptop does not take (PolicyEvaluator::decideRoute). -#}
+                        {%- set laptopController = 'App\\Assist\\UI\\Controller\\LaptopController' %}
+                        {% if isOnLaptop %}
+                        <div class="ticket__ask-laptop" data-controller="laptop-summary"
+                             data-action="local-ai:checked@window->laptop-summary#followCheck"
+                             data-laptop-summary-package-url-value="{{ path(constant(laptopController ~ '::PACKAGE_ROUTE')) }}"
+                             data-laptop-summary-result-url-value="{{ path(constant(laptopController ~ '::RESULT_ROUTE')) }}"
+                             data-laptop-summary-frame-url-value="{{ path(constant(controller ~ '::FRAME_ROUTE'), {key: ticket.key}) }}"
+                             data-laptop-summary-generate-url-value="{{ constant('App\\Assist\\UI\\LocalAiChip::OLLAMA_ORIGIN') }}/api/generate"
+                             data-laptop-summary-csrf-header-value="{{ constant(laptopController ~ '::CSRF_HEADER') }}"
+                             data-laptop-summary-token-value="{{ csrf_token(constant(laptopController ~ '::CSRF_ID')) }}"
+                             data-laptop-summary-ticket-id-value="{{ ticket.id.toString }}">
+                        {% endif %}
+                        {% if aiRefusal is not null %}
+                            <p class="ticket__ask-ai-off"{% if isOnLaptop %} data-laptop-summary-target="notReadyLine"{% endif %}>{{ aiRefusal }}</p>
+                        {% endif %}
+                        {% if state == constant('App\\Assist\\UI\\Component\\TheAsk::STATE_FAILED') %}
+                            <p class="ticket__ask-failed">{{ ask.summaryRequest.sentence }}</p>
+                        {% endif %}
+                        {% if ask.notice is not null %}
+                            <p class="ticket__ask-notice">{{ ask.notice }}</p>
+                        {% endif %}
+                        <form method="post" action="{{ path(constant(controller ~ '::REQUEST_ROUTE'), {key: ticket.key}) }}" class="ticket__ask-actions"
+                            {%- if isOnLaptop %} data-laptop-summary-target="form" data-action="laptop-summary#summarize"{% endif %}{% if aiRefusal is not null %} hidden{% endif %}>
+                            <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
+                            <twig:Button type="submit" variant="tonal" class="ticket__summarize" data-turbo-submits-with="Summarizing…" data-laptop-summary-target="button">{{ summarizeLabel }}</twig:Button>
+                        </form>
+                        {% if isOnLaptop %}
+                            <p class="ticket__ask-laptop-status" data-laptop-summary-target="statusLine" hidden></p>
+                        </div>
+                        {% endif %}
+                    {% endif %}
+                </twig:Card>
+            {% endif %}
+            {% set proposal = ask.proposal %}
+            {% if proposal is not null %}
+                {#- The prototype's "Added explanation" block, for a laptop's result: user content, escaped like any text. -#}
+                <twig:Card tag="div" class="ticket__ask ticket__ask-proposal">
+                    <p class="ticket__ask-source"><strong>{{ constant('App\\Assist\\UI\\Component\\TheAsk::PROPOSAL_HEADING') }}</strong> · <span class="ticket__ask-proposal-label">{{ proposal.label }}</span></p>
+                    <div class="ticket__ask-summary-text ticket__ask-proposal-text">{{ proposal.text }}</div>
+                    {% if ask.canChooseMainSummary %}
+                        <form method="post" action="{{ path(constant(controller ~ '::MAIN_SUMMARY_ROUTE'), {key: ticket.key, packageId: proposal.packageId.toString}) }}" class="ticket__ask-actions" data-turbo-frame="_top">
+                            <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::MAIN_SUMMARY_CSRF_ID')) }}">
+                            <twig:Button type="submit" variant="outline" class="ticket__use-as-main">Use as main summary</twig:Button>
+                        </form>
+                    {% endif %}
+                </twig:Card>
+            {% endif %}
+        </div>
+    </turbo-frame>
+</section>

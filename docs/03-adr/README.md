@@ -9,7 +9,7 @@ This folder holds every important architecture decision for pinround, why we mad
 - [Status lifecycle](#status-lifecycle) — Proposed, Accepted, Deprecated, Superseded.
 - [Naming and format](#naming-and-format) — file names, numbering, the template.
 - [How to change a decision](#how-to-change-a-decision) — superseding instead of editing.
-- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0041.
+- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0042.
 
 ## What an ADR is
 
@@ -65,7 +65,7 @@ stateDiagram-v2
 
 ## All decisions
 
-All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15) (deciders: Zairan Mir, lead, with the team).
+All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15, ADR-0042 on 2026-11-18) (deciders: Zairan Mir, lead, with the team).
 
 | ADR | Title | Decision in one line |
 |---|---|---|
@@ -87,7 +87,7 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026
 | [0016](0016-direct-ticket-creation-with-check-flags.md) | Direct ticket creation with check flags | Reports become tickets at once; unclear ones get check reasons and go to a checker; no approval inbox. |
 | [0017](0017-private-draft-rounds.md) | Private draft rounds | Draft rounds are visible only to their owner until shared; the choice is made at hand-off. |
 | [0018](0018-ai-provider-abstraction.md) | AI provider abstraction | All server-side AI goes through Symfony AI behind an AiGateway that enforces the org AI policy. |
-| [0019](0019-browser-local-ai.md) | Browser-local AI | In laptop mode the browser calls Ollama on localhost; the server treats the result as user-provided text. |
+| [0019](0019-browser-local-ai.md) | Browser-local AI | In laptop mode the browser calls Ollama on localhost; the server treats the result as user-provided text. Superseded in part by ADR-0042 (the status codes of a refused result). |
 | [0020](0020-ai-safety-and-prompt-injection.md) | AI safety and prompt injection | Ticket content is untrusted data; validated JSON output; AI never writes without a human click. |
 | [0021](0021-mcp-server.md) | MCP server | `symfony/mcp-bundle` on `mcp/sdk` at `/mcp`, personal access tokens with scopes, same voters as the UI. |
 | [0022](0022-search-and-duplicates.md) | Search and duplicates | PostgreSQL full-text search + pg_trgm for search and duplicates; optional pgvector embeddings. |
@@ -110,3 +110,4 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026
 | [0039](0039-agents-file-report-drafts-a-person-sends-them.md) | Agents file report drafts; a person sends them | A new MCP tool `create_report` (scope `reports:write`) creates an owner-only report draft; only a person clicking Send in the app creates the ticket with Round 0; no token endpoint, MCP or REST, creates a ticket. Review owns the draft (`rvw_report_draft`). Adds to ADR-0017 and ADR-0020; supersedes the scope and tool lists of ADR-0021 in part. Superseded in part by ADR-0040 (where the UI lives, signatures, storage). |
 | [0040](0040-report-drafts-live-in-review.md) | Report drafts live in Review | Review's UI (`src/Review/UI`) owns the drafts list, edit page and Send, so Ticketing never calls Review's Api; `ReportDrafts` signatures use strings and SharedKernel ids; Send turns the project key into an id with `ProjectQueries::projectByKey` and calls `TicketCommands::create`; a draft keeps its screenshots as one jsonb array, at most 10. Supersedes part of ADR-0039. |
 | [0041](0041-sign-page-images-at-render-time.md) | Sign page images at render time | A page signs view and thumb URLs while it renders, in one batched read, after its own visibility check; signing times are rounded to the minute and URLs ask for `Cache-Control: private, max-age=240, immutable`. Supersedes the reading rules of ADR-0011 in part. |
+| [0042](0042-laptop-result-refusal-status-codes.md) | Laptop result refusals: 404 for an unknown package, 410 for a used or expired one | An unknown, another person's or another organization's laptop package answers 404, a used or expired one 410, a rejected text or model 422, a policy refusal 403; every refusal writes the `local_ai.result_refused` audit entry. Supersedes ADR-0019's 409 sentence in part. |

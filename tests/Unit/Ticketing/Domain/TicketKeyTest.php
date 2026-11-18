@@ -70,4 +70,23 @@ final class TicketKeyTest extends TestCase
         $this->expectExceptionMessageIsOrContains('A ticket key is a project key, a hyphen and a number, such as SHOP-12.');
         TicketKey::fromString($text);
     }
+
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function textsATicketCanOrCannotHaveAsItsKey(): iterable
+    {
+        yield 'a valid key' => ['SHOP-12', true];
+        yield 'lowercase project key' => ['shop-12', false];
+        yield 'leading zero' => ['SHOP-012', false];
+        yield 'trailing newline' => ["SHOP-12\n", false];
+        yield 'a number past the integer range' => ['SHOP-99999999999999999999', false];
+    }
+
+    #[Test]
+    #[DataProvider('textsATicketCanOrCannotHaveAsItsKey')]
+    public function aTicketCanHaveAKeyOnlyWhenItsTextReadsBackTheSame(string $text, bool $expected): void
+    {
+        self::assertSame($expected, TicketKey::canBe($text));
+    }
 }

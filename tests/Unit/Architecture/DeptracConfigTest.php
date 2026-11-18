@@ -12,8 +12,8 @@ final class DeptracConfigTest extends TestCase
 {
     private const array PARTS = ['Api', 'Event', 'Domain', 'Application', 'Infrastructure', 'UI'];
 
-    /** Layers that are not module parts. */
-    private const array SPECIAL_LAYERS = ['SharedKernel', 'Kernel', 'Vendor'];
+    /** Layers that are not module parts; Assist_AiPlatform is the Platform folder cut out of Assist_Infrastructure. */
+    private const array SPECIAL_LAYERS = ['SharedKernel', 'Kernel', 'Vendor', 'SymfonyAi', 'Assist_AiPlatform'];
 
     #[Test]
     public function everyModuleFolderHasAllSixPartLayers(): void
@@ -113,8 +113,9 @@ final class DeptracConfigTest extends TestCase
         $dependsOn = $this->dependsOnLines();
         self::assertSame($this->moduleFolders(), array_keys($dependsOn));
 
-        foreach ($dependsOn as $module => $expected) {
+        foreach ($dependsOn as $module => ['all' => $all, 'uiOnly' => $uiOnly]) {
             foreach (['Application', 'Infrastructure', 'UI'] as $part) {
+                $expected = 'UI' === $part ? $all : array_values(array_diff($all, $uiOnly));
                 $otherApis = array_filter(
                     $this->config()['ruleset'][$module.'_'.$part],
                     static fn (string $name): bool => str_ends_with($name, '_Api') && $module.'_Api' !== $name,
@@ -156,6 +157,36 @@ final class DeptracConfigTest extends TestCase
     }
 
     #[Test]
+    public function onlyAssistAiPlatformMayUseSymfonyAiAndOnlyItsOwnModule(): void
+    {
+        $ruleset = $this->config()['ruleset'];
+        $layersAllowedSymfonyAi = array_keys(array_filter($ruleset, static fn (array $allowed): bool => \in_array('SymfonyAi', $allowed, true)));
+
+        self::assertSame(['Assist_AiPlatform'], $layersAllowedSymfonyAi);
+        self::assertEqualsCanonicalizing(
+            ['Assist_Domain', 'Assist_Application', 'Assist_Api', 'SharedKernel', 'Vendor', 'SymfonyAi'],
+            $ruleset['Assist_AiPlatform'],
+        );
+    }
+
+    #[Test]
+    public function symfonyAiClassesAreNotVendorAndThePlatformFolderIsNotAssistInfrastructure(): void
+    {
+        $layers = array_column($this->config()['layers'], null, 'name');
+
+        self::assertSame(
+            [['type' => 'classNameRegex', 'value' => '#^App\\\\#'], ['type' => 'classNameRegex', 'value' => '#^Symfony\\\\AI\\\\#'], ['type' => 'php_internal', 'value' => '.']],
+            $layers['Vendor']['collectors'][0]['must_not'] ?? null,
+        );
+        self::assertSame([['type' => 'classNameRegex', 'value' => '#^Symfony\\\\AI\\\\#']], $layers['SymfonyAi']['collectors']);
+        self::assertSame(
+            [['type' => 'classNameRegex', 'value' => '#^App\\\\Assist\\\\Infrastructure\\\\Platform\\\\#']],
+            $layers['Assist_Infrastructure']['collectors'][0]['must_not'] ?? null,
+        );
+        self::assertSame([['type' => 'classNameRegex', 'value' => '#^App\\\\Assist\\\\Infrastructure\\\\Platform\\\\#']], $layers['Assist_AiPlatform']['collectors']);
+    }
+
+    #[Test]
     public function analysisIsLimitedToSrc(): void
     {
         self::assertSame(['./src'], $this->config()['paths']);
@@ -193,7 +224,9 @@ final class DeptracConfigTest extends TestCase
     }
 
     /**
-     * @return array<string, list<string>> module => modules named in its "Depends on" line of modules.md
+     * A module named as "X Api (UI only: …)" may be called from the UI layer alone.
+     *
+     * @return array<string, array{all: list<string>, uiOnly: list<string>}> module => modules named in its "Depends on" line of modules.md
      */
     private function dependsOnLines(): array
     {
@@ -207,9 +240,12 @@ final class DeptracConfigTest extends TestCase
             if (1 === preg_match('/^### (\w+)/', $line, $heading)) {
                 $current = $heading[1];
             } elseif (null !== $current && \in_array($current, $modules, true) && str_starts_with($line, '- **Depends on:**')) {
-                $withoutNotes = (string) preg_replace('/\([^)]*\)/', '', substr($line, \strlen('- **Depends on:**')));
+                $dependsOn = substr($line, \strlen('- **Depends on:**'));
+                $withoutNotes = (string) preg_replace('/\([^)]*\)/', '', $dependsOn);
                 $text = explode('.', $withoutNotes)[0];
-                $result[$current] = array_values(array_filter($modules, static fn (string $module): bool => $module !== $current && 1 === preg_match('/\b'.$module.'\b/', $text)));
+                $all = array_values(array_filter($modules, static fn (string $module): bool => $module !== $current && 1 === preg_match('/\b'.$module.'\b/', $text)));
+                $uiOnly = array_values(array_filter($all, static fn (string $module): bool => 1 === preg_match('/\b'.$module.' Api \(UI only\b/', $dependsOn)));
+                $result[$current] = ['all' => $all, 'uiOnly' => $uiOnly];
             }
         }
         ksort($result);
@@ -226,11 +262,11 @@ final class DeptracConfigTest extends TestCase
     }
 
     /**
-     * @return array{paths: list<string>, layers: list<array{name: string}>, ruleset: array<string, list<string>>}
+     * @return array{paths: list<string>, layers: list<array{name: string, collectors: list<array<string, mixed>>}>, ruleset: array<string, list<string>>}
      */
     private function config(): array
     {
-        /** @var array{deptrac: array{paths: list<string>, layers: list<array{name: string}>, ruleset: array<string, list<string>>}} $parsed */
+        /** @var array{deptrac: array{paths: list<string>, layers: list<array{name: string, collectors: list<array<string, mixed>>}>, ruleset: array<string, list<string>>}} $parsed */
         $parsed = Yaml::parseFile(\dirname(__DIR__, 3).'/deptrac.yaml');
 
         return $parsed['deptrac'];

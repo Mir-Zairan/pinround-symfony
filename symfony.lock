@@ -68,6 +68,42 @@
             "bin/phpunit"
         ]
     },
+    "symfony/ai-anthropic-platform": {
+        "version": "1.0",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "0.1",
+            "ref": "055b125ba7a6090b155b8b9dcbfabc881460863d"
+        }
+    },
+    "symfony/ai-generic-platform": {
+        "version": "1.0",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "0.1",
+            "ref": "a3919116f59f52377b59cfffe889711f8351d472"
+        }
+    },
+    "symfony/ai-hugging-face-platform": {
+        "version": "1.0",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "0.1",
+            "ref": "68bc896a3d39a0155d55fb77635d9f7d1df66e8f"
+        }
+    },
+    "symfony/ai-ollama-platform": {
+        "version": "1.0",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "0.1",
+            "ref": "8d8a4c5ebfa1423d3e2a2c39cce16b0a270e81f0"
+        }
+    },
     "symfony/asset-mapper": {
         "version": "8.1",
         "recipe": {

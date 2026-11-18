@@ -3,7 +3,7 @@
                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                   xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
 
-    <!-- The DESC order of updated_at, id and created_at in the list indexes is in the migration only: DBAL neither
+    <!-- The DESC order of updated_at, id and created_at in the list and intake indexes is in the migration only: DBAL neither
          expresses nor reads back a column's order. -->
     <entity name="App\Ticketing\Domain\Ticket" table="tkt_ticket">
         <indexes>
@@ -11,6 +11,11 @@
             <index name="tkt_ticket_step_id_priority_rank_updated_at_id_idx" columns="organization_id,step_id,priority_rank,updated_at,id"/>
             <index name="tkt_ticket_reporter_id_created_at_id_idx" columns="organization_id,reporter_id,created_at,id"/>
             <index name="tkt_ticket_assignee_id_idx" columns="organization_id,assignee_id">
+                <options>
+                    <option name="where">(closed_at IS NULL)</option>
+                </options>
+            </index>
+            <index name="tkt_ticket_project_id_updated_at_id_open_idx" columns="organization_id,project_id,updated_at,id">
                 <options>
                     <option name="where">(closed_at IS NULL)</option>
                 </options>

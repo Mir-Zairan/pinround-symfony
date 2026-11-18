@@ -20,6 +20,8 @@ In laptop mode the server never talks to anyone's laptop. The browser does, and 
 - Date: 2026-11-06
 - Deciders: Zairan (lead), Toyib (developer), Anka (tester)
 
+Superseded in part by [ADR-0042](0042-laptop-result-refusal-status-codes.md): the sentence "A wrong or used nonce returns 409 and writes an audit event"; an unknown, another person's or another organization's package answers 404, a used or expired one 410, a rejected text or model 422 and a policy refusal 403, and every refusal writes the `local_ai.result_refused` audit entry. Everything else here still stands.
+
 ## Context and problem statement
 
 Acme Foods has no money for an AI subscription. Sara, the admin, sets "Where the AI runs: each person's laptop". Omar installs Ollama and pulls `qwen3:4b`. Ollama listens on `http://localhost:11434` on Omar's laptop.

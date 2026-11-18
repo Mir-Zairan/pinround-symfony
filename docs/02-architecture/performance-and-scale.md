@@ -58,7 +58,7 @@ Server time, p95, warm cache, measured at the app (see [ADR-0029](../03-adr/0029
 |---|---|---|
 | Home | ≤ 250 ms | 8 |
 | Tickets list (50 rows) | ≤ 200 ms | 8 for the page: 5 for the list, 3 for the project rail (a user decision of 2026-11-12) |
-| Ticket page | ≤ 250 ms | 10 |
+| Ticket page | ≤ 250 ms | 10; 11 in an organization whose AI runs on laptops, the 11th the indexed read of the laptop summary proposal (task 13, 2026-11-18) |
 | Search | ≤ 300 ms | 3 |
 | Thumbnail first byte (object storage/CDN) | ≤ 150 ms | 0 |
 | Action (move, answer, ping) | ≤ 150 ms | 6 writes, side effects async; a warm move ≤ 9 queries in all, the 9th the lock on the mover's open pings for auto-clear (a user decision of 2026-11-14) |
@@ -66,6 +66,8 @@ Server time, p95, warm cache, measured at the app (see [ADR-0029](../03-adr/0029
 Browser: LCP ≤ 2.0 s on a mid laptop, INP ≤ 200 ms, JavaScript ≤ 120 KB gzip per page.
 
 The query counts are enforced in tests (see [testing-strategy.md](testing-strategy.md)).
+
+Every main page shown to a team member or manager also runs one indexed read of the organization's AI setting, for the header's "Local AI" chip (P08.T8, 2026-11-18); frame requests, which render no header, skip it. Of the page query tests, only Home's (`DatabaseSpanTest`, where a manager's Home is now at 8 SELECTs, its limit) and the round page's (`RoundPageTest`) count this read. The Tickets list and Ticket page tests count only the queries beyond the shell (`/_test/menu/shell` renders `base.html.twig` with the chip), so they never count this read.
 
 ## Principles
 

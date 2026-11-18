@@ -40,14 +40,18 @@ final class RedactionProcessor implements ProcessorInterface
     /**
      * Correlation ids (CorrelationIdsProcessor; trace_id and span_id come with OpenTelemetry), the HTTP keys of
      * Symfony's RouterListener, the Messenger keys of its worker and retry listener, the keys RequestTransaction
-     * logs a failed rollback with, and the name of a failed readiness check (HealthController).
+     * logs a failed rollback with, the name of a failed readiness check (HealthController), why an AI summary failed
+     * (GenerateSummaryHandler: an AiResult status or a fixed word, never content), why a "Check with AI" failed
+     * (GenerateIntakeSuggestionHandler, the same way) and the name of an AI setting that
+     * holds an unknown value (DbalAiSettingsQueries, never the value). Each key names one use, so another module
+     * cannot log content under a generic word that happens to be allowed.
      */
     public const array ALLOWED_KEYS = [
         'request_id', 'trace_id', 'span_id', 'organization_id', 'user_id',
         'route', 'method', 'status_code', 'duration_ms',
         'class', 'message_id', 'transport', 'retryCount', 'delay',
         'exception', 'exception_class', 'sqlstate', 'code',
-        'check',
+        'check', 'summary_outcome', 'intake_outcome', 'unknown_ai_setting',
     ];
 
     public function __invoke(LogRecord $record): LogRecord

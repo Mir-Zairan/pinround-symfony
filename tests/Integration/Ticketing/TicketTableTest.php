@@ -15,7 +15,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * The tkt_ticket and tkt_summary tables as Version20261111120000 creates them, with the search column of
- * Version20261112100000 and the question pause of Version20261115100000: their indexes, row-level security, the checks
+ * Version20261112100000, the question pause of Version20261115100000, the AI summary label of Version20261117160000 and
+ * the intake candidates' index of Version20261118160000: their indexes, row-level security, the checks
  * the database keeps on its own and the foreign keys that tie summaries and turn rows to their ticket.
  */
 final class TicketTableTest extends KernelTestCase
@@ -25,10 +26,13 @@ final class TicketTableTest extends KernelTestCase
     private const string TICKET = '0197a3c0-0000-7000-8000-0000000032e1';
     private const string UNKNOWN_TICKET = '0197a3c0-0000-7000-8000-0000000032e2';
     private const string SUMMARY = '0197a3c0-0000-7000-8000-0000000032e9';
+    private const string EARLIER_SUMMARY = '0197a3c0-0000-7000-8000-0000000032ea';
     private const string TO_DO_STEP = '0197a3c0-0000-7000-8000-0000000032f9';
     private const string LENA = '0197a3c0-0000-7000-8000-0000000032f1';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000032f2';
     private const string CHECK_VIOLATION = '23514';
+    private const array AI_LABEL = ['author_id' => self::OMAR, 'model' => 'claude-sonnet', 'prompt_version' => 'summary.v1'];
+    private const array LAPTOP_LABEL = ['author_id' => self::OMAR, 'model' => 'qwen3:4b', 'prompt_version' => 'summary.v1', 'chosen_by_id' => self::LENA];
 
     protected function setUp(): void
     {
@@ -62,6 +66,7 @@ final class TicketTableTest extends KernelTestCase
                 'CREATE INDEX tkt_ticket_step_id_priority_rank_updated_at_id_idx ON public.tkt_ticket USING btree (organization_id, step_id, priority_rank, updated_at DESC, id DESC)',
                 'CREATE INDEX tkt_ticket_reporter_id_created_at_id_idx ON public.tkt_ticket USING btree (organization_id, reporter_id, created_at DESC, id DESC)',
                 'CREATE INDEX tkt_ticket_assignee_id_idx ON public.tkt_ticket USING btree (organization_id, assignee_id) WHERE (closed_at IS NULL)',
+                'CREATE INDEX tkt_ticket_project_id_updated_at_id_open_idx ON public.tkt_ticket USING btree (organization_id, project_id, updated_at DESC, id DESC) WHERE (closed_at IS NULL)',
             ],
             $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tkt_ticket'"),
         );
@@ -262,6 +267,87 @@ final class TicketTableTest extends KernelTestCase
         }
     }
 
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function labelsOfAnAiSummary(): iterable
+    {
+        yield 'without its requester' => ['author_id'];
+        yield 'without its model' => ['model'];
+        yield 'without its prompt version' => ['prompt_version'];
+    }
+
+    #[Test]
+    #[DataProvider('labelsOfAnAiSummary')]
+    public function theDatabaseRefusesAnAiSummaryWithoutItsLabel(string $missingLabel): void
+    {
+        try {
+            $this->rolledBackAsTheApp(function (Connection $connection) use ($missingLabel): void {
+                $this->insertTicket($connection, []);
+                $this->insertSummary($connection, self::TICKET, 'ai', [...self::AI_LABEL, $missingLabel => null]);
+            });
+            self::fail('The database accepted the unlabelled AI summary.');
+        } catch (DriverException $refusal) {
+            self::assertSame([self::CHECK_VIOLATION, true], [$refusal->getSQLState(), str_contains($refusal->getMessage(), 'tkt_summary_ai_label_check')]);
+        }
+    }
+
+    #[Test]
+    public function theDatabaseAcceptsALabelledAiSummaryAndAnUnlabelledHumanOne(): void
+    {
+        $inserted = $this->rolledBackAsTheApp(function (Connection $connection): array {
+            $this->insertTicket($connection, []);
+            $this->insertSummary($connection, self::TICKET, 'ai', self::AI_LABEL);
+            $this->insertSummary($connection, self::TICKET, 'human', ['id' => self::EARLIER_SUMMARY, 'is_current' => 'false']);
+
+            return $connection->fetchAllAssociative('SELECT source, author_id, model, prompt_version FROM tkt_summary WHERE ticket_id = ? ORDER BY source', [self::TICKET]);
+        });
+
+        self::assertSame([
+            ['source' => 'ai', 'author_id' => self::OMAR, 'model' => 'claude-sonnet', 'prompt_version' => 'summary.v1'],
+            ['source' => 'human', 'author_id' => null, 'model' => null, 'prompt_version' => null],
+        ], $inserted);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function labelsOfALaptopSummary(): iterable
+    {
+        yield 'without its poster' => ['author_id'];
+        yield 'without its model' => ['model'];
+        yield 'without its prompt version' => ['prompt_version'];
+        yield 'without who chose it' => ['chosen_by_id'];
+    }
+
+    #[Test]
+    #[DataProvider('labelsOfALaptopSummary')]
+    public function theDatabaseRefusesALaptopSummaryWithoutItsLabel(string $missingLabel): void
+    {
+        try {
+            $this->rolledBackAsTheApp(function (Connection $connection) use ($missingLabel): void {
+                $this->insertTicket($connection, []);
+                $this->insertSummary($connection, self::TICKET, 'laptop', [...self::LAPTOP_LABEL, $missingLabel => null]);
+            });
+            self::fail('The database accepted the unlabelled laptop summary.');
+        } catch (DriverException $refusal) {
+            self::assertSame([self::CHECK_VIOLATION, true], [$refusal->getSQLState(), str_contains($refusal->getMessage(), 'tkt_summary_laptop_label_check')]);
+        }
+    }
+
+    #[Test]
+    public function theDatabaseAcceptsALabelledLaptopSummary(): void
+    {
+        $inserted = $this->rolledBackAsTheApp(function (Connection $connection): array {
+            $this->insertTicket($connection, []);
+            $this->insertSummary($connection, self::TICKET, 'laptop', self::LAPTOP_LABEL);
+
+            return $connection->fetchAllAssociative('SELECT source, author_id, model, prompt_version, chosen_by_id FROM tkt_summary WHERE ticket_id = ?', [self::TICKET]);
+        });
+
+        self::assertSame([['source' => 'laptop', 'author_id' => self::OMAR, 'model' => 'qwen3:4b', 'prompt_version' => 'summary.v1', 'chosen_by_id' => self::LENA]], $inserted);
+    }
+
     #[Test]
     public function aTurnRowOrSummaryOfAnUnknownTicketIsRefused(): void
     {
@@ -344,7 +430,10 @@ final class TicketTableTest extends KernelTestCase
         ]);
     }
 
-    private function insertSummary(Connection $connection, string $ticketId, string $source): int|string
+    /**
+     * @param array<string, ?string> $change the columns that differ from a valid human summary
+     */
+    private function insertSummary(Connection $connection, string $ticketId, string $source, array $change = []): int|string
     {
         return $connection->insert('tkt_summary', [
             'organization_id' => self::ACME_FOODS,
@@ -354,6 +443,7 @@ final class TicketTableTest extends KernelTestCase
             'source' => $source,
             'is_current' => 'true',
             'created_at' => '2027-03-15 10:00:00+00',
+            ...$change,
         ]);
     }
 

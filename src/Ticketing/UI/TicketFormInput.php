@@ -28,6 +28,25 @@ final readonly class TicketFormInput
     ) {
     }
 
+    /**
+     * The radio groups, of "type" and "priority", that hold a value the form offers other than their default: in a
+     * refused form shown again they are the person's own picks, which Assist's check does not change.
+     *
+     * @return list<string>
+     */
+    public function personPickedFields(): array
+    {
+        $personPicked = [];
+        if (NewTicketController::DEFAULT_TYPE !== $this->type && \array_key_exists($this->type, NewTicketController::TYPE_LABELS)) {
+            $personPicked[] = NewTicketController::TYPE_FIELD;
+        }
+        if (NewTicketController::DEFAULT_PRIORITY !== $this->priority && \array_key_exists($this->priority, NewTicketController::PRIORITY_LABELS)) {
+            $personPicked[] = NewTicketController::PRIORITY_FIELD;
+        }
+
+        return $personPicked;
+    }
+
     public static function fromRequest(Request $request): self
     {
         // Read raw rather than with getString or all($key), which answer 400 to an array or a string where the other

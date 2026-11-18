@@ -828,8 +828,10 @@ final class TicketListTest extends WebTestCase
         // The rail's three and the menu's team names, which match the rail's.
         self::assertSame([4, 0], [self::countMatching(self::RAIL_QUERIES, $pageQueries), self::countMatching(self::RAIL_QUERIES, $frameQueries)]);
         self::assertSame([1, 1], [self::countMatching('/FROM idn_user WHERE id = ANY/', $pageQueries), self::countMatching('/FROM idn_user WHERE id = ANY/', $frameQueries)]);
-        // The menu's team names and the rail's three.
-        self::assertCount(\count($pageQueries) - 4, $frameQueries);
+        // The header's Local AI chip reads the AI settings; a frame has no header.
+        self::assertSame([1, 0], [self::countMatching("/data->'ai'/", $pageQueries), self::countMatching("/data->'ai'/", $frameQueries)]);
+        // The menu's team names, the rail's three and the chip's AI settings.
+        self::assertCount(\count($pageQueries) - 5, $frameQueries);
     }
 
     /**

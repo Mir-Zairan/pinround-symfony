@@ -148,6 +148,8 @@ final class LoginConfigTest extends TestCase
                 'two_step_code_per_user' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.two_step_code_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'media_upload_begin_per_user' => ['policy' => 'fixed_window', 'limit' => 60, 'interval' => '%media.upload_begin_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'media_upload_status_per_user' => ['policy' => 'fixed_window', 'limit' => 120, 'interval' => '%media.upload_status_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'ai_calls_per_user' => ['policy' => 'fixed_window', 'limit' => 30, 'interval' => '60 minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'ai_laptop_per_user' => ['policy' => 'fixed_window', 'limit' => 30, 'interval' => '1 minute', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
             ],
             self::at($rateLimiter, 'framework', 'rate_limiter'),
         );

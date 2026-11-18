@@ -10,16 +10,17 @@ use App\Organization\Api\Event\MemberInvited;
 use App\Organization\Api\Event\MemberJoined;
 use App\Organization\Api\Event\OrganizationEvent;
 use App\Organization\Api\Event\OrgRolesChanged;
+use App\Organization\Api\Event\SettingsChanged;
 use App\Organization\Api\Event\TeamCreated;
 use App\Organization\Api\Event\TeamRoleChanged;
 use App\SharedKernel\Application\OnceOnlyHandling;
 use App\SharedKernel\Domain\OrganizationId;
 
 /**
- * Writes one aud_event row per Organization event (ADR-0026: role and membership changes, team changes), once per
+ * Writes one aud_event row per Organization event (ADR-0026: role and membership changes, team changes, settings changes), once per
  * message however often it is delivered. It runs in worker-notify on event.bus (config/services.yaml), in the bus's
  * transaction under the event's organization, and keeps the event's time. The data of each action holds exactly the
- * keys of DATA_KEYS, ids and role values, and requireAllowListedData() refuses any other.
+ * keys of DATA_KEYS, ids, role values and setting values, and requireAllowListedData() refuses any other.
  */
 final readonly class RecordOrganizationAuditEntry
 {
@@ -34,6 +35,8 @@ final readonly class RecordOrganizationAuditEntry
         'org_roles.changed' => ['from', 'to'],
         'team.created' => ['lead_user_id'],
         'team_role.changed' => ['team_id', 'from', 'to'],
+        // The setting's path and its values; SettingsChanged never carries a secret.
+        'settings.changed' => ['setting', 'from', 'to'],
     ];
 
     public function __construct(private OnceOnlyHandling $onceOnlyHandling, private AuditLog $auditLog)
@@ -60,6 +63,7 @@ final readonly class RecordOrganizationAuditEntry
             $event instanceof OrgRolesChanged => ['org_roles.changed', 'user', $event->userId, ['from' => $event->orgRolesBefore, 'to' => $event->orgRolesAfter]],
             $event instanceof TeamCreated => ['team.created', 'team', $event->teamId, ['lead_user_id' => $event->leadUserId]],
             $event instanceof TeamRoleChanged => ['team_role.changed', 'user', $event->userId, ['team_id' => $event->teamId, 'from' => $event->teamRoleBefore, 'to' => $event->teamRoleAfter]],
+            $event instanceof SettingsChanged => ['settings.changed', 'organization', $event->organizationId, ['setting' => $event->setting, 'from' => $event->settingBefore, 'to' => $event->settingAfter]],
             default => throw new \LogicException(\sprintf('"%s" has no audit action.', $event::class)),
         };
         $allowListedValues = self::requireAllowListedData($action, $idsAndRoleValues);

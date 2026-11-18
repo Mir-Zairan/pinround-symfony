@@ -18,6 +18,9 @@ parameters:
     # What each organization may store when MEDIA_ORG_QUOTA_BYTES is unset or empty: 50 GiB, the SaaS default of
     # media-pipeline.md (Quotas). A self-hosted install sets 0 for no limit.
     media.organization_quota_default_bytes: 53687091200
+    # How long SymfonyAiProvider waits on a provider when AI_PROVIDER_TIMEOUT_SECONDS is unset or empty, both for the
+    # next byte and for the whole answer, so a hung provider cannot hold an async_ai worker.
+    assist.ai_provider_timeout_default_seconds: 30
     # The routes a logged-in user may open before choosing an organization (EnterChosenOrganization); every other one
     # sends a user without a chosen organization to the picker. Deny by default: a new route is not in this list.
     organization.routes_without_organization:
@@ -205,6 +208,10 @@ services:
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
     App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
     App\Ticketing\Api\AssigneeTicketCounts: '@App\Ticketing\Infrastructure\Doctrine\DbalAssigneeTicketCounts'
+    App\Ticketing\Api\TicketSummaryQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketSummaryQueries'
+    App\Ticketing\Api\TicketSummaryCommands: '@App\Ticketing\Application\CheckedTicketSummaryCommands'
+    App\Ticketing\Api\DraftReportChecks: '@App\Ticketing\Application\Intake\WordListDraftReportChecks'
+    App\Ticketing\Api\IntakeCandidateQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalIntakeCandidateQueries'
     # Ticketing's port that Review implements, so a move asks about the mover's draft round without depending on Review.
     App\Ticketing\Api\ShareDraftQuestion: '@App\Review\Application\RoundShareDraftQuestion'
     # Ticketing's port that Review implements, so the ticket's history names a Review event's pin and area.
@@ -215,6 +222,24 @@ services:
     App\Insight\Api\WaitingTurnCounts: '@App\Insight\Infrastructure\Doctrine\DbalWaitingTurnCounts'
     App\Insight\Api\HomeQueries: '@App\Insight\Application\HomeQueriesService'
     App\Insight\Application\WhoseTurnRows: '@App\Insight\Infrastructure\Doctrine\DbalWhoseTurnRows'
+    # Server-side AI goes through Symfony AI (ADR-0018); the test env binds FakeProvider below.
+    App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\SymfonyAiProvider'
+    # The one door to server-side AI; nothing else calls AiProvider.
+    App\Assist\Application\AiGateway: '@App\Assist\Application\Gateway\GuardedAiGateway'
+    # "Summarize with AI": the request state on the state Valkey, the job on async_ai.
+    App\Assist\Api\Summaries: '@App\Assist\Application\Summaries\QueuedSummaries'
+    App\Assist\Application\Summaries\SummaryRequests: '@App\Assist\Infrastructure\Valkey\ValkeySummaryRequests'
+    App\Assist\Application\Summaries\SummaryJobQueue: '@App\Assist\Infrastructure\Messenger\MessengerSummaryJobQueue'
+    # "Check with AI": the check's state and its draft on the state Valkey, the job on async_ai, the suggestion in ast_suggestion.
+    App\Assist\Api\IntakeAssist: '@App\Assist\Application\IntakeAssistService'
+    App\Assist\Application\Intake\IntakeRequests: '@App\Assist\Infrastructure\Valkey\ValkeyIntakeRequests'
+    App\Assist\Application\Intake\IntakeCheckIds: '@App\Assist\Infrastructure\Uid\UuidV7IntakeCheckIds'
+    App\Assist\Application\Intake\IntakeJobQueue: '@App\Assist\Infrastructure\Messenger\MessengerIntakeJobQueue'
+    App\Assist\Application\Suggestions: '@App\Assist\Infrastructure\Doctrine\DbalSuggestions'
+    # Laptop AI: the prompt packages and the laptops' results in ast_local_package; no provider call.
+    App\Assist\Api\LocalAi: '@App\Assist\Application\LocalAiService'
+    App\Assist\Application\LocalAi\LocalPackages: '@App\Assist\Infrastructure\Doctrine\DbalLocalPackages'
+    App\Assist\Application\LocalAi\LocalPackageIds: '@App\Assist\Infrastructure\Uid\UuidV7LocalPackageIds'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -307,6 +332,21 @@ when@test:
         # PersonPickerCountsLeakTest reads the person picker's counts as the picker gets them.
         test.ticketing_assignee_ticket_counts:
             alias: App\Ticketing\Api\AssigneeTicketCounts
+            public: true
+        # No page shows a ticket's summaries before P08's summary card; DbalTicketSummaryQueriesTest gets it as a page would.
+        test.ticketing_ticket_summary_queries:
+            alias: App\Ticketing\Api\TicketSummaryQueries
+            public: true
+        # GenerateSummaryHandler inlines it; TicketSummaryCommandsTest calls it as that handler does.
+        test.ticketing_ticket_summary_commands:
+            alias: App\Ticketing\Api\TicketSummaryCommands
+            public: true
+        # AiTaskAdmission inlines both for a draft report; the intake tests get them as it does.
+        test.ticketing_draft_report_checks:
+            alias: App\Ticketing\Api\DraftReportChecks
+            public: true
+        test.ticketing_intake_candidate_queries:
+            alias: App\Ticketing\Api\IntakeCandidateQueries
             public: true
         test.insight_turn_user_queries:
             alias: App\Insight\Api\TurnUserQueries
@@ -420,6 +460,62 @@ when@test:
         App\Tests\Fixtures\Media\FakeImageEncoder:
             public: true
         App\Media\Application\Processing\ImageEncoder: '@App\Tests\Fixtures\Media\FakeImageEncoder'
+        # No test may call a real AI provider, so the port gets the deterministic one; public so a test can arm a
+        # failure and read the calls. autoconfigure keeps it tagged as resettable, so each kernel reset empties it.
+        App\Assist\Infrastructure\Platform\FakeProvider:
+            autoconfigure: true
+            public: true
+        App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\FakeProvider'
+        # The gateway inlines the port; FakeProviderWiringTest and the gateway tests read the fake through it.
+        test.assist_ai_provider:
+            alias: App\Assist\Application\AiProvider
+            public: true
+        # Nothing takes the real provider in the test env; AiProviderWiringTest builds it as dev and prod do.
+        test.assist_symfony_ai_provider:
+            alias: App\Assist\Infrastructure\Platform\SymfonyAiProvider
+            public: true
+        # The gateway inlines the limit; AiCallLimitContainerTest and the gateway tests count through it.
+        test.assist_ai_call_limit:
+            alias: App\Assist\Application\AiCallLimit
+            public: true
+        # GenerateSummaryHandler inlines the gateway; the gateway tests call it as that handler does.
+        test.assist_ai_gateway:
+            alias: App\Assist\Application\AiGateway
+            public: true
+        # No page queues a summary before the ticket page's button (P08.T4); the summary tests get the Api as it will,
+        # and read the request state through its port.
+        test.assist_summaries:
+            alias: App\Assist\Api\Summaries
+            public: true
+        test.assist_summary_requests:
+            alias: App\Assist\Application\Summaries\SummaryRequests
+            public: true
+        # QueuedSummaries inlines both; QueuedSummariesTest builds it by hand with a queue that fails.
+        test.assist_ai_requesters:
+            alias: App\Assist\Application\AiRequesters
+            public: true
+        test.assist_ai_task_admission:
+            alias: App\Assist\Application\Gateway\AiTaskAdmission
+            public: true
+        # No page checks a draft before the report page's button (P08.T7, task 10); the intake tests get the Api as it
+        # will, and read the check's state and the stored suggestions through their ports.
+        test.assist_intake_assist:
+            alias: App\Assist\Api\IntakeAssist
+            public: true
+        test.assist_intake_requests:
+            alias: App\Assist\Application\Intake\IntakeRequests
+            public: true
+        test.assist_suggestions:
+            alias: App\Assist\Application\Suggestions
+            public: true
+        # No route takes a laptop package or result before LaptopController's two (P08.T9, task 12b); the laptop tests
+        # get the Api as it will, and the store through its port.
+        test.assist_local_ai:
+            alias: App\Assist\Api\LocalAi
+            public: true
+        test.assist_local_packages:
+            alias: App\Assist\Application\LocalAi\LocalPackages
+            public: true
         # No route asks, answers or withdraws a question before the thread's controllers (P04 Q4); the question tests
         # get the use cases as a controller would.
         test.conversation_ask_question:
