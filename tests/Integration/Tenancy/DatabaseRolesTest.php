@@ -652,6 +652,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX ast_local_package_pkey ON public.ast_local_package USING btree (organization_id, id)',
                 'CREATE INDEX ast_local_package_user_id_expires_at_idx ON public.ast_local_package USING btree (organization_id, user_id, expires_at)',
                 'CREATE UNIQUE INDEX ast_local_package_id_key ON public.ast_local_package USING btree (id)',
+                'CREATE INDEX ast_local_package_ticket_id_used_at_idx ON public.ast_local_package USING btree (organization_id, ticket_id, used_at DESC) WHERE ((used_at IS NOT NULL) AND (made_main_at IS NULL))',
             ],
             $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'ast_local_package'"),
         );
@@ -663,6 +664,8 @@ final class DatabaseRolesTest extends KernelTestCase
                 'ast_local_package_result_text_check CHECK (((char_length(result_text) >= 1) AND (char_length(result_text) <= 10000)))',
                 "ast_local_package_model_check CHECK ((model ~ '^[a-z0-9:._-]{1,64}$'::text))",
                 'ast_local_package_result_check CHECK ((((used_at IS NULL) = (result_text IS NULL)) AND ((used_at IS NULL) = (model IS NULL))))',
+                'ast_local_package_result_label_check CHECK ((((used_at IS NULL) = (result_label IS NULL)) AND ((char_length(result_label) >= 1) AND (char_length(result_label) <= 400))))',
+                'ast_local_package_made_main_at_check CHECK (((made_main_at IS NULL) OR (used_at IS NOT NULL)))',
                 'ast_local_package_pkey PRIMARY KEY (organization_id, id)',
             ],
             $connection->fetchFirstColumn(
