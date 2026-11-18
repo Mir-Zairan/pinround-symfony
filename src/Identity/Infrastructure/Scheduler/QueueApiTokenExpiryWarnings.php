@@ -15,8 +15,8 @@ use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Scheduler\Attribute\AsPeriodicTask;
 
 /**
- * Once a day, sends one SendApiTokenExpiryWarnings per organization with a live token that expires in about a week and
- * was not warned yet (P09.T1). It runs with no tenant set, so it finds those organizations through the resolver
+ * Once a day, sends one SendApiTokenExpiryWarnings per organization with a live token that expires within the next 8
+ * days and was not warned yet (P09.T1; SendApiTokenExpiryWarnings::expiryRangeAfter). It runs with no tenant set, so it finds those organizations through the resolver
  * organizations_with_expiring_api_tokens (data-model.md); each message carries its organization's TenantStamp, and
  * SendApiTokenExpiryWarningsHandler claims and emails under that organization's policy. Past the cap the order is
  * shuffled per run, so the organizations left out are not the same ones every run.

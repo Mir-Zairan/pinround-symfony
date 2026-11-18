@@ -138,7 +138,7 @@ Alerts (page someone): error rate > 2% for 5 minutes; `notify` queue oldest mess
 
 ## Scheduled jobs
 
-Symfony Scheduler, run by the `scheduler` service. Each job is idempotent and uses a Lock so only one instance runs.
+Symfony Scheduler, run by the `scheduler` service. Each job is idempotent. Every job is on the `default` schedule (`SharedKernel\Infrastructure\Scheduler\DefaultSchedule`), which keeps when each job last ran in the pool `cache.scheduler` on the state Valkey (stateful) and holds the lock `scheduler_default` there, so only one scheduler worker runs it. The worker restarts every hour (`--time-limit=3600`), and a periodic job counts its period from when the schedule first ran: without the kept state a daily job would never fire. After a stop, each job runs once for the runs it missed (`processOnlyLastMissedRun`). Unit and integration `DefaultScheduleTest` pin this.
 
 | Job | When | What |
 |---|---|---|

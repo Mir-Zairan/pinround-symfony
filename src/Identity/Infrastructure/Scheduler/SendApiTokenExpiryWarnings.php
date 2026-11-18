@@ -11,7 +11,7 @@ namespace App\Identity\Infrastructure\Scheduler;
  */
 final readonly class SendApiTokenExpiryWarnings
 {
-    /** A token is warned when it expires from this many days after the run up to one day later. */
+    /** A token is warned by the daily run that finds it expiring in under this many days and one more. */
     public const int WARNING_DAYS_AHEAD = 7;
 
     /**
@@ -22,17 +22,15 @@ final readonly class SendApiTokenExpiryWarnings
     }
 
     /**
-     * The expiry range of the tokens a run at $ranAt warns: from WARNING_DAYS_AHEAD days after it, up to but not
-     * including a day later. Runs at most a day apart leave no expiry out; the ranges of two runs closer than that
-     * overlap, which the once-only claim makes harmless.
+     * The expiry range of the tokens a run at $ranAt warns: from $ranAt up to but not including WARNING_DAYS_AHEAD
+     * days and one more after it. Daily runs warn each token 7 to 8 days ahead; after a missed run, the next one still
+     * warns the tokens it left out, late. Ranges overlap, which the once-only claim makes harmless.
      *
      * @return array{\DateTimeImmutable, \DateTimeImmutable} the start and the end of the range
      */
     public static function expiryRangeAfter(\DateTimeImmutable $ranAt): array
     {
-        $expiresFrom = $ranAt->modify(\sprintf('+%d days', self::WARNING_DAYS_AHEAD));
-
-        return [$expiresFrom, $expiresFrom->modify('+1 day')];
+        return [$ranAt, $ranAt->modify(\sprintf('+%d days', self::WARNING_DAYS_AHEAD + 1))];
     }
 
     /**
