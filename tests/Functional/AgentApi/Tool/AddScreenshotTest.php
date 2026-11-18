@@ -245,6 +245,32 @@ final class AddScreenshotTest extends WebTestCase
         self::assertSame([$this->toolRow('Omar', $tokenId, 'round', $this->omarsSharedDraft, 'read_only')], $this->toolRowsOf($this->acmeFoods));
     }
 
+    /**
+     * SHOP-1 moves to Mobile, for that team only, and to Lena: Omar is in no role of Mobile and no longer involved, so
+     * he may not see it. RoundPermission EDIT still grants him his own unshared draft without reading the ticket, so
+     * add_screenshot asks TicketPermission VIEW itself and answers as for an unknown key, before the upload is completed.
+     */
+    #[Test]
+    public function theOwnersDraftOnATicketTheyMayNoLongerSeeIsNotFoundAndNothingIsWrittenOrCompleted(): void
+    {
+        $uploadId = $this->addOpenUpload('Omar', $this->omarsDraft);
+        $parameters = [$this->mobile->toString(), $this->people['Lena']->id()->toString(), $this->acmeFoods->toString(), $this->ticketId];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET team_id = ?, visibility = 'team', assignee_id = ? WHERE organization_id = ? AND id = ?",
+            $parameters,
+        ));
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $before = $this->stored();
+
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE]);
+
+        $this->assertRefused(ToolRefusal::NOT_FOUND);
+        self::assertSame($before, $this->stored());
+        self::assertSame([['id' => $uploadId, 'used_at' => null]], $this->intentsOf($this->acmeFoods));
+        self::assertSame([], $this->picturesOf($uploadId));
+        self::assertSame([$this->toolRow('Omar', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found')], $this->toolRowsOf($this->acmeFoods));
+    }
+
     #[Test]
     public function aTokenWithoutRoundsWriteGetsMissingScopeAndNothingIsWritten(): void
     {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -24,14 +25,20 @@ use App\Review\Api\RoundRefused;
 use App\Review\Api\RoundView;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
+use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use Mcp\Capability\Discovery\SchemaValidator;
 use Mcp\Schema\Content\TextContent;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Security\Core\Authorization\AccessDecision;
+use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
  * add_screenshot over fakes of Media's, Review's and Ticketing's Api: its input schema as the gate's SchemaValidator
@@ -68,6 +75,7 @@ final class AddScreenshotTest extends TestCase
     private KnownDraftRounds $rounds;
     private ScriptedUploadCompletions $uploads;
     private RecordingDraftScreenshots $draftScreenshots;
+    private bool $isTicketHidden = false;
 
     protected function setUp(): void
     {
@@ -229,6 +237,23 @@ final class AddScreenshotTest extends TestCase
         self::assertSame(ToolCallOutcome::NotFound, $refusal->outcome);
         self::assertSame(ToolRefusal::NOT_FOUND, $refusal->getMessage());
         self::assertSame([], $this->uploads->completions);
+    }
+
+    /**
+     * RoundPermission EDIT grants Omar his own unshared draft without reading the ticket, so the tool asks
+     * TicketPermission VIEW before it looks the upload up.
+     */
+    #[Test]
+    public function theOwnersReadyUploadOnATicketHeMayNotSeeIsNotFoundAndNothingIsCompleted(): void
+    {
+        $this->isTicketHidden = true;
+
+        $refusal = self::refusalOf(fn () => $this->addScreenshot()->targetOf(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD]));
+
+        self::assertSame(ToolCallOutcome::NotFound, $refusal->outcome);
+        self::assertSame(ToolRefusal::NOT_FOUND, $refusal->getMessage());
+        self::assertSame([], $this->uploads->completions);
+        $this->assertNothingChanged();
     }
 
     #[Test]
@@ -408,12 +433,6 @@ final class AddScreenshotTest extends TestCase
     private function addScreenshot(): AddScreenshot
     {
         return new AddScreenshot(
-            new class implements CurrentApiToken {
-                public function access(): ApiTokenAccess
-                {
-                    return new ApiTokenAccess('019a5f00-0000-7000-8000-00000000e781', new OrganizationId(AddScreenshotTest::ACME_FOODS), ['read', 'rounds:write'], new \DateTimeImmutable('2027-02-08 09:00:00 UTC'));
-                }
-            },
             new class implements CurrentUser {
                 public function id(): UserId
                 {
@@ -439,6 +458,30 @@ final class AddScreenshotTest extends TestCase
                     return null === $ticketId ? null : new TicketId($ticketId);
                 }
             },
+            new TicketVisibilityCheck(
+                new class implements CurrentApiToken {
+                    public function access(): ApiTokenAccess
+                    {
+                        return new ApiTokenAccess('019a5f00-0000-7000-8000-00000000e781', new OrganizationId(AddScreenshotTest::ACME_FOODS), ['read', 'rounds:write'], new \DateTimeImmutable('2027-02-08 09:00:00 UTC'));
+                    }
+                },
+                new class implements TicketTurnQueries {
+                    public function factsOf(TicketId $ticketId): TicketTurnSnapshot
+                    {
+                        return new TicketTurnSnapshot($ticketId, '019a5f00-0000-7000-8000-00000000e791', '019a5f00-0000-7000-8000-00000000e792', 'todo', 'todo', null, null, null, [], [], TicketVisibilityFacts::TEAM_ONLY, 'major', null, new UserId(AddScreenshotTest::OMAR));
+                    }
+                },
+                new readonly class($this->isTicketHidden) implements AuthorizationCheckerInterface {
+                    public function __construct(private bool $isTicketHidden)
+                    {
+                    }
+
+                    public function isGranted(mixed $attribute, mixed $subject = null, ?AccessDecision $accessDecision = null): bool
+                    {
+                        return TicketPermission::VIEW === $attribute && $subject instanceof TicketVisibilityFacts && !$this->isTicketHidden;
+                    }
+                },
+            ),
             $this->uploads,
             $this->rounds,
             $this->draftScreenshots,

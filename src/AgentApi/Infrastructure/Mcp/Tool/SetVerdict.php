@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
-use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Review\Api\CheckItemAccessFacts;
 use App\Review\Api\ChecklistCommands;
@@ -19,19 +19,14 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
-use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
-use App\Ticketing\Api\TicketPermission;
-use App\Ticketing\Api\TicketTurnQueries;
-use App\Ticketing\Api\TicketVisibilityFacts;
 use Mcp\Schema\Content\TextContent;
 use Mcp\Schema\Result\CallToolResult;
 use Mcp\Schema\Tool;
 use Mcp\Schema\ToolAnnotations;
 use Psr\Clock\ClockInterface;
-use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
  * set_verdict (FR-MCP-06, P09.T4): "Looks right" or "Not right yet", and optionally the summary, on a screenshot of the
@@ -64,15 +59,13 @@ final readonly class SetVerdict implements AgentTool
     private const int MAX_KEY_OR_ID_LENGTH = 64;
 
     public function __construct(
-        private CurrentApiToken $currentApiToken,
         private CurrentUser $currentUser,
         private TicketKeyQueries $ticketKeyQueries,
-        private TicketTurnQueries $ticketTurnQueries,
+        private TicketVisibilityCheck $ticketVisibilityCheck,
         private RoundQueries $roundQueries,
         private RoundCommands $roundCommands,
         private ChecklistQueries $checklistQueries,
         private ChecklistCommands $checklistCommands,
-        private AuthorizationCheckerInterface $authorizationChecker,
         private ClockInterface $clock,
     ) {
     }
@@ -177,25 +170,11 @@ final readonly class SetVerdict implements AgentTool
      */
     private function screenshotTargetOf(TicketId $ticketId, string $screenshotId): ToolTarget
     {
-        $this->refuseUnlessTicketVisible($ticketId);
+        $this->ticketVisibilityCheck->refuseUnlessVisible($ticketId);
         $draft = $this->roundQueries->draftScreenshotOf($ticketId, $screenshotId) ?? throw ToolRefusal::notFound();
 
         // The lookup found it, so the id is a UUID, which Review keeps in lowercase.
         return new ToolTarget($draft->isUnsharedDraft ? RoundPermission::EDIT : RoundPermission::VIEW, $draft, self::SCREENSHOT_AUDIT_TYPE, strtolower($screenshotId));
-    }
-
-    /**
-     * RoundPermission grants an unshared draft to its owner without reading the ticket, so the ticket is asked here,
-     * as get_round_notes asks it, before the draft is looked up.
-     *
-     * @throws ToolRefusal not found, for a ticket Ticketing does not read or TicketPermission VIEW denies
-     */
-    private function refuseUnlessTicketVisible(TicketId $ticketId): void
-    {
-        $ticket = $this->ticketTurnQueries->factsOf($ticketId) ?? throw ToolRefusal::notFound();
-        if (!$this->authorizationChecker->isGranted(TicketPermission::VIEW, TicketVisibilityFacts::ofSnapshot($this->organizationId(), $ticket))) {
-            throw ToolRefusal::notFound();
-        }
     }
 
     /**
@@ -268,16 +247,6 @@ final readonly class SetVerdict implements AgentTool
             [new TextContent(json_encode($answer, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE))],
             structuredContent: $answer,
         );
-    }
-
-    /**
-     * @throws \LogicException when the request has no token, which the api_token firewall never lets through
-     */
-    private function organizationId(): OrganizationId
-    {
-        $access = $this->currentApiToken->access() ?? throw new \LogicException('set_verdict ran without a personal access token.');
-
-        return $access->organizationId;
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\Tool\SetVerdict;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -466,12 +467,6 @@ final class SetVerdictTest extends TestCase
     private function setVerdict(): SetVerdict
     {
         return new SetVerdict(
-            new class implements CurrentApiToken {
-                public function access(): ApiTokenAccess
-                {
-                    return new ApiTokenAccess('019a5f00-0000-7000-8000-00000000e611', new OrganizationId(SetVerdictTest::ACME_FOODS), ['rounds:write'], new \DateTimeImmutable('2027-01-01 00:00 UTC'));
-                }
-            },
             new class implements CurrentUser {
                 public function id(): UserId
                 {
@@ -497,20 +492,7 @@ final class SetVerdictTest extends TestCase
                     return null === $ticketId ? null : new TicketId($ticketId);
                 }
             },
-            new readonly class($this->isTicketUnreadable) implements TicketTurnQueries {
-                public function __construct(private bool $isTicketUnreadable)
-                {
-                }
-
-                public function factsOf(TicketId $ticketId): ?TicketTurnSnapshot
-                {
-                    if ($this->isTicketUnreadable) {
-                        return null;
-                    }
-
-                    return new TicketTurnSnapshot($ticketId, '019a5f00-0000-7000-8000-00000000e681', '019a5f00-0000-7000-8000-00000000e682', 'todo', 'todo', null, null, null, [], [], TicketVisibilityFacts::TEAM_ONLY, 'major', null, new UserId(SetVerdictTest::OMAR));
-                }
-            },
+            $this->ticketVisibilityCheck(),
             $this->rounds,
             $this->roundCommands,
             // Any case of the id, as the real query reads it.
@@ -528,6 +510,33 @@ final class SetVerdictTest extends TestCase
                 }
             },
             $this->checklistMarks,
+            new MockClock(self::NOW),
+        );
+    }
+
+    private function ticketVisibilityCheck(): TicketVisibilityCheck
+    {
+        return new TicketVisibilityCheck(
+            new class implements CurrentApiToken {
+                public function access(): ApiTokenAccess
+                {
+                    return new ApiTokenAccess('019a5f00-0000-7000-8000-00000000e611', new OrganizationId(SetVerdictTest::ACME_FOODS), ['rounds:write'], new \DateTimeImmutable('2027-01-01 00:00 UTC'));
+                }
+            },
+            new readonly class($this->isTicketUnreadable) implements TicketTurnQueries {
+                public function __construct(private bool $isTicketUnreadable)
+                {
+                }
+
+                public function factsOf(TicketId $ticketId): ?TicketTurnSnapshot
+                {
+                    if ($this->isTicketUnreadable) {
+                        return null;
+                    }
+
+                    return new TicketTurnSnapshot($ticketId, '019a5f00-0000-7000-8000-00000000e681', '019a5f00-0000-7000-8000-00000000e682', 'todo', 'todo', null, null, null, [], [], TicketVisibilityFacts::TEAM_ONLY, 'major', null, new UserId(SetVerdictTest::OMAR));
+                }
+            },
             new readonly class($this->isTicketHidden, $this->ticketViewsAsked) implements AuthorizationCheckerInterface {
                 /**
                  * @param \ArrayObject<int, TicketVisibilityFacts> $ticketViewsAsked
@@ -546,7 +555,6 @@ final class SetVerdictTest extends TestCase
                     return !$this->isTicketHidden;
                 }
             },
-            new MockClock(self::NOW),
         );
     }
 }
