@@ -30,6 +30,7 @@ final class PolicyEvaluatorTest extends TestCase
     private const string LAPTOP_NOT_READY = 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.';
     private const string SECURITY_SENSITIVE_DRAFT = 'This report mentions security, so it stays out of cloud AI.';
     private const string CLOUD_ONLY = 'Your admin runs AI help in the company cloud, not on laptops.';
+    private const string INTAKE_NOT_ON_LAPTOP = 'Your company runs AI on laptops, and Check with AI does not run there yet.';
 
     /**
      * Each row: the settings (on, leads only, where, restricted tickets to cloud, title only), the viewer, can see the
@@ -147,7 +148,27 @@ final class PolicyEvaluatorTest extends TestCase
     {
         $sentences = array_map(static fn (PolicyRefusal $refusal): string => $refusal->sentence(), PolicyRefusal::cases());
 
-        self::assertSame([self::AI_OFF, self::LEADS_ONLY, self::CANNOT_SEE, self::RESTRICTED, self::LAPTOP_NOT_READY, self::SECURITY_SENSITIVE_DRAFT, self::CLOUD_ONLY], $sentences);
+        self::assertSame([self::AI_OFF, self::LEADS_ONLY, self::CANNOT_SEE, self::RESTRICTED, self::LAPTOP_NOT_READY, self::SECURITY_SENSITIVE_DRAFT, self::CLOUD_ONLY, self::INTAKE_NOT_ON_LAPTOP], $sentences);
+    }
+
+    #[Test]
+    public function aDraftIsRefusedWithoutTheLaptopSetupAdviceAndOtherwiseForTheSameReason(): void
+    {
+        $draftRefusals = [];
+        foreach (PolicyRefusal::cases() as $refusal) {
+            $draftRefusals[$refusal->value] = $refusal->forDraft()->value;
+        }
+
+        self::assertSame([
+            'ai_off' => 'ai_off',
+            'leads_only' => 'leads_only',
+            'cannot_see_ticket' => 'cannot_see_ticket',
+            'restricted_ticket_to_cloud' => 'restricted_ticket_to_cloud',
+            'laptop_not_ready' => 'intake_not_on_laptop',
+            'security_sensitive_draft_to_cloud' => 'security_sensitive_draft_to_cloud',
+            'cloud_only' => 'cloud_only',
+            'intake_not_on_laptop' => 'intake_not_on_laptop',
+        ], $draftRefusals);
     }
 
     private static function viewer(string $who): ActorContext

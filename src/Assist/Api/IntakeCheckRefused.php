@@ -37,8 +37,8 @@ final class IntakeCheckRefused extends \DomainException
     public const string SECURITY_SENSITIVE_DRAFT_TO_CLOUD = 'security_sensitive_draft_to_cloud';
 
     /**
-     * @param string $refusalCode a PolicyView refusal code (ai_off, leads_only, laptop_not_ready,
-     *                            security_sensitive_draft_to_cloud) or one of this class's codes
+     * @param string $refusalCode a PolicyView refusal code (ai_off, leads_only,
+     *                            security_sensitive_draft_to_cloud, intake_not_on_laptop) or one of this class's codes
      * @param string $sentence    the line shown where the button is
      */
     public function __construct(public readonly string $refusalCode, string $sentence)

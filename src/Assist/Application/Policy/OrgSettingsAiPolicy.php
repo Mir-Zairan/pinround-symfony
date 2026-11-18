@@ -55,7 +55,9 @@ final readonly class OrgSettingsAiPolicy implements AiPolicy
     public function serverDraftRefusalOf(PolicyView $policy): ?string
     {
         // AiTaskAdmission decides a draft as a ticket that is not team-only.
-        return $this->serverTicketRefusalOf($policy, isTicketTeamOnly: false);
+        return $policy->refusalSentence ?? $this->policyEvaluator
+            ->decideRoute($policy->whereAiRuns, $policy->isRestrictedToCloudAllowed, $policy->isTitleOnly, isTicketRestricted: false, isLaptopReady: false)
+            ->refusal?->forDraft()->sentence();
     }
 
     private function viewOf(AiSettings $settings, ?PolicyRefusal $refusal): PolicyView

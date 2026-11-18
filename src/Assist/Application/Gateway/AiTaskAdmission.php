@@ -26,8 +26,8 @@ use App\Ticketing\Api\TicketVisibilities;
  * that queues a task asks it first, so the person is refused up front for the same reason the gateway would give.
  *
  * The server never sends to a laptop, so the policy is decided with the laptop not ready: "laptop first" goes to the
- * cloud here, and "laptop" only refuses with the setup sheet's line. Nothing here calls a provider, meters or counts
- * against the person's limit.
+ * cloud here, and "laptop" only refuses a ticket with the setup sheet's line and a draft with IntakeNotOnLaptop, as no
+ * laptop checks a draft yet. Nothing here calls a provider, meters or counts against the person's limit.
  *
  * A draft report has no ticket yet: the reporter wrote it, so they may see it, and it is not team-only. On the cloud
  * route its words decide first: a draft that mentions security never goes to cloud AI, whatever the admin's opt-in for
@@ -153,7 +153,7 @@ final readonly class AiTaskAdmission
     {
         $decision = $this->policyEvaluator->decide($settings, $viewer, canSeeTicket: true, isTicketRestricted: false, isLaptopReady: false);
         if (null !== $decision->refusal) {
-            throw new AiNotAllowed($decision->refusal);
+            throw new AiNotAllowed($decision->refusal->forDraft());
         }
         if (AiRoute::Cloud === $decision->route && $this->draftReportChecks->isSecuritySensitive($draft->title, $draft->detail, $draft->pinNotes)) {
             throw new AiNotAllowed(PolicyRefusal::SecuritySensitiveDraftToCloud);

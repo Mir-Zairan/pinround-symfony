@@ -216,8 +216,8 @@ final class AiTaskAdmissionTest extends TestCase
         $securityDraft = self::draft(title: 'Password reset mail never comes');
         yield 'a security draft, AI off' => [self::settings(isOn: false), $securityDraft, PolicyRefusal::AiOff];
         yield 'a security draft, leads only' => [self::settings(isForLeadsOnly: true), $securityDraft, PolicyRefusal::LeadsOnly];
-        yield 'a security draft, laptop AI only' => [self::settings(where: AiSettings::WHERE_LAPTOP), $securityDraft, PolicyRefusal::LaptopNotReady];
-        yield 'a plain draft, laptop AI only' => [self::settings(where: AiSettings::WHERE_LAPTOP), self::draft(), PolicyRefusal::LaptopNotReady];
+        yield 'a security draft, laptop AI only' => [self::settings(where: AiSettings::WHERE_LAPTOP), $securityDraft, PolicyRefusal::IntakeNotOnLaptop];
+        yield 'a plain draft, laptop AI only' => [self::settings(where: AiSettings::WHERE_LAPTOP), self::draft(), PolicyRefusal::IntakeNotOnLaptop];
         yield 'a security draft, team-only tickets allowed to cloud AI' => [self::settings(isRestrictedToCloudAllowed: true), $securityDraft, PolicyRefusal::SecuritySensitiveDraftToCloud];
         yield 'a security draft, laptop first' => [self::settings(where: AiSettings::WHERE_LAPTOP_FIRST), $securityDraft, PolicyRefusal::SecuritySensitiveDraftToCloud];
     }

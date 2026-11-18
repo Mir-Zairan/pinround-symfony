@@ -160,7 +160,7 @@ final class OrgSettingsAiPolicyTest extends TestCase
     {
         yield 'cloud AI that keeps team-only tickets from it, as a draft is not team-only' => [self::allowedView(), null];
         yield 'laptop first goes to the cloud on the server' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), null];
-        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.'];
+        yield 'laptop only, where no laptop checks a draft yet' => [self::allowedView(PolicyView::WHERE_LAPTOP), 'Your company runs AI on laptops, and Check with AI does not run there yet.'];
         yield 'AI off' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false), 'Your admin turned AI help off.'];
         yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false), 'Your admin allows AI help for leads only.'];
     }

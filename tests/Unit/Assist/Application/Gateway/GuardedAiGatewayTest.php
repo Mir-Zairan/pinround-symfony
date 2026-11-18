@@ -425,7 +425,7 @@ final class GuardedAiGatewayTest extends TestCase
     }
 
     #[Test]
-    public function aDraftWhenAiRunsOnlyOnTheLaptopIsSentToTheSetupSheetWithoutAProviderCallAUsageRowOrACountedCall(): void
+    public function aDraftWhenAiRunsOnlyOnTheLaptopIsRefusedWithoutSetupAdviceAProviderCallAUsageRowOrACountedCall(): void
     {
         $this->givenSettings(self::settings(where: AiSettings::WHERE_LAPTOP));
         $this->givenProviderScript([self::INTAKE_JSON]);
@@ -434,7 +434,10 @@ final class GuardedAiGatewayTest extends TestCase
             $this->gateway()->run(self::intakeOf(self::draft()), self::omar());
             self::fail('A draft went to cloud AI when AI runs only on the laptop.');
         } catch (AiNotAllowed $refusal) {
-            self::assertSame([PolicyRefusal::LaptopNotReady, PolicyRefusal::LaptopNotReady->sentence()], [$refusal->refusal, $refusal->getMessage()]);
+            self::assertSame(
+                [PolicyRefusal::IntakeNotOnLaptop, 'Your company runs AI on laptops, and Check with AI does not run there yet.'],
+                [$refusal->refusal, $refusal->getMessage()],
+            );
         }
 
         self::assertSame([[], [], [], [], []], [$this->provider->calls, $this->metering->rows, $this->limit->counted, $this->aiSettings->keyReads, $this->candidates->reads]);
