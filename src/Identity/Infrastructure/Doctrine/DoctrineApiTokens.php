@@ -34,7 +34,9 @@ final readonly class DoctrineApiTokens implements ApiTokens
     // rescan's FOR UPDATE skips the rows this statement already updated, so LIMIT would hand over the next ones too.
     private const string CLAIM_EXPIRY_WARNINGS = 'WITH picked AS MATERIALIZED ('
         .'SELECT c.id FROM idn_api_token c WHERE c.organization_id = ? AND c.revoked_at IS NULL AND c.expiry_warned_at IS NULL'
-        .' AND c.expires_at >= ? AND c.expires_at < ? ORDER BY c.expires_at, c.id LIMIT ? FOR UPDATE),'
+        .' AND c.expires_at >= ? AND c.expires_at < ?'
+        ." AND c.expires_at - c.created_at > interval '".ApiToken::EXPIRY_WARNING_WINDOW_DAYS." days'"
+        .' ORDER BY c.expires_at, c.id LIMIT ? FOR UPDATE),'
         .' claimed AS (UPDATE idn_api_token t SET expiry_warned_at = ? FROM picked'
         .' WHERE t.organization_id = ? AND t.expiry_warned_at IS NULL AND t.id = picked.id'
         .' RETURNING t.id, t.user_id, t.name, t.prefix, t.expires_at)'

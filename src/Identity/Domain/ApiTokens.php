@@ -111,8 +111,8 @@ interface ApiTokens
 
     /**
      * Marks up to $limit of the tenant's tokens as warned at $warnedAt, in one conditional statement: those neither
-     * revoked nor warned yet that expire in [$expiresFrom, $expiresBefore), the soonest to expire first (then the lower
-     * id). A token warned already is never returned again, so of two claims at once each token goes to one only. Writes
+     * revoked nor warned yet that expire in [$expiresFrom, $expiresBefore) and live longer than
+     * ApiToken::EXPIRY_WARNING_WINDOW_DAYS, the soonest to expire first (then the lower id). A token warned already is never returned again, so of two claims at once each token goes to one only. Writes
      * at once; a token already loaded keeps its old expiryWarnedAt.
      *
      * @param int $limit at least 1; the caller caps it

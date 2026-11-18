@@ -710,10 +710,10 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
-     * idn_api_token (Version20261119100000, Version20261119150000), a tenant table: the app reads and adds tokens and
-     * changes only the revocation, the last use and the expiry warning, never deletes; support reads under the tenant
-     * policy; resolve_api_token and organizations_with_expiring_api_tokens read only the ids, the hash, the two dates
-     * they check and the warning, never the name, prefix or scopes. Every index starts with the organization but the
+     * idn_api_token (Version20261119100000, Version20261119150000, Version20261119160000), a tenant table: the app reads
+     * and adds tokens and changes only the revocation, the last use and the expiry warning, never deletes; support
+     * reads under the tenant policy; resolve_api_token and organizations_with_expiring_api_tokens read only the ids,
+     * the hash, the three dates they check and the warning, never the name, prefix or scopes. Every index starts with the organization but the
      * token_hash key, which the resolver looks up before the organization is known.
      */
     #[Test]
@@ -734,7 +734,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 'pinround_app UPDATE last_used_at', 'pinround_app UPDATE revoked_at', 'pinround_app UPDATE expiry_warned_at',
                 'pinround_resolver SELECT id', 'pinround_resolver SELECT organization_id', 'pinround_resolver SELECT user_id',
                 'pinround_resolver SELECT token_hash', 'pinround_resolver SELECT expires_at', 'pinround_resolver SELECT revoked_at',
-                'pinround_resolver SELECT expiry_warned_at',
+                'pinround_resolver SELECT expiry_warned_at', 'pinround_resolver SELECT created_at',
             ],
             $connection->fetchFirstColumn(
                 "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname

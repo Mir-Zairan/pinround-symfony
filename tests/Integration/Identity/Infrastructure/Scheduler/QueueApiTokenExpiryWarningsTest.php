@@ -81,6 +81,10 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
     private const string CEDAR_IN_9_DAYS = '0197a3c0-0000-7000-8000-0000000e9a29';
     private const string OMAR_EXPIRED_AN_HOUR_AGO = '0197a3c0-0000-7000-8000-0000000e9a2a';
     private const string LENA_IN_1_DAY = '0197a3c0-0000-7000-8000-0000000e9a2b';
+    private const string OMAR_MADE_NOW_FOR_3_DAYS = '0197a3c0-0000-7000-8000-0000000e9a2c';
+    private const string OMAR_MADE_AN_HOUR_AGO_FOR_8_DAYS = '0197a3c0-0000-7000-8000-0000000e9a2d';
+    private const string OMAR_FOR_90_DAYS_WITH_3_LEFT = '0197a3c0-0000-7000-8000-0000000e9a2e';
+    private const string CEDAR_MADE_NOW_FOR_3_DAYS = '0197a3c0-0000-7000-8000-0000000e9a2f';
 
     private const string NOW = '2027-03-03 09:00:00 UTC';
     private const string RAN_AT = '2027-03-03T09:00:00+00:00';
@@ -177,6 +181,7 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
             $omarsText,
         );
         self::assertMatchesRegularExpression('#^https?://[^/\s]+/me/tokens$#m', $omarsText);
+        self::assertStringEndsWith("/me/tokens\n\nYou get this email once per token, before it stops working.\n", $omarsText);
         self::assertSame('Your pinround API token stops working soon', $emails[self::LENA_ADDRESS]->getSubject());
         $lenasText = $emails[self::LENA_ADDRESS]->getTextBody();
         self::assertIsString($lenasText);
@@ -198,6 +203,103 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
         );
         self::assertSame([self::LENA_AT_BETA => '2027-03-03 09:00:00'], $this->warnedAtOf(self::BETA_BAKERY));
         self::assertSame([self::CEDAR_IN_9_DAYS => null], $this->warnedAtOf(self::CEDAR_CAFE));
+    }
+
+    /** A run missed the Old laptop token a week out, so this one warns it with 3 days left: the email claims no week. */
+    #[Test]
+    public function aLateWarningWithThreeDaysLeftNamesTheTokensOwnEndAndNoTimeSpan(): void
+    {
+        $this->runTheJobForTheseOrganizations([self::ACME_FOODS, self::BETA_BAKERY]);
+
+        $omarsEmail = $this->emailsSent()[self::OMAR_ADDRESS];
+        $omarsText = $omarsEmail->getTextBody();
+        $omarsHtml = $omarsEmail->getHtmlBody();
+        self::assertIsString($omarsText);
+        self::assertIsString($omarsHtml);
+        self::assertStringContainsString('- Old laptop ('.$this->prefixes[self::OMAR_IN_3_DAYS].") works until 6 Mar 2027, 10:00 CET\n", $omarsText);
+        self::assertStringContainsString('<li>Old laptop ('.$this->prefixes[self::OMAR_IN_3_DAYS].') works until 6 Mar 2027, 10:00 CET</li>', $omarsHtml);
+        self::assertStringContainsString('<p>You get this email once per token, before it stops working.</p>', $omarsHtml);
+        foreach ([$omarsEmail->getSubject(), $omarsText, $omarsHtml] as $part) {
+            self::assertStringNotContainsStringIgnoringCase('week', (string) $part);
+        }
+    }
+
+    /**
+     * A token that lives 8 days or less is in the range the day it is made, so it is never warned: Cedar Cafe, with
+     * only such a token, gets no message, and in Acme Foods only the 90-day token with 3 days left is warned, once.
+     */
+    #[Test]
+    public function onlyATokenThatLivesLongerThanTheWarningRangeIsWarned(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->addToken(self::OMAR_MADE_NOW_FOR_3_DAYS, self::ACME_FOODS, self::OMAR, 'Short trial', '2027-03-06 09:00:00 UTC', 3);
+            $this->addToken(self::OMAR_MADE_AN_HOUR_AGO_FOR_8_DAYS, self::ACME_FOODS, self::OMAR, 'Eight day test', '2027-03-11 08:00:00 UTC', 8);
+            $this->addToken(self::OMAR_FOR_90_DAYS_WITH_3_LEFT, self::ACME_FOODS, self::OMAR, 'Old phone', '2027-03-06 12:00:00 UTC', 90);
+        });
+        $this->transactions()->committedAs(self::CEDAR_CAFE, fn () => $this->addToken(self::CEDAR_MADE_NOW_FOR_3_DAYS, self::CEDAR_CAFE, self::LENA, 'Short trial', '2027-03-06 09:00:00 UTC', 3));
+
+        $this->runTheJobForTheseOrganizations([self::ACME_FOODS, self::BETA_BAKERY]);
+
+        $newTokens = array_flip([self::OMAR_MADE_NOW_FOR_3_DAYS, self::OMAR_MADE_AN_HOUR_AGO_FOR_8_DAYS, self::OMAR_FOR_90_DAYS_WITH_3_LEFT]);
+        $warnedAfterTheRun = [self::OMAR_MADE_NOW_FOR_3_DAYS => null, self::OMAR_MADE_AN_HOUR_AGO_FOR_8_DAYS => null, self::OMAR_FOR_90_DAYS_WITH_3_LEFT => '2027-03-03 09:00:00'];
+        self::assertSame($warnedAfterTheRun, array_intersect_key($this->warnedAtOf(self::ACME_FOODS), $newTokens));
+        self::assertSame([self::CEDAR_IN_9_DAYS => null, self::CEDAR_MADE_NOW_FOR_3_DAYS => null], $this->warnedAtOf(self::CEDAR_CAFE));
+        $omarsText = $this->emailsSent()[self::OMAR_ADDRESS]->getTextBody();
+        self::assertIsString($omarsText);
+        self::assertStringContainsString('- Old phone ('.$this->prefixes[self::OMAR_FOR_90_DAYS_WITH_3_LEFT].") works until 6 Mar 2027, 13:00 CET\n", $omarsText);
+        self::assertStringNotContainsString('Short trial', $omarsText);
+        self::assertStringNotContainsString('Eight day test', $omarsText);
+
+        $this->asyncNotify()->reset();
+        self::assertSame([], $this->organizationsOf($this->job()()));
+        self::getContainer()->get('command.bus')->dispatch(new SendApiTokenExpiryWarnings(self::ACME_FOODS, self::RAN_AT), [new TenantStamp(new OrganizationId(self::ACME_FOODS))]);
+        $this->handleOnlyTheMessagesOfTheseOrganizations();
+
+        self::assertSame([], $this->emailsSent());
+        self::assertSame($warnedAfterTheRun, array_intersect_key($this->warnedAtOf(self::ACME_FOODS), $newTokens));
+    }
+
+    /**
+     * A page handled after the run, by a retry, a backlog or the next page, claims only from its own time on: the Old
+     * laptop token stopped working between the run and the page and is neither warned nor emailed. A page handled at
+     * the end of the run's range or later claims nothing.
+     */
+    #[Test]
+    public function aPageHandledLateClaimsNoTokenThatStoppedWorkingSinceTheRun(): void
+    {
+        $atTheRangesEnd = new RecordingMessageBus();
+        $handledAtTheRangesEnd = $this->handlerWithPagesOf(10, $atTheRangesEnd, '2027-03-11 09:00:00 UTC');
+        $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $handledAtTheRangesEnd(new SendApiTokenExpiryWarnings(self::ACME_FOODS, self::RAN_AT)));
+
+        self::assertSame([], $atTheRangesEnd->dispatched());
+        self::assertSame([], array_filter($this->warnedAtOf(self::ACME_FOODS), static fn (?string $warnedAt): bool => null !== $warnedAt));
+
+        $threeDaysLate = new RecordingMessageBus();
+        $handledThreeDaysLate = $this->handlerWithPagesOf(10, $threeDaysLate, '2027-03-06 12:00:00 UTC');
+        $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $handledThreeDaysLate(new SendApiTokenExpiryWarnings(self::ACME_FOODS, self::RAN_AT)));
+
+        self::assertSame(
+            [
+                self::OMAR_IN_7_DAYS => '2027-03-06 12:00:00',
+                self::OMAR_JUST_BEFORE_RANGE_END => '2027-03-06 12:00:00',
+                self::OMAR_IN_3_DAYS => null,
+                self::OMAR_AT_RANGE_END => null,
+                self::OMAR_IN_9_DAYS => null,
+                self::LENA_REVOKED => null,
+                self::MIA_BLOCKED => '2027-03-06 12:00:00',
+                self::OMAR_EXPIRED_AN_HOUR_AGO => null,
+            ],
+            $this->warnedAtOf(self::ACME_FOODS),
+        );
+        self::assertSame(['email to '.self::OMAR_ADDRESS.' after commit'], self::describe($threeDaysLate->dispatched()));
+        $sendEmail = $threeDaysLate->dispatched()[0]->getMessage();
+        self::assertInstanceOf(SendEmailMessage::class, $sendEmail);
+        $omarsEmail = $sendEmail->getMessage();
+        self::assertInstanceOf(Email::class, $omarsEmail);
+        $omarsText = $omarsEmail->getTextBody();
+        self::assertIsString($omarsText);
+        self::assertStringContainsString('- Claude Code (', $omarsText);
+        self::assertStringNotContainsString('Old laptop', $omarsText);
     }
 
     #[Test]
@@ -540,7 +642,7 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
         return $warnedAt;
     }
 
-    private function addToken(string $id, string $organizationId, string $userId, string $name, string $expiresAt): void
+    private function addToken(string $id, string $organizationId, string $userId, string $name, string $expiresAt, int $lifetimeDays = 30): void
     {
         $issued = ApiToken::issue(
             $id,
@@ -549,14 +651,14 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
             $name,
             ApiTokenScope::claudeCodeDefaults(),
             new HmacApiTokenHashing(self::PEPPER),
-            new \DateTimeImmutable($expiresAt)->modify('-30 days'),
-            30,
+            new \DateTimeImmutable($expiresAt)->modify(\sprintf('-%d days', $lifetimeDays)),
+            $lifetimeDays,
         );
         $this->tokens()->add($issued->token());
         $this->prefixes[$id] = $issued->token()->prefix();
     }
 
-    private function handlerWithPagesOf(int $tokensPerPage, ?MessageBusInterface $commandBus = null): SendApiTokenExpiryWarningsHandler
+    private function handlerWithPagesOf(int $tokensPerPage, ?MessageBusInterface $commandBus = null, string $handledAt = self::NOW): SendApiTokenExpiryWarningsHandler
     {
         return new SendApiTokenExpiryWarningsHandler(
             self::getContainer()->get(TenantContext::class),
@@ -564,7 +666,7 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
             self::getContainer()->get(UserQueries::class),
             self::getContainer()->get(ApiTokenExpiryMail::class),
             $commandBus ?? self::getContainer()->get('command.bus'),
-            new MockClock(new \DateTimeImmutable(self::NOW)),
+            new MockClock(new \DateTimeImmutable($handledAt)),
             $tokensPerPage,
         );
     }

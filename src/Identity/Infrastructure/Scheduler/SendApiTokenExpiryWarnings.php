@@ -4,15 +4,17 @@ declare(strict_types=1);
 
 namespace App\Identity\Infrastructure\Scheduler;
 
+use App\Identity\Domain\ApiToken;
+
 /**
- * Emails the owners of one organization's tokens that stop working in about a week (SendApiTokenExpiryWarningsHandler).
- * Sent to async_notify with a TenantStamp of $organizationId, which the handler refuses to differ from. The handler
- * sends it again for the next page, with the same $ranAt, so every page claims from the same range.
+ * Emails the owners of one organization's tokens that stop working soon (SendApiTokenExpiryWarningsHandler). Sent to
+ * async_notify with a TenantStamp of $organizationId, which the handler refuses to differ from. The handler sends it
+ * again for the next page, with the same $ranAt, so every page claims from the same range.
  */
 final readonly class SendApiTokenExpiryWarnings
 {
     /** A token is warned by the daily run that finds it expiring in under this many days and one more. */
-    public const int WARNING_DAYS_AHEAD = 7;
+    public const int WARNING_DAYS_AHEAD = ApiToken::EXPIRY_WARNING_WINDOW_DAYS - 1;
 
     /**
      * @param string $ranAt when QueueApiTokenExpiryWarnings ran, in \DATE_ATOM
