@@ -452,27 +452,27 @@ Rules:
 - `Assist_AiPlatform`: `App\Assist\Infrastructure\Platform\`. This folder is cut out of `Assist_Infrastructure`, which collects the rest of `App\Assist\Infrastructure\`.
 - `Kernel`: `App\Kernel` only.
 
-**Rules.** D(M) is the set of modules in M's "Depends on" line in the catalogue above. E is the `Event` layer of every module, including M's own. Anything not listed fails the build.
+**Rules.** D(M) is the set of modules in M's "Depends on" line in the catalogue above. U(M) is the part of D(M) the line names as "X Api (UI only: …)": only M's UI may call those. E is the `Event` layer of every module, including M's own. Anything not listed fails the build.
 
 | From | May depend on |
 |---|---|
 | `M_Api` | `SharedKernel` |
 | `M_Event` | `SharedKernel` |
 | `M_Domain` | `SharedKernel` |
-| `M_Application` | `M_Domain`, `M_Api`, `SharedKernel`, `D(M)_Api`, E |
-| `M_Infrastructure` | `M_Domain`, `M_Application`, `M_Api`, `SharedKernel`, `Vendor`, `D(M)_Api`, E |
+| `M_Application` | `M_Domain`, `M_Api`, `SharedKernel`, `(D(M) − U(M))_Api`, E |
+| `M_Infrastructure` | `M_Domain`, `M_Application`, `M_Api`, `SharedKernel`, `Vendor`, `(D(M) − U(M))_Api`, E |
 | `M_UI` | `M_Application`, `M_Api`, `SharedKernel`, `Vendor`, `D(M)_Api` |
 | `Assist_AiPlatform` | `Assist_Domain`, `Assist_Application`, `Assist_Api`, `SharedKernel`, `Vendor`, `SymfonyAi` |
 | `SharedKernel` | `Vendor` |
 | `Kernel` | `Vendor`, `SharedKernel` |
 
-- Calls into another module go through `D(M)_Api` only, and only for modules in M's "Depends on" line.
+- Calls into another module go through `D(M)_Api` only, and only for modules in M's "Depends on" line; a module marked "(UI only: …)" there only from M's UI (so far Assist's Identity Api).
 - Any module's Application and Infrastructure may use any module's event classes (E), so a module can listen to events of modules it does not call. UI may not use events.
 - Only Infrastructure and UI get `Vendor`. Api, Event, Domain and Application do not.
 - Only `src/Assist/Infrastructure/Platform` (`Assist_AiPlatform`) may depend on `Symfony\AI\*`. No other layer or module may, not even the rest of Assist's Infrastructure, although it gets `Vendor`. `Assist_AiPlatform` gets no other module's Api and no events.
 - No module may touch another module's Domain, Application, Infrastructure or UI.
 
-**Tests.** `tests/Unit/Architecture/DeptracConfigTest.php` checks that every `src/` folder has its six layers, every module layer has a folder, every layer in the ruleset exists, only Infrastructure and UI get `Vendor`, Application and Infrastructure get every Event layer, only `Assist_AiPlatform` gets `SymfonyAi` (with exactly the layers in the table above), and `Vendor` and `Assist_Infrastructure` leave out `Symfony\AI\` and the Platform folder. `tests/Unit/Architecture/ModuleSkeletonTest.php` checks that every module folder holds exactly `README.md` and the five layer folders. `tests/Integration/Architecture/ModuleBoundaryViolationTest.php` runs Deptrac with the arguments of the `deptrac` composer script on four fixtures in `tests/Fixtures/Deptrac`: `ReviewUsesTicketingDomain` must fail with `Review_Application on Ticketing_Domain`, `ReviewUsesUncoveredClass` must fail as uncovered, `AuditUsesTicketingApi` must fail with `Audit_Infrastructure on Ticketing_Api` (Ticketing is not on Audit's "Depends on" line), and `AllowedDependencies` (Review Application using Ticketing Api, Audit Infrastructure using a Ticketing event) must pass. Each fixture config imports the real `deptrac.yaml`; Deptrac merges the `paths` of imported files and resolves them against the importing file's folder, so `./src` points at the fixture. `tests/Integration/Architecture/SymfonyAiImportRuleTest.php` runs Deptrac the same way on two more fixtures there: `SymfonyAiOutsidePlatform` (Assist's `Infrastructure\Prompt` and Ticketing's Infrastructure use Symfony AI) must fail with `Assist_Infrastructure on SymfonyAi` and `Ticketing_Infrastructure on SymfonyAi`, and `SymfonyAiInPlatform` (the Platform folder using Symfony AI, Assist Application and other vendor code) must pass.
+**Tests.** `tests/Unit/Architecture/DeptracConfigTest.php` checks that every `src/` folder has its six layers, every module layer has a folder, every layer in the ruleset exists, only Infrastructure and UI get `Vendor`, Application and Infrastructure get every Event layer, each module's Application, Infrastructure and UI get exactly the other Apis of its "Depends on" line (a "UI only" one in UI alone), only `Assist_AiPlatform` gets `SymfonyAi` (with exactly the layers in the table above), and `Vendor` and `Assist_Infrastructure` leave out `Symfony\AI\` and the Platform folder. `tests/Unit/Architecture/ModuleSkeletonTest.php` checks that every module folder holds exactly `README.md` and the five layer folders. `tests/Integration/Architecture/ModuleBoundaryViolationTest.php` runs Deptrac with the arguments of the `deptrac` composer script on four fixtures in `tests/Fixtures/Deptrac`: `ReviewUsesTicketingDomain` must fail with `Review_Application on Ticketing_Domain`, `ReviewUsesUncoveredClass` must fail as uncovered, `AuditUsesTicketingApi` must fail with `Audit_Infrastructure on Ticketing_Api` (Ticketing is not on Audit's "Depends on" line), and `AllowedDependencies` (Review Application using Ticketing Api, Audit Infrastructure using a Ticketing event) must pass. Each fixture config imports the real `deptrac.yaml`; Deptrac merges the `paths` of imported files and resolves them against the importing file's folder, so `./src` points at the fixture. `tests/Integration/Architecture/SymfonyAiImportRuleTest.php` runs Deptrac the same way on two more fixtures there: `SymfonyAiOutsidePlatform` (Assist's `Infrastructure\Prompt` and Ticketing's Infrastructure use Symfony AI) must fail with `Assist_Infrastructure on SymfonyAi` and `Ticketing_Infrastructure on SymfonyAi`, and `SymfonyAiInPlatform` (the Platform folder using Symfony AI, Assist Application and other vendor code) must pass.
 
 ## Rules for adding a module
 

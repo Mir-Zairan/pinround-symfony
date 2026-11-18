@@ -158,8 +158,7 @@ final readonly class DbalTicketQueries implements TicketQueries
             .' summary.id AS summary_id, summary.text AS summary_text, summary.source AS summary_source,'
             .' summary.author_id AS summary_author_id, summary.model AS summary_model,'
             .' summary.prompt_version AS summary_prompt_version, summary.created_at AS summary_created_at,'
-            .' (SELECT count(*) FROM tkt_summary AS earlier WHERE earlier.organization_id = ticket.organization_id'
-            .' AND earlier.ticket_id = ticket.id AND NOT earlier.is_current) AS earlier_summary_count'
+            .' earlier.summary_count AS earlier_summary_count'
             .' FROM tkt_ticket AS ticket'
             .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
             .' LEFT JOIN tkt_ticket AS parent ON parent.organization_id = ticket.organization_id AND parent.id = ticket.parent_id'
@@ -167,6 +166,10 @@ final readonly class DbalTicketQueries implements TicketQueries
             // tkt_summary_ticket_id_current_key keeps at most one current summary per ticket, so the join adds no row.
             .' LEFT JOIN tkt_summary AS summary ON summary.organization_id = ticket.organization_id AND summary.ticket_id = ticket.id'
             .' AND summary.is_current'
+            // Lateral rather than a scalar subquery in the column list: the query-budget tests label a statement by its first FROM,
+            // which must stay tkt_ticket. count(*) always gives one row, so the cross join keeps the ticket's.
+            .' CROSS JOIN LATERAL (SELECT count(*) AS summary_count FROM tkt_summary AS replaced WHERE replaced.organization_id = ticket.organization_id'
+            .' AND replaced.ticket_id = ticket.id AND NOT replaced.is_current) AS earlier'
             .' WHERE ticket.organization_id = CAST(:organization AS uuid) AND ticket.key = :key AND '.$visibleTicket->sql(),
             ['organization' => $organizationId->toString(), 'key' => $key, ...$visibleTicket->parameters(), ...$visibleParent->parameters()],
         );
