@@ -35,6 +35,8 @@ const CLOUD_NEXT_LINE = 'Ollama on this laptop did not answer. Press again to us
 const CLOUD_FAILED_LINE = 'The AI answer failed. Try again.';
 /** LaptopController::TOO_MANY_REQUESTS. */
 const TOO_MANY_LINE = 'You sent too many laptop AI requests. Wait a minute and try again.';
+/** LaptopController::FORM_EXPIRED. */
+const FORM_EXPIRED_LINE = 'The page was open too long. Reload it and try again.';
 /** SummaryController::MADE_MAIN_SUMMARY. */
 const MADE_MAIN_TOAST = 'Now the main summary. The old one is kept in history.';
 
@@ -289,6 +291,25 @@ test.describe('an organization whose AI runs only on laptops', () => {
     await expect(laptopStatusLine(page)).toHaveText(NO_SUMMARY_LINE);
     await expect(summarizeButton(page)).toBeEnabled();
     expect(generateBodies).toHaveLength(1);
+    await expect(proposal(page)).toHaveCount(0);
+  });
+
+  test('a refused result shows its sentence, gives the button back and shows no proposal', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Delivery date picker skips Mondays');
+    await seedReadyLaptop(page);
+    const postedPaths = recordPathsPosted(page);
+    const generateBodies = await answerGenerateWith(page, LAPTOP_SUMMARY);
+    // A refusal the app gives for an old page, answered here with the shape LaptopController answers.
+    await page.route('**/ai/laptop/result', (route) => route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ message: FORM_EXPIRED_LINE }) }));
+    await openTicket(page, key);
+
+    await summarizeButton(page).click();
+
+    await expect(laptopStatusLine(page)).toHaveText(FORM_EXPIRED_LINE);
+    await expect(summarizeButton(page)).toBeEnabled();
+    await expect(summarizeButton(page)).not.toHaveAttribute('aria-busy');
+    expect(generateBodies).toHaveLength(1);
+    expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/'))).toEqual(['/ai/laptop/package', '/ai/laptop/result']);
     await expect(proposal(page)).toHaveCount(0);
   });
 
