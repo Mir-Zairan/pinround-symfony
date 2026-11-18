@@ -9,9 +9,13 @@ use App\SharedKernel\Infrastructure\Scheduler\DefaultScheduleLock;
 use App\Tests\Fixtures\Lock\ClockedLockStore;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
+use Psr\Log\LogLevel;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Lock\Key;
 use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\PersistingStoreInterface;
 use Symfony\Component\Messenger\Event\WorkerRunningEvent;
 use Symfony\Component\Messenger\Event\WorkerStoppedEvent;
 use Symfony\Component\Messenger\MessageBus;
@@ -106,6 +110,90 @@ final class DefaultScheduleLockTest extends TestCase
         $stalledLock->renewWhileWorkerRuns(new WorkerRunningEvent($this->worker, true));
 
         self::assertTrue($this->aNewWorkerCanTakeTheLock());
+    }
+
+    #[Test]
+    public function aStalledWorkerNobodyTookOverFromGivesUpTheLapsedLockAndWinsItBackOnItsNextDueTick(): void
+    {
+        $stalledLock = new DefaultScheduleLock($this->lockFactory);
+        $stalledWorker = $this->newGenerator($stalledLock);
+        self::runDueJobs($stalledWorker);
+
+        $this->clock->sleep(DefaultScheduleLock::TTL_SECONDS + 1);
+        // Its turn ends after the lock lapsed: renewing must not quietly take the lapsed lock back.
+        $stalledLock->renewWhileWorkerRuns(new WorkerRunningEvent($this->worker, false));
+        self::assertTrue($this->aNewWorkerCanTakeTheLock());
+
+        self::assertSame(1, $this->tick($stalledWorker, $stalledLock));
+        self::assertFalse($this->aNewWorkerCanTakeTheLock());
+    }
+
+    #[Test]
+    public function aStoreErrorWhileRenewingLeavesTheWorkerRunningAndNoLongerTheHolder(): void
+    {
+        $store = new class(new ClockedLockStore($this->clock)) implements PersistingStoreInterface {
+            public bool $isDown = false;
+            public int $renewalAttempts = 0;
+
+            public function __construct(private readonly ClockedLockStore $store)
+            {
+            }
+
+            public function save(Key $key): void
+            {
+                $this->store->save($key);
+            }
+
+            public function putOffExpiration(Key $key, float $ttl): void
+            {
+                ++$this->renewalAttempts;
+                if ($this->isDown) {
+                    throw new \RuntimeException('Connection lost to redis://:state-secret@valkey:6379', 111);
+                }
+                $this->store->putOffExpiration($key, $ttl);
+            }
+
+            public function delete(Key $key): void
+            {
+                $this->store->delete($key);
+            }
+
+            public function exists(Key $key): bool
+            {
+                return $this->store->exists($key);
+            }
+        };
+        $logger = new class extends AbstractLogger {
+            /** @var list<array{level: mixed, message: string, context: array<mixed>}> */
+            public array $records = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->records[] = ['level' => $level, 'message' => (string) $message, 'context' => $context];
+            }
+        };
+        $this->lockFactory = new LockFactory($store);
+        $holderLock = new DefaultScheduleLock($this->lockFactory, $logger);
+        $holder = $this->newGenerator($holderLock);
+        $this->tick($holder, $holderLock);
+
+        $store->isDown = true;
+        $this->clock->sleep(1);
+        $attemptsBeforeOutage = $store->renewalAttempts;
+        $holderLock->renewWhileWorkerRuns(new WorkerRunningEvent($this->worker, true));
+        $this->clock->sleep(1);
+        $holderLock->renewWhileWorkerRuns(new WorkerRunningEvent($this->worker, true));
+
+        self::assertSame($attemptsBeforeOutage + 1, $store->renewalAttempts, 'a worker that is no longer the holder still renews');
+        self::assertCount(1, $logger->records);
+        self::assertSame(LogLevel::WARNING, $logger->records[0]['level']);
+        self::assertSame(['exception_class' => \RuntimeException::class, 'code' => 111], $logger->records[0]['context']);
+        self::assertStringNotContainsString('state-secret', $logger->records[0]['message']);
+
+        $store->isDown = false;
+        $this->clock->sleep(DefaultScheduleLock::TTL_SECONDS);
+        self::assertSame(1, $this->tick($holder, $holderLock));
+        self::assertFalse($this->aNewWorkerCanTakeTheLock());
     }
 
     #[Test]

@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\SharedKernel\Infrastructure\Scheduler;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+use Symfony\Component\Lock\Exception\LockAcquiringException;
 use Symfony\Component\Lock\Exception\LockConflictedException;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\LockInterface;
@@ -33,8 +36,11 @@ final class DefaultScheduleLock implements LockInterface
     private readonly LockInterface $lock;
     private bool $isHeld = false;
 
-    public function __construct(#[Autowire(service: 'lock.factory')] LockFactory $lockFactory)
-    {
+    public function __construct(
+        #[Autowire(service: 'lock.factory')]
+        LockFactory $lockFactory,
+        private readonly LoggerInterface $logger = new NullLogger(),
+    ) {
         $this->lock = $lockFactory->createLock(self::NAME, self::TTL_SECONDS);
     }
 
@@ -43,13 +49,25 @@ final class DefaultScheduleLock implements LockInterface
         return $this->isHeld = $this->lock->acquire($blocking);
     }
 
-    /** Ignores $ttl: the lock always lives TTL_SECONDS from now. */
+    /**
+     * Ignores $ttl: the lock always lives TTL_SECONDS from now. Never throws for a lost lock or a store error (the
+     * holder renews about once a second, so a short Valkey outage would otherwise end the worker); either way this
+     * worker stops counting itself the holder.
+     */
     public function refresh(?float $ttl = null): void
     {
         try {
             $this->lock->refresh(self::TTL_SECONDS);
         } catch (LockConflictedException) {
             $this->isHeld = false;
+        } catch (LockAcquiringException $storeFailure) {
+            $this->isHeld = false;
+            $cause = $storeFailure->getPrevious() ?? $storeFailure;
+            // Class and code only: a store error's message can name the Valkey host or quote its credentials.
+            $this->logger->warning('Renewing the default schedule lock failed; the next due tick decides who holds it.', [
+                'exception_class' => $cause::class,
+                'code' => $cause->getCode(),
+            ]);
         }
     }
 
