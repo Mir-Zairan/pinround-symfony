@@ -56,7 +56,7 @@ final class LaptopSummaryProposalTest extends WebTestCase
     protected function setUp(): void
     {
         $this->seedLaptopAiTickets();
-        $this->storeAiSettings($this->acmeFoods, self::laptopAi('cloud'));
+        $this->storeAiSettings($this->acmeFoods, self::laptopAi());
         $this->addSummary($this->shopTicketId, self::CURRENT_SUMMARY, '2026-11-10 10:00:00+00');
         $this->addResult($this->acmeFoods, self::RESULT_BEFORE_THE_SUMMARY, $this->shopTicketId, '2026-11-09 10:00:00+00', 'Written before the summary.');
         $this->addResult($this->acmeFoods, self::OLDER_RESULT, $this->shopTicketId, '2026-11-11 08:00:00+00', 'An older result.');
@@ -136,7 +136,7 @@ final class LaptopSummaryProposalTest extends WebTestCase
     #[Test]
     public function theReporterMayMakeItTheMainSummaryWithAiOffAsNoAiRuns(): void
     {
-        $this->storeAiSettings($this->acmeFoods, ['on' => false, 'where' => 'cloud']);
+        $this->storeAiSettings($this->acmeFoods, ['on' => false, 'where' => 'laptop']);
         $this->setReporterOfShop1('Mia');
         $this->logIn($this->client, $this->people['Mia']);
 

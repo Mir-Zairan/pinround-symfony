@@ -66,8 +66,8 @@ final class SummaryControllerTest extends WebTestCase
     private const string USAGE_LIMITER_PREFIX = 'ai_calls_per_user-';
     private const string RUNNING = '[data-summary-poll-state-value="running"]';
     private const string FAILED_LINE = 'The AI answer failed. Try again.';
-    /** 16, and since task 13 one indexed read of the laptop summary proposal (LocalAi::proposalOf). */
-    private const int POLL_QUERY_COUNT = 17;
+    /** The fixture's AI runs in the cloud, so the frame reads no laptop summary proposal (TheAsk::proposal). */
+    private const int POLL_QUERY_COUNT = 16;
     private const string ASK_STATE_FOCUS = 'div.ticket__ask-state[tabindex="-1"]';
 
     protected function setUp(): void
