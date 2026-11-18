@@ -19,14 +19,27 @@
             <twig:Card tag="section" class="security__section" aria-labelledby="new-token-title">
                 <h2 class="security__heading" id="new-token-title">Copy your token now</h2>
                 <p class="login__hint">This is the only time pinround shows it. Keep it like a password.</p>
-                <label class="login__field">
-                    Token
-                    <input class="login__input" type="text" name="new_token" value="{{ newToken.reveal }}" readonly autocomplete="off" spellcheck="false">
-                </label>
-                <label class="login__field">
-                    Add it to Claude Code
-                    <input class="login__input" type="text" name="claude_mcp_add" value='claude mcp add --transport http pinround {{ mcpUrl }} --header "Authorization: Bearer {{ newToken.reveal }}"' readonly autocomplete="off" spellcheck="false">
-                </label>
+                {# copy-text shows each Copy button only where the browser can copy, and copies the field's exact value. #}
+                <div {{ stimulus_controller('copy-text') }}>
+                    <label class="login__field">
+                        Token
+                        <input class="login__input" type="text" name="new_token" value="{{ newToken.reveal }}" readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
+                    </label>
+                    <p {{ stimulus_target('copy-text', 'controls') }} hidden>
+                        <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy token</twig:Button>
+                        <span class="login__hint" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
+                    </p>
+                </div>
+                <div {{ stimulus_controller('copy-text') }}>
+                    <label class="login__field">
+                        Add it to Claude Code
+                        <input class="login__input" type="text" name="claude_mcp_add" value='claude mcp add --transport http pinround {{ mcpUrl }} --header "Authorization: Bearer {{ newToken.reveal }}"' readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
+                    </label>
+                    <p {{ stimulus_target('copy-text', 'controls') }} hidden>
+                        <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy command</twig:Button>
+                        <span class="login__hint" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
+                    </p>
+                </div>
             </twig:Card>
         {% endif %}
 

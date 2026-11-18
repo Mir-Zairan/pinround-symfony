@@ -43,7 +43,7 @@ test.afterEach(async ({ page }) => {
   }
 });
 
-test('the avatar menu lists Profile, Security, Theme and Log out', async ({ page }) => {
+test('the avatar menu lists Profile, Security, API tokens, Theme and Log out', async ({ page }) => {
   await openHome(page);
   await expect(avatar(page)).toHaveAttribute('aria-expanded', 'false');
 
@@ -52,6 +52,7 @@ test('the avatar menu lists Profile, Security, Theme and Log out', async ({ page
   await expect(avatar(page)).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('link', { name: 'Profile' })).toHaveAttribute('href', '/me/profile');
   await expect(page.getByRole('link', { name: 'Security' })).toHaveAttribute('href', '/me/security');
+  await expect(page.getByRole('link', { name: 'API tokens' })).toHaveAttribute('href', '/me/tokens');
   await expect(page.getByRole('banner').getByRole('group', { name: 'Theme' }).getByRole('button')).toHaveText(['System', 'Light', 'Dark']);
   await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
 });

@@ -101,6 +101,7 @@
                             {% endif %}
                             <a class="menu__item" href="{{ path('identity_profile') }}" {{ stimulus_target('menu', 'item') }}>Profile</a>
                             <a class="menu__item" href="{{ path('identity_security') }}" {{ stimulus_target('menu', 'item') }}>Security</a>
+                            <a class="menu__item" href="{{ path('identity_tokens') }}" {{ stimulus_target('menu', 'item') }}>API tokens</a>
                             <form class="avatar-menu__theme" method="post" action="{{ path('identity_theme') }}" {{ stimulus_controller('theme-switch') }} data-action="click->theme-switch#choose">
                                 <span class="avatar-menu__label" aria-hidden="true">Theme</span>
                                 <twig:SegmentedControl label="Theme" :options="{system: 'System', light: 'Light', dark: 'Dark'}" selected="{{ app.user.theme }}"/>
