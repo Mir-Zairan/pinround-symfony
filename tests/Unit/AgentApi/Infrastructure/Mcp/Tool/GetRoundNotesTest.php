@@ -163,7 +163,7 @@ final class GetRoundNotesTest extends TestCase
         self::assertInstanceOf(TextContent::class, $text);
         $json = $text->text;
         self::assertIsString($json);
-        self::assertSame($expected, json_decode($json, true, flags: \JSON_THROW_ON_ERROR));
+        self::assertSame(json_encode($expected, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE), $json, 'The text block is not structuredContent as JSON, whole-number positions without ".0" as in structuredContent.');
         foreach (["\r", "\n", "\u{2028}"] as $lineBreak) {
             self::assertStringNotContainsString($lineBreak, $json, 'A line break of a note reached the text unescaped.');
         }
