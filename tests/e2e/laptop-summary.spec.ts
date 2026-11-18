@@ -24,6 +24,8 @@ const ASK_TEXT = 'Pressing pay on the last checkout step does nothing, and the c
 // Markup in the answer must show as text: the proposal is user content.
 const LAPTOP_SUMMARY = 'The <b>Pay</b> button does nothing on the last step & the cart stays full.';
 
+/** PolicyRefusal::RestrictedTicketToCloud. */
+const KEPT_FROM_CLOUD_LINE = 'Your admin keeps team-only tickets away from cloud AI.';
 /** PolicyRefusal::LaptopNotReady. */
 const NOT_READY_LINE = 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.';
 /** laptop_run.js. */
@@ -62,10 +64,11 @@ function useAiSettingsInEachTest(ai: object): void {
   });
 }
 
-async function makeTicketWithAnAsk(browser: Browser, title: string): Promise<string> {
+/** Visibility::All or Visibility::Team; the ticket is the Shop team's, which Lena leads. */
+async function makeTicketWithAnAsk(browser: Browser, title: string, visibility: 'all' | 'team' = 'all'): Promise<string> {
   const key = await makeTicketForOmar(browser, title);
   madeTicketKeys.push(key);
-  runAsDatabaseOwner(`UPDATE tkt_ticket SET description = '${ASK_TEXT}'
+  runAsDatabaseOwner(`UPDATE tkt_ticket SET description = '${ASK_TEXT}', visibility = '${visibility}'
     WHERE key = '${key}' AND organization_id = (SELECT organization_id FROM org_organization WHERE slug = '${ORGANIZATION_SLUG}')`);
   return key;
 }
@@ -352,6 +355,24 @@ test.describe('an organization whose AI runs on laptops first, then in the cloud
     await expect(proposal(page)).not.toContainText('The ask is about the pay button.');
     expect(postedPaths.filter((path) => path === `/t/${key}/summary`)).toEqual([]);
     expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/'))).toEqual(['/ai/laptop/package', '/ai/laptop/result']);
+  });
+
+  test('a ready laptop takes the press on a team-only ticket kept from cloud AI, and nothing goes to the cloud', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Wish list forgets items after sign out', 'team');
+    await seedReadyLaptop(page);
+    const postedPaths = recordPathsPosted(page);
+    await answerGenerateWith(page, LAPTOP_SUMMARY);
+    await openTicket(page, key);
+
+    await expect(notReadyLine(page)).toHaveText(KEPT_FROM_CLOUD_LINE);
+    await expect(notReadyLine(page)).toBeHidden();
+    await expect(summarizeButton(page)).toBeVisible();
+    await summarizeButton(page).click();
+
+    await expect(proposal(page).locator('.ticket__ask-proposal-text')).toHaveText(LAPTOP_SUMMARY);
+    // The live-updates cookie may be renewed meanwhile; only the AI's own requests count here.
+    const aiPaths = postedPaths.filter((path) => path.startsWith('/ai/') || path.startsWith(`/t/${key}`) || path === '/api/generate');
+    expect(aiPaths).toEqual(['/ai/laptop/package', '/api/generate', '/ai/laptop/result']);
   });
 
   test('a laptop whose Ollama stopped answering counts as not found, and the next press goes to the cloud', async ({ browser, page }) => {
