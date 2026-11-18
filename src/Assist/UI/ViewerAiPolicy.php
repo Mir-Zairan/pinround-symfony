@@ -1,0 +1,37 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Assist\UI;
+
+use App\Assist\Api\AiPolicy;
+use App\Assist\Api\PolicyView;
+use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
+use Symfony\Contracts\Service\ResetInterface;
+
+/**
+ * The AI policy of the person the request is for, read at most once per request, so the header's Local AI chip and the
+ * ticket page's "Summarize with AI" share one read (performance-and-scale.md, the page's query budget). It reads under
+ * row-level security and so needs the request transaction; the kernel resets it between requests (ADR-0008).
+ */
+final class ViewerAiPolicy implements ResetInterface
+{
+    private ?PolicyView $policy = null;
+
+    public function __construct(private readonly TokenStorageInterface $tokenStorage, private readonly AiPolicy $aiPolicy)
+    {
+    }
+
+    /**
+     * AI off for a visitor who is not logged in to an organization (AiPolicy::forTokenUser).
+     */
+    public function policy(): PolicyView
+    {
+        return $this->policy ??= $this->aiPolicy->forTokenUser($this->tokenStorage->getToken()?->getUser());
+    }
+
+    public function reset(): void
+    {
+        $this->policy = null;
+    }
+}

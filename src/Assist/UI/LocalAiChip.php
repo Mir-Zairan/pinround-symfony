@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Assist\UI;
 
-use App\Assist\Api\AiPolicy;
 use App\Assist\Api\PolicyView;
 use App\Assist\Application\Policy\PolicyRefusal;
 use App\Organization\Api\CurrentActor;
@@ -16,8 +15,9 @@ use Twig\Attribute\AsTwigFunction;
 /**
  * Who gets the header's "Local AI" chip, its setup sheet and the status call behind it (FR-AI-10): a member whose
  * organization runs AI on laptops (laptop only or laptop first) and whose policy gives them AI help, but not an admin
- * with no team or manager role, who files and reads no tickets to use it on. It reads the policy at most once per
- * request and so needs the request transaction; the kernel resets it between requests (ADR-0008).
+ * with no team or manager role, who files and reads no tickets to use it on. It reads the policy through
+ * ViewerAiPolicy, which the ticket page's "Summarize with AI" shares, and so needs the request transaction; the kernel
+ * resets it between requests (ADR-0008).
  */
 final class LocalAiChip implements ResetInterface
 {
@@ -33,7 +33,7 @@ final class LocalAiChip implements ResetInterface
     public function __construct(
         private readonly TokenStorageInterface $tokenStorage,
         private readonly CurrentActor $currentActor,
-        private readonly AiPolicy $aiPolicy,
+        private readonly ViewerAiPolicy $viewerAiPolicy,
         private readonly CspConnectSources $cspConnectSources,
     ) {
     }
@@ -92,7 +92,7 @@ final class LocalAiChip implements ResetInterface
             return self::ADMIN_ONLY;
         }
 
-        $policy = $this->aiPolicy->forTokenUser($tokenUser);
+        $policy = $this->viewerAiPolicy->policy();
         if (null !== $policy->refusalSentence) {
             return $policy->refusalSentence;
         }
