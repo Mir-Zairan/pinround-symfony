@@ -74,14 +74,14 @@ interface LocalPackages
     public function proposalOf(OrganizationId $organizationId, TicketId $ticketId, ?\DateTimeImmutable $newerThan): ?PostedLocalResult;
 
     /**
-     * Marks the package's result made the main summary at $madeMainAt in one conditional UPDATE that matches only while
+     * Marks the package's result made the main summary now, by the application clock, in one conditional UPDATE that matches only while
      * it is the ticket's proposal as proposalOf() reads it, so of two requests at once exactly one gets it.
      *
-     * @return PostedLocalResult|null the result marked; null when the package is not the ticket's proposal, and
-     *                                nothing changed
+     * @return PostedLocalResult|null the result marked, with the time it was marked; null when the package is not
+     *                                the ticket's proposal, and nothing changed
      *
      * @throws \LogicException           when no transaction is open or $organizationId is not its tenant, before any query
      * @throws \UnexpectedValueException when the stored row is not one post() writes
      */
-    public function markMadeMain(OrganizationId $organizationId, LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $newerThan, \DateTimeImmutable $madeMainAt): ?PostedLocalResult;
+    public function markMadeMain(OrganizationId $organizationId, LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $newerThan): ?PostedLocalResult;
 }

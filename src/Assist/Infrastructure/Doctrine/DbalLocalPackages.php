@@ -178,16 +178,17 @@ final readonly class DbalLocalPackages implements LocalPackages
         return false === $row ? null : self::postedResultOf($row);
     }
 
-    public function markMadeMain(OrganizationId $organizationId, LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $newerThan, \DateTimeImmutable $madeMainAt): ?PostedLocalResult
+    public function markMadeMain(OrganizationId $organizationId, LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $newerThan): ?PostedLocalResult
     {
         $this->requireTenant($organizationId);
+        $madeMainAt = $this->clock->now();
         $row = $this->connection->fetchAssociative(self::MARK_MADE_MAIN, [
             ...self::proposalParameters($organizationId, $ticketId, $newerThan),
             'package' => $packageId->toString(),
             'made_main_at' => $madeMainAt->format(self::TIMESTAMP_FORMAT),
         ]);
 
-        return false === $row ? null : self::postedResultOf($row);
+        return false === $row ? null : self::postedResultOf($row, $madeMainAt);
     }
 
     /**
@@ -207,7 +208,7 @@ final readonly class DbalLocalPackages implements LocalPackages
      *
      * @throws \UnexpectedValueException when a column is not what post() writes
      */
-    private static function postedResultOf(array $row): PostedLocalResult
+    private static function postedResultOf(array $row, ?\DateTimeImmutable $madeMainAt = null): PostedLocalResult
     {
         foreach (['id', 'user_id', 'result_text', 'model', 'result_label', 'prompt_version', 'used_at'] as $column) {
             if (!\is_string($row[$column])) {
@@ -228,6 +229,7 @@ final readonly class DbalLocalPackages implements LocalPackages
                 new \DateTimeImmutable($row['used_at']),
             ),
             $row['prompt_version'],
+            $madeMainAt,
         );
     }
 

@@ -12,7 +12,10 @@ use App\Assist\Api\LocalResult;
  */
 final readonly class PostedLocalResult
 {
-    public function __construct(public LocalResult $result, public string $promptVersion)
+    /**
+     * @param \DateTimeImmutable|null $madeMainAt when it was made the main summary; null while it is not
+     */
+    public function __construct(public LocalResult $result, public string $promptVersion, public ?\DateTimeImmutable $madeMainAt = null)
     {
     }
 }

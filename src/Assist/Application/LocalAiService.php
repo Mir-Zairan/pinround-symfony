@@ -31,7 +31,6 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\GeneratedSummaryRefused;
 use App\Ticketing\Api\TicketSummaryCommands;
-use Psr\Clock\ClockInterface;
 
 /**
  * Laptop AI on the server's side: the policy and the prompt come from the parts the server path uses
@@ -60,7 +59,6 @@ final readonly class LocalAiService implements LocalAi
         private Transactions $transactions,
         private Savepoints $savepoints,
         private TicketSummaryCommands $ticketSummaryCommands,
-        private ClockInterface $clock,
     ) {
     }
 
@@ -74,9 +72,9 @@ final readonly class LocalAiService implements LocalAi
         // The mark comes before Ticketing checks the text, so a refusal rolls it back here: a caller that catches the
         // refusal and commits keeps the result a proposal.
         $this->savepoints->run(function () use ($packageId, $ticketId, $currentSummaryCreatedAt, $chooserId, $organizationId): void {
-            $madeMainAt = $this->clock->now();
-            $posted = $this->localPackages->markMadeMain($organizationId, $packageId, $ticketId, $currentSummaryCreatedAt, $madeMainAt)
+            $posted = $this->localPackages->markMadeMain($organizationId, $packageId, $ticketId, $currentSummaryCreatedAt)
                 ?? throw MainSummaryRefused::notAProposal();
+            $madeMainAt = $posted->madeMainAt ?? throw new \UnexpectedValueException('A result marked made the main summary has no time.');
             try {
                 $this->ticketSummaryCommands->storeChosenLaptopSummary(
                     $organizationId,

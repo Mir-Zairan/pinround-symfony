@@ -824,7 +824,6 @@ final class LocalAiServiceTest extends KernelTestCase
             $container->get(Transactions::class),
             $container->get(Savepoints::class),
             $summaryCommands,
-            $container->get(\Psr\Clock\ClockInterface::class),
         );
     }
 

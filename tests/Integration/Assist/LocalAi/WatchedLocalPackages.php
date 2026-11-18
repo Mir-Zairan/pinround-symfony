@@ -84,8 +84,8 @@ final class WatchedLocalPackages implements LocalPackages
         return $this->realPackages->proposalOf($organizationId, $ticketId, $newerThan);
     }
 
-    public function markMadeMain(OrganizationId $organizationId, LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $newerThan, \DateTimeImmutable $madeMainAt): ?PostedLocalResult
+    public function markMadeMain(OrganizationId $organizationId, LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $newerThan): ?PostedLocalResult
     {
-        return $this->realPackages->markMadeMain($organizationId, $packageId, $ticketId, $newerThan, $madeMainAt);
+        return $this->realPackages->markMadeMain($organizationId, $packageId, $ticketId, $newerThan);
     }
 }
