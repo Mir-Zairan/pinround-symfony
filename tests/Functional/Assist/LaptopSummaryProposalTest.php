@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Assist;
 
 use App\Assist\Application\Policy\PolicyRefusal;
+use App\Assist\Application\Summaries\GenerateSummary;
 use App\Assist\UI\Component\TheAsk;
 use App\Assist\UI\Controller\LaptopController;
 use App\Assist\UI\Controller\SummaryController;
@@ -379,26 +380,31 @@ final class LaptopSummaryProposalTest extends WebTestCase
     }
 
     /**
-     * Where the AI runs, and the line Sara sees in place of "Summarize with AI", or null when she gets the cloud's.
+     * The organization's AI settings, and the line Sara sees in place of "Summarize with AI", or null when she gets the
+     * cloud's.
      *
-     * @return iterable<string, array{string, string|null}>
+     * @return iterable<string, array{array<string, bool|string>, string|null}>
      */
     public static function placesWithoutTheChipForSara(): iterable
     {
-        yield 'laptop only' => ['laptop', 'Local AI is for people in a team and for managers.'];
+        yield 'laptop only' => [self::laptopAi(), 'Local AI is for people in a team and for managers.'];
         // As for anyone whose laptop is not ready: laptop first falls back to the cloud.
-        yield 'laptop first' => ['laptop_first', null];
+        yield 'laptop first' => [self::laptopAi('laptop_first'), null];
+        yield 'laptop only with AI off' => [['on' => false, 'where' => 'laptop'], 'Your admin turned AI help off.'];
+        yield 'laptop only for leads only' => [['on' => true, 'who' => 'leads_only', 'where' => 'laptop'], 'Your admin allows AI help for leads only.'];
     }
 
     /**
      * Sara may open every ticket, but the header gives her no Local AI chip, so the page offers her no laptop and never
      * sends her to the chip.
+     *
+     * @param array<string, bool|string> $ai
      */
     #[Test]
     #[DataProvider('placesWithoutTheChipForSara')]
-    public function saraAnAdminWithNoTeamOrManagerRoleGetsTheChipsAnswerAndNoLaptopPart(string $where, ?string $line): void
+    public function saraAnAdminWithNoTeamOrManagerRoleGetsTheChipsAnswerAndNoLaptopPart(array $ai, ?string $line): void
     {
-        $this->storeAiSettings($this->acmeFoods, self::laptopAi($where));
+        $this->storeAiSettings($this->acmeFoods, $ai);
         $organizationId = $this->acmeFoods->toString();
         // The button shows only on a ticket with no summary.
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM tkt_summary WHERE organization_id = ?', [$organizationId]));
@@ -450,6 +456,27 @@ final class LaptopSummaryProposalTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Local AI is for people in a team and for managers.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
         self::assertSame([], $this->sentAiJobs());
+    }
+
+    /** In laptop first the server's AI is hers as for anyone whose laptop is not ready: her press queues the cloud's job. */
+    #[Test]
+    public function saraWhoAsksForASummaryInALaptopFirstOrganizationGetsOneCloudJobQueued(): void
+    {
+        $this->storeAiSettings($this->acmeFoods, self::laptopAi('laptop_first'));
+        $organizationId = $this->acmeFoods->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM tkt_summary WHERE organization_id = ?', [$organizationId]));
+        $this->logIn($this->client, $this->people['Sara']);
+
+        $frame = $this->client->request(
+            'POST',
+            '/t/SHOP-1/summary',
+            [SummaryController::CSRF_FIELD => $this->csrfTokenFor($this->client, SummaryController::CSRF_ID)],
+            server: ['HTTP_TURBO_FRAME' => TheAsk::FRAME_ID],
+        );
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertEquals([new GenerateSummary($organizationId, $this->shopTicketId, $this->idOf('Sara'))], $this->sentAiJobs());
+        self::assertSame([], $frame->filter('.ticket__ask-ai-off')->each(static fn (Crawler $text): string => $text->text()));
     }
 
     private function assertNothingChanged(): void

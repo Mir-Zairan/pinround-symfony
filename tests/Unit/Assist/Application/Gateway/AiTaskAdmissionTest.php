@@ -336,6 +336,18 @@ final class AiTaskAdmissionTest extends TestCase
         );
     }
 
+    #[Test]
+    public function theServerSendsAnAdminWithNoTeamOrManagerRoleToTheCloudInALaptopFirstOrganization(): void
+    {
+        $this->givenSettings(self::settings(where: AiSettings::WHERE_LAPTOP_FIRST));
+        $sara = new ActorContext(new UserId(self::SARA), new OrganizationId(self::ACME_FOODS), new Roles(true, false, [], [], []));
+
+        $admitted = $this->admission()->admit(self::summaryOf(self::CHECKOUT_TICKET), $sara);
+
+        self::assertNull($this->admission()->refusalFor(self::summaryOf(self::CHECKOUT_TICKET), $sara));
+        self::assertSame(['Checkout fails', AiRoute::Cloud, null], [$admitted->promptTicket->title, $admitted->decision->route, $admitted->decision->refusal]);
+    }
+
     /**
      * @return iterable<string, array{Roles}>
      */
