@@ -393,9 +393,9 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Owns:** `api_idempotency_key` (safe retries for POST).
 - **Offers:**
   - REST under `/api/v1` (browser capture plugin, CLI);
-  - MCP tools at `/mcp`: `list_my_tickets`, `get_ticket`, `get_round_notes`, `add_screenshot`, `set_verdict`, `add_comment`, `move_ticket`.
+  - MCP tools at `/mcp`: `whoami`, `list_my_tickets`, `get_ticket`, `get_round_notes`, `add_screenshot`, `set_verdict`, `add_comment`, `move_ticket`.
 - **Rule:** thin adapters only. Each tool calls another module's Api, after the same Voter check the web UI uses. Token scopes are checked first.
-- **Depends on:** Identity, Ticketing, Review, Conversation, Media Api.
+- **Depends on:** Identity, Ticketing, Review, Conversation, Media, Audit, Insight, Workflow Api.
 - **ADRs:** [0021](../03-adr/0021-mcp-server.md).
 
 ### Web (UI shell)
