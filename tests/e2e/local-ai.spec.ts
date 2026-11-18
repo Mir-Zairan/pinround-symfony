@@ -331,7 +331,11 @@ test.describe('a person whose organization runs AI on laptops', () => {
       await mainMenuLink(page, 'Home').click();
       await expect(page).toHaveURL(/\/$/);
       await expect(mainMenuLink(page, 'Home')).toHaveAttribute('aria-current', 'page');
-      await page.goBack();
+      // A Back sent while Home still loads makes goBack return before the list has loaded again.
+      await page.waitForLoadState('networkidle');
+      // Drive is off, so Back loads the list anew: its chip reads "not checked" from the server before the dialog
+      // controller is connected to open the sheet on a click.
+      await page.goBack({ waitUntil: 'networkidle' });
 
       await expect(page).toHaveURL(/\/tickets$/);
       await expect(mainMenuLink(page, 'Tickets')).toHaveAttribute('aria-current', 'page');
