@@ -130,9 +130,9 @@ final readonly class CreateUpload implements AgentTool
      * Spends one of the caller's begins first, as the web does, so a refused call counts too: the limiter is not
      * rolled back with the savepoint.
      *
-     * @throws ToolRefusal     invalid input, with the web's plain message, past media_upload_begin_per_user or
-     *                         when Uploads refuses the type, the size, a twenty-first upload waiting or a full
-     *                         storage; not found when the new draft or the upload is denied
+     * @throws ToolRefusal     refused, with the web's plain message, past media_upload_begin_per_user or when
+     *                         Uploads refuses the type, the size, a twenty-first upload waiting or a full storage;
+     *                         not found when the new draft or the upload is denied
      * @throws \Throwable      what startDraft throws, such as RoundRefused DRAFT_EXISTS when another request
      *                         started the caller's draft meanwhile
      * @throws \LogicException without a token, a user or a target of this tool
@@ -141,7 +141,7 @@ final readonly class CreateUpload implements AgentTool
     {
         $callerId = $this->callerId();
         if (!$this->beginsPerUser->create($callerId->toString())->consume()->isAccepted()) {
-            throw ToolRefusal::invalidInput(self::ADDING_TOO_FAST);
+            throw ToolRefusal::refused(self::ADDING_TOO_FAST);
         }
         $uploadTarget = $this->uploadTargetOf($target, $callerId);
         $bytes = $arguments['bytes'] ?? null;
@@ -153,7 +153,7 @@ final readonly class CreateUpload implements AgentTool
         try {
             $slot = $this->uploads->begin($organizationId, $callerId, $uploadTarget, self::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
         } catch (UploadRefused $refused) {
-            throw ToolRefusal::invalidInput($refused->getMessage());
+            throw ToolRefusal::refused($refused->getMessage());
         } catch (UploadTargetDenied) {
             throw ToolRefusal::notFound();
         }

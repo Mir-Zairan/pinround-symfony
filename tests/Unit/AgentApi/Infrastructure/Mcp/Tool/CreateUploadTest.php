@@ -229,24 +229,24 @@ final class CreateUploadTest extends TestCase
      */
     #[Test]
     #[DataProvider('filesUploadsRefuses')]
-    public function aFileUploadsRefusesIsInvalidInputWithItsPlainMessage(array $fields, string $message): void
+    public function aFileUploadsRefusesIsRefusedWithItsPlainMessage(array $fields, string $message): void
     {
         $refusal = self::refusalOf(fn () => $this->callFor(self::arguments($fields)));
 
-        self::assertSame(ToolCallOutcome::InvalidInput, $refusal->outcome);
-        self::assertSame(\sprintf(ToolRefusal::INVALID_INPUT, $message), $refusal->getMessage());
+        self::assertSame(ToolCallOutcome::Refused, $refusal->outcome);
+        self::assertSame($message, $refusal->getMessage());
         self::assertSame([], $this->fakes->begins);
     }
 
     #[Test]
-    public function aFullStorageIsInvalidInputWithItsPlainMessage(): void
+    public function aFullStorageIsRefusedWithItsPlainMessage(): void
     {
         $this->fakes->refusal = new UploadRefused("Your company's storage is full. Ask your admin.");
 
         $refusal = self::refusalOf(fn () => $this->callFor(self::arguments()));
 
-        self::assertSame(ToolCallOutcome::InvalidInput, $refusal->outcome);
-        self::assertSame(\sprintf(ToolRefusal::INVALID_INPUT, "Your company's storage is full. Ask your admin."), $refusal->getMessage());
+        self::assertSame(ToolCallOutcome::Refused, $refusal->outcome);
+        self::assertSame("Your company's storage is full. Ask your admin.", $refusal->getMessage());
     }
 
     #[Test]
@@ -274,8 +274,8 @@ final class CreateUploadTest extends TestCase
 
         $refusal = self::refusalOf(fn () => $this->callFor(self::arguments()));
 
-        self::assertSame(ToolCallOutcome::InvalidInput, $refusal->outcome);
-        self::assertSame(\sprintf(ToolRefusal::INVALID_INPUT, CreateUpload::ADDING_TOO_FAST), $refusal->getMessage());
+        self::assertSame(ToolCallOutcome::Refused, $refusal->outcome);
+        self::assertSame(CreateUpload::ADDING_TOO_FAST, $refusal->getMessage());
         self::assertSame($beginsBefore, $this->fakes->begins);
     }
 

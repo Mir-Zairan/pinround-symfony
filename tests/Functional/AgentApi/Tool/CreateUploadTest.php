@@ -47,8 +47,6 @@ final class CreateUploadTest extends WebTestCase
     private const string MCP = '/mcp';
     private const string NOW = '2026-11-10 09:00:20 UTC';
     private const string PROTOCOL_VERSION = '2025-06-18';
-    /** JSON-RPC's "Invalid params". */
-    private const int INVALID_PARAMS = -32602;
     private const string SHARED_AT = '2026-11-05 09:00:00+00';
     private const int SCREENSHOT_BYTES = 245_760;
     private const string SHA256 = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
@@ -259,17 +257,16 @@ final class CreateUploadTest extends WebTestCase
      */
     #[Test]
     #[DataProvider('filesRefusedBeforeAnyUrl')]
-    public function aFileOfTheWrongTypeOrSizeIsInvalidInputWithTheWebsMessageAndNothingIsWritten(array $fields, string $message): void
+    public function aFileOfTheWrongTypeOrSizeIsRefusedWithTheWebsMessageAndNothingIsWritten(array $fields, string $message): void
     {
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
 
         $this->callCreateUpload($token, $this->arguments($fields));
 
-        self::assertResponseStatusCodeSame(200);
-        self::assertSame(['code' => self::INVALID_PARAMS, 'message' => \sprintf(ToolRefusal::INVALID_INPUT, $message)], $this->responseValueAt('error'));
+        $this->assertRefused($message);
         self::assertSame([], $this->roundRowsOf($this->ticketId));
         self::assertSame([], $this->storedIntents($this->acmeFoods));
-        self::assertSame([$this->toolRow('Omar', $tokenId, CreateUpload::TICKET_AUDIT_TYPE, $this->ticketId, 'invalid_input')], $this->toolRowsOf($this->acmeFoods));
+        self::assertSame([$this->toolRow('Omar', $tokenId, CreateUpload::TICKET_AUDIT_TYPE, $this->ticketId, 'refused')], $this->toolRowsOf($this->acmeFoods));
     }
 
     #[Test]
@@ -282,10 +279,9 @@ final class CreateUploadTest extends WebTestCase
 
         $this->callCreateUpload($token, $this->arguments());
 
-        self::assertResponseStatusCodeSame(200);
-        self::assertSame(['code' => self::INVALID_PARAMS, 'message' => \sprintf(ToolRefusal::INVALID_INPUT, CreateUpload::ADDING_TOO_FAST)], $this->responseValueAt('error'));
+        $this->assertRefused(CreateUpload::ADDING_TOO_FAST);
         self::assertSame([], $this->storedIntents($this->acmeFoods));
-        self::assertSame([$this->toolRow('Omar', $tokenId, CreateUpload::ROUND_AUDIT_TYPE, $omarsDraft, 'invalid_input')], $this->toolRowsOf($this->acmeFoods));
+        self::assertSame([$this->toolRow('Omar', $tokenId, CreateUpload::ROUND_AUDIT_TYPE, $omarsDraft, 'refused')], $this->toolRowsOf($this->acmeFoods));
     }
 
     /**
