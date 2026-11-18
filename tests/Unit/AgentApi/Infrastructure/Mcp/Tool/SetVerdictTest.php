@@ -8,6 +8,8 @@ use App\AgentApi\Infrastructure\Mcp\Tool\SetVerdict;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\Identity\Api\ApiTokenAccess;
+use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Review\Api\CheckItemAccessFacts;
 use App\Review\Api\ChecklistPermission;
@@ -22,14 +24,20 @@ use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
+use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use Mcp\Capability\Discovery\SchemaValidator;
 use Mcp\Schema\Content\TextContent;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Security\Core\Authorization\AccessDecision;
+use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
  * set_verdict over fakes of Review's and Ticketing's Api: its two input shapes as the gate's SchemaValidator reads
@@ -60,6 +68,10 @@ final class SetVerdictTest extends TestCase
     private KnownRounds $rounds;
     private RecordingRoundCommands $roundCommands;
     private RecordingChecklistMarks $checklistMarks;
+    private bool $isTicketHidden = false;
+    private bool $isTicketUnreadable = false;
+    /** @var \ArrayObject<int, TicketVisibilityFacts> the subject of each TicketPermission VIEW asked */
+    private \ArrayObject $ticketViewsAsked;
 
     protected function setUp(): void
     {
@@ -71,6 +83,7 @@ final class SetVerdictTest extends TestCase
         $this->rounds->add($shop1, new RoundView(self::MIAS_SHARED_DRAFT, 1, RoundView::DRAFT, new UserId(self::MIA), new \DateTimeImmutable('2026-11-05 10:00:00 UTC'), 'open', [self::screenshot(self::MIAS_SHARED_SHOT, null)]));
         $this->roundCommands = new RecordingRoundCommands();
         $this->checklistMarks = new RecordingChecklistMarks();
+        $this->ticketViewsAsked = new \ArrayObject();
     }
 
     /**
@@ -152,6 +165,39 @@ final class SetVerdictTest extends TestCase
         self::assertSame([SetVerdict::SCREENSHOT_AUDIT_TYPE, self::OMARS_SHOT], [$target->auditType, $target->auditId]);
         self::assertEquals(new RoundAccessFacts(new OrganizationId(self::ACME_FOODS), self::OMARS_DRAFT, new TicketId(self::SHOP_1), new UserId(self::OMAR), true, false), $target->subject);
         self::assertSame([[self::SHOP_1, strtoupper(self::OMARS_SHOT)]], $this->rounds->screenshotsLookedUp);
+        self::assertEquals(
+            [new TicketVisibilityFacts(new OrganizationId(self::ACME_FOODS), TicketVisibilityFacts::TEAM_ONLY, null, new UserId(self::OMAR))],
+            $this->ticketViewsAsked->getArrayCopy(),
+            'TicketPermission VIEW is asked on the ticket as Ticketing read it, in the token\'s organization',
+        );
+    }
+
+    /**
+     * @return iterable<string, array{bool, bool}>
+     */
+    public static function ticketsNotSeen(): iterable
+    {
+        yield 'a ticket TicketPermission VIEW denies' => [true, false];
+        yield 'a ticket Ticketing does not read' => [false, true];
+    }
+
+    /**
+     * RoundPermission grants an unshared draft to its owner without reading the ticket, so the owner of a draft on a
+     * ticket they may no longer see is refused here, before the draft is looked up.
+     */
+    #[Test]
+    #[DataProvider('ticketsNotSeen')]
+    public function theOwnersDraftOnATicketTheCallerMayNotSeeIsNotFound(bool $isTicketHidden, bool $isTicketUnreadable): void
+    {
+        $this->isTicketHidden = $isTicketHidden;
+        $this->isTicketUnreadable = $isTicketUnreadable;
+
+        $refusal = self::refusalOf(fn () => $this->setVerdict()->targetOf(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'looks_right']));
+
+        self::assertSame(ToolCallOutcome::NotFound, $refusal->outcome);
+        self::assertSame(ToolRefusal::NOT_FOUND, $refusal->getMessage());
+        self::assertSame([], $this->rounds->screenshotsLookedUp);
+        self::assertSame([], $this->roundCommands->verdictsSet);
     }
 
     /**
@@ -302,6 +348,7 @@ final class SetVerdictTest extends TestCase
         self::assertSame(ChecklistPermission::MARK_FIXED, $target->voterAttribute);
         self::assertSame([SetVerdict::CHECK_ITEM_AUDIT_TYPE, self::CHECK_ITEM], [$target->auditType, $target->auditId]);
         self::assertSame([], $this->rounds->screenshotsLookedUp, 'a check item needs no round');
+        self::assertSame([], $this->ticketViewsAsked->getArrayCopy(), 'ChecklistPermission MARK_FIXED asks the ticket itself');
 
         $result = $tool->call($arguments, $target);
 
@@ -419,6 +466,12 @@ final class SetVerdictTest extends TestCase
     private function setVerdict(): SetVerdict
     {
         return new SetVerdict(
+            new class implements CurrentApiToken {
+                public function access(): ApiTokenAccess
+                {
+                    return new ApiTokenAccess('019a5f00-0000-7000-8000-00000000e611', new OrganizationId(SetVerdictTest::ACME_FOODS), ['rounds:write'], new \DateTimeImmutable('2027-01-01 00:00 UTC'));
+                }
+            },
             new class implements CurrentUser {
                 public function id(): UserId
                 {
@@ -444,6 +497,20 @@ final class SetVerdictTest extends TestCase
                     return null === $ticketId ? null : new TicketId($ticketId);
                 }
             },
+            new readonly class($this->isTicketUnreadable) implements TicketTurnQueries {
+                public function __construct(private bool $isTicketUnreadable)
+                {
+                }
+
+                public function factsOf(TicketId $ticketId): ?TicketTurnSnapshot
+                {
+                    if ($this->isTicketUnreadable) {
+                        return null;
+                    }
+
+                    return new TicketTurnSnapshot($ticketId, '019a5f00-0000-7000-8000-00000000e681', '019a5f00-0000-7000-8000-00000000e682', 'todo', 'todo', null, null, null, [], [], TicketVisibilityFacts::TEAM_ONLY, 'major', null, new UserId(SetVerdictTest::OMAR));
+                }
+            },
             $this->rounds,
             $this->roundCommands,
             // Any case of the id, as the real query reads it.
@@ -461,6 +528,24 @@ final class SetVerdictTest extends TestCase
                 }
             },
             $this->checklistMarks,
+            new readonly class($this->isTicketHidden, $this->ticketViewsAsked) implements AuthorizationCheckerInterface {
+                /**
+                 * @param \ArrayObject<int, TicketVisibilityFacts> $ticketViewsAsked
+                 */
+                public function __construct(private bool $isTicketHidden, private \ArrayObject $ticketViewsAsked)
+                {
+                }
+
+                public function isGranted(mixed $attribute, mixed $subject = null, ?AccessDecision $accessDecision = null): bool
+                {
+                    if (TicketPermission::VIEW !== $attribute || !$subject instanceof TicketVisibilityFacts) {
+                        return false;
+                    }
+                    $this->ticketViewsAsked[] = $subject;
+
+                    return !$this->isTicketHidden;
+                }
+            },
             new MockClock(self::NOW),
         );
     }

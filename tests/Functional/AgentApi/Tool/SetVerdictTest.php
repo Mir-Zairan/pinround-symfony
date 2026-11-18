@@ -242,6 +242,34 @@ final class SetVerdictTest extends WebTestCase
         self::assertSame([$this->toolRow('Omar', $tokenId, 'screenshot', $this->miasShot, 'not_found')], $this->toolRowsOf($this->acmeFoods));
     }
 
+    /**
+     * SHOP-1 moves to Mobile, for that team only, and to Lena: Omar is in no role of Mobile and no longer involved, so
+     * he may not see it. RoundPermission EDIT still grants him his own unshared draft without reading the ticket, so
+     * set_verdict asks TicketPermission VIEW itself and answers as for an unknown key.
+     */
+    #[Test]
+    public function theOwnersDraftOnATicketTheyMayNoLongerSeeIsNotFoundAndNothingIsWritten(): void
+    {
+        $ticketId = $this->ticketId;
+        $parameters = [$this->mobile->toString(), $this->people['Lena']->id()->toString(), $this->acmeFoods->toString(), $ticketId];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET team_id = ?, visibility = 'team', assignee_id = ? WHERE organization_id = ? AND id = ?",
+            $parameters,
+        ));
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $before = $this->stored();
+
+        $this->callSetVerdict($token, ['key' => 'SHOP-1', 'screenshot_id' => $this->omarsShot, 'verdict' => SetVerdict::LOOKS_RIGHT, 'summary' => self::NEW_SUMMARY]);
+
+        $this->assertRefused(ToolRefusal::NOT_FOUND);
+        self::assertSame($before, $this->stored());
+        self::assertSame(
+            [['id' => $this->omarsShot, 'position' => 0, 'verdict' => null, 'title' => self::TITLE, 'summary' => self::OLD_SUMMARY]],
+            $this->screenshotRowsOf($this->omarsDraft),
+        );
+        self::assertSame([$this->toolRow('Omar', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found')], $this->toolRowsOf($this->acmeFoods));
+    }
+
     #[Test]
     public function theOwnersSharedDraftIsReadOnlyAndNothingIsWritten(): void
     {
@@ -269,8 +297,9 @@ final class SetVerdictTest extends WebTestCase
     }
 
     /**
-     * Omar works in Beta Bakery too, which has a SHOP-1 of its own that he reported and is assigned: under Beta's
-     * token, the key finds Beta's ticket, and Acme Foods' screenshot and checklist item are not of it.
+     * Omar works in Beta Bakery too, which has a SHOP-1 of its own that he reported and is assigned, with his unshared
+     * draft on it: under Beta's token, the key finds Beta's ticket, whose draft screenshot takes the verdict, and Acme
+     * Foods' screenshot and checklist item are not of it.
      */
     #[Test]
     public function aScreenshotOrItemOfAnotherOrganizationIsNotFoundAndNothingIsWritten(): void
@@ -278,7 +307,8 @@ final class SetVerdictTest extends WebTestCase
         $betaBakery = $this->createOrganization('Beta Bakery');
         $this->addMembership($this->people['Omar'], $betaBakery);
         $betaShop = $this->addProject(null, 'SHOP', 'Shop', $betaBakery);
-        $this->addTicketOf($betaBakery, $betaShop, 'SHOP-1', $this->addTodoStep($betaBakery), $this->people['Omar']);
+        $betaTicket = $this->addTicketOf($betaBakery, $betaShop, 'SHOP-1', $this->addTodoStep($betaBakery), $this->people['Omar']);
+        $betaShot = $this->addDraftScreenshotOf($betaBakery, $betaTicket, $this->people['Omar']);
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $betaBakery);
         $before = $this->stored();
 
@@ -286,11 +316,23 @@ final class SetVerdictTest extends WebTestCase
         $this->assertRefused(ToolRefusal::NOT_FOUND);
         $this->callSetVerdict($token, ['key' => 'SHOP-1', 'check_item_id' => $this->checkItem, 'state' => SetVerdict::FIXED]);
         $this->assertRefused(ToolRefusal::NOT_FOUND);
+        $this->callSetVerdict($token, ['key' => 'SHOP-1', 'screenshot_id' => $betaShot, 'verdict' => SetVerdict::LOOKS_RIGHT]);
 
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertSame(
+            ['screenshot_id' => $betaShot, 'verdict' => 'looks_right', 'verdict_label' => 'Looks right', 'summary_saved' => false],
+            $this->responseValueAt('result', 'structuredContent'),
+        );
+        self::assertSame('looks_right', $this->verdictOf($betaBakery, $betaShot));
         self::assertSame($before, $this->stored());
         self::assertSame([], $this->toolRowsOf($this->acmeFoods));
         $notFoundRow = $this->toolRow('Omar', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found');
-        self::assertSame([$notFoundRow, $notFoundRow], $this->toolRowsOf($betaBakery));
+        // All three rows are written at the frozen time, so their order in aud_event is not defined.
+        self::assertEqualsCanonicalizing(
+            [$notFoundRow, $notFoundRow, $this->toolRow('Omar', $tokenId, 'screenshot', $betaShot, 'ok')],
+            $this->toolRowsOf($betaBakery),
+        );
     }
 
     #[Test]
@@ -376,6 +418,52 @@ final class SetVerdictTest extends WebTestCase
         ));
 
         return $ticketId;
+    }
+
+    /**
+     * $owner's unshared draft on the ticket with one ready picture of their own and no verdict, unlike
+     * SeedsTicketRounds, which seeds Acme Foods only.
+     *
+     * @return string the screenshot's id
+     */
+    private function addDraftScreenshotOf(OrganizationId $organizationId, string $ticketId, User $owner): string
+    {
+        $mediaId = Uuid::v7()->toRfc4122();
+        $roundId = Uuid::v7()->toRfc4122();
+        $screenshotId = Uuid::v7()->toRfc4122();
+        $organization = $organizationId->toString();
+        $ownerId = $owner->id()->toString();
+        $this->committedAs($organizationId, static function (Connection $migrator) use ($organization, $mediaId, $roundId, $ticketId, $screenshotId, $ownerId): int {
+            $migrator->executeStatement(
+                "INSERT INTO med_object (organization_id, id, storage_key, mime, bytes, uploaded_by, created_at, status, sha256, width, height, variants)
+                 VALUES (?, ?, ?, 'image/png', 2048, ?, '2026-11-05 08:00:00+00', 'ready', ?, 1280, 800, CAST(? AS jsonb))",
+                [$organization, $mediaId, 'uploads/'.$mediaId, $ownerId, hash('sha256', $mediaId), json_encode(['view' => 'media/'.$mediaId.'/view.webp'], \JSON_THROW_ON_ERROR)],
+            );
+            $migrator->executeStatement(
+                "INSERT INTO rvw_round (organization_id, id, ticket_id, number, kind, owner_id, shared_at, state, version, created_at)
+                 VALUES (?, ?, ?, NULL, 'draft', ?, NULL, 'open', 1, '2026-11-05 08:00:00+00')",
+                [$organization, $roundId, $ticketId, $ownerId],
+            );
+
+            return (int) $migrator->executeStatement(
+                "INSERT INTO rvw_screenshot (organization_id, id, round_id, media_id, position, created_at) VALUES (?, ?, ?, ?, 0, '2026-11-05 08:00:00+00')",
+                [$organization, $screenshotId, $roundId, $mediaId],
+            );
+        });
+
+        return $screenshotId;
+    }
+
+    private function verdictOf(OrganizationId $organizationId, string $screenshotId): mixed
+    {
+        $verdict = null;
+        $this->committedAs($organizationId, static function (Connection $migrator) use ($organizationId, $screenshotId, &$verdict): int {
+            $verdict = $migrator->fetchOne('SELECT verdict FROM rvw_screenshot WHERE organization_id = ? AND id = ?', [$organizationId->toString(), $screenshotId]);
+
+            return 0;
+        });
+
+        return $verdict;
     }
 
     /**
