@@ -25,6 +25,7 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Api\TicketSummaryQueries;
 use App\Ticketing\Api\TicketVisibilityFacts;
 use App\Ticketing\UI\Voter\TicketVoter;
 use Doctrine\DBAL\Connection;
@@ -62,6 +63,7 @@ final class SummaryControllerTest extends WebTestCase
     private const string USAGE_LIMITER_PREFIX = 'ai_calls_per_user-';
     private const string RUNNING = '[data-summary-poll-state-value="running"]';
     private const string FAILED_LINE = 'The AI answer failed. Try again.';
+    private const int POLL_QUERY_COUNT = 16;
 
     protected function setUp(): void
     {
@@ -200,12 +202,7 @@ final class SummaryControllerTest extends WebTestCase
     #[Test]
     public function aPressPastTheAiCallLimitIsRefusedWith429AndKeepsTheButton(): void
     {
-        $limit = self::getContainer()->get('test.assist_ai_call_limit');
-        self::assertInstanceOf(AiCallLimit::class, $limit);
-        $omar = new ActorContext($this->people['Omar']->id(), $this->acmeFoods, Roles::none());
-        for ($call = 1; $call <= 30; ++$call) {
-            $limit->consume($omar);
-        }
+        $this->useUpTheAiCallsOf('Omar');
         $this->logIn($this->client, $this->people['Omar']);
 
         $this->postSummaryRequest('SHOP-1', $this->summaryToken());
@@ -216,6 +213,62 @@ final class SummaryControllerTest extends WebTestCase
         self::assertCount(1, $frame->filter('form .ticket__summarize'));
         self::assertSame([], $this->sentJobs());
         self::assertNull($this->stateOf($this->shopTicketId));
+    }
+
+    #[Test]
+    public function withoutTurboAPressPastTheAiCallLimitGoesBackToTheTicketPageWithTheLimitToast(): void
+    {
+        $this->useUpTheAiCallsOf('Omar');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', '/t/SHOP-1/summary', [SummaryController::CSRF_FIELD => $this->summaryToken()]);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertResponseRedirects('/t/SHOP-1');
+        self::assertSame([], $this->sentJobs());
+        self::assertNull($this->stateOf($this->shopTicketId));
+        self::assertSame('Too many AI requests. Try again in a minute.', $this->toastOfTheRedirectedPage());
+    }
+
+    #[Test]
+    public function withoutTurboAPressWhileASummaryIsQueuedGoesBackToTheTicketPageWithTheAlreadyQueuedToast(): void
+    {
+        self::assertTrue($this->requests()->claim($this->acmeFoods, new TicketId($this->shopTicketId), $this->people['Lena']->id()));
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', '/t/SHOP-1/summary', [SummaryController::CSRF_FIELD => $this->summaryToken()]);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertResponseRedirects('/t/SHOP-1');
+        self::assertSame([], $this->sentJobs());
+        $stillQueued = $this->stateOf($this->shopTicketId);
+        self::assertNotNull($stillQueued);
+        self::assertSame($this->idOf('Lena'), $stillQueued->requesterId->toString(), 'The refused press replaced the queued request.');
+        self::assertSame('A summary is already on its way.', $this->toastOfTheRedirectedPage());
+    }
+
+    /**
+     * A poll checks the viewer's access once, in the controller: one read of the ticket for its page, and no second
+     * membership, roles or ticket read for the request state, which lives on Valkey. The count holds the transaction's
+     * start and commit.
+     */
+    #[Test]
+    public function aPollOfARunningRequestReadsTheTicketOnce(): void
+    {
+        self::assertTrue($this->requests()->claim($this->acmeFoods, new TicketId($this->shopTicketId), $this->people['Lena']->id()));
+        $this->logIn($this->client, $this->people['Omar']);
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+
+        $frame = $this->frameOf('/t/SHOP-1/summary');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $frame->filter(self::RUNNING));
+        $queries = self::queriesOf($debugData->getData());
+        self::assertCount(self::POLL_QUERY_COUNT, $queries, implode("\n", $queries));
+        $ticketReads = preg_grep('/\bFROM tkt_ticket\b/', $queries);
+        self::assertIsArray($ticketReads);
+        self::assertCount(1, $ticketReads, implode("\n", $queries));
     }
 
     /**
@@ -255,7 +308,7 @@ final class SummaryControllerTest extends WebTestCase
                 throw new SummaryRequestRefused('a_code_added_later', 'AI help is not available for this ticket.');
             }
 
-            public function latestRequestOf(TicketId $ticketId, UserId $viewerId, OrganizationId $organizationId): ?SummaryRequestView
+            public function latestRequestOfVisibleTicket(TicketId $ticketId, OrganizationId $organizationId): ?SummaryRequestView
             {
                 return null;
             }
@@ -349,18 +402,20 @@ final class SummaryControllerTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, string|null, string}>
+     * The summary's source and author, its line, and the heading of the original text under it.
+     *
+     * @return iterable<string, array{string, string|null, string, string}>
      */
     public static function storedSummaries(): iterable
     {
-        yield 'asked for an hour ago' => ['ai', 'Omar', 'In short AI SUMMARY written on 12 Nov at Omar’s request'];
-        yield 'written on sync' => ['sync', null, 'In short AI SUMMARY written from the Jira text when the ticket was synced'];
-        yield 'written by a person' => ['human', 'Lena', 'In short'];
+        yield 'asked for an hour ago' => ['ai', 'Omar', 'In short AI SUMMARY written on 12 Nov at Omar’s request', 'Original text from the report'];
+        yield 'written on sync' => ['sync', null, 'In short AI SUMMARY written from the Jira text when the ticket was synced', 'Original text from Jira'];
+        yield 'written by a person' => ['human', 'Lena', 'In short', 'Original text from the report'];
     }
 
     #[Test]
     #[DataProvider('storedSummaries')]
-    public function theTicketPageShowsTheCurrentSummaryWithTheNoteItsSourceGets(string $source, ?string $author, string $expectedLine): void
+    public function theTicketPageShowsTheCurrentSummaryWithTheNoteItsSourceGets(string $source, ?string $author, string $expectedLine, string $expectedOriginalHeading): void
     {
         $this->addSummary($source, 'Pay does nothing on the last step.', $author, true, '2026-11-12 11:00:00+00');
         $this->logIn($this->client, $this->people['Omar']);
@@ -372,6 +427,45 @@ final class SummaryControllerTest extends WebTestCase
         self::assertSame($expectedLine, $frame->filter('.ticket__ask--summary > .ticket__ask-source')->text());
         self::assertSame('Pay does nothing on the last step.', $frame->filter('.ticket__ask-summary-text')->text());
         self::assertSame('Asked by Lena · 4 Nov', $frame->filter('.ticket__asked')->text());
+        self::assertSame([$expectedOriginalHeading], $frame->filter('.ticket__ask-original .ticket__ask-raw .ticket__ask-source')->each(static fn (Crawler $heading): string => $heading->text()));
+        self::assertSame(self::TICKET_TEXT, $frame->filter('.ticket__ask-original .ticket__ask-text')->text());
+    }
+
+    #[Test]
+    public function oneEarlierSummaryIsCountedInTheSingular(): void
+    {
+        $this->addSummary('human', 'The current one.', 'Lena', true, '2026-11-11 09:00:00+00');
+        $this->addSummary('ai', 'The first take.', 'Omar', false, '2026-11-10 09:00:00+00');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1');
+
+        self::assertResponseStatusCodeSame(200);
+        $earlier = $page->filter('turbo-frame#ticket-ask details.ticket__ask-earlier');
+        self::assertSame(['Show 1 earlier summary', 'Hide 1 earlier summary'], [$earlier->filter('.ticket__ask-show')->text(), $earlier->filter('.ticket__ask-hide')->text()]);
+    }
+
+    #[Test]
+    public function theEarlierSummariesListStopsAtItsLimitAndSaysHowManyAreNotShown(): void
+    {
+        $this->addSummary('human', 'The current one.', 'Lena', true, '2026-11-11 09:00:00+00');
+        // One more earlier summary than the list holds, inserted oldest last, so the oldest is the one left out.
+        $earlierCount = TicketSummaryQueries::EARLIER_LIMIT + 1;
+        for ($day = $earlierCount; $day >= 1; --$day) {
+            $this->addSummary('human', 'Take of 2026-10-'.\sprintf('%02d', $day).'.', 'Lena', false, \sprintf('2026-10-%02d 09:00:00+00', $day));
+        }
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $list = $this->frameOf('/t/SHOP-1/summary/earlier', 'ticket-ask-earlier');
+
+        self::assertResponseStatusCodeSame(200);
+        $expectedTexts = [];
+        for ($day = $earlierCount; $day >= 2; --$day) {
+            $expectedTexts[] = 'Take of 2026-10-'.\sprintf('%02d', $day).'.';
+        }
+        self::assertCount(TicketSummaryQueries::EARLIER_LIMIT, $expectedTexts);
+        self::assertSame($expectedTexts, $list->filter('.ticket__ask-earlier-item .ticket__ask-summary-text')->each(static fn (Crawler $text): string => $text->text()));
+        self::assertSame('1 older summary is not shown.', $list->filter('.ticket__ask-earlier-more')->text());
     }
 
     #[Test]
@@ -504,6 +598,27 @@ final class SummaryControllerTest extends WebTestCase
         self::assertResponseRedirects('/login', 302);
         self::assertSame([], $this->sentJobs());
         self::assertNull($this->stateOf($this->shopTicketId));
+    }
+
+    private function useUpTheAiCallsOf(string $person): void
+    {
+        $limit = self::getContainer()->get('test.assist_ai_call_limit');
+        self::assertInstanceOf(AiCallLimit::class, $limit);
+        $actor = new ActorContext($this->people[$person]->id(), $this->acmeFoods, Roles::none());
+        for ($call = 1; $call <= 30; ++$call) {
+            $limit->consume($actor);
+        }
+    }
+
+    /**
+     * Follows the redirect and reads the toast the ticket page shows once.
+     */
+    private function toastOfTheRedirectedPage(): ?string
+    {
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+
+        return $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value');
     }
 
     private function postSummaryRequest(string $key, ?string $token): void

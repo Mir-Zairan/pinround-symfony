@@ -32,12 +32,11 @@ interface Summaries
     public function request(TicketId $ticketId, UserId $requesterId, OrganizationId $organizationId): void;
 
     /**
-     * The latest request of the ticket that is queued or failed, for a viewer who may see the ticket. Reads the
-     * request state first and the viewer's membership and ticket visibility only when there is one; those read under
-     * row-level security, so it needs an open transaction whose tenant is $organizationId.
+     * The latest request of the ticket that is queued or failed. Checks no access: the caller must already have
+     * decided Ticketing's TicketPermission::VIEW on the ticket for the viewer, as the ticket page's summary frame does
+     * on each poll. Reads only the request state, no database row.
      *
-     * @return SummaryRequestView|null null when no request is queued or failed, the summary was stored, or the viewer
-     *                                 is no member or may not see the ticket
+     * @return SummaryRequestView|null null when no request is queued or failed, or the summary was stored
      */
-    public function latestRequestOf(TicketId $ticketId, UserId $viewerId, OrganizationId $organizationId): ?SummaryRequestView;
+    public function latestRequestOfVisibleTicket(TicketId $ticketId, OrganizationId $organizationId): ?SummaryRequestView;
 }

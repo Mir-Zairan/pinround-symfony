@@ -78,7 +78,7 @@ final class TicketPageTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                foreach (['tkt_ticket_event', 'ins_ticket_turn', 'ins_project_count_ticket', 'ins_project_counts', 'tkt_ticket', 'wf_step'] as $table) {
+                foreach (['tkt_ticket_event', 'tkt_summary', 'ins_ticket_turn', 'ins_project_count_ticket', 'ins_project_counts', 'tkt_ticket', 'wf_step'] as $table) {
                     $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
                 }
                 $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
@@ -1070,7 +1070,8 @@ final class TicketPageTest extends WebTestCase
      * position), a saved turn of someone outside the ticket's people and team and a move by another such person (one
      * more names query for both), What happened's moves (one query), the lead's Needs input dialog (one membership
      * read), and People's Ping button for Omar, whose ping limit comes with the settings and whose pinged state comes
-     * from the ping window on Valkey, so it reads none. Conversation's thread and the Rounds section load in lazy frames
+     * from the ping window on Valkey, so it reads none. The ask's current summary and its count of earlier ones come
+     * with the ticket, and its author, on the page for nothing else, comes in the names batch. Conversation's thread and the Rounds section load in lazy frames
      * of their own requests (TicketThreadTest, RoundsFrameTest), so the page reads none of them.
      */
     #[Test]
@@ -1084,6 +1085,10 @@ final class TicketPageTest extends WebTestCase
         ));
         $this->addTurnRow($keys['X'], 'Raj', 'decide');
         $this->addHistoryRow($keys['X'], 'moved', 'Sara', 'todo', 'todo', [], '2026-11-06 11:00:00+00');
+        // Mia, a viewer of Shop, is on the page only as the current summary's author.
+        $this->addSummary($keys['X'], 'ai', 'Mia', true, '2026-11-05 10:00:00+00');
+        $this->addSummary($keys['X'], 'ai', 'Omar', false, '2026-11-04 10:00:00+00');
+        $this->addSummary($keys['X'], 'sync', null, false, '2026-11-03 10:00:00+00');
         $this->logIn($this->client, $this->people['Lena']);
         $this->queryCountOf(self::SHELL);
         $shellQueryCount = $this->queryCountOf(self::SHELL);
@@ -1092,6 +1097,9 @@ final class TicketPageTest extends WebTestCase
 
         $pageQueryCount = $this->queryCountOf($uri) - $shellQueryCount;
 
+        $ask = $this->client->getCrawler()->filter('turbo-frame#ticket-ask');
+        self::assertSame('In short AI SUMMARY written on 5 Nov at Mia’s request', $ask->filter('.ticket__ask--summary > .ticket__ask-source')->text());
+        self::assertSame('Show 2 earlier summaries', $ask->filter('.ticket__ask-earlier .ticket__ask-show')->text());
         self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertSame(['1 h ago · Sara moved it to To do', '5 Nov · Created by Lena'], self::activityLinesOf($this->client->getCrawler()));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
@@ -1316,6 +1324,24 @@ final class TicketPageTest extends WebTestCase
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             'INSERT INTO tkt_ticket_event (id, organization_id, ticket_id, actor_id, type, from_step, to_step, payload, at)
              VALUES (?, ?, (SELECT id FROM tkt_ticket WHERE key = ?), ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS timestamptz))',
+            $parameters,
+        ));
+    }
+
+    /**
+     * A summary of the ticket as Ticketing stores one; only an 'ai' summary names a model and prompt version.
+     */
+    private function addSummary(string $ticketKey, string $source, ?string $author, bool $isCurrent, string $createdAt): void
+    {
+        $isAi = 'ai' === $source;
+        $parameters = [
+            $this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $ticketKey, 'Pay does nothing on the last step.', $source,
+            null === $author ? null : $this->people[$author]->id()->toString(), $isAi ? 'test-model' : null, $isAi ? 'summary.v1' : null,
+            $isCurrent ? 'true' : 'false', $createdAt,
+        ];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'INSERT INTO tkt_summary (organization_id, id, ticket_id, text, source, author_id, model, prompt_version, is_current, created_at)
+             VALUES (?, ?, (SELECT id FROM tkt_ticket WHERE key = ?), ?, ?, ?, ?, ?, ?, ?)',
             $parameters,
         ));
     }

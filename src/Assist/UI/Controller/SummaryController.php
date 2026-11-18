@@ -30,8 +30,8 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * "The ask"'s summary frame (P08.T4, ticket-page.md): GET /t/{key}/summary renders TheAsk's frame with the latest
- * request the viewer may see (Summaries::latestRequestOf), which the summary-poll controller fetches while a request
- * runs; GET /t/{key}/summary/earlier lists the earlier summaries in their lazy frame; POST /t/{key}/summary queues a
+ * request of the ticket (Summaries::latestRequestOfVisibleTicket, which trusts this controller's voter check, so a
+ * poll checks access once), which the summary-poll controller fetches while a request runs; GET /t/{key}/summary/earlier lists the earlier summaries in their lazy frame; POST /t/{key}/summary queues a
  * summary ("Summarize with AI") and answers the frame in its running state.
  *
  * Each route reads the ticket with TicketQueries::pageOf and decides TicketPermission::VIEW on it, so an unknown or
@@ -82,7 +82,7 @@ final class SummaryController extends AbstractController
             return $this->redirectToTicket($key);
         }
 
-        return $this->renderFrame($ticket, $this->summaries->latestRequestOf($ticket->id, $actor->userId(), $actor->organizationId()));
+        return $this->renderFrame($ticket, $this->summaries->latestRequestOfVisibleTicket($ticket->id, $actor->organizationId()));
     }
 
     /**
@@ -135,7 +135,7 @@ final class SummaryController extends AbstractController
                     $request,
                     $ticket,
                     Response::HTTP_CONFLICT,
-                    summaryRequest: $this->summaries->latestRequestOf($ticket->id, $actor->userId(), $actor->organizationId()) ?? SummaryRequestView::queued($actor->userId(), $this->clock->now()),
+                    summaryRequest: $this->summaries->latestRequestOfVisibleTicket($ticket->id, $actor->organizationId()) ?? SummaryRequestView::queued($actor->userId(), $this->clock->now()),
                     toast: $refused->getMessage(),
                 ),
                 default => $this->respondToRefusal($request, $ticket, Response::HTTP_FORBIDDEN, refusal: $refused->getMessage()),

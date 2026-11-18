@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Assist\UI\Component;
 
-use App\Assist\Api\PolicyView;
 use App\Assist\UI\Component\TheAsk;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The ask's 700-character cut and the line that says why "Summarize with AI" is hidden.
+ * The ask's 700-character cut.
  */
 final class TheAskTest extends TestCase
 {
@@ -53,32 +52,5 @@ final class TheAskTest extends TestCase
 
         self::assertNotNull($shortAsk);
         self::assertSame(699, mb_strlen($shortAsk) - mb_strlen(TheAsk::ASK_CUT_MARK));
-    }
-
-    /**
-     * @return iterable<string, array{PolicyView, bool, string|null}>
-     */
-    public static function policies(): iterable
-    {
-        yield 'cloud AI for everyone, an open ticket' => [self::policy(), false, null];
-        yield 'cloud AI for everyone, a team-only ticket the admin lets go to cloud AI' => [self::policy(isRestrictedToCloudAllowed: true), true, null];
-        yield 'cloud AI, a team-only ticket kept from cloud AI' => [self::policy(), true, 'Your admin keeps team-only tickets away from cloud AI.'];
-        yield 'laptop only, which the server never runs' => [self::policy(PolicyView::WHERE_LAPTOP), false, 'AI help runs on your laptop, and Ollama is not ready there yet.'];
-        yield 'laptop first goes to the cloud on the server' => [self::policy(PolicyView::WHERE_LAPTOP_FIRST), false, null];
-        yield 'laptop first, a team-only ticket kept from cloud AI' => [self::policy(PolicyView::WHERE_LAPTOP_FIRST), true, 'Your admin keeps team-only tickets away from cloud AI.'];
-        yield 'AI off says so before the ticket' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false), true, 'Your admin turned AI help off.'];
-        yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false), false, 'Your admin allows AI help for leads only.'];
-    }
-
-    #[Test]
-    #[DataProvider('policies')]
-    public function theButtonIsHiddenWithThePolicysLineForTheServersAi(PolicyView $policy, bool $isTicketTeamOnly, ?string $expectedLine): void
-    {
-        self::assertSame($expectedLine, TheAsk::refusalOf($policy, $isTicketTeamOnly));
-    }
-
-    private static function policy(string $whereAiRuns = PolicyView::WHERE_CLOUD, bool $isRestrictedToCloudAllowed = false): PolicyView
-    {
-        return new PolicyView(null, null, $whereAiRuns, false, false, $isRestrictedToCloudAllowed);
     }
 }

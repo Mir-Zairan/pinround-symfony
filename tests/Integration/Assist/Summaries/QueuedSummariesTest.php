@@ -29,8 +29,6 @@ use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketCommands;
-use App\Ticketing\Api\TicketQueries;
-use App\Ticketing\Api\TicketVisibilities;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -269,24 +267,11 @@ final class QueuedSummariesTest extends KernelTestCase
         self::assertCount(1, $this->asyncAi()->getSent());
     }
 
-    #[Test]
-    public function theLatestRequestIsShownToEveryMemberWhoMaySeeTheTicket(): void
-    {
-        $this->requestAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::checkoutTicketId());
-
-        foreach ([self::OMAR, self::LENA] as $viewerId) {
-            $latest = $this->latestRequestAs($viewerId, self::checkoutTicketId());
-            self::assertNotNull($latest, $viewerId);
-            self::assertSame([SummaryRequestView::QUEUED, self::OMAR, '2027-03-15 10:00:00', null], self::fieldsOf($latest));
-        }
-    }
-
     /**
-     * The ticket page polls the latest request: the membership without the roles, the viewer's roles and teams for the
-     * visibility, and the ticket's, nothing more.
+     * The ticket page polls the latest request after its own voter check, so the read sends no query.
      */
     #[Test]
-    public function aPollOfTheLatestRequestSendsFourQueries(): void
+    public function theLatestRequestOfATicketIsItsQueuedRequestReadWithoutAQuery(): void
     {
         $this->requestAs(self::OMAR, self::AI_ON_IN_THE_CLOUD, self::checkoutTicketId());
         $summaries = $this->summaries();
@@ -294,31 +279,32 @@ final class QueuedSummariesTest extends KernelTestCase
 
         [$latest, $sentSql] = self::transactions()->rolledBackAs(self::ACME_FOODS, static function () use ($summaries, $debugData): array {
             $debugData->reset();
-            $latest = $summaries->latestRequestOf(self::checkoutTicketId(), new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS));
+            $latest = $summaries->latestRequestOfVisibleTicket(self::checkoutTicketId(), new OrganizationId(self::ACME_FOODS));
 
             return [$latest, self::sqlOf($debugData)];
         });
 
         self::assertNotNull($latest);
-        self::assertSame(SummaryRequestView::QUEUED, $latest->status);
-        self::assertCount(4, $sentSql, implode("\n", $sentSql));
+        self::assertSame([SummaryRequestView::QUEUED, self::OMAR, '2027-03-15 10:00:00', null], self::fieldsOf($latest));
+        self::assertSame([], $sentSql);
     }
 
     #[Test]
-    public function aPersonWhoMayNotSeeTheTicketGetsNoRequestEvenWhenOneExists(): void
+    public function theLatestRequestIsReadForTheTicketAndOrganizationAskedOnly(): void
     {
-        self::assertTrue($this->requests()->claim(new OrganizationId(self::ACME_FOODS), self::teamOnlyTicketId(), new UserId(self::LENA)));
         $this->requests()->recordFailure(new OrganizationId(self::ACME_FOODS), self::checkoutTicketId(), new UserId(self::OMAR), 'The AI answer failed. Try again.');
 
-        self::assertNotNull($this->latestRequestAs(self::LENA, self::teamOnlyTicketId()), 'Lena leads Shop, so the state proves nothing if she gets none.');
-        self::assertNull($this->latestRequestAs(self::OMAR, self::teamOnlyTicketId()));
-        self::assertNull($this->latestRequestAs(self::MIA, self::checkoutTicketId()), 'Mia is no member of Acme Foods.');
+        $latest = $this->latestRequestOf(self::ACME_FOODS, self::checkoutTicketId());
+        self::assertNotNull($latest, 'The failed request proves nothing if Acme Foods gets none.');
+        self::assertSame([SummaryRequestView::FAILED, self::OMAR, '2027-03-15 10:00:00', 'The AI answer failed. Try again.'], self::fieldsOf($latest));
+        self::assertNull($this->latestRequestOf(self::ACME_FOODS, self::teamOnlyTicketId()));
+        self::assertNull($this->latestRequestOf(self::BETA_BAKERY, self::checkoutTicketId()));
     }
 
     #[Test]
     public function aTicketWithNoRequestHasNoLatestRequest(): void
     {
-        self::assertNull($this->latestRequestAs(self::LENA, self::checkoutTicketId()));
+        self::assertNull($this->latestRequestOf(self::ACME_FOODS, self::checkoutTicketId()));
     }
 
     /**
@@ -334,9 +320,9 @@ final class QueuedSummariesTest extends KernelTestCase
         });
     }
 
-    private function latestRequestAs(string $viewerId, TicketId $ticketId): ?SummaryRequestView
+    private function latestRequestOf(string $organizationId, TicketId $ticketId): ?SummaryRequestView
     {
-        return self::transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?SummaryRequestView => $this->summaries()->latestRequestOf($ticketId, new UserId($viewerId), new OrganizationId(self::ACME_FOODS)));
+        return self::transactions()->rolledBackAs($organizationId, fn (): ?SummaryRequestView => $this->summaries()->latestRequestOfVisibleTicket($ticketId, new OrganizationId($organizationId)));
     }
 
     private function stateOf(TicketId $ticketId): ?SummaryRequestView
@@ -366,12 +352,8 @@ final class QueuedSummariesTest extends KernelTestCase
         \assert($aiRequesters instanceof AiRequesters);
         $aiTaskAdmission = self::getContainer()->get('test.assist_ai_task_admission');
         \assert($aiTaskAdmission instanceof AiTaskAdmission);
-        $ticketVisibilities = self::getContainer()->get('test.ticketing_ticket_visibilities');
-        \assert($ticketVisibilities instanceof TicketVisibilities);
-        $ticketQueries = self::getContainer()->get('test.ticketing_ticket_queries');
-        \assert($ticketQueries instanceof TicketQueries);
 
-        return new QueuedSummaries($aiRequesters, $aiTaskAdmission, $this->limit(), $this->requests(), $summaryJobQueue, $ticketVisibilities, $ticketQueries);
+        return new QueuedSummaries($aiRequesters, $aiTaskAdmission, $this->limit(), $this->requests(), $summaryJobQueue);
     }
 
     private function limit(): AiCallLimit

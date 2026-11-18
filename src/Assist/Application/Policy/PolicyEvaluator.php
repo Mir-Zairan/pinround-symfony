@@ -56,18 +56,30 @@ final readonly class PolicyEvaluator
             return PolicyDecision::refuse(PolicyRefusal::CannotSeeTicket);
         }
 
-        if (AiSettings::WHERE_CLOUD !== $settings->whereAiRuns && $isLaptopReady) {
-            return PolicyDecision::send(AiRoute::Laptop, $settings->isTitleOnly);
+        return $this->decideRoute($settings->whereAiRuns, $settings->isRestrictedToCloudAllowed, $settings->isTitleOnly, $isTicketRestricted, $isLaptopReady);
+    }
+
+    /**
+     * The last step of decide(), for a viewer already allowed AI help on a ticket they may see: the laptop when it is
+     * ready and allowed, the setup sheet for "laptop only", then a team-only ticket kept from cloud AI, then the cloud.
+     * A page that holds the viewer's policy but not their roles decides the step here too (AiPolicy::serverTicketRefusalOf).
+     *
+     * @param string $whereAiRuns one of AiSettings::WHERE_VALUES
+     */
+    public function decideRoute(string $whereAiRuns, bool $isRestrictedToCloudAllowed, bool $isTitleOnly, bool $isTicketRestricted, bool $isLaptopReady): PolicyDecision
+    {
+        if (AiSettings::WHERE_CLOUD !== $whereAiRuns && $isLaptopReady) {
+            return PolicyDecision::send(AiRoute::Laptop, $isTitleOnly);
         }
-        if (AiSettings::WHERE_LAPTOP === $settings->whereAiRuns) {
+        if (AiSettings::WHERE_LAPTOP === $whereAiRuns) {
             return PolicyDecision::setupSheet();
         }
 
-        if ($isTicketRestricted && !$settings->isRestrictedToCloudAllowed) {
+        if ($isTicketRestricted && !$isRestrictedToCloudAllowed) {
             return PolicyDecision::refuse(PolicyRefusal::RestrictedTicketToCloud);
         }
 
-        return PolicyDecision::send(AiRoute::Cloud, $settings->isTitleOnly);
+        return PolicyDecision::send(AiRoute::Cloud, $isTitleOnly);
     }
 
     private static function isLeadOfAnyTeam(ActorContext $viewer): bool

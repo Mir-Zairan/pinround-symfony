@@ -17,8 +17,6 @@ use App\Assist\Domain\AiFeature;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
-use App\Ticketing\Api\TicketQueries;
-use App\Ticketing\Api\TicketVisibilities;
 
 /**
  * Asks AiTaskAdmission, the check the job's gateway call makes first, and the person's call limit without counting a
@@ -34,8 +32,6 @@ final readonly class QueuedSummaries implements Summaries
         private AiCallLimit $aiCallLimit,
         private SummaryRequests $summaryRequests,
         private SummaryJobQueue $summaryJobQueue,
-        private TicketVisibilities $ticketVisibilities,
-        private TicketQueries $ticketQueries,
     ) {
     }
 
@@ -65,15 +61,9 @@ final readonly class QueuedSummaries implements Summaries
         }
     }
 
-    public function latestRequestOf(TicketId $ticketId, UserId $viewerId, OrganizationId $organizationId): ?SummaryRequestView
+    public function latestRequestOfVisibleTicket(TicketId $ticketId, OrganizationId $organizationId): ?SummaryRequestView
     {
-        $latest = $this->summaryRequests->latestOf($organizationId, $ticketId);
-        if (null === $latest || !$this->aiRequesters->isMember($viewerId, $organizationId)) {
-            return null;
-        }
-        $visibility = $this->ticketVisibilities->of($organizationId, $viewerId);
-
-        return [] === $this->ticketQueries->visibleTicketIdsOf($visibility, [$ticketId]) ? null : $latest;
+        return $this->summaryRequests->latestOf($organizationId, $ticketId);
     }
 
     private static function refusedFor(PolicyRefusal $refusal): SummaryRequestRefused

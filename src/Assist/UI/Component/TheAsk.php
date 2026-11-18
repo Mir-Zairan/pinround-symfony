@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace App\Assist\UI\Component;
 
-use App\Assist\Api\PolicyView;
 use App\Assist\Api\SummaryRequestView;
-use App\Assist\Application\Policy\PolicyRefusal;
 use App\Assist\UI\SummarySourceNote;
 use App\Assist\UI\ViewerAiPolicy;
 use App\Identity\Api\CurrentTimeZone;
@@ -33,6 +31,9 @@ final class TheAsk
     public const string ASK_CUT_MARK = ' …';
 
     public const string UNKNOWN_REPORTER = 'an unknown person';
+
+    public const string ORIGINAL_TEXT_FROM_REPORT = 'Original text from the report';
+    public const string ORIGINAL_TEXT_FROM_JIRA = 'Original text from Jira';
 
     public const string STATE_IDLE = 'idle';
     public const string STATE_RUNNING = 'running';
@@ -82,27 +83,7 @@ final class TheAsk
             return $this->refusal;
         }
 
-        return self::refusalOf($this->viewerAiPolicy->policy(), $this->ticket->isTeamOnly());
-    }
-
-    /**
-     * The policy's answer for the server's AI as AiTaskAdmission gives it before a summary is queued, with the laptop
-     * not ready: AI off or not for this person, then "laptop only", which the server never runs, then a team-only
-     * ticket the admin keeps from cloud AI.
-     */
-    public static function refusalOf(PolicyView $policy, bool $isTicketTeamOnly): ?string
-    {
-        if (null !== $policy->refusalSentence) {
-            return $policy->refusalSentence;
-        }
-        if (PolicyView::WHERE_LAPTOP === $policy->whereAiRuns) {
-            return PolicyRefusal::LaptopNotReady->sentence();
-        }
-        if ($isTicketTeamOnly && !$policy->isRestrictedToCloudAllowed) {
-            return PolicyRefusal::RestrictedTicketToCloud->sentence();
-        }
-
-        return null;
+        return $this->viewerAiPolicy->serverTicketRefusalOf($this->ticket->isTeamOnly());
     }
 
     public function shortAsk(): ?string
@@ -128,6 +109,14 @@ final class TheAsk
         $authorName = null === $summary->authorId ? null : ($this->ticket->displayNames[$summary->authorId->toString()] ?? null);
 
         return SummarySourceNote::of($summary, $authorName, $this->clock->now(), $this->currentTimeZone->zone());
+    }
+
+    /**
+     * The heading of the ask's text under a summary: a summary written at sync was written from the Jira text.
+     */
+    public function originalTextHeading(): string
+    {
+        return 'sync' === $this->ticket->currentSummary?->source ? self::ORIGINAL_TEXT_FROM_JIRA : self::ORIGINAL_TEXT_FROM_REPORT;
     }
 
     public function isSummaryWrittenByAi(): bool

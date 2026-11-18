@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Assist\Application\Policy;
 
+use App\Assist\Api\PolicyView;
 use App\Assist\Application\Policy\OrgSettingsAiPolicy;
 use App\Assist\Application\Policy\PolicyEvaluator;
 use App\Organization\Api\ActorContext;
@@ -15,6 +16,7 @@ use App\Organization\Api\Roles;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -122,6 +124,38 @@ final class OrgSettingsAiPolicyTest extends TestCase
         self::assertSame([false, false, 'cloud'], [$view->isSummaryOnSyncOn, $view->isLaptopAllowed(), $view->whereAiRuns]);
         self::assertSame([], $this->settingsReads);
         self::assertSame([], $this->roleLookups);
+    }
+
+    /**
+     * @return iterable<string, array{PolicyView, bool, string|null}>
+     */
+    public static function serverTicketPolicies(): iterable
+    {
+        yield 'cloud AI for everyone, an open ticket' => [self::allowedView(), false, null];
+        yield 'cloud AI for everyone, a team-only ticket the admin lets go to cloud AI' => [self::allowedView(isRestrictedToCloudAllowed: true), true, null];
+        yield 'cloud AI, a team-only ticket kept from cloud AI' => [self::allowedView(), true, 'Your admin keeps team-only tickets away from cloud AI.'];
+        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), false, 'AI help runs on your laptop, and Ollama is not ready there yet.'];
+        yield 'laptop only says so before a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP), true, 'AI help runs on your laptop, and Ollama is not ready there yet.'];
+        yield 'laptop first goes to the cloud on the server' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), false, null];
+        yield 'laptop first, a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), true, 'Your admin keeps team-only tickets away from cloud AI.'];
+        yield 'AI off says so before the ticket' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false), true, 'Your admin turned AI help off.'];
+        yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false), false, 'Your admin allows AI help for leads only.'];
+    }
+
+    #[Test]
+    #[DataProvider('serverTicketPolicies')]
+    public function aTicketIsRefusedTheServersAiInTheGatewaysOrderWithoutReadingAnything(PolicyView $view, bool $isTicketTeamOnly, ?string $expectedLine): void
+    {
+        $policy = $this->policyWith(new AiSettings(true, false, false, false, 'cloud', false, null, null));
+
+        self::assertSame($expectedLine, $policy->serverTicketRefusalOf($view, $isTicketTeamOnly));
+        self::assertSame([], $this->settingsReads);
+        self::assertSame([], $this->roleLookups);
+    }
+
+    private static function allowedView(string $whereAiRuns = PolicyView::WHERE_CLOUD, bool $isRestrictedToCloudAllowed = false): PolicyView
+    {
+        return new PolicyView(null, null, $whereAiRuns, false, false, $isRestrictedToCloudAllowed);
     }
 
     private function policyWith(AiSettings $settings): OrgSettingsAiPolicy

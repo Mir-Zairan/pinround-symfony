@@ -30,6 +30,14 @@ final class ViewerAiPolicy implements ResetInterface
         return $this->policy ??= $this->aiPolicy->forTokenUser($this->tokenStorage->getToken()?->getUser());
     }
 
+    /**
+     * Why the server's AI may not run for this person on a ticket (AiPolicy::serverTicketRefusalOf); null when it may.
+     */
+    public function serverTicketRefusalOf(bool $isTicketTeamOnly): ?string
+    {
+        return $this->aiPolicy->serverTicketRefusalOf($this->policy(), $isTicketTeamOnly);
+    }
+
     public function reset(): void
     {
         $this->policy = null;

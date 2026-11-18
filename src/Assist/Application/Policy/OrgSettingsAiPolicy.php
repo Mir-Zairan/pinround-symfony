@@ -45,6 +45,13 @@ final readonly class OrgSettingsAiPolicy implements AiPolicy
         return $this->viewOf($settings, $this->policyEvaluator->refusalForViewer($settings, new ActorContext($viewerId, $organizationId, $roles)));
     }
 
+    public function serverTicketRefusalOf(PolicyView $policy, bool $isTicketTeamOnly): ?string
+    {
+        return $policy->refusalSentence ?? $this->policyEvaluator
+            ->decideRoute($policy->whereAiRuns, $policy->isRestrictedToCloudAllowed, $policy->isTitleOnly, $isTicketTeamOnly, isLaptopReady: false)
+            ->reason();
+    }
+
     private function viewOf(AiSettings $settings, ?PolicyRefusal $refusal): PolicyView
     {
         return new PolicyView(
