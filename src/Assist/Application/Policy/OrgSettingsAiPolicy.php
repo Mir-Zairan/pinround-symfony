@@ -29,27 +29,38 @@ final readonly class OrgSettingsAiPolicy implements AiPolicy
     {
         $viewer = $this->currentActor->actorFor($tokenUser);
         if (null === $viewer) {
-            return $this->viewOf(AiSettings::off(), PolicyRefusal::AiOff);
+            return $this->viewOf(AiSettings::off(), PolicyRefusal::AiOff, null);
         }
 
         $settings = $this->aiSettingsQueries->aiSettingsOf($viewer->organizationId());
 
-        return $this->viewOf($settings, $this->policyEvaluator->refusalForViewer($settings, $viewer));
+        return $this->viewOf($settings, $this->policyEvaluator->refusalForViewer($settings, $viewer), $viewer);
     }
 
     public function for(UserId $viewerId, OrganizationId $organizationId): PolicyView
     {
         $settings = $this->aiSettingsQueries->aiSettingsOf($organizationId);
-        $roles = $this->policyEvaluator->needsViewerRoles($settings) ? $this->membershipQueries->rolesOf($viewerId, $organizationId) : Roles::none();
+        $roles = $this->policyEvaluator->needsViewerRoles($settings) || self::isLaptopAiOn($settings)
+            ? $this->membershipQueries->rolesOf($viewerId, $organizationId)
+            : Roles::none();
+        $viewer = new ActorContext($viewerId, $organizationId, $roles);
 
-        return $this->viewOf($settings, $this->policyEvaluator->refusalForViewer($settings, new ActorContext($viewerId, $organizationId, $roles)));
+        return $this->viewOf($settings, $this->policyEvaluator->refusalForViewer($settings, $viewer), $viewer);
     }
 
     public function serverTicketRefusalOf(PolicyView $policy, bool $isTicketTeamOnly): ?string
     {
-        return $policy->refusalSentence ?? $this->policyEvaluator
-            ->decideRoute($policy->whereAiRuns, $policy->isRestrictedToCloudAllowed, $policy->isTitleOnly, $isTicketTeamOnly, isLaptopReady: false)
-            ->reason();
+        if (null !== $policy->refusalSentence) {
+            return $policy->refusalSentence;
+        }
+        $decision = $this->policyEvaluator
+            ->decideRoute($policy->whereAiRuns, $policy->isRestrictedToCloudAllowed, $policy->isTitleOnly, $isTicketTeamOnly, isLaptopReady: false);
+        if (PolicyRefusal::LaptopNotReady === $decision->refusal) {
+            // As AiTaskAdmission::admitTicket: the setup line points to the Local AI chip, which this person never gets.
+            return $policy->laptopViewerRefusalSentence ?? $decision->reason();
+        }
+
+        return $decision->reason();
     }
 
     public function serverDraftRefusalOf(PolicyView $policy): ?string
@@ -60,8 +71,13 @@ final readonly class OrgSettingsAiPolicy implements AiPolicy
             ->refusal?->forDraft()->sentence();
     }
 
-    private function viewOf(AiSettings $settings, ?PolicyRefusal $refusal): PolicyView
+    /**
+     * @param ActorContext|null $viewer null for a token user not logged in to an organization
+     */
+    private function viewOf(AiSettings $settings, ?PolicyRefusal $refusal, ?ActorContext $viewer): PolicyView
     {
+        $laptopViewerRefusal = null !== $viewer && self::isLaptopAiOn($settings) ? $this->policyEvaluator->refusalForLaptopViewer($viewer) : null;
+
         return new PolicyView(
             $refusal?->value,
             $refusal?->sentence(),
@@ -69,6 +85,12 @@ final readonly class OrgSettingsAiPolicy implements AiPolicy
             $settings->isTitleOnly,
             $settings->isOn && $settings->isSummaryOnSyncOn,
             $settings->isRestrictedToCloudAllowed,
+            $laptopViewerRefusal?->sentence(),
         );
+    }
+
+    private static function isLaptopAiOn(AiSettings $settings): bool
+    {
+        return $settings->isOn && AiSettings::WHERE_CLOUD !== $settings->whereAiRuns;
     }
 }

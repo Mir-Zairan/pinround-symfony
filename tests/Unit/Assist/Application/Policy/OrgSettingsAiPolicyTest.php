@@ -26,6 +26,9 @@ final class OrgSettingsAiPolicyTest extends TestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000a6e2';
     private const string LENA = '0197a3c0-0000-7000-8000-00000000a6f1';
     private const string OMAR = '0197a3c0-0000-7000-8000-00000000a6f2';
+    private const string SARA = '0197a3c0-0000-7000-8000-00000000a6f3';
+    private const string NOT_FOR_LAPTOP_AI = 'Local AI is for people in a team and for managers.';
+    private const string LAPTOP_NOT_READY = 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.';
     private const string SHOP_TEAM = '0197a3c0-0000-7000-8000-00000000a601';
 
     /** @var list<string> the organization of each roles lookup, in order */
@@ -127,6 +130,50 @@ final class OrgSettingsAiPolicyTest extends TestCase
     }
 
     /**
+     * Sara, an admin with no team or manager role, may use AI help but never laptop AI; Lena, who leads, may.
+     *
+     * @return iterable<string, array{string, string|null, string|null}>
+     */
+    public static function laptopViewerRefusals(): iterable
+    {
+        yield 'laptop only, an admin with no team or manager role' => ['laptop', 'sara in acme foods', self::NOT_FOR_LAPTOP_AI];
+        yield 'laptop first, an admin with no team or manager role' => ['laptop_first', 'sara in acme foods', self::NOT_FOR_LAPTOP_AI];
+        yield 'laptop only, a lead' => ['laptop', 'lena in acme foods', null];
+        yield 'the cloud, where no one gets laptop AI' => ['cloud', 'sara in acme foods', null];
+    }
+
+    #[Test]
+    #[DataProvider('laptopViewerRefusals')]
+    public function aPageSaysWhyThePersonMayNeverUseLaptopAiWithoutReadingRolesAgain(string $whereAiRuns, string $tokenUser, ?string $expectedLine): void
+    {
+        $view = $this->policyWith(new AiSettings(true, false, false, false, $whereAiRuns, false, null, null))->forTokenUser($tokenUser);
+
+        self::assertSame([null, $expectedLine], [$view->refusalCode, $view->laptopViewerRefusalSentence]);
+        self::assertSame([], $this->roleLookups);
+    }
+
+    #[Test]
+    public function aPageWithAiOffSaysOnlyThatEvenToAnAdminKeptFromLaptopAi(): void
+    {
+        $view = $this->policyWith(new AiSettings(false, false, false, false, 'laptop', false, null, null))->forTokenUser('sara in acme foods');
+
+        self::assertSame(['ai_off', null], [$view->refusalCode, $view->laptopViewerRefusalSentence]);
+    }
+
+    #[Test]
+    public function aWorkerReadsTheRolesInALaptopOrganizationToSayWhoMayNeverUseLaptopAi(): void
+    {
+        $policy = $this->policyWith(new AiSettings(true, false, false, false, 'laptop', false, null, null));
+
+        $saraView = $policy->for(new UserId(self::SARA), new OrganizationId(self::ACME_FOODS));
+        $lenaView = $policy->for(new UserId(self::LENA), new OrganizationId(self::ACME_FOODS));
+
+        self::assertSame([null, self::NOT_FOR_LAPTOP_AI], [$saraView->refusalCode, $saraView->laptopViewerRefusalSentence]);
+        self::assertSame([null, null], [$lenaView->refusalCode, $lenaView->laptopViewerRefusalSentence]);
+        self::assertSame([self::ACME_FOODS, self::ACME_FOODS], $this->roleLookups);
+    }
+
+    /**
      * @return iterable<string, array{PolicyView, bool, string|null}>
      */
     public static function serverTicketPolicies(): iterable
@@ -134,12 +181,16 @@ final class OrgSettingsAiPolicyTest extends TestCase
         yield 'cloud AI for everyone, an open ticket' => [self::allowedView(), false, null];
         yield 'cloud AI for everyone, a team-only ticket the admin lets go to cloud AI' => [self::allowedView(isRestrictedToCloudAllowed: true), true, null];
         yield 'cloud AI, a team-only ticket kept from cloud AI' => [self::allowedView(), true, 'Your admin keeps team-only tickets away from cloud AI.'];
-        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), false, 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.'];
-        yield 'laptop only says so before a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP), true, 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.'];
+        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), false, self::LAPTOP_NOT_READY];
+        yield 'laptop only says so before a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP), true, self::LAPTOP_NOT_READY];
         yield 'laptop first goes to the cloud on the server' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), false, null];
         yield 'laptop first, a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), true, 'Your admin keeps team-only tickets away from cloud AI.'];
-        yield 'AI off says so before the ticket' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false), true, 'Your admin turned AI help off.'];
-        yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false), false, 'Your admin allows AI help for leads only.'];
+        yield 'AI off says so before the ticket' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false, null), true, 'Your admin turned AI help off.'];
+        yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false, null), false, 'Your admin allows AI help for leads only.'];
+        yield 'laptop only, a person kept from laptop AI is told why, not sent to set it up' => [self::allowedView(PolicyView::WHERE_LAPTOP, laptopViewerRefusalSentence: self::NOT_FOR_LAPTOP_AI), false, self::NOT_FOR_LAPTOP_AI];
+        yield 'laptop only, a person kept from laptop AI is told why before a team-only ticket' => [self::allowedView(PolicyView::WHERE_LAPTOP, laptopViewerRefusalSentence: self::NOT_FOR_LAPTOP_AI), true, self::NOT_FOR_LAPTOP_AI];
+        yield 'laptop first, a person kept from laptop AI goes to the cloud' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST, laptopViewerRefusalSentence: self::NOT_FOR_LAPTOP_AI), false, null];
+        yield 'laptop first, a person kept from laptop AI, a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST, laptopViewerRefusalSentence: self::NOT_FOR_LAPTOP_AI), true, 'Your admin keeps team-only tickets away from cloud AI.'];
     }
 
     #[Test]
@@ -161,8 +212,10 @@ final class OrgSettingsAiPolicyTest extends TestCase
         yield 'cloud AI that keeps team-only tickets from it, as a draft is not team-only' => [self::allowedView(), null];
         yield 'laptop first goes to the cloud on the server' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), null];
         yield 'laptop only, where no laptop checks a draft yet' => [self::allowedView(PolicyView::WHERE_LAPTOP), 'Your company runs AI on laptops, and “Check with AI” does not run there yet.'];
-        yield 'AI off' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false), 'Your admin turned AI help off.'];
-        yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false), 'Your admin allows AI help for leads only.'];
+        yield 'AI off' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false, null), 'Your admin turned AI help off.'];
+        yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false, null), 'Your admin allows AI help for leads only.'];
+        // As AiTaskAdmission: no laptop checks a draft, so a person kept from laptop AI hears the same as anyone.
+        yield 'laptop only, a person kept from laptop AI' => [self::allowedView(PolicyView::WHERE_LAPTOP, laptopViewerRefusalSentence: self::NOT_FOR_LAPTOP_AI), 'Your company runs AI on laptops, and “Check with AI” does not run there yet.'];
     }
 
     #[Test]
@@ -176,9 +229,9 @@ final class OrgSettingsAiPolicyTest extends TestCase
         self::assertSame([], $this->roleLookups);
     }
 
-    private static function allowedView(string $whereAiRuns = PolicyView::WHERE_CLOUD, bool $isRestrictedToCloudAllowed = false): PolicyView
+    private static function allowedView(string $whereAiRuns = PolicyView::WHERE_CLOUD, bool $isRestrictedToCloudAllowed = false, ?string $laptopViewerRefusalSentence = null): PolicyView
     {
-        return new PolicyView(null, null, $whereAiRuns, false, false, $isRestrictedToCloudAllowed);
+        return new PolicyView(null, null, $whereAiRuns, false, false, $isRestrictedToCloudAllowed, $laptopViewerRefusalSentence);
     }
 
     private function policyWith(AiSettings $settings): OrgSettingsAiPolicy
@@ -218,8 +271,9 @@ final class OrgSettingsAiPolicyTest extends TestCase
     }
 
     /**
-     * The actors a request already built: Lena, lead of the shop team in Acme Foods, and Omar, a member of a team in
-     * Beta Bakery; any other token user is nobody logged in to an organization.
+     * The actors a request already built: Lena, lead of the shop team in Acme Foods, Sara, an admin of Acme Foods with
+     * no team or manager role, and Omar, a member of a team in Beta Bakery; any other token user is nobody logged in to
+     * an organization.
      */
     private static function requestActors(): CurrentActor
     {
@@ -232,6 +286,7 @@ final class OrgSettingsAiPolicyTest extends TestCase
             {
                 return match ($tokenUser) {
                     'lena in acme foods' => new ActorContext(new UserId(OrgSettingsAiPolicyTest::lena()), new OrganizationId(OrgSettingsAiPolicyTest::acmeFoods()), new Roles(false, false, [$this->shop], [], [])),
+                    'sara in acme foods' => new ActorContext(new UserId(OrgSettingsAiPolicyTest::sara()), new OrganizationId(OrgSettingsAiPolicyTest::acmeFoods()), new Roles(true, false, [], [], [])),
                     'omar in beta bakery' => new ActorContext(new UserId(OrgSettingsAiPolicyTest::omar()), new OrganizationId(OrgSettingsAiPolicyTest::betaBakery()), new Roles(false, false, [], [$this->shop], [])),
                     default => null,
                 };
@@ -240,8 +295,8 @@ final class OrgSettingsAiPolicyTest extends TestCase
     }
 
     /**
-     * Lena leads the shop team and Omar is a member of it, in Acme Foods only; as under row-level security, anyone
-     * else, or any other organization, has no roles. Each lookup is recorded.
+     * Lena leads the shop team, Omar is a member of it and Sara is an admin with no team or manager role, in Acme Foods
+     * only; as under row-level security, anyone else, or any other organization, has no roles. Each lookup is recorded.
      */
     private function acmeFoodsMemberships(): MembershipQueries
     {
@@ -268,6 +323,7 @@ final class OrgSettingsAiPolicyTest extends TestCase
                 return match ($userId->toString()) {
                     OrgSettingsAiPolicyTest::lena() => new Roles(false, false, [$this->shop], [], []),
                     OrgSettingsAiPolicyTest::omar() => new Roles(false, false, [], [$this->shop], []),
+                    OrgSettingsAiPolicyTest::sara() => new Roles(true, false, [], [], []),
                     default => Roles::none(),
                 };
             }
@@ -287,6 +343,11 @@ final class OrgSettingsAiPolicyTest extends TestCase
     public static function omar(): string
     {
         return self::OMAR;
+    }
+
+    public static function sara(): string
+    {
+        return self::SARA;
     }
 
     public static function acmeFoods(): string

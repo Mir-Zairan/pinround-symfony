@@ -125,20 +125,11 @@ final class TheAsk
      * Why "Summarize with AI" is hidden for this person and ticket; null when it shows. Reads the viewer's policy only
      * for an ask with text and no summary, the only place the button may show. In a laptop-only organization the server
      * cannot tell whether this laptop is ready, so it is PolicyRefusal::LaptopNotReady's line (ticket-page.md, AI not
-     * available), which the browser hides when it is; for a person the Local AI chip leaves out, it is the chip's line,
-     * as no laptop can ever be set up for them, and it stands for the server's refusal of their request too. In "laptop
-     * first" that person keeps the server's answer: the cloud, as for a laptop that is not ready.
+     * available), which the browser hides when it is, or for a person no laptop can ever be set up for, the line that
+     * says so (AiPolicy::serverTicketRefusalOf).
      */
     public function aiRefusal(): ?string
     {
-        $policy = $this->viewerAiPolicy->policy();
-        if (PolicyView::WHERE_LAPTOP === $policy->whereAiRuns && $policy->isAllowed()) {
-            $chipRefusal = $this->localAiChip->refusal();
-            if (null !== $chipRefusal) {
-                return $chipRefusal;
-            }
-        }
-
         return $this->refusal ?? $this->viewerAiPolicy->serverTicketRefusalOf($this->ticket->isTeamOnly());
     }
 

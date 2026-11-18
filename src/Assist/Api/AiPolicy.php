@@ -25,15 +25,16 @@ interface AiPolicy
     public function forTokenUser(mixed $tokenUser): PolicyView;
 
     /**
-     * Outside a request, as in a worker. Reads the viewer's roles only when the organization allows AI help for leads
-     * only.
+     * Outside a request, as in a worker. Reads the viewer's roles only when AI help is on and the organization allows
+     * it for leads only or runs it on laptops.
      */
     public function for(UserId $viewerId, OrganizationId $organizationId): PolicyView;
 
     /**
      * The line that keeps the server's AI from a ticket for the person $policy is about, in the order the server's AI
      * door decides it before a summary is queued, with the laptop not ready: $policy's own refusal, then "laptop only",
-     * which the server never runs, then a team-only ticket the admin keeps from cloud AI. Reads nothing.
+     * which the server never runs (said with $policy's laptopViewerRefusalSentence when it has one), then a team-only
+     * ticket the admin keeps from cloud AI. Reads nothing.
      *
      * @param bool $isTicketTeamOnly the ticket's visibility is team (team-only)
      *
