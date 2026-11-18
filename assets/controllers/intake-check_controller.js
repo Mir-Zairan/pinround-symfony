@@ -103,16 +103,19 @@ export default class extends Controller {
     }
     this.#pressing = null;
     // Only focus the disabled button dropped, never one the person put elsewhere while the press ran.
-    const isFocusDropped = hadFocus && (document.activeElement === null || document.activeElement === document.body || frame.contains(document.activeElement));
+    const focused = document.activeElement;
+    const isFocusOnPage = focused === null || focused === document.body;
     if (freshFrame !== null) {
-      swapFrameChildren(frame, freshFrame, { hadFocus: isFocusDropped });
+      // The swap replaces everything inside the frame, so focus there is lost with it.
+      swapFrameChildren(frame, freshFrame, { hadFocus: hadFocus && (isFocusOnPage || frame.contains(focused)) });
       return;
     }
     // No frame came (offline, an error page): the person keeps the button and reads why nothing changed.
     clearMarks(this.#form);
     this.#showUnanswered();
     this.#offerTheButtonAgain();
-    if (isFocusDropped) {
+    // The frame stays, so a link or Close the person moved to inside it keeps the focus.
+    if (hadFocus && (isFocusOnPage || focused === button)) {
       button.focus();
     }
   }

@@ -111,6 +111,18 @@ async function answerPressesAndPolls(page: Page, token: string, pollAnswers: Fra
   return { presses, polls };
 }
 
+/** Holds each press until release runs, then answers it with reply; isHolding says whether a press has arrived. */
+async function holdPresses(page: Page, reply: (route: Route) => Promise<void>): Promise<{ isHolding: () => boolean; release: () => void }> {
+  const press: { release: (() => void) | null } = { release: null };
+  await page.route('**/tickets/new/check', async (route) => {
+    await new Promise<void>((resolve) => {
+      press.release = resolve;
+    });
+    await reply(route);
+  });
+  return { isHolding: () => press.release !== null, release: () => press.release?.() };
+}
+
 /** The value of one field of a multipart/form-data body, as FormData posts it; null when the body has no such field. */
 function postedField(request: Request, name: string): string | null {
   const body = request.postData() ?? '';
@@ -417,22 +429,52 @@ test.describe('"Check with AI" on the New ticket form', () => {
 
   test('a press leaves the focus where the person put it while the press ran', async ({ page }) => {
     const { form, token } = await openFormWithPausedClock(page);
-    const press: { answer: (() => void) | null } = { answer: null };
-    await page.route('**/tickets/new/check', async (route) => {
-      await new Promise<void>((resolve) => {
-        press.answer = resolve;
-      });
-      await route.fulfill({ status: 200, contentType: 'text/html; charset=UTF-8', body: frameAnswer({ state: 'running' }, token) });
-    });
+    const press = await holdPresses(page, (route) => route.fulfill({ status: 200, contentType: 'text/html; charset=UTF-8', body: frameAnswer({ state: 'running' }, token) }));
     await form.title.fill(TITLE);
     await page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_LABEL }).press('Enter');
-    await expect.poll(() => press.answer !== null).toBe(true);
+    await expect.poll(() => press.isHolding()).toBe(true);
 
     await form.description.focus();
-    press.answer?.();
+    press.release();
 
     await expect(page.locator(CHECK_STATE)).toHaveAttribute('data-intake-check-state-value', 'running');
     await expect(form.description).toBeFocused();
+  });
+
+  test('a press that gets no frame back leaves the focus in a field the person moved to while it ran', async ({ page }) => {
+    const { form } = await openFormWithPausedClock(page);
+    const press = await holdPresses(page, (route) => route.abort('connectionfailed'));
+    await form.title.fill(TITLE);
+    await page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_LABEL }).press('Enter');
+    await expect.poll(() => press.isHolding()).toBe(true);
+
+    await form.description.focus();
+    press.release();
+
+    await expect(page.locator(CHECK_FRAME).locator('.intake-check__unanswered')).toHaveText(UNANSWERED_LINE);
+    await expect(page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_LABEL })).toBeEnabled();
+    await expect(form.description).toBeFocused();
+  });
+
+  test('a press that gets no frame back leaves the focus on a link in the check the person moved to while it ran', async ({ page }) => {
+    const { form, token } = await openFormWithPausedClock(page);
+    const { polls } = await answerPressesAndPolls(page, token, [{ state: 'done', type: 'story', priority: 'major' }]);
+    await form.title.fill(TITLE);
+    await pressCheck(page, CHECK_LABEL, 'running');
+    await nextPoll(page, polls, 1);
+    await page.unroute('**/tickets/new/check**');
+    const press = await holdPresses(page, (route) => route.abort('connectionfailed'));
+    const frame = page.locator(CHECK_FRAME);
+    await frame.getByRole('button', { name: CHECK_AGAIN_LABEL }).press('Enter');
+    await expect.poll(() => press.isHolding()).toBe(true);
+
+    const duplicateLink = frame.getByRole('link', { name: DUPLICATE_TITLE });
+    await duplicateLink.focus();
+    press.release();
+
+    await expect(frame.locator('.intake-check__unanswered')).toHaveText(UNANSWERED_LINE);
+    await expect(frame.getByRole('button', { name: CHECK_AGAIN_LABEL })).toBeEnabled();
+    await expect(duplicateLink).toBeFocused();
   });
 
   test('after 60 polls that still say running the button is offered again, polling stops, and a press checks again', async ({ page }) => {
