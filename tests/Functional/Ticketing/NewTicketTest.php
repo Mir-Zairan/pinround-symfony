@@ -362,6 +362,42 @@ final class NewTicketTest extends WebTestCase
     }
 
     /**
+     * @return iterable<string, array{array<string, string>, ?string}>
+     */
+    public static function typeAndPriorityPicks(): iterable
+    {
+        yield 'Bug and Major' => [['priority' => 'major'], 'priority'];
+        yield 'Story and Minor' => [['type' => 'story', 'priority' => 'minor'], 'type priority'];
+        yield 'Task and Normal' => [['type' => 'task'], 'type'];
+        yield 'the defaults, Bug and Normal' => [[], null];
+        yield 'an unknown type and priority' => [['type' => 'epic', 'priority' => 'urgent'], null];
+    }
+
+    /**
+     * @param array<string, string> $picks
+     */
+    #[Test]
+    #[DataProvider('typeAndPriorityPicks')]
+    public function aRefusedFormMarksTheTypeAndPriorityThePersonMovedOffTheDefaultAsTheirPicks(array $picks, ?string $personPicked): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->addCoreSteps();
+        $projectId = $this->addProject($this->shop, 'SHOP', 'Shop web');
+        $this->logIn($this->client, $people['Omar']);
+
+        $form = $this->client->request('GET', self::NEW_TICKET);
+        self::assertResponseStatusCodeSame(200);
+        self::assertNull($form->filter('form.login__form')->attr('data-intake-check-person-picked'));
+
+        $page = $this->postTicket($projectId, [...$picks, 'title' => '   ']);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(NewTicketController::TITLE_MISSING, $page->filter('#ticket-title-error')->text());
+        self::assertSame($personPicked, $page->filter('form.login__form')->attr('data-intake-check-person-picked'));
+        self::assertSame([], $this->committedTickets());
+    }
+
+    /**
      * @return iterable<string, array{?string}>
      */
     public static function refusedCsrfTokens(): iterable

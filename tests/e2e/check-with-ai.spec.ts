@@ -10,8 +10,9 @@ import { openNewTicketForm, type TicketForm } from './new-ticket-form';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
-/** frame_poll.js POLL_INTERVAL_MS. */
+/** frame_poll.js POLL_INTERVAL_MS and MAX_POLLS. */
 const POLL_INTERVAL_MS = 3000;
+const MAX_POLLS = 60;
 
 const ORGANIZATION_SLUG = 'acme-foods';
 const CLOUD_AI = { on: true, who: 'everyone', where: 'cloud' };
@@ -29,6 +30,8 @@ const NOTE = 'AI can look for duplicates, missing info and risk, and suggest typ
 const RUNNING_LINE = 'The AI is reading your report…';
 const FAILED_LINE = 'The AI answer failed. Try again.';
 const FORM_EXPIRED = 'The page was open too long. Reload it and try again.';
+/** NewTicketController::FORM_EXPIRED. */
+const MAKE_TICKET_FORM_EXPIRED = 'The page was open too long. Try again.';
 const UNANSWERED_LINE = 'The check did not go through. Try again.';
 const DUPLICATES_HEADING = 'The AI thinks this may already be reported';
 const CHECK_LABEL = 'Check with AI';
@@ -133,10 +136,14 @@ function useAiSettingsInEachTest(ai: object): void {
   });
 }
 
-/** Opens the New ticket form and stops the page's clock; from here only runFor moves the polls. */
-async function openFormWithPausedClock(page: Page): Promise<{ form: TicketForm; token: string }> {
+/**
+ * Opens the New ticket form and stops the page's clock; from here only runFor moves the polls. beforePause runs on the
+ * open form while the clock still runs, for steps that load a page, whose load waits on timers.
+ */
+async function openFormWithPausedClock(page: Page, beforePause?: (form: TicketForm) => Promise<void>): Promise<{ form: TicketForm; token: string }> {
   await page.clock.install({ time: FROZEN_AT });
   const form = await openNewTicketForm(page);
+  await beforePause?.(form);
   await page.clock.pauseAt(new Date(FROZEN_AT.getTime() + 60_000));
   const token = await form.form.locator(CHECK_TOKEN).getAttribute('value');
   if (token === null || token === '') {
@@ -181,10 +188,12 @@ async function pressCheck(page: Page, label: string, expectedState: string): Pro
     return sign;
   });
   await page.locator(CHECK_FRAME).getByRole('button', { name: label }).press('Enter');
+  // Waits for the swap, not only the state: a press after the last poll starts from a state that already says running.
+  await expect.poll(() => swap.evaluate((sign) => sign.swappedAtMs), { message: 'The press swapped no frame in.' }).not.toBeNull();
   await expect(page.locator(CHECK_STATE)).toHaveAttribute('data-intake-check-state-value', expectedState);
   const swappedAtMs = await swap.evaluate((sign) => sign.swappedAtMs);
   if (swappedAtMs === null) {
-    throw new Error('The press changed the check state without swapping the frame.');
+    throw new Error('The press swapped no frame in.');
   }
   return swappedAtMs;
 }
@@ -198,6 +207,17 @@ async function nextPoll(page: Page, polls: Request[], expectedCount: number): Pr
 
 function radio(form: TicketForm, name: 'type' | 'priority', value: string) {
   return form.form.locator(`input[type="radio"][name="${name}"][value="${value}"]`);
+}
+
+/** Every field the form would post, as name and value pairs, in the form's order. */
+async function formFieldsOf(form: TicketForm): Promise<[string, string][]> {
+  return form.form.evaluate((formElement) => [...new FormData(formElement as HTMLFormElement).entries()].map(([name, value]): [string, string] => [name, String(value)]));
+}
+
+/** The names of the fields whose value differs between the two lists of formFieldsOf, which must name the same fields. */
+function changedFieldNames(before: [string, string][], after: [string, string][]): string[] {
+  expect(after.map(([name]) => name)).toEqual(before.map(([name]) => name));
+  return before.filter(([, value], index) => after[index][1] !== value).map(([name]) => name);
 }
 
 /** The values of the radios of that group whose label carries the ✦ mark. */
@@ -238,6 +258,7 @@ test.describe('"Check with AI" on the New ticket form', () => {
     await page.evaluate(() => {
       (window as Window & { beforeTheCheck?: boolean }).beforeTheCheck = true;
     });
+    const fieldsBeforeTheCheck = await formFieldsOf(form);
 
     const swappedAtMs = await pressCheck(page, CHECK_LABEL, 'running');
     expect(presses).toHaveLength(1);
@@ -273,6 +294,8 @@ test.describe('"Check with AI" on the New ticket form', () => {
     await expect(form.title).toHaveValue(TITLE);
     await expect(form.description).toHaveValue(DETAIL);
     await expect(form.form.locator('select[name="project_id"]')).toHaveValue(project);
+    // The AI never sets any other field, such as who sees the ticket: only its Type pick went in.
+    expect(changedFieldNames(fieldsBeforeTheCheck, await formFieldsOf(form))).toEqual(['type']);
 
     await page.clock.runFor(3 * POLL_INTERVAL_MS);
     expect(await pollTimes()).toHaveLength(2);
@@ -319,37 +342,121 @@ test.describe('"Check with AI" on the New ticket form', () => {
     await expect(radio(form, 'priority', 'normal')).toBeChecked();
   });
 
-  test('a press the app refuses shows its sentence and keeps the button', async ({ page }) => {
-    const { form } = await openFormWithPausedClock(page);
+  test('after a refused "Make ticket" the check keeps the Priority the person picked before it', async ({ page }) => {
+    const { form, token } = await openFormWithPausedClock(page, async (openForm) => {
+      await openForm.title.fill(TITLE);
+      await radio(openForm, 'priority', 'minor').check();
+      await openForm.form.locator('input[name="_csrf_token"]').evaluate((field) => {
+        (field as HTMLInputElement).value = 'a-token-from-a-page-open-too-long';
+      });
+      const refused = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/tickets/new');
+      await openForm.submit.click();
+      expect((await refused).status()).toBe(422);
+      await page.waitForLoadState('networkidle');
+    });
+    await expect(page.locator('.login__error[role="alert"]')).toHaveText(MAKE_TICKET_FORM_EXPIRED);
+    await expect(form.title).toHaveValue(TITLE);
+    await expect(radio(form, 'priority', 'minor')).toBeChecked();
+    const { polls } = await answerPressesAndPolls(page, token, [{ state: 'done', type: 'story', priority: 'major' }]);
+
+    await pressCheck(page, CHECK_LABEL, 'running');
+    await nextPoll(page, polls, 1);
+
+    expect(await markedValues(form, 'type')).toEqual(['story']);
+    expect(await markedValues(form, 'priority')).toEqual(['major']);
+    await expect(radio(form, 'type', 'story')).toBeChecked();
+    await expect(radio(form, 'priority', 'minor')).toBeChecked();
+  });
+
+  test('a press the app refuses shows its sentence, keeps the button and takes the marks away', async ({ page }) => {
+    const { form, token } = await openFormWithPausedClock(page);
+    const { polls } = await answerPressesAndPolls(page, token, [{ state: 'done', type: 'story', priority: 'major' }]);
     await form.title.fill(TITLE);
+    await pressCheck(page, CHECK_LABEL, 'running');
+    await nextPoll(page, polls, 1);
+    await expect(form.form.locator(MARK)).toHaveCount(2);
+    await page.unroute('**/tickets/new/check**');
     await form.form.locator(CHECK_TOKEN).evaluate((field) => {
       (field as HTMLInputElement).value = 'a-token-from-a-page-open-too-long';
     });
     const refused = page.waitForResponse((response) => isPress(response.request()));
 
-    await page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_LABEL }).press('Enter');
+    await page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_AGAIN_LABEL }).press('Enter');
 
     expect((await refused).status()).toBe(422);
     const frame = page.locator(CHECK_FRAME);
     await expect(frame.locator('.intake-check__notice')).toHaveText(FORM_EXPIRED);
     await expect(frame.getByRole('button', { name: CHECK_LABEL })).toBeEnabled();
     await expect(page.locator(CHECK_STATE)).toHaveAttribute('data-intake-check-state-value', 'idle');
+    await expect(page.locator(CHECK_STATE)).toBeFocused();
+    await expect(form.form.locator(MARK)).toHaveCount(0);
     await expect(form.title).toHaveValue(TITLE);
   });
 
-  test('a press that gets no frame back says so and gives the button back', async ({ page }) => {
-    const { form } = await openFormWithPausedClock(page);
-    await page.route('**/tickets/new/check', (route) => route.abort('connectionfailed'));
+  test('a press that gets no frame back says so, gives the button back and takes the marks away', async ({ page }) => {
+    const { form, token } = await openFormWithPausedClock(page);
+    const { polls } = await answerPressesAndPolls(page, token, [{ state: 'done', type: 'story', priority: 'major' }]);
     await form.title.fill(TITLE);
+    await pressCheck(page, CHECK_LABEL, 'running');
+    await nextPoll(page, polls, 1);
+    await expect(form.form.locator(MARK)).toHaveCount(2);
+    await page.unroute('**/tickets/new/check**');
+    await page.route('**/tickets/new/check', (route) => route.abort('connectionfailed'));
 
-    await page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_LABEL }).press('Enter');
+    await page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_AGAIN_LABEL }).press('Enter');
 
     const frame = page.locator(CHECK_FRAME);
     await expect(frame.locator('.intake-check__unanswered')).toHaveText(UNANSWERED_LINE);
-    const button = frame.getByRole('button', { name: CHECK_LABEL });
+    const button = frame.getByRole('button', { name: CHECK_AGAIN_LABEL });
     await expect(button).toBeEnabled();
     await expect(button).not.toHaveAttribute('aria-busy', 'true');
-    await expect(frame.locator('.intake-check__line')).toHaveText(NOTE);
+    await expect(button).toBeFocused();
+    await expect(frame.locator('.intake-check__summary')).toHaveText(`In short: ${SUMMARY}`);
+    await expect(form.form.locator(MARK)).toHaveCount(0);
+  });
+
+  test('a press leaves the focus where the person put it while the press ran', async ({ page }) => {
+    const { form, token } = await openFormWithPausedClock(page);
+    const press: { answer: (() => void) | null } = { answer: null };
+    await page.route('**/tickets/new/check', async (route) => {
+      await new Promise<void>((resolve) => {
+        press.answer = resolve;
+      });
+      await route.fulfill({ status: 200, contentType: 'text/html; charset=UTF-8', body: frameAnswer({ state: 'running' }, token) });
+    });
+    await form.title.fill(TITLE);
+    await page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_LABEL }).press('Enter');
+    await expect.poll(() => press.answer !== null).toBe(true);
+
+    await form.description.focus();
+    press.answer?.();
+
+    await expect(page.locator(CHECK_STATE)).toHaveAttribute('data-intake-check-state-value', 'running');
+    await expect(form.description).toBeFocused();
+  });
+
+  test('after 60 polls that still say running the button is offered again, polling stops, and a press checks again', async ({ page }) => {
+    test.slow();
+    const { form, token } = await openFormWithPausedClock(page);
+    const { presses, polls } = await answerPressesAndPolls(page, token, [{ state: 'running' }]);
+    const pollTimes = await recordPollTimes(page);
+    await form.title.fill(TITLE);
+    const swappedAtMs = await pressCheck(page, CHECK_LABEL, 'running');
+
+    for (let poll = 1; poll <= MAX_POLLS; poll += 1) {
+      await nextPoll(page, polls, poll);
+    }
+
+    const button = page.locator(CHECK_FRAME).getByRole('button', { name: CHECK_LABEL });
+    await expect(button).toBeEnabled();
+    await expect(button).not.toHaveAttribute('aria-busy', 'true');
+    await page.clock.runFor(3 * POLL_INTERVAL_MS);
+    expect(await pollTimes()).toEqual(Array.from({ length: MAX_POLLS }, (_, index) => swappedAtMs + (index + 1) * POLL_INTERVAL_MS));
+    expect(polls).toHaveLength(MAX_POLLS);
+
+    await pressCheck(page, CHECK_LABEL, 'running');
+    expect(presses).toHaveLength(2);
+    expect(postedField(presses[1], '_intake_check_token')).toBe(token);
   });
 
   test('a hidden page sends no polls and goes on polling when it shows again', async ({ page }) => {

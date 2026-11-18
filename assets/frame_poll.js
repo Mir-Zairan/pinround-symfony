@@ -107,10 +107,12 @@ export async function frameOfAnswer(response, frameId) {
 /**
  * Puts the fresh frame's children in the frame, as Turbo would. The removed children may hold the focus, which would
  * fall to the top of the page: it moves to the new state's focus target, its [autofocus], but only when it was inside
- * the frame. That attribute comes off before the swap, so the browser never focuses it itself.
+ * the frame. That attribute comes off before the swap, so the browser never focuses it itself. A caller that disabled
+ * the focused button, which drops the focus before the swap, passes hadFocus as it was then.
+ *
+ * @param {{hadFocus?: boolean}} [options] hadFocus defaults to whether the focus is inside the frame now
  */
-export function swapFrameChildren(frame, freshFrame) {
-  const hadFocus = frame.contains(document.activeElement);
+export function swapFrameChildren(frame, freshFrame, { hadFocus = frame.contains(document.activeElement) } = {}) {
   const focusTarget = freshFrame.querySelector('[autofocus]');
   focusTarget?.removeAttribute('autofocus');
   frame.replaceChildren(...freshFrame.childNodes);

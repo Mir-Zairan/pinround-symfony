@@ -18,7 +18,10 @@
         {% endif %}
 
         <twig:Card>
-            <form class="login__form" method="post" action="{{ path('ticketing_ticket_new') }}">
+            {#- The person's own Type and Priority picks of a refused form, which the check's suggestions leave alone (intake-check_controller.js). -#}
+            {%- set personPicked = input.personPickedFields %}
+            <form class="login__form" method="post" action="{{ path('ticketing_ticket_new') }}"
+                {%- if personPicked is not empty %} data-intake-check-person-picked="{{ personPicked|join(' ') }}"{% endif %}>
                 <div class="profile__field">
                     <label class="login__field">
                         Project

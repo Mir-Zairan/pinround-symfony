@@ -1,21 +1,15 @@
 import { Controller } from '@hotwired/stimulus';
 import { FramePoll, frameOfAnswer, RUNNING, swapFrameChildren } from '../frame_poll.js';
+import { clearMarks, markSuggestions, notePersonPick } from '../intake_marks.js';
 
 const DONE = 'done';
-
-/** The New ticket form's radio groups the AI suggests a value for; it never touches any other field (ADR-0020). */
-const SUGGESTED_FIELDS = ['type', 'priority'];
-
-/** On the form, the radio groups the person changed themselves, space-separated; it outlives the frame's swaps. */
-const PERSON_PICKED_ATTRIBUTE = 'data-intake-check-person-picked';
-
-const MARK_CLASS = 'intake-check__mark';
 
 // On .intake-check__state inside IntakeCheck's turbo-frame in the New ticket form; each state Turbo or this controller
 // swaps in connects a new instance. "Check with AI" posts the form's fields to the request url with the Turbo-Frame
 // header and puts the answer's frame in, a refusal's frame too; the button shows only while the title is not empty.
 // While the state is "running" its FramePoll fetches the check's frame until it is done or failed. A done state marks
-// its suggested Type and Priority with ✦ and selects each, unless the person picked that group themselves.
+// its suggested Type and Priority with ✦ and selects each, unless the person picked that group themselves; any other
+// state clears the marks.
 export default class extends Controller {
   static targets = ['button'];
   static values = {
@@ -43,10 +37,12 @@ export default class extends Controller {
     this.#form?.addEventListener('change', this.#notePersonPick);
     this.#followTitle();
 
-    if (this.stateValue === DONE) {
-      this.#markSuggestions();
-    } else if (this.stateValue === RUNNING) {
-      this.#clearMarks();
+    if (this.#form !== null) {
+      if (this.stateValue === DONE) {
+        markSuggestions(this.#form, { type: this.typeValue, priority: this.priorityValue }, this.markLabelValue);
+      } else {
+        clearMarks(this.#form);
+      }
     }
 
     this.#poll = new FramePoll(this.element, {
@@ -81,6 +77,8 @@ export default class extends Controller {
     if (this.#form === null || frame === null || this.#pressing !== null) {
       return;
     }
+    // Read before the button goes off: a disabled button loses the focus to the page.
+    const hadFocus = frame.contains(document.activeElement);
     const pressing = new AbortController();
     this.#pressing = pressing;
     button.disabled = true;
@@ -104,13 +102,19 @@ export default class extends Controller {
       return;
     }
     this.#pressing = null;
+    // Only focus the disabled button dropped, never one the person put elsewhere while the press ran.
+    const isFocusDropped = hadFocus && (document.activeElement === null || document.activeElement === document.body || frame.contains(document.activeElement));
     if (freshFrame !== null) {
-      swapFrameChildren(frame, freshFrame);
+      swapFrameChildren(frame, freshFrame, { hadFocus: isFocusDropped });
       return;
     }
     // No frame came (offline, an error page): the person keeps the button and reads why nothing changed.
+    clearMarks(this.#form);
     this.#showUnanswered();
     this.#offerTheButtonAgain();
+    if (isFocusDropped) {
+      button.focus();
+    }
   }
 
   #followTitle = () => {
@@ -122,65 +126,7 @@ export default class extends Controller {
     }
   };
 
-  // Only the person's own choice counts: selecting a radio from script fires no change event.
-  #notePersonPick = (event) => {
-    const field = event.target;
-    if (!event.isTrusted || !(field instanceof HTMLInputElement) || field.type !== 'radio' || !SUGGESTED_FIELDS.includes(field.name)) {
-      return;
-    }
-    const picked = new Set(this.#personPickedFields());
-    picked.add(field.name);
-    this.#form.setAttribute(PERSON_PICKED_ATTRIBUTE, [...picked].join(' '));
-  };
-
-  #personPickedFields() {
-    return (this.#form?.getAttribute(PERSON_PICKED_ATTRIBUTE) ?? '').split(' ').filter((name) => name !== '');
-  }
-
-  #markSuggestions() {
-    this.#clearMarks();
-    const suggestedValues = { type: this.typeValue, priority: this.priorityValue };
-    const personPicked = this.#personPickedFields();
-    for (const fieldName of SUGGESTED_FIELDS) {
-      const suggestedRadio = this.#radiosOf(fieldName).find((radio) => radio.value === suggestedValues[fieldName]);
-      if (suggestedRadio === undefined) {
-        continue;
-      }
-      suggestedRadio.closest('label')?.append(this.#mark());
-      if (!personPicked.includes(fieldName)) {
-        suggestedRadio.checked = true;
-      }
-    }
-  }
-
-  #clearMarks() {
-    for (const fieldName of SUGGESTED_FIELDS) {
-      for (const radio of this.#radiosOf(fieldName)) {
-        radio.closest('label')?.querySelector(`.${MARK_CLASS}`)?.remove();
-      }
-    }
-  }
-
-  #radiosOf(fieldName) {
-    if (this.#form === null) {
-      return [];
-    }
-    return [...this.#form.querySelectorAll('input[type="radio"]')].filter((radio) => radio.name === fieldName);
-  }
-
-  // "✦" after the label; screen readers hear the mark's label instead.
-  #mark() {
-    const mark = document.createElement('span');
-    mark.className = MARK_CLASS;
-    const sign = document.createElement('span');
-    sign.setAttribute('aria-hidden', 'true');
-    sign.textContent = '✦';
-    const label = document.createElement('span');
-    label.className = 'visually-hidden';
-    label.textContent = this.markLabelValue;
-    mark.append(' ', sign, label);
-    return mark;
-  }
+  #notePersonPick = (event) => notePersonPick(this.#form, event);
 
   #showUnanswered() {
     let line = this.element.querySelector('.intake-check__unanswered');
